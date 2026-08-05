@@ -25,7 +25,8 @@
     - [5.1.2. `dgxcoder chat`](#512-dgxcoder-chat)
     - [5.1.3. `dgxcoder run`](#513-dgxcoder-run)
     - [5.1.4. `dgxcoder status`](#514-dgxcoder-status)
-    - [5.1.5. `dgxcoder serve`](#515-dgxcoder-serve)
+    - [5.1.5. `dgxcoder start_server`](#515-dgxcoder-start_server)
+    - [5.1.5a. `dgxcoder stop_server`](#515a-dgxcoder-stop_server)
     - [5.1.6. `dgxcoder index`](#516-dgxcoder-index)
     - [5.1.7. `dgxcoder mcp`](#517-dgxcoder-mcp)
     - [5.1.8. `dgxcoder web`](#518-dgxcoder-web)
@@ -145,7 +146,7 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
   - `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is unset
 * **Config-Stored but Not Passed to vLLM**: `num_scheduler_steps` (default `8`) is accepted on CLI/config/status display but is **not** appended as `--num-scheduler-steps` in `build_launch_command` today.
 * **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code --enforce-eager` plus the optional flags above.
-* **Readiness Polling & Live Streaming**: `GooseRunner.wait_for_vllm()` auto-launches background vLLM when offline, streams `[vLLM]` logs, and polls `GET /v1/models` until HTTP 200. `VLLMStartupMonitor` estimates load **percentage from unified-memory growth** since launch vs `MODEL_MATRIX` `min_memory_gb` (primary + draft), printing periodic `~N% (used/target GB)` updates while logs are quiet.
+* **Readiness Polling & Live Streaming**: `dgxcoder start_server` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`. The monitor thread constantly pipes raw vLLM container logs to stdout, prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`), tracks loading stages from logs, and polls `/v1/models` until healthy. `start_server` exits once the health check passes (server keeps running in background).
 * **Instant Signal Handling**: Poll loop sleeps in short intervals so `Ctrl+C` is handled promptly.
 
 ### 4.3. Agent Runtimes (Goose, Cline, Aider, Continue, OpenHands)
@@ -274,13 +275,13 @@ dgxcoder chat | run [--agent goose]
 3. Pull `ghcr.io/all-hands-ai/openhands:main` if missing.
 4. `docker rm -f dgxcoder-openhands`; run container on port **3000** with workspace + docker.sock mounts and LLM env pointing at local vLLM. Prompt unused.
 
-#### `dgxcoder serve` Variant
+#### `dgxcoder start_server` Variant
 
-Resolves `DGXCoderConfig`, then calls `VLLMServerManager.start_server(background=False)` with **CLI `args.model` / `args.draft_model` / `args.num_speculative_tokens` passed through directly**. When those flags are omitted, Python `None` is passed into `start_server` (overriding the function’s default `"qwen2.5-coder-32b"`). Prefer explicit `--model` on `serve`, or rely on `chat`/`run` auto-launch which uses `config.model`. Tuning flags (`enable_prefix_caching`, etc.) come from the resolved config. Foreground process owns the terminal; no agent runner is started.
+Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadingMonitor` thread (live log piping + 10s Docker memory stats + stage detection + health polling), prints progress, and **exits once the model health check passes** (the vLLM server/container continues running). Uses CLI `--model` (defaults to `qwen2.5-coder-32b`) and other tuning flags from config. No agent runner is started.
 
 #### Failure Modes
 
-* **vLLM launch failure**: Hint to run `dgxcoder serve --model <model>`; `chat`/`run` exit `1`.
+* **vLLM launch failure**: Hint to run `dgxcoder start_server --model <model>`; `chat`/`run` exit `1`.
 * **Process crash during wait**: Drain remaining logs; return failure.
 * **Ctrl+C during wait**: Cancel without starting the agent.
 * **Goose install failure**: Print manual curl install command; exit `1`.
@@ -311,7 +312,8 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 | **`chat`** | Interactive session for selected agent (Goose / Aider CLI, or VS Code / OpenHands UI) |
 | **`run`** | Non-interactive task where supported (Goose `--text`, Aider `--message`; others launch UI and may ignore prompt) |
 | **`status`** | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index |
-| **`serve`** | Foreground vLLM server (multi-tier launch) |
+| **`endpoints`** | Lists all vLLM/OpenAI-compatible REST endpoints + credentials |
+| **`serve`** | Background vLLM server with live monitoring (exits after ready) |
 | **`index`** | AST + FTS5 + TF-IDF workspace index |
 | **`mcp`** | Stdio MCP server for IDE companion tools |
 | **`download`** | Pre-download model weights to HF cache |
@@ -337,9 +339,17 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
   * **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`/`aider`/`continue`/`openhands`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose CLI, Cline extension, Aider CLI, Continue extension, OpenHands Docker image readiness, config paths.
   * **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
-##### 5.1.5. `dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …]`
-* **Behavior**: Foreground `start_server` as in [serve variant](#dgxcoder-serve-variant). Pass `--model` explicitly; bare `serve` currently forwards `model=None` from argparse.
-* **Example**: `dgxcoder serve --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --port 8000`
+##### 5.1.4a. `dgxcoder endpoints`
+* **Behavior**: Prints two Rich tables: (1) all standard OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`, etc.) with HTTP methods and short descriptions; (2) credentials showing base URL, optional API key (enabled via `--api-key` on serve), and `Authorization: Bearer <key>` when used. Intended for quick copy-paste into external clients.
+* **Example**: `dgxcoder endpoints`
+
+##### 5.1.5. `dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER]`
+* **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). `--enable-auto-tool-choice` + `--tool-call-parser` enable Goose-style function calling. See [start_server variant](#dgxcoder-start_server-variant).
+* **Example**: `dgxcoder start_server --model qwen2.5-coder-32b --enable-auto-tool-choice --tool-call-parser hermes --port 8000`
+
+##### 5.1.5a. `dgxcoder stop_server [--port PORT]`
+* **Behavior**: Stops and removes the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running).
+* **Example**: `dgxcoder stop_server --port 8000`
 
 ##### 5.1.6. `dgxcoder index [--dir PATH] [--force]`
 * **Behavior**: Indexes workspace (Python AST + full-text FTS + in-memory TF-IDF); persists `.dgxcoder/context_index.json` and `.dgxcoder/context.db`.
@@ -447,7 +457,7 @@ Note: runtime Goose auto-install uses `releases/download/stable/…`; the instal
 | `scripts/run_vllm_gb10.sh [MODEL] [PORT] [DRAFT] [TOKENS]` | Thin foreground Python-module vLLM launch (no prefix-cache / chunked-prefill / kv-cache flags) |
 | `scripts/run_goose.sh` | Sets Goose OpenAI env vars and runs `goose session` |
 
-Prefer `dgxcoder serve` / `dgxcoder chat` for full GB10-tuned behavior.
+Prefer `dgxcoder start_server` / `dgxcoder chat` for full GB10-tuned behavior.
 
 ---
 

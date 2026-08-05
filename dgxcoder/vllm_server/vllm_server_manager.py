@@ -137,6 +137,9 @@ class VLLMServerManager:
         num_scheduler_steps: int = 8,
         attention_backend: str = "auto",
         kv_cache_dtype: str = "auto",
+        api_key: Optional[str] = None,
+        enable_auto_tool_choice: bool = False,
+        tool_call_parser: Optional[str] = None,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -160,6 +163,9 @@ class VLLMServerManager:
             num_scheduler_steps (int): Multi-step scheduling iteration count.
             attention_backend (str): Attention implementation backend.
             kv_cache_dtype (str): Datatype for KV cache.
+            api_key (Optional[str]): Optional API key for OpenAI-compatible auth (not set by default).
+            enable_auto_tool_choice (bool): Enable automatic tool choice.
+            tool_call_parser (Optional[str]): Parser name for tool calls.
 
         Returns:
             List[str]: Complete executable command list.
@@ -191,6 +197,12 @@ class VLLMServerManager:
             base_args.extend(["--attention-backend", attention_backend])
         if kv_cache_dtype:
             base_args.extend(["--kv-cache-dtype", kv_cache_dtype])
+        if api_key:
+            base_args.extend(["--api-key", api_key])
+        if enable_auto_tool_choice:
+            base_args.append("--enable-auto-tool-choice")
+        if tool_call_parser:
+            base_args.extend(["--tool-call-parser", tool_call_parser])
 
         if shutil.which("vllm"):
             cmd = ["vllm", "serve", hf_model] + base_args
@@ -233,6 +245,9 @@ class VLLMServerManager:
         num_scheduler_steps: int = 8,
         attention_backend: str = "auto",
         kv_cache_dtype: str = "auto",
+        api_key: Optional[str] = None,
+        enable_auto_tool_choice: bool = False,
+        tool_call_parser: Optional[str] = None,
         background: bool = True
     ) -> Optional[subprocess.Popen]:
         """
@@ -250,6 +265,9 @@ class VLLMServerManager:
             num_scheduler_steps (int): Multi-step scheduling count.
             attention_backend (str): Attention backend.
             kv_cache_dtype (str): KV cache precision.
+            api_key (Optional[str]): Optional API key (not set by default).
+            enable_auto_tool_choice (bool): Enable automatic tool choice.
+            tool_call_parser (Optional[str]): Tool call parser name.
             background (bool): If True, run asynchronously as Popen subprocess.
 
         Returns:
@@ -278,6 +296,9 @@ class VLLMServerManager:
             num_scheduler_steps=num_scheduler_steps,
             attention_backend=attention_backend,
             kv_cache_dtype=kv_cache_dtype,
+            api_key=api_key,
+            enable_auto_tool_choice=enable_auto_tool_choice,
+            tool_call_parser=tool_call_parser,
         )
 
         # Step 3: Cleanup potential container name conflicts prior to launch
@@ -322,6 +343,17 @@ class VLLMServerManager:
         else:
             subprocess.run(cmd, check=True, env=env)
             return None
+
+    def stop_server(self, port: int = 8000) -> None:
+        """
+        Stops and removes the vLLM Docker container for the given port.
+        Safe no-op if container is not running.
+        """
+        container_name = f"dgxcoder-vllm-{port}"
+        print(f"🛑 Stopping vLLM container: {container_name}")
+        subprocess.run(["docker", "stop", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"✅ Container {container_name} stopped and removed.")
 
     def get_new_logs(self) -> List[str]:
         """

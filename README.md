@@ -8,6 +8,7 @@
 [![Agent Runtime](https://img.shields.io/badge/Agent-AAIF%20Goose%201.45%2B-0052CC?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/aaif-goose/goose)
 [![Inference Engine](https://img.shields.io/badge/vLLM-Speculative%20Decoding-FF6F00?style=for-the-badge&logo=python&logoColor=white)](https://github.com/vllm-project/vllm)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=for-the-badge)](LICENSE)
+[![Docs](https://img.shields.io/badge/Docs-GitHub%20Pages-4CAF50?style=for-the-badge)](https://dgxcoder.github.io/dgxcoder)
 [![Build Status](https://img.shields.io/badge/Tests-15%20Passed-brightgreen?style=for-the-badge)](tests/)
 
 <p align="center">

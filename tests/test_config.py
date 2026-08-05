@@ -5,8 +5,8 @@ def test_config_env_vars():
     config = DGXCoderConfig(vllm_host="http://localhost:8000", model="qwen2.5-coder-32b")
     env = config.get_env_vars()
     assert env["GOOSE_PROVIDER"] == "openai"
-    assert env["OPENAI_HOST"] == "http://localhost:8000"
-    assert env["GOOSE_MODEL"] == "qwen2.5-coder-32b"
+    assert env["OPENAI_BASE_URL"] == "http://localhost:8000/v1"
+    assert env["GOOSE_MODEL"] == "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 def test_ensure_goose_config(tmp_path):
     config = DGXCoderConfig()

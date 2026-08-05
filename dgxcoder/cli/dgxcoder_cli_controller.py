@@ -176,17 +176,20 @@ class DGXCoderCLIController:
         # Command: dgxcoder status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
 
-        # Command: dgxcoder serve
-        serve_parser = subparsers.add_parser("serve", help="Launch local vLLM server optimized for GB10 unified memory")
-        serve_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name to serve (default: qwen2.5-coder-32b; examples: llama-3.3-70b, deepseek-r1-distill-32b)")
-        serve_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
-        serve_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
-        serve_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
-        serve_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
-        serve_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
-        serve_parser.add_argument("--num-scheduler-steps", type=int, default=None, help="Multi-step scheduling iterations per step")
-        serve_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
-        serve_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
+        # Command: dgxcoder start_server
+        start_server_parser = subparsers.add_parser("start_server", help="Launch local vLLM server optimized for GB10 unified memory")
+        start_server_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name to serve (default: qwen2.5-coder-32b; examples: llama-3.3-70b, deepseek-r1-distill-32b)")
+        start_server_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
+        start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
+        start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
+        start_server_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
+        start_server_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+        start_server_parser.add_argument("--num-scheduler-steps", type=int, default=None, help="Multi-step scheduling iterations per step")
+        start_server_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
+        start_server_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
+        start_server_parser.add_argument("--api-key", default=None, help="OpenAI-compatible API key (optional; not set by default)")
+        start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", help="Enable automatic tool choice for function calling")
+        start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (e.g. hermes, llama3_json)")
 
         # Command: dgxcoder index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -200,6 +203,13 @@ class DGXCoderCLIController:
         download_parser = subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
+
+        # Command: dgxcoder endpoints
+        subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
+
+        # Command: dgxcoder stop_server
+        stop_parser = subparsers.add_parser("stop_server", help="Stop and remove the running vLLM Docker container")
+        stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
 
         # Command: dgxcoder web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
@@ -307,7 +317,42 @@ class DGXCoderCLIController:
         elif args.command == "status":
             cls.handle_status()
 
-        elif args.command == "serve":
+        elif args.command == "endpoints":
+            cls.display_header()
+            from rich.table import Table
+            table = Table(title="Available Endpoints (OpenAI-compatible)", show_header=True, header_style="bold magenta")
+            table.add_column("Endpoint", style="cyan")
+            table.add_column("Method", style="green")
+            table.add_column("Description")
+            table.add_row("/v1/models", "GET", "List available models")
+            table.add_row("/v1/chat/completions", "POST", "Chat completions (OpenAI format)")
+            table.add_row("/v1/completions", "POST", "Legacy text completions")
+            table.add_row("/v1/embeddings", "POST", "Text embeddings (if supported)")
+            table.add_row("/health", "GET", "vLLM server health (if enabled)")
+            console.print(table)
+
+            # Detect a local LAN IP for remote access (vLLM binds to 0.0.0.0)
+            import socket
+            local_ip = "localhost"
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                pass
+
+            cred_table = Table(title="OpenAPI-compatible Credentials", show_header=False)
+            cred_table.add_column("Key", style="bold cyan")
+            cred_table.add_column("Value", style="white")
+            cred_table.add_row("Base URL (localhost)", "http://localhost:8000/v1")
+            cred_table.add_row("Base URL (LAN IP)", f"http://{local_ip}:8000/v1")
+            cred_table.add_row("API Key", "Optional (use --api-key on serve; otherwise not required)")
+            cred_table.add_row("Auth Header", "Authorization: Bearer <key> (when enabled)")
+            console.print(cred_table)
+            print("\n💡 Use with any OpenAI-compatible client by pointing base_url to the endpoint above.")
+
+        elif args.command == "start_server":
             cls.display_header()
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             
@@ -331,6 +376,9 @@ class DGXCoderCLIController:
                     num_scheduler_steps=config.num_scheduler_steps,
                     attention_backend=config.attention_backend,
                     kv_cache_dtype=config.kv_cache_dtype,
+                    api_key=args.api_key,
+                    enable_auto_tool_choice=args.enable_auto_tool_choice,
+                    tool_call_parser=args.tool_call_parser,
                     background=True
                 )
                 
@@ -363,6 +411,11 @@ class DGXCoderCLIController:
                         vllm_mgr.process.kill()
             finally:
                 monitor.stop()
+
+        elif args.command == "stop_server":
+            cls.display_header()
+            vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+            vllm_mgr.stop_server(port=args.port)
 
         elif args.command == "index":
             cls.display_header()

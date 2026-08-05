@@ -212,14 +212,16 @@ class DGXCoderConfig:
         Generates environment variables required for Goose agent processes.
 
         Returns:
-            Dict[str, str]: Environment variables dictionary (GOOSE_PROVIDER, OPENAI_HOST, HF_TOKEN, etc.).
+            Dict[str, str]: Environment variables dictionary (GOOSE_PROVIDER, OPENAI_BASE_URL, HF_TOKEN, etc.).
         """
+        from dgxcoder.hardware import resolve_model_hf_repo
+        resolved_model = resolve_model_hf_repo(self.model)
+        base_url = self.vllm_host.rstrip("/") + "/v1"
         env: Dict[str, str] = {
             "GOOSE_PROVIDER": "openai",
-            "OPENAI_HOST": self.vllm_host,
-            "OPENAI_BASE_PATH": "v1",
+            "OPENAI_BASE_URL": base_url,
             "OPENAI_API_KEY": "gb10-local-token",
-            "GOOSE_MODEL": self.model,
+            "GOOSE_MODEL": resolved_model,
         }
         if self.hf_token:
             env["HF_TOKEN"] = self.hf_token
@@ -236,13 +238,15 @@ class DGXCoderConfig:
         """
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         
+        from dgxcoder.hardware import resolve_model_hf_repo
+        resolved_model = resolve_model_hf_repo(self.model)
+        base_url = self.vllm_host.rstrip("/") + "/v1"
         config_data: Dict[str, Any] = {
             "provider": "openai",
             "openai": {
-                "host": self.vllm_host,
-                "base_path": "v1",
+                "base_url": base_url,
                 "api_key": "gb10-local-token",
-                "model": self.model
+                "model": resolved_model
             },
             "extensions": {
                 "jetbrains_mcp": {
