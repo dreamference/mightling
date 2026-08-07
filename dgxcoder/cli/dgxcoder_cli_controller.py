@@ -17,7 +17,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from dgxcoder.config import DGXCoderConfig
-from dgxcoder.runner import GooseRunner, ClineRunner, ClineInstaller
+from dgxcoder.runner import (
+    GooseRunner, ClineRunner, ClineInstaller,
+    AiderRunner, AiderInstaller,
+    ContinueRunner, ContinueInstaller,
+    OpenHandsRunner, OpenHandsInstaller
+)
 from dgxcoder.hardware import detect_gb10_hardware, download_model, download_all_models
 from dgxcoder.vllm_server import VLLMServerManager
 from dgxcoder.context_engine import ContextEngine
@@ -44,7 +49,7 @@ class DGXCoderCLIController:
     @classmethod
     def handle_status(cls) -> None:
         """
-        Executes `dgxcoder status` command, displaying hardware metrics, vLLM health, Goose/Cline config,
+        Executes `dgxcoder status` command, displaying hardware metrics, vLLM health, Goose/Cline/Aider/Continue/OpenHands config,
         and context engine index telemetry in formatted Rich panels.
         """
         cls.display_header()
@@ -80,7 +85,10 @@ class DGXCoderCLIController:
         vllm_str = f"[green]Online ({config.vllm_host})[/green]" if vllm_status["healthy"] else f"[red]Offline ({config.vllm_host})[/red]"
         goose_str = "[green]Installed[/green]" if goose_runner.is_goose_installed() else "[yellow]Not Found[/yellow]"
         cline_str = "[green]Extension Ready[/green]" if ClineInstaller.is_cline_extension_installed() else "[yellow]Extension Available[/yellow]"
-        
+        aider_str = "[green]CLI Ready[/green]" if AiderInstaller.is_installed() else "[yellow]CLI Available[/yellow]"
+        continue_str = "[green]Extension Ready[/green]" if ContinueInstaller.is_continue_extension_installed() else "[yellow]Extension Available[/yellow]"
+        openhands_str = "[green]Docker Image Ready[/green]" if OpenHandsInstaller.is_image_downloaded() else "[yellow]Docker Available[/yellow]"
+
         agent_table.add_row("Local vLLM Server", vllm_str)
         agent_table.add_row("Active Served Models", ", ".join(vllm_status["models"]) if vllm_status["models"] else "None (vLLM idle)")
         agent_table.add_row("Active Agent Runner", f"[bold green]{config.agent_runner.upper()}[/bold green] (Default: GOOSE)")
@@ -96,6 +104,9 @@ class DGXCoderCLIController:
         agent_table.add_row("KV Cache Dtype", config.kv_cache_dtype)
         agent_table.add_row("Goose CLI Runtime", goose_str)
         agent_table.add_row("Cline Extension Runtime", cline_str)
+        agent_table.add_row("Aider CLI Runtime", aider_str)
+        agent_table.add_row("Continue IDE Runtime", continue_str)
+        agent_table.add_row("OpenHands Docker Runtime", openhands_str)
         agent_table.add_row("DGXCoder Config Path", str(config.config_file_path))
         agent_table.add_row("Goose Config Path", str(config.config_path))
 
@@ -123,21 +134,23 @@ class DGXCoderCLIController:
         """
         parser = argparse.ArgumentParser(
             prog="dgxcoder",
-            description="DGXCoder: Autonomous local agentic coding engine powered by Goose, Cline & NVIDIA GB10"
+            description="DGXCoder: Autonomous local agentic coding engine powered by Goose, Cline, Aider, Continue, OpenHands & NVIDIA GB10"
         )
+        agent_choices = ["goose", "cline", "aider", "continue", "openhands"]
+
         parser.add_argument("--config", default=None, help="Path to custom DGXCoder config file (.yaml or .json)")
         parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
-        parser.add_argument("--agent", choices=["goose", "cline"], default=None, help="Select primary AI agent runner (default: goose)")
+        parser.add_argument("--agent", choices=agent_choices, default=None, help="Select primary AI agent runner (default: goose)")
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
         subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
         # Command: dgxcoder init
-        init_parser = subparsers.add_parser("init", help="Initialize .dgxcoder project workspace and Goose MCP config")
+        init_parser = subparsers.add_parser("init", help="Initialize .dgxcoder project workspace and agent configs")
         init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
         init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         init_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
-        init_parser.add_argument("--agent", choices=["goose", "cline"], default=None, help="Primary AI agent runner")
+        init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
         # Command: dgxcoder chat
@@ -145,7 +158,7 @@ class DGXCoderCLIController:
         chat_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         chat_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
-        chat_parser.add_argument("--agent", choices=["goose", "cline"], default=None, help="Primary AI agent runner")
+        chat_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         chat_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         chat_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
 
@@ -155,12 +168,12 @@ class DGXCoderCLIController:
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         run_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
-        run_parser.add_argument("--agent", choices=["goose", "cline"], default=None, help="Primary AI agent runner")
+        run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
 
         # Command: dgxcoder status
-        subparsers.add_parser("status", help="Display local GB10 hardware & Goose connection status")
+        subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
 
         # Command: dgxcoder serve
         serve_parser = subparsers.add_parser("serve", help="Launch local vLLM server optimized for GB10 unified memory")
@@ -234,9 +247,15 @@ class DGXCoderCLIController:
             kv_cache_dtype=kv_cache_dtype
         )
 
-        # Instantiate selected runner (Goose by default, or Cline)
+        # Instantiate selected runner (Goose by default, or Cline/Aider/Continue/OpenHands)
         if config.agent_runner == "cline":
             runner = ClineRunner(config=config)
+        elif config.agent_runner == "aider":
+            runner = AiderRunner(config=config)
+        elif config.agent_runner == "continue":
+            runner = ContinueRunner(config=config)
+        elif config.agent_runner == "openhands":
+            runner = OpenHandsRunner(config=config)
         else:
             runner = GooseRunner(config=config)
 

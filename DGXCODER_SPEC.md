@@ -1,6 +1,6 @@
 # DGXCoder Technical Specification
 
-> **Version:** 1.2.1  
+> **Version:** 1.2.0 (`dgxcoder.__version__`)  
 > **Status:** Implemented / Production-Ready  
 > **Target Hardware:** Exclusive to **NVIDIA GB10** (Blackwell architecture with 128 GB Unified Memory)  
 > **Deployment Model:** Single-Node Standalone NVIDIA GB10 System  
@@ -16,8 +16,8 @@
 - [4. Hardware Integration & Optimization](#4-hardware-integration--optimization)
   - [4.1. NVIDIA GB10 Hardware Specification](#41-nvidia-gb10-hardware-specification)
   - [4.2. GB10 Inference Stack & Auto-Launch Engine](#42-gb10-inference-stack--auto-launch-engine)
-  - [4.3. Goose Agentic Loop & Automatic CLI Provisioning](#43-goose-agentic-loop--automatic-cli-provisioning)
-  - [4.4. Codebase Context Engine (AST + Vector Index)](#44-codebase-context-engine-ast--vector-index)
+  - [4.3. Agent Runtimes (Goose & Cline)](#43-agent-runtimes-goose--cline)
+  - [4.4. Codebase Context Engine (AST + SQLite / FTS5)](#44-codebase-context-engine-ast--sqlite--fts5)
   - [4.5. Session Startup Process](#45-session-startup-process)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dgxcoder` CLI Suite](#51-dgxcoder-cli-suite)
@@ -29,22 +29,16 @@
     - [5.1.6. `dgxcoder index`](#516-dgxcoder-index)
     - [5.1.7. `dgxcoder mcp`](#517-dgxcoder-mcp)
     - [5.1.8. `dgxcoder web`](#518-dgxcoder-web)
-  - [5.2. JetBrains & VS Code Integration (via Stdio MCP)](#52-jetbrains--vs-code-integration-via-stdio-mcp)
-  - [5.3. Web Canvas UI & Live Diff / Telemetry Pane](#53-web-canvas-ui--live-diff--telemetry-pane)
+    - [5.1.9. `dgxcoder download`](#519-dgxcoder-download)
+  - [5.2. IDE Integration via Stdio MCP](#52-ide-integration-via-stdio-mcp)
+  - [5.3. Web Canvas UI & Telemetry Pane](#53-web-canvas-ui--telemetry-pane)
 - [6. System Requirements & Setup](#6-system-requirements--setup)
   - [Requirements](#requirements)
   - [Identifying Your Hardware Variant](#identifying-your-hardware-variant)
   - [Quickstart Installation](#quickstart-installation)
+  - [Helper Scripts](#helper-scripts)
 - [7. Roadmap & Implementation Verification](#7-roadmap--implementation-verification)
 - [8. Codebase Architecture & Source Reference](#8-codebase-architecture--source-reference)
-  - [8.1. `dgxcoder/hardware.py`](#81-dgxcoderhardwarepy)
-  - [8.2. `dgxcoder/config.py`](#82-dgxcoderconfigpy)
-  - [8.3. `dgxcoder/runner.py`](#83-dgxcoderrunnerpy)
-  - [8.4. `dgxcoder/vllm_server.py`](#84-dgxcodervllm_serverpy)
-  - [8.5. `dgxcoder/context_engine.py`](#85-dgxcodercontext_enginepy)
-  - [8.6. `dgxcoder/mcp_server.py`](#86-dgxcodermcp_serverpy)
-  - [8.7. `dgxcoder/web_canvas.py`](#87-dgxcoderweb_canvaspy)
-  - [8.8. `dgxcoder/cli.py`](#88-dgxcoderclipy)
 
 ---
 
@@ -54,33 +48,34 @@
 
 By leveraging the integrated SoC architecture of the NVIDIA GB10 (Blackwell GPU paired with high-performance ARM Cortex CPU host sharing **128 GB of high-speed Unified LPDDR5X Memory**), DGXCoder hosts state-of-the-art open coding LLMs with high generation speeds and low latency.
 
+Primary agent runtime is **Goose** (`aaif-goose/goose`). An optional **Cline** path (`--agent cline`) configures VS Code / VSCodium with the Cline extension against the same local vLLM endpoint.
+
 ```
 +-----------------------------------------------------------------------------------+
 |                                  DGXCoder Clients                                 |
 |   +-----------------------+   +------------------------+   +-------------------+  |
-|   |  `dgxcoder` CLI       |   | JetBrains / VS Code    |   | Web Canvas UI     |  |
-|   |  Terminal Interface   |   | MCP Companion Plugin   |   | Interactive App   |  |
+|   |  `dgxcoder` CLI       |   | Stdio MCP Companion    |   | Web Canvas UI     |  |
+|   |  Terminal Interface   |   | (Goose IDE bridge)     |   | Telemetry Pane    |  |
 |   +-----------+-----------+   +-----------+------------+   +---------+---------+  |
 +---------------+---------------------------+--------------------------+------------+
                                             | Model Context Protocol (MCP)
 +-------------------------------------------v---------------------------------------+
-|                       Goose Agent Execution Engine (AAIF)                         |
+|              Agent Execution (Goose default | Cline optional)                     |
 |  +--------------------+  +--------------------+  +------------------------------+ |
-|  | Context Engine     |  | Goose Controller   |  | MCP Tool Execution Runtime   | |
-|  | AST + Vector Index |  | Session & Prompts  |  | Sandboxed Container Runner   | |
+|  | Context Engine     |  | Goose / Cline      |  | Sandbox + MCP Tool Runtime   | |
+|  | AST + FTS5 + TF-IDF|  | Session Controllers|  | Rootless Container Prefix    | |
 |  +--------------------+  +--------------------+  +------------------------------+ |
 +-------------------------------------------+---------------------------------------+
-|                                           | Local Async Requests (vLLM / TRT-LLM OpenAI API)
+|                                           | Local OpenAI-compatible HTTP (vLLM)
 +-------------------------------------------v---------------------------------------+
 |                  NVIDIA GB10 Hardware & Inference Engine                          |
 |  +------------------------------------------------------------------------------+  |
-|  | vLLM / TensorRT-LLM Engine (BF16 / INT8 / FP8 / INT4 Quantization)            |  |
-|  | PagedAttention + FlashAttention-2 / Unified Memory Management                |  |
+|  | vLLM Engine (BF16 / INT8 / FP8 / INT4) + Prefix Cache / Chunked Prefill       |  |
 |  +------------------------------------------------------------------------------+  |
-|  | GB10 Open Models: Qwen 2.5 Coder 32B/72B (INT8) | DeepSeek-R1-Distill 32B/70B  |  |
-|  |                   Llama 3.3 70B (INT8) | StarCoder2 15B                     |  |
+|  | GB10 Open Models: Qwen 2.5 Coder 32B/72B | DeepSeek-R1-Distill 32B/70B         |  |
+|  |                   Llama 3.3 70B | StarCoder2 15B | Draft 1.5B/3B              |  |
 |  +------------------------------------------------------------------------------+  |
-|  | Hardware: 1x NVIDIA GB10 (Blackwell Architecture | 128 GB Unified Memory)     |  |
+|  | Hardware: 1x NVIDIA GB10 (Blackwell | 128 GB Unified Memory)                  |  |
 |  +------------------------------------------------------------------------------+  |
 +-----------------------------------------------------------------------------------+
 ```
@@ -97,25 +92,27 @@ By leveraging the integrated SoC architecture of the NVIDIA GB10 (Blackwell GPU 
 | **Inference Hardware** | Cloud TPUs / GPUs | **NVIDIA GB10 (Blackwell Architecture)** |
 | **Data Privacy** | Cloud Privacy Policy | **Strict Zero-Egress Air-Gapped Local Execution** |
 | **System Memory** | Cloud Allocation | **128 GB Unified LPDDR5X Memory** |
-| **Interfaces** | Antigravity IDE, CLI, Desktop | **CLI (`dgxcoder`), JetBrains Plugin, VS Code Extension, Web Canvas** |
+| **Interfaces** | Antigravity IDE, CLI, Desktop | **CLI (`dgxcoder`), Goose + stdio MCP, optional Cline/VS Code, Web Canvas** |
 
 ---
 
 ## 3. Supported NVIDIA GB10 Model Matrix
 
-All supported models are qualified to run on a single **NVIDIA GB10 system (128 GB Unified Memory)**:
+Aliases and HuggingFace repos are defined in `ModelMatrixRegistry.MATRIX` (`dgxcoder/hardware/model_matrix_registry.py`):
 
-| Model | Parameters | Precision / Quantization | Memory Required | NVIDIA GB10 Compatibility |
-| :--- | :--- | :--- | :--- | :--- |
-| **Qwen 2.5 Coder 32B** | 32B | BF16 / INT8 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
-| **Qwen 2.5 Coder 72B** | 72B | INT8 / FP8 / INT4 | ~45 - 80 GB | ✅ Supported (INT8/FP8 quantized fit) |
-| **Qwen 2.5 Coder 1.5B (Draft)** | 1.5B | BF16 / FP16 / INT8 | ~3.5 - 6 GB | ✅ Ideal Speculative Decoding Draft Model |
-| **Qwen 2.5 Coder 3B (Draft)** | 3.0B | BF16 / FP16 / INT8 | ~6.5 - 10 GB | ✅ Ideal Speculative Decoding Draft Model |
-| **DeepSeek-R1-Distill-Qwen-32B** | 32B | BF16 / INT8 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
-| **DeepSeek-R1-Distill-Llama-70B** | 70B | INT8 / FP8 / INT4 | ~45 - 80 GB | ✅ Supported (INT8/FP8 quantized fit) |
-| **Llama 3.3 70B Instruct** | 70B | INT8 / FP8 | ~75 GB | ✅ Supported (INT8/FP8 quantized fit) |
-| **StarCoder2 15B** | 15B | BF16 / FP16 | ~20 - 30 GB | ✅ Fits easily |
-| **DeepSeek-V3 671B** | 671B (MoE) | INT4 (AWQ/GPTQ) | ~350 GB | ❌ Exceeds 128GB (Requires multi-node or >128GB hardware) |
+| Alias | Model | Parameters | Precision | Memory Required | GB10 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `qwen2.5-coder-32b` | Qwen 2.5 Coder 32B | 32B | BF16 / INT8 / FP8 | ~35 - 64 GB | ✅ |
+| `qwen2.5-coder-72b` | Qwen 2.5 Coder 72B | 72B | INT8 / FP8 / INT4 | ~45 - 80 GB | ✅ |
+| `qwen2.5-coder-1.5b` | Qwen 2.5 Coder 1.5B (Draft) | 1.5B | BF16 / FP16 / INT8 | ~3.5 - 6 GB | ✅ Draft |
+| `qwen2.5-coder-3b` | Qwen 2.5 Coder 3B (Draft) | 3.0B | BF16 / FP16 / INT8 | ~6.5 - 10 GB | ✅ Draft |
+| `deepseek-r1-distill-32b` | DeepSeek-R1-Distill-Qwen-32B | 32B | BF16 / INT8 / FP8 | ~35 - 64 GB | ✅ |
+| `deepseek-r1-distill-70b` | DeepSeek-R1-Distill-Llama-70B | 70B | INT8 / FP8 / INT4 | ~45 - 80 GB | ✅ |
+| `llama-3.3-70b` | Llama 3.3 70B Instruct | 70B | INT8 / FP8 | ~75 GB | ✅ |
+| `starcoder2-15b` | StarCoder2 15B | 15B | BF16 / FP16 | ~20 - 30 GB | ✅ |
+| `deepseek-v3-671b` | DeepSeek-V3 671B (MoE) | 671B | INT4 | ~350 GB | ❌ |
+
+HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`, `meta-llama/Llama-3.3-70B-Instruct`, `bigcode/starcoder2-15b`.
 
 ---
 
@@ -126,56 +123,76 @@ All supported models are qualified to run on a single **NVIDIA GB10 system (128 
 * **Unified Memory**: 128 GB LPDDR5X high-speed unified memory shared dynamically between CPU and GPU.
 * **CPU Host**: High-performance ARM Cortex CPU cores (`aarch64` architecture).
 * **Storage**: NVMe PCIe SSD for high-speed workspace indexing and model caching.
+* **Detection** (`HardwareManager.detect_gb10_hardware`):
+  1. Query `nvidia-smi --query-gpu=name,driver_version,memory.total`.
+  2. Read `/proc/meminfo` for total/available/used system memory.
+  3. Mark `is_gb10=True` if GPU name contains `GB10` or `BLACKWELL`, **or** if total system memory ≥ **100 GB** (fallback; may label GPU as `NVIDIA GB10 (Simulated / Unified Memory Node)` when name is missing).
+* Telemetry fields returned as a dict: `is_gb10`, `gpu_name`, `driver_version`, `total_unified_memory_gb`, `available_memory_gb`, `used_memory_gb`, `vram_gb`, `arch`. (`vram_gb` is collected but not shown in `dgxcoder status`.)
 
-### 4.2. GB10 Inference Stack & Performance Engine
-* **Multi-Tiered Launch Resolution**:
-  1. **Native CLI**: Uses `vllm serve <model>` if `vllm` CLI binary is available.
-  2. **Python Module**: Uses `python -m vllm.entrypoints.openai.api_server` if `vllm` package is installed.
-  3. **Docker Container Fallback**: Uses `docker run --rm --gpus all -p 8000:8000 vllm/vllm-openai:latest` when local python vLLM package is absent.
-* **Dual-Model Speculative Decoding Pipeline**:
-  - Leverages GB10 128GB Unified Memory to run a primary target model (e.g. `Qwen 2.5 Coder 32B/72B`) alongside a lightweight draft model (e.g. `Qwen 2.5 Coder 1.5B/3B`).
-  - Appends `--speculative-model <draft_model> --num-speculative-tokens <tokens>` to boost inference generation speed by 2x–3x.
-* **Blackwell GB10 Performance Optimizations**:
-  - **Automatic Prefix Caching (`--enable-prefix-caching`)**: Caches reusable system prompts and workspace AST context payloads across turns, cutting prefill latency by 80%.
-  - **Chunked Prefill Execution (`--enable-chunked-prefill`)**: Prevents long prompt prefill stalls from interrupting token generation.
-  - **Multi-Step Scheduling (`--num-scheduler-steps 8`)**: Batches CPU-to-GPU kernel launches on ARM host CPU, increasing token throughput by 15%–30%.
-  - **FP8 Model & KV-Cache Auto-Resolution (`--quantization fp8`)**: Automatically resolves FP8 quantization for 70B/72B models on GB10.
-* **GB10 Launch Flags**: `--host 0.0.0.0 --port 8000 --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code --enforce-eager --enable-prefix-caching --enable-chunked-prefill --num-scheduler-steps 8 --kv-cache-dtype auto`.
-* **Readiness Polling & Live Streaming**: Automatically launches vLLM in background if offline when `dgxcoder chat` or `run` starts, streaming live `[vLLM]` output logs into the terminal until HTTP 200 OK is returned.
-* **Instant Signal Handling**: Polling loop operates on 0.1s sub-second sleep slices to handle `Ctrl+C` (`SIGINT`) instantly.
+### 4.2. GB10 Inference Stack & Auto-Launch Engine
+* **Multi-Tiered Launch Resolution** (`VLLMServerManager.build_launch_command`):
+  1. **Native CLI**: `vllm serve <hf_repo>` when `vllm` is on `PATH`.
+  2. **Python Module**: `python -m vllm.entrypoints.openai.api_server --model <hf_repo>` when the `vllm` package imports successfully.
+  3. **Docker Fallback**: `docker run --rm --name dgxcoder-vllm-{port} --gpus all -p {port}:{port} -v ~/.cache/huggingface:/root/.cache/huggingface [-e HF_TOKEN=…] vllm/vllm-openai:latest <hf_repo> …` when Docker is available (`docker ps` succeeds). Pre-removes conflicting container name before launch.
+  4. If neither vLLM nor Docker is available, still emits the Python-module command form and prints an install hint.
+* **Weight Pre-Download**: `start_server()` always calls `download_model()` for primary (and draft if set) before spawning the process. Download uses `huggingface_hub.snapshot_download`, then `huggingface-cli download`, else defers fetch to vLLM init.
+* **Dual-Model Speculative Decoding**: When `draft_model` is set, appends `--speculative-model <hf_draft> --num-speculative-tokens <N>`.
+* **Blackwell Performance Flags Actually Applied**:
+  - `--enable-prefix-caching` (when enabled; default on)
+  - `--enable-chunked-prefill` (when enabled; default on)
+  - `--kv-cache-dtype <dtype>` (default `auto`)
+  - `--attention-backend <backend>` only when backend ≠ `auto`
+  - `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is unset
+* **Config-Stored but Not Passed to vLLM**: `num_scheduler_steps` (default `8`) is accepted on CLI/config/status display but is **not** appended as `--num-scheduler-steps` in `build_launch_command` today.
+* **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code --enforce-eager` plus the optional flags above.
+* **Readiness Polling & Live Streaming**: `GooseRunner.wait_for_vllm()` auto-launches background vLLM when offline, streams `[vLLM]` logs, and polls `GET /v1/models` until HTTP 200.
+* **Instant Signal Handling**: Poll loop sleeps in 0.1s slices so `Ctrl+C` is handled promptly.
 
-### 4.3. Goose Agentic Loop & Rootless Container Sandboxing
+### 4.3. Agent Runtimes (Goose & Cline)
+
+#### Goose (default, `agent_runner=goose`)
 * **Execution Runtime**: Goose AI Agent (`aaif-goose/goose` v1.45+).
-* **Auto-Installation**: Automatically provisions official AAIF Goose binary from `https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh` if missing from system `PATH`.
-* **Executable Resolution**: Detects `goose` in `PATH`, `~/.local/bin/goose`, `~/.goose/bin/goose`, and `sys.prefix/bin/goose`.
-* **OpenAI-Compatible Bridge**: Configures `~/.config/goose/config.yaml` to point to `http://localhost:8000/v1` with token `gb10-local-token`.
-* **Rootless Container Sandbox Isolation**:
-  - Supports `--sandbox {none,apptainer,podman,docker}` to isolate subagent tool executions (shell commands, package installs, test runs) from the host system.
-  - **Apptainer**: `apptainer exec --writable-tmpfs --bind $(pwd):/workspace docker://ubuntu:22.04` (Unprivileged user namespace isolation).
-  - **Podman**: `podman run --rm -it -v $(pwd):/workspace:Z -w /workspace ubuntu:22.04` (Rootless OCI container execution).
-  - **Docker**: `docker run --rm -it -v $(pwd):/workspace -w /workspace ubuntu:22.04` (Containerized workspace execution).
+* **Auto-Installation**: `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash -s -- --yes`.
+* **Executable Resolution**: `PATH` → `~/.local/bin/goose` → `~/.goose/bin/goose` → `sys.prefix/bin/goose` → `sys.prefix/bin/goose-ai`.
+* **OpenAI-Compatible Bridge**: `ensure_goose_config()` writes `~/.config/goose/config.yaml` with provider `openai`, host `{vllm_host}`, `base_path: v1`, `api_key: gb10-local-token`, model name, and stdio MCP extension `dgxcoder mcp`.
+* **Session Commands**: `goose session` (chat) or `goose run --text "<prompt>"` (run); optional `--debug`.
+* **Rootless Sandbox Prefix** (`SandboxManager`, Goose path only):
+  - `--sandbox {none,apptainer,podman,docker}` (default `none`).
+  - **Apptainer**: `apptainer exec --writable-tmpfs --bind {cwd}:/workspace docker://ubuntu:22.04`
+  - **Podman**: `podman run --rm -it -v {cwd}:/workspace:Z -w /workspace ubuntu:22.04`
+  - **Docker**: `docker run --rm -it -v {cwd}:/workspace -w /workspace ubuntu:22.04`
+  - Missing runtime binary → warning and unsandboxed execution.
 
-### 4.4. Codebase Context Engine (Parallel AST + SQLite / FTS5 Store)
-* **Parallel Multi-Core AST Parsing**: Uses `ThreadPoolExecutor` worker pools to parse workspace Python AST symbol definitions in parallel across ARM CPU cores.
-* **SQLite + FTS5 Full-Text Search Engine**: Persists symbols and file tokens into an embedded SQLite database (`.dgxcoder/context.db`) equipped with FTS5 full-text search tables.
-* **TF-IDF Semantic Vector Index**: Tokenizes identifiers, camelCase, and snake_case terms to perform air-gapped zero-egress local semantic retrieval.
-* **Index Cache**: Persists workspace metadata at `.dgxcoder/context_index.json` and `.dgxcoder/context.db`.
+#### Cline (optional, `--agent cline` / `DGXCODER_AGENT=cline`)
+* **Runtime**: VS Code (`code`) or VSCodium (`codium`) + marketplace extension `saoudrizwan.claude-dev`.
+* **Provisioning**: `ClineInstaller.install_cline_if_missing()` runs `code --install-extension saoudrizwan.claude-dev` when absent.
+* **Workspace Rules**: Writes `.clinerules` (once, if missing) with OpenAI-compatible base URL `{vllm_host}/v1`, resolved HF model ID, and local/offline guidance.
+* **Session Behavior**: Reuses GooseRunner’s `wait_for_vllm()` for auto-launch, prints Cline connection details (including API key `gb10-local-token`), then launches `code|codium $(pwd)`. Does **not** apply sandbox prefixes or invoke Goose.
+
+### 4.4. Codebase Context Engine (AST + SQLite / FTS5)
+* **Parallel Parsing**: `ThreadPoolExecutor` with `max_workers = min(32, cpu_count * 2)` over non-ignored workspace files.
+* **AST**: Python (`.py`) only — class/function symbols, signatures, docstrings, line ranges via `ASTSymbolExtractor`.
+* **Tokenization / TF-IDF**: All indexed text files tokenized (camelCase / snake_case aware). TF-IDF matrix is computed in-memory during `index_workspace()` and used for hybrid search in the same process.
+* **SQLite + FTS5**: `.dgxcoder/context.db` tables `files`, `symbols`, and FTS virtual table `fts_context` storing **full file content** (not pre-tokenized terms).
+* **JSON Cache**: `.dgxcoder/context_index.json` stores symbols and file metadata **without** tokens or TF-IDF. After `load_index()`, `tokens=[]` and TF-IDF is empty until a fresh in-process reindex; FTS5 search still works from SQLite.
+* **Hybrid Search**: `search_code()` combines FTS5 ranks with in-memory TF-IDF scores.
+* **Ignore Sets**: VCS/venv/node_modules/build/dist/`.dgxcoder`, plus common binary extensions.
 
 ### 4.5. Session Startup Process
 
-When `dgxcoder chat` or `dgxcoder run` starts, DGXCoder bootstraps the local inference and agent stack in a fixed order before handing control to Goose. Explicit `dgxcoder serve` follows the same vLLM launch path without the Goose steps.
+#### Goose path (`dgxcoder chat|run` with default agent)
 
 ```
-dgxcoder chat | run
+dgxcoder chat | run [--agent goose]
        |
        v
-[1] Resolve config (CLI > Env > .dgxcoder/config.yaml > defaults)
+[1] Resolve config (CLI > Env > config file > defaults)
        |
        v
 [2] ensure_goose_config()  -->  ~/.config/goose/config.yaml
        |
        v
-[3] validate_model()       -->  warn if model exceeds GB10 memory budget
+[3] validate_model()       -->  warn if model exceeds memory budget
        |
        v
 [4] GET {vllm_host}/v1/models  --healthy?--+
@@ -183,339 +200,290 @@ dgxcoder chat | run
        | no                                | yes
        v                                   |
 [5] Auto-launch vLLM (background)          |
-       |                                   |
-       |  a. download_model(primary)       |
-       |  b. download_model(draft) [opt]   |
-       |  c. resolve launch tier:          |
-       |       vllm CLI > python -m vllm   |
-       |       > docker vllm-openai        |
-       |  d. Popen + live log streamer     |
-       |                                   |
+       |  a. download_model(primary/draft) |
+       |  b. launch tier resolve + Popen   |
+       |  c. log streamer                  |
        v                                   |
-[6] Poll readiness (0.1s slices)           |
-       |  stream [vLLM] logs               |
-       |  abort on Ctrl+C / process exit   |
+[6] Poll readiness (0.1s slices, [vLLM] logs)
        |                                   |
        +------------------+----------------+
                           |
                           v
-[7] Provision Goose CLI if missing (aaif-goose download_cli.sh)
+[7] Provision Goose CLI if missing
        |
        v
-[8] Optional sandbox prefix (apptainer | podman | docker)
+[8] Optional sandbox prefix
        |
        v
 [9] Exec goose session | goose run --text "<prompt>"
 ```
 
-#### Step Detail
+#### Cline path (`--agent cline`)
 
-| Step | Component | Behavior |
-| :--- | :--- | :--- |
-| **1. Config resolution** | `DGXCoderConfig` / `cli.py` | Merges CLI flags, env vars (`DGXCODER_*`, `HF_TOKEN`), workspace `.dgxcoder/config.yaml`, and built-in defaults into the runtime config. |
-| **2. Goose bridge sync** | `config.ensure_goose_config()` | Writes/updates `~/.config/goose/config.yaml` to point Goose at the local OpenAI-compatible endpoint (`{vllm_host}/v1`, token `gb10-local-token`) and registers the stdio MCP companion. |
-| **3. Model validation** | `config.validate_model()` | Checks the selected primary/draft models against the GB10 `MODEL_MATRIX` memory budgets; prints a warning on mismatch but does not block startup. |
-| **4. Health probe** | `VLLMServerManager.check_health()` | Issues `GET /v1/models` with a short timeout. On HTTP 200, skips auto-launch and continues at step 7. |
-| **5. Auto-launch** | `GooseRunner.wait_for_vllm()` → `VLLMServerManager.start_server(background=True)` | Triggered only when the endpoint is offline. Pre-downloads weights into `~/.cache/huggingface/hub/` (skips if already cached), resolves the HF repo ID from the model alias, builds GB10-tuned launch flags, then starts vLLM (or Docker fallback) as a background subprocess with a non-blocking log queue. |
-| **6. Readiness wait** | `wait_for_vllm()` polling loop | Drains `[vLLM]` log lines to the terminal, re-probes `/v1/models` every ~1s using 0.1s sleep slices for instant `SIGINT` handling, and fails fast if the child process exits or an optional `max_wait` elapses. |
-| **7. Goose provisioning** | `GooseInstaller` | Resolves `goose` from `PATH`, `~/.local/bin`, `~/.goose/bin`, or `sys.prefix/bin`. If absent, runs the official AAIF `download_cli.sh` installer. |
-| **8. Sandbox wrap** | `SandboxManager.get_prefix()` | When `sandbox` is `apptainer`, `podman`, or `docker`, prefixes the Goose command with the corresponding rootless container launcher; falls back to host execution if the runtime binary is missing. |
-| **9. Agent handoff** | `GooseRunner.run_session()` | Invokes `goose session` (interactive chat) or `goose run --text "<prompt>"` (non-interactive), forwarding env vars from the resolved config. |
+1. Health-check / auto-launch vLLM via `GooseRunner.wait_for_vllm()` (same download + launch path).
+2. Require `code` or `codium` on `PATH`.
+3. Install Cline extension if missing.
+4. Ensure `.clinerules` exists.
+5. Print connection details; launch VS Code on the workspace. Prompt text is printed only (not auto-submitted to Cline).
 
 #### `dgxcoder serve` Variant
 
-`dgxcoder serve` resolves config, then calls `VLLMServerManager.start_server(background=False)` directly: pre-download primary/draft weights, resolve the launch tier, and run vLLM in the **foreground** so the terminal owns the server lifecycle. It skips Goose bridge sync, readiness polling, Goose provisioning, and sandbox wrapping.
+Resolves `DGXCoderConfig`, then calls `VLLMServerManager.start_server(background=False)` with **CLI `args.model` / `args.draft_model` / `args.num_speculative_tokens` passed through directly**. When those flags are omitted, Python `None` is passed into `start_server` (overriding the function’s default `"qwen2.5-coder-32b"`). Prefer explicit `--model` on `serve`, or rely on `chat`/`run` auto-launch which uses `config.model`. Tuning flags (`enable_prefix_caching`, etc.) come from the resolved config. Foreground process owns the terminal; Goose/Cline are not started.
 
 #### Failure Modes
 
-* **vLLM launch failure**: Auto-launch exceptions surface a hint to run `dgxcoder serve --model <model>` manually; `chat`/`run` exit with code `1`.
-* **Process crash during wait**: Unexpected child exit drains remaining logs and returns failure.
-* **Ctrl+C during wait**: Cancels polling/launch cleanly without starting Goose.
-* **Goose install failure**: Prints the manual `curl …/download_cli.sh` install command and exits with code `1`.
+* **vLLM launch failure**: Hint to run `dgxcoder serve --model <model>`; `chat`/`run` exit `1`.
+* **Process crash during wait**: Drain remaining logs; return failure.
+* **Ctrl+C during wait**: Cancel without starting the agent.
+* **Goose install failure**: Print manual curl install command; exit `1`.
+* **Cline without VS Code**: Exit `1` with PATH install hint.
 
 ---
 
 ## 5. Client Interfaces & Developer Experience
 
 ### 5.1. `dgxcoder` CLI Suite
-Terminal application powered by `Rich` and `Goose`.
 
-#### Subcommand Summary:
+Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal UI. **9** subcommands.
+
+#### Global Options
+| Flag | Description |
+| :--- | :--- |
+| `--config PATH` | Custom DGXCoder config (`.yaml` / `.json`) |
+| `--sandbox {none,apptainer,podman,docker}` | Rootless sandbox (Goose sessions) |
+| `--agent {goose,cline}` | Primary agent runner (default: `goose`) |
+| `--hf-token TOKEN` | HuggingFace token (else `HF_TOKEN` / `DGXCODER_HF_TOKEN`) |
+
+#### Subcommand Summary
 | Subcommand | Description |
 | :--- | :--- |
-| **`init`** | Initializes `.dgxcoder` workspace, generates `~/.config/goose/config.yaml`, and indexes AST symbols. |
-| **`chat`** | Launches interactive pair-programming session with Goose AI agent on local GB10 endpoint. |
-| **`run`** | Executes autonomous coding prompt non-interactively using Goose. |
-| **`status`** | Displays Rich visual panel of GB10 hardware memory, vLLM endpoint health, Goose state, and context index stats. |
-| **`serve`** | Launches local vLLM server optimized for GB10 unified memory (supports Docker fallback). |
-| **`index`** | Indexes workspace codebase AST definitions and TF-IDF vector context. |
-| **`mcp`** | Runs stdio Model Context Protocol (MCP) server for JetBrains & VS Code extensions. |
-| **`web`** | Launches interactive Web Canvas UI pane for live diffs and hardware monitoring. |
+| **`init`** | Pre-download models, save `.dgxcoder/config.yaml`, write Goose config, force-index workspace |
+| **`chat`** | Interactive session (Goose) or launch VS Code+Cline |
+| **`run`** | Non-interactive Goose task, or Cline launch with printed prompt |
+| **`status`** | Rich panels: hardware, vLLM/agent, context index |
+| **`serve`** | Foreground vLLM server (multi-tier launch) |
+| **`index`** | AST + FTS5 + TF-IDF workspace index |
+| **`mcp`** | Stdio MCP server for IDE companion tools |
+| **`download`** | Pre-download model weights to HF cache |
+| **`web`** | Web Canvas UI on port 8501 (default) |
 
-#### Command Specification Subsections:
+#### Command Specification Subsections
 
-##### 5.1.1. `dgxcoder init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST]`
-Initializes the current project workspace for DGXCoder agentic pair-programming.
-* **Behavior**: Generates local `.dgxcoder/config.yaml`, writes or updates Goose AI Agent config at `~/.config/goose/config.yaml`, registers stdio MCP companion tools, and triggers an initial workspace AST symbol and vector index.
-* **Options**:
-  * `--model MODEL`: Target LLM served on vLLM GB10 endpoint (default: `qwen2.5-coder-32b`).
-  * `--draft-model DRAFT_MODEL`: Optional speculative decoding draft model name (default: `None`).
-  * `--vllm-host HOST`: Base URL of local vLLM API endpoint (default: `http://localhost:8000`).
-* **Example**: `dgxcoder init --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b`
+##### 5.1.1. `dgxcoder init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--sandbox …] [--agent …] [--hf-token …]`
+* **Behavior**: Downloads primary/draft weights → `save_config()` → `ensure_goose_config()` → `ContextEngine.index_workspace(force_reindex=True)`.
+* **Example**: `dgxcoder init --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --agent goose`
 
-##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`
-Launches an interactive pair-programming session with the Goose AI agent connected to the local GB10 endpoint.
-* **Behavior**: Follows the full [Session Startup Process](#45-session-startup-process) (config → Goose bridge → model validate → vLLM health/auto-launch → Goose provision → optional sandbox → `goose session`). If the local vLLM server is offline, automatically launches vLLM in the background and streams live `[vLLM]` startup logs until ready.
-* **Options**:
-  * `--model MODEL`: Override target LLM model name for session.
-  * `--draft-model DRAFT_MODEL`: Speculative decoding draft model name.
-  * `--debug`: Enable verbose Goose debug logging.
-* **Example**: `dgxcoder chat --debug`
+##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline] [--sandbox …] [--hf-token …] [--debug]`
+* **Behavior**: Selects `GooseRunner` or `ClineRunner` from `config.agent_runner`, then `run_session(debug=…)`. Goose follows [§4.5](#45-session-startup-process); Cline follows the Cline path.
+* **Example**: `dgxcoder chat --agent goose --debug`
 
-##### 5.1.3. `dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`
-Executes an autonomous coding task non-interactively using Goose AI Agent.
-* **Behavior**: Same [Session Startup Process](#45-session-startup-process) as `chat`, then runs `goose run --text "<prompt>"` for a single autonomous task and exits upon completion.
-* **Options**:
-  * `PROMPT`: Mandatory instruction or prompt string for the agent.
-  * `--model MODEL`: Override target LLM model name.
-  * `--draft-model DRAFT_MODEL`: Speculative decoding draft model.
-  * `--debug`: Enable verbose Goose debug output.
+##### 5.1.3. `dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug]`
+* **Behavior**: Same runner selection; Goose executes `goose run --text "<prompt>"`; Cline prints the prompt and opens VS Code.
 * **Example**: `dgxcoder run "Refactor database connection pool to use async pg"`
 
 ##### 5.1.4. `dgxcoder status`
-Displays Rich visual status panels summarizing GB10 hardware, inference server state, agent runtime, and context index statistics.
-* **Behavior**: Queries `nvidia-smi` and `/proc/meminfo` to display GB10 unified memory usage (RAM/VRAM/total), polls vLLM health status, displays active served models, checks Goose CLI installation, and shows total indexed workspace AST symbols.
-* **Options**: None.
-* **Example**: `dgxcoder status`
+* **Behavior**: Panels for:
+  * **Hardware**: GB10 qualification, GPU name, driver, total/used/available unified memory, architecture (no VRAM row).
+  * **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose install state, Cline extension state, config paths.
+  * **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
-##### 5.1.5. `dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT_MODEL] [--num-speculative-tokens TOKENS]`
-Launches the local vLLM GB10 inference server with unified memory optimizations.
-* **Behavior**: Runs the [serve variant](#dgxcoder-serve-variant) of the startup process: pre-downloads model weights, resolves the launch tier (native `vllm` CLI > Python `vllm` module > Docker `vllm/vllm-openai:latest`), applies GB10 unified memory flags (`--gpu-memory-utilization 0.90`, `--max-model-len 16384`, `--kv-cache-dtype auto`), and blocks in the foreground. Supports dual-model speculative decoding (`--speculative-model` and `--num-speculative-tokens`).
-* **Options**:
-  * `--model MODEL`: Model name to load and serve (default: `qwen2.5-coder-32b`).
-  * `--port PORT`: Port to expose OpenAI-compatible HTTP API (default: `8000`).
-  * `--quantization QUANT`: Optional quantization precision (`int8`, `fp8`, `awq`).
-  * `--draft-model DRAFT_MODEL`: Optional speculative decoding draft model name.
-  * `--num-speculative-tokens TOKENS`: Number of speculative draft tokens to propose (default: `5`).
+##### 5.1.5. `dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …]`
+* **Behavior**: Foreground `start_server` as in [serve variant](#dgxcoder-serve-variant). Pass `--model` explicitly; bare `serve` currently forwards `model=None` from argparse.
 * **Example**: `dgxcoder serve --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --port 8000`
 
 ##### 5.1.6. `dgxcoder index [--dir PATH] [--force]`
-Indexes codebase AST symbol definitions and TF-IDF vector context.
-* **Behavior**: Scans source files in workspace, parses Python AST (extracting class/function signatures, docstrings, line ranges), builds a TF-IDF term index, and saves cached index to `.dgxcoder/context_index.json`.
-* **Options**:
-  * `--dir PATH`: Root directory to index (default: current workspace).
-  * `--force`: Force full reindexing from scratch ignoring cache.
+* **Behavior**: Indexes workspace (Python AST + full-text FTS + in-memory TF-IDF); persists `.dgxcoder/context_index.json` and `.dgxcoder/context.db`.
 * **Example**: `dgxcoder index --force`
 
 ##### 5.1.7. `dgxcoder mcp`
-Runs stdio Model Context Protocol (MCP) server for JetBrains (PyCharm, IntelliJ) and VS Code IDE companion extensions.
-* **Behavior**: Handles JSON-RPC 2.0 requests over stdin/stdout. Exposes IDE diagnostic tools (`ide_get_diagnostics`, `ide_get_active_editor`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`) to the Goose agent.
-* **Options**: None.
-* **Example**: `dgxcoder mcp`
+* **Behavior**: Stdio JSON-RPC MCP server. Tools: `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`. IDE fields live in in-process `IDEState` (empty unless populated by a companion); `workspace_search_code` uses `ContextEngine.search_code`.
 
 ##### 5.1.8. `dgxcoder web [--port PORT]`
-Launches interactive Web Canvas UI server.
-* **Behavior**: Starts lightweight HTTP server rendering single-page Glassmorphism UI with live Mermaid.js architecture diagrams, code diff stream, and real-time GB10 unified memory gauges. Exposes REST telemetry endpoint (`GET /api/status`).
-* **Options**:
-  * `--port PORT`: Port to expose Web Canvas UI (default: `8501`).
+* **Behavior**: HTTP server on `0.0.0.0:{port}` (default `8501`). Serves static Glassmorphism SPA + `GET /api/status` (`hardware`, `vllm`, `context`). Memory gauge updates from telemetry; Mermaid diagram and diff pane are **static placeholders**; KV gauge shows fixed `45%` width when vLLM is healthy.
 * **Example**: `dgxcoder web --port 8501`
 
 ##### 5.1.9. `dgxcoder download [--model MODEL] [--all]`
-Pre-downloads LLM primary and draft model weights from HuggingFace Hub into local cache (`~/.cache/huggingface/hub/`) as the mandatory first step before server startup.
-* **Behavior**: Checks local HuggingFace cache snapshots and pre-fetches missing model weights using `huggingface_hub.snapshot_download` or `huggingface-cli`. Guaranteed to run automatically prior to vLLM server launch.
-* **Options**:
-  * `--model MODEL`: Specific model to pre-download.
-  * `--all`: Pre-download all GB10 qualified LLM and draft models in parallel.
-* **Example**: `dgxcoder download --model qwen2.5-coder-32b --all`
+* **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. Also invoked automatically from `init` and `start_server`.
+* **Example**: `dgxcoder download --model qwen2.5-coder-32b`
 
-#### Configuration Hierarchy & Resolution Order:
-DGXCoder supports a 4-tier configuration precedence hierarchy:
-1. **Command Line Parameters** (`--config`, `--model`, `--vllm-host`, `--draft-model`) - *Highest Priority*
-2. **Environment Variables** (`DGXCODER_CONFIG_PATH`, `DGXCODER_MODEL`, `DGXCODER_VLLM_HOST`, etc.)
-3. **DGXCoder Config File** (`.dgxcoder/config.yaml` or `~/.config/dgxcoder/config.yaml`)
-4. **Built-in System Defaults** - *Lowest Priority*
+#### Configuration Hierarchy & Resolution Order
+1. **CLI parameters** (`--config`, `--model`, `--agent`, `--sandbox`, …) — highest
+2. **Environment variables** (`DGXCODER_*`, `HF_TOKEN`, …)
+3. **Config file** — `.dgxcoder/config.yaml` (or `.json`) if present, else `~/.config/dgxcoder/config.yaml`, else default path `.dgxcoder/config.yaml`
+4. **Built-in defaults** — lowest
 
-#### DGXCoder Config File (`.dgxcoder/config.yaml`):
+#### DGXCoder Config File (defaults example)
 ```yaml
 vllm_host: http://localhost:8000
 model: qwen2.5-coder-32b
-draft_model: qwen2.5-coder-1.5b
+draft_model: null
 num_speculative_tokens: 5
-sandbox: apptainer
-hf_token: hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+sandbox: none
+agent_runner: goose
+hf_token: null
+enable_prefix_caching: true
+enable_chunked_prefill: true
+num_scheduler_steps: 8
+attention_backend: auto
+kv_cache_dtype: auto
 ```
 
-#### Environment Variables:
+#### Environment Variables
 | Variable | Description | Default |
 | :--- | :--- | :--- |
-| `DGXCODER_CONFIG_PATH` | Path to custom DGXCoder configuration file | `.dgxcoder/config.yaml` |
-| `DGXCODER_VLLM_HOST` | Local vLLM server endpoint URL | `http://localhost:8000` |
-| `DGXCODER_MODEL` | Default LLM model name served on GB10 | `qwen2.5-coder-32b` |
-| `DGXCODER_DRAFT_MODEL` | Speculative decoding draft model name | `None` (Disabled) |
-| `DGXCODER_SPECULATIVE_TOKENS` | Number of speculative draft tokens | `5` |
-| `DGXCODER_SANDBOX` | Subagent rootless container sandbox | `none` |
-| `HF_TOKEN` / `DGXCODER_HF_TOKEN` | HuggingFace API access token for vLLM downloads | `None` |
-| `GOOSE_PROVIDER` | Provider setting passed to Goose | `openai` |
-| `OPENAI_HOST` | Host URL for local OpenAI-compatible vLLM API | `http://localhost:8000` |
-| `OPENAI_BASE_PATH` | Base path for vLLM API | `v1` |
+| `DGXCODER_CONFIG_PATH` | Custom config file path | (resolver default) |
+| `DGXCODER_VLLM_HOST` | vLLM endpoint URL | `http://localhost:8000` |
+| `DGXCODER_MODEL` | Primary model alias | `qwen2.5-coder-32b` |
+| `DGXCODER_DRAFT_MODEL` | Draft model alias | unset |
+| `DGXCODER_SPECULATIVE_TOKENS` | Speculative token count | `5` |
+| `DGXCODER_SANDBOX` | Sandbox engine | `none` |
+| `DGXCODER_AGENT` / `DGXCODER_RUNNER` | Agent runner (`goose` \| `cline`) | `goose` |
+| `HF_TOKEN` / `DGXCODER_HF_TOKEN` | HuggingFace token | unset |
+| `GOOSE_PROVIDER` | Set for Goose processes | `openai` |
+| `OPENAI_HOST` | Set for Goose processes | `{vllm_host}` |
+| `OPENAI_BASE_PATH` | Set for Goose processes | `v1` |
+| `OPENAI_API_KEY` | Set for Goose processes | `gb10-local-token` |
+| `GOOSE_MODEL` | Set for Goose processes | `{model}` |
 
-### 5.2. JetBrains & VS Code Integration (via Stdio MCP)
-Registered as stdio MCP server (`dgxcoder mcp`) in `~/.config/goose/config.yaml`.
-* **Tools Exposed**:
-  * `ide_get_active_editor`: Active file path, line, column, selection.
-  * `ide_get_diagnostics`: Workspace linter errors and diagnostics.
-  * `ide_get_open_files`: Currently open editor tab paths.
-  * `ide_open_file`: Command to open target file at line:column.
-  * `ide_apply_diff`: Inline code diff proposal renderer.
-  * `workspace_search_code`: Local AST & TF-IDF semantic code search.
+Tuning keys `enable_prefix_caching`, `enable_chunked_prefill`, `num_scheduler_steps`, `attention_backend`, `kv_cache_dtype` are config-file / CLI only (no dedicated `DGXCODER_*` env vars).
 
-### 5.3. Web Canvas UI & Live Diff / Telemetry Pane
-Single-page web application (`dgxcoder web --port 8501`) featuring:
-* Glassmorphism dark aesthetic (`Inter` + `Fira Code` typography, HSL/vibrant accent palette).
-* Live Mermaid.js architecture diagrams.
-* Active streaming diff view.
-* Real-time GB10 unified memory utilization and KV-cache allocation gauges.
-* REST telemetry endpoint (`GET /api/status`).
+### 5.2. IDE Integration via Stdio MCP
+Registered in Goose config as stdio extension (`cmd: dgxcoder`, `args: [mcp]`). This repository ships the **MCP server**, not a JetBrains plugin or VS Code extension package. Editor tools read/write in-memory `IDEState`; search uses the local context engine.
+
+### 5.3. Web Canvas UI & Telemetry Pane
+`dgxcoder web --port 8501`:
+* Glassmorphism dark SPA (CDN Mermaid).
+* Static architecture Mermaid snippet and placeholder diff lines.
+* Live unified-memory gauge from `/api/status`; illustrative KV fill when healthy.
+* REST: `GET /api/status` → `{ hardware, vllm, context }`.
 
 ---
 
 ## 6. System Requirements & Setup
 
 ### Requirements
-* **System**: 1x NVIDIA GB10 System (Blackwell Architecture, 128 GB Unified Memory)
+* **System**: 1x NVIDIA GB10 (Blackwell, 128 GB Unified Memory) — or host with ≥100 GB RAM for detection fallback
 * **OS**: Linux ARM64 (Ubuntu 22.04 LTS or compatible)
-* **Drivers**: NVIDIA Linux Driver 580+ / CUDA 13.x
-* **Dependencies**: Python 3.10+, PyYAML, Rich, Requests, Docker 24+ (optional for containerized vLLM serving)
+* **Drivers**: NVIDIA Linux Driver 580+ / CUDA 13.x (typical GB10 stack)
+* **Dependencies**: Python 3.10+, PyYAML, Rich, Requests; optional Docker for containerized vLLM; optional VS Code/`codium` for Cline
 
 ### Identifying Your Hardware Variant
 ```bash
 nvidia-smi --query-gpu=name --format=csv
 free -h
 ```
-* **NVIDIA GB10 System**: `nvidia-smi` returns `NVIDIA GB10` and system memory displays ~`128Gi` total unified memory.
+* Qualified when GPU name contains `GB10`/`BLACKWELL`, or when total memory ≥ ~100 GiB per detection heuristic.
 
 ### Quickstart Installation
 ```bash
 git clone https://github.com/dgxcoder/dgxcoder.git
 cd dgxcoder
-./scripts/install_gb10.sh --model qwen2.5-coder-32b
+./scripts/install_gb10.sh qwen2.5-coder-32b   # positional MODEL arg (default qwen2.5-coder-32b)
 dgxcoder status
 dgxcoder chat
 ```
+
+`scripts/install_gb10.sh`:
+1. Installs Goose via `releases/latest/download/download_cli.sh` (falls back to `pip install goose-ai`).
+2. `pip install -e .`
+3. `dgxcoder init --model "${1:-qwen2.5-coder-32b}"`
+
+Note: runtime Goose auto-install uses `releases/download/stable/…`; the install script uses `releases/latest/…`.
+
+### Helper Scripts
+| Script | Role |
+| :--- | :--- |
+| `scripts/install_gb10.sh [MODEL]` | Package + Goose + `dgxcoder init` |
+| `scripts/run_vllm_gb10.sh [MODEL] [PORT] [DRAFT] [TOKENS]` | Thin foreground Python-module vLLM launch (no prefix-cache / chunked-prefill / kv-cache flags) |
+| `scripts/run_goose.sh` | Sets Goose OpenAI env vars and runs `goose session` |
+
+Prefer `dgxcoder serve` / `dgxcoder chat` for full GB10-tuned behavior.
 
 ---
 
 ## 7. Roadmap & Implementation Verification
 
-- [x] **Phase 1: NVIDIA GB10 Exclusive Specification**
-  - Scope memory budgets, model matrices, and unified memory architecture exclusively to NVIDIA GB10 (128 GB Unified Memory) hardware.
-- [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine**
-  - Implement multi-tiered vLLM deployment engine optimized for GB10 unified memory with Docker container fallback and live log streaming.
-  - Implement complete `dgxcoder` CLI suite (`init`, `chat`, `run`, `status`, `serve`, `index`, `mcp`, `web`).
-- [x] **Phase 3: Agentic Engine, Automatic Provisioning & MCP Integration**
-  - Implement Goose auto-installer (`aaif-goose/goose` 1.45+) and stdio MCP bridge (`ide_get_diagnostics`, `ide_get_active_editor`, `workspace_search_code`).
-- [x] **Phase 4: AST/Vector Context Engine & Web Canvas UI**
-  - Build local AST symbol parser & TF-IDF vector code indexer (`.dgxcoder/context_index.json`).
-  - Build HTML/CSS/JS Glassmorphism Web Canvas UI for live diagramming, diff visualization, and hardware monitoring.
+- [x] **Phase 1: NVIDIA GB10 Exclusive Specification** — model matrix & unified-memory targeting
+- [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine** — multi-tier vLLM, live logs, weight pre-download, CLI suite including `download`
+- [x] **Phase 3: Agentic Engine, Provisioning & MCP** — Goose auto-install, stdio MCP tools, optional Cline/VS Code path
+- [x] **Phase 4: Context Engine & Web Canvas** — parallel AST, SQLite/FTS5, TF-IDF (in-process), Web Canvas telemetry UI
+- [x] **Phase 5: Modular Package Layout** — split packages under `dgxcoder/{hardware,config,runner,vllm_server,context_engine,mcp_server,cli}/` with shim modules for stable imports
 
 ---
 
 ## 8. Codebase Architecture & Source Reference
 
-The DGXCoder software stack is organized into modular Python components:
+Package version: `dgxcoder.__version__ == "1.2.0"`. Top-level `dgxcoder/*.py` modules are thin re-export shims; implementations live in subpackages.
 
 ```
 dgxcoder/
-├── __init__.py           # Package initialization & version (1.2.0)
-├── cli.py               # Rich CLI application with 8 subcommands
-├── config.py            # 4-Tier configuration hierarchy & Goose sync
-├── context_engine.py    # Zero-egress AST symbol parser & TF-IDF vector indexer
-├── hardware.py          # NVIDIA GB10 hardware detection & model qualification matrix
-├── mcp_server.py        # Stdio Model Context Protocol (MCP) JSON-RPC 2.0 server
-├── runner.py            # Goose AI agent runner, auto-installer & vLLM waiting supervisor
-├── vllm_server.py       # Multi-tiered vLLM server launcher & live log queueing engine
-└── web_canvas.py        # Single-page Glassmorphism Web Canvas UI server
+├── __init__.py                 # __version__ = "1.2.0"
+├── cli.py                      # shim → cli package
+├── cli/
+│   └── dgxcoder_cli_controller.py   # DGXCoderCLIController (9 subcommands)
+├── config.py                   # shim
+├── config/
+│   ├── config_path_resolver.py
+│   ├── config_file_storage_manager.py
+│   └── dgxcoder_config.py
+├── context_engine.py           # shim
+├── context_engine/
+│   ├── context_engine.py
+│   ├── ast_symbol_extractor.py
+│   ├── tfidf_calculator.py
+│   ├── sqlite_context_storage.py
+│   ├── code_symbol.py
+│   └── indexed_file.py
+├── hardware.py                 # shim + detect/download helpers
+├── hardware/
+│   ├── model_matrix_registry.py
+│   ├── model_downloader.py
+│   ├── hardware_manager.py
+│   ├── model_spec.py
+│   ├── memory_metrics.py
+│   └── hardware_telemetry.py
+├── mcp_server.py               # shim
+├── mcp_server/
+│   ├── mcp_server.py
+│   ├── mcp_tool_registry.py
+│   ├── ide_state.py
+│   └── editor_selection.py
+├── runner.py                   # shim
+├── runner/
+│   ├── goose_runner.py         # wait_for_vllm + Goose session
+│   ├── goose_installer.py
+│   ├── sandbox_manager.py
+│   ├── cline_runner.py
+│   └── cline_installer.py
+├── vllm_server.py              # shim
+├── vllm_server/
+│   ├── vllm_server_manager.py
+│   ├── vllm_log_streamer.py
+│   ├── vllm_launch_options.py
+│   └── vllm_server_status.py
+└── web_canvas.py               # CanvasHandler + start_web_canvas_server
 ```
 
-### 8.1. `dgxcoder/hardware.py`
-Provides NVIDIA GB10 hardware detection, system memory profiling via `/proc/meminfo`, model matrix resolution, and model pre-downloading into local HuggingFace cache.
+### 8.1. `dgxcoder/hardware/`
+GB10 detection, model matrix, speculative memory checks, HF cache downloads.
 
-```python
-# Classes & Data Models
-class ModelSpec: ...
-class MemoryMetrics: ...
-class HardwareTelemetry: ...
-class ModelMatrixRegistry: ...
-class ModelDownloader: ...
-class HardwareManager: ...
-```
-
-### 8.2. `dgxcoder/config.py`
-Implements the 4-tier configuration precedence hierarchy (CLI Args > Env Vars > Config File > Defaults) and writes `~/.config/goose/config.yaml`.
-
-```python
-class ConfigPathResolver: ...
-class ConfigFileStorageManager: ...
-class DGXCoderConfig: ...
-```
+### 8.2. `dgxcoder/config/`
+4-tier config merge, Goose YAML sync, env vars for Goose (`OPENAI_*`, `GOOSE_*`).
 
 ### 8.3. `dgxcoder/runner/`
-Orchestrates the [Session Startup Process](#45-session-startup-process): Goose CLI and Cline extension auto-provisioning, `wait_for_vllm()` readiness polling with sub-second signal handling, container sandbox isolation, and agent handoff (`goose` as default, `cline` as configurable option).
+Session startup orchestration across 5 AI Agent runners (`goose` [default], `cline`, `aider`, `continue`, `openhands`), sandbox prefixes (`Apptainer`, `Podman`, `Docker`), and automatic binary/extension provisioning (`GooseInstaller`, `ClineInstaller`, `AiderInstaller`, `ContinueInstaller`, `OpenHandsInstaller`).
 
-```python
-class GooseInstaller: ...
-class SandboxManager: ...
-class GooseRunner: ...
-class ClineInstaller: ...
-class ClineRunner: ...
-```
+### 8.4. `dgxcoder/vllm_server/`
+Multi-tier launch, pre-download, health checks, background log queue.
 
-### 8.4. `dgxcoder/vllm_server.py`
-Multi-tiered vLLM server launcher (Native CLI > Python Module > Docker Container) used by both auto-launch (`chat`/`run`) and foreground `serve`. Pre-downloads weights via `hardware.download_model`, applies Blackwell GB10 prefill caching flags, and streams logs via a non-blocking queue.
+### 8.5. `dgxcoder/context_engine/`
+Parallel index, SQLite/FTS5, TF-IDF, hybrid `search_code`.
 
-```python
-class VLLMLaunchOptions: ...
-class VLLMServerStatus: ...
-class VLLMLogStreamer: ...
-class VLLMServerManager: ...
-```
+### 8.6. `dgxcoder/mcp_server/`
+Async stdio MCP + tool registry + in-memory `IDEState`.
 
-### 8.5. `dgxcoder/context_engine.py`
-Zero-egress local parallel AST symbol extractor, SQLite + FTS5 full-text storage engine, and TF-IDF vector code indexer.
+### 8.7. `dgxcoder/web_canvas.py`
+HTTP SPA + `/api/status` telemetry.
 
-```python
-class CodeSymbol: ...
-class IndexedFile: ...
-class ASTSymbolExtractor: ...
-class TFIDFCalculator: ...
-class SQLiteContextStorage: ...
-class ContextEngine: ...
-```
-
-### 8.6. `dgxcoder/mcp_server.py`
-Asynchronous stdio Model Context Protocol (MCP) server for JetBrains and VS Code IDE companion extensions.
-
-```python
-class EditorSelection: ...
-class IDEState: ...
-class MCPToolRegistry: ...
-class MCPServer: ...
-```
-
-### 8.7. `dgxcoder/cli.py`
-Object-oriented CLI controller for Rich terminal user interface rendering and subcommand dispatching.
-
-```python
-class DGXCoderCLIController: ...
-```
-
-### 8.8. `dgxcoder/web_canvas.py`
-Lightweight HTTP server serving the interactive Web Canvas UI for live diffs, Mermaid.js diagrams, and GB10 hardware telemetry.
-
-```python
-def start_web_canvas_server(port: int = 8501, daemon: bool = True) -> threading.Thread
-```
-
-### 8.8. `dgxcoder/cli.py`
-Main entrypoint (`dgxcoder`) providing the Rich terminal user interface for all subcommands (`init`, `chat`, `run`, `status`, `serve`, `index`, `mcp`, `web`).
-
+### 8.8. `dgxcoder/cli/`
+`DGXCoderCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`).
