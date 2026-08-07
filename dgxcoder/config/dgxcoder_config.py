@@ -20,6 +20,7 @@ DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 DEFAULT_MODEL: Final[str] = "qwen2.5-coder-32b"
 DEFAULT_SPECULATIVE_TOKENS: Final[int] = 5
 DEFAULT_SANDBOX: Final[str] = "none"
+DEFAULT_AGENT_RUNNER: Final[str] = "goose"
 DEFAULT_PREFIX_CACHING: Final[bool] = True
 DEFAULT_CHUNKED_PREFILL: Final[bool] = True
 DEFAULT_SCHEDULER_STEPS: Final[int] = 8
@@ -42,6 +43,7 @@ class DGXCoderConfig:
         draft_model: Optional[str] = None,
         num_speculative_tokens: Optional[int] = None,
         sandbox: Optional[str] = None,
+        agent_runner: Optional[str] = None,
         hf_token: Optional[str] = None,
         enable_prefix_caching: Optional[bool] = None,
         enable_chunked_prefill: Optional[bool] = None,
@@ -106,7 +108,20 @@ class DGXCoderConfig:
             )
         ).lower()
 
-        # 6. HuggingFace access token
+        # 6. Primary AI agent runner ('goose' [default] or 'cline')
+        self.agent_runner: str = (
+            agent_runner
+            if agent_runner is not None
+            else os.getenv(
+                "DGXCODER_AGENT",
+                os.getenv(
+                    "DGXCODER_RUNNER",
+                    str(self.file_data.get("agent_runner", DEFAULT_AGENT_RUNNER))
+                )
+            )
+        ).lower()
+
+        # 7. HuggingFace access token
         self.hf_token: Optional[str] = (
             hf_token
             if hf_token is not None
@@ -119,7 +134,7 @@ class DGXCoderConfig:
             )
         )
 
-        # 7. Blackwell GB10 Performance Tuning Flags
+        # 8. Blackwell GB10 Performance Tuning Flags
         self.enable_prefix_caching: bool = bool(
             enable_prefix_caching
             if enable_prefix_caching is not None
@@ -170,6 +185,7 @@ class DGXCoderConfig:
             "draft_model": self.draft_model,
             "num_speculative_tokens": self.num_speculative_tokens,
             "sandbox": self.sandbox,
+            "agent_runner": self.agent_runner,
             "hf_token": self.hf_token,
             "enable_prefix_caching": self.enable_prefix_caching,
             "enable_chunked_prefill": self.enable_chunked_prefill,
