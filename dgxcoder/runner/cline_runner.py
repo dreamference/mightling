@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from dgxcoder.config import DGXCoderConfig
+from dgxcoder.config import DGXCoderConfig, CAVE_MODE_PROMPT
 from dgxcoder.vllm_server import VLLMServerManager
 from dgxcoder.runner.cline_installer import ClineInstaller
 from dgxcoder.hardware import resolve_model_hf_repo
@@ -34,6 +34,7 @@ class ClineRunner:
     def ensure_clinerules(self) -> Path:
         """
         Creates or updates workspace `.clinerules` file to configure GB10 vLLM local backend rules.
+        When cave_mode is enabled, appends the strict Cave Mode prompt.
 
         Returns:
             Path: Path to written `.clinerules` file.
@@ -53,6 +54,8 @@ class ClineRunner:
             "- Leverage local vLLM prefix caching by reusing system prompt context.\n"
             "- Operate completely offline with zero data egress.\n"
         )
+        if self.config.cave_mode:
+            content += f"\n## Cave Mode\n{CAVE_MODE_PROMPT}\n"
 
         if not rules_path.exists():
             with open(rules_path, "w", encoding="utf-8") as f:

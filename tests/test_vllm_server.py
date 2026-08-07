@@ -19,8 +19,19 @@ def test_vllm_build_launch_command_default():
     assert "0.9" in cmd
     assert "--enable-prefix-caching" in cmd
     assert "--enable-chunked-prefill" in cmd
+    assert "--tool-call-parser" in cmd
+    idx = cmd.index("--tool-call-parser")
+    assert cmd[idx + 1] == "hermes"
+
+def test_vllm_build_launch_command_auto_tool_call_parser_llama():
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="llama-3.3-70b")
+    assert "--tool-call-parser" in cmd
+    idx = cmd.index("--tool-call-parser")
+    assert cmd[idx + 1] == "hermes"
 
 def test_vllm_build_launch_command_speculative():
+
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(
         model="qwen2.5-coder-32b",
@@ -54,6 +65,17 @@ def test_vllm_build_launch_command_attention_and_kv_cache():
     assert "--kv-cache-dtype" in cmd
     kv_idx = cmd.index("--kv-cache-dtype")
     assert cmd[kv_idx + 1] == "fp8"
+
+def test_vllm_build_launch_command_docker(monkeypatch):
+    mgr = VLLMServerManager()
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(mgr, "is_vllm_installed", lambda: False)
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", port=8000)
+    assert "docker" in cmd
+    assert "vllm/vllm-openai:latest" in cmd
+    img_idx = cmd.index("vllm/vllm-openai:latest")
+    assert cmd[img_idx + 1] == "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 def test_vllm_environment_checks_real():
     mgr = VLLMServerManager()

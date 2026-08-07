@@ -1,22 +1,27 @@
 """
 Parallel Codebase Context Indexing Engine for DGXCoder.
 
-This module provides the ContextEngine class which coordinates multi-threaded AST parsing,
+This module provides the ContextEngine class which coordinates multi-process AST parsing,
 SQLite/FTS5 persistence, and TF-IDF vector search for zero-egress local code retrieval.
 """
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set, Tuple, Final
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore
 
 from dgxcoder.context_engine.code_symbol import CodeSymbol
 from dgxcoder.context_engine.indexed_file import IndexedFile
 from dgxcoder.context_engine.ast_symbol_extractor import ASTSymbolExtractor
 from dgxcoder.context_engine.tfidf_calculator import TFIDFCalculator
 from dgxcoder.context_engine.sqlite_context_storage import SQLiteContextStorage
+from dgxcoder.context_engine.embedding_calculator import EmbeddingCalculator
 
 # Directories ignored during indexing
 IGNORE_DIRS: Final[Set[str]] = {
@@ -53,6 +58,7 @@ class ContextEngine:
         self.symbols: List[CodeSymbol] = []
         self.tf_idf_index: Dict[str, Dict[str, float]] = {}
         self.idf_table: Dict[str, float] = {}
+        self.file_embeddings: Dict[str, np.ndarray] = {}
 
     def is_ignored(self, path: Path) -> bool:
         """
@@ -114,7 +120,7 @@ class ContextEngine:
 
     def index_workspace(self, force_reindex: bool = False) -> Dict[str, Any]:
         """
-        Indexes all source files in workspace in parallel using ThreadPoolExecutor and persists
+        Indexes all source files in workspace in parallel using ProcessPoolExecutor and persists
         results to `.dgxcoder/context_index.json` and `.dgxcoder/context.db`.
 
         Args:
@@ -153,9 +159,9 @@ class ContextEngine:
             except Exception:
                 pass
 
-        # Step 3: Parallel multi-threaded file parsing across CPU cores
+        # Step 3: Parallel multi-process file parsing across CPU cores (bypasses GIL)
         max_workers = min(32, (os.cpu_count() or 4) * 2)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
             results = executor.map(self._process_single_file, files_to_index)
 
         # Step 4: Populate database records and in-memory indexes
@@ -180,14 +186,28 @@ class ContextEngine:
 
         conn.close()
 
-        # Step 5: Calculate TF-IDF matrix
+        # Step 5: Calculate TF-IDF matrix (kept for backward compat) + semantic embeddings
         self.idf_table, self.tf_idf_index = TFIDFCalculator.compute_matrix(doc_tokens, all_tokens_set)
+
+        # Compute and store dense embeddings + vec table
+        doc_contents = {p: c for p, (f, c) in zip([item[0].rel_path for item in results if item], [(item[0], item[1]) for item in results if item]) if p}
+        # Re-collect contents for embedding
+        file_to_content = {}
+        for item in results:
+            if item:
+                idx_file, content = item
+                file_to_content[idx_file.rel_path] = content
+        file_to_emb, emb_matrix = EmbeddingCalculator.compute_embeddings(file_to_content)
+        self.file_embeddings = file_to_emb
+        if emb_matrix.size > 0:
+            self.sqlite_storage.insert_vectors(list(file_to_emb.keys()), emb_matrix)
+
         self.save_index()
         return self.get_summary()
 
     def search_code(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
-        Performs local hybrid semantic search combining SQLite FTS5 rank and TF-IDF scores.
+        Performs local hybrid semantic search combining SQLite FTS5 rank, TF-IDF, and dense vector similarity.
 
         Args:
             query (str): Natural language or code search query string.
@@ -204,6 +224,16 @@ class ContextEngine:
             if token in self.tf_idf_index:
                 for rel_path, tfidf in self.tf_idf_index[token].items():
                     file_scores[rel_path] = file_scores.get(rel_path, 0.0) + tfidf
+
+        # Semantic vector component (query embedding vs stored doc embeddings)
+        q_emb = EmbeddingCalculator.embed_texts([query])
+        if q_emb.size > 0 and self.file_embeddings:
+            vec_scores = {}
+            for rel_path, emb in self.file_embeddings.items():
+                sim = float(np.dot(q_emb[0], emb) / (np.linalg.norm(q_emb[0]) * np.linalg.norm(emb) + 1e-8))
+                vec_scores[rel_path] = max(0.0, sim)
+            for rel_path, sim in vec_scores.items():
+                file_scores[rel_path] = file_scores.get(rel_path, 0.0) + sim * 3.0  # weight semantic higher
 
         sorted_files = sorted(file_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
         

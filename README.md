@@ -111,7 +111,7 @@ DGXCoder uses a **4-Tier Configuration Hierarchy**:
 vllm_host: http://localhost:8000
 model: qwen2.5-coder-32b
 draft_model: qwen2.5-coder-1.5b
-num_speculative_tokens: 5
+num_speculative_tokens: 8
 sandbox: apptainer
 ```
 

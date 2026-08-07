@@ -19,6 +19,8 @@
   - [4.3. Agent Runtimes (Goose, Cline, Aider, Continue, OpenHands)](#43-agent-runtimes-goose-cline-aider-continue-openhands)
   - [4.4. Codebase Context Engine (AST + SQLite / FTS5)](#44-codebase-context-engine-ast--sqlite--fts5)
   - [4.5. Session Startup Process](#45-session-startup-process)
+  - [4.6. Goose-vLLM Integration](#46-goose-vllm-integration)
+  - [4.7. Code Indexing Pipeline](#47-code-indexing-pipeline)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dgxcoder` CLI Suite](#51-dgxcoder-cli-suite)
     - [5.1.1. `dgxcoder init`](#511-dgxcoder-init)
@@ -199,13 +201,7 @@ CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / co
 * **Session Behavior**: Auto-launch vLLM → Docker check → pull image → remove stale container → run OpenHands UI. Prompt argument is unused (not passed into the container).
 
 ### 4.4. Codebase Context Engine (AST + SQLite / FTS5)
-* **Parallel Parsing**: `ThreadPoolExecutor` with `max_workers = min(32, cpu_count * 2)` over non-ignored workspace files.
-* **AST**: Python (`.py`) only — class/function symbols, signatures, docstrings, line ranges via `ASTSymbolExtractor`.
-* **Tokenization / TF-IDF**: All indexed text files tokenized (camelCase / snake_case aware). TF-IDF matrix is computed in-memory during `index_workspace()` and used for hybrid search in the same process.
-* **SQLite + FTS5**: `.dgxcoder/context.db` tables `files`, `symbols`, and FTS virtual table `fts_context` storing **full file content** (not pre-tokenized terms).
-* **JSON Cache**: `.dgxcoder/context_index.json` stores symbols and file metadata **without** tokens or TF-IDF. After `load_index()`, `tokens=[]` and TF-IDF is empty until a fresh in-process reindex; FTS5 search still works from SQLite.
-* **Hybrid Search**: `search_code()` combines FTS5 ranks with in-memory TF-IDF scores.
-* **Ignore Sets**: VCS/venv/node_modules/build/dist/`.dgxcoder`, plus common binary extensions.
+See dedicated section [4.7 Code Indexing Pipeline](#47-code-indexing-pipeline) for full architecture, ProcessPoolExecutor parallelization, SQLite mmap optimization, ingestion pipeline, and hybrid FTS5+TF-IDF search.
 
 ### 4.5. Session Startup Process
 
@@ -238,13 +234,16 @@ dgxcoder chat | run [--agent goose]
        +------------------+----------------+
                           |
                           v
-[7] Provision Goose CLI if missing
+[7] Pre-warm Goose system prompt + MCP tools (silent max_tokens=1 chat request)
        |
        v
-[8] Optional sandbox prefix
+[8] Provision Goose CLI if missing
        |
        v
-[9] Exec goose session | goose run --text "<prompt>"
+[9] Optional sandbox prefix
+       |
+       v
+[10] Exec goose session | goose run --text "<prompt>"
 ```
 
 #### Cline path (`--agent cline`)
@@ -290,6 +289,51 @@ Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadi
 * **Aider install failure**: Exit `1` with `pip install aider-chat` hint.
 * **OpenHands without Docker / pull failure**: Exit `1` with Docker daemon hint.
 
+### 4.6. Goose-vLLM Integration
+
+`DGXCoderConfig` (`dgxcoder/config/dgxcoder_config.py`) wires Goose directly to the local vLLM OpenAI-compatible endpoint and guarantees real OS shell execution:
+
+* **Endpoint Wiring** (`get_env_vars` + `ensure_goose_config`):
+  - `GOOSE_PROVIDER=openai`
+  - `OPENAI_BASE_URL={vllm_host}/v1`
+  - `OPENAI_API_KEY=gb10-local-token`
+  - `GOOSE_MODEL=<resolved HF repo>`
+* **Real Shell Execution**:
+  - `GOOSE_ALLOW_SHELL=1` and `GOOSE_ALLOW_READ=1` exported on every launch.
+  - Built-in `developer` extension registered with `"allow_shell": true` so Goose invokes the native `/bin/bash -c` instead of emitting simulated JSON `{"name":"shell"}` tool calls.
+* **MCP Companion**: Always registers the `jetbrains_mcp` stdio extension (`dgxcoder mcp`).
+* **Deep-Merge Safety**: `ensure_goose_config` performs a targeted deep-merge of the `extensions` dict so `developer` + `jetbrains_mcp` are never overwritten when the user already has an `extensions` section in `~/.config/goose/config.yaml`.
+* **vLLM Side**: `start_server` passes `--enable-auto-tool-choice --tool-call-parser hermes` by default, satisfying Goose function-calling requirements without extra flags.
+
+Result: `dgxcoder chat` / `run` produce a fully-functional Goose session that can execute real shell commands and call tools against the GB10 vLLM instance out-of-the-box.
+
+### 4.7. Code Indexing Pipeline
+* **Entry Points**:
+  - `dgxcoder init` always forces a full re-index (`ContextEngine.index_workspace(force_reindex=True)`).
+  - `dgxcoder index [--dir PATH] [--force]` — manual indexing of any directory (defaults to CWD).
+* **Parallel Execution**: `index_workspace` uses `ProcessPoolExecutor(max_workers = min(32, cpu_count*2))` to bypass the GIL on the ARM Cortex host (`context_engine.py:156-159`).
+* **Ingestion Steps**:
+  1. Walk workspace, skip `IGNORE_DIRS` (`.git`, `.venv`, `node_modules`, `.idea`, `.dgxcoder`, …) and `IGNORE_EXTENSIONS` (binaries, images, archives).
+  2. For every accepted file: read content, tokenize (camelCase/snake_case aware), extract Python AST symbols (class/function, signature, docstring, line ranges) via `ASTSymbolExtractor`.
+  3. Persist to SQLite: `files`, `symbols`, FTS5 virtual table `fts_context` (full original content), and `vec_context` (vec0) virtual table for dense embeddings — plus `PRAGMA mmap_size = 2147483648` (2 GB) for unified-memory access on GB10.
+  4. Compute in-memory TF-IDF matrix (`TFIDFCalculator.compute_matrix`).
+  5. Compute 768-dim semantic embeddings via `EmbeddingCalculator` (sentence-transformers + nomic-ai/nomic-embed-text-v1.5) and store in `vec_context` (`sqlite_context_storage.insert_vectors`).
+  6. Write JSON cache `.dgxcoder/context_index.json` (symbols + metadata only) and close DB.
+* **Hybrid Search** (`search_code`): Combines FTS5 rank + TF-IDF score + cosine similarity from stored embeddings (weighted ×3). Returns top-k files with symbols and paths. Used by MCP `workspace_search_code` tool.
+* **Cache Behavior**: Without `--force`, `load_index()` returns cached summary instantly; FTS5 + vector queries still work from SQLite even if TF-IDF/embeddings are cold.
+* **Performance Notes**: ProcessPoolExecutor + SQLite mmap + FP8 KV cache on vLLM side together keep indexing fast on the 128 GB unified memory SoC. Local 100-300 MB embedding model runs alongside vLLM.
+
+### 4.8. Tests Architecture
+* **Framework**: pytest (invoked via `pytest tests/ -q`).
+* **Structure**: One `test_*.py` per major subsystem:
+  - `test_config.py` — DGXCoderConfig, env vars, temporary Goose config, cave mode.
+  - `test_context_engine.py` — indexing, AST extraction, hybrid search (FTS5 + TF-IDF + embeddings).
+  - `test_hardware.py` — GB10 detection, model matrix, download helpers.
+  - `test_mcp_server.py` — MCP tools and IDE state.
+  - `test_runner.py` — all agent runners (Goose, Cline, …) and sandbox logic.
+  - `test_vllm_server.py` — VLLMLaunchOptions, server manager, health checks.
+* **Style**: Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external services required. Existing tests remain green after every change.
+
 ---
 
 ## 5. Client Interfaces & Developer Experience
@@ -327,11 +371,13 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 * **Behavior**: Downloads primary/draft weights → `save_config()` → `ensure_goose_config()` → `ContextEngine.index_workspace(force_reindex=True)`.
 * **Example**: `dgxcoder init --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --agent goose`
 
-##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aider|continue|openhands] [--sandbox …] [--hf-token …] [--debug]`
+##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aider|continue|openhands] [--sandbox …] [--hf-token …] [--debug] [--cave]`
 * **Behavior**: Instantiates `GooseRunner` / `ClineRunner` / `AiderRunner` / `ContinueRunner` / `OpenHandsRunner` from `config.agent_runner`, then `run_session(debug=…)`. See [§4.3](#43-agent-runtimes-goose-cline-aider-continue-openhands) and [§4.5](#45-session-startup-process).
+* **Function calling (Goose)**: Enabled by default via `--enable-auto-tool-choice --tool-call-parser hermes`. No extra flags needed for `dgxcoder chat`.
+* **Cave Mode (`--cave`)**: When enabled, DGXCoder injects the strict Cave Mode system prompt ("You are in Cave Mode...") into Goose `instructions` or `.clinerules` for Cline. Forces terse, command-only output.
 * **Example**: `dgxcoder chat --agent aider --debug`
 
-##### 5.1.3. `dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug]`
+##### 5.1.3. `dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug] [--cave]`
 * **Behavior**: Same runner selection. Goose: `goose run --text "<prompt>"`. Aider: `aider … --message "<prompt>"`. Cline: prints prompt and opens VS Code. Continue / OpenHands: launch UI; prompt unused.
 * **Example**: `dgxcoder run "Refactor database connection pool to use async pg" --agent goose`
 
@@ -341,30 +387,30 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
   * **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`/`aider`/`continue`/`openhands`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose CLI, Cline extension, Aider CLI, Continue extension, OpenHands Docker image readiness, config paths.
   * **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
+##### 5.1.5. `dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--guided-decoding-backend BACKEND]`
+* **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). Function calling for Goose is enabled **by default** (`--enable-auto-tool-choice --tool-call-parser hermes`). `--max-num-batched-tokens 8192` is passed automatically when `--enable-chunked-prefill` (default) to improve TTFT on large codebase prompts. See [start_server variant](#dgxcoder-start_server-variant).
+* **Example**: `dgxcoder start_server --model qwen2.5-coder-32b --port 8000`
+
+##### 5.1.6. `dgxcoder stop_server [--port PORT]`
+* **Behavior**: Stops and removes the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running).
+* **Example**: `dgxcoder stop_server --port 8000`
+
+##### 5.1.7. `dgxcoder index [--dir PATH] [--force]`
+* **Behavior**: Indexes workspace (Python AST + FTS5 + TF-IDF + nomic-embed-text semantic embeddings); persists `.dgxcoder/context_index.json` and `.dgxcoder/context.db` (vec0 table).
+* **Example**: `dgxcoder index --force`
+
+##### 5.1.8. `dgxcoder mcp`
+* **Behavior**: Stdio JSON-RPC MCP server. Tools: `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`. IDE fields live in in-process `IDEState` (empty unless populated by a companion); `workspace_search_code` uses `ContextEngine.search_code`.
+
 ##### 5.1.9. `dgxcoder endpoints`
 * **Behavior**: Prints two Rich tables: (1) all standard OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`, etc.) with HTTP methods and short descriptions; (2) credentials showing base URL, optional API key (enabled via `--api-key` on start_server), and `Authorization: Bearer <key>` when used. Intended for quick copy-paste into external clients.
 * **Example**: `dgxcoder endpoints`
 
-##### 5.1.5. `dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER]`
-* **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). `--enable-auto-tool-choice` + `--tool-call-parser` enable Goose-style function calling. See [start_server variant](#dgxcoder-start_server-variant).
-* **Example**: `dgxcoder start_server --model qwen2.5-coder-32b --enable-auto-tool-choice --tool-call-parser hermes --port 8000`
-
-##### 5.1.10. `dgxcoder stop_server [--port PORT]`
-* **Behavior**: Stops and removes the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running).
-* **Example**: `dgxcoder stop_server --port 8000`
-
-##### 5.1.6. `dgxcoder index [--dir PATH] [--force]`
-* **Behavior**: Indexes workspace (Python AST + full-text FTS + in-memory TF-IDF); persists `.dgxcoder/context_index.json` and `.dgxcoder/context.db`.
-* **Example**: `dgxcoder index --force`
-
-##### 5.1.7. `dgxcoder mcp`
-* **Behavior**: Stdio JSON-RPC MCP server. Tools: `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`. IDE fields live in in-process `IDEState` (empty unless populated by a companion); `workspace_search_code` uses `ContextEngine.search_code`.
-
-##### 5.1.11. `dgxcoder web [--port PORT]`
+##### 5.1.10. `dgxcoder web [--port PORT]`
 * **Behavior**: HTTP server on `0.0.0.0:{port}` (default `8501`). Serves static Glassmorphism SPA + `GET /api/status` (`hardware`, `vllm`, `context`). Memory gauge updates from telemetry; Mermaid diagram and diff pane are **static placeholders**; KV gauge shows fixed `45%` width when vLLM is healthy.
 * **Example**: `dgxcoder web --port 8501`
 
-##### 5.1.8. `dgxcoder download [--model MODEL] [--all]`
+##### 5.1.11. `dgxcoder download [--model MODEL] [--all]`
 * **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. Also invoked automatically from `init` and `start_server`.
 * **Example**: `dgxcoder download --model qwen2.5-coder-32b`
 
@@ -379,7 +425,7 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 vllm_host: http://localhost:8000
 model: qwen2.5-coder-32b
 draft_model: null
-num_speculative_tokens: 5
+num_speculative_tokens: 8
 sandbox: none
 agent_runner: goose
 hf_token: null
@@ -387,7 +433,7 @@ enable_prefix_caching: true
 enable_chunked_prefill: true
 num_scheduler_steps: 8
 attention_backend: auto
-kv_cache_dtype: auto
+kv_cache_dtype: fp8
 ```
 
 #### Environment Variables
@@ -397,7 +443,7 @@ kv_cache_dtype: auto
 | `DGXCODER_VLLM_HOST` | vLLM endpoint URL | `http://localhost:8000` |
 | `DGXCODER_MODEL` | Primary model alias | `qwen2.5-coder-32b` |
 | `DGXCODER_DRAFT_MODEL` | Draft model alias | unset |
-| `DGXCODER_SPECULATIVE_TOKENS` | Speculative token count | `5` |
+| `DGXCODER_SPECULATIVE_TOKENS` | Speculative token count | `8` |
 | `DGXCODER_SANDBOX` | Sandbox engine | `none` |
 | `DGXCODER_AGENT` / `DGXCODER_RUNNER` | Agent runner (`goose` \| `cline` \| `aider` \| `continue` \| `openhands`) | `goose` |
 | `HF_TOKEN` / `DGXCODER_HF_TOKEN` | HuggingFace token | unset |

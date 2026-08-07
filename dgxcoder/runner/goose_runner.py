@@ -6,10 +6,12 @@ polls server health endpoints while streaming real-time startup logs, verifies G
 and executes interactive pair-programming sessions or autonomous coding tasks.
 """
 
+import json
 import os
 import subprocess
 import sys
 import time
+import urllib.request
 from typing import List, Optional
 from dgxcoder.config import DGXCoderConfig
 from dgxcoder.vllm_server import VLLMServerManager, VLLMStartupMonitor
@@ -67,98 +69,51 @@ class GooseRunner:
                 known = True
         return total if known else None
 
-    def wait_for_vllm(self, poll_interval: float = 1.0, max_wait: Optional[float] = None, auto_launch: bool = True) -> bool:
+    def wait_for_vllm(self, poll_interval: float = 1.0, max_wait: Optional[float] = None, auto_launch: bool = False) -> bool:
         """
-        Waits for local vLLM HTTP endpoint to become healthy. If offline and auto_launch=True,
-        automatically starts local vLLM server and streams startup logs in real time.
-        Uses a dedicated VLLMStartupMonitor thread to detect and log stalls instead of printing dots.
-
-        Args:
-            poll_interval (float): Polling loop interval in seconds.
-            max_wait (Optional[float]): Maximum wait duration in seconds before timing out.
-            auto_launch (bool): Automatically launch vLLM server if not running.
+        Checks if local vLLM HTTP endpoint is online and healthy.
+        If offline, prints an error and instructions to start vLLM, then returns False immediately.
 
         Returns:
-            bool: True if vLLM endpoint becomes online and healthy, False on failure/cancel.
+            bool: True if vLLM endpoint is online and healthy, False otherwise.
         """
         try:
-            if self.vllm_manager.check_health(timeout=0.5):
+            if self.vllm_manager.check_health(timeout=1.0):
+                self._pre_warm_goose_prompt()
                 return True
         except (KeyboardInterrupt, SystemExit):
-            print("\n🛑 Cancelled waiting for vLLM server.")
+            print("\n🛑 Cancelled checking vLLM server.")
             return False
 
-        print(f"⚠️ Local vLLM server at {self.config.vllm_host} is not responding.")
-        if auto_launch:
-            print(f"🚀 Automatically launching local GB10 vLLM server ({self.config.model})...")
-            try:
-                self.vllm_manager.start_server(
-                    model=self.config.model,
-                    draft_model=self.config.draft_model,
-                    num_speculative_tokens=self.config.num_speculative_tokens,
-                    hf_token=self.config.hf_token,
-                    enable_prefix_caching=self.config.enable_prefix_caching,
-                    enable_chunked_prefill=self.config.enable_chunked_prefill,
-                    num_scheduler_steps=self.config.num_scheduler_steps,
-                    attention_backend=self.config.attention_backend,
-                    kv_cache_dtype=self.config.kv_cache_dtype,
-                    background=True
-                )
-            except (KeyboardInterrupt, SystemExit):
-                print("\n🛑 Cancelled launching vLLM server.")
-                return False
-            except Exception as e:
-                print(f"⚠️ Failed to auto-launch vLLM server: {e}")
-                print(f"💡 You can manually start vLLM via: `dgxcoder serve --model {self.config.model}`")
-        else:
-            print(f"💡 Start vLLM in another terminal via: `dgxcoder serve --model {self.config.model}`")
+        print(f"❌ Local vLLM server at {self.config.vllm_host} is not running.")
+        print(f"💡 Start vLLM in another terminal via: `dgxcoder start_server`")
+        return False
 
-        print("⏳ Waiting for local vLLM endpoint to become online... (Press Ctrl+C to cancel)\n")
 
-        expected_gb = self.estimate_vllm_load_memory_gb()
-        if expected_gb:
-            print(f"📊 Estimating load progress from unified-memory growth (target ~{expected_gb:.0f} GB).\n")
-        monitor = VLLMStartupMonitor(
-            warn_timeout_sec=30.0,
-            stuck_threshold_sec=90.0,
-            progress_interval_sec=5.0,
-            expected_memory_gb=expected_gb,
-        )
-        monitor.start()
-        start_time = time.time()
+    def _pre_warm_goose_prompt(self) -> None:
+        """
+        Silently pre-warms the FP8 KV cache with Goose's static system prompt + MCP tool schemas.
+        Sends a max_tokens=1 chat completion immediately after vLLM health check succeeds.
+        This eliminates first-turn TTFT delay for the massive Goose context.
+        """
         try:
-            while True:
-                # Retrieve and print newly accumulated startup logs from vLLM stdout
-                new_logs = self.vllm_manager.get_new_logs()
-                if new_logs:
-                    # Pass logs to monitor for PID extraction and memory measurement
-                    for log_line in new_logs:
-                        monitor.notify_log_received(log_line)
-                        print(f"  [vLLM] {log_line}")
-
-                if self.vllm_manager.check_health(timeout=0.5):
-                    monitor.stop()
-                    print("\n✅ vLLM endpoint is online and responding!")
-                    return True
-
-                if self.vllm_manager.process and self.vllm_manager.process.poll() is not None:
-                    monitor.stop()
-                    exit_code = self.vllm_manager.process.poll()
-                    print(f"\n❌ vLLM process terminated unexpectedly (exit code {exit_code}).")
-                    for log_line in self.vllm_manager.get_new_logs():
-                        print(f"  [vLLM] {log_line}")
-                    return False
-
-                if max_wait and (time.time() - start_time) >= max_wait:
-                    monitor.stop()
-                    print("\n❌ Timed out waiting for vLLM server.")
-                    return False
-
-                time.sleep(poll_interval)
-        except (KeyboardInterrupt, SystemExit):
-            monitor.stop()
-            print("\n🛑 Cancelled waiting for vLLM server.")
-            return False
+            url = f"{self.config.vllm_host}/v1/chat/completions"
+            payload = {
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": "You are Goose, an autonomous coding agent. You have access to the local filesystem and can execute shell commands."},
+                    {"role": "user", "content": "Pre-warm system prompt and MCP tools."}
+                ],
+                "tools": [{"type": "function", "function": {"name": "dgxcoder_mcp", "description": "DGXCoder MCP tool", "parameters": {"type": "object", "properties": {}}}}],
+                "max_tokens": 1,
+                "temperature": 0.0
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10):
+                pass  # silent success; KV cache now primed
+        except Exception:
+            pass  # pre-warm is best-effort; never block startup
 
     def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:
         """
@@ -178,16 +133,17 @@ class GooseRunner:
         if local_bin not in env.get("PATH", "").split(os.pathsep):
             env["PATH"] = f"{local_bin}:{env.get('PATH', '')}"
 
-        self.config.ensure_goose_config()
+        # Use a fresh temporary Goose config on every launch (never touches ~/.config/goose)
+        temp_goose_config = self.config.write_temporary_goose_config()
 
         valid, msg = self.config.validate_model()
         if not valid:
             print(f"⚠️ Warning: {msg}")
 
-        # Auto-launch or wait for local vLLM server
-        if not self.vllm_manager.check_health():
-            if not self.wait_for_vllm():
-                return 1
+        # Verify local vLLM server is running; exit immediately if offline
+        if not self.wait_for_vllm():
+            return 1
+
 
         # Provision Goose CLI binary if missing
         if not self.is_goose_installed():
@@ -211,6 +167,8 @@ class GooseRunner:
 
         cmd.append(goose_bin)
 
+        cmd.extend(["--config", str(temp_goose_config)])
+
         if prompt:
             cmd.extend(["run", "--text", prompt])
         else:
@@ -225,3 +183,9 @@ class GooseRunner:
         except Exception as e:
             print(f"❌ Failed to run Goose: {e}")
             return 1
+        finally:
+            # Clean up the per-session temporary config
+            try:
+                temp_goose_config.unlink(missing_ok=True)
+            except Exception:
+                pass

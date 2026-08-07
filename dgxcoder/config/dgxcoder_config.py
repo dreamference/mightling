@@ -18,14 +18,30 @@ from dgxcoder.config.config_file_storage_manager import ConfigFileStorageManager
 # System defaults
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 DEFAULT_MODEL: Final[str] = "qwen2.5-coder-32b"
-DEFAULT_SPECULATIVE_TOKENS: Final[int] = 5
+DEFAULT_SPECULATIVE_TOKENS: Final[int] = 8
 DEFAULT_SANDBOX: Final[str] = "none"
 DEFAULT_AGENT_RUNNER: Final[str] = "goose"
 DEFAULT_PREFIX_CACHING: Final[bool] = True
 DEFAULT_CHUNKED_PREFILL: Final[bool] = True
 DEFAULT_SCHEDULER_STEPS: Final[int] = 8
 DEFAULT_ATTENTION_BACKEND: Final[str] = "auto"
-DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
+DEFAULT_KV_CACHE_DTYPE: Final[str] = "fp8"
+DEFAULT_ENABLE_AUTO_TOOL_CHOICE: Final[bool] = True
+DEFAULT_TOOL_CALL_PARSER: Final[str] = "hermes"
+DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
+
+HERMES_TOOL_CALL_PROMPT: Final[str] = "You must format tool calls using <tool_call>{\"name\": \"call_name\", \"arguments\": {\"arg\": \"val\"}}</tool_call>."
+
+
+DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "outlines"
+DEFAULT_CAVE_MODE: Final[bool] = False
+
+CAVE_MODE_PROMPT: Final[str] = (
+    "You are in Cave Mode. You are a senior Staff Engineer. "
+    "Do not explain your reasoning. Do not use pleasantries, greetings, or conclusions. "
+    "Do not apologize. Output only the exact shell commands, tool calls, or code modifications "
+    "required to complete the user's objective. If asked a question, answer in 15 words or less."
+)
 
 GOOSE_CONFIG_PATH: Final[Path] = Path.home() / ".config" / "goose" / "config.yaml"
 
@@ -50,6 +66,7 @@ class DGXCoderConfig:
         num_scheduler_steps: Optional[int] = None,
         attention_backend: Optional[str] = None,
         kv_cache_dtype: Optional[str] = None,
+        cave_mode: Optional[bool] = None,
     ):
         """
         Initializes DGXCoderConfig by loading file defaults and overriding with environment variables and parameters.
@@ -165,6 +182,12 @@ class DGXCoderConfig:
             else self.file_data.get("kv_cache_dtype", DEFAULT_KV_CACHE_DTYPE)
         )
 
+        self.cave_mode: bool = bool(
+            cave_mode
+            if cave_mode is not None
+            else self.file_data.get("cave_mode", DEFAULT_CAVE_MODE)
+        )
+
         # Path to official Goose config file
         self.config_path: Path = GOOSE_CONFIG_PATH
 
@@ -192,6 +215,7 @@ class DGXCoderConfig:
             "num_scheduler_steps": self.num_scheduler_steps,
             "attention_backend": self.attention_backend,
             "kv_cache_dtype": self.kv_cache_dtype,
+            "cave_mode": self.cave_mode,
         }
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 
@@ -210,6 +234,9 @@ class DGXCoderConfig:
     def get_env_vars(self) -> Dict[str, str]:
         """
         Generates environment variables required for Goose agent processes.
+        Includes GOOSE_ALLOW_SHELL=1 and GOOSE_ALLOW_READ=1 so the built-in
+        developer extension can execute real OS shell commands (/bin/bash -c ...)
+        instead of emitting simulated JSON tool calls.
 
         Returns:
             Dict[str, str]: Environment variables dictionary (GOOSE_PROVIDER, OPENAI_BASE_URL, HF_TOKEN, etc.).
@@ -222,6 +249,8 @@ class DGXCoderConfig:
             "OPENAI_BASE_URL": base_url,
             "OPENAI_API_KEY": "gb10-local-token",
             "GOOSE_MODEL": resolved_model,
+            "GOOSE_ALLOW_SHELL": "1",
+            "GOOSE_ALLOW_READ": "1",
         }
         if self.hf_token:
             env["HF_TOKEN"] = self.hf_token
@@ -230,8 +259,9 @@ class DGXCoderConfig:
 
     def ensure_goose_config(self, extra_mcp_servers: Optional[Dict[str, Any]] = None) -> None:
         """
-        Ensures ~/.config/goose/config.yaml is updated with local vLLM OpenAI endpoint settings
-        and stdio MCP extension configuration.
+        Ensures ~/.config/goose/config.yaml is updated with local vLLM OpenAI endpoint settings,
+        the built-in "developer" extension (real OS shell execution via /bin/bash with allow_shell), and the stdio MCP extension.
+        When cave_mode=True, injects the strict Cave Mode system prompt via the "instructions" key.
 
         Args:
             extra_mcp_servers (Optional[Dict[str, Any]]): Optional additional MCP extensions to merge.
@@ -249,6 +279,11 @@ class DGXCoderConfig:
                 "model": resolved_model
             },
             "extensions": {
+                "developer": {
+                    "enabled": True,
+                    "type": "builtin",
+                    "allow_shell": True
+                },
                 "jetbrains_mcp": {
                     "enabled": True,
                     "type": "stdio",
@@ -257,6 +292,11 @@ class DGXCoderConfig:
                 }
             }
         }
+        if self.cave_mode:
+            config_data["instructions"] = f"{HERMES_TOOL_CALL_PROMPT}\n\n{CAVE_MODE_PROMPT}"
+        else:
+            config_data["instructions"] = HERMES_TOOL_CALL_PROMPT
+
         
         if extra_mcp_servers:
             config_data["extensions"].update(extra_mcp_servers)
@@ -267,13 +307,88 @@ class DGXCoderConfig:
                     with open(self.config_path, "r", encoding="utf-8") as f:
                         existing = yaml.safe_load(f) or {}
                     if isinstance(existing, dict):
+                        # Deep-merge extensions so developer + jetbrains_mcp are never lost
+                        if "extensions" in existing and isinstance(existing["extensions"], dict):
+                            existing["extensions"].update(config_data.get("extensions", {}))
+                            config_data["extensions"] = existing["extensions"]
                         existing.update(config_data)
                         config_data = existing
+                        # Force developer extension (with allow_shell) so real /bin/bash is always used
+                        if "extensions" not in config_data or not isinstance(config_data["extensions"], dict):
+                            config_data["extensions"] = {}
+                        config_data["extensions"]["developer"] = {
+                            "enabled": True,
+                            "type": "builtin",
+                            "allow_shell": True
+                        }
+                        # Force cave instructions when enabled
+                        if self.cave_mode:
+                            config_data["instructions"] = CAVE_MODE_PROMPT
                 except Exception:
                     pass
 
+            print(f"[dgxcoder] Writing Goose config to {self.config_path}")
+            print(f"[dgxcoder] Final developer extension: {config_data.get('extensions', {}).get('developer')}")
+            if self.cave_mode:
+                print(f"[dgxcoder] Final instructions (cave): {config_data.get('instructions', '')[:80]}...")
             with open(self.config_path, "w", encoding="utf-8") as f:
                 yaml.dump(config_data, f, default_flow_style=False)
         else:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=2)
+
+    def write_temporary_goose_config(self, extra_mcp_servers: Optional[Dict[str, Any]] = None) -> "Path":
+        """
+        Creates a fresh Goose config file in /tmp/dgxcoder with a random name.
+        The file contains the local vLLM endpoint, developer extension (with allow_shell),
+        jetbrains_mcp, and cave instructions when enabled.
+        The caller is responsible for deleting the file after use.
+
+        Returns:
+            Path: Absolute path to the generated temporary config file.
+        """
+        import uuid
+        from pathlib import Path as _Path
+
+        tmp_dir = _Path("/tmp/dgxcoder")
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = tmp_dir / f"goose_{uuid.uuid4().hex}.yaml"
+
+        from dgxcoder.hardware import resolve_model_hf_repo
+        resolved_model = resolve_model_hf_repo(self.model)
+        base_url = self.vllm_host.rstrip("/") + "/v1"
+        config_data: Dict[str, Any] = {
+            "provider": "openai",
+            "openai": {
+                "base_url": base_url,
+                "api_key": "gb10-local-token",
+                "model": resolved_model
+            },
+            "extensions": {
+                "developer": {
+                    "enabled": True,
+                    "type": "builtin",
+                    "allow_shell": True
+                },
+                "jetbrains_mcp": {
+                    "enabled": True,
+                    "type": "stdio",
+                    "cmd": "dgxcoder",
+                    "args": ["mcp"]
+                }
+            }
+        }
+        if self.cave_mode:
+            config_data["instructions"] = CAVE_MODE_PROMPT
+
+        if extra_mcp_servers:
+            config_data["extensions"].update(extra_mcp_servers)
+
+        if yaml:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                yaml.dump(config_data, f, default_flow_style=False)
+        else:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(config_data, f, indent=2)
+
+        return temp_path

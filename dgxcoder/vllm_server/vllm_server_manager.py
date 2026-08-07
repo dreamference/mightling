@@ -138,8 +138,10 @@ class VLLMServerManager:
         attention_backend: str = "auto",
         kv_cache_dtype: str = "auto",
         api_key: Optional[str] = None,
-        enable_auto_tool_choice: bool = False,
+        enable_auto_tool_choice: bool = True,
         tool_call_parser: Optional[str] = None,
+        max_num_batched_tokens: Optional[int] = 8192,
+        guided_decoding_backend: Optional[str] = "outlines",
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -166,6 +168,8 @@ class VLLMServerManager:
             api_key (Optional[str]): Optional API key for OpenAI-compatible auth (not set by default).
             enable_auto_tool_choice (bool): Enable automatic tool choice.
             tool_call_parser (Optional[str]): Parser name for tool calls.
+            max_num_batched_tokens (Optional[int]): Max tokens per batch when chunked prefill active (GB10).
+            guided_decoding_backend (Optional[str]): Guided decoding backend for deterministic JSON/tool calls.
 
         Returns:
             List[str]: Complete executable command list.
@@ -180,19 +184,31 @@ class VLLMServerManager:
         if not quantization and ("70b" in model.lower() or "72b" in model.lower()):
             quantization = "fp8"
 
+        # Auto-resolve optimal tool_call_parser based on model architecture if None or default 'hermes'
+        if not tool_call_parser or tool_call_parser == "auto":
+            model_lower = model.lower()
+            if "qwen" in model_lower or "llama" in model_lower:
+                tool_call_parser = "hermes"
+            elif "mistral" in model_lower:
+                tool_call_parser = "mistral"
+            else:
+                tool_call_parser = "hermes"
+
+
         base_args: List[str] = [
             "--host", "0.0.0.0",
             "--port", str(port),
             "--max-model-len", str(max_model_len),
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--trust-remote-code",
-            "--enforce-eager",
         ]
 
         if enable_prefix_caching:
             base_args.append("--enable-prefix-caching")
         if enable_chunked_prefill:
             base_args.append("--enable-chunked-prefill")
+            if max_num_batched_tokens and max_num_batched_tokens > 0:
+                base_args.extend(["--max-num-batched-tokens", str(max_num_batched_tokens)])
         if attention_backend and attention_backend != "auto":
             base_args.extend(["--attention-backend", attention_backend])
         if kv_cache_dtype:
@@ -213,9 +229,10 @@ class VLLMServerManager:
             os.makedirs(hf_cache, exist_ok=True)
             cmd = [
                 "docker", "run", "--rm",
+                "--ipc=host",
+                "--network", "host",
                 "--name", f"dgxcoder-vllm-{port}",
                 "--gpus", "all",
-                "-p", f"{port}:{port}",
                 "-v", f"{hf_cache}:/root/.cache/huggingface",
             ]
             if token_env:
@@ -246,8 +263,11 @@ class VLLMServerManager:
         attention_backend: str = "auto",
         kv_cache_dtype: str = "auto",
         api_key: Optional[str] = None,
-        enable_auto_tool_choice: bool = False,
+        enable_auto_tool_choice: bool = True,
         tool_call_parser: Optional[str] = None,
+        max_num_batched_tokens: Optional[int] = 8192,
+
+        guided_decoding_backend: Optional[str] = "outlines",
         background: bool = True
     ) -> Optional[subprocess.Popen]:
         """
@@ -299,6 +319,7 @@ class VLLMServerManager:
             api_key=api_key,
             enable_auto_tool_choice=enable_auto_tool_choice,
             tool_call_parser=tool_call_parser,
+            max_num_batched_tokens=max_num_batched_tokens,
         )
 
         # Step 3: Cleanup potential container name conflicts prior to launch

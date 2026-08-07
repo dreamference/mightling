@@ -2,7 +2,7 @@
 DGXCoder Command Line Interface (CLI) Controller.
 
 This module provides the DGXCoderCLIController class which parses command line arguments
-for subcommands (`init`, `chat`, `run`, `status`, `serve`, `index`, `mcp`, `download`, `web`),
+for subcommands (`init`, `chat`, `run`, `status`, `start_server`, `index`, `mcp`, `download`, `web`),
 renders Rich terminal user interfaces, and coordinates backend component execution.
 """
 
@@ -162,6 +162,7 @@ class DGXCoderCLIController:
         chat_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         chat_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         chat_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
+        chat_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
 
         # Command: dgxcoder run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
@@ -172,6 +173,7 @@ class DGXCoderCLIController:
         run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
+        run_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
 
         # Command: dgxcoder status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
@@ -188,8 +190,11 @@ class DGXCoderCLIController:
         start_server_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
         start_server_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
         start_server_parser.add_argument("--api-key", default=None, help="OpenAI-compatible API key (optional; not set by default)")
-        start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", help="Enable automatic tool choice for function calling")
-        start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (e.g. hermes, llama3_json)")
+        start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", default=True, help="Enable automatic tool choice for function calling (default: enabled)")
+        start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (default: auto-detected based on model, e.g. hermes, llama3_json)")
+
+        start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
+        start_server_parser.add_argument("--guided-decoding-backend", default="outlines", help="Guided decoding backend for deterministic JSON/tool calls (default: outlines)")
 
         # Command: dgxcoder index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -243,6 +248,9 @@ class DGXCoderCLIController:
         num_scheduler_steps = getattr(args, "num_scheduler_steps", None)
         attention_backend = getattr(args, "attention_backend", None)
         kv_cache_dtype = getattr(args, "kv_cache_dtype", None)
+        max_num_batched_tokens = getattr(args, "max_num_batched_tokens", None)
+        guided_decoding_backend = getattr(args, "guided_decoding_backend", None)
+        cave_mode = getattr(args, "cave", None)
 
         config = DGXCoderConfig(
             config_file=config_file,
@@ -255,7 +263,8 @@ class DGXCoderCLIController:
             hf_token=hf_token,
             num_scheduler_steps=num_scheduler_steps,
             attention_backend=attention_backend,
-            kv_cache_dtype=kv_cache_dtype
+            kv_cache_dtype=kv_cache_dtype,
+            cave_mode=cave_mode
         )
 
         # Instantiate selected runner (Goose by default, or Cline/Aider/Continue/OpenHands)
@@ -379,6 +388,8 @@ class DGXCoderCLIController:
                     api_key=args.api_key,
                     enable_auto_tool_choice=args.enable_auto_tool_choice,
                     tool_call_parser=args.tool_call_parser,
+                    max_num_batched_tokens=args.max_num_batched_tokens,
+                    guided_decoding_backend=args.guided_decoding_backend,
                     background=True
                 )
                 

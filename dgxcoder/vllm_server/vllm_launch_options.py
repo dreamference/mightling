@@ -27,6 +27,10 @@ class VLLMLaunchOptions:
         num_scheduler_steps (int): Multi-step scheduling iteration count.
         attention_backend (str): Attention implementation backend ('FLASHINFER', 'FLASH_ATTN', 'auto').
         kv_cache_dtype (str): Precision datatype for KV cache ('auto', 'fp8').
+    enable_auto_tool_choice (bool): Enable automatic tool choice for function calling (Goose).
+    tool_call_parser (str): Tool-call parser name (e.g. 'hermes').
+    max_num_batched_tokens (int): Max tokens per batch when chunked prefill is enabled (GB10 optimization).
+    guided_decoding_backend (str): Guided decoding backend for deterministic JSON/tool-call output ('outlines').
     """
     model: str = "qwen2.5-coder-32b"
     port: int = 8000
@@ -34,10 +38,14 @@ class VLLMLaunchOptions:
     max_model_len: int = 16384
     gpu_memory_utilization: float = 0.90
     draft_model: Optional[str] = None
-    num_speculative_tokens: int = 5
+    num_speculative_tokens: int = 8
     hf_token: Optional[str] = None
     enable_prefix_caching: bool = True
     enable_chunked_prefill: bool = True
     num_scheduler_steps: int = 8
     attention_backend: str = "auto"
-    kv_cache_dtype: str = "auto"
+    enable_auto_tool_choice: bool = True
+    tool_call_parser: str = "hermes"
+    max_num_batched_tokens: int = 8192
+    guided_decoding_backend: str = "outlines"
+
