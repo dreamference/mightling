@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -e
+
+export GOOSE_PROVIDER="openai"
+export OPENAI_HOST="${DGXCODER_VLLM_HOST:-http://localhost:8000}"
+export OPENAI_BASE_PATH="v1"
+export OPENAI_API_KEY="gb10-local-token"
+export GOOSE_MODEL="${DGXCODER_MODEL:-qwen2.5-coder-32b}"
+
+echo "🚀 Starting Goose session connected to GB10 local endpoint ($GOOSE_MODEL)..."
+goose session "$@"
