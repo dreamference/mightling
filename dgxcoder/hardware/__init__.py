@@ -31,10 +31,10 @@ def tensorize_model(model_key: str, force: bool = False, hf_token: Optional[str]
 def get_tensorized_path(model_key: str) -> Optional[Path]:
     return ModelDownloader.get_tensorized_path(model_key)
 
-def download_model(model_key: str, hf_token: Optional[str] = None, auto_tensorize: bool = True) -> bool:
+def download_model(model_key: str, hf_token: Optional[str] = None, auto_tensorize: bool = False) -> bool:
     return ModelDownloader.download_model(model_key, hf_token=hf_token, auto_tensorize=auto_tensorize)
 
-def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = True) -> Dict[str, bool]:
+def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = False) -> Dict[str, bool]:
     return ModelDownloader.download_all_models(hf_token=hf_token, auto_tensorize=auto_tensorize)
 
 def clear_model_cache() -> None:

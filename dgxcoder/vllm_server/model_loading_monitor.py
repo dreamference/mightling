@@ -26,7 +26,7 @@ class ModelLoadingMonitor:
         ("ready", r"Uvicorn running|started server|ready|listening on"),
     ]
 
-    def __init__(self, get_logs_fn: Callable[[], List[str]], check_health_fn: Callable[[], bool], get_memory_fn: Optional[Callable[[], Optional[str]]] = None):
+    def __init__(self, get_logs_fn: Callable[[], List[str]], check_health_fn: Callable[[], bool], get_memory_fn: Optional[Callable[[], Optional[str]]] = None, recipe_env_keys: Optional[set] = None):
         """
         Initializes the model loading monitor.
 
@@ -34,10 +34,12 @@ class ModelLoadingMonitor:
             get_logs_fn: Function that returns new log lines from vLLM server.
             check_health_fn: Function that checks if server is healthy (HTTP health check).
             get_memory_fn: Optional function returning Docker container reserved memory string.
+            recipe_env_keys: Set of environment variable names injected from launch overrides.
         """
         self.get_logs_fn = get_logs_fn
         self.check_health_fn = check_health_fn
         self.get_memory_fn = get_memory_fn
+        self.recipe_env_keys = recipe_env_keys or set()
         self.monitor_thread: Optional[threading.Thread] = None
         self.running = False
         self.stages_reached: set = set()
@@ -99,6 +101,11 @@ class ModelLoadingMonitor:
         try:
             logs = self.get_logs_fn()
             for log_line in logs:
+                # Suppress benign NVIDIA container warnings about its own injected variables
+                if "Unknown vLLM environment variable detected" in log_line:
+                    if "VLLM_VERSION" in log_line or "VLLM_FLASH_ATTN_SRC_DIR" in log_line:
+                        self._process_log_line(log_line)
+                        continue
                 print(log_line.rstrip())
                 self._process_log_line(log_line)
         except Exception:
@@ -112,6 +119,17 @@ class ModelLoadingMonitor:
             line (str): A log line from vLLM server.
         """
         line_lower = line.lower()
+        
+        # Check for unknown vLLM environment variables
+        unknown_env_match = re.search(r"unknown vllm environment variable[:\s']*([^'\s]+)", line_lower, re.IGNORECASE)
+        if unknown_env_match:
+            var_name = unknown_env_match.group(1).upper()
+            if var_name in self.recipe_env_keys:
+                print(f"\n[bold red]FATAL ERROR: vLLM rejected recipe-supplied environment variable '{var_name}'.[/bold red]")
+                print("[bold red]This usually indicates a typo or a change in vLLM version that breaks the required kernel pin.[/bold red]")
+                import sys
+                sys.exit(1)
+
         for stage_name, pattern in self.LOADING_STAGES:
             if re.search(pattern, line_lower, re.IGNORECASE):
                 self.stages_reached.add(stage_name)
@@ -184,12 +202,13 @@ class ModelLoadingMonitor:
         print(f"[{timestamp}] {ready_indicator} ({elapsed:.1f}s) {progress}")
 
 
-def create_model_loading_monitor(vllm_manager) -> ModelLoadingMonitor:
+def create_model_loading_monitor(vllm_manager, recipe_env_keys: Optional[set] = None) -> ModelLoadingMonitor:
     """
     Factory function to create a monitor for a VLLMServerManager instance.
 
     Args:
         vllm_manager: VLLMServerManager instance to monitor.
+        recipe_env_keys: Optional set of environment variables injected from launch overrides.
 
     Returns:
         ModelLoadingMonitor: Configured monitor instance.
@@ -198,4 +217,5 @@ def create_model_loading_monitor(vllm_manager) -> ModelLoadingMonitor:
         get_logs_fn=vllm_manager.get_new_logs,
         check_health_fn=vllm_manager.check_health,
         get_memory_fn=vllm_manager.get_container_reserved_memory,
+        recipe_env_keys=recipe_env_keys,
     )

@@ -42,13 +42,9 @@ class ModelMatrixRegistry:
                 "gpu_memory_utilization": 0.81,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
-                "moe_backend": "marlin",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
                 "max_num_batched_tokens": 32768,
-                # Tensorizer round-tripping of a pre-quantized NVFP4 checkpoint is unverified; loading
-                # the checkpoint directly is the path NVIDIA's recipe exercises.
-                "use_tensorizer": False,
                 # MTP ships inside this checkpoint. Without it NVFP4 lands at the low end of the
                 # published throughput range, so it is part of the recipe rather than a tuning extra.
                 "speculative_config": {"method": "mtp", "num_speculative_tokens": 3},
@@ -57,11 +53,6 @@ class ModelMatrixRegistry:
                     "--tensor-parallel-size", "1",
                     "--dtype", "auto",
                 ],
-                # The MoE layer path reads these from the process environment, not from CLI flags.
-                "env": {
-                    "VLLM_NVFP4_GEMM_BACKEND": "flashinfer-b12x",
-                    "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
-                },
             },
         ),
         "qwen2.5-coder-32b": ModelSpec(

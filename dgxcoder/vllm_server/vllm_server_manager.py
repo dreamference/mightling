@@ -434,7 +434,7 @@ class VLLMServerManager:
         kv_cache_dtype = resolved(kv_cache_dtype, "kv_cache_dtype", DEFAULT_KV_CACHE_DTYPE)
         moe_backend = resolved(moe_backend, "moe_backend", None)
         reasoning_parser = resolved(reasoning_parser, "reasoning_parser", None)
-        use_tensorizer = resolved(use_tensorizer, "use_tensorizer", True)
+        use_tensorizer = resolved(use_tensorizer, "use_tensorizer", False)
         max_num_batched_tokens = resolved(max_num_batched_tokens, "max_num_batched_tokens", 8192)
         if not attention_backend or attention_backend == "auto":
             attention_backend = recipe.get("attention_backend", "auto")
@@ -624,7 +624,7 @@ class VLLMServerManager:
         from dgxcoder.hardware import download_model, get_model_launch_overrides
         tensorize = use_tensorizer
         if tensorize is None:
-            tensorize = get_model_launch_overrides(model).get("use_tensorizer", True)
+            tensorize = get_model_launch_overrides(model).get("use_tensorizer", False)
         download_model(model, hf_token=hf_token, auto_tensorize=tensorize)
         if draft_model:
             download_model(draft_model, hf_token=hf_token, auto_tensorize=tensorize)

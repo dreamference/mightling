@@ -299,7 +299,7 @@ class ModelDownloader:
         cls,
         model_key: str,
         hf_token: Optional[str] = None,
-        auto_tensorize: bool = True
+        auto_tensorize: bool = False
     ) -> bool:
         """
         Pre-downloads HuggingFace model weights into local cache and optionally converts to tensorize format.
@@ -392,7 +392,7 @@ class ModelDownloader:
     def download_all_models(
         cls,
         hf_token: Optional[str] = None,
-        auto_tensorize: bool = True
+        auto_tensorize: bool = False
     ) -> Dict[str, bool]:
         """
         Pre-downloads all qualified GB10 models in the matrix.

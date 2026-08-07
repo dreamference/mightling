@@ -209,7 +209,7 @@ class DGXCoderCLIController:
         start_server_parser.add_argument("--moe-backend", default=None, help="Mixture-of-experts kernel backend (e.g. marlin, flashinfer-b12x); GB10 requires an SM121-safe choice")
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
-        start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: per-model, True unless the model opts out)")
+        start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: False)")
         start_server_parser.add_argument("--docker-image", default=DEFAULT_VLLM_IMAGE, help="Docker image for vLLM (default: nvcr.io/nvidia/vllm:26.07-py3)")
 
         # Command: dgxcoder index
@@ -224,7 +224,7 @@ class DGXCoderCLIController:
         download_parser = subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
-        download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=True, help="Auto-convert model to tensorize format after download (default: True)")
+        download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=False, help="Auto-convert model to tensorize format after download (default: False)")
 
         # Command: dgxcoder clear-cache
         subparsers.add_parser("clear-cache", help="Clear local HuggingFace and tensorizer model caches")
@@ -307,7 +307,7 @@ class DGXCoderCLIController:
         # Dispatch subcommand logic
         if args.command == "download":
             cls.display_header()
-            auto_t = getattr(args, "tensorize", True)
+            auto_t = getattr(args, "tensorize", False)
             if getattr(args, "all", False):
                 download_all_models(hf_token=config.hf_token, auto_tensorize=auto_t)
             else:
@@ -403,7 +403,9 @@ class DGXCoderCLIController:
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             
             # Start monitoring thread before server launch
-            monitor = create_model_loading_monitor(vllm_mgr)
+            from dgxcoder.hardware import get_model_launch_overrides
+            recipe_env_keys = set(get_model_launch_overrides(args.model).get("env", {}).keys())
+            monitor = create_model_loading_monitor(vllm_mgr, recipe_env_keys=recipe_env_keys)
             monitor.start()
             
             print(f"📊 Model Loading Monitor: Tracking initialization progress for '{args.model}'...\n")

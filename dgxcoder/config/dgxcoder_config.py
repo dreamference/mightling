@@ -41,7 +41,7 @@ HERMES_TOOL_CALL_PROMPT: Final[str] = (
 
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "outlines"
 DEFAULT_CAVE_MODE: Final[bool] = False
-DEFAULT_USE_TENSORIZER: Final[bool] = True
+DEFAULT_USE_TENSORIZER: Final[bool] = False
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
