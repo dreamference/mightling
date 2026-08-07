@@ -87,9 +87,13 @@ class VLLMServerManager:
         num_speculative_tokens: int = 5,
     ) -> List[str]:
         """Generates vLLM command line (native CLI, Python module, or Docker container) for NVIDIA GB10 with Speculative Decoding support."""
+        from dgxcoder.hardware import resolve_model_hf_repo
+        hf_model = resolve_model_hf_repo(model)
+        hf_draft_model = resolve_model_hf_repo(draft_model) if draft_model else None
+
         if shutil.which("vllm"):
             cmd = [
-                "vllm", "serve", model,
+                "vllm", "serve", hf_model,
                 "--host", "0.0.0.0",
                 "--port", str(port),
                 "--max-model-len", str(max_model_len),
@@ -102,7 +106,7 @@ class VLLMServerManager:
                 sys.executable, "-m", "vllm.entrypoints.openai.api_server",
                 "--host", "0.0.0.0",
                 "--port", str(port),
-                "--model", model,
+                "--model", hf_model,
                 "--max-model-len", str(max_model_len),
                 "--gpu-memory-utilization", str(gpu_memory_utilization),
                 "--trust-remote-code",
@@ -118,7 +122,7 @@ class VLLMServerManager:
                 "-p", f"{port}:{port}",
                 "-v", f"{hf_cache}:/root/.cache/huggingface",
                 "vllm/vllm-openai:latest",
-                "--model", model,
+                "--model", hf_model,
                 "--max-model-len", str(max_model_len),
                 "--gpu-memory-utilization", str(gpu_memory_utilization),
                 "--trust-remote-code",
@@ -129,7 +133,7 @@ class VLLMServerManager:
                 sys.executable, "-m", "vllm.entrypoints.openai.api_server",
                 "--host", "0.0.0.0",
                 "--port", str(port),
-                "--model", model,
+                "--model", hf_model,
                 "--max-model-len", str(max_model_len),
                 "--gpu-memory-utilization", str(gpu_memory_utilization),
                 "--trust-remote-code",
@@ -139,8 +143,8 @@ class VLLMServerManager:
         if quantization:
             cmd.extend(["--quantization", quantization])
 
-        if draft_model:
-            cmd.extend(["--speculative-model", draft_model, "--num-speculative-tokens", str(num_speculative_tokens)])
+        if hf_draft_model:
+            cmd.extend(["--speculative-model", hf_draft_model, "--num-speculative-tokens", str(num_speculative_tokens)])
         
         hw = detect_gb10_hardware()
         if hw.get("is_gb10") and "--kv-cache-dtype" not in cmd:

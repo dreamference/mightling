@@ -14,6 +14,7 @@ class ModelSpec:
     max_memory_gb: float
     compatible_gb10: bool
     notes: str
+    hf_repo_id: str
 
 MODEL_MATRIX: Dict[str, ModelSpec] = {
     "qwen2.5-coder-32b": ModelSpec(
@@ -23,7 +24,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=35.0,
         max_memory_gb=64.0,
         compatible_gb10=True,
-        notes="Fits comfortably in 128GB Unified Memory"
+        notes="Fits comfortably in 128GB Unified Memory",
+        hf_repo_id="Qwen/Qwen2.5-Coder-32B-Instruct"
     ),
     "qwen2.5-coder-72b": ModelSpec(
         name="Qwen 2.5 Coder 72B",
@@ -32,7 +34,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=45.0,
         max_memory_gb=80.0,
         compatible_gb10=True,
-        notes="Supported (INT8/FP8 quantized fit)"
+        notes="Supported (INT8/FP8 quantized fit)",
+        hf_repo_id="Qwen/Qwen2.5-Coder-72B-Instruct"
     ),
     "deepseek-r1-distill-32b": ModelSpec(
         name="DeepSeek-R1-Distill-Qwen-32B",
@@ -41,7 +44,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=35.0,
         max_memory_gb=64.0,
         compatible_gb10=True,
-        notes="Fits comfortably in 128GB Unified Memory"
+        notes="Fits comfortably in 128GB Unified Memory",
+        hf_repo_id="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
     ),
     "deepseek-r1-distill-70b": ModelSpec(
         name="DeepSeek-R1-Distill-Llama-70B",
@@ -50,7 +54,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=45.0,
         max_memory_gb=80.0,
         compatible_gb10=True,
-        notes="Supported (INT8/FP8 quantized fit)"
+        notes="Supported (INT8/FP8 quantized fit)",
+        hf_repo_id="deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
     ),
     "llama-3.3-70b": ModelSpec(
         name="Llama 3.3 70B Instruct",
@@ -59,7 +64,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=75.0,
         max_memory_gb=80.0,
         compatible_gb10=True,
-        notes="Supported (INT8/FP8 quantized fit)"
+        notes="Supported (INT8/FP8 quantized fit)",
+        hf_repo_id="meta-llama/Llama-3.3-70B-Instruct"
     ),
     "qwen2.5-coder-1.5b": ModelSpec(
         name="Qwen 2.5 Coder 1.5B (Draft Model)",
@@ -68,7 +74,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=3.5,
         max_memory_gb=6.0,
         compatible_gb10=True,
-        notes="Speculative decoding draft model (~3.5GB memory)"
+        notes="Speculative decoding draft model (~3.5GB memory)",
+        hf_repo_id="Qwen/Qwen2.5-Coder-1.5B-Instruct"
     ),
     "qwen2.5-coder-3b": ModelSpec(
         name="Qwen 2.5 Coder 3B (Draft Model)",
@@ -77,7 +84,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=6.5,
         max_memory_gb=10.0,
         compatible_gb10=True,
-        notes="Speculative decoding draft model (~6.5GB memory)"
+        notes="Speculative decoding draft model (~6.5GB memory)",
+        hf_repo_id="Qwen/Qwen2.5-Coder-3B-Instruct"
     ),
     "starcoder2-15b": ModelSpec(
         name="StarCoder2 15B",
@@ -86,7 +94,8 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=20.0,
         max_memory_gb=30.0,
         compatible_gb10=True,
-        notes="Fits easily"
+        notes="Fits easily",
+        hf_repo_id="bigcode/starcoder2-15b"
     ),
     "deepseek-v3-671b": ModelSpec(
         name="DeepSeek-V3 671B (MoE)",
@@ -95,9 +104,19 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         min_memory_gb=350.0,
         max_memory_gb=400.0,
         compatible_gb10=False,
-        notes="Exceeds 128GB (Requires multi-node or >128GB hardware)"
+        notes="Exceeds 128GB (Requires multi-node or >128GB hardware)",
+        hf_repo_id="deepseek-ai/DeepSeek-V3"
     ),
 }
+
+def resolve_model_hf_repo(model_key: str) -> str:
+    """Resolves short model alias to official HuggingFace repository ID."""
+    if not model_key:
+        return model_key
+    spec = MODEL_MATRIX.get(model_key.lower())
+    if spec:
+        return spec.hf_repo_id
+    return model_key
 
 def get_system_memory() -> Dict[str, float]:
     """Retrieves total and available system memory in GB from /proc/meminfo."""

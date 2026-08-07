@@ -9,7 +9,7 @@ def test_vllm_build_launch_command_speculative():
     )
     assert "--speculative-model" in cmd
     idx = cmd.index("--speculative-model")
-    assert cmd[idx + 1] == "qwen2.5-coder-1.5b"
+    assert cmd[idx + 1] == "Qwen/Qwen2.5-Coder-1.5B-Instruct"
     assert "--num-speculative-tokens" in cmd
     tokens_idx = cmd.index("--num-speculative-tokens")
     assert cmd[tokens_idx + 1] == "5"
