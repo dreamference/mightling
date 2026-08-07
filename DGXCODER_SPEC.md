@@ -16,7 +16,7 @@
 - [4. Hardware Integration & Optimization](#4-hardware-integration--optimization)
   - [4.1. NVIDIA GB10 Hardware Specification](#41-nvidia-gb10-hardware-specification)
   - [4.2. GB10 Inference Stack & Auto-Launch Engine](#42-gb10-inference-stack--auto-launch-engine)
-  - [4.3. Agent Runtimes (Goose & Cline)](#43-agent-runtimes-goose--cline)
+  - [4.3. Agent Runtimes (Goose, Cline, Aider, Continue, OpenHands)](#43-agent-runtimes-goose-cline-aider-continue-openhands)
   - [4.4. Codebase Context Engine (AST + SQLite / FTS5)](#44-codebase-context-engine-ast--sqlite--fts5)
   - [4.5. Session Startup Process](#45-session-startup-process)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
@@ -48,7 +48,7 @@
 
 By leveraging the integrated SoC architecture of the NVIDIA GB10 (Blackwell GPU paired with high-performance ARM Cortex CPU host sharing **128 GB of high-speed Unified LPDDR5X Memory**), DGXCoder hosts state-of-the-art open coding LLMs with high generation speeds and low latency.
 
-Primary agent runtime is **Goose** (`aaif-goose/goose`). An optional **Cline** path (`--agent cline`) configures VS Code / VSCodium with the Cline extension against the same local vLLM endpoint.
+Primary agent runtime is **Goose** (`aaif-goose/goose`). Additional runners selected via `--agent` / `DGXCODER_AGENT`: **Cline**, **Aider**, **Continue**, and **OpenHands** — all targeting the same local vLLM OpenAI-compatible endpoint.
 
 ```
 +-----------------------------------------------------------------------------------+
@@ -60,10 +60,10 @@ Primary agent runtime is **Goose** (`aaif-goose/goose`). An optional **Cline** p
 +---------------+---------------------------+--------------------------+------------+
                                             | Model Context Protocol (MCP)
 +-------------------------------------------v---------------------------------------+
-|              Agent Execution (Goose default | Cline optional)                     |
+|   Agents: Goose (default) | Cline | Aider | Continue | OpenHands                  |
 |  +--------------------+  +--------------------+  +------------------------------+ |
-|  | Context Engine     |  | Goose / Cline      |  | Sandbox + MCP Tool Runtime   | |
-|  | AST + FTS5 + TF-IDF|  | Session Controllers|  | Rootless Container Prefix    | |
+|  | Context Engine     |  | Session Controllers|  | Sandbox / Docker / IDE        | |
+|  | AST + FTS5 + TF-IDF|  | (5 runners)        |  | Prefix / Extension / Image   | |
 |  +--------------------+  +--------------------+  +------------------------------+ |
 +-------------------------------------------+---------------------------------------+
 |                                           | Local OpenAI-compatible HTTP (vLLM)
@@ -92,7 +92,7 @@ Primary agent runtime is **Goose** (`aaif-goose/goose`). An optional **Cline** p
 | **Inference Hardware** | Cloud TPUs / GPUs | **NVIDIA GB10 (Blackwell Architecture)** |
 | **Data Privacy** | Cloud Privacy Policy | **Strict Zero-Egress Air-Gapped Local Execution** |
 | **System Memory** | Cloud Allocation | **128 GB Unified LPDDR5X Memory** |
-| **Interfaces** | Antigravity IDE, CLI, Desktop | **CLI (`dgxcoder`), Goose + stdio MCP, optional Cline/VS Code, Web Canvas** |
+| **Interfaces** | Antigravity IDE, CLI, Desktop | **CLI (`dgxcoder`); agents Goose / Cline / Aider / Continue / OpenHands; stdio MCP; Web Canvas** |
 
 ---
 
@@ -148,7 +148,9 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
 * **Readiness Polling & Live Streaming**: `GooseRunner.wait_for_vllm()` auto-launches background vLLM when offline, streams `[vLLM]` logs, and polls `GET /v1/models` until HTTP 200.
 * **Instant Signal Handling**: Poll loop sleeps in 0.1s slices so `Ctrl+C` is handled promptly.
 
-### 4.3. Agent Runtimes (Goose & Cline)
+### 4.3. Agent Runtimes (Goose, Cline, Aider, Continue, OpenHands)
+
+CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / config `agent_runner` (default `goose`). Choices: `goose`, `cline`, `aider`, `continue`, `openhands`. Non-Goose runners reuse `GooseRunner.wait_for_vllm()` for shared vLLM auto-launch.
 
 #### Goose (default, `agent_runner=goose`)
 * **Execution Runtime**: Goose AI Agent (`aaif-goose/goose` v1.45+).
@@ -163,11 +165,36 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
   - **Docker**: `docker run --rm -it -v {cwd}:/workspace -w /workspace ubuntu:22.04`
   - Missing runtime binary → warning and unsandboxed execution.
 
-#### Cline (optional, `--agent cline` / `DGXCODER_AGENT=cline`)
+#### Cline (`--agent cline`)
 * **Runtime**: VS Code (`code`) or VSCodium (`codium`) + marketplace extension `saoudrizwan.claude-dev`.
 * **Provisioning**: `ClineInstaller.install_cline_if_missing()` runs `code --install-extension saoudrizwan.claude-dev` when absent.
 * **Workspace Rules**: Writes `.clinerules` (once, if missing) with OpenAI-compatible base URL `{vllm_host}/v1`, resolved HF model ID, and local/offline guidance.
-* **Session Behavior**: Reuses GooseRunner’s `wait_for_vllm()` for auto-launch, prints Cline connection details (including API key `gb10-local-token`), then launches `code|codium $(pwd)`. Does **not** apply sandbox prefixes or invoke Goose.
+* **Session Behavior**: Auto-launch vLLM → require VS Code → install extension → ensure `.clinerules` → print connection details (API key `gb10-local-token`) → `code|codium $(pwd)`. Prompt is printed only (not auto-submitted). No Goose sandbox prefix.
+
+#### Aider (`--agent aider`)
+* **Runtime**: Aider CLI (`aider` from package `aider-chat`).
+* **Provisioning**: `pip install aider-chat`, then `pipx install aider-chat` if still missing.
+* **Launch Flags**: `--openai-api-base {vllm_host}/v1/` , `--openai-api-key gb10-local-token`, `--model openai/{hf_repo}`.
+  - `sandbox != none` → `--no-auto-commits`; otherwise `--auto-commits` (does **not** wrap with `SandboxManager` prefixes).
+  - If `draft_model` is set: adds `--editor-model openai/{primary_hf}` `--architect` and rebinds `--model` to `openai/{draft_hf}` (architect/editor split).
+  - `run` prompt → `--message <prompt>`; `--debug` → `--verbose`.
+
+#### Continue (`--agent continue`)
+* **Runtime**: VS Code / VSCodium + marketplace extension `Continue.continue`.
+* **Provisioning**: `code --install-extension Continue.continue` when absent.
+* **Config**: Writes/merges `~/.continue/config.json` with:
+  - chat `models[]` entry: provider `openai`, model = primary HF repo, `apiBase` `{vllm_host}/v1/`, key `gb10-local-token`
+  - `tabAutocompleteModel`: draft HF repo if set, else `Qwen/Qwen2.5-Coder-1.5B-Instruct`
+* **Session Behavior**: Auto-launch vLLM → require VS Code → install extension → write Continue config → open workspace. Prompt argument is unused.
+
+#### OpenHands (`--agent openhands`)
+* **Runtime**: Docker image `ghcr.io/all-hands-ai/openhands:main` (container name `dgxcoder-openhands`).
+* **Provisioning**: Requires working Docker (`docker ps`); `docker pull` image if missing.
+* **Launch**: `docker run --rm -it --name dgxcoder-openhands` with:
+  - Env: `LLM_MODEL=openai/{hf_repo}`, `LLM_BASE_URL={vllm_host}/v1`, `LLM_API_KEY=gb10-local-token`, `WORKSPACE_BASE={cwd}`
+  - Mounts: `/var/run/docker.sock`, `{cwd}:/opt/workspace_base`
+  - Port: **3000:3000** (UI at `http://localhost:3000`)
+* **Session Behavior**: Auto-launch vLLM → Docker check → pull image → remove stale container → run OpenHands UI. Prompt argument is unused (not passed into the container).
 
 ### 4.4. Codebase Context Engine (AST + SQLite / FTS5)
 * **Parallel Parsing**: `ThreadPoolExecutor` with `max_workers = min(32, cpu_count * 2)` over non-ignored workspace files.
