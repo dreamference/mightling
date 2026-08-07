@@ -20,6 +20,14 @@
   - [4.4. Codebase Context Engine (AST + Vector Index)](#44-codebase-context-engine-ast--vector-index)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dgxcoder` CLI Suite](#51-dgxcoder-cli-suite)
+    - [5.1.1. `dgxcoder init`](#511-dgxcoder-init)
+    - [5.1.2. `dgxcoder chat`](#512-dgxcoder-chat)
+    - [5.1.3. `dgxcoder run`](#513-dgxcoder-run)
+    - [5.1.4. `dgxcoder status`](#514-dgxcoder-status)
+    - [5.1.5. `dgxcoder serve`](#515-dgxcoder-serve)
+    - [5.1.6. `dgxcoder index`](#516-dgxcoder-index)
+    - [5.1.7. `dgxcoder mcp`](#517-dgxcoder-mcp)
+    - [5.1.8. `dgxcoder web`](#518-dgxcoder-web)
   - [5.2. JetBrains & VS Code Integration (via Stdio MCP)](#52-jetbrains--vs-code-integration-via-stdio-mcp)
   - [5.3. Web Canvas UI & Live Diff / Telemetry Pane](#53-web-canvas-ui--live-diff--telemetry-pane)
 - [6. System Requirements & Setup](#6-system-requirements--setup)
@@ -160,15 +168,73 @@ Terminal application powered by `Rich` and `Goose`.
 | **`mcp`** | Runs stdio Model Context Protocol (MCP) server for JetBrains & VS Code extensions. |
 | **`web`** | Launches interactive Web Canvas UI pane for live diffs and hardware monitoring. |
 
-#### Command Details & Options:
-* **`dgxcoder init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST]`**
-* **`dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`**
-* **`dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`**
-* **`dgxcoder status`**
-* **`dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT_MODEL] [--num-speculative-tokens TOKENS]`**
-* **`dgxcoder index [--dir PATH] [--force]`**
-* **`dgxcoder mcp`**
-* **`dgxcoder web [--port PORT]`**
+#### Command Specification Subsections:
+
+##### 5.1.1. `dgxcoder init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST]`
+Initializes the current project workspace for DGXCoder agentic pair-programming.
+* **Behavior**: Generates local `.dgxcoder/config.yaml`, writes or updates Goose AI Agent config at `~/.config/goose/config.yaml`, registers stdio MCP companion tools, and triggers an initial workspace AST symbol and vector index.
+* **Options**:
+  * `--model MODEL`: Target LLM served on vLLM GB10 endpoint (default: `qwen2.5-coder-32b`).
+  * `--draft-model DRAFT_MODEL`: Optional speculative decoding draft model name (default: `None`).
+  * `--vllm-host HOST`: Base URL of local vLLM API endpoint (default: `http://localhost:8000`).
+* **Example**: `dgxcoder init --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b`
+
+##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`
+Launches an interactive pair-programming session with the Goose AI agent connected to the local GB10 endpoint.
+* **Behavior**: Validates model compatibility on GB10 unified memory. If the local vLLM server is offline, automatically launches vLLM in the background and streams live `[vLLM]` startup logs until ready. Provisions official AAIF Goose binary if missing.
+* **Options**:
+  * `--model MODEL`: Override target LLM model name for session.
+  * `--draft-model DRAFT_MODEL`: Speculative decoding draft model name.
+  * `--debug`: Enable verbose Goose debug logging.
+* **Example**: `dgxcoder chat --debug`
+
+##### 5.1.3. `dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`
+Executes an autonomous coding task non-interactively using Goose AI Agent.
+* **Behavior**: Takes a single task prompt string, initializes vLLM/Goose bridges as needed, executes the requested code generation or refactoring task autonomously, and exits upon completion.
+* **Options**:
+  * `PROMPT`: Mandatory instruction or prompt string for the agent.
+  * `--model MODEL`: Override target LLM model name.
+  * `--draft-model DRAFT_MODEL`: Speculative decoding draft model.
+  * `--debug`: Enable verbose Goose debug output.
+* **Example**: `dgxcoder run "Refactor database connection pool to use async pg"`
+
+##### 5.1.4. `dgxcoder status`
+Displays Rich visual status panels summarizing GB10 hardware, inference server state, agent runtime, and context index statistics.
+* **Behavior**: Queries `nvidia-smi` and `/proc/meminfo` to display GB10 unified memory usage (RAM/VRAM/total), polls vLLM health status, displays active served models, checks Goose CLI installation, and shows total indexed workspace AST symbols.
+* **Options**: None.
+* **Example**: `dgxcoder status`
+
+##### 5.1.5. `dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT_MODEL] [--num-speculative-tokens TOKENS]`
+Launches the local vLLM GB10 inference server with unified memory optimizations.
+* **Behavior**: Uses a multi-tiered launch resolution strategy (native `vllm` CLI > Python `vllm` module > Docker `vllm/vllm-openai:latest` container). Configures GB10 unified memory flags (`--gpu-memory-utilization 0.90`, `--max-model-len 16384`, `--kv-cache-dtype auto`). Supports dual-model speculative decoding (`--speculative-model` and `--num-speculative-tokens`).
+* **Options**:
+  * `--model MODEL`: Model name to load and serve (default: `qwen2.5-coder-32b`).
+  * `--port PORT`: Port to expose OpenAI-compatible HTTP API (default: `8000`).
+  * `--quantization QUANT`: Optional quantization precision (`int8`, `fp8`, `awq`).
+  * `--draft-model DRAFT_MODEL`: Optional speculative decoding draft model name.
+  * `--num-speculative-tokens TOKENS`: Number of speculative draft tokens to propose (default: `5`).
+* **Example**: `dgxcoder serve --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --port 8000`
+
+##### 5.1.6. `dgxcoder index [--dir PATH] [--force]`
+Indexes codebase AST symbol definitions and TF-IDF vector context.
+* **Behavior**: Scans source files in workspace, parses Python AST (extracting class/function signatures, docstrings, line ranges), builds a TF-IDF term index, and saves cached index to `.dgxcoder/context_index.json`.
+* **Options**:
+  * `--dir PATH`: Root directory to index (default: current workspace).
+  * `--force`: Force full reindexing from scratch ignoring cache.
+* **Example**: `dgxcoder index --force`
+
+##### 5.1.7. `dgxcoder mcp`
+Runs stdio Model Context Protocol (MCP) server for JetBrains (PyCharm, IntelliJ) and VS Code IDE companion extensions.
+* **Behavior**: Handles JSON-RPC 2.0 requests over stdin/stdout. Exposes IDE diagnostic tools (`ide_get_diagnostics`, `ide_get_active_editor`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`) to the Goose agent.
+* **Options**: None.
+* **Example**: `dgxcoder mcp`
+
+##### 5.1.8. `dgxcoder web [--port PORT]`
+Launches interactive Web Canvas UI server.
+* **Behavior**: Starts lightweight HTTP server rendering single-page Glassmorphism UI with live Mermaid.js architecture diagrams, code diff stream, and real-time GB10 unified memory gauges. Exposes REST telemetry endpoint (`GET /api/status`).
+* **Options**:
+  * `--port PORT`: Port to expose Web Canvas UI (default: `8501`).
+* **Example**: `dgxcoder web --port 8501`
 
 #### Configuration Hierarchy & Resolution Order:
 DGXCoder supports a 4-tier configuration precedence hierarchy:
