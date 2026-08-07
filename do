@@ -1,0 +1,13 @@
+dgxcoder
+dgxcoder.egg-info
+DGXCODER_RESEARCH_PAPER.md
+DGXCODER_SPEC.md
+do
+docs
+mkdocs.yml
+__pycache__
+README.md
+scripts
+setup.py
+squash_todays_commits.py
+tests

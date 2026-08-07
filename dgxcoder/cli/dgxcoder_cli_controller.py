@@ -23,7 +23,7 @@ from dgxcoder.runner import (
     ContinueRunner, ContinueInstaller,
     OpenHandsRunner, OpenHandsInstaller
 )
-from dgxcoder.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache
+from dgxcoder.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache
 from dgxcoder.vllm_server import VLLMServerManager
 from dgxcoder.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dgxcoder.context_engine import ContextEngine
@@ -216,6 +216,9 @@ class DGXCoderCLIController:
         # Command: dgxcoder clear-cache
         subparsers.add_parser("clear-cache", help="Clear local HuggingFace and tensorizer model caches")
 
+        # Command: dgxcoder clear-tensorize-cache
+        subparsers.add_parser("clear-tensorize-cache", help="Clear local tensorizer model cache only")
+
         # Command: dgxcoder endpoints
         subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
 
@@ -307,6 +310,11 @@ class DGXCoderCLIController:
         elif args.command == "clear-cache":
             cls.display_header()
             clear_model_cache()
+            sys.exit(0)
+
+        elif args.command == "clear-tensorize-cache":
+            cls.display_header()
+            clear_tensorizer_cache()
             sys.exit(0)
 
         elif args.command == "init":

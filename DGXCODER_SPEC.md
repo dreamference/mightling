@@ -334,6 +334,23 @@ Result: `dgxcoder chat` / `run` produce a fully-functional Goose session that ca
   - `test_vllm_server.py` — VLLMLaunchOptions, server manager, health checks.
 * **Style**: Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external services required. Existing tests remain green after every change.
 
+### 4.9. Model Download, Hugging Face Caching & Tensorization
+* **Hugging Face Behavior** (`ModelDownloader`):
+  - Primary cache: `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if `HF_HOME` set).
+  - Pre-download via `huggingface_hub.snapshot_download` (preferred) or `huggingface-cli download` fallback.
+  - `download_model()` and `download_all_models()` check `is_model_downloaded()` first; only fetch if missing.
+  - Invoked automatically by `init`, `start_server`, and explicit `download` command.
+* **Tensorizer Behavior**:
+  - Secondary cache: `~/.cache/dgxcoder/tensorizer/`.
+  - After HF download (when `auto_tensorize=True`, default), `tensorize_model()` serializes weights to `<repo>--/model.tensors`.
+  - `is_model_tensorized()` checks for non-empty `model.tensors` file.
+  - Used by vLLM server when `--tensorize` flag enabled (default on) for faster loading on GB10.
+* **Cache Management Commands**:
+  - `dgxcoder clear-cache`: removes both HF and tensorizer parent directories.
+  - `dgxcoder clear-tensorize-cache`: removes only the tensorizer cache directory.
+* **Download CLI** (`dgxcoder download`): supports `--model`, `--all`, `--tensorize/--no-tensorize`.
+* All operations are best-effort; failures fall back to on-demand fetch by vLLM.
+
 ---
 
 ## 5. Client Interfaces & Developer Experience

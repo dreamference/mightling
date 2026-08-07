@@ -1,0 +1,19 @@
+site_name: DGXCoder Documentation
+site_description: Autonomous Local Agentic Pair Programmer for NVIDIA GB10
+repo_url: https://github.com/dgxcoder/dgxcoder
+theme:
+  name: material
+  palette:
+    primary: indigo
+    accent: teal
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - CLI Reference: cli.md
+  - Architecture: architecture.md
+  - Models: models.md
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - tables

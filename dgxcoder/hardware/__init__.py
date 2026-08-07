@@ -34,6 +34,9 @@ def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = T
 def clear_model_cache() -> None:
     return ModelDownloader.clear_cache()
 
+def clear_tensorizer_cache() -> None:
+    return ModelDownloader.clear_tensorizer_cache()
+
 def get_system_memory() -> Dict[str, float]:
     m = HardwareManager.get_system_memory()
     return {"total_gb": m.total_gb, "available_gb": m.available_gb, "used_gb": m.used_gb}

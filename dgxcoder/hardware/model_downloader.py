@@ -415,3 +415,16 @@ class ModelDownloader:
                 print(f"ℹ️  Cache directory not found: {cache_dir}")
         print("✅ Model cache cleared.")
 
+    @classmethod
+    def clear_tensorizer_cache(cls) -> None:
+        """
+        Clears only the tensorizer model cache.
+        """
+        cache_dir = cls.get_tensorizer_cache_dir().parent
+        if cache_dir.exists():
+            print(f"🗑️  Clearing tensorizer cache: {cache_dir}")
+            shutil.rmtree(cache_dir, ignore_errors=True)
+        else:
+            print(f"ℹ️  Tensorizer cache directory not found: {cache_dir}")
+        print("✅ Tensorizer cache cleared.")
+
