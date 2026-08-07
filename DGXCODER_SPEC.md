@@ -26,11 +26,12 @@
     - [5.1.3. `dgxcoder run`](#513-dgxcoder-run)
     - [5.1.4. `dgxcoder status`](#514-dgxcoder-status)
     - [5.1.5. `dgxcoder start_server`](#515-dgxcoder-start_server)
-    - [5.1.5a. `dgxcoder stop_server`](#515a-dgxcoder-stop_server)
     - [5.1.6. `dgxcoder index`](#516-dgxcoder-index)
     - [5.1.7. `dgxcoder mcp`](#517-dgxcoder-mcp)
-    - [5.1.8. `dgxcoder web`](#518-dgxcoder-web)
-    - [5.1.9. `dgxcoder download`](#519-dgxcoder-download)
+    - [5.1.8. `dgxcoder download`](#518-dgxcoder-download)
+    - [5.1.9. `dgxcoder endpoints`](#519-dgxcoder-endpoints)
+    - [5.1.10. `dgxcoder stop_server`](#5110-dgxcoder-stop_server)
+    - [5.1.11. `dgxcoder web`](#5111-dgxcoder-web)
   - [5.2. IDE Integration via Stdio MCP](#52-ide-integration-via-stdio-mcp)
   - [5.3. Web Canvas UI & Telemetry Pane](#53-web-canvas-ui--telemetry-pane)
 - [6. System Requirements & Setup](#6-system-requirements--setup)
@@ -295,7 +296,7 @@ Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadi
 
 ### 5.1. `dgxcoder` CLI Suite
 
-Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal UI. **9** subcommands.
+Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal UI. **11** subcommands.
 
 #### Global Options
 | Flag | Description |
@@ -312,12 +313,13 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 | **`chat`** | Interactive session for selected agent (Goose / Aider CLI, or VS Code / OpenHands UI) |
 | **`run`** | Non-interactive task where supported (Goose `--text`, Aider `--message`; others launch UI and may ignore prompt) |
 | **`status`** | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index |
+| **`start_server`** | Launch local vLLM server optimized for GB10 |
+| **`stop_server`** | Stop the running vLLM Docker container |
 | **`endpoints`** | Lists all vLLM/OpenAI-compatible REST endpoints + credentials |
-| **`serve`** | Background vLLM server with live monitoring (exits after ready) |
 | **`index`** | AST + FTS5 + TF-IDF workspace index |
 | **`mcp`** | Stdio MCP server for IDE companion tools |
-| **`download`** | Pre-download model weights to HF cache |
 | **`web`** | Web Canvas UI on port 8501 (default) |
+| **`download`** | Pre-download model weights to HF cache |
 
 #### Command Specification Subsections
 
@@ -339,15 +341,15 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
   * **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`/`aider`/`continue`/`openhands`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose CLI, Cline extension, Aider CLI, Continue extension, OpenHands Docker image readiness, config paths.
   * **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
-##### 5.1.4a. `dgxcoder endpoints`
-* **Behavior**: Prints two Rich tables: (1) all standard OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`, etc.) with HTTP methods and short descriptions; (2) credentials showing base URL, optional API key (enabled via `--api-key` on serve), and `Authorization: Bearer <key>` when used. Intended for quick copy-paste into external clients.
+##### 5.1.9. `dgxcoder endpoints`
+* **Behavior**: Prints two Rich tables: (1) all standard OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`, etc.) with HTTP methods and short descriptions; (2) credentials showing base URL, optional API key (enabled via `--api-key` on start_server), and `Authorization: Bearer <key>` when used. Intended for quick copy-paste into external clients.
 * **Example**: `dgxcoder endpoints`
 
 ##### 5.1.5. `dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER]`
 * **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). `--enable-auto-tool-choice` + `--tool-call-parser` enable Goose-style function calling. See [start_server variant](#dgxcoder-start_server-variant).
 * **Example**: `dgxcoder start_server --model qwen2.5-coder-32b --enable-auto-tool-choice --tool-call-parser hermes --port 8000`
 
-##### 5.1.5a. `dgxcoder stop_server [--port PORT]`
+##### 5.1.10. `dgxcoder stop_server [--port PORT]`
 * **Behavior**: Stops and removes the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running).
 * **Example**: `dgxcoder stop_server --port 8000`
 
@@ -358,11 +360,11 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 ##### 5.1.7. `dgxcoder mcp`
 * **Behavior**: Stdio JSON-RPC MCP server. Tools: `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`. IDE fields live in in-process `IDEState` (empty unless populated by a companion); `workspace_search_code` uses `ContextEngine.search_code`.
 
-##### 5.1.8. `dgxcoder web [--port PORT]`
+##### 5.1.11. `dgxcoder web [--port PORT]`
 * **Behavior**: HTTP server on `0.0.0.0:{port}` (default `8501`). Serves static Glassmorphism SPA + `GET /api/status` (`hardware`, `vllm`, `context`). Memory gauge updates from telemetry; Mermaid diagram and diff pane are **static placeholders**; KV gauge shows fixed `45%` width when vLLM is healthy.
 * **Example**: `dgxcoder web --port 8501`
 
-##### 5.1.9. `dgxcoder download [--model MODEL] [--all]`
+##### 5.1.8. `dgxcoder download [--model MODEL] [--all]`
 * **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. Also invoked automatically from `init` and `start_server`.
 * **Example**: `dgxcoder download --model qwen2.5-coder-32b`
 
