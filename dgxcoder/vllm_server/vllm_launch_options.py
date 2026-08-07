@@ -38,7 +38,7 @@ class VLLMLaunchOptions:
     port: int = 8000
     quantization: Optional[str] = None
     max_model_len: int = 16384
-    gpu_memory_utilization: float = 0.90
+    gpu_memory_utilization: float = 0.50
     draft_model: Optional[str] = None
     num_speculative_tokens: int = 8
     hf_token: Optional[str] = None

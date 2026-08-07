@@ -81,7 +81,7 @@ DGXCoder automatically applies an optimized **NVIDIA GB10 launch recipe** when s
 | :--- | :--- | :--- |
 | **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | Pinned NGC vLLM container with Blackwell SM121 support |
 | **Context Length (`--max-model-len`)** | `131072` | 128K context window for large codebase context |
-| **Memory Ratio (`--gpu-memory-utilization`)** | `0.81` | 81% memory utilization tuned for GB10 unified memory |
+| **Memory Ratio (`--gpu-memory-utilization`)** | `0.5` | 50% memory utilization tuned for GB10 unified memory |
 | **KV Cache Dtype (`--kv-cache-dtype`)** | `fp8` | FP8 quantized KV cache for high token capacity |
 | **Attention Backend (`--attention-backend`)** | `flashinfer` | Blackwell-optimized FlashInfer attention kernels |
 | **MoE Backend (`--moe-backend`)** | `marlin` | Marlin MoE backend for SM121 execution compatibility |

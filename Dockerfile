@@ -10,10 +10,9 @@
 # Then pass it via the docker_image argument of VLLMServerManager.build_launch_command().
 FROM nvcr.io/nvidia/vllm:26.07-py3
 
-# Patch xgrammar to a version that vLLM 26.07-py3 supports, without letting pip downgrade transformers
-RUN python -m pip install --no-cache-dir --no-deps "xgrammar==0.2.4"
 
 # Install tensorizer optional dependencies for fast model weight loading
 RUN pip install "vllm[tensorizer]"
+RUN python -m pip install --no-cache-dir --no-deps --force-reinstall "xgrammar==0.2.4"
 
 ENTRYPOINT ["vllm", "serve"]

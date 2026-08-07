@@ -8,7 +8,7 @@ def test_vllm_build_launch_command_default():
         model="qwen2.5-coder-32b",
         port=8000,
         max_model_len=16384,
-        gpu_memory_utilization=0.90
+        gpu_memory_utilization=0.5
     )
     assert "--host" in cmd
     assert "0.0.0.0" in cmd
@@ -17,7 +17,7 @@ def test_vllm_build_launch_command_default():
     assert "--max-model-len" in cmd
     assert "16384" in cmd
     assert "--gpu-memory-utilization" in cmd
-    assert "0.9" in cmd
+    assert "0.5" in cmd
     assert "--enable-prefix-caching" in cmd
     assert "--enable-chunked-prefill" in cmd
     assert "--tool-call-parser" in cmd
@@ -28,10 +28,10 @@ def test_nvfp4_model_applies_registry_launch_recipe():
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
     assert cmd[cmd.index("--max-model-len") + 1] == "131072"
-    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.81"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.5"
     assert cmd[cmd.index("--kv-cache-dtype") + 1] == "fp8"
     assert cmd[cmd.index("--attention-backend") + 1] == "flashinfer"
-    assert cmd[cmd.index("--moe-backend") + 1] == "marlin"
+    assert cmd[cmd.index("--moe-backend") + 1] == "vllm_cutlass"
     assert cmd[cmd.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
 
@@ -51,6 +51,7 @@ def test_nvfp4_recipe_emits_self_speculation_and_extra_args():
     cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
     spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
     assert spec["method"] == "mtp"
+    assert spec["moe_backend"] == "triton"
     assert "--speculative-model" not in cmd
     assert cmd[cmd.index("--max-num-seqs") + 1] == "4"
 
@@ -72,11 +73,11 @@ def test_model_without_recipe_keeps_global_defaults():
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(model="qwen2.5-coder-32b")
     assert cmd[cmd.index("--max-model-len") + 1] == "16384"
-    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.9"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.5"
     assert "--moe-backend" not in cmd
     assert "--reasoning-parser" not in cmd
     assert "--speculative-config" not in cmd
-    assert "-e" not in cmd
+    assert "CUTE_DSL_ARCH=sm_121a" in cmd
 
 def test_self_declaring_quantization_is_not_overridden():
     mgr = VLLMServerManager()
@@ -337,7 +338,7 @@ def test_detect_image_vllm_version_parses_and_caches(monkeypatch):
     VLLMServerManager._image_probe_cache.clear()
 
 def test_default_image_is_pinned_not_latest():
-    assert DEFAULT_VLLM_IMAGE == "nvcr.io/nvidia/vllm:26.07-py3"
+    assert DEFAULT_VLLM_IMAGE == "dgxcoder-vllm-tensorizer:26.07-py3"
     assert not DEFAULT_VLLM_IMAGE.endswith(":latest")
 
 def test_probe_image_reports_tensorizer(monkeypatch):

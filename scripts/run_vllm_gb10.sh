@@ -16,7 +16,7 @@ CMD=(
     --port "$PORT"
     --model "$MODEL"
     --max-model-len 16384
-    --gpu-memory-utilization 0.90
+    --gpu-memory-utilization 0.50
     --trust-remote-code
     --enforce-eager
 )

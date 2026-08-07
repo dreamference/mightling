@@ -25,23 +25,23 @@ from dgxcoder.config.dgxcoder_config import (
 
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 DEFAULT_MAX_MODEL_LEN: Final[int] = 16384
-DEFAULT_GPU_MEMORY_UTILIZATION: Final[float] = 0.90
+DEFAULT_GPU_MEMORY_UTILIZATION: Final[float] = 0.50
 DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
 
 # Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
 
 # Pinned vLLM runtime container built from project Dockerfile with tensorizer support.
 # Pinned to an exact tag (never ':latest') so that upstream vLLM CLI changes cannot silently break launches.
-DEFAULT_VLLM_IMAGE: Final[str] = "nvcr.io/nvidia/vllm:26.07-py3"
+DEFAULT_VLLM_IMAGE: Final[str] = "dgxcoder-vllm-tensorizer:26.07-py3"
 
 # vLLM release that removed `--guided-decoding-backend` in favour of `--structured-outputs-config.*`
 STRUCTURED_OUTPUTS_MIN_VERSION: Final[tuple] = (0, 12)
 
 # Backends selectable on current vLLM ('auto' lets vLLM pick per request)
-SUPPORTED_STRUCTURED_OUTPUT_BACKENDS: Final[tuple] = ("auto", "xgrammar", "guidance")
+SUPPORTED_STRUCTURED_OUTPUT_BACKENDS: Final[tuple] = ("auto", "xgrammar", "guidance", "outlines")
 
 # Backends that only exist on pre-v0.12 vLLM
-LEGACY_STRUCTURED_OUTPUT_BACKENDS: Final[tuple] = ("outlines", "lm-format-enforcer")
+LEGACY_STRUCTURED_OUTPUT_BACKENDS: Final[tuple] = ("lm-format-enforcer",)
 
 class VLLMServerManager:
     """
@@ -514,7 +514,7 @@ class VLLMServerManager:
             os.makedirs(hf_cache, exist_ok=True)
             os.makedirs(dgx_cache, exist_ok=True)
             cmd = [
-                "docker", "run", "--rm",
+                "docker", "run",
                 "--ipc=host",
                 "--network", "host",
                 "--name", f"dgxcoder-vllm-{port}",
@@ -528,6 +528,7 @@ class VLLMServerManager:
             # environment rather than CLI flags, so the recipe's env has to cross the container boundary.
             for env_key, env_val in sorted(recipe.get("env", {}).items()):
                 cmd.extend(["-e", f"{env_key}={env_val}"])
+            cmd.extend(["-e", "CUTE_DSL_ARCH=sm_121a"])
             cmd.extend(["--entrypoint", "vllm", docker_image, "serve", hf_model] + base_args)
         else:
             raise RuntimeError(
@@ -705,14 +706,23 @@ class VLLMServerManager:
 
     def stop_server(self, port: int = 8000) -> None:
         """
-        Stops and removes the vLLM Docker container for the given port.
+        Stops the vLLM Docker container for the given port.
         Safe no-op if container is not running.
         """
         container_name = f"dgxcoder-vllm-{port}"
         print(f"🛑 Stopping vLLM container: {container_name}")
         subprocess.run(["docker", "stop", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"✅ Container {container_name} stopped.")
+
+    def remove_server(self, port: int = 8000) -> None:
+        """
+        Removes the vLLM Docker container for the given port.
+        Safe no-op if container does not exist.
+        """
+        container_name = f"dgxcoder-vllm-{port}"
+        print(f"🗑️ Removing vLLM container: {container_name}")
         subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"✅ Container {container_name} stopped and removed.")
+        print(f"✅ Container {container_name} removed.")
 
     def get_new_logs(self) -> List[str]:
         """

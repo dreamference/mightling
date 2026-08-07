@@ -39,15 +39,16 @@ class ModelMatrixRegistry:
             hf_repo_id="nvidia/Qwen3.6-35B-A3B-NVFP4",
             launch_overrides={
                 "max_model_len": 131072,
-                "gpu_memory_utilization": 0.81,
+                "gpu_memory_utilization": 0.5,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
-                "max_num_batched_tokens": 32768,
+                "max_num_batched_tokens": 8192,
+                "moe_backend": "vllm_cutlass",
                 # MTP ships inside this checkpoint. Without it NVFP4 lands at the low end of the
                 # published throughput range, so it is part of the recipe rather than a tuning extra.
-                "speculative_config": {"method": "mtp", "num_speculative_tokens": 3},
+                "speculative_config": {"method": "mtp", "num_speculative_tokens": 3, "moe_backend": "triton"},
                 "extra_args": [
                     "--max-num-seqs", "4",
                     "--tensor-parallel-size", "1",

@@ -236,8 +236,12 @@ class DGXCoderCLIController:
         subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
 
         # Command: dgxcoder stop_server
-        stop_parser = subparsers.add_parser("stop_server", help="Stop and remove the running vLLM Docker container")
+        stop_parser = subparsers.add_parser("stop_server", help="Stop the running vLLM Docker container")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
+
+        # Command: dgxcoder remove_server
+        remove_parser = subparsers.add_parser("remove_server", help="Remove the vLLM Docker container")
+        remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
 
         # Command: dgxcoder web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
@@ -491,6 +495,11 @@ class DGXCoderCLIController:
             cls.display_header()
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             vllm_mgr.stop_server(port=args.port)
+
+        elif args.command == "remove_server":
+            cls.display_header()
+            vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+            vllm_mgr.remove_server(port=args.port)
 
         elif args.command == "index":
             cls.display_header()

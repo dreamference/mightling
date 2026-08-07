@@ -40,7 +40,7 @@ The table below lists all CLI flags passed to the vLLM engine when launching `qw
 | CLI Flag | Value | Description |
 | :--- | :--- | :--- |
 | `--max-model-len` | `131072` | Configures a 128K token context window for large codebase analysis. |
-| `--gpu-memory-utilization` | `0.81` | Allocates 81% of GB10 memory to vLLM, leaving space for host OS and processes. |
+| `--gpu-memory-utilization` | `0.5` | Allocates 50% of GB10 memory to vLLM, leaving space for host OS and processes. |
 | `--kv-cache-dtype` | `fp8` | Uses FP8 precision for KV cache tensors to maximize context capacity. |
 | `--attention-backend` | `flashinfer` | Uses FlashInfer attention implementation optimized for Blackwell SM121. |
 | `--moe-backend` | `marlin` | Selects Marlin MoE kernel path to avoid SM120 CUTLASS kernel corruption on SM121. |
