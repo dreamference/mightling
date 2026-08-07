@@ -6,21 +6,51 @@ import shutil
 import threading
 import subprocess
 import requests
-from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional, List, Final
 from dgxcoder.hardware import detect_gb10_hardware, MODEL_MATRIX
 
-DEFAULT_VLLM_HOST = "http://localhost:8000"
+DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 
-class VLLMServerManager:
-    """Manages the local vLLM / TensorRT-LLM server on NVIDIA GB10 hardware."""
+@dataclass
+class VLLMLaunchOptions:
+    model: str = "qwen2.5-coder-32b"
+    port: int = 8000
+    quantization: Optional[str] = None
+    max_model_len: int = 16384
+    gpu_memory_utilization: float = 0.90
+    draft_model: Optional[str] = None
+    num_speculative_tokens: int = 5
+    hf_token: Optional[str] = None
+    enable_prefix_caching: bool = True
+    enable_chunked_prefill: bool = True
+    num_scheduler_steps: int = 8
+    attention_backend: str = "auto"
+    kv_cache_dtype: str = "auto"
 
-    def __init__(self, host: str = DEFAULT_VLLM_HOST):
-        self.host = host.rstrip("/")
-        self.process: Optional[subprocess.Popen] = None
+@dataclass
+class VLLMServerStatus:
+    host: str
+    healthy: bool
+    models: List[str]
+    pid: Optional[int]
+
+class VLLMLogStreamer:
+    """Handles non-blocking background output queueing for vLLM server logs."""
+
+    def __init__(self):
         self.log_queue: queue.Queue = queue.Queue()
         self.log_thread: Optional[threading.Thread] = None
 
-    def _enqueue_output(self, out):
+    def start_streaming(self, stdout_pipe: Any) -> None:
+        self.log_thread = threading.Thread(
+            target=self._enqueue_output,
+            args=(stdout_pipe,),
+            daemon=True
+        )
+        self.log_thread.start()
+
+    def _enqueue_output(self, out: Any) -> None:
         try:
             for line in iter(out.readline, ''):
                 if line:
@@ -34,6 +64,23 @@ class VLLMServerManager:
                 out.close()
             except Exception:
                 pass
+
+    def pop_logs(self) -> List[str]:
+        logs: List[str] = []
+        while not self.log_queue.empty():
+            try:
+                logs.append(self.log_queue.get_nowait())
+            except queue.Empty:
+                break
+        return logs
+
+class VLLMServerManager:
+    """Manages local vLLM / TensorRT-LLM server lifecycle on NVIDIA GB10 hardware."""
+
+    def __init__(self, host: str = DEFAULT_VLLM_HOST):
+        self.host: str = host.rstrip("/")
+        self.process: Optional[subprocess.Popen] = None
+        self.streamer: VLLMLogStreamer = VLLMLogStreamer()
 
     def check_health(self, timeout: float = 0.5) -> bool:
         """Checks if vLLM server is active and responding to HTTP requests."""
@@ -57,7 +104,7 @@ class VLLMServerManager:
         return []
 
     def is_vllm_installed(self) -> bool:
-        """Checks if vLLM binary or python package is available in the current environment."""
+        """Checks if vLLM binary or python package is available in current environment."""
         if shutil.which("vllm") is not None:
             return True
         try:
@@ -92,18 +139,17 @@ class VLLMServerManager:
         attention_backend: str = "auto",
         kv_cache_dtype: str = "auto",
     ) -> List[str]:
-        """Generates vLLM command line with Blackwell GB10 performance tuning (Prefix Caching, Chunked Prefill, Multi-Step Scheduling)."""
+        """Generates vLLM command line with Blackwell GB10 performance tuning."""
         from dgxcoder.hardware import resolve_model_hf_repo
         hf_model = resolve_model_hf_repo(model)
         hf_draft_model = resolve_model_hf_repo(draft_model) if draft_model else None
 
         token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DGXCODER_HF_TOKEN")
 
-        # Auto-quantization resolution for large 70B/72B models on 128GB Unified Memory
         if not quantization and ("70b" in model.lower() or "72b" in model.lower()):
             quantization = "fp8"
 
-        base_args = [
+        base_args: List[str] = [
             "--host", "0.0.0.0",
             "--port", str(port),
             "--max-model-len", str(max_model_len),
@@ -169,7 +215,6 @@ class VLLMServerManager:
             print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
             print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
 
-        # Step 1: Pre-download model weights as first step before anything else
         from dgxcoder.hardware import download_model
         download_model(model, hf_token=hf_token)
         if draft_model:
@@ -210,12 +255,7 @@ class VLLMServerManager:
                 bufsize=1,
                 env=env
             )
-            self.log_thread = threading.Thread(
-                target=self._enqueue_output,
-                args=(self.process.stdout,),
-                daemon=True
-            )
-            self.log_thread.start()
+            self.streamer.start_streaming(self.process.stdout)
             return self.process
         else:
             subprocess.run(cmd, check=True, env=env)
@@ -223,21 +263,21 @@ class VLLMServerManager:
 
     def get_new_logs(self) -> List[str]:
         """Retrieves unread log lines from the vLLM server process output queue."""
-        logs = []
-        while not self.log_queue.empty():
-            try:
-                logs.append(self.log_queue.get_nowait())
-            except queue.Empty:
-                break
-        return logs
+        return self.streamer.pop_logs()
 
     def get_server_status(self) -> Dict[str, Any]:
         """Returns health, models, and host info."""
         healthy = self.check_health()
         models = self.get_models() if healthy else []
+        status = VLLMServerStatus(
+            host=self.host,
+            healthy=healthy,
+            models=models,
+            pid=self.process.pid if self.process else None
+        )
         return {
-            "host": self.host,
-            "healthy": healthy,
-            "models": models,
-            "pid": self.process.pid if self.process else None
+            "host": status.host,
+            "healthy": status.healthy,
+            "models": status.models,
+            "pid": status.pid
         }

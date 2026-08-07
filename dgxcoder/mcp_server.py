@@ -2,39 +2,126 @@ import sys
 import json
 import os
 import asyncio
-from typing import Dict, Any, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional, Final
 from dgxcoder.context_engine import ContextEngine
+
+@dataclass
+class EditorSelection:
+    file_path: Optional[str] = None
+    line: int = 1
+    column: int = 1
+    selection_text: str = ""
 
 class IDEState:
     """Mock/Bridge state store for connected IDE editor sessions."""
+
     def __init__(self):
-        self.active_file: Optional[str] = None
-        self.cursor_line: int = 1
-        self.cursor_column: int = 1
-        self.selection_text: str = ""
+        self.selection: EditorSelection = EditorSelection()
         self.open_files: List[str] = []
         self.diagnostics: List[Dict[str, Any]] = []
 
-    def set_active_editor(self, file_path: str, line: int = 1, col: int = 1, selection: str = ""):
-        self.active_file = file_path
-        self.cursor_line = line
-        self.cursor_column = col
-        self.selection_text = selection
+    @property
+    def active_file(self) -> Optional[str]:
+        return self.selection.file_path
+
+    @property
+    def cursor_line(self) -> int:
+        return self.selection.line
+
+    @property
+    def cursor_column(self) -> int:
+        return self.selection.column
+
+    @property
+    def selection_text(self) -> str:
+        return self.selection.selection_text
+
+    def set_active_editor(self, file_path: str, line: int = 1, col: int = 1, selection: str = "") -> None:
+        self.selection = EditorSelection(
+            file_path=file_path,
+            line=line,
+            column=col,
+            selection_text=selection
+        )
         if file_path not in self.open_files:
             self.open_files.append(file_path)
 
-global_ide_state = IDEState()
+global_ide_state: Final[IDEState] = IDEState()
+
+class MCPToolRegistry:
+    """Provides Tool definitions for Model Context Protocol consumers."""
+
+    @classmethod
+    def get_tool_definitions(cls) -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": "ide_get_active_editor",
+                "description": "Returns current active open editor file path, selection, and cursor position.",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            {
+                "name": "ide_get_diagnostics",
+                "description": "Returns active linter diagnostics and syntax errors in the workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"file_path": {"type": "string", "description": "Optional target file path"}}
+                }
+            },
+            {
+                "name": "ide_get_open_files",
+                "description": "Lists all files currently open in JetBrains or VS Code tabs.",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            {
+                "name": "ide_open_file",
+                "description": "Opens a file in the IDE editor at specified line and column.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string"},
+                        "line": {"type": "integer"},
+                        "column": {"type": "integer"}
+                    },
+                    "required": ["file_path"]
+                }
+            },
+            {
+                "name": "ide_apply_diff",
+                "description": "Applies visual code diff to target file with inline red/green preview.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string"},
+                        "diff_content": {"type": "string"}
+                    },
+                    "required": ["file_path", "diff_content"]
+                }
+            },
+            {
+                "name": "workspace_search_code",
+                "description": "Performs local AST & vector semantic code search in the workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "top_k": {"type": "integer"}
+                    },
+                    "required": ["query"]
+                }
+            }
+        ]
 
 class MCPServer:
     """Model Context Protocol (MCP) Async Stdio Server for JetBrains & VS Code Integration."""
 
     def __init__(self):
-        self.context_engine = ContextEngine()
+        self.context_engine: ContextEngine = ContextEngine()
 
     async def handle_request_async(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        method = request.get("method")
-        msg_id = request.get("id")
-        params = request.get("params", {})
+        method: Optional[str] = request.get("method")
+        msg_id: Any = request.get("id")
+        params: Dict[str, Any] = request.get("params", {})
 
         if method == "initialize":
             return {
@@ -52,69 +139,13 @@ class MCPServer:
                 "jsonrpc": "2.0",
                 "id": msg_id,
                 "result": {
-                    "tools": [
-                        {
-                            "name": "ide_get_active_editor",
-                            "description": "Returns current active open editor file path, selection, and cursor position.",
-                            "inputSchema": {"type": "object", "properties": {}}
-                        },
-                        {
-                            "name": "ide_get_diagnostics",
-                            "description": "Returns active linter diagnostics and syntax errors in the workspace.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {"file_path": {"type": "string", "description": "Optional target file path"}}
-                            }
-                        },
-                        {
-                            "name": "ide_get_open_files",
-                            "description": "Lists all files currently open in JetBrains or VS Code tabs.",
-                            "inputSchema": {"type": "object", "properties": {}}
-                        },
-                        {
-                            "name": "ide_open_file",
-                            "description": "Opens a file in the IDE editor at specified line and column.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": {"type": "string"},
-                                    "line": {"type": "integer"},
-                                    "column": {"type": "integer"}
-                                },
-                                "required": ["file_path"]
-                            }
-                        },
-                        {
-                            "name": "ide_apply_diff",
-                            "description": "Applies visual code diff to target file with inline red/green preview.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": {"type": "string"},
-                                    "diff_content": {"type": "string"}
-                                },
-                                "required": ["file_path", "diff_content"]
-                            }
-                        },
-                        {
-                            "name": "workspace_search_code",
-                            "description": "Performs local AST & vector semantic code search in the workspace.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": {"type": "string"},
-                                    "top_k": {"type": "integer"}
-                                },
-                                "required": ["query"]
-                            }
-                        }
-                    ]
+                    "tools": MCPToolRegistry.get_tool_definitions()
                 }
             }
 
         elif method == "tools/call":
-            tool_name = params.get("name")
-            args = params.get("arguments", {})
+            tool_name: str = str(params.get("name", ""))
+            args: Dict[str, Any] = params.get("arguments", {})
             result_content = await self.execute_tool_async(tool_name, args)
             return {
                 "jsonrpc": "2.0",
@@ -132,7 +163,6 @@ class MCPServer:
             }
 
     def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Synchronous wrapper for handle_request_async for backward compatibility."""
         return asyncio.run(self.handle_request_async(request))
 
     async def execute_tool_async(self, tool_name: str, args: Dict[str, Any]) -> Any:
@@ -145,7 +175,7 @@ class MCPServer:
             }
 
         elif tool_name == "ide_get_diagnostics":
-            target_file = args.get("file_path")
+            target_file: Optional[str] = args.get("file_path")
             if target_file:
                 return [d for d in global_ide_state.diagnostics if d.get("file") == target_file]
             return global_ide_state.diagnostics
@@ -154,22 +184,21 @@ class MCPServer:
             return {"open_files": global_ide_state.open_files}
 
         elif tool_name == "ide_open_file":
-            path = args.get("file_path", "")
-            line = args.get("line", 1)
-            col = args.get("column", 1)
+            path: str = str(args.get("file_path", ""))
+            line: int = int(args.get("line", 1))
+            col: int = int(args.get("column", 1))
             global_ide_state.set_active_editor(path, line, col)
             return {"status": "success", "message": f"Opened {path} at line {line}:{col}"}
 
         elif tool_name == "ide_apply_diff":
-            path = args.get("file_path", "")
-            diff = args.get("diff_content", "")
+            path: str = str(args.get("file_path", ""))
+            diff: str = str(args.get("diff_content", ""))
             return {"status": "success", "message": f"Applied diff overlay to {path}", "diff_applied": diff}
 
         elif tool_name == "workspace_search_code":
-            query = args.get("query", "")
-            top_k = args.get("top_k", 5)
-            # Offload synchronous indexing and search to background thread pool
-            def _do_search():
+            query: str = str(args.get("query", ""))
+            top_k: int = int(args.get("top_k", 5))
+            def _do_search() -> List[Dict[str, Any]]:
                 self.context_engine.index_workspace()
                 return self.context_engine.search_code(query, top_k=top_k)
             return await asyncio.to_thread(_do_search)
@@ -177,11 +206,9 @@ class MCPServer:
         return {"error": f"Tool '{tool_name}' not implemented"}
 
     def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Any:
-        """Synchronous wrapper for execute_tool_async."""
         return asyncio.run(self.execute_tool_async(tool_name, args))
 
-    async def run_stdio_async(self):
-        """Runs asynchronous non-blocking JSON-RPC stdio loop for Goose / MCP integration."""
+    async def run_stdio_async(self) -> None:
         loop = asyncio.get_running_loop()
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
@@ -195,7 +222,7 @@ class MCPServer:
             if not line:
                 continue
             try:
-                req = json.loads(line)
+                req: Dict[str, Any] = json.loads(line)
                 resp = await self.handle_request_async(req)
                 sys.stdout.write(json.dumps(resp) + "\n")
                 sys.stdout.flush()
@@ -204,11 +231,10 @@ class MCPServer:
                 sys.stdout.write(json.dumps(err_resp) + "\n")
                 sys.stdout.flush()
 
-    def run_stdio(self):
-        """Runs the JSON-RPC stdio loop."""
+    def run_stdio(self) -> None:
         asyncio.run(self.run_stdio_async())
 
-def main():
+def main() -> None:
     server = MCPServer()
     server.run_stdio()
 
