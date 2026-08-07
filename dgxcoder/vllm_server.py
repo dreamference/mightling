@@ -190,6 +190,11 @@ class VLLMServerManager:
             attention_backend=attention_backend,
             kv_cache_dtype=kv_cache_dtype,
         )
+
+        if cmd and cmd[0] == "docker":
+            container_name = f"dgxcoder-vllm-{port}"
+            subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         print(f"🚀 Starting GB10 vLLM Server: {' '.join(cmd)}")
         
         env = os.environ.copy()
