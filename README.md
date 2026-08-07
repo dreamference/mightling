@@ -70,7 +70,30 @@ All supported models are qualified to run on a single **NVIDIA GB10 System (128 
 | **`starcoder2-15b`** | 15B | BF16 / FP16 | ~20 - 30 GB | ✅ Fits easily |
 | `deepseek-v3-671b` | 671B | INT4 | ~350 GB | ❌ Exceeds 128GB (Requires multi-node) |
 
+
 ---
+
+## ⚙️ vLLM Parameters for Default Model (`qwen3.6-35b-a3b-nvfp4`)
+
+DGXCoder automatically applies an optimized **NVIDIA GB10 launch recipe** when starting the default model (`qwen3.6-35b-a3b-nvfp4` / `nvidia/Qwen3.6-35B-A3B-NVFP4`):
+
+| Parameter / Flag | Value | Function |
+| :--- | :--- | :--- |
+| **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | Pinned NGC vLLM container with Blackwell SM121 support |
+| **Context Length (`--max-model-len`)** | `131072` | 128K context window for large codebase context |
+| **Memory Ratio (`--gpu-memory-utilization`)** | `0.81` | 81% memory utilization tuned for GB10 unified memory |
+| **KV Cache Dtype (`--kv-cache-dtype`)** | `fp8` | FP8 quantized KV cache for high token capacity |
+| **Attention Backend (`--attention-backend`)** | `flashinfer` | Blackwell-optimized FlashInfer attention kernels |
+| **MoE Backend (`--moe-backend`)** | `marlin` | Marlin MoE backend for SM121 execution compatibility |
+| **Tool Parser (`--tool-call-parser`)** | `qwen3_xml` | Qwen 3.6 XML tool call parser |
+| **Reasoning Parser (`--reasoning-parser`)** | `qwen3` | Qwen 3.6 reasoning channel parser |
+| **Max Batched Tokens (`--max-num-batched-tokens`)** | `32768` | Batched tokens limit for chunked prefill |
+| **Speculation (`--speculative-config`)** | `{"method": "mtp", "num_speculative_tokens": 3}` | MTP (Multi-Token Prediction) with 3 draft tokens |
+| **Cache & Prefill** | `--enable-prefix-caching --enable-chunked-prefill` | Multi-turn prefix reuse & fast TTFT prefill chunking |
+| **Container Environment (`-e`)** | `VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x`<br>`VLLM_MARLIN_USE_ATOMIC_ADD=1` | Directs process to SM121 FlashInfer b12x NVFP4 GEMM kernels |
+
+---
+
 
 ## 🛠️ CLI Suite & Commands
 
@@ -88,7 +111,7 @@ dgxcoder run "Refactor database pool to use async pg" --sandbox apptainer
 dgxcoder status
 
 # 5. Launch local vLLM GB10 server with MTP Speculative Decoding
-dgxcoder serve --model qwen3.6-35b-a3b-nvfp4 --port 8000
+dgxcoder start_server --model qwen3.6-35b-a3b-nvfp4 --port 8000
 
 # 6. Index codebase AST & vector context
 dgxcoder index --force

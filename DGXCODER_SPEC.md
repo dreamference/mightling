@@ -134,18 +134,17 @@ Primary agent runtime is **Goose** (`aaif-goose/goose`). Additional runners sele
 
 Aliases and HuggingFace repos are defined in `ModelMatrixRegistry.MATRIX` (`dgxcoder/hardware/model_matrix_registry.py`):
 
-| Alias                     | Model                         | Parameters | Precision          | Memory Required | GB10     |
-| :------------------------ | :---------------------------- | :--------- | :----------------- | :-------------- | :------- |
-| `qwen3.6-35b-a3b-nvfp4`   | Qwen 3.6 35B-A3B (**default**) | 35B (3B active) | NVFP4         | ~25 - 60 GB     | ✅       |
-| `qwen2.5-coder-32b`       | Qwen 2.5 Coder 32B            | 32B        | BF16 / INT8 / FP8  | ~35 - 64 GB     | ✅       |
-| `qwen2.5-coder-72b`       | Qwen 2.5 Coder 72B            | 72B        | INT8 / FP8 / INT4  | ~45 - 80 GB     | ✅       |
-| `qwen2.5-coder-1.5b`      | Qwen 2.5 Coder 1.5B (Draft)   | 1.5B       | BF16 / FP16 / INT8 | ~3.5 - 6 GB     | ✅ Draft |
-| `qwen2.5-coder-3b`        | Qwen 2.5 Coder 3B (Draft)     | 3.0B       | BF16 / FP16 / INT8 | ~6.5 - 10 GB    | ✅ Draft |
-| `deepseek-r1-distill-32b` | DeepSeek-R1-Distill-Qwen-32B  | 32B        | BF16 / INT8 / FP8  | ~35 - 64 GB     | ✅       |
-| `deepseek-r1-distill-70b` | DeepSeek-R1-Distill-Llama-70B | 70B        | INT8 / FP8 / INT4  | ~45 - 80 GB     | ✅       |
-| `llama-3.3-70b`           | Llama 3.3 70B Instruct        | 70B        | INT8 / FP8         | ~75 GB          | ✅       |
-| `starcoder2-15b`          | StarCoder2 15B                | 15B        | BF16 / FP16        | ~20 - 30 GB     | ✅       |
-| `deepseek-v3-671b`        | DeepSeek-V3 671B (MoE)        | 671B       | INT4               | ~350 GB         | ❌       |
+| Alias                     | Model                         | Parameters | Weight Format / Quantization | Memory Required | Tool Support | GB10     |
+| :------------------------ | :---------------------------- | :--------- | :--------------------------- | :-------------- | :----------- | :------- |
+| `qwen3.6-35b-a3b-nvfp4`   | Qwen 3.6 35B-A3B (**default**) | 35B (3B active) | NVFP4                     | ~25 - 60 GB     | ✅            | ✅       |
+| `qwen2.5-coder-32b`       | Qwen 2.5 Coder 32B            | 32B        | BF16 / INT8 / FP8 / AWQ      | ~35 - 64 GB     | ✅            | ✅       |
+| `qwen2.5-coder-1.5b`      | Qwen 2.5 Coder 1.5B (Draft)   | 1.5B       | BF16 / FP16 / INT8           | ~3.5 - 6 GB     | ✅            | ✅ Draft |
+| `qwen2.5-coder-3b`        | Qwen 2.5 Coder 3B (Draft)     | 3.0B       | BF16 / FP16 / INT8           | ~6.5 - 10 GB    | ✅            | ✅ Draft |
+| `deepseek-r1-distill-32b` | DeepSeek-R1-Distill-Qwen-32B  | 32B        | BF16 / INT8 / FP8 / AWQ      | ~35 - 64 GB     | ✅            | ✅       |
+| `deepseek-r1-distill-70b` | DeepSeek-R1-Distill-Llama-70B | 70B        | BF16 / INT8 / FP8 / AWQ      | ~45 - 80 GB     | ✅            | ✅       |
+| `llama-3.3-70b`           | Llama 3.3 70B Instruct        | 70B        | BF16 / INT8 / FP8 / AWQ      | ~45 - 80 GB     | ✅            | ✅       |
+| `starcoder2-15b`          | StarCoder2 15B                | 15B        | BF16 / FP16                  | ~20 - 30 GB     | ❌            | ✅       |
+| `deepseek-v3-671b`        | DeepSeek-V3 671B (MoE)        | 671B       | AWQ                          | ~350 GB         | ✅            | ❌       |
 
 HF repo examples: `nvidia/Qwen3.6-35B-A3B-NVFP4`, `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`, `meta-llama/Llama-3.3-70B-Instruct`, `bigcode/starcoder2-15b`.
 
@@ -158,11 +157,11 @@ model of comparable quality, and 4-bit weights leave most of the 128 GB for KV c
 **This model only works on an SM121-safe kernel path.** The CUTLASS FP4 kernels are compiled for the
 SM120 ISA and run on GB10 without erroring while producing corrupt output — the recognisable symptom
 is a response consisting only of `!` characters. DGXCoder pins the working path via the model's
-`launch_overrides` recipe (see [§4.2.7](#427-per-model-launch-recipes)). Verify after first launch:
+`launch_overrides` recipe (see [§4.2.7](#427-per-model-launch-recipes)), and runs an **automated post-launch canary** upon server startup.
 
-1. Send one completion. Output of only `!` means the wrong GEMM/MoE kernel was selected.
-2. Confirm the startup log names `flashinfer-b12x`, not `FLASHINFER_CUTLASS`.
-3. Benchmark against FP8 on your own unit before treating the FP4 numbers as settled — published
+The canary sends a single completion request:
+1. It asserts the output isn't corrupted (all `!`), warning the user if the wrong CUTLASS backend took over.
+2. The user should still benchmark against FP8 on their own unit before treating the FP4 numbers as settled — published
    results range from NVFP4 losing to FP8 to winning by ~3x, driven by whether MTP is active and
    which backend was chosen.
 
@@ -187,17 +186,18 @@ launch falls back to a slower or broken path — see [§4.10.1](#4101-vllm-runti
 - Download uses `huggingface_hub.snapshot_download`, then `huggingface-cli download`, else defers fetch to vLLM init.
 
 #### 4.2.2. Dual-Model Speculative Decoding
-- When `draft_model` is set, appends `--speculative-model <hf_draft> --num-speculative-tokens <N>`.
+- Speculative decoding requires the draft and target models to share a vocabulary (tokenizer compatibility). For example, `qwen2.5-coder-1.5b` is a valid draft for `qwen2.5-coder-32b`, but invalid for `qwen3.6-35b-a3b-nvfp4` or `llama-3.3-70b`.
+- Providing an external `draft_model` when the primary model's recipe already declares in-checkpoint speculation (MTP/Eagle) is a **configuration error** and will fail fast.
+- Configured via `--speculative-config` (consolidated from the older `--speculative-model` flag).
 
 #### 4.2.3. Blackwell Performance Flags Actually Applied
 - `--enable-prefix-caching` (when enabled; default on)
 - `--enable-chunked-prefill` (when enabled; default on)
-- `--kv-cache-dtype <dtype>` (default `auto`)
+- `--kv-cache-dtype <dtype>` (default `auto` unless specified otherwise by recipe)
 - `--attention-backend <backend>` only when backend ≠ `auto`
 - `--moe-backend <backend>` only when set (by argument or model recipe)
 - `--reasoning-parser <parser>` only when set (by argument or model recipe)
-- `--speculative-config <json>` when the model recipe declares in-checkpoint speculation (MTP/Eagle)
-  and no separate `draft_model` is configured
+- `--speculative-config <json>` (used for both external drafts and in-checkpoint MTP speculation)
 - `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is
   unset **and** the checkpoint does not declare its own format. Self-declaring formats (NVFP4, MXFP4,
   AWQ, GPTQ) are detected by vLLM from `config.json`; DGXCoder suppresses the flag rather than
@@ -214,8 +214,8 @@ explicit caller argument  >  model launch_overrides  >  module default
 ```
 
 An argument left as `None` is treated as unset; `attention_backend='auto'` also counts as unset,
-since `auto` delegates the choice by definition. Models with no recipe (every pre-1.3 entry) resolve
-to exactly the previous defaults, so the mechanism is inert unless a model opts in.
+since `auto` delegates the choice by definition. Models with no recipe resolve
+to exactly the previous defaults, so the mechanism is inert unless a model opts in. For example, `deepseek-r1-distill-32b` and `deepseek-r1-distill-70b` opt-in to specify `reasoning_parser: "deepseek_r1"`.
 
 Recognised keys mirror `build_launch_command` parameters, plus:
 
@@ -226,14 +226,38 @@ Recognised keys mirror `build_launch_command` parameters, plus:
 | `extra_args` | Verbatim flags appended to the launch command, for recipe settings without a first-class parameter. |
 
 The default model's recipe is `ModelMatrixRegistry.MATRIX['qwen3.6-35b-a3b-nvfp4'].launch_overrides`
-and follows NVIDIA's published DGX Spark recipe: 262144 context, `gpu_memory_utilization` 0.4,
-FP8 KV cache, FlashInfer attention, `flashinfer_cutedsl_sm12x` MoE backend, `qwen3_xml` tool parser,
-`qwen3` reasoning parser, MTP speculation, `--max-num-seqs 4`, tensorizer disabled, and
-`VLLM_NVFP4_GEMM_BACKEND` / `VLLM_MARLIN_USE_ATOMIC_ADD` in the container environment.
+and follows NVIDIA's published DGX Spark recipe: 131072 (`131k`) context, `gpu_memory_utilization` 0.81,
+FP8 KV cache, FlashInfer attention, `marlin` MoE backend, `qwen3_xml` tool parser, `qwen3` reasoning parser,
+`32768` max batched tokens, MTP speculation (`num_speculative_tokens: 3`), `--max-num-seqs 4`, tensorizer disabled (`use_tensorizer: False`),
+and `VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x` / `VLLM_MARLIN_USE_ATOMIC_ADD=1` in the container environment.
+
+#### 4.2.8. vLLM Parameters for Default Model (`qwen3.6-35b-a3b-nvfp4`)
+
+Detailed specification of parameters generated by `VLLMServerManager.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")`:
+
+| Parameter / Flag | Passed Value | Source / Recipe Setting | Purpose & Function |
+| :--- | :--- | :--- | :--- |
+| **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | `DEFAULT_VLLM_IMAGE` | NGC container pinned with Blackwell SM121 driver & library compatibility. |
+| `--model` | `nvidia/Qwen3.6-35B-A3B-NVFP4` | `ModelMatrixRegistry.resolve_hf_repo` | HuggingFace repository ID for default NVFP4 weights. |
+| `--max-model-len` | `131072` | `launch_overrides["max_model_len"]` | Context window size (128K tokens). |
+| `--gpu-memory-utilization` | `0.81` | `launch_overrides["gpu_memory_utilization"]` | 81% memory reservation for GB10 unified memory pool. |
+| `--kv-cache-dtype` | `fp8` | `launch_overrides["kv_cache_dtype"]` | Enables FP8 quantization for key-value cache tensors. |
+| `--attention-backend` | `flashinfer` | `launch_overrides["attention_backend"]` | Blackwell-optimized FlashInfer attention implementation. |
+| `--moe-backend` | `marlin` | `launch_overrides["moe_backend"]` | Marlin MoE execution backend preventing SM120 kernel corruption on SM121. |
+| `--tool-call-parser` | `qwen3_xml` | `launch_overrides["tool_call_parser"]` | Qwen 3.6 XML tool call parser (`<tool_call>`). |
+| `--reasoning-parser` | `qwen3` | `launch_overrides["reasoning_parser"]` | Qwen 3.6 reasoning channel parser. |
+| `--max-num-batched-tokens` | `32768` | `launch_overrides["max_num_batched_tokens"]` | Max batched token count for chunked prefill iterations. |
+| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | `launch_overrides["speculative_config"]` | In-checkpoint Multi-Token Prediction (3 speculative tokens/step). |
+| `--enable-prefix-caching` | *(boolean flag)* | `DEFAULT_PREFIX_CACHING=True` | Automatic KV cache prefix reuse across multi-turn sessions. |
+| `--enable-chunked-prefill` | *(boolean flag)* | `DEFAULT_CHUNKED_PREFILL=True` | Prefill chunking for responsive TTFT during long prompt processing. |
+| `--max-num-seqs` | `4` | `launch_overrides["extra_args"]` | Caps maximum concurrent sequence count at 4. |
+| `--tensor-parallel-size` | `1` | `launch_overrides["extra_args"]` | Single-GPU execution level for single-chip GB10. |
+| `--dtype` | `auto` | `launch_overrides["extra_args"]` | Auto-detect model weight precision. |
+| `VLLM_NVFP4_GEMM_BACKEND` | `flashinfer-b12x` | `launch_overrides["env"]` | Enforces SM121 FlashInfer b12x NVFP4 GEMM kernel backend path. |
+| `VLLM_MARLIN_USE_ATOMIC_ADD` | `1` | `launch_overrides["env"]` | Enables atomic addition acceleration inside Marlin kernels. |
 
 #### 4.2.4. Configuration & Base Flags
-- **Config-Stored but Not Passed to vLLM**: `num_scheduler_steps` (default `8`) is accepted on CLI/config/status display but is **not** appended as `--num-scheduler-steps` in `build_launch_command` today.
-- **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code` plus the optional flags above.
+- **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.40 --trust-remote-code` plus the optional flags above. (A low `0.40` default prevents OOMs on the 128GB unified memory SoC).
 
 #### 4.2.5. Readiness Polling & Live Streaming
 - `dgxcoder start_server` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
@@ -274,7 +298,6 @@ CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / co
 - **Provisioning**: `pip install aider-chat`, then `pipx install aider-chat` if still missing.
 - **Launch Flags**: `--openai-api-base {vllm_host}/v1/` , `--openai-api-key gb10-local-token`, `--model openai/{hf_repo}`.
   - `sandbox != none` → `--no-auto-commits`; otherwise `--auto-commits` (does **not** wrap with `SandboxManager` prefixes).
-  - If `draft_model` is set: adds `--editor-model openai/{primary_hf}` `--architect` and rebinds `--model` to `openai/{draft_hf}` (architect/editor split).
   - `run` prompt → `--message <prompt>`; `--debug` → `--verbose`.
 
 #### 4.3.4. Continue (`--agent continue`)
@@ -283,7 +306,7 @@ CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / co
 - **Provisioning**: `code --install-extension Continue.continue` when absent.
 - **Config**: Writes/merges `~/.continue/config.json` with:
   - chat `models[]` entry: provider `openai`, model = primary HF repo, `apiBase` `{vllm_host}/v1/`, key `gb10-local-token`
-  - `tabAutocompleteModel`: draft HF repo if set, else `Qwen/Qwen2.5-Coder-1.5B-Instruct`
+  - `tabAutocompleteModel`: Unset by default. A real autocomplete model requires a separate vLLM instance on another port, as speculative draft models are not served as separate endpoints.
 - **Session Behavior**: Auto-launch vLLM → require VS Code → install extension → write Continue config → open workspace. Prompt argument is unused.
 
 #### 4.3.5. OpenHands (`--agent openhands`)
@@ -314,7 +337,7 @@ dgxcoder chat | run [--agent goose]
 [2] ensure_goose_config()  -->  ~/.config/goose/config.yaml
        |
        v
-[3] validate_model()       -->  warn if model exceeds memory budget
+[3] validate_model()       -->  hard-fail if model exceeds memory budget (e.g. deepseek-v3-671b)
        |
        v
 [4] GET {vllm_host}/v1/models  --healthy?--+
@@ -571,7 +594,7 @@ dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|a
 ```
 
 - **Behavior**: Instantiates `GooseRunner` / `ClineRunner` / `AiderRunner` / `ContinueRunner` / `OpenHandsRunner` from `config.agent_runner`, then `run_session(debug=…)`. See [§4.3](#43-agent-runtimes-goose-cline-aider-continue-openhands) and [§4.5](#45-session-startup-process).
-- **Function calling (Goose)**: Enabled by default via `--enable-auto-tool-choice --tool-call-parser hermes`. No extra flags needed for `dgxcoder chat`.
+- **Function calling (Goose)**: Enabled by default via `--enable-auto-tool-choice`. The `--tool-call-parser` is resolved automatically per-model (e.g., `qwen3_xml` for the default model, `hermes` for Qwen 2.5 Coder). No extra flags needed for `dgxcoder chat`.
 - **Cave Mode (`--cave`)**: When enabled, DGXCoder injects the strict Cave Mode system prompt ("You are in Cave Mode...") into Goose `instructions` or `.clinerules` for Cline. Forces terse, command-only output.
 - **Example**: `dgxcoder chat --agent aider --debug`
 
@@ -597,7 +620,7 @@ dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] 
 dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--guided-decoding-backend BACKEND]
 ```
 
-- **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). Function calling for Goose is enabled **by default** (`--enable-auto-tool-choice --tool-call-parser hermes`). `--max-num-batched-tokens 8192` is passed automatically when `--enable-chunked-prefill` (default) to improve TTFT on large codebase prompts. See [start_server variant](#dgxcoder-start_server-variant).
+- **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). Function calling for Goose is enabled **by default** (`--enable-auto-tool-choice`), with `--tool-call-parser` automatically resolved per-model. `--max-num-batched-tokens 8192` is passed automatically when `--enable-chunked-prefill` (default) to improve TTFT on large codebase prompts. See [start_server variant](#dgxcoder-start_server-variant).
 - **Example**: `dgxcoder start_server --model qwen3.6-35b-a3b-nvfp4 --port 8000`
 
 ##### 5.1.6. `dgxcoder stop_server`
@@ -780,7 +803,7 @@ dgxcoder/
 ├── __init__.py                      # __version__ = "1.2.0"
 ├── cli.py                           # shim → cli package
 ├── cli/
-│   └── dgxcoder_cli_controller.py   # DGXCoderCLIController (9 subcommands)
+│   └── dgxcoder_cli_controller.py   # DGXCoderCLIController (13 subcommands)
 ├── config.py                        # shim
 ├── config/
 │   ├── config_path_resolver.py
@@ -793,7 +816,8 @@ dgxcoder/
 │   ├── tfidf_calculator.py
 │   ├── sqlite_context_storage.py
 │   ├── code_symbol.py
-│   └── indexed_file.py
+│   ├── indexed_file.py
+│   └── embedding_calculator.py
 ├── hardware.py                      # shim + detect/download helpers
 ├── hardware/
 │   ├── model_matrix_registry.py
@@ -826,7 +850,9 @@ dgxcoder/
 │   ├── vllm_server_manager.py
 │   ├── vllm_log_streamer.py
 │   ├── vllm_launch_options.py
-│   └── vllm_server_status.py
+│   ├── vllm_server_status.py
+│   ├── vllm_startup_monitor.py
+│   └── model_loading_monitor.py
 └── web_canvas.py                    # CanvasHandler + start_web_canvas_server
 ```
 
@@ -844,11 +870,11 @@ Session startup orchestration across 5 AI Agent runners (`goose` [default], `cli
 
 ### 8.4. `dgxcoder/vllm_server/`
 
-Multi-tier launch, pre-download, health checks, background log queue.
+Multi-tier launch, pre-download, health checks, background log queue, loading stage & memory progress monitoring (`ModelLoadingMonitor`, `VLLMStartupMonitor`).
 
 ### 8.5. `dgxcoder/context_engine/`
 
-Parallel index, SQLite/FTS5, TF-IDF, hybrid `search_code`.
+Parallel index, SQLite/FTS5, TF-IDF, dense semantic embeddings (`EmbeddingCalculator`), hybrid `search_code`.
 
 ### 8.6. `dgxcoder/mcp_server/`
 
@@ -860,4 +886,4 @@ HTTP SPA + `/api/status` telemetry.
 
 ### 8.8. `dgxcoder/cli/`
 
-`DGXCoderCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`).
+`DGXCoderCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`) (13 subcommands: `init`, `chat`, `run`, `status`, `start_server`, `stop_server`, `index`, `mcp`, `endpoints`, `web`, `download`, `clear-cache`, `clear-tensorize-cache`).

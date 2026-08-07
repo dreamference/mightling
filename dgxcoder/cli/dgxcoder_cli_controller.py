@@ -206,7 +206,7 @@ class DGXCoderCLIController:
         start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", default=True, help="Enable automatic tool choice for function calling (default: enabled)")
         start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (default: from the model's registry recipe, e.g. hermes, qwen3_xml)")
         start_server_parser.add_argument("--reasoning-parser", default=None, help="Reasoning-channel parser for models that emit separate thinking output (e.g. qwen3)")
-        start_server_parser.add_argument("--moe-backend", default=None, help="Mixture-of-experts kernel backend (e.g. marlin, flashinfer_cutedsl_sm12x); GB10 requires an SM121-safe choice")
+        start_server_parser.add_argument("--moe-backend", default=None, help="Mixture-of-experts kernel backend (e.g. marlin, flashinfer-b12x); GB10 requires an SM121-safe choice")
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: per-model, True unless the model opts out)")
@@ -450,6 +450,26 @@ class DGXCoderCLIController:
                     print(f"\n✅ Server Ready! API running at {vllm_mgr.host}")
                     print(f"   Model: {args.model}")
                     print(f"   Loaded in: {monitor.get_status()['elapsed_seconds']:.1f} seconds\n")
+
+                    if "nvfp4" in args.model.lower():
+                        print("🧪 Running NVFP4 kernel backend canary test...")
+                        try:
+                            import requests
+                            resp = requests.post(f"{vllm_mgr.host}/v1/completions", json={
+                                "model": args.model,
+                                "prompt": "Hello",
+                                "max_tokens": 10
+                            }, timeout=10)
+                            if resp.status_code == 200:
+                                text = resp.json()["choices"][0]["text"].strip()
+                                if text and all(c == "!" for c in text if c.strip()):
+                                    print("❌ NVFP4 Canary Failed: Output corrupted (all '!'). Wrong SM12x CUTLASS backend selected.")
+                                else:
+                                    print("✅ NVFP4 Canary Passed: Output is healthy.")
+                            else:
+                                print(f"⚠️  NVFP4 Canary skipped: API returned {resp.status_code}")
+                        except Exception as e:
+                            print(f"⚠️  NVFP4 Canary failed to execute: {e}")
                 
                 # Do not block: exit after health check passes (server keeps running)
                     
