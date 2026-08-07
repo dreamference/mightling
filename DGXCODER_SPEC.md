@@ -27,6 +27,15 @@
   - [Identifying Your Hardware Variant](#identifying-your-hardware-variant)
   - [Quickstart Installation](#quickstart-installation)
 - [7. Roadmap & Implementation Verification](#7-roadmap--implementation-verification)
+- [8. Codebase Architecture & Source Reference](#8-codebase-architecture--source-reference)
+  - [8.1. `dgxcoder/hardware.py`](#81-dgxcoderhardwarepy)
+  - [8.2. `dgxcoder/config.py`](#82-dgxcoderconfigpy)
+  - [8.3. `dgxcoder/runner.py`](#83-dgxcoderrunnerpy)
+  - [8.4. `dgxcoder/vllm_server.py`](#84-dgxcodervllm_serverpy)
+  - [8.5. `dgxcoder/context_engine.py`](#85-dgxcodercontext_enginepy)
+  - [8.6. `dgxcoder/mcp_server.py`](#86-dgxcodermcp_serverpy)
+  - [8.7. `dgxcoder/web_canvas.py`](#87-dgxcoderweb_canvaspy)
+  - [8.8. `dgxcoder/cli.py`](#88-dgxcoderclipy)
 
 ---
 
@@ -246,3 +255,94 @@ dgxcoder chat
 - [x] **Phase 4: AST/Vector Context Engine & Web Canvas UI**
   - Build local AST symbol parser & TF-IDF vector code indexer (`.dgxcoder/context_index.json`).
   - Build HTML/CSS/JS Glassmorphism Web Canvas UI for live diagramming, diff visualization, and hardware monitoring.
+
+---
+
+## 8. Codebase Architecture & Source Reference
+
+The DGXCoder software stack is organized into modular Python components:
+
+```
+dgxcoder/
+├── __init__.py           # Package initialization & version (1.2.0)
+├── cli.py               # Rich CLI application with 8 subcommands
+├── config.py            # 4-Tier configuration hierarchy & Goose sync
+├── context_engine.py    # Zero-egress AST symbol parser & TF-IDF vector indexer
+├── hardware.py          # NVIDIA GB10 hardware detection & model qualification matrix
+├── mcp_server.py        # Stdio Model Context Protocol (MCP) JSON-RPC 2.0 server
+├── runner.py            # Goose AI agent runner, auto-installer & vLLM waiting supervisor
+├── vllm_server.py       # Multi-tiered vLLM server launcher & live log queueing engine
+└── web_canvas.py        # Single-page Glassmorphism Web Canvas UI server
+```
+
+### 8.1. `dgxcoder/hardware.py`
+Provides NVIDIA GB10 hardware detection, system memory profiling via `/proc/meminfo`, and model compatibility checks for dual-model speculative decoding.
+
+```python
+# Key Functions & Data Structures
+MODEL_MATRIX: Dict[str, ModelSpec]
+def detect_gb10_hardware() -> Dict[str, Any]
+def check_model_compatibility(model_key: str) -> Tuple[bool, str]
+def check_speculative_compatibility(main_model_key: str, draft_model_key: str) -> Tuple[bool, str]
+```
+
+### 8.2. `dgxcoder/config.py`
+Implements the 4-tier configuration precedence hierarchy (CLI Args > Env Vars > Config File > Defaults) and writes `~/.config/goose/config.yaml`.
+
+```python
+class DGXCoderConfig:
+    def __init__(self, config_file=None, vllm_host=None, model=None, draft_model=None, num_speculative_tokens=None)
+    def save_config(self, target_path=None) -> Path
+    def ensure_goose_config(self, extra_mcp_servers=None) -> None
+```
+
+### 8.3. `dgxcoder/runner.py`
+Supervisor for launching Goose sessions, auto-provisioning official AAIF Goose 1.45+ binaries, and executing `wait_for_vllm()` with sub-second signal handling.
+
+```python
+class GooseRunner:
+    def is_goose_installed(self) -> bool
+    def install_goose(self) -> bool
+    def wait_for_vllm(self, poll_interval=1.0, max_wait=None, auto_launch=True) -> bool
+    def run_session(self, prompt=None, debug=False) -> int
+```
+
+### 8.4. `dgxcoder/vllm_server.py`
+Multi-tiered vLLM server launcher (Native CLI > Python Module > Docker Container) with background thread log queueing and non-blocking streaming.
+
+```python
+class VLLMServerManager:
+    def check_health(self, timeout=0.5) -> bool
+    def build_launch_command(...) -> List[str]
+    def start_server(...) -> Optional[subprocess.Popen]
+    def get_new_logs() -> List[str]
+```
+
+### 8.5. `dgxcoder/context_engine.py`
+Zero-egress local AST symbol extractor and TF-IDF vector code indexer persisting workspace context at `.dgxcoder/context_index.json`.
+
+```python
+class ContextEngine:
+    def index_workspace(self, force_reindex=False) -> Dict[str, Any]
+    def search_code(self, query: str, top_k=5) -> List[Dict[str, Any]]
+```
+
+### 8.6. `dgxcoder/mcp_server.py`
+Stdio Model Context Protocol (MCP) server for JetBrains and VS Code IDE companion extensions.
+
+```python
+class MCPServer:
+    def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]
+    def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Any
+```
+
+### 8.7. `dgxcoder/web_canvas.py`
+Lightweight HTTP server serving the interactive Web Canvas UI for live diffs, Mermaid.js diagrams, and GB10 hardware telemetry.
+
+```python
+def start_web_canvas_server(port: int = 8501, daemon: bool = True) -> threading.Thread
+```
+
+### 8.8. `dgxcoder/cli.py`
+Main entrypoint (`dgxcoder`) providing the Rich terminal user interface for all subcommands (`init`, `chat`, `run`, `status`, `serve`, `index`, `mcp`, `web`).
+
