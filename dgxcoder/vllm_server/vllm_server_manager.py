@@ -12,6 +12,7 @@ import sys
 import shutil
 import subprocess
 import requests
+from pathlib import Path
 from typing import Dict, Any, Optional, List, Final
 
 from dgxcoder.vllm_server.vllm_server_status import VLLMServerStatus
@@ -19,10 +20,9 @@ from dgxcoder.vllm_server.vllm_log_streamer import VLLMLogStreamer
 
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 
-# Pinned vLLM runtime container. NVIDIA NGC publishes aarch64/Blackwell builds, so this is pullable
-# on a GB10 host with no local image build. Pinned to an exact tag (never ':latest') so that upstream
-# vLLM CLI changes cannot silently break launches.
-DEFAULT_VLLM_IMAGE: Final[str] = "nvcr.io/nvidia/vllm:26.07-py3"
+# Pinned vLLM runtime container built from project Dockerfile with tensorizer support.
+# Pinned to an exact tag (never ':latest') so that upstream vLLM CLI changes cannot silently break launches.
+DEFAULT_VLLM_IMAGE: Final[str] = "dgxcoder-vllm-tensorizer:26.07-py3"
 
 # vLLM release that removed `--guided-decoding-backend` in favour of `--structured-outputs-config.*`
 STRUCTURED_OUTPUTS_MIN_VERSION: Final[tuple] = (0, 12)
@@ -141,6 +141,63 @@ class VLLMServerManager:
         except Exception:
             return False
 
+    def is_image_present(self, docker_image: str) -> bool:
+        """
+        Checks whether target Docker image is present in local Docker registry.
+
+        Args:
+            docker_image (str): Name of Docker image to check.
+
+        Returns:
+            bool: True if image exists in local Docker daemon.
+        """
+        if shutil.which("docker") is None:
+            return False
+        try:
+            res = subprocess.run(
+                ["docker", "image", "inspect", docker_image],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
+
+    def ensure_docker_image(self, docker_image: str = DEFAULT_VLLM_IMAGE) -> bool:
+        """
+        Ensures that the Docker image exists locally. If missing and a local Dockerfile exists,
+        builds the image locally using `docker build`.
+
+        Args:
+            docker_image (str): Target Docker image name.
+
+        Returns:
+            bool: True if image is present or successfully built, False otherwise.
+        """
+        if self.is_image_present(docker_image):
+            return True
+
+        project_root = Path(__file__).resolve().parent.parent.parent
+        dockerfile_path = project_root / "Dockerfile"
+
+        if dockerfile_path.is_file():
+            print(f"📦 Docker image '{docker_image}' not found locally. Building from {dockerfile_path}...")
+            try:
+                res = subprocess.run(
+                    ["docker", "build", "-t", docker_image, "-f", str(dockerfile_path), str(project_root)],
+                    check=True
+                )
+                if res.returncode == 0 and self.is_image_present(docker_image):
+                    print(f"✅ Successfully built Docker image '{docker_image}'.")
+                    return True
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Failed to build Docker image '{docker_image}': {e}")
+            except Exception as e:
+                print(f"❌ Unexpected error building Docker image '{docker_image}': {e}")
+
+        print(f"⚠️  Docker image '{docker_image}' is missing locally and could not be built.")
+        return False
+
     def probe_image(self, docker_image: str) -> Dict[str, Any]:
         """
         Inspects the target Docker image for the capabilities DGXCoder's launch command depends on.
@@ -160,6 +217,10 @@ class VLLMServerManager:
             return self._image_probe_cache[docker_image]
 
         result: Dict[str, Any] = {"vllm_version": None, "has_tensorizer": False}
+        if not self.ensure_docker_image(docker_image):
+            self._image_probe_cache[docker_image] = result
+            return result
+
         script = (
             "import importlib.util as u\n"
             "try:\n"
@@ -348,15 +409,14 @@ class VLLMServerManager:
         docker_available = self.is_docker_available()
         is_docker_launch = docker_available  # Always prefer Docker when available
 
-        # Ask the image whether it can import tensorizer. The image name says nothing about this:
-        # the pinned NGC runtime may or may not ship the package depending on the tag.
+        # Ask the image whether it can import tensorizer. The image name says nothing about this.
         if use_tensorizer and is_model_tensorized(model):
             has_tensorizer = self.image_has_tensorizer(docker_image)
             if not has_tensorizer:
                 if is_docker_launch:
-                    print(f"⚠️  Notice: Running vLLM via Docker container ({docker_image}) which does not include the 'tensorizer' package. Falling back cleanly to standard weights loading.")
+                    print(f"⚠️  Notice: Running vLLM via Docker container ({docker_image}) which does not include the 'tensorizer' package.")
                 else:
-                    print("⚠️  Notice: 'tensorizer' package is not installed in vLLM environment. Falling back cleanly to standard weights loading. (Install via: pip install 'vllm[tensorizer]')")
+                    print("⚠️  Notice: 'tensorizer' package is not installed in vLLM environment. (Install via: pip install 'vllm[tensorizer]')")
             else:
                 tpath = get_tensorized_path(model)
                 if tpath:
@@ -419,7 +479,8 @@ class VLLMServerManager:
         max_num_batched_tokens: Optional[int] = 8192,
         guided_decoding_backend: Optional[str] = None,
         use_tensorizer: bool = True,
-        background: bool = True
+        background: bool = True,
+        docker_image: str = DEFAULT_VLLM_IMAGE,
     ) -> Optional[subprocess.Popen]:
         """
         Pre-downloads model weights, saves in tensorize format, and starts local vLLM OpenAI API server.
@@ -443,6 +504,7 @@ class VLLMServerManager:
             guided_decoding_backend (Optional[str]): Structured-outputs backend; None leaves vLLM's default.
             use_tensorizer (bool): Convert and load model using tensorize (.tensors) format.
             background (bool): If True, run asynchronously as Popen subprocess.
+            docker_image (str): Docker image to launch vLLM in (default: DEFAULT_VLLM_IMAGE).
 
         Returns:
             Optional[subprocess.Popen]: Popen object if background=True, else None.
@@ -451,6 +513,21 @@ class VLLMServerManager:
             raise RuntimeError(
                 "Docker is required to run vLLM but is not available. "
                 "Please ensure Docker is installed and the daemon is running (`docker ps` must succeed)."
+            )
+
+        if not self.ensure_docker_image(docker_image):
+            raise RuntimeError(
+                f"Docker image '{docker_image}' is missing locally and could not be built. "
+                "Please check the Dockerfile or Docker daemon status."
+            )
+
+        # GB10 hardware check
+        from dgxcoder.hardware.hardware_manager import HardwareManager
+        hw = HardwareManager.detect_gb10_hardware()
+        if not hw.is_gb10:
+            raise RuntimeError(
+                "dgxcoder start_server requires NVIDIA GB10 hardware (or ≥100 GB unified memory). "
+                "Current system does not meet the target specs."
             )
 
         # Step 1: Pre-download model weights into local cache and convert to tensorize format
@@ -478,6 +555,7 @@ class VLLMServerManager:
             max_num_batched_tokens=max_num_batched_tokens,
             guided_decoding_backend=guided_decoding_backend,
             use_tensorizer=use_tensorizer,
+            docker_image=docker_image,
         )
 
         # Step 3: Cleanup potential container name conflicts prior to launch

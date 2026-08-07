@@ -24,7 +24,7 @@ from dgxcoder.runner import (
     OpenHandsRunner, OpenHandsInstaller
 )
 from dgxcoder.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache
-from dgxcoder.vllm_server import VLLMServerManager
+from dgxcoder.vllm_server import VLLMServerManager, DEFAULT_VLLM_IMAGE
 from dgxcoder.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dgxcoder.context_engine import ContextEngine
 from dgxcoder.mcp_server import main as run_mcp_server
@@ -198,6 +198,7 @@ class DGXCoderCLIController:
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=True, help="Save and load model in tensorize (.tensors) format (default: True)")
+        start_server_parser.add_argument("--docker-image", default=DEFAULT_VLLM_IMAGE, help="Docker image for vLLM (default: dgxcoder-vllm-tensorizer:26.07-py3)")
 
         # Command: dgxcoder index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -415,7 +416,8 @@ class DGXCoderCLIController:
                     max_num_batched_tokens=args.max_num_batched_tokens,
                     guided_decoding_backend=args.guided_decoding_backend,
                     use_tensorizer=getattr(args, "tensorize", True),
-                    background=True
+                    background=True,
+                    docker_image=getattr(args, "docker_image", DEFAULT_VLLM_IMAGE)
                 )
                 
                 # Print progress while server is initializing

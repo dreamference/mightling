@@ -17,12 +17,38 @@
   - [4.1. NVIDIA GB10 Hardware Specification](#41-nvidia-gb10-hardware-specification)
   - [4.2. GB10 Inference Stack & Auto-Launch Engine](#42-gb10-inference-stack--auto-launch-engine)
   - [4.3. Agent Runtimes (Goose, Cline, Aider, Continue, OpenHands)](#43-agent-runtimes-goose-cline-aider-continue-openhands)
+    - [4.3.1. Goose (default, `agent_runner=goose`)](#431-goose-default-agent_runnergoose)
+    - [4.3.2. Cline (`--agent cline`)](#432-cline-agent-cline)
+    - [4.3.3. Aider (`--agent aider`)](#433-aider-agent-aider)
+    - [4.3.4. Continue (`--agent continue`)](#434-continue-agent-continue)
+    - [4.3.5. OpenHands (`--agent openhands`)](#435-openhands-agent-openhands)
   - [4.4. Codebase Context Engine (AST + SQLite / FTS5)](#44-codebase-context-engine-ast--sqlite--fts5)
   - [4.5. Session Startup Process](#45-session-startup-process)
   - [4.6. Goose-vLLM Integration](#46-goose-vllm-integration)
+    - [4.6.1. Endpoint Wiring](#461-endpoint-wiring)
+    - [4.6.2. Real Shell Execution](#462-real-shell-execution)
+    - [4.6.3. MCP Companion](#463-mcp-companion)
+    - [4.6.4. Deep-Merge Safety](#464-deep-merge-safety)
+    - [4.6.5. vLLM Side](#465-vllm-side)
   - [4.7. Code Indexing Pipeline](#47-code-indexing-pipeline)
+    - [4.7.1. Entry Points](#471-entry-points)
+    - [4.7.2. Parallel Execution](#472-parallel-execution)
+    - [4.7.3. Ingestion Steps](#473-ingestion-steps)
+    - [4.7.4. Hybrid Search](#474-hybrid-search)
+    - [4.7.5. Cache Behavior](#475-cache-behavior)
+    - [4.7.6. Performance Notes](#476-performance-notes)
   - [4.8. Tests Architecture](#48-tests-architecture)
+    - [4.8.1. Framework](#481-framework)
+    - [4.8.2. Structure](#482-structure)
+    - [4.8.3. Style](#483-style)
   - [4.9. Model Download, Hugging Face Caching & Tensorization](#49-model-download-hugging-face-caching--tensorization)
+    - [4.9.1. Hugging Face Behavior](#491-hugging-face-behavior)
+    - [4.9.2. Tensorizer Behavior](#492-tensorizer-behavior)
+    - [4.9.3. Cache Management Commands](#493-cache-management-commands)
+    - [4.9.4. Download CLI](#494-download-cli)
+    - [4.9.5. Best-Effort Policy](#495-best-effort-policy)
+  - [4.10. Docker vLLM Architecture](#410-docker-vllm-architecture)
+  - [4.11. Docker Agent Architecture](#411-docker-agent-architecture)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dgxcoder` CLI Suite](#51-dgxcoder-cli-suite)
     - [5.1.1. `dgxcoder init`](#511-dgxcoder-init)
@@ -132,37 +158,40 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
 - **Unified Memory**: 128 GB LPDDR5X high-speed unified memory shared dynamically between CPU and GPU.
 - **CPU Host**: High-performance ARM Cortex CPU cores (`aarch64` architecture).
 - **Storage**: NVMe PCIe SSD for high-speed workspace indexing and model caching.
-- **Detection** (`HardwareManager.detect_gb10_hardware`):
-  1. Query `nvidia-smi --query-gpu=name,driver_version,memory.total`.
-  2. Read `/proc/meminfo` for total/available/used system memory.
-  3. Mark `is_gb10=True` if GPU name contains `GB10` or `BLACKWELL`, **or** if total system memory ≥ **100 GB** (fallback; may label GPU as `NVIDIA GB10 (Simulated / Unified Memory Node)` when name is missing).
-- Telemetry fields returned as a dict: `is_gb10`, `gpu_name`, `driver_version`, `total_unified_memory_gb`, `available_memory_gb`, `used_memory_gb`, `vram_gb`, `arch`. (`vram_gb` is collected but not shown in `dgxcoder status`.)
 
 ### 4.2. GB10 Inference Stack & Auto-Launch Engine
 
-- **Docker-Only Launch Resolution** (`VLLMServerManager.build_launch_command`):
-  - Always uses Docker (`docker run --gpus all ... vllm-tensorizer:latest`) when `docker ps` succeeds.
-  - Fails cleanly by raising `RuntimeError` (with install/daemon hint) if Docker is unavailable — no native `vllm serve` or `python -m` fallbacks are attempted.
-  - Custom image `vllm-tensorizer:latest` (or override via param) that includes tensorizer support; pre-removes conflicting container name before launch.
-  - The same clean-failure check is performed early in `start_server()`.
-- **Weight Pre-Download**: `start_server()` always calls `download_model()` for primary (and draft if set) before spawning the process. Download uses `huggingface_hub.snapshot_download`, then `huggingface-cli download`, else defers fetch to vLLM init.
-- **Dual-Model Speculative Decoding**: When `draft_model` is set, appends `--speculative-model <hf_draft> --num-speculative-tokens <N>`.
-- **Blackwell Performance Flags Actually Applied**:
-  - `--enable-prefix-caching` (when enabled; default on)
-  - `--enable-chunked-prefill` (when enabled; default on)
-  - `--kv-cache-dtype <dtype>` (default `auto`)
-  - `--attention-backend <backend>` only when backend ≠ `auto`
-  - `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is unset
+#### 4.2.1. Weight Pre-Download
+- `start_server()` always calls `download_model()` for primary (and draft if set) before spawning the process.
+- Download uses `huggingface_hub.snapshot_download`, then `huggingface-cli download`, else defers fetch to vLLM init.
+
+#### 4.2.2. Dual-Model Speculative Decoding
+- When `draft_model` is set, appends `--speculative-model <hf_draft> --num-speculative-tokens <N>`.
+
+#### 4.2.3. Blackwell Performance Flags Actually Applied
+- `--enable-prefix-caching` (when enabled; default on)
+- `--enable-chunked-prefill` (when enabled; default on)
+- `--kv-cache-dtype <dtype>` (default `auto`)
+- `--attention-backend <backend>` only when backend ≠ `auto`
+- `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is unset
+
+#### 4.2.4. Configuration & Base Flags
 - **Config-Stored but Not Passed to vLLM**: `num_scheduler_steps` (default `8`) is accepted on CLI/config/status display but is **not** appended as `--num-scheduler-steps` in `build_launch_command` today.
 - **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code` plus the optional flags above.
-- **Readiness Polling & Live Streaming**: `dgxcoder start_server` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`. The monitor thread constantly pipes raw vLLM container logs to stdout, prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`), tracks loading stages from logs, and polls `/v1/models` until healthy. `start_server` exits once the health check passes (server keeps running in background).
-- **Instant Signal Handling**: Poll loop sleeps in short intervals so `Ctrl+C` is handled promptly.
+
+#### 4.2.5. Readiness Polling & Live Streaming
+- `dgxcoder start_server` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
+- The monitor thread constantly pipes raw vLLM container logs to stdout, prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`), tracks loading stages from logs, and polls `/v1/models` until healthy.
+- `start_server` exits once the health check passes (server keeps running in background).
+
+#### 4.2.6. Instant Signal Handling
+- Poll loop sleeps in short intervals so `Ctrl+C` is handled promptly.
 
 ### 4.3. Agent Runtimes (Goose, Cline, Aider, Continue, OpenHands)
 
 CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / config `agent_runner` (default `goose`). Choices: `goose`, `cline`, `aider`, `continue`, `openhands`. Non-Goose runners reuse `GooseRunner.wait_for_vllm()` for shared vLLM auto-launch.
 
-#### Goose (default, `agent_runner=goose`)
+#### 4.3.1. Goose (default, `agent_runner=goose`)
 
 - **Execution Runtime**: Goose AI Agent (`aaif-goose/goose` v1.45+).
 - **Auto-Installation**: `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash -s -- --yes`.
@@ -176,14 +205,14 @@ CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / co
   - **Docker**: `docker run --rm -it -v {cwd}:/workspace -w /workspace ubuntu:22.04`
   - Missing runtime binary → warning and unsandboxed execution.
 
-#### Cline (`--agent cline`)
+#### 4.3.2. Cline (`--agent cline`)
 
 - **Runtime**: VS Code (`code`) or VSCodium (`codium`) + marketplace extension `saoudrizwan.claude-dev`.
 - **Provisioning**: `ClineInstaller.install_cline_if_missing()` runs `code --install-extension saoudrizwan.claude-dev` when absent.
 - **Workspace Rules**: Writes `.clinerules` (once, if missing) with OpenAI-compatible base URL `{vllm_host}/v1`, resolved HF model ID, and local/offline guidance.
 - **Session Behavior**: Auto-launch vLLM → require VS Code → install extension → ensure `.clinerules` → print connection details (API key `gb10-local-token`) → `code|codium $(pwd)`. Prompt is printed only (not auto-submitted). No Goose sandbox prefix.
 
-#### Aider (`--agent aider`)
+#### 4.3.3. Aider (`--agent aider`)
 
 - **Runtime**: Aider CLI (`aider` from package `aider-chat`).
 - **Provisioning**: `pip install aider-chat`, then `pipx install aider-chat` if still missing.
@@ -192,7 +221,7 @@ CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / co
   - If `draft_model` is set: adds `--editor-model openai/{primary_hf}` `--architect` and rebinds `--model` to `openai/{draft_hf}` (architect/editor split).
   - `run` prompt → `--message <prompt>`; `--debug` → `--verbose`.
 
-#### Continue (`--agent continue`)
+#### 4.3.4. Continue (`--agent continue`)
 
 - **Runtime**: VS Code / VSCodium + marketplace extension `Continue.continue`.
 - **Provisioning**: `code --install-extension Continue.continue` when absent.
@@ -201,7 +230,7 @@ CLI selects the runner via `--agent` / `DGXCODER_AGENT` / `DGXCODER_RUNNER` / co
   - `tabAutocompleteModel`: draft HF repo if set, else `Qwen/Qwen2.5-Coder-1.5B-Instruct`
 - **Session Behavior**: Auto-launch vLLM → require VS Code → install extension → write Continue config → open workspace. Prompt argument is unused.
 
-#### OpenHands (`--agent openhands`)
+#### 4.3.5. OpenHands (`--agent openhands`)
 
 - **Runtime**: Docker image `ghcr.io/all-hands-ai/openhands:main` (container name `dgxcoder-openhands`).
 - **Provisioning**: Requires working Docker (`docker ps`); `docker pull` image if missing.
@@ -303,68 +332,126 @@ Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadi
 
 ### 4.6. Goose-vLLM Integration
 
-`DGXCoderConfig` (`dgxcoder/config/dgxcoder_config.py`) wires Goose directly to the local vLLM OpenAI-compatible endpoint and guarantees real OS shell execution:
+`DGXCoderConfig` (`dgxcoder/config/dgxcoder_config.py`) wires Goose directly to the local vLLM OpenAI-compatible endpoint and guarantees real OS shell execution.
 
-- **Endpoint Wiring** (`get_env_vars` + `ensure_goose_config`):
-  - `GOOSE_PROVIDER=openai`
-  - `OPENAI_BASE_URL={vllm_host}/v1`
-  - `OPENAI_API_KEY=gb10-local-token`
-  - `GOOSE_MODEL=<resolved HF repo>`
-- **Real Shell Execution**:
-  - `GOOSE_ALLOW_SHELL=1` and `GOOSE_ALLOW_READ=1` exported on every launch.
-  - Built-in `developer` extension registered with `"allow_shell": true` so Goose invokes the native `/bin/bash -c` instead of emitting simulated JSON `{"name":"shell"}` tool calls.
-- **MCP Companion**: Always registers the `jetbrains_mcp` stdio extension (`dgxcoder mcp`).
-- **Deep-Merge Safety**: `ensure_goose_config` performs a targeted deep-merge of the `extensions` dict so `developer` + `jetbrains_mcp` are never overwritten when the user already has an `extensions` section in `~/.config/goose/config.yaml`.
-- **vLLM Side**: `start_server` passes `--enable-auto-tool-choice --tool-call-parser hermes` by default, satisfying Goose function-calling requirements without extra flags.
+#### 4.6.1. Endpoint Wiring
+`get_env_vars` + `ensure_goose_config` set:
+- `GOOSE_PROVIDER=openai`
+- `OPENAI_BASE_URL={vllm_host}/v1`
+- `OPENAI_API_KEY=gb10-local-token`
+- `GOOSE_MODEL=<resolved HF repo>`
+
+#### 4.6.2. Real Shell Execution
+- `GOOSE_ALLOW_SHELL=1` and `GOOSE_ALLOW_READ=1` exported on every launch.
+- Built-in `developer` extension registered with `"allow_shell": true` so Goose invokes the native `/bin/bash -c` instead of emitting simulated JSON `{"name":"shell"}` tool calls.
+
+#### 4.6.3. MCP Companion
+Always registers the `jetbrains_mcp` stdio extension (`dgxcoder mcp`).
+
+#### 4.6.4. Deep-Merge Safety
+`ensure_goose_config` performs a targeted deep-merge of the `extensions` dict so `developer` + `jetbrains_mcp` are never overwritten when the user already has an `extensions` section in `~/.config/goose/config.yaml`.
+
+#### 4.6.5. vLLM Side
+`start_server` passes `--enable-auto-tool-choice --tool-call-parser hermes` by default, satisfying Goose function-calling requirements without extra flags.
 
 Result: `dgxcoder chat` / `run` produce a fully-functional Goose session that can execute real shell commands and call tools against the GB10 vLLM instance out-of-the-box.
 
 ### 4.7. Code Indexing Pipeline
 
-- **Entry Points**:
-  - `dgxcoder init` always forces a full re-index (`ContextEngine.index_workspace(force_reindex=True)`).
-  - `dgxcoder index [--dir PATH] [--force]` — manual indexing of any directory (defaults to CWD).
-- **Parallel Execution**: `index_workspace` uses `ProcessPoolExecutor(max_workers = min(32, cpu_count*2))` to bypass the GIL on the ARM Cortex host (`context_engine.py:156-159`).
-- **Ingestion Steps**:
-  1. Walk workspace, skip `IGNORE_DIRS` (`.git`, `.venv`, `node_modules`, `.idea`, `.dgxcoder`, …) and `IGNORE_EXTENSIONS` (binaries, images, archives).
-  2. For every accepted file: read content, tokenize (camelCase/snake_case aware), extract Python AST symbols (class/function, signature, docstring, line ranges) via `ASTSymbolExtractor`.
-  3. Persist to SQLite: `files`, `symbols`, FTS5 virtual table `fts_context` (full original content), and `vec_context` (vec0) virtual table for dense embeddings — plus `PRAGMA mmap_size = 2147483648` (2 GB) for unified-memory access on GB10.
-  4. Compute in-memory TF-IDF matrix (`TFIDFCalculator.compute_matrix`).
-  5. Compute 768-dim semantic embeddings via `EmbeddingCalculator` (sentence-transformers + nomic-ai/nomic-embed-text-v1.5) and store in `vec_context` (`sqlite_context_storage.insert_vectors`).
-  6. Write JSON cache `.dgxcoder/context_index.json` (symbols + metadata only) and close DB.
-- **Hybrid Search** (`search_code`): Combines FTS5 rank + TF-IDF score + cosine similarity from stored embeddings (weighted ×3). Returns top-k files with symbols and paths. Used by MCP `workspace_search_code` tool.
-- **Cache Behavior**: Without `--force`, `load_index()` returns cached summary instantly; FTS5 + vector queries still work from SQLite even if TF-IDF/embeddings are cold.
-- **Performance Notes**: ProcessPoolExecutor + SQLite mmap + FP8 KV cache on vLLM side together keep indexing fast on the 128 GB unified memory SoC. Local 100-300 MB embedding model runs alongside vLLM.
+#### 4.7.1. Entry Points
+- `dgxcoder init` always forces a full re-index (`ContextEngine.index_workspace(force_reindex=True)`).
+- `dgxcoder index [--dir PATH] [--force]` — manual indexing of any directory (defaults to CWD).
+
+#### 4.7.2. Parallel Execution
+`index_workspace` uses `ProcessPoolExecutor(max_workers = min(32, cpu_count*2))` to bypass the GIL on the ARM Cortex host (`context_engine.py:156-159`).
+
+#### 4.7.3. Ingestion Steps
+1. Walk workspace, skip `IGNORE_DIRS` (`.git`, `.venv`, `node_modules`, `.idea`, `.dgxcoder`, …) and `IGNORE_EXTENSIONS` (binaries, images, archives).
+2. For every accepted file: read content, tokenize (camelCase/snake_case aware), extract Python AST symbols (class/function, signature, docstring, line ranges) via `ASTSymbolExtractor`.
+3. Persist to SQLite: `files`, `symbols`, FTS5 virtual table `fts_context` (full original content), and `vec_context` (vec0) virtual table for dense embeddings — plus `PRAGMA mmap_size = 2147483648` (2 GB) for unified-memory access on GB10.
+4. Compute in-memory TF-IDF matrix (`TFIDFCalculator.compute_matrix`).
+5. Compute 768-dim semantic embeddings via `EmbeddingCalculator` (sentence-transformers + nomic-ai/nomic-embed-text-v1.5) and store in `vec_context` (`sqlite_context_storage.insert_vectors`).
+6. Write JSON cache `.dgxcoder/context_index.json` (symbols + metadata only) and close DB.
+
+#### 4.7.4. Hybrid Search
+`search_code` combines FTS5 rank + TF-IDF score + cosine similarity from stored embeddings (weighted ×3). Returns top-k files with symbols and paths. Used by MCP `workspace_search_code` tool.
+
+#### 4.7.5. Cache Behavior
+Without `--force`, `load_index()` returns cached summary instantly; FTS5 + vector queries still work from SQLite even if TF-IDF/embeddings are cold.
+
+#### 4.7.6. Performance Notes
+ProcessPoolExecutor + SQLite mmap + FP8 KV cache on vLLM side together keep indexing fast on the 128 GB unified memory SoC. Local 100-300 MB embedding model runs alongside vLLM.
 
 ### 4.8. Tests Architecture
 
-- **Framework**: pytest (invoked via `pytest tests/ -q`).
-- **Structure**: One `test_*.py` per major subsystem:
-  - `test_config.py` — DGXCoderConfig, env vars, temporary Goose config, cave mode.
-  - `test_context_engine.py` — indexing, AST extraction, hybrid search (FTS5 + TF-IDF + embeddings).
-  - `test_hardware.py` — GB10 detection, model matrix, download helpers.
-  - `test_mcp_server.py` — MCP tools and IDE state.
-  - `test_runner.py` — all agent runners (Goose, Cline, …) and sandbox logic.
-  - `test_vllm_server.py` — VLLMLaunchOptions, server manager, health checks.
-- **Style**: Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external services required. Existing tests remain green after every change.
+#### 4.8.1. Framework
+pytest (invoked via `pytest tests/ -q`).
+
+#### 4.8.2. Structure
+One `test_*.py` per major subsystem:
+- `test_config.py` — DGXCoderConfig, env vars, temporary Goose config, cave mode.
+- `test_context_engine.py` — indexing, AST extraction, hybrid search (FTS5 + TF-IDF + embeddings).
+- `test_hardware.py` — GB10 detection, model matrix, download helpers.
+- `test_mcp_server.py` — MCP tools and IDE state.
+- `test_runner.py` — all agent runners (Goose, Cline, …) and sandbox logic.
+- `test_vllm_server.py` — VLLMLaunchOptions, server manager, health checks.
+
+#### 4.8.3. Style
+Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external services required. Existing tests remain green after every change.
 
 ### 4.9. Model Download, Hugging Face Caching & Tensorization
 
-- **Hugging Face Behavior** (`ModelDownloader`):
-  - Primary cache: `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if `HF_HOME` set).
-  - Pre-download via `huggingface_hub.snapshot_download` (preferred) or `huggingface-cli download` fallback.
-  - `download_model()` and `download_all_models()` check `is_model_downloaded()` first; only fetch if missing.
-  - Invoked automatically by `init`, `start_server`, and explicit `download` command.
-- **Tensorizer Behavior**:
-  - Secondary cache: `~/.cache/dgxcoder/tensorizer/`.
-  - After HF download (when `auto_tensorize=True`, default), `tensorize_model()` serializes weights to `<repo>--/model.tensors`.
-  - `is_model_tensorized()` checks for non-empty `model.tensors` file.
-  - Used by vLLM server when `--tensorize` flag enabled (default on) for faster loading on GB10.
-- **Cache Management Commands**:
-  - `dgxcoder clear-cache`: removes both HF and tensorizer parent directories.
-  - `dgxcoder clear-tensorize-cache`: removes only the tensorizer cache directory.
-- **Download CLI** (`dgxcoder download`): supports `--model`, `--all`, `--tensorize/--no-tensorize`.
-- All operations are best-effort; failures fall back to on-demand fetch by vLLM.
+#### 4.9.1. Hugging Face Behavior
+`ModelDownloader`:
+- Primary cache: `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if `HF_HOME` set).
+- Pre-download via `huggingface_hub.snapshot_download` (preferred) or `huggingface-cli download` fallback.
+- `download_model()` and `download_all_models()` check `is_model_downloaded()` first; only fetch if missing.
+- Invoked automatically by `init`, `start_server`, and explicit `download` command.
+
+#### 4.9.2. Tensorizer Behavior
+- Secondary cache: `~/.cache/dgxcoder/tensorizer/`.
+- After HF download (when `auto_tensorize=True`, default), `tensorize_model()` serializes weights to `<repo>--/model.tensors`.
+- `is_model_tensorized()` checks for non-empty `model.tensors` file.
+- Used by vLLM server when `--tensorize` flag enabled (default on) for faster loading on GB10.
+
+#### 4.9.3. Cache Management Commands
+- `dgxcoder clear-cache`: removes both HF and tensorizer parent directories.
+- `dgxcoder clear-tensorize-cache`: removes only the tensorizer cache directory.
+
+#### 4.9.4. Download CLI
+`dgxcoder download` supports `--model`, `--all`, `--tensorize/--no-tensorize`.
+
+#### 4.9.5. Best-Effort Policy
+All operations are best-effort; failures fall back to on-demand fetch by vLLM.
+
+### 4.10. Docker vLLM Architecture
+
+DGXCoder uses Docker for the primary vLLM inference runtime. All Docker operations require a working Docker daemon (`docker ps` must succeed).
+
+#### 4.10.1. vLLM Runtime Images
+- **Default tensorizer-enabled image** (`DEFAULT_VLLM_IMAGE`): `dgxcoder-vllm-tensorizer:26.07-py3`
+  - Built from the project root `Dockerfile` (user performs one-time `docker build -t dgxcoder-vllm-tensorizer:26.07-py3 .`).
+  - Dockerfile:
+    ```dockerfile
+    FROM nvcr.io/nvidia/vllm:26.07-py3
+    RUN pip install "vllm[tensorizer]"
+    ```
+  - Used by default in `build_launch_command(docker_image=...)` and `start_server`.
+  - Provides tensorizer support for fast GB10 model loading.
+  - Container name pattern: `dgxcoder-vllm-<port>`; pre-removed before launch.
+  - Launch form: `docker run --rm --name ... --gpus all -p {port}:{port} -v ~/.cache/huggingface:/root/.cache/huggingface [-e HF_TOKEN=…] dgxcoder-vllm-tensorizer:26.07-py3 <hf_repo> …`
+
+### 4.11. Docker Agent Architecture
+
+DGXCoder uses Docker for the optional OpenHands agent UI. All Docker operations require a working Docker daemon (`docker ps` must succeed).
+
+#### 4.11.1. OpenHands Agent Image
+- **Image**: `ghcr.io/all-hands-ai/openhands:main` (constant `OPENHANDS_IMAGE` in `openhands_installer.py`)
+  - Pulled on-demand by `OpenHandsInstaller.pull_image_if_missing()` when `--agent openhands` is selected.
+  - Container name: `dgxcoder-openhands`
+  - Mounts: workspace directory + Docker socket; LLM endpoint pointed at local vLLM.
+  - Port mapping: host 3000 → container 3000.
+  - No local build; always pulled from GHCR.
 
 ---
 
@@ -372,7 +459,7 @@ Result: `dgxcoder chat` / `run` produce a fully-functional Goose session that ca
 
 ### 5.1. `dgxcoder` CLI Suite
 
-Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal UI. **11** subcommands.
+Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal UI. **13** subcommands.
 
 #### Global Options
 
@@ -449,12 +536,11 @@ dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--dr
 - **Example**: `dgxcoder start_server --model qwen2.5-coder-32b --port 8000`
 
 ##### 5.1.6. `dgxcoder stop_server`
-
 ```text
 dgxcoder stop_server [--port PORT]
 ```
 
-- **Behavior**: Stops and removes the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running).
+- **Behavior**: Stops and removes the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running). `--port` defaults to 8000.
 - **Example**: `dgxcoder stop_server --port 8000`
 
 ##### 5.1.7. `dgxcoder index`
@@ -485,22 +571,21 @@ dgxcoder web [--port PORT]
 - **Example**: `dgxcoder web --port 8501`
 
 ##### 5.1.11. `dgxcoder download`
-
 ```text
-dgxcoder download [--model MODEL] [--all]
+dgxcoder download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 ```
 
-- **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. Also invoked automatically from `init` and `start_server`.
+- **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. `--tensorize` (default) also converts the model to tensorizer format. Also invoked automatically from `init` and `start_server`.
 - **Example**: `dgxcoder download --model qwen2.5-coder-32b`
 
 ##### 5.1.12. `dgxcoder clear-cache`
 
-- **Behavior**: Clears both Hugging Face (`~/.cache/huggingface`) and tensorizer (`~/.cache/dgxcoder`) parent cache directories using `shutil.rmtree`. Invokes `ModelDownloader.clear_cache()`.
+- **Behavior**: Clears both Hugging Face (`~/.cache/huggingface`) and tensorizer (`~/.cache/dgxcoder`) parent cache directories using `shutil.rmtree`. Invokes `ModelDownloader.clear_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
 - **Example**: `dgxcoder clear-cache`
 
 ##### 5.1.13. `dgxcoder clear-tensorize-cache`
 
-- **Behavior**: Clears only the tensorizer cache directory (`~/.cache/dgxcoder/tensorizer` parent). Invokes `ModelDownloader.clear_tensorizer_cache()`.
+- **Behavior**: Clears only the tensorizer cache directory (`~/.cache/dgxcoder/tensorizer` parent). Invokes `ModelDownloader.clear_tensorizer_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
 - **Example**: `dgxcoder clear-tensorize-cache`
 
 #### Configuration Hierarchy & Resolution Order

@@ -183,8 +183,9 @@ class ModelDownloader:
                     container_snap = f"/root/.cache/huggingface/{snap_rel}"
                     container_tfile = f"/root/.cache/dgxcoder/{tdir_rel}/model.tensors"
 
-                    from dgxcoder.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
-                    print(f"   Using {DEFAULT_VLLM_IMAGE} Docker container for model weight serialization...")
+                    from dgxcoder.vllm_server.vllm_server_manager import VLLMServerManager, DEFAULT_VLLM_IMAGE
+                    if VLLMServerManager().ensure_docker_image(DEFAULT_VLLM_IMAGE):
+                        print(f"   Using {DEFAULT_VLLM_IMAGE} Docker container for model weight serialization...")
                     cmd = [
                         "docker", "run", "--rm", "--gpus", "all",
                         "-v", f"{hf_cache}:/root/.cache/huggingface",

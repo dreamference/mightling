@@ -155,6 +155,7 @@ def test_vllm_startup_monitor_memory_progress_percent():
 def test_vllm_build_launch_command_tensorizer(monkeypatch, tmp_path):
     from dgxcoder.hardware.model_downloader import ModelDownloader
     mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "image_has_tensorizer", lambda img: True)
 
     # Mock tensorized file
     tfile = tmp_path / "model.tensors"
@@ -175,6 +176,7 @@ def test_vllm_build_launch_command_tensorizer_docker(monkeypatch, tmp_path):
     import os
     from dgxcoder.hardware.model_downloader import ModelDownloader
     mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "image_has_tensorizer", lambda img: True)
     monkeypatch.setattr("shutil.which", lambda name: None)
     monkeypatch.setattr(mgr, "is_vllm_installed", lambda: False)
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
@@ -226,6 +228,7 @@ def test_start_server_forwards_guided_decoding_backend(monkeypatch):
     mgr = VLLMServerManager()
     captured = {}
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    monkeypatch.setattr(mgr, "ensure_docker_image", lambda img=DEFAULT_VLLM_IMAGE: True)
     monkeypatch.setattr("dgxcoder.hardware.download_model", lambda *a, **k: None)
 
     def fake_build(**kwargs):
@@ -257,6 +260,7 @@ def test_detect_image_vllm_version_parses_and_caches(monkeypatch):
         calls.append(a)
         return Result()
 
+    monkeypatch.setattr(mgr, "ensure_docker_image", lambda img: True)
     monkeypatch.setattr("subprocess.run", fake_run)
     assert mgr.detect_image_vllm_version("some-image:tag") == (0, 12)
     assert mgr.detect_image_vllm_version("some-image:tag") == (0, 12)
@@ -264,7 +268,7 @@ def test_detect_image_vllm_version_parses_and_caches(monkeypatch):
     VLLMServerManager._image_probe_cache.clear()
 
 def test_default_image_is_pinned_not_latest():
-    assert DEFAULT_VLLM_IMAGE == "nvcr.io/nvidia/vllm:26.07-py3"
+    assert DEFAULT_VLLM_IMAGE == "dgxcoder-vllm-tensorizer:26.07-py3"
     assert not DEFAULT_VLLM_IMAGE.endswith(":latest")
 
 def test_probe_image_reports_tensorizer(monkeypatch):
@@ -275,6 +279,7 @@ def test_probe_image_reports_tensorizer(monkeypatch):
         returncode = 0
         stdout = "vllm=0.13.0\ntensorizer=False\n"
 
+    monkeypatch.setattr(mgr, "ensure_docker_image", lambda img: True)
     monkeypatch.setattr("subprocess.run", lambda *a, **k: Result())
     assert mgr.image_has_tensorizer("img:tag") is False
     assert mgr.detect_image_vllm_version("img:tag") == (0, 13)
@@ -287,7 +292,39 @@ def test_probe_image_failure_is_conservative(monkeypatch):
     def boom(*a, **k):
         raise OSError("docker missing")
 
+    monkeypatch.setattr(mgr, "ensure_docker_image", lambda img: True)
     monkeypatch.setattr("subprocess.run", boom)
     assert mgr.image_has_tensorizer("img:tag") is False
     assert mgr.detect_image_vllm_version("img:tag") is None
     VLLMServerManager._image_probe_cache.clear()
+
+def test_ensure_docker_image_present(monkeypatch):
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_image_present", lambda img: True)
+    assert mgr.ensure_docker_image("dgxcoder-vllm-tensorizer:26.07-py3") is True
+
+def test_ensure_docker_image_builds_if_missing(monkeypatch):
+    mgr = VLLMServerManager()
+    present_state = {"present": False}
+    build_calls = []
+
+    def mock_is_image_present(img):
+        return present_state["present"]
+
+    def mock_run(cmd, check=False, **kwargs):
+        if cmd[0] == "docker" and cmd[1] == "build":
+            build_calls.append(cmd)
+            present_state["present"] = True
+            class Proc:
+                returncode = 0
+            return Proc()
+        raise RuntimeError("Unexpected command")
+
+    monkeypatch.setattr(mgr, "is_image_present", mock_is_image_present)
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    assert mgr.ensure_docker_image("dgxcoder-vllm-tensorizer:26.07-py3") is True
+    assert len(build_calls) == 1
+    assert "docker" in build_calls[0]
+    assert "build" in build_calls[0]
+    assert "dgxcoder-vllm-tensorizer:26.07-py3" in build_calls[0]
