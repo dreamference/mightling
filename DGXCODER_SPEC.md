@@ -21,6 +21,8 @@
   - [4.5. Session Startup Process](#45-session-startup-process)
   - [4.6. Goose-vLLM Integration](#46-goose-vllm-integration)
   - [4.7. Code Indexing Pipeline](#47-code-indexing-pipeline)
+  - [4.8. Tests Architecture](#48-tests-architecture)
+  - [4.9. Model Download, Hugging Face Caching & Tensorization](#49-model-download-hugging-face-caching--tensorization)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dgxcoder` CLI Suite](#51-dgxcoder-cli-suite)
     - [5.1.1. `dgxcoder init`](#511-dgxcoder-init)
@@ -134,11 +136,11 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
 * Telemetry fields returned as a dict: `is_gb10`, `gpu_name`, `driver_version`, `total_unified_memory_gb`, `available_memory_gb`, `used_memory_gb`, `vram_gb`, `arch`. (`vram_gb` is collected but not shown in `dgxcoder status`.)
 
 ### 4.2. GB10 Inference Stack & Auto-Launch Engine
-* **Multi-Tiered Launch Resolution** (`VLLMServerManager.build_launch_command`):
-  1. **Native CLI**: `vllm serve <hf_repo>` when `vllm` is on `PATH`.
-  2. **Python Module**: `python -m vllm.entrypoints.openai.api_server --model <hf_repo>` when the `vllm` package imports successfully.
-  3. **Docker Fallback**: `docker run --rm --name dgxcoder-vllm-{port} --gpus all -p {port}:{port} -v ~/.cache/huggingface:/root/.cache/huggingface [-e HF_TOKEN=…] vllm/vllm-openai:latest <hf_repo> …` when Docker is available (`docker ps` succeeds). Pre-removes conflicting container name before launch.
-  4. If neither vLLM nor Docker is available, still emits the Python-module command form and prints an install hint.
+* **Docker-Only Launch Resolution** (`VLLMServerManager.build_launch_command`):
+  - Always uses Docker (`docker run --gpus all ... vllm-tensorizer:latest`) when `docker ps` succeeds.
+  - Fails cleanly by raising `RuntimeError` (with install/daemon hint) if Docker is unavailable — no native `vllm serve` or `python -m` fallbacks are attempted.
+  - Custom image `vllm-tensorizer:latest` (or override via param) that includes tensorizer support; pre-removes conflicting container name before launch.
+  - The same clean-failure check is performed early in `start_server()`.
 * **Weight Pre-Download**: `start_server()` always calls `download_model()` for primary (and draft if set) before spawning the process. Download uses `huggingface_hub.snapshot_download`, then `huggingface-cli download`, else defers fetch to vLLM init.
 * **Dual-Model Speculative Decoding**: When `draft_model` is set, appends `--speculative-model <hf_draft> --num-speculative-tokens <N>`.
 * **Blackwell Performance Flags Actually Applied**:
@@ -381,6 +383,8 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 | **`mcp`** | Stdio MCP server for IDE companion tools |
 | **`web`** | Web Canvas UI on port 8501 (default) |
 | **`download`** | Pre-download model weights to HF cache |
+| **`clear-cache`** | Clear both HF and tensorizer model caches |
+| **`clear-tensorize-cache`** | Clear only the tensorizer model cache |
 
 #### Command Specification Subsections
 
@@ -430,6 +434,14 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 ##### 5.1.11. `dgxcoder download [--model MODEL] [--all]`
 * **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. Also invoked automatically from `init` and `start_server`.
 * **Example**: `dgxcoder download --model qwen2.5-coder-32b`
+
+##### 5.1.12. `dgxcoder clear-cache`
+* **Behavior**: Clears both Hugging Face (`~/.cache/huggingface`) and tensorizer (`~/.cache/dgxcoder`) parent cache directories using `shutil.rmtree`. Invokes `ModelDownloader.clear_cache()`.
+* **Example**: `dgxcoder clear-cache`
+
+##### 5.1.13. `dgxcoder clear-tensorize-cache`
+* **Behavior**: Clears only the tensorizer cache directory (`~/.cache/dgxcoder/tensorizer` parent). Invokes `ModelDownloader.clear_tensorizer_cache()`.
+* **Example**: `dgxcoder clear-tensorize-cache`
 
 #### Configuration Hierarchy & Resolution Order
 1. **CLI parameters** (`--config`, `--model`, `--agent`, `--sandbox`, …) — highest

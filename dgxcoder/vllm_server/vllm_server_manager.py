@@ -148,10 +148,8 @@ class VLLMServerManager:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
 
-        Applies tier fallback:
-        Tier 1: `vllm serve <model>` native binary
-        Tier 2: `python -m vllm.entrypoints.openai.api_server`
-        Tier 3: `docker run --gpus all ... vllm-tensorizer:latest`
+        Docker-only policy: always uses Docker (docker run --gpus all ...).
+        Fails cleanly with RuntimeError if Docker is unavailable (no native/python fallbacks).
 
         Args:
             model (str): Target model short alias or HuggingFace repo ID.
@@ -226,23 +224,16 @@ class VLLMServerManager:
         if tool_call_parser:
             base_args.extend(["--tool-call-parser", tool_call_parser])
 
-        is_docker_fallback = not shutil.which("vllm") and not self.is_vllm_installed() and self.is_docker_available()
-        
+        docker_available = self.is_docker_available()
+        is_docker_launch = docker_available  # Always prefer Docker when available
+
         # Check if tensorizer package is available in the target vLLM runtime
-        has_tensorizer = False
-        if not is_docker_fallback:
-            try:
-                import tensorizer  # noqa: F401
-                has_tensorizer = True
-            except ImportError:
-                has_tensorizer = False
-        else:
-            # Custom images like vllm-tensorizer:latest include the tensorizer package
-            has_tensorizer = "tensorizer" in docker_image
+        # Docker images (vllm-tensorizer:latest etc.) are assumed to include tensorizer
+        has_tensorizer = "tensorizer" in docker_image
 
         if use_tensorizer and is_model_tensorized(model):
             if not has_tensorizer:
-                if is_docker_fallback:
+                if is_docker_launch:
                     print(f"⚠️  Notice: Running vLLM via Docker container ({docker_image}) which does not include the 'tensorizer' package. Falling back cleanly to standard weights loading.")
                 else:
                     print("⚠️  Notice: 'tensorizer' package is not installed in vLLM environment. Falling back cleanly to standard weights loading. (Install via: pip install 'vllm[tensorizer]')")
@@ -251,18 +242,14 @@ class VLLMServerManager:
                 if tpath:
                     import json
                     t_uri = str(tpath)
-                    if is_docker_fallback:
+                    if is_docker_launch:
                         dgx_cache_host = os.path.expanduser("~/.cache/dgxcoder")
                         if t_uri.startswith(dgx_cache_host):
                             t_uri = t_uri.replace(dgx_cache_host, "/root/.cache/dgxcoder", 1)
                     base_args.extend(["--load-format", "tensorizer"])
                     base_args.extend(["--model-loader-extra-config", json.dumps({"tensorizer_uri": t_uri})])
 
-        if shutil.which("vllm"):
-            cmd = ["vllm", "serve", hf_model] + base_args
-        elif self.is_vllm_installed():
-            cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", hf_model] + base_args
-        elif self.is_docker_available():
+        if docker_available:
             hf_cache = os.path.expanduser("~/.cache/huggingface")
             dgx_cache = os.path.expanduser("~/.cache/dgxcoder")
             os.makedirs(hf_cache, exist_ok=True)
@@ -280,7 +267,10 @@ class VLLMServerManager:
                 cmd.extend(["-e", f"HF_TOKEN={token_env}"])
             cmd.extend([docker_image, hf_model] + base_args)
         else:
-            cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", hf_model] + base_args
+            raise RuntimeError(
+                "Docker is required to run vLLM but is not available. "
+                "Please ensure Docker is installed and the daemon is running (`docker ps` must succeed)."
+            )
 
         if quantization:
             cmd.extend(["--quantization", quantization])
@@ -336,9 +326,11 @@ class VLLMServerManager:
         Returns:
             Optional[subprocess.Popen]: Popen object if background=True, else None.
         """
-        if not self.is_vllm_installed() and not self.is_docker_available():
-            print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
-            print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
+        if not self.is_docker_available():
+            raise RuntimeError(
+                "Docker is required to run vLLM but is not available. "
+                "Please ensure Docker is installed and the daemon is running (`docker ps` must succeed)."
+            )
 
         # Step 1: Pre-download model weights into local cache and convert to tensorize format
         from dgxcoder.hardware import download_model
