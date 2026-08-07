@@ -32,3 +32,10 @@ def test_check_speculative_compatibility():
     valid, msg = check_speculative_compatibility("qwen2.5-coder-32b", "qwen2.5-coder-1.5b")
     assert valid is True
     assert "Speculative Decoding Qualified" in msg or "Compatible" in msg
+
+def test_download_model_functions():
+    from dgxcoder.hardware import is_model_downloaded, download_model, resolve_model_hf_repo
+    repo = resolve_model_hf_repo("qwen2.5-coder-32b")
+    assert repo == "Qwen/Qwen2.5-Coder-32B-Instruct"
+    is_dl = is_model_downloaded("qwen2.5-coder-32b")
+    assert isinstance(is_dl, bool)

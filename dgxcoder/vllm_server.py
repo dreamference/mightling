@@ -171,6 +171,12 @@ class VLLMServerManager:
             print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
             print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
 
+        # Step 1: Pre-download model weights as first step before anything else
+        from dgxcoder.hardware import download_model
+        download_model(model, hf_token=hf_token)
+        if draft_model:
+            download_model(draft_model, hf_token=hf_token)
+
         cmd = self.build_launch_command(
             model=model,
             port=port,

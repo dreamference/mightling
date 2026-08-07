@@ -247,6 +247,14 @@ Launches interactive Web Canvas UI server.
   * `--port PORT`: Port to expose Web Canvas UI (default: `8501`).
 * **Example**: `dgxcoder web --port 8501`
 
+##### 5.1.9. `dgxcoder download [--model MODEL] [--all]`
+Pre-downloads LLM primary and draft model weights from HuggingFace Hub into local cache (`~/.cache/huggingface/hub/`) as the mandatory first step before server startup.
+* **Behavior**: Checks local HuggingFace cache snapshots and pre-fetches missing model weights using `huggingface_hub.snapshot_download` or `huggingface-cli`. Guaranteed to run automatically prior to vLLM server launch.
+* **Options**:
+  * `--model MODEL`: Specific model to pre-download.
+  * `--all`: Pre-download all GB10 qualified LLM and draft models in parallel.
+* **Example**: `dgxcoder download --model qwen2.5-coder-32b --all`
+
 #### Configuration Hierarchy & Resolution Order:
 DGXCoder supports a 4-tier configuration precedence hierarchy:
 1. **Command Line Parameters** (`--config`, `--model`, `--vllm-host`, `--draft-model`) - *Highest Priority*

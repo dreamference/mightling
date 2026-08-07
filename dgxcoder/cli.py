@@ -149,6 +149,11 @@ def main() -> None:
     # mcp
     subparsers.add_parser("mcp", help="Run stdio MCP server for JetBrains & VS Code extensions")
 
+    # download
+    download_parser = subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
+    download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
+    download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
+
     # web / canvas
     web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
     web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -188,8 +193,24 @@ def main() -> None:
     )
     runner = GooseRunner(config=config)
 
-    if args.command == "init":
+    if args.command == "download":
         display_header()
+        from dgxcoder.hardware import download_model, download_all_models
+        if getattr(args, "all", False):
+            download_all_models(hf_token=config.hf_token)
+        else:
+            target_model = args.model or config.model
+            download_model(target_model, hf_token=config.hf_token)
+            if config.draft_model:
+                download_model(config.draft_model, hf_token=config.hf_token)
+        sys.exit(0)
+
+    elif args.command == "init":
+        display_header()
+        from dgxcoder.hardware import download_model
+        download_model(config.model, hf_token=config.hf_token)
+        if config.draft_model:
+            download_model(config.draft_model, hf_token=config.hf_token)
         saved_config_path = config.save_config()
         config.ensure_goose_config()
         ctx_engine = ContextEngine()
