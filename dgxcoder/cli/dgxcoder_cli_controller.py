@@ -17,6 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from dgxcoder.config import DGXCoderConfig
+from dgxcoder.config.dgxcoder_config import DEFAULT_MODEL
 from dgxcoder.runner import (
     GooseRunner, ClineRunner, ClineInstaller,
     AiderRunner, AiderInstaller,
@@ -106,6 +107,15 @@ class DGXCoderCLIController:
         agent_table.add_row("Prefix Caching / Chunked", "[bold green]Enabled (Blackwell GB10 Optimized)[/bold green]")
         agent_table.add_row("Multi-Step Scheduling", f"{config.num_scheduler_steps} steps/iter")
         agent_table.add_row("KV Cache Dtype", config.kv_cache_dtype)
+        agent_table.add_row("Tool Call Parser", config.resolve_tool_call_parser())
+        # Surfaced because on GB10 (SM121) the wrong MoE kernel does not error — it produces
+        # corrupt output — so the selected backend is worth being able to read off `status`.
+        from dgxcoder.hardware import get_model_launch_overrides
+        recipe = get_model_launch_overrides(config.model)
+        agent_table.add_row(
+            "MoE Kernel Backend",
+            recipe.get("moe_backend") or "[yellow]vLLM default (no model recipe)[/yellow]"
+        )
         agent_table.add_row("Goose CLI Runtime", goose_str)
         agent_table.add_row("Cline Extension Runtime", cline_str)
         agent_table.add_row("Aider CLI Runtime", aider_str)
@@ -183,7 +193,7 @@ class DGXCoderCLIController:
 
         # Command: dgxcoder start_server
         start_server_parser = subparsers.add_parser("start_server", help="Launch local vLLM server optimized for GB10 unified memory")
-        start_server_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name to serve (default: qwen2.5-coder-32b; examples: llama-3.3-70b, deepseek-r1-distill-32b)")
+        start_server_parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model name to serve (default: {DEFAULT_MODEL}; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
         start_server_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
@@ -194,11 +204,13 @@ class DGXCoderCLIController:
         start_server_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
         start_server_parser.add_argument("--api-key", default=None, help="OpenAI-compatible API key (optional; not set by default)")
         start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", default=True, help="Enable automatic tool choice for function calling (default: enabled)")
-        start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (default: auto-detected based on model, e.g. hermes, llama3_json)")
+        start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (default: from the model's registry recipe, e.g. hermes, qwen3_xml)")
+        start_server_parser.add_argument("--reasoning-parser", default=None, help="Reasoning-channel parser for models that emit separate thinking output (e.g. qwen3)")
+        start_server_parser.add_argument("--moe-backend", default=None, help="Mixture-of-experts kernel backend (e.g. marlin, flashinfer_cutedsl_sm12x); GB10 requires an SM121-safe choice")
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
-        start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=True, help="Save and load model in tensorize (.tensors) format (default: True)")
-        start_server_parser.add_argument("--docker-image", default=DEFAULT_VLLM_IMAGE, help="Docker image for vLLM (default: dgxcoder-vllm-tensorizer:26.07-py3)")
+        start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: per-model, True unless the model opts out)")
+        start_server_parser.add_argument("--docker-image", default=DEFAULT_VLLM_IMAGE, help="Docker image for vLLM (default: nvcr.io/nvidia/vllm:26.07-py3)")
 
         # Command: dgxcoder index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -413,9 +425,11 @@ class DGXCoderCLIController:
                     api_key=args.api_key,
                     enable_auto_tool_choice=args.enable_auto_tool_choice,
                     tool_call_parser=args.tool_call_parser,
+                    reasoning_parser=getattr(args, "reasoning_parser", None),
+                    moe_backend=getattr(args, "moe_backend", None),
                     max_num_batched_tokens=args.max_num_batched_tokens,
                     guided_decoding_backend=args.guided_decoding_backend,
-                    use_tensorizer=getattr(args, "tensorize", True),
+                    use_tensorizer=getattr(args, "tensorize", None),
                     background=True,
                     docker_image=getattr(args, "docker_image", DEFAULT_VLLM_IMAGE)
                 )

@@ -193,8 +193,9 @@ class ModelDownloader:
                         "--entrypoint", "python3",
                         DEFAULT_VLLM_IMAGE,
                         "-c",
-                        f"from tensorizer import TensorSerializer; from transformers import AutoModelForCausalLM; "
+                        f"import torch, torch.nn as nn; from tensorizer import TensorSerializer; from transformers import AutoModelForCausalLM; "
                         f"model = AutoModelForCausalLM.from_pretrained('{container_snap}', trust_remote_code=True, torch_dtype='auto'); "
+                        f"model.register_parameter('vllm_tensorized_marker', nn.Parameter(torch.tensor((1,), device='meta'), requires_grad=False)); "
                         f"serializer = TensorSerializer('{container_tfile}'); "
                         f"serializer.write_module(model); serializer.close()"
                     ]
@@ -207,6 +208,8 @@ class ModelDownloader:
         # Attempt 2: Try local tensorizer library (TensorSerializer)
         if not serialization_success:
             try:
+                import torch
+                import torch.nn as nn
                 from tensorizer import TensorSerializer
                 from transformers import AutoModelForCausalLM
                 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
@@ -223,6 +226,10 @@ class ModelDownloader:
                         trust_remote_code=True,
                         low_cpu_mem_usage=True,
                         torch_dtype="auto"
+                    )
+                    model.register_parameter(
+                        "vllm_tensorized_marker",
+                        nn.Parameter(torch.tensor((1,), device="meta"), requires_grad=False)
                     )
                     progress.update(task, description="Serializing to .tensors format")
                     serializer = TensorSerializer(str(tensors_file))

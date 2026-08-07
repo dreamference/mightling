@@ -5,8 +5,16 @@ This module provides the ModelMatrixRegistry class which acts as the single sour
 for supported LLMs, speculative decoding draft models, and short alias resolution.
 """
 
-from typing import Dict, Optional, Final
+from typing import Any, Dict, Optional, Final
 from dgxcoder.hardware.model_spec import ModelSpec
+
+# Quantization formats that a checkpoint declares in its own config.json. vLLM auto-detects these,
+# and passing an explicit --quantization alongside them fights that detection.
+SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset({"NVFP4", "MXFP4", "AWQ", "GPTQ"})
+
+# Single source of truth for the model DGXCoder serves when nothing else is specified. Imported by
+# the config layer and the vLLM launcher so the two cannot drift apart.
+DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.6-35b-a3b-nvfp4"
 
 class ModelMatrixRegistry:
     """
@@ -15,6 +23,47 @@ class ModelMatrixRegistry:
 
     # Static registry of supported target models and speculative draft models
     MATRIX: Final[Dict[str, ModelSpec]] = {
+        "qwen3.6-35b-a3b-nvfp4": ModelSpec(
+            name="Qwen 3.6 35B-A3B (NVFP4)",
+            params_b=35.0,
+            supported_precisions=["NVFP4"],
+            min_memory_gb=25.0,
+            max_memory_gb=60.0,
+            compatible_gb10=True,
+            notes=(
+                "Default. MoE with ~3B active params — decode speed tracks active params, not total, "
+                "which is what the GB10's memory bandwidth rewards. Requires the FlashInfer b12x NVFP4 "
+                "path (vLLM >= the May 2026 SM12x backends); the CUTLASS FP4 path is compiled for SM120 "
+                "and silently emits garbage on SM121. Launch values follow NVIDIA's DGX Spark recipe."
+            ),
+            hf_repo_id="nvidia/Qwen3.6-35B-A3B-NVFP4",
+            launch_overrides={
+                "max_model_len": 131072,
+                "gpu_memory_utilization": 0.81,
+                "kv_cache_dtype": "fp8",
+                "attention_backend": "flashinfer",
+                "moe_backend": "marlin",
+                "tool_call_parser": "qwen3_xml",
+                "reasoning_parser": "qwen3",
+                "max_num_batched_tokens": 32768,
+                # Tensorizer round-tripping of a pre-quantized NVFP4 checkpoint is unverified; loading
+                # the checkpoint directly is the path NVIDIA's recipe exercises.
+                "use_tensorizer": False,
+                # MTP ships inside this checkpoint. Without it NVFP4 lands at the low end of the
+                # published throughput range, so it is part of the recipe rather than a tuning extra.
+                "speculative_config": {"method": "mtp", "num_speculative_tokens": 3},
+                "extra_args": [
+                    "--max-num-seqs", "4",
+                    "--tensor-parallel-size", "1",
+                    "--dtype", "auto",
+                ],
+                # The MoE layer path reads these from the process environment, not from CLI flags.
+                "env": {
+                    "VLLM_NVFP4_GEMM_BACKEND": "flashinfer-b12x",
+                    "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+                },
+            },
+        ),
         "qwen2.5-coder-32b": ModelSpec(
             name="Qwen 2.5 Coder 32B",
             params_b=32.0,
@@ -110,28 +159,80 @@ class ModelMatrixRegistry:
     @classmethod
     def resolve_hf_repo(cls, model_key: str) -> str:
         """
-        Resolves short model alias (e.g. 'qwen2.5-coder-32b') to official HuggingFace repository ID.
+        Resolves model alias, repo string, or display name to official HuggingFace repository ID.
 
         Args:
-            model_key (str): Short model alias or full repo string.
+            model_key (str): Short model alias, HF repo ID, or display name.
 
         Returns:
             str: Official HuggingFace repository identifier (or original string if unmapped).
         """
         if not model_key:
             return model_key
-        spec = cls.MATRIX.get(model_key.lower())
+        spec = cls.get_spec(model_key)
         return spec.hf_repo_id if spec else model_key
 
     @classmethod
     def get_spec(cls, model_key: str) -> Optional[ModelSpec]:
         """
-        Retrieves ModelSpec for given short alias.
+        Retrieves ModelSpec for given short alias, HuggingFace repo ID, or display name.
 
         Args:
-            model_key (str): Short model name key.
+            model_key (str): Short model name key, HF repo ID, or display name.
 
         Returns:
             Optional[ModelSpec]: ModelSpec object or None if key is unrecognized.
         """
-        return cls.MATRIX.get(model_key.lower())
+        if not model_key:
+            return None
+        key = model_key.strip().lower()
+        if key in cls.MATRIX:
+            return cls.MATRIX[key]
+        for spec in cls.MATRIX.values():
+            if spec.hf_repo_id.lower() == key or spec.name.lower() == key:
+                return spec
+        norm_key = key.replace(" ", "").replace("_", "").replace("-", "").replace("/", "")
+        for alias, spec in cls.MATRIX.items():
+            norm_alias = alias.replace(" ", "").replace("_", "").replace("-", "").replace("/", "")
+            norm_hf = spec.hf_repo_id.lower().replace(" ", "").replace("_", "").replace("-", "").replace("/", "")
+            norm_name = spec.name.lower().replace(" ", "").replace("_", "").replace("-", "").replace("/", "")
+            if norm_key in (norm_alias, norm_hf, norm_name):
+                return spec
+        return None
+
+    @classmethod
+    def get_launch_overrides(cls, model_key: str) -> Dict[str, Any]:
+        """
+        Retrieves the per-model vLLM launch recipe for the given alias, repo ID, or display name.
+
+        Args:
+            model_key (str): Model alias, HF repo ID, or display name. Unrecognized keys
+                yield an empty recipe, leaving the caller on global defaults.
+
+        Returns:
+            Dict[str, Any]: Copy of the model's launch_overrides, safe for the caller to mutate.
+        """
+        if not model_key:
+            return {}
+        spec = cls.get_spec(model_key)
+        return dict(spec.launch_overrides) if spec else {}
+
+    @classmethod
+    def declares_own_quantization(cls, model_key: str) -> bool:
+        """
+        Reports whether the checkpoint carries its quantization format in its own config.
+
+        Callers use this to suppress an inferred `--quantization` flag: an NVFP4 or AWQ checkpoint
+        already tells vLLM what it is, and overriding that with a guess derived from the model name
+        misconfigures the load.
+
+        Args:
+            model_key (str): Short model alias, HF repo ID, or display name.
+
+        Returns:
+            bool: True when the model's precisions are all self-declaring.
+        """
+        spec = cls.get_spec(model_key) if model_key else None
+        if not spec or not spec.supported_precisions:
+            return False
+        return all(p.upper() in SELF_DECLARING_PRECISIONS for p in spec.supported_precisions)

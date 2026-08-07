@@ -13,6 +13,12 @@ MODEL_MATRIX = ModelMatrixRegistry.MATRIX
 def resolve_model_hf_repo(model_key: str) -> str:
     return ModelMatrixRegistry.resolve_hf_repo(model_key)
 
+def get_model_launch_overrides(model_key: str) -> Dict[str, Any]:
+    return ModelMatrixRegistry.get_launch_overrides(model_key)
+
+def model_declares_own_quantization(model_key: str) -> bool:
+    return ModelMatrixRegistry.declares_own_quantization(model_key)
+
 def is_model_downloaded(model_key: str) -> bool:
     return ModelDownloader.is_model_downloaded(model_key)
 
@@ -69,6 +75,8 @@ __all__ = [
     "HardwareManager",
     "MODEL_MATRIX",
     "resolve_model_hf_repo",
+    "get_model_launch_overrides",
+    "model_declares_own_quantization",
     "is_model_downloaded",
     "is_model_tensorized",
     "tensorize_model",

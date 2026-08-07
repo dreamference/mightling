@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, Final
 
 from dgxcoder.hardware import MODEL_MATRIX, check_model_compatibility
+from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
 from dgxcoder.config.config_path_resolver import ConfigPathResolver
 from dgxcoder.config.config_file_storage_manager import ConfigFileStorageManager, yaml
 
 # System defaults
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
-DEFAULT_MODEL: Final[str] = "qwen2.5-coder-32b"
+DEFAULT_MODEL: Final[str] = DEFAULT_MODEL_ALIAS
 DEFAULT_SPECULATIVE_TOKENS: Final[int] = 8
 DEFAULT_SANDBOX: Final[str] = "none"
 DEFAULT_AGENT_RUNNER: Final[str] = "goose"
@@ -235,6 +236,35 @@ class DGXCoderConfig:
         }
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 
+    def resolve_tool_call_parser(self) -> str:
+        """
+        Returns the vLLM tool-call parser that matches the configured model.
+
+        Returns:
+            str: Parser name (e.g. 'hermes', 'qwen3_xml').
+        """
+        from dgxcoder.vllm_server.vllm_server_manager import VLLMServerManager
+        return VLLMServerManager().resolve_tool_call_parser(self.model)
+
+    def build_instructions(self) -> str:
+        """
+        Builds the Goose `instructions` block for the configured model.
+
+        The Hermes prompt teaches the model to wrap tool calls in `<tool_call>` tags, which is only
+        correct when vLLM is running the hermes parser. Models served through a different parser
+        (Qwen 3.6 emits XML) already produce the format their parser expects, and instructing them
+        to emit Hermes tags instead yields tool calls that the server cannot parse.
+
+        Returns:
+            str: Instructions text, possibly empty when no prompt is warranted.
+        """
+        parts = []
+        if self.resolve_tool_call_parser() == "hermes":
+            parts.append(HERMES_TOOL_CALL_PROMPT)
+        if self.cave_mode:
+            parts.append(CAVE_MODE_PROMPT)
+        return "\n\n".join(parts)
+
     def validate_model(self) -> Tuple[bool, str]:
         """
         Validates selected main and draft models against GB10 hardware memory specs.
@@ -309,12 +339,8 @@ class DGXCoderConfig:
                 }
             }
         }
-        if self.cave_mode:
-            config_data["instructions"] = f"{HERMES_TOOL_CALL_PROMPT}\n\n{CAVE_MODE_PROMPT}"
-        else:
-            config_data["instructions"] = HERMES_TOOL_CALL_PROMPT
+        config_data["instructions"] = self.build_instructions()
 
-        
         if extra_mcp_servers:
             config_data["extensions"].update(extra_mcp_servers)
 
@@ -338,9 +364,9 @@ class DGXCoderConfig:
                             "type": "builtin",
                             "allow_shell": True
                         }
-                        # Force cave instructions when enabled
-                        if self.cave_mode:
-                            config_data["instructions"] = CAVE_MODE_PROMPT
+                        # Re-assert our instructions: the merge above lets a stale user-authored
+                        # block (or a previous model's tool-call format) win otherwise.
+                        config_data["instructions"] = self.build_instructions()
                 except Exception:
                     pass
 
@@ -395,10 +421,7 @@ class DGXCoderConfig:
                 }
             }
         }
-        if self.cave_mode:
-            config_data["instructions"] = f"{HERMES_TOOL_CALL_PROMPT}\n\n{CAVE_MODE_PROMPT}"
-        else:
-            config_data["instructions"] = HERMES_TOOL_CALL_PROMPT
+        config_data["instructions"] = self.build_instructions()
 
         if extra_mcp_servers:
             config_data["extensions"].update(extra_mcp_servers)

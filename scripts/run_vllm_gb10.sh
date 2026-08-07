@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-MODEL="${1:-qwen2.5-coder-32b}"
+MODEL="${1:-qwen3.6-35b-a3b-nvfp4}"
 PORT="${2:-8000}"
 DRAFT_MODEL="${3:-}"
 NUM_TOKENS="${4:-5}"

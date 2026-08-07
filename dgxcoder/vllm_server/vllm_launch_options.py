@@ -7,6 +7,7 @@ launching vLLM OpenAI API server processes on NVIDIA GB10 hardware.
 
 from dataclasses import dataclass
 from typing import Optional
+from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
 
 @dataclass
 class VLLMLaunchOptions:
@@ -33,7 +34,7 @@ class VLLMLaunchOptions:
     guided_decoding_backend (Optional[str]): Structured-outputs backend for deterministic JSON/tool-call
         output ('auto', 'xgrammar', 'guidance'). None leaves vLLM's own default in place.
     """
-    model: str = "qwen2.5-coder-32b"
+    model: str = DEFAULT_MODEL_ALIAS
     port: int = 8000
     quantization: Optional[str] = None
     max_model_len: int = 16384

@@ -15,14 +15,20 @@ import requests
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Final
 
+from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS as DEFAULT_MODEL
 from dgxcoder.vllm_server.vllm_server_status import VLLMServerStatus
 from dgxcoder.vllm_server.vllm_log_streamer import VLLMLogStreamer
 
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 
+# Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
+DEFAULT_MAX_MODEL_LEN: Final[int] = 16384
+DEFAULT_GPU_MEMORY_UTILIZATION: Final[float] = 0.90
+DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
+
 # Pinned vLLM runtime container built from project Dockerfile with tensorizer support.
 # Pinned to an exact tag (never ':latest') so that upstream vLLM CLI changes cannot silently break launches.
-DEFAULT_VLLM_IMAGE: Final[str] = "dgxcoder-vllm-tensorizer:26.07-py3"
+DEFAULT_VLLM_IMAGE: Final[str] = "nvcr.io/nvidia/vllm:26.07-py3"
 
 # vLLM release that removed `--guided-decoding-backend` in favour of `--structured-outputs-config.*`
 STRUCTURED_OUTPUTS_MIN_VERSION: Final[tuple] = (0, 12)
@@ -300,27 +306,58 @@ class VLLMServerManager:
             )
         return ["--structured-outputs-config.backend", backend]
 
+    def resolve_tool_call_parser(self, model: str, requested: Optional[str] = None) -> str:
+        """
+        Determines which vLLM tool-call parser matches the target model.
+
+        Resolution order is explicit request, then the model's registry recipe, then a family guess
+        from the model name. The registry step matters because parser choice is not a per-family
+        constant: Qwen 2.5 emits Hermes-style `<tool_call>` blocks while Qwen 3.6 emits XML, so a
+        name-substring guess silently produces a model whose tool calls never parse.
+
+        Args:
+            model (str): Model short alias or HuggingFace repo ID.
+            requested (Optional[str]): Caller-supplied parser; 'auto' is treated as unset.
+
+        Returns:
+            str: Parser name to pass to --tool-call-parser.
+        """
+        if requested and requested != "auto":
+            return requested
+
+        from dgxcoder.hardware import get_model_launch_overrides
+        recipe_parser = get_model_launch_overrides(model).get("tool_call_parser")
+        if recipe_parser:
+            return recipe_parser
+
+        model_lower = model.lower()
+        if "mistral" in model_lower:
+            return "mistral"
+        return "hermes"
+
     def build_launch_command(
         self,
-        model: str = "qwen2.5-coder-32b",
+        model: str = DEFAULT_MODEL,
         port: int = 8000,
         quantization: Optional[str] = None,
-        max_model_len: int = 16384,
-        gpu_memory_utilization: float = 0.90,
+        max_model_len: Optional[int] = None,
+        gpu_memory_utilization: Optional[float] = None,
         draft_model: Optional[str] = None,
         num_speculative_tokens: int = 5,
         hf_token: Optional[str] = None,
         enable_prefix_caching: bool = True,
         enable_chunked_prefill: bool = True,
         num_scheduler_steps: int = 8,
-        attention_backend: str = "auto",
-        kv_cache_dtype: str = "auto",
+        attention_backend: Optional[str] = None,
+        kv_cache_dtype: Optional[str] = None,
         api_key: Optional[str] = None,
         enable_auto_tool_choice: bool = True,
         tool_call_parser: Optional[str] = None,
+        reasoning_parser: Optional[str] = None,
+        moe_backend: Optional[str] = None,
         max_num_batched_tokens: Optional[int] = 8192,
         guided_decoding_backend: Optional[str] = None,
-        use_tensorizer: bool = True,
+        use_tensorizer: Optional[bool] = None,
         docker_image: str = DEFAULT_VLLM_IMAGE,
     ) -> List[str]:
         """
@@ -329,34 +366,52 @@ class VLLMServerManager:
         Docker-only policy: always uses Docker (docker run --gpus all ...).
         Fails cleanly with RuntimeError if Docker is unavailable (no native/python fallbacks).
 
+        Optional arguments left as None fall back to the target model's `launch_overrides` recipe in
+        `ModelMatrixRegistry`, and then to the module defaults. Models without a recipe therefore see
+        exactly the previous behaviour, while a model that needs specific backends (NVFP4 on SM121)
+        carries them as registry data instead of requiring a caller to remember the flag set.
+        `attention_backend='auto'` counts as unset, since 'auto' delegates the choice by definition.
+
         Args:
             model (str): Target model short alias or HuggingFace repo ID.
             port (int): Port number for server.
-            quantization (Optional[str]): Quantization method.
-            max_model_len (int): Context length limit.
-            gpu_memory_utilization (float): Memory allocation fraction.
+            quantization (Optional[str]): Quantization method. Suppressed for checkpoints that declare
+                their own format (NVFP4, AWQ, …), which vLLM auto-detects.
+            max_model_len (Optional[int]): Context length limit.
+            gpu_memory_utilization (Optional[float]): Memory allocation fraction.
             draft_model (Optional[str]): Speculative decoding draft model.
             num_speculative_tokens (int): Proposed draft tokens per iteration.
             hf_token (Optional[str]): HuggingFace token.
             enable_prefix_caching (bool): Flag to enable prefix KV cache.
             enable_chunked_prefill (bool): Flag to enable chunked prefill.
             num_scheduler_steps (int): Multi-step scheduling iteration count.
-            attention_backend (str): Attention implementation backend.
-            kv_cache_dtype (str): Datatype for KV cache.
+            attention_backend (Optional[str]): Attention implementation backend.
+            kv_cache_dtype (Optional[str]): Datatype for KV cache.
             api_key (Optional[str]): Optional API key for OpenAI-compatible auth (not set by default).
             enable_auto_tool_choice (bool): Enable automatic tool choice.
             tool_call_parser (Optional[str]): Parser name for tool calls.
+            reasoning_parser (Optional[str]): Parser for models that emit a separate reasoning channel.
+            moe_backend (Optional[str]): Mixture-of-experts kernel backend. Load-bearing on GB10: the
+                CUTLASS FP4 experts path is compiled for SM120 and corrupts output on SM121.
             max_num_batched_tokens (Optional[int]): Max tokens per batch when chunked prefill active (GB10).
             guided_decoding_backend (Optional[str]): Structured-outputs backend for deterministic JSON/tool
                 calls ('auto', 'xgrammar', 'guidance'). When None, no flag is emitted and vLLM applies its
                 own default ('auto').
-            use_tensorizer (bool): Pass model in tensorize (.tensors) format to vLLM if available.
+            use_tensorizer (Optional[bool]): Pass model in tensorize (.tensors) format to vLLM if available.
             docker_image (str): Docker image to launch vLLM in (default: pinned DEFAULT_VLLM_IMAGE).
 
         Returns:
             List[str]: Complete executable command list.
         """
-        from dgxcoder.hardware import resolve_model_hf_repo, is_model_tensorized, get_tensorized_path
+        import json
+
+        from dgxcoder.hardware import (
+            resolve_model_hf_repo,
+            is_model_tensorized,
+            get_tensorized_path,
+            get_model_launch_overrides,
+            model_declares_own_quantization,
+        )
         from dgxcoder.hardware.model_downloader import ModelDownloader
 
         hf_model = resolve_model_hf_repo(model)
@@ -364,20 +419,34 @@ class VLLMServerManager:
 
         token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DGXCODER_HF_TOKEN")
 
-        # Auto FP8 resolution for 70B/72B models on GB10
-        if not quantization and ("70b" in model.lower() or "72b" in model.lower()):
-            quantization = "fp8"
+        recipe = get_model_launch_overrides(model)
 
-        # Auto-resolve optimal tool_call_parser based on model architecture if None or default 'hermes'
-        if not tool_call_parser or tool_call_parser == "auto":
-            model_lower = model.lower()
-            if "qwen" in model_lower or "llama" in model_lower:
-                tool_call_parser = "hermes"
-            elif "mistral" in model_lower:
-                tool_call_parser = "mistral"
-            else:
-                tool_call_parser = "hermes"
+        def resolved(value: Any, key: str, fallback: Any) -> Any:
+            """Explicit caller argument wins; otherwise the model recipe; otherwise the module default."""
+            if value is not None:
+                return value
+            return recipe.get(key, fallback)
 
+        max_model_len = resolved(max_model_len, "max_model_len", DEFAULT_MAX_MODEL_LEN)
+        gpu_memory_utilization = resolved(
+            gpu_memory_utilization, "gpu_memory_utilization", DEFAULT_GPU_MEMORY_UTILIZATION
+        )
+        kv_cache_dtype = resolved(kv_cache_dtype, "kv_cache_dtype", DEFAULT_KV_CACHE_DTYPE)
+        moe_backend = resolved(moe_backend, "moe_backend", None)
+        reasoning_parser = resolved(reasoning_parser, "reasoning_parser", None)
+        use_tensorizer = resolved(use_tensorizer, "use_tensorizer", True)
+        max_num_batched_tokens = resolved(max_num_batched_tokens, "max_num_batched_tokens", 8192)
+        if not attention_backend or attention_backend == "auto":
+            attention_backend = recipe.get("attention_backend", "auto")
+
+        # 70B/72B checkpoints published in BF16 need an explicit FP8 request to fit GB10. Checkpoints
+        # that are already quantized announce their format in config.json, so adding a guess here would
+        # override vLLM's own detection with a value derived from nothing but the model name.
+        if not quantization and not model_declares_own_quantization(model):
+            if "70b" in model.lower() or "72b" in model.lower():
+                quantization = "fp8"
+
+        tool_call_parser = self.resolve_tool_call_parser(model, tool_call_parser)
 
         base_args: List[str] = [
             "--host", "0.0.0.0",
@@ -397,12 +466,16 @@ class VLLMServerManager:
             base_args.extend(["--attention-backend", attention_backend])
         if kv_cache_dtype:
             base_args.extend(["--kv-cache-dtype", kv_cache_dtype])
+        if moe_backend:
+            base_args.extend(["--moe-backend", moe_backend])
         if api_key:
             base_args.extend(["--api-key", api_key])
         if enable_auto_tool_choice:
             base_args.append("--enable-auto-tool-choice")
         if tool_call_parser:
             base_args.extend(["--tool-call-parser", tool_call_parser])
+        if reasoning_parser:
+            base_args.extend(["--reasoning-parser", reasoning_parser])
         if guided_decoding_backend:
             base_args.extend(self.build_structured_outputs_args(guided_decoding_backend, docker_image))
 
@@ -420,14 +493,13 @@ class VLLMServerManager:
             else:
                 tpath = get_tensorized_path(model)
                 if tpath:
-                    import json
                     t_uri = str(tpath)
                     if is_docker_launch:
                         dgx_cache_host = os.path.expanduser("~/.cache/dgxcoder")
                         if t_uri.startswith(dgx_cache_host):
                             t_uri = t_uri.replace(dgx_cache_host, "/root/.cache/dgxcoder", 1)
                     base_args.extend(["--load-format", "tensorizer"])
-                    base_args.extend(["--model-loader-extra-config", json.dumps({"tensorizer_uri": t_uri})])
+                    base_args.extend(["--model-loader-extra-config", json.dumps({"tensorizer_uri": t_uri, "tensorizer_dir": None})])
 
         if docker_available:
             hf_cache = os.path.expanduser("~/.cache/huggingface")
@@ -445,6 +517,10 @@ class VLLMServerManager:
             ]
             if token_env:
                 cmd.extend(["-e", f"HF_TOKEN={token_env}"])
+            # Kernel-backend selection for some layers (notably NVFP4 MoE) is read from the process
+            # environment rather than CLI flags, so the recipe's env has to cross the container boundary.
+            for env_key, env_val in sorted(recipe.get("env", {}).items()):
+                cmd.extend(["-e", f"{env_key}={env_val}"])
             cmd.extend(["--entrypoint", "vllm", docker_image, "serve", hf_model] + base_args)
         else:
             raise RuntimeError(
@@ -457,12 +533,20 @@ class VLLMServerManager:
 
         if hf_draft_model:
             cmd.extend(["--speculative-model", hf_draft_model, "--num-speculative-tokens", str(num_speculative_tokens)])
-            
+        elif recipe.get("speculative_config"):
+            # Self-speculation (MTP/Eagle heads shipped inside the checkpoint) has no separate draft
+            # model, so it is configured as a blob rather than via --speculative-model.
+            cmd.extend(["--speculative-config", json.dumps(recipe["speculative_config"])])
+
+        extra_args = recipe.get("extra_args")
+        if extra_args:
+            cmd.extend(str(a) for a in extra_args)
+
         return cmd
 
     def start_server(
         self,
-        model: str = "qwen2.5-coder-32b",
+        model: str = DEFAULT_MODEL,
         port: int = 8000,
         quantization: Optional[str] = None,
         draft_model: Optional[str] = None,
@@ -471,14 +555,16 @@ class VLLMServerManager:
         enable_prefix_caching: bool = True,
         enable_chunked_prefill: bool = True,
         num_scheduler_steps: int = 8,
-        attention_backend: str = "auto",
-        kv_cache_dtype: str = "auto",
+        attention_backend: Optional[str] = None,
+        kv_cache_dtype: Optional[str] = None,
         api_key: Optional[str] = None,
         enable_auto_tool_choice: bool = True,
         tool_call_parser: Optional[str] = None,
+        reasoning_parser: Optional[str] = None,
+        moe_backend: Optional[str] = None,
         max_num_batched_tokens: Optional[int] = 8192,
         guided_decoding_backend: Optional[str] = None,
-        use_tensorizer: bool = True,
+        use_tensorizer: Optional[bool] = None,
         background: bool = True,
         docker_image: str = DEFAULT_VLLM_IMAGE,
     ) -> Optional[subprocess.Popen]:
@@ -495,14 +581,16 @@ class VLLMServerManager:
             enable_prefix_caching (bool): Enable prefix KV caching.
             enable_chunked_prefill (bool): Enable chunked prefill.
             num_scheduler_steps (int): Multi-step scheduling count.
-            attention_backend (str): Attention backend.
-            kv_cache_dtype (str): KV cache precision.
+            attention_backend (Optional[str]): Attention backend.
+            kv_cache_dtype (Optional[str]): KV cache precision.
             api_key (Optional[str]): Optional API key (not set by default).
             enable_auto_tool_choice (bool): Enable automatic tool choice.
             tool_call_parser (Optional[str]): Tool call parser name.
+            reasoning_parser (Optional[str]): Reasoning-channel parser name.
+            moe_backend (Optional[str]): Mixture-of-experts kernel backend.
             max_num_batched_tokens (Optional[int]): Max tokens per batch when chunked prefill active.
             guided_decoding_backend (Optional[str]): Structured-outputs backend; None leaves vLLM's default.
-            use_tensorizer (bool): Convert and load model using tensorize (.tensors) format.
+            use_tensorizer (Optional[bool]): Convert and load model using tensorize (.tensors) format.
             background (bool): If True, run asynchronously as Popen subprocess.
             docker_image (str): Docker image to launch vLLM in (default: DEFAULT_VLLM_IMAGE).
 
@@ -530,11 +618,16 @@ class VLLMServerManager:
                 "Current system does not meet the target specs."
             )
 
-        # Step 1: Pre-download model weights into local cache and convert to tensorize format
-        from dgxcoder.hardware import download_model
-        download_model(model, hf_token=hf_token, auto_tensorize=use_tensorizer)
+        # Step 1: Pre-download model weights into local cache and convert to tensorize format.
+        # Resolve the tensorizer decision up front: some checkpoints opt out in their registry recipe,
+        # and converting one anyway would burn time and disk on an artifact the launcher will not use.
+        from dgxcoder.hardware import download_model, get_model_launch_overrides
+        tensorize = use_tensorizer
+        if tensorize is None:
+            tensorize = get_model_launch_overrides(model).get("use_tensorizer", True)
+        download_model(model, hf_token=hf_token, auto_tensorize=tensorize)
         if draft_model:
-            download_model(draft_model, hf_token=hf_token, auto_tensorize=use_tensorizer)
+            download_model(draft_model, hf_token=hf_token, auto_tensorize=tensorize)
 
         # Step 2: Build launch command
         cmd = self.build_launch_command(
@@ -552,6 +645,8 @@ class VLLMServerManager:
             api_key=api_key,
             enable_auto_tool_choice=enable_auto_tool_choice,
             tool_call_parser=tool_call_parser,
+            reasoning_parser=reasoning_parser,
+            moe_backend=moe_backend,
             max_num_batched_tokens=max_num_batched_tokens,
             guided_decoding_backend=guided_decoding_backend,
             use_tensorizer=use_tensorizer,

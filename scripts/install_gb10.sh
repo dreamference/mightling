@@ -18,6 +18,6 @@ fi
 pip install -e .
 
 echo "🚀 Initializing DGXCoder Goose configuration & indexing workspace..."
-dgxcoder init --model "${1:-qwen2.5-coder-32b}"
+dgxcoder init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
 
 echo "🎉 DGXCoder Installation & GB10 Setup Complete!"

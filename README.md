@@ -59,6 +59,7 @@ All supported models are qualified to run on a single **NVIDIA GB10 System (128 
 
 | Model Alias | Parameters | Precision | Memory Required | Hardware Qualification |
 | :--- | :--- | :--- | :--- | :--- |
+| **`qwen3.6-35b-a3b-nvfp4`** | 35B (3B active) | NVFP4 | ~25 - 60 GB | ✅ **Default**. GB10 optimized MoE |
 | **`qwen2.5-coder-32b`** | 32B | BF16 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
 | **`qwen2.5-coder-72b`** | 72B | INT8 / FP8 | ~45 - 80 GB | ✅ Supported (Quantized fit) |
 | **`deepseek-r1-distill-32b`** | 32B | BF16 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
@@ -75,7 +76,7 @@ All supported models are qualified to run on a single **NVIDIA GB10 System (128 
 
 ```bash
 # 1. Initialize project workspace & Goose agent configuration
-dgxcoder init --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b
+dgxcoder init --model qwen3.6-35b-a3b-nvfp4
 
 # 2. Launch interactive pair-programming session (Auto-launches vLLM if offline)
 dgxcoder chat --debug
@@ -86,8 +87,8 @@ dgxcoder run "Refactor database pool to use async pg" --sandbox apptainer
 # 4. Check GB10 memory telemetry & vLLM health
 dgxcoder status
 
-# 5. Launch local vLLM GB10 server with Speculative Decoding
-dgxcoder serve --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --port 8000
+# 5. Launch local vLLM GB10 server with MTP Speculative Decoding
+dgxcoder serve --model qwen3.6-35b-a3b-nvfp4 --port 8000
 
 # 6. Index codebase AST & vector context
 dgxcoder index --force
@@ -109,8 +110,8 @@ DGXCoder uses a **4-Tier Configuration Hierarchy**:
 ### Example `.dgxcoder/config.yaml`:
 ```yaml
 vllm_host: http://localhost:8000
-model: qwen2.5-coder-32b
-draft_model: qwen2.5-coder-1.5b
+model: qwen3.6-35b-a3b-nvfp4
+draft_model: null
 num_speculative_tokens: 8
 sandbox: apptainer
 ```

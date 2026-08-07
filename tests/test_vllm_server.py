@@ -24,6 +24,74 @@ def test_vllm_build_launch_command_default():
     idx = cmd.index("--tool-call-parser")
     assert cmd[idx + 1] == "hermes"
 
+def test_nvfp4_model_applies_registry_launch_recipe():
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    assert cmd[cmd.index("--max-model-len") + 1] == "131072"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.81"
+    assert cmd[cmd.index("--kv-cache-dtype") + 1] == "fp8"
+    assert cmd[cmd.index("--attention-backend") + 1] == "flashinfer"
+    assert cmd[cmd.index("--moe-backend") + 1] == "marlin"
+    assert cmd[cmd.index("--tool-call-parser") + 1] == "qwen3_xml"
+    assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
+
+def test_nvfp4_recipe_env_crosses_container_boundary():
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    assert "VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x" in cmd
+    assert "VLLM_MARLIN_USE_ATOMIC_ADD=1" in cmd
+    # -e must precede the image name, or docker treats it as a container argument
+    for var in ("VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x", "VLLM_MARLIN_USE_ATOMIC_ADD=1"):
+        assert cmd[cmd.index(var) - 1] == "-e"
+        assert cmd.index(var) < cmd.index(DEFAULT_VLLM_IMAGE)
+
+def test_nvfp4_recipe_emits_self_speculation_and_extra_args():
+    import json
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
+    assert spec["method"] == "mtp"
+    assert "--speculative-model" not in cmd
+    assert cmd[cmd.index("--max-num-seqs") + 1] == "4"
+
+def test_explicit_arguments_win_over_registry_recipe():
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(
+        model="qwen3.6-35b-a3b-nvfp4",
+        max_model_len=8192,
+        tool_call_parser="hermes",
+        moe_backend="marlin",
+        kv_cache_dtype="auto",
+    )
+    assert cmd[cmd.index("--max-model-len") + 1] == "8192"
+    assert cmd[cmd.index("--tool-call-parser") + 1] == "hermes"
+    assert cmd[cmd.index("--moe-backend") + 1] == "marlin"
+    assert cmd[cmd.index("--kv-cache-dtype") + 1] == "auto"
+
+def test_model_without_recipe_keeps_global_defaults():
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b")
+    assert cmd[cmd.index("--max-model-len") + 1] == "16384"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.9"
+    assert "--moe-backend" not in cmd
+    assert "--reasoning-parser" not in cmd
+    assert "--speculative-config" not in cmd
+    assert "-e" not in cmd
+
+def test_self_declaring_quantization_is_not_overridden():
+    mgr = VLLMServerManager()
+    # The name contains no 70b/72b marker, but the guard must hold for any self-declaring checkpoint.
+    assert "--quantization" not in mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+
+def test_nvfp4_model_opts_out_of_tensorizer(monkeypatch):
+    from dgxcoder.hardware.model_downloader import ModelDownloader
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "image_has_tensorizer", lambda img: True)
+    monkeypatch.setattr(ModelDownloader, "is_model_tensorized", lambda key: True)
+    monkeypatch.setattr(ModelDownloader, "get_tensorized_path", lambda key: "/tmp/model.tensors")
+    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    assert "--load-format" not in cmd
+
 def test_vllm_build_launch_command_auto_tool_call_parser_llama():
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(model="llama-3.3-70b")
@@ -269,7 +337,7 @@ def test_detect_image_vllm_version_parses_and_caches(monkeypatch):
     VLLMServerManager._image_probe_cache.clear()
 
 def test_default_image_is_pinned_not_latest():
-    assert DEFAULT_VLLM_IMAGE == "dgxcoder-vllm-tensorizer:26.07-py3"
+    assert DEFAULT_VLLM_IMAGE == "nvcr.io/nvidia/vllm:26.07-py3"
     assert not DEFAULT_VLLM_IMAGE.endswith(":latest")
 
 def test_probe_image_reports_tensorizer(monkeypatch):

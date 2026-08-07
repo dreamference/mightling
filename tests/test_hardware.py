@@ -33,6 +33,45 @@ def test_check_speculative_compatibility():
     assert valid is True
     assert "Speculative Decoding Qualified" in msg or "Compatible" in msg
 
+def test_default_model_is_registered_and_gb10_compatible():
+    from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+    spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
+    assert spec.compatible_gb10 is True
+    assert spec.hf_repo_id == "nvidia/Qwen3.6-35B-A3B-NVFP4"
+
+def test_launch_overrides_are_isolated_per_call():
+    from dgxcoder.hardware import get_model_launch_overrides
+    from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+    first = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
+    first["max_model_len"] = 1
+    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS)["max_model_len"] == 131072
+    assert get_model_launch_overrides("qwen2.5-coder-32b") == {}
+    assert get_model_launch_overrides("some/unknown-repo") == {}
+
+def test_declares_own_quantization():
+    from dgxcoder.hardware import model_declares_own_quantization
+    assert model_declares_own_quantization("qwen3.6-35b-a3b-nvfp4") is True
+    assert model_declares_own_quantization("qwen2.5-coder-72b") is False
+    assert model_declares_own_quantization("some/unknown-repo") is False
+
+def test_flexible_model_alias_resolution():
+    from dgxcoder.hardware import resolve_model_hf_repo, get_model_launch_overrides, model_declares_own_quantization
+    from dgxcoder.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    aliases = [
+        "qwen3.6-35b-a3b-nvfp4",
+        "nvidia/Qwen3.6-35B-A3B-NVFP4",
+        "NVIDIA Qwen3.6-35B-A3B-NVFP4",
+        "qwen 3.6 35b-a3b (nvfp4)",
+    ]
+    for name in aliases:
+        spec = ModelMatrixRegistry.get_spec(name)
+        assert spec is not None, f"Failed to get spec for {name}"
+        assert spec.hf_repo_id == "nvidia/Qwen3.6-35B-A3B-NVFP4"
+        assert resolve_model_hf_repo(name) == "nvidia/Qwen3.6-35B-A3B-NVFP4"
+        assert get_model_launch_overrides(name).get("max_model_len") == 131072
+        assert model_declares_own_quantization(name) is True
+
 def test_download_model_functions():
     from dgxcoder.hardware import is_model_downloaded, download_model, resolve_model_hf_repo
     repo = resolve_model_hf_repo("qwen2.5-coder-32b")

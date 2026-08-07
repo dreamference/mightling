@@ -136,6 +136,7 @@ Aliases and HuggingFace repos are defined in `ModelMatrixRegistry.MATRIX` (`dgxc
 
 | Alias                     | Model                         | Parameters | Precision          | Memory Required | GB10     |
 | :------------------------ | :---------------------------- | :--------- | :----------------- | :-------------- | :------- |
+| `qwen3.6-35b-a3b-nvfp4`   | Qwen 3.6 35B-A3B (**default**) | 35B (3B active) | NVFP4         | ~25 - 60 GB     | ✅       |
 | `qwen2.5-coder-32b`       | Qwen 2.5 Coder 32B            | 32B        | BF16 / INT8 / FP8  | ~35 - 64 GB     | ✅       |
 | `qwen2.5-coder-72b`       | Qwen 2.5 Coder 72B            | 72B        | INT8 / FP8 / INT4  | ~45 - 80 GB     | ✅       |
 | `qwen2.5-coder-1.5b`      | Qwen 2.5 Coder 1.5B (Draft)   | 1.5B       | BF16 / FP16 / INT8 | ~3.5 - 6 GB     | ✅ Draft |
@@ -146,7 +147,27 @@ Aliases and HuggingFace repos are defined in `ModelMatrixRegistry.MATRIX` (`dgxc
 | `starcoder2-15b`          | StarCoder2 15B                | 15B        | BF16 / FP16        | ~20 - 30 GB     | ✅       |
 | `deepseek-v3-671b`        | DeepSeek-V3 671B (MoE)        | 671B       | INT4               | ~350 GB         | ❌       |
 
-HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`, `meta-llama/Llama-3.3-70B-Instruct`, `bigcode/starcoder2-15b`.
+HF repo examples: `nvidia/Qwen3.6-35B-A3B-NVFP4`, `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`, `meta-llama/Llama-3.3-70B-Instruct`, `bigcode/starcoder2-15b`.
+
+#### Default Model Rationale
+
+`qwen3.6-35b-a3b-nvfp4` is the default because decode speed on GB10 is bounded by memory bandwidth,
+not compute: a mixture-of-experts model with ~3B active parameters generates far faster than a dense
+model of comparable quality, and 4-bit weights leave most of the 128 GB for KV cache at long context.
+
+**This model only works on an SM121-safe kernel path.** The CUTLASS FP4 kernels are compiled for the
+SM120 ISA and run on GB10 without erroring while producing corrupt output — the recognisable symptom
+is a response consisting only of `!` characters. DGXCoder pins the working path via the model's
+`launch_overrides` recipe (see [§4.2.7](#427-per-model-launch-recipes)). Verify after first launch:
+
+1. Send one completion. Output of only `!` means the wrong GEMM/MoE kernel was selected.
+2. Confirm the startup log names `flashinfer-b12x`, not `FLASHINFER_CUTLASS`.
+3. Benchmark against FP8 on your own unit before treating the FP4 numbers as settled — published
+   results range from NVFP4 losing to FP8 to winning by ~3x, driven by whether MTP is active and
+   which backend was chosen.
+
+The b12x SM12x backends merged upstream in May 2026. If `DEFAULT_VLLM_IMAGE` predates them, the
+launch falls back to a slower or broken path — see [§4.10.1](#4101-vllm-runtime-images).
 
 ---
 
@@ -173,7 +194,42 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
 - `--enable-chunked-prefill` (when enabled; default on)
 - `--kv-cache-dtype <dtype>` (default `auto`)
 - `--attention-backend <backend>` only when backend ≠ `auto`
-- `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is unset
+- `--moe-backend <backend>` only when set (by argument or model recipe)
+- `--reasoning-parser <parser>` only when set (by argument or model recipe)
+- `--speculative-config <json>` when the model recipe declares in-checkpoint speculation (MTP/Eagle)
+  and no separate `draft_model` is configured
+- `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is
+  unset **and** the checkpoint does not declare its own format. Self-declaring formats (NVFP4, MXFP4,
+  AWQ, GPTQ) are detected by vLLM from `config.json`; DGXCoder suppresses the flag rather than
+  overriding that detection with a guess derived from the model name.
+
+#### 4.2.7. Per-Model Launch Recipes
+
+Not every model runs correctly on one global flag set. `ModelSpec.launch_overrides`
+(`dgxcoder/hardware/model_spec.py`) carries a per-model vLLM recipe as registry data, and
+`build_launch_command` merges it with this precedence:
+
+```text
+explicit caller argument  >  model launch_overrides  >  module default
+```
+
+An argument left as `None` is treated as unset; `attention_backend='auto'` also counts as unset,
+since `auto` delegates the choice by definition. Models with no recipe (every pre-1.3 entry) resolve
+to exactly the previous defaults, so the mechanism is inert unless a model opts in.
+
+Recognised keys mirror `build_launch_command` parameters, plus:
+
+| Key | Effect |
+| :-- | :----- |
+| `env` | `Dict[str, str]` exported into the vLLM container as `docker run -e K=V`. Required because some kernel-backend selection (notably NVFP4 MoE) is read from the process environment, not CLI flags. |
+| `speculative_config` | Dict serialised to `--speculative-config`. For in-checkpoint speculation, which has no separate draft model. |
+| `extra_args` | Verbatim flags appended to the launch command, for recipe settings without a first-class parameter. |
+
+The default model's recipe is `ModelMatrixRegistry.MATRIX['qwen3.6-35b-a3b-nvfp4'].launch_overrides`
+and follows NVIDIA's published DGX Spark recipe: 262144 context, `gpu_memory_utilization` 0.4,
+FP8 KV cache, FlashInfer attention, `flashinfer_cutedsl_sm12x` MoE backend, `qwen3_xml` tool parser,
+`qwen3` reasoning parser, MTP speculation, `--max-num-seqs 4`, tensorizer disabled, and
+`VLLM_NVFP4_GEMM_BACKEND` / `VLLM_MARLIN_USE_ATOMIC_ADD` in the container environment.
 
 #### 4.2.4. Configuration & Base Flags
 - **Config-Stored but Not Passed to vLLM**: `num_scheduler_steps` (default `8`) is accepted on CLI/config/status display but is **not** appended as `--num-scheduler-steps` in `build_launch_command` today.
@@ -318,7 +374,7 @@ dgxcoder chat | run [--agent goose]
 
 #### `dgxcoder start_server` Variant
 
-Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadingMonitor` thread (live log piping + 10s Docker memory stats + stage detection + health polling), prints progress, and **exits once the model health check passes** (the vLLM server/container continues running). Uses CLI `--model` (defaults to `qwen2.5-coder-32b`) and other tuning flags from config. No agent runner is started.
+Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadingMonitor` thread (live log piping + 10s Docker memory stats + stage detection + health polling), prints progress, and **exits once the model health check passes** (the vLLM server/container continues running). Uses CLI `--model` (defaults to `qwen3.6-35b-a3b-nvfp4`) and other tuning flags from config. No agent runner is started.
 
 #### Failure Modes
 
@@ -352,7 +408,17 @@ Always registers the `jetbrains_mcp` stdio extension (`dgxcoder mcp`).
 `ensure_goose_config` performs a targeted deep-merge of the `extensions` dict so `developer` + `jetbrains_mcp` are never overwritten when the user already has an `extensions` section in `~/.config/goose/config.yaml`.
 
 #### 4.6.5. vLLM Side
-`start_server` passes `--enable-auto-tool-choice --tool-call-parser hermes` by default, satisfying Goose function-calling requirements without extra flags.
+`start_server` passes `--enable-auto-tool-choice` plus the parser resolved for the target model,
+satisfying Goose function-calling requirements without extra flags. Parser resolution order is
+explicit `--tool-call-parser` → the model's `launch_overrides` recipe → a family guess from the model
+name (`mistral` → `mistral`, otherwise `hermes`). Parser choice is not a per-family constant: Qwen 2.5
+emits Hermes-style `<tool_call>` blocks while Qwen 3.6 emits XML, so the default model resolves to
+`qwen3_xml` and Qwen 2.5 Coder still resolves to `hermes`.
+
+Correspondingly, `DGXCoderConfig.build_instructions()` injects `HERMES_TOOL_CALL_PROMPT` into the
+Goose `instructions` block **only** when the resolved parser is `hermes`. Teaching a model to emit
+Hermes tags while the server runs an XML parser produces tool calls the server cannot parse. Cave
+Mode instructions are appended independently of parser choice.
 
 Result: `dgxcoder chat` / `run` produce a fully-functional Goose session that can execute real shell commands and call tools against the GB10 vLLM instance out-of-the-box.
 
@@ -429,8 +495,7 @@ All operations are best-effort; failures fall back to on-demand fetch by vLLM.
 DGXCoder uses Docker for the primary vLLM inference runtime. All Docker operations require a working Docker daemon (`docker ps` must succeed).
 
 #### 4.10.1. vLLM Runtime Images
-- **Default tensorizer-enabled image** (`DEFAULT_VLLM_IMAGE`): `dgxcoder-vllm-tensorizer:26.07-py3`
-  - Built from the project root `Dockerfile` (user performs one-time `docker build -t dgxcoder-vllm-tensorizer:26.07-py3 .`).
+- **Default container image** (`DEFAULT_VLLM_IMAGE`): `nvcr.io/nvidia/vllm:26.07-py3`
   - Dockerfile:
     ```dockerfile
     FROM nvcr.io/nvidia/vllm:26.07-py3
@@ -497,7 +562,7 @@ dgxcoder init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--
 ```
 
 - **Behavior**: Downloads primary/draft weights → `save_config()` → `ensure_goose_config()` → `ContextEngine.index_workspace(force_reindex=True)`.
-- **Example**: `dgxcoder init --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --agent goose`
+- **Example**: `dgxcoder init --model qwen3.6-35b-a3b-nvfp4 --agent goose`
 
 ##### 5.1.2. `dgxcoder chat`
 
@@ -533,7 +598,7 @@ dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--dr
 ```
 
 - **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). Function calling for Goose is enabled **by default** (`--enable-auto-tool-choice --tool-call-parser hermes`). `--max-num-batched-tokens 8192` is passed automatically when `--enable-chunked-prefill` (default) to improve TTFT on large codebase prompts. See [start_server variant](#dgxcoder-start_server-variant).
-- **Example**: `dgxcoder start_server --model qwen2.5-coder-32b --port 8000`
+- **Example**: `dgxcoder start_server --model qwen3.6-35b-a3b-nvfp4 --port 8000`
 
 ##### 5.1.6. `dgxcoder stop_server`
 ```text
@@ -576,7 +641,7 @@ dgxcoder download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 ```
 
 - **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. `--tensorize` (default) also converts the model to tensorizer format. Also invoked automatically from `init` and `start_server`.
-- **Example**: `dgxcoder download --model qwen2.5-coder-32b`
+- **Example**: `dgxcoder download --model qwen3.6-35b-a3b-nvfp4`
 
 ##### 5.1.12. `dgxcoder clear-cache`
 
@@ -599,7 +664,7 @@ dgxcoder download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 
 ```yaml
 vllm_host: http://localhost:8000
-model: qwen2.5-coder-32b
+model: qwen3.6-35b-a3b-nvfp4
 draft_model: null
 num_speculative_tokens: 8
 sandbox: none
@@ -618,7 +683,7 @@ kv_cache_dtype: fp8
 | :----------------------------------- | :------------------------------------------------------------------------ | :---------------------- |
 | `DGXCODER_CONFIG_PATH`               | Custom config file path                                                   | (resolver default)      |
 | `DGXCODER_VLLM_HOST`                 | vLLM endpoint URL                                                         | `http://localhost:8000` |
-| `DGXCODER_MODEL`                     | Primary model alias                                                       | `qwen2.5-coder-32b`     |
+| `DGXCODER_MODEL`                     | Primary model alias                                                       | `qwen3.6-35b-a3b-nvfp4` |
 | `DGXCODER_DRAFT_MODEL`               | Draft model alias                                                         | unset                   |
 | `DGXCODER_SPECULATIVE_TOKENS`        | Speculative token count                                                   | `8`                     |
 | `DGXCODER_SANDBOX`                   | Sandbox engine                                                            | `none`                  |
@@ -670,7 +735,7 @@ Qualified when GPU name contains `GB10`/`BLACKWELL`, or when total memory ≥ ~1
 ```bash
 git clone https://github.com/dgxcoder/dgxcoder.git
 cd dgxcoder
-./scripts/install_gb10.sh qwen2.5-coder-32b   # positional MODEL arg (default qwen2.5-coder-32b)
+./scripts/install_gb10.sh qwen3.6-35b-a3b-nvfp4   # positional MODEL arg (default qwen3.6-35b-a3b-nvfp4)
 dgxcoder status
 dgxcoder chat
 ```
@@ -679,7 +744,7 @@ dgxcoder chat
 
 1. Installs Goose via `releases/latest/download/download_cli.sh` (falls back to `pip install goose-ai`).
 2. `pip install -e .`
-3. `dgxcoder init --model "${1:-qwen2.5-coder-32b}"`
+3. `dgxcoder init --model "${1:-qwen3.6-35b-a3b-nvfp4}"`
 
 Note: runtime Goose auto-install uses `releases/download/stable/…`; the install script uses `releases/latest/…`.
 
