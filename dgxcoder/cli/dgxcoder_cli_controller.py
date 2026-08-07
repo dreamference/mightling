@@ -25,6 +25,7 @@ from dgxcoder.runner import (
 )
 from dgxcoder.hardware import detect_gb10_hardware, download_model, download_all_models
 from dgxcoder.vllm_server import VLLMServerManager
+from dgxcoder.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dgxcoder.context_engine import ContextEngine
 from dgxcoder.mcp_server import main as run_mcp_server
 from dgxcoder.web_canvas import start_web_canvas_server
@@ -177,7 +178,7 @@ class DGXCoderCLIController:
 
         # Command: dgxcoder serve
         serve_parser = subparsers.add_parser("serve", help="Launch local vLLM server optimized for GB10 unified memory")
-        serve_parser.add_argument("--model", default=None, help="Model name to serve")
+        serve_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name to serve (default: qwen2.5-coder-32b; examples: llama-3.3-70b, deepseek-r1-distill-32b)")
         serve_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
         serve_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         serve_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
@@ -266,16 +267,20 @@ class DGXCoderCLIController:
                 download_all_models(hf_token=config.hf_token)
             else:
                 target_model = args.model or config.model
-                download_model(target_model, hf_token=config.hf_token)
-                if config.draft_model:
-                    download_model(config.draft_model, hf_token=config.hf_token)
+                if target_model:
+                    download_model(target_model, hf_token=config.hf_token)
+                    if config.draft_model:
+                        download_model(config.draft_model, hf_token=config.hf_token)
+                else:
+                    print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dgxcoder init --model <model_name>'")
             sys.exit(0)
 
         elif args.command == "init":
             cls.display_header()
-            download_model(config.model, hf_token=config.hf_token)
-            if config.draft_model:
-                download_model(config.draft_model, hf_token=config.hf_token)
+            if config.model:
+                download_model(config.model, hf_token=config.hf_token)
+                if config.draft_model:
+                    download_model(config.draft_model, hf_token=config.hf_token)
             saved_config_path = config.save_config()
             config.ensure_goose_config()
             ctx_engine = ContextEngine()
@@ -305,20 +310,59 @@ class DGXCoderCLIController:
         elif args.command == "serve":
             cls.display_header()
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
-            vllm_mgr.start_server(
-                model=args.model,
-                port=args.port,
-                quantization=args.quantization,
-                draft_model=args.draft_model,
-                num_speculative_tokens=args.num_speculative_tokens,
-                hf_token=config.hf_token,
-                enable_prefix_caching=config.enable_prefix_caching,
-                enable_chunked_prefill=config.enable_chunked_prefill,
-                num_scheduler_steps=config.num_scheduler_steps,
-                attention_backend=config.attention_backend,
-                kv_cache_dtype=config.kv_cache_dtype,
-                background=False
-            )
+            
+            # Start monitoring thread before server launch
+            monitor = create_model_loading_monitor(vllm_mgr)
+            monitor.start()
+            
+            print(f"📊 Model Loading Monitor: Tracking initialization progress for '{args.model}'...\n")
+            
+            try:
+                # Start vLLM server in background to allow progress monitoring
+                vllm_mgr.start_server(
+                    model=args.model,
+                    port=args.port,
+                    quantization=args.quantization,
+                    draft_model=args.draft_model,
+                    num_speculative_tokens=args.num_speculative_tokens,
+                    hf_token=config.hf_token,
+                    enable_prefix_caching=config.enable_prefix_caching,
+                    enable_chunked_prefill=config.enable_chunked_prefill,
+                    num_scheduler_steps=config.num_scheduler_steps,
+                    attention_backend=config.attention_backend,
+                    kv_cache_dtype=config.kv_cache_dtype,
+                    background=True
+                )
+                
+                # Print progress while server is initializing
+                import time
+                last_status = None
+                while not monitor.server_ready and vllm_mgr.process and vllm_mgr.process.poll() is None:
+                    current_status = monitor.get_status()
+                    # Only print if status changed to avoid spam
+                    if current_status['stages_reached'] != last_status:
+                        monitor.print_progress()
+                        last_status = current_status['stages_reached']
+                    time.sleep(1)
+                
+                # Server is ready
+                if monitor.server_ready:
+                    print(f"\n✅ Server Ready! API running at {vllm_mgr.host}")
+                    print(f"   Model: {args.model}")
+                    print(f"   Loaded in: {monitor.get_status()['elapsed_seconds']:.1f} seconds\n")
+                
+                # Do not block: exit after health check passes (server keeps running)
+                    
+            except KeyboardInterrupt:
+                print("\n⏹️  Shutting down server...")
+                if vllm_mgr.process:
+                    vllm_mgr.process.terminate()
+                    try:
+                        vllm_mgr.process.wait(timeout=5)
+                    except:
+                        vllm_mgr.process.kill()
+            finally:
+                monitor.stop()
 
         elif args.command == "index":
             cls.display_header()

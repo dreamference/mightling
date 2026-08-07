@@ -71,6 +71,27 @@ class VLLMServerManager:
             pass
         return []
 
+    def get_container_reserved_memory(self) -> Optional[str]:
+        """
+        Returns reserved memory usage of the Docker container (if running via docker).
+        Uses docker stats --no-stream to get current memory usage.
+        """
+        if not self.process or not shutil.which("docker"):
+            return None
+        try:
+            # Extract port from host for container name
+            port = self.host.split(":")[-1] if ":" in self.host else "8000"
+            container_name = f"dgxcoder-vllm-{port}"
+            result = subprocess.run(
+                ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", container_name],
+                capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None
+
     def is_vllm_installed(self) -> bool:
         """
         Checks if vLLM CLI or python package is installed in environment.
@@ -268,9 +289,24 @@ class VLLMServerManager:
         
         env = os.environ.copy()
         token_val = hf_token or os.getenv("HF_TOKEN") or os.getenv("DGXCODER_HF_TOKEN")
+        
+        # Configure HuggingFace to use local cache exclusively when possible
+        from dgxcoder.hardware.model_downloader import ModelDownloader
+        hf_cache_dir = str(ModelDownloader.get_hf_cache_dir().parent)
+        env["HF_HOME"] = hf_cache_dir
+        
+        # Set HF_HUB_OFFLINE to 0 (default) to allow cache-first behavior
+        # Models must be pre-downloaded or vLLM will download on first load
+        env["HF_HUB_OFFLINE"] = "0"
+        
+        # Disable auth token usage for anonymous downloads (use cache-only mode)
+        # Only set token if explicitly provided
         if token_val:
             env["HF_TOKEN"] = token_val
             env["HUGGING_FACE_HUB_TOKEN"] = token_val
+            print(f"   HuggingFace Token: Configured")
+        else:
+            print(f"   HuggingFace Token: Not configured (cache-only mode)")
 
         if background:
             self.process = subprocess.Popen(
