@@ -68,6 +68,8 @@ def handle_status():
         agent_table.add_row("Speculative Draft Model", f"{config.draft_model} ({config.num_speculative_tokens} tokens)")
     sandbox_str = f"[bold green]{config.sandbox.upper()} (Rootless Isolated)[/bold green]" if config.sandbox != "none" else "[yellow]Disabled (Native Host)[/yellow]"
     agent_table.add_row("Container Sandbox", sandbox_str)
+    hf_token_str = f"[green]Configured ({config.hf_token[:4]}...{config.hf_token[-4:]})[/green]" if config.hf_token else "[yellow]Not Configured (Anonymous Hub Access)[/yellow]"
+    agent_table.add_row("HuggingFace Auth Token", hf_token_str)
     agent_table.add_row("Goose CLI Runtime", goose_str)
     agent_table.add_row("DGXCoder Config Path", str(config.config_file_path))
     agent_table.add_row("Goose Config Path", str(config.config_path))
@@ -91,6 +93,7 @@ def main() -> None:
     )
     parser.add_argument("--config", default=None, help="Path to custom DGXCoder config file (.yaml or .json)")
     parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
+    parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # init
@@ -99,12 +102,14 @@ def main() -> None:
     init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
     init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
     init_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
+    init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
     # chat
     chat_parser = subparsers.add_parser("chat", help="Launch interactive Goose pair programming session")
     chat_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
     chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
     chat_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
+    chat_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
     chat_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
     # run
@@ -113,6 +118,7 @@ def main() -> None:
     run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
     run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
     run_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
+    run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
     run_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
     # status
@@ -125,6 +131,7 @@ def main() -> None:
     serve_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
     serve_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
     serve_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
+    serve_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
     # index
     index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -154,6 +161,7 @@ def main() -> None:
     draft_model = getattr(args, "draft_model", None)
     num_speculative_tokens = getattr(args, "num_speculative_tokens", None)
     sandbox = getattr(args, "sandbox", None)
+    hf_token = getattr(args, "hf_token", None)
 
     config = DGXCoderConfig(
         config_file=config_file,
@@ -161,7 +169,8 @@ def main() -> None:
         model=model,
         draft_model=draft_model,
         num_speculative_tokens=num_speculative_tokens,
-        sandbox=sandbox
+        sandbox=sandbox,
+        hf_token=hf_token
     )
     runner = GooseRunner(config=config)
 
@@ -179,6 +188,7 @@ def main() -> None:
         if config.draft_model:
             console.print(f"   [cyan]Draft Model:[/cyan]     {config.draft_model} ({config.num_speculative_tokens} tokens)")
         console.print(f"   [cyan]Sandbox Isolation:[/cyan]{config.sandbox.upper() if config.sandbox != 'none' else 'Disabled (Native Host)'}")
+        console.print(f"   [cyan]HF Auth Token:[/cyan]    {'Configured' if config.hf_token else 'Not Configured'}")
         console.print(f"   [cyan]Target Host:[/cyan]     {config.vllm_host}")
         console.print(f"   [cyan]Indexed Files:[/cyan]   {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")
 
@@ -200,6 +210,7 @@ def main() -> None:
             quantization=args.quantization,
             draft_model=args.draft_model,
             num_speculative_tokens=args.num_speculative_tokens,
+            hf_token=config.hf_token,
             background=False
         )
 

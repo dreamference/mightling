@@ -85,11 +85,14 @@ class VLLMServerManager:
         gpu_memory_utilization: float = 0.90,
         draft_model: Optional[str] = None,
         num_speculative_tokens: int = 5,
+        hf_token: Optional[str] = None,
     ) -> List[str]:
         """Generates vLLM command line (native CLI, Python module, or Docker container) for NVIDIA GB10 with Speculative Decoding support."""
         from dgxcoder.hardware import resolve_model_hf_repo
         hf_model = resolve_model_hf_repo(model)
         hf_draft_model = resolve_model_hf_repo(draft_model) if draft_model else None
+
+        token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DGXCODER_HF_TOKEN")
 
         if shutil.which("vllm"):
             cmd = [
@@ -121,13 +124,17 @@ class VLLMServerManager:
                 "--gpus", "all",
                 "-p", f"{port}:{port}",
                 "-v", f"{hf_cache}:/root/.cache/huggingface",
+            ]
+            if token_env:
+                cmd.extend(["-e", f"HF_TOKEN={token_env}"])
+            cmd.extend([
                 "vllm/vllm-openai:latest",
                 "--model", hf_model,
                 "--max-model-len", str(max_model_len),
                 "--gpu-memory-utilization", str(gpu_memory_utilization),
                 "--trust-remote-code",
                 "--enforce-eager",
-            ]
+            ])
         else:
             cmd = [
                 sys.executable, "-m", "vllm.entrypoints.openai.api_server",
@@ -159,9 +166,10 @@ class VLLMServerManager:
         quantization: Optional[str] = None,
         draft_model: Optional[str] = None,
         num_speculative_tokens: int = 5,
+        hf_token: Optional[str] = None,
         background: bool = True
     ) -> Optional[subprocess.Popen]:
-        """Launches vLLM server instance on NVIDIA GB10 with optional speculative decoding."""
+        """Launches vLLM server instance on NVIDIA GB10 with optional speculative decoding and HF_TOKEN authentication."""
         if not self.is_vllm_installed() and not self.is_docker_available():
             print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
             print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
@@ -171,17 +179,25 @@ class VLLMServerManager:
             port=port,
             quantization=quantization,
             draft_model=draft_model,
-            num_speculative_tokens=num_speculative_tokens
+            num_speculative_tokens=num_speculative_tokens,
+            hf_token=hf_token
         )
         print(f"🚀 Starting GB10 vLLM Server: {' '.join(cmd)}")
         
+        env = os.environ.copy()
+        token_val = hf_token or os.getenv("HF_TOKEN") or os.getenv("DGXCODER_HF_TOKEN")
+        if token_val:
+            env["HF_TOKEN"] = token_val
+            env["HUGGING_FACE_HUB_TOKEN"] = token_val
+
         if background:
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                env=env
             )
             self.log_thread = threading.Thread(
                 target=self._enqueue_output,
@@ -191,7 +207,7 @@ class VLLMServerManager:
             self.log_thread.start()
             return self.process
         else:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=env)
             return None
 
     def get_new_logs(self) -> List[str]:

@@ -27,7 +27,8 @@ class DGXCoderConfig:
         model: Optional[str] = None,
         draft_model: Optional[str] = None,
         num_speculative_tokens: Optional[int] = None,
-        sandbox: Optional[str] = None
+        sandbox: Optional[str] = None,
+        hf_token: Optional[str] = None,
     ):
         self.config_file_path = self._resolve_config_path(config_file)
         self.file_data = self._load_file_config(self.config_file_path)
@@ -79,6 +80,18 @@ class DGXCoderConfig:
             )
         ).lower()
 
+        self.hf_token = (
+            hf_token
+            if hf_token is not None
+            else os.getenv(
+                "HF_TOKEN",
+                os.getenv(
+                    "DGXCODER_HF_TOKEN",
+                    self.file_data.get("hf_token", None)
+                )
+            )
+        )
+
         self.config_path = GOOSE_CONFIG_PATH
 
     def _resolve_config_path(self, custom_path: Optional[str] = None) -> Path:
@@ -126,7 +139,8 @@ class DGXCoderConfig:
             "model": self.model,
             "draft_model": self.draft_model,
             "num_speculative_tokens": self.num_speculative_tokens,
-            "sandbox": self.sandbox
+            "sandbox": self.sandbox,
+            "hf_token": self.hf_token
         }
 
         if yaml and out_path.suffix in (".yaml", ".yml"):
@@ -147,13 +161,17 @@ class DGXCoderConfig:
 
     def get_env_vars(self) -> Dict[str, str]:
         """Returns environment variables required to run Goose against local GB10 vLLM endpoint."""
-        return {
+        env = {
             "GOOSE_PROVIDER": "openai",
             "OPENAI_HOST": self.vllm_host,
             "OPENAI_BASE_PATH": "v1",
             "OPENAI_API_KEY": "gb10-local-token",
             "GOOSE_MODEL": self.model,
         }
+        if self.hf_token:
+            env["HF_TOKEN"] = self.hf_token
+            env["HUGGING_FACE_HUB_TOKEN"] = self.hf_token
+        return env
 
     def ensure_goose_config(self, extra_mcp_servers: Optional[Dict[str, Any]] = None) -> None:
         """Writes or updates ~/.config/goose/config.yaml to integrate local vLLM and MCP servers."""

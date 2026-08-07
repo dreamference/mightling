@@ -39,3 +39,14 @@ def test_sandbox_config(tmp_path):
 
     config_cli = DGXCoderConfig(config_file=str(cfg_file), sandbox="podman")
     assert config_cli.sandbox == "podman"
+
+def test_hf_token_config(tmp_path):
+    cfg_file = tmp_path / "hf_config.yaml"
+    cfg_file.write_text("hf_token: hf_test_token_12345\n")
+    config = DGXCoderConfig(config_file=str(cfg_file))
+    assert config.hf_token == "hf_test_token_12345"
+    env = config.get_env_vars()
+    assert env["HF_TOKEN"] == "hf_test_token_12345"
+
+    config_cli = DGXCoderConfig(config_file=str(cfg_file), hf_token="hf_override_67890")
+    assert config_cli.hf_token == "hf_override_67890"

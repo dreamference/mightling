@@ -254,6 +254,8 @@ vllm_host: http://localhost:8000
 model: qwen2.5-coder-32b
 draft_model: qwen2.5-coder-1.5b
 num_speculative_tokens: 5
+sandbox: apptainer
+hf_token: hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 #### Environment Variables:
@@ -264,6 +266,8 @@ num_speculative_tokens: 5
 | `DGXCODER_MODEL` | Default LLM model name served on GB10 | `qwen2.5-coder-32b` |
 | `DGXCODER_DRAFT_MODEL` | Speculative decoding draft model name | `None` (Disabled) |
 | `DGXCODER_SPECULATIVE_TOKENS` | Number of speculative draft tokens | `5` |
+| `DGXCODER_SANDBOX` | Subagent rootless container sandbox | `none` |
+| `HF_TOKEN` / `DGXCODER_HF_TOKEN` | HuggingFace API access token for vLLM downloads | `None` |
 | `GOOSE_PROVIDER` | Provider setting passed to Goose | `openai` |
 | `OPENAI_HOST` | Host URL for local OpenAI-compatible vLLM API | `http://localhost:8000` |
 | `OPENAI_BASE_PATH` | Base path for vLLM API | `v1` |

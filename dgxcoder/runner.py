@@ -73,6 +73,7 @@ class GooseRunner:
                     model=self.config.model,
                     draft_model=self.config.draft_model,
                     num_speculative_tokens=self.config.num_speculative_tokens,
+                    hf_token=self.config.hf_token,
                     background=True
                 )
             except (KeyboardInterrupt, SystemExit):
