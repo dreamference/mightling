@@ -7,6 +7,7 @@ polling HTTP health checks, and capturing logs.
 """
 
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -18,10 +19,28 @@ from dgxcoder.vllm_server.vllm_log_streamer import VLLMLogStreamer
 
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 
+# Pinned vLLM runtime container. NVIDIA NGC publishes aarch64/Blackwell builds, so this is pullable
+# on a GB10 host with no local image build. Pinned to an exact tag (never ':latest') so that upstream
+# vLLM CLI changes cannot silently break launches.
+DEFAULT_VLLM_IMAGE: Final[str] = "nvcr.io/nvidia/vllm:26.07-py3"
+
+# vLLM release that removed `--guided-decoding-backend` in favour of `--structured-outputs-config.*`
+STRUCTURED_OUTPUTS_MIN_VERSION: Final[tuple] = (0, 12)
+
+# Backends selectable on current vLLM ('auto' lets vLLM pick per request)
+SUPPORTED_STRUCTURED_OUTPUT_BACKENDS: Final[tuple] = ("auto", "xgrammar", "guidance")
+
+# Backends that only exist on pre-v0.12 vLLM
+LEGACY_STRUCTURED_OUTPUT_BACKENDS: Final[tuple] = ("outlines", "lm-format-enforcer")
+
 class VLLMServerManager:
     """
     Supervisor class managing local vLLM OpenAI API server startup, container fallback, and health monitoring.
     """
+
+    # Cache of docker image name -> probe results ('vllm_version', 'has_tensorizer').
+    # Probing costs a container start, so it is done at most once per image per process.
+    _image_probe_cache: Dict[str, Dict[str, Any]] = {}
 
     def __init__(self, host: str = DEFAULT_VLLM_HOST):
         """
@@ -122,6 +141,104 @@ class VLLMServerManager:
         except Exception:
             return False
 
+    def probe_image(self, docker_image: str) -> Dict[str, Any]:
+        """
+        Inspects the target Docker image for the capabilities DGXCoder's launch command depends on.
+
+        Runs one short throwaway container that reports the installed vLLM version and whether the
+        `tensorizer` package is importable. Both facts change which flags are valid, and neither can
+        be inferred from the image name. Results are cached per image name because the probe costs
+        a container start.
+
+        Args:
+            docker_image (str): Docker image name to probe.
+
+        Returns:
+            Dict[str, Any]: {'vllm_version': (major, minor) or None, 'has_tensorizer': bool}.
+        """
+        if docker_image in self._image_probe_cache:
+            return self._image_probe_cache[docker_image]
+
+        result: Dict[str, Any] = {"vllm_version": None, "has_tensorizer": False}
+        script = (
+            "import importlib.util as u\n"
+            "try:\n"
+            "    import vllm; print('vllm=' + vllm.__version__)\n"
+            "except Exception: pass\n"
+            "print('tensorizer=' + str(u.find_spec('tensorizer') is not None))\n"
+        )
+        try:
+            res = subprocess.run(
+                ["docker", "run", "--rm", "--entrypoint", "python3", docker_image, "-c", script],
+                capture_output=True, text=True, timeout=120
+            )
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    if line.startswith("vllm="):
+                        # Strip local/build suffixes such as '0.12.1+cu129' or '0.11.0rc1'
+                        parts = line.split("=", 1)[1].strip().split("+")[0].split(".")
+                        result["vllm_version"] = (int(parts[0]), int(re.sub(r"\D.*$", "", parts[1])))
+                    elif line.startswith("tensorizer="):
+                        result["has_tensorizer"] = line.split("=", 1)[1].strip() == "True"
+        except Exception:
+            pass
+
+        self._image_probe_cache[docker_image] = result
+        return result
+
+    def detect_image_vllm_version(self, docker_image: str) -> Optional[tuple]:
+        """
+        Returns the (major, minor) vLLM version inside the target image, or None if undetectable.
+
+        Args:
+            docker_image (str): Docker image name to probe.
+
+        Returns:
+            Optional[tuple]: (major, minor) version tuple, or None.
+        """
+        return self.probe_image(docker_image)["vllm_version"]
+
+    def image_has_tensorizer(self, docker_image: str) -> bool:
+        """
+        Returns True when the target image can import `tensorizer`.
+
+        Args:
+            docker_image (str): Docker image name to probe.
+
+        Returns:
+            bool: True if tensorizer is importable inside the image.
+        """
+        return bool(self.probe_image(docker_image)["has_tensorizer"])
+
+    def build_structured_outputs_args(self, backend: str, docker_image: str) -> List[str]:
+        """
+        Builds the CLI flag that selects the structured-outputs (guided decoding) backend.
+
+        vLLM renamed this interface: `--guided-decoding-backend <b>` was deprecated and removed in
+        v0.12.0 in favour of `--structured-outputs-config.backend <b>`. The correct spelling depends
+        on the vLLM inside the target image, so probe it. When the version cannot be determined the
+        modern form is used, because the default image tracks `vllm/vllm-openai:latest`.
+
+        Args:
+            backend (str): Requested backend name (e.g. 'auto', 'xgrammar', 'guidance').
+            docker_image (str): Docker image the server will run in.
+
+        Returns:
+            List[str]: Two-element flag/value pair to append to the launch command.
+        """
+        version = self.detect_image_vllm_version(docker_image)
+
+        if version is not None and version < STRUCTURED_OUTPUTS_MIN_VERSION:
+            return ["--guided-decoding-backend", backend]
+
+        if backend in LEGACY_STRUCTURED_OUTPUT_BACKENDS:
+            print(
+                f"⚠️  Structured-outputs backend '{backend}' was removed in vLLM v{STRUCTURED_OUTPUTS_MIN_VERSION[0]}."
+                f"{STRUCTURED_OUTPUTS_MIN_VERSION[1]}. Supported backends are: "
+                f"{', '.join(SUPPORTED_STRUCTURED_OUTPUT_BACKENDS)}. Passing it through as requested."
+            )
+        return ["--structured-outputs-config.backend", backend]
+
     def build_launch_command(
         self,
         model: str = "qwen2.5-coder-32b",
@@ -141,9 +258,9 @@ class VLLMServerManager:
         enable_auto_tool_choice: bool = True,
         tool_call_parser: Optional[str] = None,
         max_num_batched_tokens: Optional[int] = 8192,
-        guided_decoding_backend: Optional[str] = "outlines",
+        guided_decoding_backend: Optional[str] = None,
         use_tensorizer: bool = True,
-        docker_image: str = "vllm-tensorizer:latest",
+        docker_image: str = DEFAULT_VLLM_IMAGE,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -169,9 +286,11 @@ class VLLMServerManager:
             enable_auto_tool_choice (bool): Enable automatic tool choice.
             tool_call_parser (Optional[str]): Parser name for tool calls.
             max_num_batched_tokens (Optional[int]): Max tokens per batch when chunked prefill active (GB10).
-            guided_decoding_backend (Optional[str]): Guided decoding backend for deterministic JSON/tool calls.
+            guided_decoding_backend (Optional[str]): Structured-outputs backend for deterministic JSON/tool
+                calls ('auto', 'xgrammar', 'guidance'). When None, no flag is emitted and vLLM applies its
+                own default ('auto').
             use_tensorizer (bool): Pass model in tensorize (.tensors) format to vLLM if available.
-            docker_image (str): Docker image name to use for docker fallback (default 'vllm-tensorizer:latest').
+            docker_image (str): Docker image to launch vLLM in (default: pinned DEFAULT_VLLM_IMAGE).
 
         Returns:
             List[str]: Complete executable command list.
@@ -223,15 +342,16 @@ class VLLMServerManager:
             base_args.append("--enable-auto-tool-choice")
         if tool_call_parser:
             base_args.extend(["--tool-call-parser", tool_call_parser])
+        if guided_decoding_backend:
+            base_args.extend(self.build_structured_outputs_args(guided_decoding_backend, docker_image))
 
         docker_available = self.is_docker_available()
         is_docker_launch = docker_available  # Always prefer Docker when available
 
-        # Check if tensorizer package is available in the target vLLM runtime
-        # Docker images (vllm-tensorizer:latest etc.) are assumed to include tensorizer
-        has_tensorizer = "tensorizer" in docker_image
-
+        # Ask the image whether it can import tensorizer. The image name says nothing about this:
+        # the pinned NGC runtime may or may not ship the package depending on the tag.
         if use_tensorizer and is_model_tensorized(model):
+            has_tensorizer = self.image_has_tensorizer(docker_image)
             if not has_tensorizer:
                 if is_docker_launch:
                     print(f"⚠️  Notice: Running vLLM via Docker container ({docker_image}) which does not include the 'tensorizer' package. Falling back cleanly to standard weights loading.")
@@ -297,8 +417,7 @@ class VLLMServerManager:
         enable_auto_tool_choice: bool = True,
         tool_call_parser: Optional[str] = None,
         max_num_batched_tokens: Optional[int] = 8192,
-
-        guided_decoding_backend: Optional[str] = "outlines",
+        guided_decoding_backend: Optional[str] = None,
         use_tensorizer: bool = True,
         background: bool = True
     ) -> Optional[subprocess.Popen]:
@@ -320,6 +439,8 @@ class VLLMServerManager:
             api_key (Optional[str]): Optional API key (not set by default).
             enable_auto_tool_choice (bool): Enable automatic tool choice.
             tool_call_parser (Optional[str]): Tool call parser name.
+            max_num_batched_tokens (Optional[int]): Max tokens per batch when chunked prefill active.
+            guided_decoding_backend (Optional[str]): Structured-outputs backend; None leaves vLLM's default.
             use_tensorizer (bool): Convert and load model using tensorize (.tensors) format.
             background (bool): If True, run asynchronously as Popen subprocess.
 
@@ -355,6 +476,7 @@ class VLLMServerManager:
             enable_auto_tool_choice=enable_auto_tool_choice,
             tool_call_parser=tool_call_parser,
             max_num_batched_tokens=max_num_batched_tokens,
+            guided_decoding_backend=guided_decoding_backend,
             use_tensorizer=use_tensorizer,
         )
 

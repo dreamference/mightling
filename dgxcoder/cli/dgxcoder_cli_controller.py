@@ -196,7 +196,7 @@ class DGXCoderCLIController:
         start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", default=True, help="Enable automatic tool choice for function calling (default: enabled)")
         start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (default: auto-detected based on model, e.g. hermes, llama3_json)")
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
-        start_server_parser.add_argument("--guided-decoding-backend", default="outlines", help="Guided decoding backend for deterministic JSON/tool calls (default: outlines)")
+        start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=True, help="Save and load model in tensorize (.tensors) format (default: True)")
 
         # Command: dgxcoder index

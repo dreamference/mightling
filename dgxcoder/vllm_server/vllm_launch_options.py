@@ -30,7 +30,8 @@ class VLLMLaunchOptions:
     enable_auto_tool_choice (bool): Enable automatic tool choice for function calling (Goose).
     tool_call_parser (str): Tool-call parser name (e.g. 'hermes').
     max_num_batched_tokens (int): Max tokens per batch when chunked prefill is enabled (GB10 optimization).
-    guided_decoding_backend (str): Guided decoding backend for deterministic JSON/tool-call output ('outlines').
+    guided_decoding_backend (Optional[str]): Structured-outputs backend for deterministic JSON/tool-call
+        output ('auto', 'xgrammar', 'guidance'). None leaves vLLM's own default in place.
     """
     model: str = "qwen2.5-coder-32b"
     port: int = 8000
@@ -47,5 +48,5 @@ class VLLMLaunchOptions:
     enable_auto_tool_choice: bool = True
     tool_call_parser: str = "hermes"
     max_num_batched_tokens: int = 8192
-    guided_decoding_backend: str = "outlines"
+    guided_decoding_backend: Optional[str] = None
 

@@ -1,5 +1,6 @@
 import time
 from dgxcoder.vllm_server import VLLMServerManager, VLLMStartupMonitor, VLLMServerStatus
+from dgxcoder.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
 
 def test_vllm_build_launch_command_default():
     mgr = VLLMServerManager(host="http://localhost:8000")
@@ -73,8 +74,8 @@ def test_vllm_build_launch_command_docker(monkeypatch):
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
     cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", port=8000)
     assert "docker" in cmd
-    assert "vllm-tensorizer:latest" in cmd
-    img_idx = cmd.index("vllm-tensorizer:latest")
+    assert DEFAULT_VLLM_IMAGE in cmd
+    img_idx = cmd.index(DEFAULT_VLLM_IMAGE)
     assert cmd[img_idx + 1] == "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 def test_vllm_environment_checks_real():
@@ -183,10 +184,110 @@ def test_vllm_build_launch_command_tensorizer_docker(monkeypatch, tmp_path):
     monkeypatch.setattr(ModelDownloader, "get_tensorized_path", lambda key: tpath)
 
     cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", use_tensorizer=True)
-    assert "vllm-tensorizer:latest" in cmd
+    assert DEFAULT_VLLM_IMAGE in cmd
     assert "--load-format" in cmd
     assert "--model-loader-extra-config" in cmd
     cfg_idx = cmd.index("--model-loader-extra-config")
     assert "/root/.cache/dgxcoder/tensorizer/test/model.tensors" in cmd[cfg_idx + 1]
 
 
+
+def test_guided_decoding_omitted_by_default():
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b")
+    assert "--guided-decoding-backend" not in cmd
+    assert "--structured-outputs-config.backend" not in cmd
+
+def test_guided_decoding_modern_flag(monkeypatch):
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "detect_image_vllm_version", lambda image: (0, 12))
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", guided_decoding_backend="xgrammar")
+    assert "--structured-outputs-config.backend" in cmd
+    idx = cmd.index("--structured-outputs-config.backend")
+    assert cmd[idx + 1] == "xgrammar"
+    assert "--guided-decoding-backend" not in cmd
+
+def test_guided_decoding_legacy_flag_for_old_vllm(monkeypatch):
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "detect_image_vllm_version", lambda image: (0, 11))
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", guided_decoding_backend="outlines")
+    assert "--guided-decoding-backend" in cmd
+    idx = cmd.index("--guided-decoding-backend")
+    assert cmd[idx + 1] == "outlines"
+    assert "--structured-outputs-config.backend" not in cmd
+
+def test_guided_decoding_undetectable_version_uses_modern_flag(monkeypatch):
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "detect_image_vllm_version", lambda image: None)
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", guided_decoding_backend="auto")
+    assert "--structured-outputs-config.backend" in cmd
+
+def test_start_server_forwards_guided_decoding_backend(monkeypatch):
+    mgr = VLLMServerManager()
+    captured = {}
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    monkeypatch.setattr("dgxcoder.hardware.download_model", lambda *a, **k: None)
+
+    def fake_build(**kwargs):
+        captured.update(kwargs)
+        return ["docker", "run", DEFAULT_VLLM_IMAGE]
+
+    class FakeProc:
+        stdout = None
+        pid = 1234
+
+    monkeypatch.setattr(mgr, "build_launch_command", fake_build)
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(mgr.streamer, "start_streaming", lambda stream: None)
+
+    mgr.start_server(model="qwen2.5-coder-32b", guided_decoding_backend="guidance", background=True)
+    assert captured["guided_decoding_backend"] == "guidance"
+
+def test_detect_image_vllm_version_parses_and_caches(monkeypatch):
+    mgr = VLLMServerManager()
+    VLLMServerManager._image_probe_cache.clear()
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "vllm=0.12.1+cu129\ntensorizer=True\n"
+
+    def fake_run(*a, **k):
+        calls.append(a)
+        return Result()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    assert mgr.detect_image_vllm_version("some-image:tag") == (0, 12)
+    assert mgr.detect_image_vllm_version("some-image:tag") == (0, 12)
+    assert len(calls) == 1  # cached, probed only once
+    VLLMServerManager._image_probe_cache.clear()
+
+def test_default_image_is_pinned_not_latest():
+    assert DEFAULT_VLLM_IMAGE == "nvcr.io/nvidia/vllm:26.07-py3"
+    assert not DEFAULT_VLLM_IMAGE.endswith(":latest")
+
+def test_probe_image_reports_tensorizer(monkeypatch):
+    mgr = VLLMServerManager()
+    VLLMServerManager._image_probe_cache.clear()
+
+    class Result:
+        returncode = 0
+        stdout = "vllm=0.13.0\ntensorizer=False\n"
+
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: Result())
+    assert mgr.image_has_tensorizer("img:tag") is False
+    assert mgr.detect_image_vllm_version("img:tag") == (0, 13)
+    VLLMServerManager._image_probe_cache.clear()
+
+def test_probe_image_failure_is_conservative(monkeypatch):
+    mgr = VLLMServerManager()
+    VLLMServerManager._image_probe_cache.clear()
+
+    def boom(*a, **k):
+        raise OSError("docker missing")
+
+    monkeypatch.setattr("subprocess.run", boom)
+    assert mgr.image_has_tensorizer("img:tag") is False
+    assert mgr.detect_image_vllm_version("img:tag") is None
+    VLLMServerManager._image_probe_cache.clear()

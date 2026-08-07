@@ -183,13 +183,14 @@ class ModelDownloader:
                     container_snap = f"/root/.cache/huggingface/{snap_rel}"
                     container_tfile = f"/root/.cache/dgxcoder/{tdir_rel}/model.tensors"
 
-                    print("   Using vllm-tensorizer Docker container for model weight serialization...")
+                    from dgxcoder.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
+                    print(f"   Using {DEFAULT_VLLM_IMAGE} Docker container for model weight serialization...")
                     cmd = [
                         "docker", "run", "--rm", "--gpus", "all",
                         "-v", f"{hf_cache}:/root/.cache/huggingface",
                         "-v", f"{dgx_cache}:/root/.cache/dgxcoder",
                         "--entrypoint", "python3",
-                        "vllm-tensorizer:latest",
+                        DEFAULT_VLLM_IMAGE,
                         "-c",
                         f"from tensorizer import TensorSerializer; from transformers import AutoModelForCausalLM; "
                         f"model = AutoModelForCausalLM.from_pretrained('{container_snap}', trust_remote_code=True, torch_dtype='auto'); "

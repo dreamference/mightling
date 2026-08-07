@@ -154,7 +154,7 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
   - `--attention-backend <backend>` only when backend ≠ `auto`
   - `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is unset
 - **Config-Stored but Not Passed to vLLM**: `num_scheduler_steps` (default `8`) is accepted on CLI/config/status display but is **not** appended as `--num-scheduler-steps` in `build_launch_command` today.
-- **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code --enforce-eager` plus the optional flags above.
+- **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code` plus the optional flags above.
 - **Readiness Polling & Live Streaming**: `dgxcoder start_server` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`. The monitor thread constantly pipes raw vLLM container logs to stdout, prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`), tracks loading stages from logs, and polls `/v1/models` until healthy. `start_server` exits once the health check passes (server keeps running in background).
 - **Instant Signal Handling**: Poll loop sleeps in short intervals so `Ctrl+C` is handled promptly.
 
