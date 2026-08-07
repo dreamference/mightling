@@ -18,13 +18,17 @@ from typing import Dict, Any, Optional, List, Final
 from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS as DEFAULT_MODEL
 from dgxcoder.vllm_server.vllm_server_status import VLLMServerStatus
 from dgxcoder.vllm_server.vllm_log_streamer import VLLMLogStreamer
+from dgxcoder.config.dgxcoder_config import (
+    DGXCoderConfig,
+    DEFAULT_GUIDED_DECODING_BACKEND,
+)
 
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
-
-# Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
 DEFAULT_MAX_MODEL_LEN: Final[int] = 16384
 DEFAULT_GPU_MEMORY_UTILIZATION: Final[float] = 0.90
 DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
+
+# Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
 
 # Pinned vLLM runtime container built from project Dockerfile with tensorizer support.
 # Pinned to an exact tag (never ':latest') so that upstream vLLM CLI changes cannot silently break launches.
@@ -435,6 +439,7 @@ class VLLMServerManager:
         moe_backend = resolved(moe_backend, "moe_backend", None)
         reasoning_parser = resolved(reasoning_parser, "reasoning_parser", None)
         use_tensorizer = resolved(use_tensorizer, "use_tensorizer", False)
+        guided_decoding_backend = resolved(guided_decoding_backend, "guided_decoding_backend", DEFAULT_GUIDED_DECODING_BACKEND)
         max_num_batched_tokens = resolved(max_num_batched_tokens, "max_num_batched_tokens", 8192)
         if not attention_backend or attention_backend == "auto":
             attention_backend = recipe.get("attention_backend", "auto")
@@ -454,6 +459,8 @@ class VLLMServerManager:
             "--max-model-len", str(max_model_len),
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--trust-remote-code",
+            "--async-scheduling",
+            "--load-format", "fastsafetensors",
         ]
 
         if enable_prefix_caching:

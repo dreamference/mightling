@@ -75,6 +75,7 @@ class DGXCoderConfig:
         kv_cache_dtype: Optional[str] = None,
         cave_mode: Optional[bool] = None,
         use_tensorizer: Optional[bool] = None,
+        guided_decoding_backend: Optional[str] = None,
     ):
         """
         Initializes DGXCoderConfig by loading file defaults and overriding with environment variables and parameters.
@@ -196,6 +197,12 @@ class DGXCoderConfig:
             else self.file_data.get("cave_mode", DEFAULT_CAVE_MODE)
         )
 
+        self.guided_decoding_backend: str = str(
+            guided_decoding_backend
+            if guided_decoding_backend is not None
+            else self.file_data.get("guided_decoding_backend", DEFAULT_GUIDED_DECODING_BACKEND)
+        )
+
         env_tensorizer = os.getenv("DGXCODER_USE_TENSORIZER")
         if use_tensorizer is not None:
             self.use_tensorizer: bool = use_tensorizer
@@ -232,6 +239,7 @@ class DGXCoderConfig:
             "attention_backend": self.attention_backend,
             "kv_cache_dtype": self.kv_cache_dtype,
             "cave_mode": self.cave_mode,
+            "guided_decoding_backend": self.guided_decoding_backend,
             "use_tensorizer": self.use_tensorizer,
         }
         return ConfigFileStorageManager.save_config_dict(out_path, data)

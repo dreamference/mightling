@@ -289,7 +289,8 @@ class DGXCoderCLIController:
             attention_backend=attention_backend,
             kv_cache_dtype=kv_cache_dtype,
             cave_mode=cave_mode,
-            use_tensorizer=tensorize_opt
+            use_tensorizer=tensorize_opt,
+            guided_decoding_backend=guided_decoding_backend
         )
 
         # Instantiate selected runner (Goose by default, or Cline/Aider/Continue/OpenHands)
@@ -430,7 +431,7 @@ class DGXCoderCLIController:
                     reasoning_parser=getattr(args, "reasoning_parser", None),
                     moe_backend=getattr(args, "moe_backend", None),
                     max_num_batched_tokens=args.max_num_batched_tokens,
-                    guided_decoding_backend=args.guided_decoding_backend,
+                    guided_decoding_backend=args.guided_decoding_backend or config.guided_decoding_backend,
                     use_tensorizer=getattr(args, "tensorize", None),
                     background=True,
                     docker_image=getattr(args, "docker_image", DEFAULT_VLLM_IMAGE)
