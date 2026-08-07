@@ -67,6 +67,7 @@ def handle_status():
     if config.draft_model:
         agent_table.add_row("Speculative Draft Model", f"{config.draft_model} ({config.num_speculative_tokens} tokens)")
     agent_table.add_row("Goose CLI Runtime", goose_str)
+    agent_table.add_row("DGXCoder Config Path", str(config.config_file_path))
     agent_table.add_row("Goose Config Path", str(config.config_path))
 
     console.print(Panel(agent_table, title="[bold]🤖 vLLM & Goose Agent Status[/bold]", border_style="magenta"))
@@ -86,24 +87,25 @@ def main() -> None:
         prog="dgxcoder",
         description="DGXCoder: Autonomous local agentic coding engine powered by Goose & NVIDIA GB10"
     )
+    parser.add_argument("--config", default=None, help="Path to custom DGXCoder config file (.yaml or .json)")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # init
     init_parser = subparsers.add_parser("init", help="Initialize .dgxcoder project workspace and Goose MCP config")
-    init_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name served on vLLM GB10 endpoint")
-    init_parser.add_argument("--vllm-host", default="http://localhost:8000", help="vLLM server URL")
+    init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
+    init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
     init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
 
     # chat
     chat_parser = subparsers.add_parser("chat", help="Launch interactive Goose pair programming session")
-    chat_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name served on vLLM GB10 endpoint")
+    chat_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
     chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
     chat_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
     # run
     run_parser = subparsers.add_parser("run", help="Run an autonomous coding task with Goose")
     run_parser.add_argument("prompt", type=str, help="Task prompt for Goose agent")
-    run_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name served on vLLM GB10 endpoint")
+    run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
     run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
     run_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
@@ -112,11 +114,11 @@ def main() -> None:
 
     # serve / vllm
     serve_parser = subparsers.add_parser("serve", help="Launch local vLLM server optimized for GB10 unified memory")
-    serve_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name to serve")
+    serve_parser.add_argument("--model", default=None, help="Model name to serve")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
     serve_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
     serve_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
-    serve_parser.add_argument("--num-speculative-tokens", type=int, default=5, help="Number of speculative tokens to propose")
+    serve_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
 
     # index
     index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -140,12 +142,14 @@ def main() -> None:
         run_mcp_server()
         sys.exit(0)
 
-    vllm_host = getattr(args, "vllm_host", "http://localhost:8000")
-    model = getattr(args, "model", "qwen2.5-coder-32b")
+    config_file = getattr(args, "config", None)
+    vllm_host = getattr(args, "vllm_host", None)
+    model = getattr(args, "model", None)
     draft_model = getattr(args, "draft_model", None)
-    num_speculative_tokens = getattr(args, "num_speculative_tokens", 5)
+    num_speculative_tokens = getattr(args, "num_speculative_tokens", None)
 
     config = DGXCoderConfig(
+        config_file=config_file,
         vllm_host=vllm_host,
         model=model,
         draft_model=draft_model,
@@ -155,17 +159,19 @@ def main() -> None:
 
     if args.command == "init":
         display_header()
+        saved_config_path = config.save_config()
         config.ensure_goose_config()
         ctx_engine = ContextEngine()
         summary = ctx_engine.index_workspace(force_reindex=True)
 
         console.print("[bold green]✅ DGXCoder & Goose workspace initialized successfully![/bold green]")
-        console.print(f"   [cyan]Goose Config:[/cyan] {config.config_path}")
-        console.print(f"   [cyan]Target Model:[/cyan] {config.model}")
+        console.print(f"   [cyan]DGXCoder Config:[/cyan] {saved_config_path}")
+        console.print(f"   [cyan]Goose Config:[/cyan]    {config.config_path}")
+        console.print(f"   [cyan]Target Model:[/cyan]    {config.model}")
         if config.draft_model:
-            console.print(f"   [cyan]Draft Model:[/cyan]  {config.draft_model} ({config.num_speculative_tokens} tokens)")
-        console.print(f"   [cyan]Target Host:[/cyan]  {config.vllm_host}")
-        console.print(f"   [cyan]Indexed Files:[/cyan] {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")
+            console.print(f"   [cyan]Draft Model:[/cyan]     {config.draft_model} ({config.num_speculative_tokens} tokens)")
+        console.print(f"   [cyan]Target Host:[/cyan]     {config.vllm_host}")
+        console.print(f"   [cyan]Indexed Files:[/cyan]   {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")
 
     elif args.command == "chat":
         sys.exit(runner.run_session(debug=args.debug))

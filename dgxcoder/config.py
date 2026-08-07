@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from dgxcoder.hardware import MODEL_MATRIX, check_model_compatibility
 
 try:
@@ -11,25 +11,122 @@ except ImportError:
 
 DEFAULT_VLLM_HOST = "http://localhost:8000"
 DEFAULT_MODEL = "qwen2.5-coder-32b"
+DEFAULT_SPECULATIVE_TOKENS = 5
 GOOSE_CONFIG_PATH = Path.home() / ".config" / "goose" / "config.yaml"
+GLOBAL_DGXCODER_CONFIG_PATH = Path.home() / ".config" / "dgxcoder" / "config.yaml"
+LOCAL_DGXCODER_CONFIG_PATH = Path(".dgxcoder") / "config.yaml"
 
 class DGXCoderConfig:
-    """Manages GB10 hardware setup and Goose agent configurations."""
+    """Manages GB10 hardware setup, workspace config files, and Goose agent configurations."""
 
     def __init__(
         self,
-        vllm_host: str = DEFAULT_VLLM_HOST,
-        model: str = DEFAULT_MODEL,
+        config_file: Optional[str] = None,
+        vllm_host: Optional[str] = None,
+        model: Optional[str] = None,
         draft_model: Optional[str] = None,
-        num_speculative_tokens: int = 5
+        num_speculative_tokens: Optional[int] = None
     ):
-        self.vllm_host = os.getenv("DGXCODER_VLLM_HOST", vllm_host)
-        self.model = os.getenv("DGXCODER_MODEL", model)
-        self.draft_model = os.getenv("DGXCODER_DRAFT_MODEL", draft_model)
-        self.num_speculative_tokens = int(os.getenv("DGXCODER_SPECULATIVE_TOKENS", str(num_speculative_tokens)))
+        self.config_file_path = self._resolve_config_path(config_file)
+        self.file_data = self._load_file_config(self.config_file_path)
+
+        # Merge Precedence: CLI Param > Environment Var > Config File > System Default
+        self.vllm_host = (
+            vllm_host
+            if vllm_host is not None
+            else os.getenv(
+                "DGXCODER_VLLM_HOST",
+                self.file_data.get("vllm_host", DEFAULT_VLLM_HOST)
+            )
+        )
+
+        self.model = (
+            model
+            if model is not None
+            else os.getenv(
+                "DGXCODER_MODEL",
+                self.file_data.get("model", DEFAULT_MODEL)
+            )
+        )
+
+        self.draft_model = (
+            draft_model
+            if draft_model is not None
+            else os.getenv(
+                "DGXCODER_DRAFT_MODEL",
+                self.file_data.get("draft_model", None)
+            )
+        )
+
+        env_spec_tokens = os.getenv("DGXCODER_SPECULATIVE_TOKENS")
+        if num_speculative_tokens is not None:
+            self.num_speculative_tokens = num_speculative_tokens
+        elif env_spec_tokens is not None:
+            self.num_speculative_tokens = int(env_spec_tokens)
+        else:
+            self.num_speculative_tokens = int(
+                self.file_data.get("num_speculative_tokens", DEFAULT_SPECULATIVE_TOKENS)
+            )
+
         self.config_path = GOOSE_CONFIG_PATH
 
-    def validate_model(self) -> tuple[bool, str]:
+    def _resolve_config_path(self, custom_path: Optional[str] = None) -> Path:
+        """Determines active config file path."""
+        if custom_path:
+            return Path(custom_path).resolve()
+        
+        env_path = os.getenv("DGXCODER_CONFIG_PATH")
+        if env_path:
+            return Path(env_path).resolve()
+
+        if LOCAL_DGXCODER_CONFIG_PATH.exists():
+            return LOCAL_DGXCODER_CONFIG_PATH.resolve()
+
+        local_json = Path(".dgxcoder") / "config.json"
+        if local_json.exists():
+            return local_json.resolve()
+
+        if GLOBAL_DGXCODER_CONFIG_PATH.exists():
+            return GLOBAL_DGXCODER_CONFIG_PATH.resolve()
+
+        return LOCAL_DGXCODER_CONFIG_PATH.resolve()
+
+    def _load_file_config(self, path: Path) -> Dict[str, Any]:
+        """Loads configuration dictionary from YAML or JSON config file."""
+        if not path.exists():
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                if yaml and path.suffix in (".yaml", ".yml"):
+                    return yaml.safe_load(f) or {}
+                else:
+                    return json.load(f) or {}
+        except Exception as e:
+            print(f"⚠️ Error reading DGXCoder config file ({path}): {e}")
+            return {}
+
+    def save_config(self, target_path: Optional[Path] = None) -> Path:
+        """Saves current configuration parameters to YAML or JSON config file."""
+        out_path = target_path or self.config_file_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            "vllm_host": self.vllm_host,
+            "model": self.model,
+            "draft_model": self.draft_model,
+            "num_speculative_tokens": self.num_speculative_tokens
+        }
+
+        if yaml and out_path.suffix in (".yaml", ".yml"):
+            with open(out_path, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False)
+        else:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+        return out_path
+
+    def validate_model(self) -> Tuple[bool, str]:
         """Validates selected main and draft models against GB10 hardware specs."""
         if self.draft_model:
             from dgxcoder.hardware import check_speculative_compatibility

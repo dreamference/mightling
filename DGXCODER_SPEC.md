@@ -161,9 +161,25 @@ Terminal application powered by `Rich` and `Goose`.
 * **`dgxcoder mcp`**
 * **`dgxcoder web [--port PORT]`**
 
+#### Configuration Hierarchy & Resolution Order:
+DGXCoder supports a 4-tier configuration precedence hierarchy:
+1. **Command Line Parameters** (`--config`, `--model`, `--vllm-host`, `--draft-model`) - *Highest Priority*
+2. **Environment Variables** (`DGXCODER_CONFIG_PATH`, `DGXCODER_MODEL`, `DGXCODER_VLLM_HOST`, etc.)
+3. **DGXCoder Config File** (`.dgxcoder/config.yaml` or `~/.config/dgxcoder/config.yaml`)
+4. **Built-in System Defaults** - *Lowest Priority*
+
+#### DGXCoder Config File (`.dgxcoder/config.yaml`):
+```yaml
+vllm_host: http://localhost:8000
+model: qwen2.5-coder-32b
+draft_model: qwen2.5-coder-1.5b
+num_speculative_tokens: 5
+```
+
 #### Environment Variables:
 | Variable | Description | Default |
 | :--- | :--- | :--- |
+| `DGXCODER_CONFIG_PATH` | Path to custom DGXCoder configuration file | `.dgxcoder/config.yaml` |
 | `DGXCODER_VLLM_HOST` | Local vLLM server endpoint URL | `http://localhost:8000` |
 | `DGXCODER_MODEL` | Default LLM model name served on GB10 | `qwen2.5-coder-32b` |
 | `DGXCODER_DRAFT_MODEL` | Speculative decoding draft model name | `None` (Disabled) |
