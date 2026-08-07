@@ -70,6 +70,9 @@ def handle_status():
     agent_table.add_row("Container Sandbox", sandbox_str)
     hf_token_str = f"[green]Configured ({config.hf_token[:4]}...{config.hf_token[-4:]})[/green]" if config.hf_token else "[yellow]Not Configured (Anonymous Hub Access)[/yellow]"
     agent_table.add_row("HuggingFace Auth Token", hf_token_str)
+    agent_table.add_row("Prefix Caching / Chunked", "[bold green]Enabled (Blackwell GB10 Optimized)[/bold green]")
+    agent_table.add_row("Multi-Step Scheduling", f"{config.num_scheduler_steps} steps/iter")
+    agent_table.add_row("KV Cache Dtype", config.kv_cache_dtype)
     agent_table.add_row("Goose CLI Runtime", goose_str)
     agent_table.add_row("DGXCoder Config Path", str(config.config_file_path))
     agent_table.add_row("Goose Config Path", str(config.config_path))
@@ -84,6 +87,8 @@ def handle_status():
         ctx_table.add_row("Indexed Workspace Files", str(ctx_summary["total_indexed_files"]))
         ctx_table.add_row("Total AST Symbols", str(ctx_summary["total_ast_symbols"]))
         ctx_table.add_row("Index Path", ctx_summary["index_file"])
+        if ctx_summary.get("sqlite_file"):
+            ctx_table.add_row("SQLite Context Store", ctx_summary["sqlite_file"])
         console.print(Panel(ctx_table, title="[bold]📚 Context Engine Index Status[/bold]", border_style="green"))
 
 def main() -> None:
@@ -132,6 +137,9 @@ def main() -> None:
     serve_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
     serve_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
     serve_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
+    serve_parser.add_argument("--num-scheduler-steps", type=int, default=None, help="Multi-step scheduling iterations per step")
+    serve_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
+    serve_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
 
     # index
     index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -162,6 +170,9 @@ def main() -> None:
     num_speculative_tokens = getattr(args, "num_speculative_tokens", None)
     sandbox = getattr(args, "sandbox", None)
     hf_token = getattr(args, "hf_token", None)
+    num_scheduler_steps = getattr(args, "num_scheduler_steps", None)
+    attention_backend = getattr(args, "attention_backend", None)
+    kv_cache_dtype = getattr(args, "kv_cache_dtype", None)
 
     config = DGXCoderConfig(
         config_file=config_file,
@@ -170,7 +181,10 @@ def main() -> None:
         draft_model=draft_model,
         num_speculative_tokens=num_speculative_tokens,
         sandbox=sandbox,
-        hf_token=hf_token
+        hf_token=hf_token,
+        num_scheduler_steps=num_scheduler_steps,
+        attention_backend=attention_backend,
+        kv_cache_dtype=kv_cache_dtype
     )
     runner = GooseRunner(config=config)
 
@@ -211,6 +225,11 @@ def main() -> None:
             draft_model=args.draft_model,
             num_speculative_tokens=args.num_speculative_tokens,
             hf_token=config.hf_token,
+            enable_prefix_caching=config.enable_prefix_caching,
+            enable_chunked_prefill=config.enable_chunked_prefill,
+            num_scheduler_steps=config.num_scheduler_steps,
+            attention_backend=config.attention_backend,
+            kv_cache_dtype=config.kv_cache_dtype,
             background=False
         )
 

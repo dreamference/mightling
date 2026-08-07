@@ -13,12 +13,18 @@ DEFAULT_VLLM_HOST = "http://localhost:8000"
 DEFAULT_MODEL = "qwen2.5-coder-32b"
 DEFAULT_SPECULATIVE_TOKENS = 5
 DEFAULT_SANDBOX = "none"
+DEFAULT_PREFIX_CACHING = True
+DEFAULT_CHUNKED_PREFILL = True
+DEFAULT_SCHEDULER_STEPS = 8
+DEFAULT_ATTENTION_BACKEND = "auto"
+DEFAULT_KV_CACHE_DTYPE = "auto"
+
 GOOSE_CONFIG_PATH = Path.home() / ".config" / "goose" / "config.yaml"
 GLOBAL_DGXCODER_CONFIG_PATH = Path.home() / ".config" / "dgxcoder" / "config.yaml"
 LOCAL_DGXCODER_CONFIG_PATH = Path(".dgxcoder") / "config.yaml"
 
 class DGXCoderConfig:
-    """Manages GB10 hardware setup, workspace config files, and Goose agent configurations."""
+    """Manages GB10 hardware setup, workspace config files, performance tuning, and Goose agent configurations."""
 
     def __init__(
         self,
@@ -29,6 +35,11 @@ class DGXCoderConfig:
         num_speculative_tokens: Optional[int] = None,
         sandbox: Optional[str] = None,
         hf_token: Optional[str] = None,
+        enable_prefix_caching: Optional[bool] = None,
+        enable_chunked_prefill: Optional[bool] = None,
+        num_scheduler_steps: Optional[int] = None,
+        attention_backend: Optional[str] = None,
+        kv_cache_dtype: Optional[str] = None,
     ):
         self.config_file_path = self._resolve_config_path(config_file)
         self.file_data = self._load_file_config(self.config_file_path)
@@ -92,6 +103,36 @@ class DGXCoderConfig:
             )
         )
 
+        self.enable_prefix_caching = (
+            enable_prefix_caching
+            if enable_prefix_caching is not None
+            else self.file_data.get("enable_prefix_caching", DEFAULT_PREFIX_CACHING)
+        )
+
+        self.enable_chunked_prefill = (
+            enable_chunked_prefill
+            if enable_chunked_prefill is not None
+            else self.file_data.get("enable_chunked_prefill", DEFAULT_CHUNKED_PREFILL)
+        )
+
+        self.num_scheduler_steps = (
+            num_scheduler_steps
+            if num_scheduler_steps is not None
+            else int(self.file_data.get("num_scheduler_steps", DEFAULT_SCHEDULER_STEPS))
+        )
+
+        self.attention_backend = (
+            attention_backend
+            if attention_backend is not None
+            else self.file_data.get("attention_backend", DEFAULT_ATTENTION_BACKEND)
+        )
+
+        self.kv_cache_dtype = (
+            kv_cache_dtype
+            if kv_cache_dtype is not None
+            else self.file_data.get("kv_cache_dtype", DEFAULT_KV_CACHE_DTYPE)
+        )
+
         self.config_path = GOOSE_CONFIG_PATH
 
     def _resolve_config_path(self, custom_path: Optional[str] = None) -> Path:
@@ -140,7 +181,12 @@ class DGXCoderConfig:
             "draft_model": self.draft_model,
             "num_speculative_tokens": self.num_speculative_tokens,
             "sandbox": self.sandbox,
-            "hf_token": self.hf_token
+            "hf_token": self.hf_token,
+            "enable_prefix_caching": self.enable_prefix_caching,
+            "enable_chunked_prefill": self.enable_chunked_prefill,
+            "num_scheduler_steps": self.num_scheduler_steps,
+            "attention_backend": self.attention_backend,
+            "kv_cache_dtype": self.kv_cache_dtype,
         }
 
         if yaml and out_path.suffix in (".yaml", ".yml"):

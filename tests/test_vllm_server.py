@@ -13,3 +13,6 @@ def test_vllm_build_launch_command_speculative():
     assert "--num-speculative-tokens" in cmd
     tokens_idx = cmd.index("--num-speculative-tokens")
     assert cmd[tokens_idx + 1] == "5"
+    assert "--enable-prefix-caching" in cmd
+    assert "--enable-chunked-prefill" in cmd
+    assert "--num-scheduler-steps" in cmd

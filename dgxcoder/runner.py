@@ -74,6 +74,11 @@ class GooseRunner:
                     draft_model=self.config.draft_model,
                     num_speculative_tokens=self.config.num_speculative_tokens,
                     hf_token=self.config.hf_token,
+                    enable_prefix_caching=self.config.enable_prefix_caching,
+                    enable_chunked_prefill=self.config.enable_chunked_prefill,
+                    num_scheduler_steps=self.config.num_scheduler_steps,
+                    attention_backend=self.config.attention_backend,
+                    kv_cache_dtype=self.config.kv_cache_dtype,
                     background=True
                 )
             except (KeyboardInterrupt, SystemExit):

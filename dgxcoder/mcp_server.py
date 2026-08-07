@@ -1,6 +1,7 @@
 import sys
 import json
 import os
+import asyncio
 from typing import Dict, Any, List, Optional
 from dgxcoder.context_engine import ContextEngine
 
@@ -25,12 +26,12 @@ class IDEState:
 global_ide_state = IDEState()
 
 class MCPServer:
-    """Model Context Protocol (MCP) Stdio Server for JetBrains & VS Code Integration."""
+    """Model Context Protocol (MCP) Async Stdio Server for JetBrains & VS Code Integration."""
 
     def __init__(self):
         self.context_engine = ContextEngine()
 
-    def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_request_async(self, request: Dict[str, Any]) -> Dict[str, Any]:
         method = request.get("method")
         msg_id = request.get("id")
         params = request.get("params", {})
@@ -114,7 +115,7 @@ class MCPServer:
         elif method == "tools/call":
             tool_name = params.get("name")
             args = params.get("arguments", {})
-            result_content = self.execute_tool(tool_name, args)
+            result_content = await self.execute_tool_async(tool_name, args)
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
@@ -130,7 +131,11 @@ class MCPServer:
                 "error": {"code": -32601, "message": f"Method '{method}' not found"}
             }
 
-    def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Any:
+    def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Synchronous wrapper for handle_request_async for backward compatibility."""
+        return asyncio.run(self.handle_request_async(request))
+
+    async def execute_tool_async(self, tool_name: str, args: Dict[str, Any]) -> Any:
         if tool_name == "ide_get_active_editor":
             return {
                 "active_file": global_ide_state.active_file or "No active file",
@@ -163,26 +168,45 @@ class MCPServer:
         elif tool_name == "workspace_search_code":
             query = args.get("query", "")
             top_k = args.get("top_k", 5)
-            self.context_engine.index_workspace()
-            return self.context_engine.search_code(query, top_k=top_k)
+            # Offload synchronous indexing and search to background thread pool
+            def _do_search():
+                self.context_engine.index_workspace()
+                return self.context_engine.search_code(query, top_k=top_k)
+            return await asyncio.to_thread(_do_search)
 
         return {"error": f"Tool '{tool_name}' not implemented"}
 
-    def run_stdio(self):
-        """Runs the JSON-RPC stdio loop for Goose / MCP integration."""
-        for line in sys.stdin:
-            line = line.strip()
+    def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Any:
+        """Synchronous wrapper for execute_tool_async."""
+        return asyncio.run(self.execute_tool_async(tool_name, args))
+
+    async def run_stdio_async(self):
+        """Runs asynchronous non-blocking JSON-RPC stdio loop for Goose / MCP integration."""
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(reader)
+        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+
+        while True:
+            line_bytes = await reader.readline()
+            if not line_bytes:
+                break
+            line = line_bytes.decode("utf-8").strip()
             if not line:
                 continue
             try:
                 req = json.loads(line)
-                resp = self.handle_request(req)
+                resp = await self.handle_request_async(req)
                 sys.stdout.write(json.dumps(resp) + "\n")
                 sys.stdout.flush()
             except Exception as e:
                 err_resp = {"jsonrpc": "2.0", "error": {"code": -32700, "message": f"Parse error: {str(e)}"}}
                 sys.stdout.write(json.dumps(err_resp) + "\n")
                 sys.stdout.flush()
+
+    def run_stdio(self):
+        """Runs the JSON-RPC stdio loop."""
+        asyncio.run(self.run_stdio_async())
 
 def main():
     server = MCPServer()

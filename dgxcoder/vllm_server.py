@@ -86,35 +86,47 @@ class VLLMServerManager:
         draft_model: Optional[str] = None,
         num_speculative_tokens: int = 5,
         hf_token: Optional[str] = None,
+        enable_prefix_caching: bool = True,
+        enable_chunked_prefill: bool = True,
+        num_scheduler_steps: int = 8,
+        attention_backend: str = "auto",
+        kv_cache_dtype: str = "auto",
     ) -> List[str]:
-        """Generates vLLM command line (native CLI, Python module, or Docker container) for NVIDIA GB10 with Speculative Decoding support."""
+        """Generates vLLM command line with Blackwell GB10 performance tuning (Prefix Caching, Chunked Prefill, Multi-Step Scheduling)."""
         from dgxcoder.hardware import resolve_model_hf_repo
         hf_model = resolve_model_hf_repo(model)
         hf_draft_model = resolve_model_hf_repo(draft_model) if draft_model else None
 
         token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DGXCODER_HF_TOKEN")
 
+        # Auto-quantization resolution for large 70B/72B models on 128GB Unified Memory
+        if not quantization and ("70b" in model.lower() or "72b" in model.lower()):
+            quantization = "fp8"
+
+        base_args = [
+            "--host", "0.0.0.0",
+            "--port", str(port),
+            "--max-model-len", str(max_model_len),
+            "--gpu-memory-utilization", str(gpu_memory_utilization),
+            "--trust-remote-code",
+            "--enforce-eager",
+        ]
+
+        if enable_prefix_caching:
+            base_args.append("--enable-prefix-caching")
+        if enable_chunked_prefill:
+            base_args.append("--enable-chunked-prefill")
+        if num_scheduler_steps > 1:
+            base_args.extend(["--num-scheduler-steps", str(num_scheduler_steps)])
+        if attention_backend and attention_backend != "auto":
+            base_args.extend(["--attention-backend", attention_backend])
+        if kv_cache_dtype:
+            base_args.extend(["--kv-cache-dtype", kv_cache_dtype])
+
         if shutil.which("vllm"):
-            cmd = [
-                "vllm", "serve", hf_model,
-                "--host", "0.0.0.0",
-                "--port", str(port),
-                "--max-model-len", str(max_model_len),
-                "--gpu-memory-utilization", str(gpu_memory_utilization),
-                "--trust-remote-code",
-                "--enforce-eager",
-            ]
+            cmd = ["vllm", "serve", hf_model] + base_args
         elif self.is_vllm_installed():
-            cmd = [
-                sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-                "--host", "0.0.0.0",
-                "--port", str(port),
-                "--model", hf_model,
-                "--max-model-len", str(max_model_len),
-                "--gpu-memory-utilization", str(gpu_memory_utilization),
-                "--trust-remote-code",
-                "--enforce-eager",
-            ]
+            cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", hf_model] + base_args
         elif self.is_docker_available():
             hf_cache = os.path.expanduser("~/.cache/huggingface")
             os.makedirs(hf_cache, exist_ok=True)
@@ -127,35 +139,15 @@ class VLLMServerManager:
             ]
             if token_env:
                 cmd.extend(["-e", f"HF_TOKEN={token_env}"])
-            cmd.extend([
-                "vllm/vllm-openai:latest",
-                "--model", hf_model,
-                "--max-model-len", str(max_model_len),
-                "--gpu-memory-utilization", str(gpu_memory_utilization),
-                "--trust-remote-code",
-                "--enforce-eager",
-            ])
+            cmd.extend(["vllm/vllm-openai:latest", "--model", hf_model] + base_args)
         else:
-            cmd = [
-                sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-                "--host", "0.0.0.0",
-                "--port", str(port),
-                "--model", hf_model,
-                "--max-model-len", str(max_model_len),
-                "--gpu-memory-utilization", str(gpu_memory_utilization),
-                "--trust-remote-code",
-                "--enforce-eager",
-            ]
+            cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", hf_model] + base_args
 
         if quantization:
             cmd.extend(["--quantization", quantization])
 
         if hf_draft_model:
             cmd.extend(["--speculative-model", hf_draft_model, "--num-speculative-tokens", str(num_speculative_tokens)])
-        
-        hw = detect_gb10_hardware()
-        if hw.get("is_gb10") and "--kv-cache-dtype" not in cmd:
-            cmd.extend(["--kv-cache-dtype", "auto"])
             
         return cmd
 
@@ -167,9 +159,14 @@ class VLLMServerManager:
         draft_model: Optional[str] = None,
         num_speculative_tokens: int = 5,
         hf_token: Optional[str] = None,
+        enable_prefix_caching: bool = True,
+        enable_chunked_prefill: bool = True,
+        num_scheduler_steps: int = 8,
+        attention_backend: str = "auto",
+        kv_cache_dtype: str = "auto",
         background: bool = True
     ) -> Optional[subprocess.Popen]:
-        """Launches vLLM server instance on NVIDIA GB10 with optional speculative decoding and HF_TOKEN authentication."""
+        """Launches vLLM server instance on NVIDIA GB10 with speculative decoding and high-performance prefill caching."""
         if not self.is_vllm_installed() and not self.is_docker_available():
             print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
             print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
@@ -180,7 +177,12 @@ class VLLMServerManager:
             quantization=quantization,
             draft_model=draft_model,
             num_speculative_tokens=num_speculative_tokens,
-            hf_token=hf_token
+            hf_token=hf_token,
+            enable_prefix_caching=enable_prefix_caching,
+            enable_chunked_prefill=enable_chunked_prefill,
+            num_scheduler_steps=num_scheduler_steps,
+            attention_backend=attention_backend,
+            kv_cache_dtype=kv_cache_dtype,
         )
         print(f"🚀 Starting GB10 vLLM Server: {' '.join(cmd)}")
         
