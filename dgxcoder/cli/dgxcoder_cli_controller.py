@@ -304,6 +304,11 @@ class DGXCoderCLIController:
                     print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dgxcoder init --model <model_name>'")
             sys.exit(0)
 
+        elif args.command == "clear-cache":
+            cls.display_header()
+            clear_model_cache()
+            sys.exit(0)
+
         elif args.command == "init":
             cls.display_header()
             auto_t = config.use_tensorizer
