@@ -35,6 +35,7 @@ HERMES_TOOL_CALL_PROMPT: Final[str] = "You must format tool calls using <tool_ca
 
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "outlines"
 DEFAULT_CAVE_MODE: Final[bool] = False
+DEFAULT_USE_TENSORIZER: Final[bool] = True
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -67,6 +68,7 @@ class DGXCoderConfig:
         attention_backend: Optional[str] = None,
         kv_cache_dtype: Optional[str] = None,
         cave_mode: Optional[bool] = None,
+        use_tensorizer: Optional[bool] = None,
     ):
         """
         Initializes DGXCoderConfig by loading file defaults and overriding with environment variables and parameters.
@@ -188,6 +190,14 @@ class DGXCoderConfig:
             else self.file_data.get("cave_mode", DEFAULT_CAVE_MODE)
         )
 
+        env_tensorizer = os.getenv("DGXCODER_USE_TENSORIZER")
+        if use_tensorizer is not None:
+            self.use_tensorizer: bool = use_tensorizer
+        elif env_tensorizer is not None:
+            self.use_tensorizer = env_tensorizer.lower() in ("1", "true", "yes")
+        else:
+            self.use_tensorizer = bool(self.file_data.get("use_tensorizer", DEFAULT_USE_TENSORIZER))
+
         # Path to official Goose config file
         self.config_path: Path = GOOSE_CONFIG_PATH
 
@@ -216,6 +226,7 @@ class DGXCoderConfig:
             "attention_backend": self.attention_backend,
             "kv_cache_dtype": self.kv_cache_dtype,
             "cave_mode": self.cave_mode,
+            "use_tensorizer": self.use_tensorizer,
         }
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

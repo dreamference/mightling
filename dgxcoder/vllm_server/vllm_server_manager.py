@@ -142,6 +142,7 @@ class VLLMServerManager:
         tool_call_parser: Optional[str] = None,
         max_num_batched_tokens: Optional[int] = 8192,
         guided_decoding_backend: Optional[str] = "outlines",
+        use_tensorizer: bool = True,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -170,11 +171,14 @@ class VLLMServerManager:
             tool_call_parser (Optional[str]): Parser name for tool calls.
             max_num_batched_tokens (Optional[int]): Max tokens per batch when chunked prefill active (GB10).
             guided_decoding_backend (Optional[str]): Guided decoding backend for deterministic JSON/tool calls.
+            use_tensorizer (bool): Pass model in tensorize (.tensors) format to vLLM if available.
 
         Returns:
             List[str]: Complete executable command list.
         """
-        from dgxcoder.hardware import resolve_model_hf_repo
+        from dgxcoder.hardware import resolve_model_hf_repo, is_model_tensorized, get_tensorized_path
+        from dgxcoder.hardware.model_downloader import ModelDownloader
+
         hf_model = resolve_model_hf_repo(model)
         hf_draft_model = resolve_model_hf_repo(draft_model) if draft_model else None
 
@@ -220,13 +224,27 @@ class VLLMServerManager:
         if tool_call_parser:
             base_args.extend(["--tool-call-parser", tool_call_parser])
 
+        if use_tensorizer and is_model_tensorized(model):
+            tpath = get_tensorized_path(model)
+            if tpath:
+                import json
+                t_uri = str(tpath)
+                if not shutil.which("vllm") and not self.is_vllm_installed() and self.is_docker_available():
+                    dgx_cache = str(ModelDownloader.get_tensorizer_cache_dir().parent)
+                    if t_uri.startswith(dgx_cache):
+                        t_uri = t_uri.replace(dgx_cache, "/root/.cache/dgxcoder", 1)
+                base_args.extend(["--load-format", "tensorizer"])
+                base_args.extend(["--model-loader-extra-config", json.dumps({"tensorizer_uri": t_uri})])
+
         if shutil.which("vllm"):
             cmd = ["vllm", "serve", hf_model] + base_args
         elif self.is_vllm_installed():
             cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", hf_model] + base_args
         elif self.is_docker_available():
             hf_cache = os.path.expanduser("~/.cache/huggingface")
+            dgx_cache = os.path.expanduser("~/.cache/dgxcoder")
             os.makedirs(hf_cache, exist_ok=True)
+            os.makedirs(dgx_cache, exist_ok=True)
             cmd = [
                 "docker", "run", "--rm",
                 "--ipc=host",
@@ -234,6 +252,7 @@ class VLLMServerManager:
                 "--name", f"dgxcoder-vllm-{port}",
                 "--gpus", "all",
                 "-v", f"{hf_cache}:/root/.cache/huggingface",
+                "-v", f"{dgx_cache}:/root/.cache/dgxcoder",
             ]
             if token_env:
                 cmd.extend(["-e", f"HF_TOKEN={token_env}"])
@@ -268,10 +287,11 @@ class VLLMServerManager:
         max_num_batched_tokens: Optional[int] = 8192,
 
         guided_decoding_backend: Optional[str] = "outlines",
+        use_tensorizer: bool = True,
         background: bool = True
     ) -> Optional[subprocess.Popen]:
         """
-        Pre-downloads model weights and starts local vLLM OpenAI API server.
+        Pre-downloads model weights, saves in tensorize format, and starts local vLLM OpenAI API server.
 
         Args:
             model (str): Primary model name.
@@ -288,6 +308,7 @@ class VLLMServerManager:
             api_key (Optional[str]): Optional API key (not set by default).
             enable_auto_tool_choice (bool): Enable automatic tool choice.
             tool_call_parser (Optional[str]): Tool call parser name.
+            use_tensorizer (bool): Convert and load model using tensorize (.tensors) format.
             background (bool): If True, run asynchronously as Popen subprocess.
 
         Returns:
@@ -297,11 +318,11 @@ class VLLMServerManager:
             print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
             print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
 
-        # Step 1: Pre-download model weights into local HuggingFace cache
+        # Step 1: Pre-download model weights into local cache and convert to tensorize format
         from dgxcoder.hardware import download_model
-        download_model(model, hf_token=hf_token)
+        download_model(model, hf_token=hf_token, auto_tensorize=use_tensorizer)
         if draft_model:
-            download_model(draft_model, hf_token=hf_token)
+            download_model(draft_model, hf_token=hf_token, auto_tensorize=use_tensorizer)
 
         # Step 2: Build launch command
         cmd = self.build_launch_command(
@@ -320,6 +341,7 @@ class VLLMServerManager:
             enable_auto_tool_choice=enable_auto_tool_choice,
             tool_call_parser=tool_call_parser,
             max_num_batched_tokens=max_num_batched_tokens,
+            use_tensorizer=use_tensorizer,
         )
 
         # Step 3: Cleanup potential container name conflicts prior to launch

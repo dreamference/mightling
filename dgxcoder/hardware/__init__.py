@@ -15,11 +15,20 @@ def resolve_model_hf_repo(model_key: str) -> str:
 def is_model_downloaded(model_key: str) -> bool:
     return ModelDownloader.is_model_downloaded(model_key)
 
-def download_model(model_key: str, hf_token: Optional[str] = None) -> bool:
-    return ModelDownloader.download_model(model_key, hf_token=hf_token)
+def is_model_tensorized(model_key: str) -> bool:
+    return ModelDownloader.is_model_tensorized(model_key)
 
-def download_all_models(hf_token: Optional[str] = None) -> Dict[str, bool]:
-    return ModelDownloader.download_all_models(hf_token=hf_token)
+def tensorize_model(model_key: str, force: bool = False, hf_token: Optional[str] = None) -> bool:
+    return ModelDownloader.tensorize_model(model_key, force=force, hf_token=hf_token)
+
+def get_tensorized_path(model_key: str) -> Optional[Path]:
+    return ModelDownloader.get_tensorized_path(model_key)
+
+def download_model(model_key: str, hf_token: Optional[str] = None, auto_tensorize: bool = True) -> bool:
+    return ModelDownloader.download_model(model_key, hf_token=hf_token, auto_tensorize=auto_tensorize)
+
+def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = True) -> Dict[str, bool]:
+    return ModelDownloader.download_all_models(hf_token=hf_token, auto_tensorize=auto_tensorize)
 
 def get_system_memory() -> Dict[str, float]:
     m = HardwareManager.get_system_memory()
@@ -54,6 +63,9 @@ __all__ = [
     "MODEL_MATRIX",
     "resolve_model_hf_repo",
     "is_model_downloaded",
+    "is_model_tensorized",
+    "tensorize_model",
+    "get_tensorized_path",
     "download_model",
     "download_all_models",
     "get_system_memory",
@@ -61,3 +73,4 @@ __all__ = [
     "check_model_compatibility",
     "check_speculative_compatibility",
 ]
+

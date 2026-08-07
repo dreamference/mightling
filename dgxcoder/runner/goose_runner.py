@@ -165,9 +165,9 @@ class GooseRunner:
             print(f"🛡️  Enforcing Rootless Subagent Sandbox ({self.config.sandbox.upper()})...")
             cmd.extend(sandbox_prefix)
 
-        cmd.append(goose_bin)
+        env["GOOSE_CONFIG_PATH"] = str(temp_goose_config)
 
-        cmd.extend(["--config", str(temp_goose_config)])
+        cmd.append(goose_bin)
 
         if prompt:
             cmd.extend(["run", "--text", prompt])
@@ -176,6 +176,7 @@ class GooseRunner:
 
         if debug:
             cmd.append("--debug")
+
 
         print(f"🚀 Launching Goose AI Agent on GB10 local endpoint ({self.config.model})...")
         try:
