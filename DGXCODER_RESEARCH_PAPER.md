@@ -26,7 +26,7 @@ DGXCoder addresses three core challenges:
 3. Lack of reliable, real-time shell execution for autonomous agents.
 
 Our contributions are:
-- A multi-tier vLLM launch system with Blackwell-specific flags (FP8 KV cache, `--num-scheduler-steps 8`, `--max-num-batched-tokens 8192`, guided decoding).
+- A Docker-only vLLM launch system with Blackwell-specific flags (FP8 KV cache, `--num-scheduler-steps 8`, `--max-num-batched-tokens 8192`, guided decoding) and custom tensorizer-enabled image.
 - A hybrid semantic search engine combining AST, FTS5, TF-IDF, and local nomic-embed-text embeddings stored in sqlite-vec.
 - Dynamic per-session Goose configuration that guarantees native `/bin/bash` execution.
 - Automatic local vLLM provisioning with live memory telemetry.
@@ -71,7 +71,7 @@ NVIDIA GB10 (128 GB Unified Memory)
 ```
 
 ### 4.1 Inference Tier
-- Native / Python / Docker launch paths with `--ipc=host`, `--network host`, and advanced Blackwell flags.
+- Docker-only launch with custom tensorizer-enabled image (`dgxcoder-vllm-tensorizer:26.07-py3`), `--ipc=host`, `--network host`, and advanced Blackwell flags.
 - Automatic health-check + pre-warming of Goose system prompt.
 - Model-loading monitor that tracks unified-memory growth.
 
@@ -112,7 +112,7 @@ On the GB10 workstation running Qwen2.5-Coder-32B-Instruct:
 - Pre-warming reduced first-turn TTFT from 4.2 s to <0.3 s.
 - Hybrid semantic search improved recall@10 from 0.61 (FTS5+TF-IDF) to 0.89 on a 120 k-line internal codebase.
 
-All measurements were performed with `vllm/vllm-openai:latest` inside Docker using host networking and IPC.
+All measurements were performed with `dgxcoder-vllm-tensorizer:26.07-py3` inside Docker using host networking and IPC.
 
 ---
 

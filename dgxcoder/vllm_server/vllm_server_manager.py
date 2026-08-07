@@ -445,7 +445,7 @@ class VLLMServerManager:
             ]
             if token_env:
                 cmd.extend(["-e", f"HF_TOKEN={token_env}"])
-            cmd.extend([docker_image, hf_model] + base_args)
+            cmd.extend(["--entrypoint", "vllm", docker_image, "serve", hf_model] + base_args)
         else:
             raise RuntimeError(
                 "Docker is required to run vLLM but is not available. "

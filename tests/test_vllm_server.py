@@ -76,7 +76,8 @@ def test_vllm_build_launch_command_docker(monkeypatch):
     assert "docker" in cmd
     assert DEFAULT_VLLM_IMAGE in cmd
     img_idx = cmd.index(DEFAULT_VLLM_IMAGE)
-    assert cmd[img_idx + 1] == "Qwen/Qwen2.5-Coder-32B-Instruct"
+    assert cmd[img_idx + 1] == "serve"
+    assert cmd[img_idx + 2] == "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 def test_vllm_environment_checks_real():
     mgr = VLLMServerManager()

@@ -12,3 +12,5 @@ FROM nvcr.io/nvidia/vllm:26.07-py3
 
 # Install tensorizer optional dependencies for fast model weight loading
 RUN pip install "vllm[tensorizer]"
+
+ENTRYPOINT ["vllm", "serve"]
