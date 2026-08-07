@@ -12,7 +12,7 @@ import sys
 import time
 from typing import List, Optional
 from dgxcoder.config import DGXCoderConfig
-from dgxcoder.vllm_server import VLLMServerManager
+from dgxcoder.vllm_server import VLLMServerManager, VLLMStartupMonitor
 from dgxcoder.runner.goose_installer import GooseInstaller
 from dgxcoder.runner.sandbox_manager import SandboxManager
 
@@ -52,6 +52,7 @@ class GooseRunner:
         """
         Waits for local vLLM HTTP endpoint to become healthy. If offline and auto_launch=True,
         automatically starts local vLLM server and streams startup logs in real time.
+        Uses a dedicated VLLMStartupMonitor thread to detect and log stalls instead of printing dots.
 
         Args:
             poll_interval (float): Polling loop interval in seconds.
@@ -95,19 +96,25 @@ class GooseRunner:
 
         print("⏳ Waiting for local vLLM endpoint to become online... (Press Ctrl+C to cancel)\n")
 
+        monitor = VLLMStartupMonitor(warn_timeout_sec=30.0, stuck_threshold_sec=90.0)
+        monitor.start()
         start_time = time.time()
         try:
             while True:
                 # Retrieve and print newly accumulated startup logs from vLLM stdout
                 new_logs = self.vllm_manager.get_new_logs()
-                for log_line in new_logs:
-                    print(f"  [vLLM] {log_line}")
+                if new_logs:
+                    monitor.notify_log_received()
+                    for log_line in new_logs:
+                        print(f"  [vLLM] {log_line}")
 
                 if self.vllm_manager.check_health(timeout=0.5):
+                    monitor.stop()
                     print("\n✅ vLLM endpoint is online and responding!")
                     return True
 
                 if self.vllm_manager.process and self.vllm_manager.process.poll() is not None:
+                    monitor.stop()
                     exit_code = self.vllm_manager.process.poll()
                     print(f"\n❌ vLLM process terminated unexpectedly (exit code {exit_code}).")
                     for log_line in self.vllm_manager.get_new_logs():
@@ -115,16 +122,13 @@ class GooseRunner:
                     return False
 
                 if max_wait and (time.time() - start_time) >= max_wait:
+                    monitor.stop()
                     print("\n❌ Timed out waiting for vLLM server.")
                     return False
 
-                for _ in range(int(poll_interval * 10)):
-                    time.sleep(0.1)
-
-                if not new_logs:
-                    sys.stdout.write(".")
-                    sys.stdout.flush()
+                time.sleep(poll_interval)
         except (KeyboardInterrupt, SystemExit):
+            monitor.stop()
             print("\n🛑 Cancelled waiting for vLLM server.")
             return False
 
