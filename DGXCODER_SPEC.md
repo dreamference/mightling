@@ -145,8 +145,8 @@ HF repo examples: `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Di
   - `--quantization fp8` auto-selected for model names containing `70b` or `72b` when quantization is unset
 * **Config-Stored but Not Passed to vLLM**: `num_scheduler_steps` (default `8`) is accepted on CLI/config/status display but is **not** appended as `--num-scheduler-steps` in `build_launch_command` today.
 * **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code --enforce-eager` plus the optional flags above.
-* **Readiness Polling & Live Streaming**: `GooseRunner.wait_for_vllm()` auto-launches background vLLM when offline, streams `[vLLM]` logs, and polls `GET /v1/models` until HTTP 200.
-* **Instant Signal Handling**: Poll loop sleeps in 0.1s slices so `Ctrl+C` is handled promptly.
+* **Readiness Polling & Live Streaming**: `GooseRunner.wait_for_vllm()` auto-launches background vLLM when offline, streams `[vLLM]` logs, and polls `GET /v1/models` until HTTP 200. `VLLMStartupMonitor` estimates load **percentage from unified-memory growth** since launch vs `MODEL_MATRIX` `min_memory_gb` (primary + draft), printing periodic `~N% (used/target GB)` updates while logs are quiet.
+* **Instant Signal Handling**: Poll loop sleeps in short intervals so `Ctrl+C` is handled promptly.
 
 ### 4.3. Agent Runtimes (Goose, Cline, Aider, Continue, OpenHands)
 
@@ -247,15 +247,36 @@ dgxcoder chat | run [--agent goose]
 
 #### Cline path (`--agent cline`)
 
-1. Health-check / auto-launch vLLM via `GooseRunner.wait_for_vllm()` (same download + launch path).
+1. Health-check / auto-launch vLLM via `GooseRunner.wait_for_vllm()`.
 2. Require `code` or `codium` on `PATH`.
 3. Install Cline extension if missing.
 4. Ensure `.clinerules` exists.
 5. Print connection details; launch VS Code on the workspace. Prompt text is printed only (not auto-submitted to Cline).
 
+#### Aider path (`--agent aider`)
+
+1. Health-check / auto-launch vLLM via `GooseRunner.wait_for_vllm()`.
+2. Install `aider-chat` via pip (then pipx) if `aider` missing.
+3. Launch `aider` with OpenAI-compatible base/key/model flags; optional architect/editor split when `draft_model` is set; `--message` for `run`; `--verbose` for `--debug`.
+
+#### Continue path (`--agent continue`)
+
+1. Health-check / auto-launch vLLM.
+2. Require VS Code / VSCodium.
+3. Install `Continue.continue` if missing.
+4. Write/merge `~/.continue/config.json` (chat model + tab autocomplete).
+5. Launch `code|codium $(pwd)`. Prompt unused.
+
+#### OpenHands path (`--agent openhands`)
+
+1. Health-check / auto-launch vLLM.
+2. Require Docker daemon.
+3. Pull `ghcr.io/all-hands-ai/openhands:main` if missing.
+4. `docker rm -f dgxcoder-openhands`; run container on port **3000** with workspace + docker.sock mounts and LLM env pointing at local vLLM. Prompt unused.
+
 #### `dgxcoder serve` Variant
 
-Resolves `DGXCoderConfig`, then calls `VLLMServerManager.start_server(background=False)` with **CLI `args.model` / `args.draft_model` / `args.num_speculative_tokens` passed through directly**. When those flags are omitted, Python `None` is passed into `start_server` (overriding the function’s default `"qwen2.5-coder-32b"`). Prefer explicit `--model` on `serve`, or rely on `chat`/`run` auto-launch which uses `config.model`. Tuning flags (`enable_prefix_caching`, etc.) come from the resolved config. Foreground process owns the terminal; Goose/Cline are not started.
+Resolves `DGXCoderConfig`, then calls `VLLMServerManager.start_server(background=False)` with **CLI `args.model` / `args.draft_model` / `args.num_speculative_tokens` passed through directly**. When those flags are omitted, Python `None` is passed into `start_server` (overriding the function’s default `"qwen2.5-coder-32b"`). Prefer explicit `--model` on `serve`, or rely on `chat`/`run` auto-launch which uses `config.model`. Tuning flags (`enable_prefix_caching`, etc.) come from the resolved config. Foreground process owns the terminal; no agent runner is started.
 
 #### Failure Modes
 
@@ -263,7 +284,9 @@ Resolves `DGXCoderConfig`, then calls `VLLMServerManager.start_server(background
 * **Process crash during wait**: Drain remaining logs; return failure.
 * **Ctrl+C during wait**: Cancel without starting the agent.
 * **Goose install failure**: Print manual curl install command; exit `1`.
-* **Cline without VS Code**: Exit `1` with PATH install hint.
+* **Cline / Continue without VS Code**: Exit `1` with PATH install hint.
+* **Aider install failure**: Exit `1` with `pip install aider-chat` hint.
+* **OpenHands without Docker / pull failure**: Exit `1` with Docker daemon hint.
 
 ---
 
@@ -277,17 +300,17 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 | Flag | Description |
 | :--- | :--- |
 | `--config PATH` | Custom DGXCoder config (`.yaml` / `.json`) |
-| `--sandbox {none,apptainer,podman,docker}` | Rootless sandbox (Goose sessions) |
-| `--agent {goose,cline}` | Primary agent runner (default: `goose`) |
+| `--sandbox {none,apptainer,podman,docker}` | Rootless sandbox prefix (**Goose only**) |
+| `--agent {goose,cline,aider,continue,openhands}` | Primary agent runner (default: `goose`) |
 | `--hf-token TOKEN` | HuggingFace token (else `HF_TOKEN` / `DGXCODER_HF_TOKEN`) |
 
 #### Subcommand Summary
 | Subcommand | Description |
 | :--- | :--- |
 | **`init`** | Pre-download models, save `.dgxcoder/config.yaml`, write Goose config, force-index workspace |
-| **`chat`** | Interactive session (Goose) or launch VS Code+Cline |
-| **`run`** | Non-interactive Goose task, or Cline launch with printed prompt |
-| **`status`** | Rich panels: hardware, vLLM/agent, context index |
+| **`chat`** | Interactive session for selected agent (Goose / Aider CLI, or VS Code / OpenHands UI) |
+| **`run`** | Non-interactive task where supported (Goose `--text`, Aider `--message`; others launch UI and may ignore prompt) |
+| **`status`** | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index |
 | **`serve`** | Foreground vLLM server (multi-tier launch) |
 | **`index`** | AST + FTS5 + TF-IDF workspace index |
 | **`mcp`** | Stdio MCP server for IDE companion tools |
@@ -300,18 +323,18 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 * **Behavior**: Downloads primary/draft weights → `save_config()` → `ensure_goose_config()` → `ContextEngine.index_workspace(force_reindex=True)`.
 * **Example**: `dgxcoder init --model qwen2.5-coder-32b --draft-model qwen2.5-coder-1.5b --agent goose`
 
-##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline] [--sandbox …] [--hf-token …] [--debug]`
-* **Behavior**: Selects `GooseRunner` or `ClineRunner` from `config.agent_runner`, then `run_session(debug=…)`. Goose follows [§4.5](#45-session-startup-process); Cline follows the Cline path.
-* **Example**: `dgxcoder chat --agent goose --debug`
+##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aider|continue|openhands] [--sandbox …] [--hf-token …] [--debug]`
+* **Behavior**: Instantiates `GooseRunner` / `ClineRunner` / `AiderRunner` / `ContinueRunner` / `OpenHandsRunner` from `config.agent_runner`, then `run_session(debug=…)`. See [§4.3](#43-agent-runtimes-goose-cline-aider-continue-openhands) and [§4.5](#45-session-startup-process).
+* **Example**: `dgxcoder chat --agent aider --debug`
 
 ##### 5.1.3. `dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug]`
-* **Behavior**: Same runner selection; Goose executes `goose run --text "<prompt>"`; Cline prints the prompt and opens VS Code.
-* **Example**: `dgxcoder run "Refactor database connection pool to use async pg"`
+* **Behavior**: Same runner selection. Goose: `goose run --text "<prompt>"`. Aider: `aider … --message "<prompt>"`. Cline: prints prompt and opens VS Code. Continue / OpenHands: launch UI; prompt unused.
+* **Example**: `dgxcoder run "Refactor database connection pool to use async pg" --agent goose`
 
 ##### 5.1.4. `dgxcoder status`
 * **Behavior**: Panels for:
   * **Hardware**: GB10 qualification, GPU name, driver, total/used/available unified memory, architecture (no VRAM row).
-  * **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose install state, Cline extension state, config paths.
+  * **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`/`aider`/`continue`/`openhands`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose CLI, Cline extension, Aider CLI, Continue extension, OpenHands Docker image readiness, config paths.
   * **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
 ##### 5.1.5. `dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--num-scheduler-steps N] [--attention-backend …] [--kv-cache-dtype …]`
@@ -364,7 +387,7 @@ kv_cache_dtype: auto
 | `DGXCODER_DRAFT_MODEL` | Draft model alias | unset |
 | `DGXCODER_SPECULATIVE_TOKENS` | Speculative token count | `5` |
 | `DGXCODER_SANDBOX` | Sandbox engine | `none` |
-| `DGXCODER_AGENT` / `DGXCODER_RUNNER` | Agent runner (`goose` \| `cline`) | `goose` |
+| `DGXCODER_AGENT` / `DGXCODER_RUNNER` | Agent runner (`goose` \| `cline` \| `aider` \| `continue` \| `openhands`) | `goose` |
 | `HF_TOKEN` / `DGXCODER_HF_TOKEN` | HuggingFace token | unset |
 | `GOOSE_PROVIDER` | Set for Goose processes | `openai` |
 | `OPENAI_HOST` | Set for Goose processes | `{vllm_host}` |
@@ -392,7 +415,7 @@ Registered in Goose config as stdio extension (`cmd: dgxcoder`, `args: [mcp]`). 
 * **System**: 1x NVIDIA GB10 (Blackwell, 128 GB Unified Memory) — or host with ≥100 GB RAM for detection fallback
 * **OS**: Linux ARM64 (Ubuntu 22.04 LTS or compatible)
 * **Drivers**: NVIDIA Linux Driver 580+ / CUDA 13.x (typical GB10 stack)
-* **Dependencies**: Python 3.10+, PyYAML, Rich, Requests; optional Docker for containerized vLLM; optional VS Code/`codium` for Cline
+* **Dependencies**: Python 3.10+, PyYAML, Rich, Requests; optional Docker (vLLM fallback + OpenHands); optional VS Code/`codium` (Cline, Continue); optional `aider-chat` (Aider)
 
 ### Identifying Your Hardware Variant
 ```bash
@@ -432,9 +455,10 @@ Prefer `dgxcoder serve` / `dgxcoder chat` for full GB10-tuned behavior.
 
 - [x] **Phase 1: NVIDIA GB10 Exclusive Specification** — model matrix & unified-memory targeting
 - [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine** — multi-tier vLLM, live logs, weight pre-download, CLI suite including `download`
-- [x] **Phase 3: Agentic Engine, Provisioning & MCP** — Goose auto-install, stdio MCP tools, optional Cline/VS Code path
+- [x] **Phase 3: Agentic Engine, Provisioning & MCP** — Goose auto-install, stdio MCP tools, multi-agent runners (Cline, Aider, Continue, OpenHands)
 - [x] **Phase 4: Context Engine & Web Canvas** — parallel AST, SQLite/FTS5, TF-IDF (in-process), Web Canvas telemetry UI
 - [x] **Phase 5: Modular Package Layout** — split packages under `dgxcoder/{hardware,config,runner,vllm_server,context_engine,mcp_server,cli}/` with shim modules for stable imports
+- [x] **Phase 6: Expanded Agent Matrix** — Aider CLI, Continue IDE, OpenHands Docker UI wired through `--agent`
 
 ---
 
@@ -479,9 +503,15 @@ dgxcoder/
 ├── runner/
 │   ├── goose_runner.py         # wait_for_vllm + Goose session
 │   ├── goose_installer.py
-│   ├── sandbox_manager.py
+│   ├── sandbox_manager.py      # Goose sandbox prefixes only
 │   ├── cline_runner.py
-│   └── cline_installer.py
+│   ├── cline_installer.py
+│   ├── aider_runner.py
+│   ├── aider_installer.py
+│   ├── continue_runner.py
+│   ├── continue_installer.py
+│   ├── openhands_runner.py
+│   └── openhands_installer.py
 ├── vllm_server.py              # shim
 ├── vllm_server/
 │   ├── vllm_server_manager.py

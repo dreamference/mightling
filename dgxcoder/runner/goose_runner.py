@@ -48,6 +48,25 @@ class GooseRunner:
         """Delegates to SandboxManager."""
         return SandboxManager.get_prefix(self.config.sandbox, os.getcwd())
 
+    def estimate_vllm_load_memory_gb(self) -> Optional[float]:
+        """
+        Estimates expected unified-memory growth while loading configured primary/draft models.
+
+        Returns:
+            Optional[float]: Sum of MODEL_MATRIX min_memory_gb values, or None if unknown.
+        """
+        from dgxcoder.hardware import MODEL_MATRIX
+        total = 0.0
+        known = False
+        for key in (self.config.model, self.config.draft_model):
+            if not key:
+                continue
+            spec = MODEL_MATRIX.get(str(key).lower())
+            if spec:
+                total += float(spec.min_memory_gb)
+                known = True
+        return total if known else None
+
     def wait_for_vllm(self, poll_interval: float = 1.0, max_wait: Optional[float] = None, auto_launch: bool = True) -> bool:
         """
         Waits for local vLLM HTTP endpoint to become healthy. If offline and auto_launch=True,
@@ -96,7 +115,15 @@ class GooseRunner:
 
         print("⏳ Waiting for local vLLM endpoint to become online... (Press Ctrl+C to cancel)\n")
 
-        monitor = VLLMStartupMonitor(warn_timeout_sec=30.0, stuck_threshold_sec=90.0)
+        expected_gb = self.estimate_vllm_load_memory_gb()
+        if expected_gb:
+            print(f"📊 Estimating load progress from unified-memory growth (target ~{expected_gb:.0f} GB).\n")
+        monitor = VLLMStartupMonitor(
+            warn_timeout_sec=30.0,
+            stuck_threshold_sec=90.0,
+            progress_interval_sec=5.0,
+            expected_memory_gb=expected_gb,
+        )
         monitor.start()
         start_time = time.time()
         try:
@@ -104,8 +131,9 @@ class GooseRunner:
                 # Retrieve and print newly accumulated startup logs from vLLM stdout
                 new_logs = self.vllm_manager.get_new_logs()
                 if new_logs:
-                    monitor.notify_log_received()
+                    # Pass logs to monitor for PID extraction and memory measurement
                     for log_line in new_logs:
+                        monitor.notify_log_received(log_line)
                         print(f"  [vLLM] {log_line}")
 
                 if self.vllm_manager.check_health(timeout=0.5):

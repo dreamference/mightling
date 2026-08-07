@@ -81,6 +81,7 @@ def test_vllm_startup_monitor():
         warn_timeout_sec=0.05,
         stuck_threshold_sec=0.1,
         check_interval_sec=0.02,
+        progress_interval_sec=10.0,
         log_callback=lambda m: logs.append(m)
     )
     monitor.start()
@@ -95,6 +96,7 @@ def test_vllm_startup_monitor_reset_on_log():
         warn_timeout_sec=0.1,
         stuck_threshold_sec=0.2,
         check_interval_sec=0.02,
+        progress_interval_sec=10.0,
         log_callback=lambda m: logs.append(m)
     )
     monitor.start()
@@ -102,3 +104,27 @@ def test_vllm_startup_monitor_reset_on_log():
     monitor.notify_log_received()
     assert monitor.warned is False
     monitor.stop()
+
+def test_vllm_startup_monitor_memory_progress_percent():
+    logs = []
+    used = {"gb": 0.0}
+    monitor = VLLMStartupMonitor(
+        warn_timeout_sec=60.0,
+        stuck_threshold_sec=120.0,
+        check_interval_sec=0.02,
+        progress_interval_sec=0.05,
+        expected_memory_gb=10.0,
+        log_callback=lambda m: logs.append(m)
+    )
+    monitor._read_used_memory_gb = lambda: used["gb"]  # type: ignore[method-assign]
+    used["gb"] = 0.0
+    monitor.start()
+    used["gb"] = 4.0
+    pct, delta, expected = monitor.estimate_progress()
+    assert pct == 40
+    assert delta == 4.0
+    assert expected == 10.0
+    assert "~40%" in monitor._format_progress_suffix()
+    time.sleep(0.15)
+    monitor.stop()
+    assert any("~40%" in line for line in logs)
