@@ -83,8 +83,10 @@ class VLLMServerManager:
         quantization: Optional[str] = None,
         max_model_len: int = 16384,
         gpu_memory_utilization: float = 0.90,
+        draft_model: Optional[str] = None,
+        num_speculative_tokens: int = 5,
     ) -> List[str]:
-        """Generates vLLM command line (native CLI, Python module, or Docker container) for NVIDIA GB10."""
+        """Generates vLLM command line (native CLI, Python module, or Docker container) for NVIDIA GB10 with Speculative Decoding support."""
         if shutil.which("vllm"):
             cmd = [
                 "vllm", "serve", model,
@@ -136,6 +138,9 @@ class VLLMServerManager:
 
         if quantization:
             cmd.extend(["--quantization", quantization])
+
+        if draft_model:
+            cmd.extend(["--speculative-model", draft_model, "--num-speculative-tokens", str(num_speculative_tokens)])
         
         hw = detect_gb10_hardware()
         if hw.get("is_gb10") and "--kv-cache-dtype" not in cmd:
@@ -148,14 +153,22 @@ class VLLMServerManager:
         model: str = "qwen2.5-coder-32b",
         port: int = 8000,
         quantization: Optional[str] = None,
+        draft_model: Optional[str] = None,
+        num_speculative_tokens: int = 5,
         background: bool = True
     ) -> Optional[subprocess.Popen]:
-        """Launches vLLM server instance."""
+        """Launches vLLM server instance on NVIDIA GB10 with optional speculative decoding."""
         if not self.is_vllm_installed() and not self.is_docker_available():
             print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
             print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
 
-        cmd = self.build_launch_command(model=model, port=port, quantization=quantization)
+        cmd = self.build_launch_command(
+            model=model,
+            port=port,
+            quantization=quantization,
+            draft_model=draft_model,
+            num_speculative_tokens=num_speculative_tokens
+        )
         print(f"🚀 Starting GB10 vLLM Server: {' '.join(cmd)}")
         
         if background:

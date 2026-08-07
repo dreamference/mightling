@@ -69,7 +69,12 @@ class GooseRunner:
         if auto_launch:
             print(f"🚀 Automatically launching local GB10 vLLM server ({self.config.model})...")
             try:
-                self.vllm_manager.start_server(model=self.config.model, background=True)
+                self.vllm_manager.start_server(
+                    model=self.config.model,
+                    draft_model=self.config.draft_model,
+                    num_speculative_tokens=self.config.num_speculative_tokens,
+                    background=True
+                )
             except (KeyboardInterrupt, SystemExit):
                 print("\n🛑 Cancelled launching vLLM server.")
                 return False

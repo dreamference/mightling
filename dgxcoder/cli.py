@@ -64,6 +64,8 @@ def handle_status():
     agent_table.add_row("Local vLLM Server", vllm_str)
     agent_table.add_row("Active Served Models", ", ".join(vllm_status["models"]) if vllm_status["models"] else "None (vLLM idle)")
     agent_table.add_row("Configured Model", config.model)
+    if config.draft_model:
+        agent_table.add_row("Speculative Draft Model", f"{config.draft_model} ({config.num_speculative_tokens} tokens)")
     agent_table.add_row("Goose CLI Runtime", goose_str)
     agent_table.add_row("Goose Config Path", str(config.config_path))
 
@@ -90,16 +92,19 @@ def main() -> None:
     init_parser = subparsers.add_parser("init", help="Initialize .dgxcoder project workspace and Goose MCP config")
     init_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name served on vLLM GB10 endpoint")
     init_parser.add_argument("--vllm-host", default="http://localhost:8000", help="vLLM server URL")
+    init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
 
     # chat
     chat_parser = subparsers.add_parser("chat", help="Launch interactive Goose pair programming session")
     chat_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name served on vLLM GB10 endpoint")
+    chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
     chat_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
     # run
     run_parser = subparsers.add_parser("run", help="Run an autonomous coding task with Goose")
     run_parser.add_argument("prompt", type=str, help="Task prompt for Goose agent")
     run_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name served on vLLM GB10 endpoint")
+    run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
     run_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
     # status
@@ -110,6 +115,8 @@ def main() -> None:
     serve_parser.add_argument("--model", default="qwen2.5-coder-32b", help="Model name to serve")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
     serve_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
+    serve_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
+    serve_parser.add_argument("--num-speculative-tokens", type=int, default=5, help="Number of speculative tokens to propose")
 
     # index
     index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -135,7 +142,15 @@ def main() -> None:
 
     vllm_host = getattr(args, "vllm_host", "http://localhost:8000")
     model = getattr(args, "model", "qwen2.5-coder-32b")
-    config = DGXCoderConfig(vllm_host=vllm_host, model=model)
+    draft_model = getattr(args, "draft_model", None)
+    num_speculative_tokens = getattr(args, "num_speculative_tokens", 5)
+
+    config = DGXCoderConfig(
+        vllm_host=vllm_host,
+        model=model,
+        draft_model=draft_model,
+        num_speculative_tokens=num_speculative_tokens
+    )
     runner = GooseRunner(config=config)
 
     if args.command == "init":
@@ -147,6 +162,8 @@ def main() -> None:
         console.print("[bold green]✅ DGXCoder & Goose workspace initialized successfully![/bold green]")
         console.print(f"   [cyan]Goose Config:[/cyan] {config.config_path}")
         console.print(f"   [cyan]Target Model:[/cyan] {config.model}")
+        if config.draft_model:
+            console.print(f"   [cyan]Draft Model:[/cyan]  {config.draft_model} ({config.num_speculative_tokens} tokens)")
         console.print(f"   [cyan]Target Host:[/cyan]  {config.vllm_host}")
         console.print(f"   [cyan]Indexed Files:[/cyan] {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")
 
@@ -162,7 +179,14 @@ def main() -> None:
     elif args.command == "serve":
         display_header()
         vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
-        vllm_mgr.start_server(model=args.model, port=args.port, quantization=args.quantization, background=False)
+        vllm_mgr.start_server(
+            model=args.model,
+            port=args.port,
+            quantization=args.quantization,
+            draft_model=args.draft_model,
+            num_speculative_tokens=args.num_speculative_tokens,
+            background=False
+        )
 
     elif args.command == "index":
         display_header()

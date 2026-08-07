@@ -61,6 +61,24 @@ MODEL_MATRIX: Dict[str, ModelSpec] = {
         compatible_gb10=True,
         notes="Supported (INT8/FP8 quantized fit)"
     ),
+    "qwen2.5-coder-1.5b": ModelSpec(
+        name="Qwen 2.5 Coder 1.5B (Draft Model)",
+        params_b=1.5,
+        supported_precisions=["BF16", "FP16", "INT8"],
+        min_memory_gb=3.5,
+        max_memory_gb=6.0,
+        compatible_gb10=True,
+        notes="Speculative decoding draft model (~3.5GB memory)"
+    ),
+    "qwen2.5-coder-3b": ModelSpec(
+        name="Qwen 2.5 Coder 3B (Draft Model)",
+        params_b=3.0,
+        supported_precisions=["BF16", "FP16", "INT8"],
+        min_memory_gb=6.5,
+        max_memory_gb=10.0,
+        compatible_gb10=True,
+        notes="Speculative decoding draft model (~6.5GB memory)"
+    ),
     "starcoder2-15b": ModelSpec(
         name="StarCoder2 15B",
         params_b=15.0,
@@ -176,3 +194,26 @@ def check_model_compatibility(model_key: str) -> Tuple[bool, str]:
         return False, f"Model '{spec.name}' requires {spec.min_memory_gb} GB, but system only has {avail_mem} GB available."
 
     return True, f"✅ Compatible: {spec.name} ({spec.notes})"
+
+def check_speculative_compatibility(main_model_key: str, draft_model_key: str) -> Tuple[bool, str]:
+    """Validates combined memory budget for dual-model speculative decoding on GB10 unified memory."""
+    valid_main, msg_main = check_model_compatibility(main_model_key)
+    if not valid_main:
+        return False, f"Main model error: {msg_main}"
+
+    valid_draft, msg_draft = check_model_compatibility(draft_model_key)
+    if not valid_draft:
+        return False, f"Draft model error: {msg_draft}"
+
+    main_spec = MODEL_MATRIX.get(main_model_key.lower())
+    draft_spec = MODEL_MATRIX.get(draft_model_key.lower())
+
+    if main_spec and draft_spec:
+        total_req = main_spec.min_memory_gb + draft_spec.min_memory_gb
+        hw = detect_gb10_hardware()
+        avail_mem = hw["total_unified_memory_gb"] or 128.0
+        if total_req > avail_mem * 0.95:
+            return False, f"Combined memory requirement ({total_req:.1f} GB) exceeds available unified memory ({avail_mem:.1f} GB)."
+        return True, f"✅ Speculative Decoding Qualified: {main_spec.name} + {draft_spec.name} (~{total_req:.1f} GB total memory)"
+
+    return True, f"✅ Speculative decoding enabled for {main_model_key} with draft model {draft_model_key}"

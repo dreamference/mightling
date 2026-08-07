@@ -91,6 +91,8 @@ All supported models are qualified to run on a single **NVIDIA GB10 system (128 
 | :--- | :--- | :--- | :--- | :--- |
 | **Qwen 2.5 Coder 32B** | 32B | BF16 / INT8 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
 | **Qwen 2.5 Coder 72B** | 72B | INT8 / FP8 / INT4 | ~45 - 80 GB | ✅ Supported (INT8/FP8 quantized fit) |
+| **Qwen 2.5 Coder 1.5B (Draft)** | 1.5B | BF16 / FP16 / INT8 | ~3.5 - 6 GB | ✅ Ideal Speculative Decoding Draft Model |
+| **Qwen 2.5 Coder 3B (Draft)** | 3.0B | BF16 / FP16 / INT8 | ~6.5 - 10 GB | ✅ Ideal Speculative Decoding Draft Model |
 | **DeepSeek-R1-Distill-Qwen-32B** | 32B | BF16 / INT8 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
 | **DeepSeek-R1-Distill-Llama-70B** | 70B | INT8 / FP8 / INT4 | ~45 - 80 GB | ✅ Supported (INT8/FP8 quantized fit) |
 | **Llama 3.3 70B Instruct** | 70B | INT8 / FP8 | ~75 GB | ✅ Supported (INT8/FP8 quantized fit) |
@@ -107,11 +109,14 @@ All supported models are qualified to run on a single **NVIDIA GB10 system (128 
 * **CPU Host**: High-performance ARM Cortex CPU cores (`aarch64` architecture).
 * **Storage**: NVMe PCIe SSD for high-speed workspace indexing and model caching.
 
-### 4.2. GB10 Inference Stack & Auto-Launch Engine
+### 4.2. GB10 Inference Stack & Speculative Decoding Engine
 * **Multi-Tiered Launch Resolution**:
   1. **Native CLI**: Uses `vllm serve <model>` if `vllm` CLI binary is available.
   2. **Python Module**: Uses `python -m vllm.entrypoints.openai.api_server` if `vllm` package is installed.
   3. **Docker Container Fallback**: Uses `docker run --rm --gpus all -p 8000:8000 vllm/vllm-openai:latest` when local python vLLM package is absent.
+* **Dual-Model Speculative Decoding Pipeline**:
+  - Leverages GB10 128GB Unified Memory to run a primary target model (e.g. `Qwen 2.5 Coder 32B/72B`) alongside a lightweight draft model (e.g. `Qwen 2.5 Coder 1.5B/3B`).
+  - Appends `--speculative-model <draft_model> --num-speculative-tokens <tokens>` to boost inference generation speed by 2x–3x.
 * **GB10 Launch Flags**: `--host 0.0.0.0 --port 8000 --max-model-len 16384 --gpu-memory-utilization 0.90 --trust-remote-code --enforce-eager --kv-cache-dtype auto`.
 * **Readiness Polling & Live Streaming**: Automatically launches vLLM in background if offline when `dgxcoder chat` or `run` starts, streaming live `[vLLM]` output logs into the terminal until HTTP 200 OK is returned.
 * **Instant Signal Handling**: Polling loop operates on 0.1s sub-second sleep slices to handle `Ctrl+C` (`SIGINT`) instantly.
@@ -147,11 +152,11 @@ Terminal application powered by `Rich` and `Goose`.
 | **`web`** | Launches interactive Web Canvas UI pane for live diffs and hardware monitoring. |
 
 #### Command Details & Options:
-* **`dgxcoder init [--model MODEL] [--vllm-host HOST]`**
-* **`dgxcoder chat [--model MODEL] [--debug]`**
-* **`dgxcoder run "PROMPT" [--model MODEL] [--debug]`**
+* **`dgxcoder init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST]`**
+* **`dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`**
+* **`dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`**
 * **`dgxcoder status`**
-* **`dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT]`**
+* **`dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT_MODEL] [--num-speculative-tokens TOKENS]`**
 * **`dgxcoder index [--dir PATH] [--force]`**
 * **`dgxcoder mcp`**
 * **`dgxcoder web [--port PORT]`**
@@ -161,6 +166,8 @@ Terminal application powered by `Rich` and `Goose`.
 | :--- | :--- | :--- |
 | `DGXCODER_VLLM_HOST` | Local vLLM server endpoint URL | `http://localhost:8000` |
 | `DGXCODER_MODEL` | Default LLM model name served on GB10 | `qwen2.5-coder-32b` |
+| `DGXCODER_DRAFT_MODEL` | Speculative decoding draft model name | `None` (Disabled) |
+| `DGXCODER_SPECULATIVE_TOKENS` | Number of speculative draft tokens | `5` |
 | `GOOSE_PROVIDER` | Provider setting passed to Goose | `openai` |
 | `OPENAI_HOST` | Host URL for local OpenAI-compatible vLLM API | `http://localhost:8000` |
 | `OPENAI_BASE_PATH` | Base path for vLLM API | `v1` |

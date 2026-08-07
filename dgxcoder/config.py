@@ -16,13 +16,24 @@ GOOSE_CONFIG_PATH = Path.home() / ".config" / "goose" / "config.yaml"
 class DGXCoderConfig:
     """Manages GB10 hardware setup and Goose agent configurations."""
 
-    def __init__(self, vllm_host: str = DEFAULT_VLLM_HOST, model: str = DEFAULT_MODEL):
+    def __init__(
+        self,
+        vllm_host: str = DEFAULT_VLLM_HOST,
+        model: str = DEFAULT_MODEL,
+        draft_model: Optional[str] = None,
+        num_speculative_tokens: int = 5
+    ):
         self.vllm_host = os.getenv("DGXCODER_VLLM_HOST", vllm_host)
         self.model = os.getenv("DGXCODER_MODEL", model)
+        self.draft_model = os.getenv("DGXCODER_DRAFT_MODEL", draft_model)
+        self.num_speculative_tokens = int(os.getenv("DGXCODER_SPECULATIVE_TOKENS", str(num_speculative_tokens)))
         self.config_path = GOOSE_CONFIG_PATH
 
     def validate_model(self) -> tuple[bool, str]:
-        """Validates selected model against GB10 hardware specs."""
+        """Validates selected main and draft models against GB10 hardware specs."""
+        if self.draft_model:
+            from dgxcoder.hardware import check_speculative_compatibility
+            return check_speculative_compatibility(self.model, self.draft_model)
         return check_model_compatibility(self.model)
 
     def get_env_vars(self) -> Dict[str, str]:

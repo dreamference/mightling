@@ -26,3 +26,9 @@ def test_check_model_compatibility():
     valid_large, msg_large = check_model_compatibility("deepseek-v3-671b")
     assert valid_large is False
     assert "exceeds" in msg_large.lower()
+
+def test_check_speculative_compatibility():
+    from dgxcoder.hardware import check_speculative_compatibility
+    valid, msg = check_speculative_compatibility("qwen2.5-coder-32b", "qwen2.5-coder-1.5b")
+    assert valid is True
+    assert "Speculative Decoding Qualified" in msg or "Compatible" in msg
