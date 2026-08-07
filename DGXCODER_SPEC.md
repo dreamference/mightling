@@ -1,6 +1,6 @@
 # DGXCoder Technical Specification
 
-> **Version:** 1.2.0  
+> **Version:** 1.2.1  
 > **Status:** Implemented / Production-Ready  
 > **Target Hardware:** Exclusive to **NVIDIA GB10** (Blackwell architecture with 128 GB Unified Memory)  
 > **Deployment Model:** Single-Node Standalone NVIDIA GB10 System  
@@ -18,6 +18,7 @@
   - [4.2. GB10 Inference Stack & Auto-Launch Engine](#42-gb10-inference-stack--auto-launch-engine)
   - [4.3. Goose Agentic Loop & Automatic CLI Provisioning](#43-goose-agentic-loop--automatic-cli-provisioning)
   - [4.4. Codebase Context Engine (AST + Vector Index)](#44-codebase-context-engine-ast--vector-index)
+  - [4.5. Session Startup Process](#45-session-startup-process)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dgxcoder` CLI Suite](#51-dgxcoder-cli-suite)
     - [5.1.1. `dgxcoder init`](#511-dgxcoder-init)
@@ -160,6 +161,78 @@ All supported models are qualified to run on a single **NVIDIA GB10 system (128 
 * **TF-IDF Semantic Vector Index**: Tokenizes identifiers, camelCase, and snake_case terms to perform air-gapped zero-egress local semantic retrieval.
 * **Index Cache**: Persists workspace metadata at `.dgxcoder/context_index.json` and `.dgxcoder/context.db`.
 
+### 4.5. Session Startup Process
+
+When `dgxcoder chat` or `dgxcoder run` starts, DGXCoder bootstraps the local inference and agent stack in a fixed order before handing control to Goose. Explicit `dgxcoder serve` follows the same vLLM launch path without the Goose steps.
+
+```
+dgxcoder chat | run
+       |
+       v
+[1] Resolve config (CLI > Env > .dgxcoder/config.yaml > defaults)
+       |
+       v
+[2] ensure_goose_config()  -->  ~/.config/goose/config.yaml
+       |
+       v
+[3] validate_model()       -->  warn if model exceeds GB10 memory budget
+       |
+       v
+[4] GET {vllm_host}/v1/models  --healthy?--+
+       |                                   |
+       | no                                | yes
+       v                                   |
+[5] Auto-launch vLLM (background)          |
+       |                                   |
+       |  a. download_model(primary)       |
+       |  b. download_model(draft) [opt]   |
+       |  c. resolve launch tier:          |
+       |       vllm CLI > python -m vllm   |
+       |       > docker vllm-openai        |
+       |  d. Popen + live log streamer     |
+       |                                   |
+       v                                   |
+[6] Poll readiness (0.1s slices)           |
+       |  stream [vLLM] logs               |
+       |  abort on Ctrl+C / process exit   |
+       |                                   |
+       +------------------+----------------+
+                          |
+                          v
+[7] Provision Goose CLI if missing (aaif-goose download_cli.sh)
+       |
+       v
+[8] Optional sandbox prefix (apptainer | podman | docker)
+       |
+       v
+[9] Exec goose session | goose run --text "<prompt>"
+```
+
+#### Step Detail
+
+| Step | Component | Behavior |
+| :--- | :--- | :--- |
+| **1. Config resolution** | `DGXCoderConfig` / `cli.py` | Merges CLI flags, env vars (`DGXCODER_*`, `HF_TOKEN`), workspace `.dgxcoder/config.yaml`, and built-in defaults into the runtime config. |
+| **2. Goose bridge sync** | `config.ensure_goose_config()` | Writes/updates `~/.config/goose/config.yaml` to point Goose at the local OpenAI-compatible endpoint (`{vllm_host}/v1`, token `gb10-local-token`) and registers the stdio MCP companion. |
+| **3. Model validation** | `config.validate_model()` | Checks the selected primary/draft models against the GB10 `MODEL_MATRIX` memory budgets; prints a warning on mismatch but does not block startup. |
+| **4. Health probe** | `VLLMServerManager.check_health()` | Issues `GET /v1/models` with a short timeout. On HTTP 200, skips auto-launch and continues at step 7. |
+| **5. Auto-launch** | `GooseRunner.wait_for_vllm()` → `VLLMServerManager.start_server(background=True)` | Triggered only when the endpoint is offline. Pre-downloads weights into `~/.cache/huggingface/hub/` (skips if already cached), resolves the HF repo ID from the model alias, builds GB10-tuned launch flags, then starts vLLM (or Docker fallback) as a background subprocess with a non-blocking log queue. |
+| **6. Readiness wait** | `wait_for_vllm()` polling loop | Drains `[vLLM]` log lines to the terminal, re-probes `/v1/models` every ~1s using 0.1s sleep slices for instant `SIGINT` handling, and fails fast if the child process exits or an optional `max_wait` elapses. |
+| **7. Goose provisioning** | `GooseInstaller` | Resolves `goose` from `PATH`, `~/.local/bin`, `~/.goose/bin`, or `sys.prefix/bin`. If absent, runs the official AAIF `download_cli.sh` installer. |
+| **8. Sandbox wrap** | `SandboxManager.get_prefix()` | When `sandbox` is `apptainer`, `podman`, or `docker`, prefixes the Goose command with the corresponding rootless container launcher; falls back to host execution if the runtime binary is missing. |
+| **9. Agent handoff** | `GooseRunner.run_session()` | Invokes `goose session` (interactive chat) or `goose run --text "<prompt>"` (non-interactive), forwarding env vars from the resolved config. |
+
+#### `dgxcoder serve` Variant
+
+`dgxcoder serve` resolves config, then calls `VLLMServerManager.start_server(background=False)` directly: pre-download primary/draft weights, resolve the launch tier, and run vLLM in the **foreground** so the terminal owns the server lifecycle. It skips Goose bridge sync, readiness polling, Goose provisioning, and sandbox wrapping.
+
+#### Failure Modes
+
+* **vLLM launch failure**: Auto-launch exceptions surface a hint to run `dgxcoder serve --model <model>` manually; `chat`/`run` exit with code `1`.
+* **Process crash during wait**: Unexpected child exit drains remaining logs and returns failure.
+* **Ctrl+C during wait**: Cancels polling/launch cleanly without starting Goose.
+* **Goose install failure**: Prints the manual `curl …/download_cli.sh` install command and exits with code `1`.
+
 ---
 
 ## 5. Client Interfaces & Developer Experience
@@ -192,7 +265,7 @@ Initializes the current project workspace for DGXCoder agentic pair-programming.
 
 ##### 5.1.2. `dgxcoder chat [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`
 Launches an interactive pair-programming session with the Goose AI agent connected to the local GB10 endpoint.
-* **Behavior**: Validates model compatibility on GB10 unified memory. If the local vLLM server is offline, automatically launches vLLM in the background and streams live `[vLLM]` startup logs until ready. Provisions official AAIF Goose binary if missing.
+* **Behavior**: Follows the full [Session Startup Process](#45-session-startup-process) (config → Goose bridge → model validate → vLLM health/auto-launch → Goose provision → optional sandbox → `goose session`). If the local vLLM server is offline, automatically launches vLLM in the background and streams live `[vLLM]` startup logs until ready.
 * **Options**:
   * `--model MODEL`: Override target LLM model name for session.
   * `--draft-model DRAFT_MODEL`: Speculative decoding draft model name.
@@ -201,7 +274,7 @@ Launches an interactive pair-programming session with the Goose AI agent connect
 
 ##### 5.1.3. `dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--debug]`
 Executes an autonomous coding task non-interactively using Goose AI Agent.
-* **Behavior**: Takes a single task prompt string, initializes vLLM/Goose bridges as needed, executes the requested code generation or refactoring task autonomously, and exits upon completion.
+* **Behavior**: Same [Session Startup Process](#45-session-startup-process) as `chat`, then runs `goose run --text "<prompt>"` for a single autonomous task and exits upon completion.
 * **Options**:
   * `PROMPT`: Mandatory instruction or prompt string for the agent.
   * `--model MODEL`: Override target LLM model name.
@@ -217,7 +290,7 @@ Displays Rich visual status panels summarizing GB10 hardware, inference server s
 
 ##### 5.1.5. `dgxcoder serve [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT_MODEL] [--num-speculative-tokens TOKENS]`
 Launches the local vLLM GB10 inference server with unified memory optimizations.
-* **Behavior**: Uses a multi-tiered launch resolution strategy (native `vllm` CLI > Python `vllm` module > Docker `vllm/vllm-openai:latest` container). Configures GB10 unified memory flags (`--gpu-memory-utilization 0.90`, `--max-model-len 16384`, `--kv-cache-dtype auto`). Supports dual-model speculative decoding (`--speculative-model` and `--num-speculative-tokens`).
+* **Behavior**: Runs the [serve variant](#dgxcoder-serve-variant) of the startup process: pre-downloads model weights, resolves the launch tier (native `vllm` CLI > Python `vllm` module > Docker `vllm/vllm-openai:latest`), applies GB10 unified memory flags (`--gpu-memory-utilization 0.90`, `--max-model-len 16384`, `--kv-cache-dtype auto`), and blocks in the foreground. Supports dual-model speculative decoding (`--speculative-model` and `--num-speculative-tokens`).
 * **Options**:
   * `--model MODEL`: Model name to load and serve (default: `qwen2.5-coder-32b`).
   * `--port PORT`: Port to expose OpenAI-compatible HTTP API (default: `8000`).
@@ -387,7 +460,7 @@ class DGXCoderConfig: ...
 ```
 
 ### 8.3. `dgxcoder/runner.py`
-Supervisor for launching Goose sessions, auto-provisioning official AAIF Goose 1.45+ binaries, container sandbox isolation, and executing `wait_for_vllm()`.
+Orchestrates the [Session Startup Process](#45-session-startup-process): Goose auto-provisioning, `wait_for_vllm()` readiness polling with sub-second signal handling, container sandbox isolation, and agent handoff.
 
 ```python
 class GooseInstaller: ...
@@ -396,7 +469,7 @@ class GooseRunner: ...
 ```
 
 ### 8.4. `dgxcoder/vllm_server.py`
-Multi-tiered vLLM server launcher (Native CLI > Python Module > Docker Container) with Blackwell GB10 prefill caching and non-blocking log streaming.
+Multi-tiered vLLM server launcher (Native CLI > Python Module > Docker Container) used by both auto-launch (`chat`/`run`) and foreground `serve`. Pre-downloads weights via `hardware.download_model`, applies Blackwell GB10 prefill caching flags, and streams logs via a non-blocking queue.
 
 ```python
 class VLLMLaunchOptions: ...
