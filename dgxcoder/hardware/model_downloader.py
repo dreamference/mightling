@@ -169,28 +169,72 @@ class ModelDownloader:
 
         serialization_success = False
 
-        # Attempt 1: Try using tensorizer library (TensorSerializer)
-        try:
-            from tensorizer import TensorSerializer
-            from transformers import AutoModelForCausalLM
-            print("   Using TensorSerializer (tensorizer Python library)...")
-            model = AutoModelForCausalLM.from_pretrained(
-                str(snapshot_dir),
-                trust_remote_code=True,
-                low_cpu_mem_usage=True,
-                torch_dtype="auto"
-            )
-            serializer = TensorSerializer(str(tensors_file))
-            serializer.write_module(model)
-            serializer.close()
-            del model
-            serialization_success = True
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"⚠️ TensorSerializer note: {e}")
+        # Attempt 1: Try containerized vllm-tensorizer if Docker is available
+        if shutil.which("docker"):
+            try:
+                hf_cache = os.path.expanduser("~/.cache/huggingface")
+                dgx_cache = os.path.expanduser("~/.cache/dgxcoder")
+                hf_base = cls.get_hf_cache_dir()
+                dgx_base = cls.get_dgx_cache_dir()
+                
+                if snapshot_dir.is_relative_to(hf_base) and tdir.is_relative_to(dgx_base):
+                    snap_rel = snapshot_dir.relative_to(hf_base)
+                    tdir_rel = tdir.relative_to(dgx_base)
+                    container_snap = f"/root/.cache/huggingface/{snap_rel}"
+                    container_tfile = f"/root/.cache/dgxcoder/{tdir_rel}/model.tensors"
 
-        # Attempt 2: Try vLLM tensorize script module if available
+                    print("   Using vllm-tensorizer Docker container for model weight serialization...")
+                    cmd = [
+                        "docker", "run", "--rm", "--gpus", "all",
+                        "-v", f"{hf_cache}:/root/.cache/huggingface",
+                        "-v", f"{dgx_cache}:/root/.cache/dgxcoder",
+                        "--entrypoint", "python3",
+                        "vllm-tensorizer:latest",
+                        "-c",
+                        f"from tensorizer import TensorSerializer; from transformers import AutoModelForCausalLM; "
+                        f"model = AutoModelForCausalLM.from_pretrained('{container_snap}', trust_remote_code=True, torch_dtype='auto'); "
+                        f"serializer = TensorSerializer('{container_tfile}'); "
+                        f"serializer.write_module(model); serializer.close()"
+                    ]
+                    res = subprocess.run(cmd, capture_output=True, text=True)
+                    if res.returncode == 0 and tensors_file.exists():
+                        serialization_success = True
+            except Exception as e:
+                pass
+
+        # Attempt 2: Try local tensorizer library (TensorSerializer)
+        if not serialization_success:
+            try:
+                from tensorizer import TensorSerializer
+                from transformers import AutoModelForCausalLM
+                from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+                print("   Using local TensorSerializer (tensorizer Python library)...")
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TimeElapsedColumn(),
+                ) as progress:
+                    task = progress.add_task("Tensorizing model weights", total=None)
+                    model = AutoModelForCausalLM.from_pretrained(
+                        str(snapshot_dir),
+                        trust_remote_code=True,
+                        low_cpu_mem_usage=True,
+                        torch_dtype="auto"
+                    )
+                    progress.update(task, description="Serializing to .tensors format")
+                    serializer = TensorSerializer(str(tensors_file))
+                    serializer.write_module(model)
+                    serializer.close()
+                    del model
+                    progress.update(task, description="Tensorization complete", completed=True)
+                serialization_success = True
+            except ImportError:
+                pass
+            except Exception as e:
+                print(f"⚠️ TensorSerializer note: {e}")
+
+        # Attempt 3: Try vLLM tensorize script module if available
         if not serialization_success:
             try:
                 import sys
@@ -207,9 +251,8 @@ class ModelDownloader:
                 pass
 
         if not serialization_success:
-            print(f"💡 Tensorize note: 'tensorizer' package is not installed.")
-            print(f"   Install tensorizer via: `pip install tensorizer` or `pip install vllm[tensorizer]`")
-            return False
+            print(f"⚠️  'tensorizer' not installed — skipping tensorize step (normal download will be used).")
+            return True
 
         # Copy metadata and tokenizer config files alongside model.tensors
         for fpath in snapshot_dir.iterdir():
@@ -301,7 +344,7 @@ class ModelDownloader:
                     success = True
 
         if success and auto_tensorize:
-            cls.tensorize_model(model_key, hf_token=hf_token)
+            cls.tensorize_model(model_key, hf_token=hf_token)  # best-effort; continues even if tensorizer missing
 
         if not success:
             print(f"💡 vLLM will attempt to fetch '{repo_id}' during initialization (cache-first mode).")
@@ -358,4 +401,17 @@ class ModelDownloader:
             if spec.compatible_gb10:
                 results[key] = cls.download_model(key, hf_token=hf_token, auto_tensorize=auto_tensorize)
         return results
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """
+        Clears the HuggingFace and tensorizer model caches.
+        """
+        for cache_dir in [cls.get_hf_cache_dir().parent, cls.get_tensorizer_cache_dir().parent]:
+            if cache_dir.exists():
+                print(f"🗑️  Clearing cache: {cache_dir}")
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            else:
+                print(f"ℹ️  Cache directory not found: {cache_dir}")
+        print("✅ Model cache cleared.")
 

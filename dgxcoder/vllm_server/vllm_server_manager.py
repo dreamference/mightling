@@ -143,6 +143,7 @@ class VLLMServerManager:
         max_num_batched_tokens: Optional[int] = 8192,
         guided_decoding_backend: Optional[str] = "outlines",
         use_tensorizer: bool = True,
+        docker_image: str = "vllm-tensorizer:latest",
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -150,7 +151,7 @@ class VLLMServerManager:
         Applies tier fallback:
         Tier 1: `vllm serve <model>` native binary
         Tier 2: `python -m vllm.entrypoints.openai.api_server`
-        Tier 3: `docker run --gpus all ... vllm/vllm-openai:latest`
+        Tier 3: `docker run --gpus all ... vllm-tensorizer:latest`
 
         Args:
             model (str): Target model short alias or HuggingFace repo ID.
@@ -172,6 +173,7 @@ class VLLMServerManager:
             max_num_batched_tokens (Optional[int]): Max tokens per batch when chunked prefill active (GB10).
             guided_decoding_backend (Optional[str]): Guided decoding backend for deterministic JSON/tool calls.
             use_tensorizer (bool): Pass model in tensorize (.tensors) format to vLLM if available.
+            docker_image (str): Docker image name to use for docker fallback (default 'vllm-tensorizer:latest').
 
         Returns:
             List[str]: Complete executable command list.
@@ -224,17 +226,37 @@ class VLLMServerManager:
         if tool_call_parser:
             base_args.extend(["--tool-call-parser", tool_call_parser])
 
+        is_docker_fallback = not shutil.which("vllm") and not self.is_vllm_installed() and self.is_docker_available()
+        
+        # Check if tensorizer package is available in the target vLLM runtime
+        has_tensorizer = False
+        if not is_docker_fallback:
+            try:
+                import tensorizer  # noqa: F401
+                has_tensorizer = True
+            except ImportError:
+                has_tensorizer = False
+        else:
+            # Custom images like vllm-tensorizer:latest include the tensorizer package
+            has_tensorizer = "tensorizer" in docker_image
+
         if use_tensorizer and is_model_tensorized(model):
-            tpath = get_tensorized_path(model)
-            if tpath:
-                import json
-                t_uri = str(tpath)
-                if not shutil.which("vllm") and not self.is_vllm_installed() and self.is_docker_available():
-                    dgx_cache = str(ModelDownloader.get_tensorizer_cache_dir().parent)
-                    if t_uri.startswith(dgx_cache):
-                        t_uri = t_uri.replace(dgx_cache, "/root/.cache/dgxcoder", 1)
-                base_args.extend(["--load-format", "tensorizer"])
-                base_args.extend(["--model-loader-extra-config", json.dumps({"tensorizer_uri": t_uri})])
+            if not has_tensorizer:
+                if is_docker_fallback:
+                    print(f"⚠️  Notice: Running vLLM via Docker container ({docker_image}) which does not include the 'tensorizer' package. Falling back cleanly to standard weights loading.")
+                else:
+                    print("⚠️  Notice: 'tensorizer' package is not installed in vLLM environment. Falling back cleanly to standard weights loading. (Install via: pip install 'vllm[tensorizer]')")
+            else:
+                tpath = get_tensorized_path(model)
+                if tpath:
+                    import json
+                    t_uri = str(tpath)
+                    if is_docker_fallback:
+                        dgx_cache_host = os.path.expanduser("~/.cache/dgxcoder")
+                        if t_uri.startswith(dgx_cache_host):
+                            t_uri = t_uri.replace(dgx_cache_host, "/root/.cache/dgxcoder", 1)
+                    base_args.extend(["--load-format", "tensorizer"])
+                    base_args.extend(["--model-loader-extra-config", json.dumps({"tensorizer_uri": t_uri})])
 
         if shutil.which("vllm"):
             cmd = ["vllm", "serve", hf_model] + base_args
@@ -256,7 +278,7 @@ class VLLMServerManager:
             ]
             if token_env:
                 cmd.extend(["-e", f"HF_TOKEN={token_env}"])
-            cmd.extend(["vllm/vllm-openai:latest", hf_model] + base_args)
+            cmd.extend([docker_image, hf_model] + base_args)
         else:
             cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", hf_model] + base_args
 

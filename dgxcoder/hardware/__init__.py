@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
 from dgxcoder.hardware.model_spec import ModelSpec
@@ -29,6 +30,9 @@ def download_model(model_key: str, hf_token: Optional[str] = None, auto_tensoriz
 
 def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = True) -> Dict[str, bool]:
     return ModelDownloader.download_all_models(hf_token=hf_token, auto_tensorize=auto_tensorize)
+
+def clear_model_cache() -> None:
+    return ModelDownloader.clear_cache()
 
 def get_system_memory() -> Dict[str, float]:
     m = HardwareManager.get_system_memory()

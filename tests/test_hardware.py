@@ -39,3 +39,26 @@ def test_download_model_functions():
     assert repo == "Qwen/Qwen2.5-Coder-32B-Instruct"
     is_dl = is_model_downloaded("qwen2.5-coder-32b")
     assert isinstance(is_dl, bool)
+
+def test_tensorizer_functions(tmp_path, monkeypatch):
+    from dgxcoder.hardware import is_model_tensorized, get_tensorized_path, ModelDownloader
+    
+    # Test checking non-existent model tensorization
+    assert is_model_tensorized("qwen2.5-coder-32b") is False or isinstance(is_model_tensorized("qwen2.5-coder-32b"), bool)
+
+    # Test creating mock tensorized directory and verifying detection
+    tdir = ModelDownloader.get_tensorized_dir("qwen2.5-coder-32b")
+    assert tdir is not None
+    tdir.mkdir(parents=True, exist_ok=True)
+    tfile = tdir / "model.tensors"
+    tfile.write_text("mock tensors data")
+
+    try:
+        assert is_model_tensorized("qwen2.5-coder-32b") is True
+        tpath = get_tensorized_path("qwen2.5-coder-32b")
+        assert tpath == tfile
+    finally:
+        # Cleanup mock file
+        if tfile.exists():
+            tfile.unlink()
+

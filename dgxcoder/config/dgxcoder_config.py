@@ -30,7 +30,12 @@ DEFAULT_ENABLE_AUTO_TOOL_CHOICE: Final[bool] = True
 DEFAULT_TOOL_CALL_PARSER: Final[str] = "hermes"
 DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
 
-HERMES_TOOL_CALL_PROMPT: Final[str] = "You must format tool calls using <tool_call>{\"name\": \"call_name\", \"arguments\": {\"arg\": \"val\"}}</tool_call>."
+HERMES_TOOL_CALL_PROMPT: Final[str] = (
+    "When you need to execute a tool, format your tool call strictly using <tool_call> tags as follows:\n"
+    "<tool_call>\n"
+    "{\"name\": \"function_name\", \"arguments\": {\"arg\": \"val\"}}\n"
+    "</tool_call>"
+)
 
 
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "outlines"
@@ -262,6 +267,7 @@ class DGXCoderConfig:
             "GOOSE_MODEL": resolved_model,
             "GOOSE_ALLOW_SHELL": "1",
             "GOOSE_ALLOW_READ": "1",
+            "GOOSE_TELEMETRY_OFF": "1",
         }
         if self.hf_token:
             env["HF_TOKEN"] = self.hf_token
@@ -390,7 +396,9 @@ class DGXCoderConfig:
             }
         }
         if self.cave_mode:
-            config_data["instructions"] = CAVE_MODE_PROMPT
+            config_data["instructions"] = f"{HERMES_TOOL_CALL_PROMPT}\n\n{CAVE_MODE_PROMPT}"
+        else:
+            config_data["instructions"] = HERMES_TOOL_CALL_PROMPT
 
         if extra_mcp_servers:
             config_data["extensions"].update(extra_mcp_servers)

@@ -179,6 +179,27 @@ class GooseRunner:
 
 
         print(f"🚀 Launching Goose AI Agent on GB10 local endpoint ({self.config.model})...")
+        
+        # Display active Goose configuration in a single clean line
+        try:
+            from rich.console import Console
+            from dgxcoder.hardware import resolve_model_hf_repo
+            console = Console()
+            resolved = resolve_model_hf_repo(self.config.model)
+            endpoint = self.config.vllm_host.rstrip("/") + "/v1"
+            exts = "developer, jetbrains_mcp"
+            cave = " | [bold red]CAVE MODE[/bold red]" if self.config.cave_mode else ""
+            console.print(
+                f"[bold cyan]🪿 Goose Config:[/bold cyan] "
+                f"[bold green]Provider:[/bold green] openai | "
+                f"[bold green]Model:[/bold green] {resolved} | "
+                f"[bold green]Endpoint:[/bold green] {endpoint} | "
+                f"[bold green]Extensions:[/bold green] {exts} | "
+                f"[bold green]Telemetry:[/bold green] OFF{cave}"
+            )
+        except Exception:
+            print(f"🪿 Goose Config: provider=openai | model={self.config.model} | endpoint={self.config.vllm_host}/v1 | telemetry=OFF")
+
         try:
             return subprocess.call(cmd, env=env)
         except Exception as e:

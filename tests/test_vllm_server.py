@@ -73,8 +73,8 @@ def test_vllm_build_launch_command_docker(monkeypatch):
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
     cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", port=8000)
     assert "docker" in cmd
-    assert "vllm/vllm-openai:latest" in cmd
-    img_idx = cmd.index("vllm/vllm-openai:latest")
+    assert "vllm-tensorizer:latest" in cmd
+    img_idx = cmd.index("vllm-tensorizer:latest")
     assert cmd[img_idx + 1] == "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 def test_vllm_environment_checks_real():
@@ -150,3 +150,43 @@ def test_vllm_startup_monitor_memory_progress_percent():
     time.sleep(0.15)
     monitor.stop()
     assert any("~40%" in line for line in logs)
+
+def test_vllm_build_launch_command_tensorizer(monkeypatch, tmp_path):
+    from dgxcoder.hardware.model_downloader import ModelDownloader
+    mgr = VLLMServerManager()
+
+    # Mock tensorized file
+    tfile = tmp_path / "model.tensors"
+    tfile.write_text("dummy tensors content")
+    monkeypatch.setattr(ModelDownloader, "is_model_tensorized", lambda key: True)
+    monkeypatch.setattr(ModelDownloader, "get_tensorized_path", lambda key: tfile)
+
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", use_tensorizer=True)
+    assert "--load-format" in cmd
+    fmt_idx = cmd.index("--load-format")
+    assert cmd[fmt_idx + 1] == "tensorizer"
+    assert "--model-loader-extra-config" in cmd
+    cfg_idx = cmd.index("--model-loader-extra-config")
+    assert "tensorizer_uri" in cmd[cfg_idx + 1]
+    assert str(tfile) in cmd[cfg_idx + 1]
+
+def test_vllm_build_launch_command_tensorizer_docker(monkeypatch, tmp_path):
+    import os
+    from dgxcoder.hardware.model_downloader import ModelDownloader
+    mgr = VLLMServerManager()
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(mgr, "is_vllm_installed", lambda: False)
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+
+    tpath = os.path.expanduser("~/.cache/dgxcoder/tensorizer/test/model.tensors")
+    monkeypatch.setattr(ModelDownloader, "is_model_tensorized", lambda key: True)
+    monkeypatch.setattr(ModelDownloader, "get_tensorized_path", lambda key: tpath)
+
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", use_tensorizer=True)
+    assert "vllm-tensorizer:latest" in cmd
+    assert "--load-format" in cmd
+    assert "--model-loader-extra-config" in cmd
+    cfg_idx = cmd.index("--model-loader-extra-config")
+    assert "/root/.cache/dgxcoder/tensorizer/test/model.tensors" in cmd[cfg_idx + 1]
+
+

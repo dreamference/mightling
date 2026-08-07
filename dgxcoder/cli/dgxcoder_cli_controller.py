@@ -23,7 +23,7 @@ from dgxcoder.runner import (
     ContinueRunner, ContinueInstaller,
     OpenHandsRunner, OpenHandsInstaller
 )
-from dgxcoder.hardware import detect_gb10_hardware, download_model, download_all_models
+from dgxcoder.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache
 from dgxcoder.vllm_server import VLLMServerManager
 from dgxcoder.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dgxcoder.context_engine import ContextEngine
@@ -94,6 +94,9 @@ class DGXCoderCLIController:
         agent_table.add_row("Active Served Models", ", ".join(vllm_status["models"]) if vllm_status["models"] else "None (vLLM idle)")
         agent_table.add_row("Active Agent Runner", f"[bold green]{config.agent_runner.upper()}[/bold green] (Default: GOOSE)")
         agent_table.add_row("Configured Model", config.model)
+        from dgxcoder.hardware import is_model_tensorized
+        tensorize_str = "[bold green]Saved & Active (.tensors)[/bold green]" if is_model_tensorized(config.model) else "[yellow]Standard Weights (HF Cache)[/yellow]"
+        agent_table.add_row("Tensorize Format Status", tensorize_str)
         if config.draft_model:
             agent_table.add_row("Speculative Draft Model", f"{config.draft_model} ({config.num_speculative_tokens} tokens)")
         sandbox_str = f"[bold green]{config.sandbox.upper()} (Rootless Isolated)[/bold green]" if config.sandbox != "none" else "[yellow]Disabled (Native Host)[/yellow]"
@@ -192,9 +195,9 @@ class DGXCoderCLIController:
         start_server_parser.add_argument("--api-key", default=None, help="OpenAI-compatible API key (optional; not set by default)")
         start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", default=True, help="Enable automatic tool choice for function calling (default: enabled)")
         start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (default: auto-detected based on model, e.g. hermes, llama3_json)")
-
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
         start_server_parser.add_argument("--guided-decoding-backend", default="outlines", help="Guided decoding backend for deterministic JSON/tool calls (default: outlines)")
+        start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=True, help="Save and load model in tensorize (.tensors) format (default: True)")
 
         # Command: dgxcoder index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
@@ -208,6 +211,10 @@ class DGXCoderCLIController:
         download_parser = subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
+        download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=True, help="Auto-convert model to tensorize format after download (default: True)")
+
+        # Command: dgxcoder clear-cache
+        subparsers.add_parser("clear-cache", help="Clear local HuggingFace and tensorizer model caches")
 
         # Command: dgxcoder endpoints
         subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
@@ -251,6 +258,7 @@ class DGXCoderCLIController:
         max_num_batched_tokens = getattr(args, "max_num_batched_tokens", None)
         guided_decoding_backend = getattr(args, "guided_decoding_backend", None)
         cave_mode = getattr(args, "cave", None)
+        tensorize_opt = getattr(args, "tensorize", None)
 
         config = DGXCoderConfig(
             config_file=config_file,
@@ -264,7 +272,8 @@ class DGXCoderCLIController:
             num_scheduler_steps=num_scheduler_steps,
             attention_backend=attention_backend,
             kv_cache_dtype=kv_cache_dtype,
-            cave_mode=cave_mode
+            cave_mode=cave_mode,
+            use_tensorizer=tensorize_opt
         )
 
         # Instantiate selected runner (Goose by default, or Cline/Aider/Continue/OpenHands)
@@ -282,24 +291,26 @@ class DGXCoderCLIController:
         # Dispatch subcommand logic
         if args.command == "download":
             cls.display_header()
+            auto_t = getattr(args, "tensorize", True)
             if getattr(args, "all", False):
-                download_all_models(hf_token=config.hf_token)
+                download_all_models(hf_token=config.hf_token, auto_tensorize=auto_t)
             else:
                 target_model = args.model or config.model
                 if target_model:
-                    download_model(target_model, hf_token=config.hf_token)
+                    download_model(target_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                     if config.draft_model:
-                        download_model(config.draft_model, hf_token=config.hf_token)
+                        download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                 else:
                     print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dgxcoder init --model <model_name>'")
             sys.exit(0)
 
         elif args.command == "init":
             cls.display_header()
+            auto_t = config.use_tensorizer
             if config.model:
-                download_model(config.model, hf_token=config.hf_token)
+                download_model(config.model, hf_token=config.hf_token, auto_tensorize=auto_t)
                 if config.draft_model:
-                    download_model(config.draft_model, hf_token=config.hf_token)
+                    download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
             saved_config_path = config.save_config()
             config.ensure_goose_config()
             ctx_engine = ContextEngine()
@@ -390,6 +401,7 @@ class DGXCoderCLIController:
                     tool_call_parser=args.tool_call_parser,
                     max_num_batched_tokens=args.max_num_batched_tokens,
                     guided_decoding_backend=args.guided_decoding_backend,
+                    use_tensorizer=getattr(args, "tensorize", True),
                     background=True
                 )
                 
