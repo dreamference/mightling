@@ -116,8 +116,6 @@ class VLLMServerManager:
             base_args.append("--enable-prefix-caching")
         if enable_chunked_prefill:
             base_args.append("--enable-chunked-prefill")
-        if num_scheduler_steps > 1:
-            base_args.extend(["--num-scheduler-steps", str(num_scheduler_steps)])
         if attention_backend and attention_backend != "auto":
             base_args.extend(["--attention-backend", attention_backend])
         if kv_cache_dtype:
@@ -139,7 +137,7 @@ class VLLMServerManager:
             ]
             if token_env:
                 cmd.extend(["-e", f"HF_TOKEN={token_env}"])
-            cmd.extend(["vllm/vllm-openai:latest", "--model", hf_model] + base_args)
+            cmd.extend(["vllm/vllm-openai:latest", hf_model] + base_args)
         else:
             cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", hf_model] + base_args
 
