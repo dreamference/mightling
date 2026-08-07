@@ -66,6 +66,8 @@ def handle_status():
     agent_table.add_row("Configured Model", config.model)
     if config.draft_model:
         agent_table.add_row("Speculative Draft Model", f"{config.draft_model} ({config.num_speculative_tokens} tokens)")
+    sandbox_str = f"[bold green]{config.sandbox.upper()} (Rootless Isolated)[/bold green]" if config.sandbox != "none" else "[yellow]Disabled (Native Host)[/yellow]"
+    agent_table.add_row("Container Sandbox", sandbox_str)
     agent_table.add_row("Goose CLI Runtime", goose_str)
     agent_table.add_row("DGXCoder Config Path", str(config.config_file_path))
     agent_table.add_row("Goose Config Path", str(config.config_path))
@@ -88,6 +90,7 @@ def main() -> None:
         description="DGXCoder: Autonomous local agentic coding engine powered by Goose & NVIDIA GB10"
     )
     parser.add_argument("--config", default=None, help="Path to custom DGXCoder config file (.yaml or .json)")
+    parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # init
@@ -95,11 +98,13 @@ def main() -> None:
     init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
     init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
     init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
+    init_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
 
     # chat
     chat_parser = subparsers.add_parser("chat", help="Launch interactive Goose pair programming session")
     chat_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
     chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
+    chat_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
     chat_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
     # run
@@ -107,6 +112,7 @@ def main() -> None:
     run_parser.add_argument("prompt", type=str, help="Task prompt for Goose agent")
     run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
     run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
+    run_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
     run_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
     # status
@@ -147,13 +153,15 @@ def main() -> None:
     model = getattr(args, "model", None)
     draft_model = getattr(args, "draft_model", None)
     num_speculative_tokens = getattr(args, "num_speculative_tokens", None)
+    sandbox = getattr(args, "sandbox", None)
 
     config = DGXCoderConfig(
         config_file=config_file,
         vllm_host=vllm_host,
         model=model,
         draft_model=draft_model,
-        num_speculative_tokens=num_speculative_tokens
+        num_speculative_tokens=num_speculative_tokens,
+        sandbox=sandbox
     )
     runner = GooseRunner(config=config)
 
@@ -170,6 +178,7 @@ def main() -> None:
         console.print(f"   [cyan]Target Model:[/cyan]    {config.model}")
         if config.draft_model:
             console.print(f"   [cyan]Draft Model:[/cyan]     {config.draft_model} ({config.num_speculative_tokens} tokens)")
+        console.print(f"   [cyan]Sandbox Isolation:[/cyan]{config.sandbox.upper() if config.sandbox != 'none' else 'Disabled (Native Host)'}")
         console.print(f"   [cyan]Target Host:[/cyan]     {config.vllm_host}")
         console.print(f"   [cyan]Indexed Files:[/cyan]   {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")
 

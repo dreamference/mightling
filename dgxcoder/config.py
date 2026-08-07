@@ -12,6 +12,7 @@ except ImportError:
 DEFAULT_VLLM_HOST = "http://localhost:8000"
 DEFAULT_MODEL = "qwen2.5-coder-32b"
 DEFAULT_SPECULATIVE_TOKENS = 5
+DEFAULT_SANDBOX = "none"
 GOOSE_CONFIG_PATH = Path.home() / ".config" / "goose" / "config.yaml"
 GLOBAL_DGXCODER_CONFIG_PATH = Path.home() / ".config" / "dgxcoder" / "config.yaml"
 LOCAL_DGXCODER_CONFIG_PATH = Path(".dgxcoder") / "config.yaml"
@@ -25,7 +26,8 @@ class DGXCoderConfig:
         vllm_host: Optional[str] = None,
         model: Optional[str] = None,
         draft_model: Optional[str] = None,
-        num_speculative_tokens: Optional[int] = None
+        num_speculative_tokens: Optional[int] = None,
+        sandbox: Optional[str] = None
     ):
         self.config_file_path = self._resolve_config_path(config_file)
         self.file_data = self._load_file_config(self.config_file_path)
@@ -67,6 +69,15 @@ class DGXCoderConfig:
             self.num_speculative_tokens = int(
                 self.file_data.get("num_speculative_tokens", DEFAULT_SPECULATIVE_TOKENS)
             )
+
+        self.sandbox = (
+            sandbox
+            if sandbox is not None
+            else os.getenv(
+                "DGXCODER_SANDBOX",
+                self.file_data.get("sandbox", DEFAULT_SANDBOX)
+            )
+        ).lower()
 
         self.config_path = GOOSE_CONFIG_PATH
 
@@ -114,7 +125,8 @@ class DGXCoderConfig:
             "vllm_host": self.vllm_host,
             "model": self.model,
             "draft_model": self.draft_model,
-            "num_speculative_tokens": self.num_speculative_tokens
+            "num_speculative_tokens": self.num_speculative_tokens,
+            "sandbox": self.sandbox
         }
 
         if yaml and out_path.suffix in (".yaml", ".yml"):

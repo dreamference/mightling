@@ -138,11 +138,16 @@ All supported models are qualified to run on a single **NVIDIA GB10 system (128 
 * **Readiness Polling & Live Streaming**: Automatically launches vLLM in background if offline when `dgxcoder chat` or `run` starts, streaming live `[vLLM]` output logs into the terminal until HTTP 200 OK is returned.
 * **Instant Signal Handling**: Polling loop operates on 0.1s sub-second sleep slices to handle `Ctrl+C` (`SIGINT`) instantly.
 
-### 4.3. Goose Agentic Loop & Automatic CLI Provisioning
+### 4.3. Goose Agentic Loop & Rootless Container Sandboxing
 * **Execution Runtime**: Goose AI Agent (`aaif-goose/goose` v1.45+).
 * **Auto-Installation**: Automatically provisions official AAIF Goose binary from `https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh` if missing from system `PATH`.
 * **Executable Resolution**: Detects `goose` in `PATH`, `~/.local/bin/goose`, `~/.goose/bin/goose`, and `sys.prefix/bin/goose`.
 * **OpenAI-Compatible Bridge**: Configures `~/.config/goose/config.yaml` to point to `http://localhost:8000/v1` with token `gb10-local-token`.
+* **Rootless Container Sandbox Isolation**:
+  - Supports `--sandbox {none,apptainer,podman,docker}` to isolate subagent tool executions (shell commands, package installs, test runs) from the host system.
+  - **Apptainer**: `apptainer exec --writable-tmpfs --bind $(pwd):/workspace docker://ubuntu:22.04` (Unprivileged user namespace isolation).
+  - **Podman**: `podman run --rm -it -v $(pwd):/workspace:Z -w /workspace ubuntu:22.04` (Rootless OCI container execution).
+  - **Docker**: `docker run --rm -it -v $(pwd):/workspace -w /workspace ubuntu:22.04` (Containerized workspace execution).
 
 ### 4.4. Codebase Context Engine (AST + Vector Index)
 * **AST Extraction**: Parses Python AST to extract class definitions, method signatures, function arguments, docstrings, and line ranges.

@@ -121,6 +121,34 @@ class GooseRunner:
             print("\n🛑 Cancelled waiting for vLLM server.")
             return False
 
+    def get_sandbox_command_prefix(self) -> List[str]:
+        """Generates container sandbox launcher command prefix based on configured sandbox mode."""
+        mode = self.config.sandbox
+        cwd = os.getcwd()
+
+        if mode == "apptainer":
+            if shutil.which("apptainer"):
+                return ["apptainer", "exec", "--writable-tmpfs", "--bind", f"{cwd}:/workspace", "docker://ubuntu:22.04"]
+            else:
+                print("⚠️ Apptainer container runtime requested but not found in PATH. Running un-sandboxed.")
+                return []
+
+        elif mode == "podman":
+            if shutil.which("podman"):
+                return ["podman", "run", "--rm", "-it", "-v", f"{cwd}:/workspace:Z", "-w", "/workspace", "ubuntu:22.04"]
+            else:
+                print("⚠️ Podman container runtime requested but not found in PATH. Running un-sandboxed.")
+                return []
+
+        elif mode == "docker":
+            if shutil.which("docker"):
+                return ["docker", "run", "--rm", "-it", "-v", f"{cwd}:/workspace", "-w", "/workspace", "ubuntu:22.04"]
+            else:
+                print("⚠️ Docker container runtime requested but not found in PATH. Running un-sandboxed.")
+                return []
+
+        return []
+
     def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:
         """Launches an interactive or non-interactive Goose agent session connected to local GB10 vLLM endpoint."""
         env = os.environ.copy()
@@ -154,7 +182,15 @@ class GooseRunner:
             return 1
 
         goose_bin = self.get_goose_executable()
-        cmd: List[str] = [goose_bin]
+        sandbox_prefix = self.get_sandbox_command_prefix()
+
+        cmd: List[str] = []
+        if sandbox_prefix:
+            print(f"🛡️  Enforcing Rootless Subagent Sandbox ({self.config.sandbox.upper()})...")
+            cmd.extend(sandbox_prefix)
+
+        cmd.append(goose_bin)
+
         if prompt:
             cmd.extend(["run", "--text", prompt])
         else:

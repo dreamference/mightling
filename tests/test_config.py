@@ -30,3 +30,12 @@ def test_load_custom_config_file(tmp_path):
     config_override = DGXCoderConfig(config_file=str(cfg_file), model="starcoder2-15b")
     assert config_override.model == "starcoder2-15b"
     assert config_override.draft_model == "qwen2.5-coder-1.5b"
+
+def test_sandbox_config(tmp_path):
+    cfg_file = tmp_path / "sandbox_config.yaml"
+    cfg_file.write_text("sandbox: apptainer\n")
+    config = DGXCoderConfig(config_file=str(cfg_file))
+    assert config.sandbox == "apptainer"
+
+    config_cli = DGXCoderConfig(config_file=str(cfg_file), sandbox="podman")
+    assert config_cli.sandbox == "podman"
