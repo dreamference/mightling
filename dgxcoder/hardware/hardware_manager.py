@@ -1,3 +1,11 @@
+"""
+NVIDIA GB10 Hardware Manager & Compatibility Verification.
+
+This module provides the HardwareManager class responsible for inspecting host physical
+RAM via /proc/meminfo, detecting Blackwell GPU specs via nvidia-smi, and evaluating
+model memory budgets.
+"""
+
 import os
 import shutil
 import subprocess
@@ -7,10 +15,18 @@ from dgxcoder.hardware.hardware_telemetry import HardwareTelemetry
 from dgxcoder.hardware.model_matrix_registry import ModelMatrixRegistry
 
 class HardwareManager:
-    """Manages system memory, NVIDIA GB10 hardware telemetry, and model compatibility checks."""
+    """
+    Manager class for querying host system hardware specs and evaluating LLM memory compatibility.
+    """
 
     @classmethod
     def get_system_memory(cls) -> MemoryMetrics:
+        """
+        Parses Linux /proc/meminfo to retrieve system RAM statistics in Gigabytes.
+
+        Returns:
+            MemoryMetrics: Dataclass containing total_gb, available_gb, and used_gb.
+        """
         total_gb, avail_gb, used_gb = 0.0, 0.0, 0.0
         meminfo_path = "/proc/meminfo"
         if os.path.exists(meminfo_path):
@@ -32,6 +48,12 @@ class HardwareManager:
 
     @classmethod
     def detect_gb10_hardware(cls) -> HardwareTelemetry:
+        """
+        Detects GPU device info via `nvidia-smi` and checks system qualification for NVIDIA GB10 target specs.
+
+        Returns:
+            HardwareTelemetry: Dataclass containing GPU name, unified memory size, driver version, and architecture.
+        """
         gpu_name = "N/A"
         is_gb10 = False
         driver_version = "N/A"
@@ -62,6 +84,7 @@ class HardwareManager:
         sys_mem = cls.get_system_memory()
         total_mem_gb = sys_mem.total_gb
 
+        # Qualification logic: GB10 name check or Unified Memory >= 100GB
         if "GB10" in gpu_name.upper() or "BLACKWELL" in gpu_name.upper():
             is_gb10 = True
         elif total_mem_gb >= 100.0:
@@ -82,6 +105,15 @@ class HardwareManager:
 
     @classmethod
     def check_model_compatibility(cls, model_key: str) -> Tuple[bool, str]:
+        """
+        Validates if requested model fits local hardware unified memory budget.
+
+        Args:
+            model_key (str): Short model alias or repo name.
+
+        Returns:
+            Tuple[bool, str]: Tuple of (is_compatible, status_message).
+        """
         spec = ModelMatrixRegistry.get_spec(model_key)
         if not spec:
             return True, f"Unknown model '{model_key}'. Make sure host has enough memory."
@@ -99,6 +131,16 @@ class HardwareManager:
 
     @classmethod
     def check_speculative_compatibility(cls, main_model_key: str, draft_model_key: str) -> Tuple[bool, str]:
+        """
+        Validates combined memory budget for dual-model speculative decoding.
+
+        Args:
+            main_model_key (str): Main target LLM model key.
+            draft_model_key (str): Speculative decoding draft model key.
+
+        Returns:
+            Tuple[bool, str]: Tuple of (is_compatible, status_message).
+        """
         valid_main, msg_main = cls.check_model_compatibility(main_model_key)
         if not valid_main:
             return False, f"Main model error: {msg_main}"

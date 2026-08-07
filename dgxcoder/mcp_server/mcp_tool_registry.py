@@ -1,10 +1,26 @@
+"""
+Model Context Protocol (MCP) Tool Schema Registry.
+
+This module provides the MCPToolRegistry class which defines available tools for IDE
+integration (`ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`,
+`ide_open_file`, `ide_apply_diff`, `workspace_search_code`).
+"""
+
 from typing import Dict, Any, List
 
 class MCPToolRegistry:
-    """Provides Tool definitions for Model Context Protocol consumers."""
+    """
+    Registry providing JSON-RPC tool schema definitions for MCP consumers.
+    """
 
     @classmethod
     def get_tool_definitions(cls) -> List[Dict[str, Any]]:
+        """
+        Returns complete tool definition schemas array following Model Context Protocol spec.
+
+        Returns:
+            List[Dict[str, Any]]: List of tool schema objects.
+        """
         return [
             {
                 "name": "ide_get_active_editor",

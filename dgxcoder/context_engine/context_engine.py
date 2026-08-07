@@ -1,3 +1,10 @@
+"""
+Parallel Codebase Context Indexing Engine for DGXCoder.
+
+This module provides the ContextEngine class which coordinates multi-threaded AST parsing,
+SQLite/FTS5 persistence, and TF-IDF vector search for zero-egress local code retrieval.
+"""
+
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -11,20 +18,30 @@ from dgxcoder.context_engine.ast_symbol_extractor import ASTSymbolExtractor
 from dgxcoder.context_engine.tfidf_calculator import TFIDFCalculator
 from dgxcoder.context_engine.sqlite_context_storage import SQLiteContextStorage
 
+# Directories ignored during indexing
 IGNORE_DIRS: Final[Set[str]] = {
     ".git", ".svn", ".hg", "__pycache__", ".venv", "venv",
     "node_modules", ".idea", ".vscode", "build", "dist", ".dgxcoder"
 }
 
+# Binary and non-source extensions ignored during indexing
 IGNORE_EXTENSIONS: Final[Set[str]] = {
     ".pyc", ".pyo", ".so", ".o", ".a", ".exe", ".dll", ".dylib",
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".tar", ".gz"
 }
 
 class ContextEngine:
-    """Parallel AST + SQLite/FTS5 Vector Indexing Engine for DGXCoder zero-egress local code context."""
+    """
+    Context indexing engine providing zero-egress local semantic code search.
+    """
 
     def __init__(self, workspace_root: Optional[str] = None):
+        """
+        Initializes ContextEngine for specified workspace root directory.
+
+        Args:
+            workspace_root (Optional[str]): Root directory path of target workspace. Defaults to current working directory.
+        """
         self.workspace_root: Path = Path(workspace_root or os.getcwd()).resolve()
         self.dgxcoder_dir: Path = self.workspace_root / ".dgxcoder"
         self.dgxcoder_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +55,15 @@ class ContextEngine:
         self.idf_table: Dict[str, float] = {}
 
     def is_ignored(self, path: Path) -> bool:
+        """
+        Checks whether file path matches ignored directory names or extensions.
+
+        Args:
+            path (Path): Path to evaluate.
+
+        Returns:
+            bool: True if path should be skipped during indexing.
+        """
         for part in path.parts:
             if part in IGNORE_DIRS:
                 return True
@@ -46,12 +72,23 @@ class ContextEngine:
         return False
 
     def tokenize(self, text: str) -> List[str]:
+        """Delegates tokenization to TFIDFCalculator."""
         return TFIDFCalculator.tokenize(text)
 
     def extract_python_ast(self, file_path: Path, rel_path: str, content: str) -> List[CodeSymbol]:
+        """Delegates AST parsing to ASTSymbolExtractor."""
         return ASTSymbolExtractor.extract_python_ast(file_path, rel_path, content)
 
     def _process_single_file(self, abs_path: Path) -> Optional[Tuple[IndexedFile, str]]:
+        """
+        Worker thread routine that reads file contents, tokenizes terms, and extracts AST symbols.
+
+        Args:
+            abs_path (Path): Absolute filesystem path of target file.
+
+        Returns:
+            Optional[Tuple[IndexedFile, str]]: Tuple of (IndexedFile, content_string) or None if ignored/failed.
+        """
         if self.is_ignored(abs_path):
             return None
         rel_path = str(abs_path.relative_to(self.workspace_root))
@@ -76,6 +113,16 @@ class ContextEngine:
             return None
 
     def index_workspace(self, force_reindex: bool = False) -> Dict[str, Any]:
+        """
+        Indexes all source files in workspace in parallel using ThreadPoolExecutor and persists
+        results to `.dgxcoder/context_index.json` and `.dgxcoder/context.db`.
+
+        Args:
+            force_reindex (bool): If True, reindexes workspace regardless of existing cached files.
+
+        Returns:
+            Dict[str, Any]: Summary dictionary containing indexing metrics.
+        """
         if not force_reindex and self.load_index():
             return self.get_summary()
 
@@ -84,6 +131,7 @@ class ContextEngine:
         self.tf_idf_index.clear()
         self.idf_table.clear()
 
+        # Step 1: Collect workspace files
         files_to_index: List[Path] = []
         for root, dirs, files in os.walk(self.workspace_root):
             dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
@@ -95,6 +143,7 @@ class ContextEngine:
         doc_tokens: Dict[str, List[str]] = {}
         all_tokens_set: Set[str] = set()
 
+        # Step 2: Initialize SQLite schema
         conn = self.sqlite_storage.init_db()
         with conn:
             conn.execute("DELETE FROM files;")
@@ -104,10 +153,12 @@ class ContextEngine:
             except Exception:
                 pass
 
+        # Step 3: Parallel multi-threaded file parsing across CPU cores
         max_workers = min(32, (os.cpu_count() or 4) * 2)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = executor.map(self._process_single_file, files_to_index)
 
+        # Step 4: Populate database records and in-memory indexes
         with conn:
             for item in results:
                 if item is None:
@@ -129,12 +180,24 @@ class ContextEngine:
 
         conn.close()
 
+        # Step 5: Calculate TF-IDF matrix
         self.idf_table, self.tf_idf_index = TFIDFCalculator.compute_matrix(doc_tokens, all_tokens_set)
         self.save_index()
         return self.get_summary()
 
     def search_code(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Performs local hybrid semantic search combining SQLite FTS5 rank and TF-IDF scores.
+
+        Args:
+            query (str): Natural language or code search query string.
+            top_k (int): Number of top matching files to return.
+
+        Returns:
+            List[Dict[str, Any]]: List of matching file records sorted by score descending.
+        """
         query_tokens = self.tokenize(query)
+        # Combine FTS5 full-text score with TF-IDF vector score
         file_scores: Dict[str, float] = self.sqlite_storage.search_fts(query_tokens, top_k)
 
         for token in query_tokens:
@@ -157,6 +220,7 @@ class ContextEngine:
         return results
 
     def save_index(self) -> None:
+        """Saves cached index JSON to `.dgxcoder/context_index.json`."""
         data: Dict[str, Any] = {
             "workspace_root": str(self.workspace_root),
             "symbol_count": len(self.symbols),
@@ -175,6 +239,7 @@ class ContextEngine:
             json.dump(data, f, indent=2)
 
     def load_index(self) -> bool:
+        """Loads cached index from disk if available."""
         if not self.index_file.exists():
             return False
         try:
@@ -197,6 +262,7 @@ class ContextEngine:
             return False
 
     def get_summary(self) -> Dict[str, Any]:
+        """Returns workspace indexing stats."""
         return {
             "workspace_root": str(self.workspace_root),
             "total_indexed_files": len(self.indexed_files),

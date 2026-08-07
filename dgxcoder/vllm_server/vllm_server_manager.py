@@ -1,3 +1,11 @@
+"""
+vLLM Server Lifecycle & Process Manager for DGXCoder.
+
+This module provides the VLLMServerManager class which handles building vLLM server launch commands
+(native CLI > python module > docker container), executing server subprocesses, pre-downloading weights,
+polling HTTP health checks, and capturing logs.
+"""
+
 import os
 import sys
 import shutil
@@ -11,14 +19,31 @@ from dgxcoder.vllm_server.vllm_log_streamer import VLLMLogStreamer
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 
 class VLLMServerManager:
-    """Manages local vLLM / TensorRT-LLM server lifecycle on NVIDIA GB10 hardware."""
+    """
+    Supervisor class managing local vLLM OpenAI API server startup, container fallback, and health monitoring.
+    """
 
     def __init__(self, host: str = DEFAULT_VLLM_HOST):
+        """
+        Initializes VLLMServerManager with target host endpoint URL.
+
+        Args:
+            host (str): Target HTTP endpoint URL (default 'http://localhost:8000').
+        """
         self.host: str = host.rstrip("/")
         self.process: Optional[subprocess.Popen] = None
         self.streamer: VLLMLogStreamer = VLLMLogStreamer()
 
     def check_health(self, timeout: float = 0.5) -> bool:
+        """
+        Performs non-blocking HTTP GET request to /v1/models to verify vLLM server health.
+
+        Args:
+            timeout (float): Request timeout in seconds.
+
+        Returns:
+            bool: True if server returns HTTP status 200 OK.
+        """
         try:
             url = f"{self.host}/v1/models"
             resp = requests.get(url, timeout=timeout)
@@ -27,6 +52,15 @@ class VLLMServerManager:
             return False
 
     def get_models(self, timeout: float = 2.0) -> List[str]:
+        """
+        Queries /v1/models to list active served model IDs.
+
+        Args:
+            timeout (float): Request timeout in seconds.
+
+        Returns:
+            List[str]: List of model ID strings served on endpoint.
+        """
         try:
             url = f"{self.host}/v1/models"
             resp = requests.get(url, timeout=timeout)
@@ -38,6 +72,12 @@ class VLLMServerManager:
         return []
 
     def is_vllm_installed(self) -> bool:
+        """
+        Checks if vLLM CLI or python package is installed in environment.
+
+        Returns:
+            bool: True if vLLM binary or python package exists.
+        """
         if shutil.which("vllm") is not None:
             return True
         try:
@@ -47,6 +87,12 @@ class VLLMServerManager:
             return False
 
     def is_docker_available(self) -> bool:
+        """
+        Checks if Docker daemon is running and accessible.
+
+        Returns:
+            bool: True if docker binary exists and `docker ps` succeeds.
+        """
         if shutil.which("docker") is None:
             return False
         try:
@@ -71,12 +117,39 @@ class VLLMServerManager:
         attention_backend: str = "auto",
         kv_cache_dtype: str = "auto",
     ) -> List[str]:
+        """
+        Constructs the shell command array to launch vLLM OpenAI API server.
+
+        Applies tier fallback:
+        Tier 1: `vllm serve <model>` native binary
+        Tier 2: `python -m vllm.entrypoints.openai.api_server`
+        Tier 3: `docker run --gpus all ... vllm/vllm-openai:latest`
+
+        Args:
+            model (str): Target model short alias or HuggingFace repo ID.
+            port (int): Port number for server.
+            quantization (Optional[str]): Quantization method.
+            max_model_len (int): Context length limit.
+            gpu_memory_utilization (float): Memory allocation fraction.
+            draft_model (Optional[str]): Speculative decoding draft model.
+            num_speculative_tokens (int): Proposed draft tokens per iteration.
+            hf_token (Optional[str]): HuggingFace token.
+            enable_prefix_caching (bool): Flag to enable prefix KV cache.
+            enable_chunked_prefill (bool): Flag to enable chunked prefill.
+            num_scheduler_steps (int): Multi-step scheduling iteration count.
+            attention_backend (str): Attention implementation backend.
+            kv_cache_dtype (str): Datatype for KV cache.
+
+        Returns:
+            List[str]: Complete executable command list.
+        """
         from dgxcoder.hardware import resolve_model_hf_repo
         hf_model = resolve_model_hf_repo(model)
         hf_draft_model = resolve_model_hf_repo(draft_model) if draft_model else None
 
         token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DGXCODER_HF_TOKEN")
 
+        # Auto FP8 resolution for 70B/72B models on GB10
         if not quantization and ("70b" in model.lower() or "72b" in model.lower()):
             quantization = "fp8"
 
@@ -141,15 +214,37 @@ class VLLMServerManager:
         kv_cache_dtype: str = "auto",
         background: bool = True
     ) -> Optional[subprocess.Popen]:
+        """
+        Pre-downloads model weights and starts local vLLM OpenAI API server.
+
+        Args:
+            model (str): Primary model name.
+            port (int): Endpoint port.
+            quantization (Optional[str]): Quantization format.
+            draft_model (Optional[str]): Draft model for speculative decoding.
+            num_speculative_tokens (int): Speculative token length.
+            hf_token (Optional[str]): HuggingFace token.
+            enable_prefix_caching (bool): Enable prefix KV caching.
+            enable_chunked_prefill (bool): Enable chunked prefill.
+            num_scheduler_steps (int): Multi-step scheduling count.
+            attention_backend (str): Attention backend.
+            kv_cache_dtype (str): KV cache precision.
+            background (bool): If True, run asynchronously as Popen subprocess.
+
+        Returns:
+            Optional[subprocess.Popen]: Popen object if background=True, else None.
+        """
         if not self.is_vllm_installed() and not self.is_docker_available():
             print("⚠️ vLLM Python package is not installed and Docker is unavailable.")
             print("💡 Install vLLM via: `pip install vllm` or `pip install vllm --extra-index-url https://download.pytorch.org/whl/cu121`")
 
+        # Step 1: Pre-download model weights into local HuggingFace cache
         from dgxcoder.hardware import download_model
         download_model(model, hf_token=hf_token)
         if draft_model:
             download_model(draft_model, hf_token=hf_token)
 
+        # Step 2: Build launch command
         cmd = self.build_launch_command(
             model=model,
             port=port,
@@ -164,6 +259,7 @@ class VLLMServerManager:
             kv_cache_dtype=kv_cache_dtype,
         )
 
+        # Step 3: Cleanup potential container name conflicts prior to launch
         if cmd and cmd[0] == "docker":
             container_name = f"dgxcoder-vllm-{port}"
             subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -192,9 +288,21 @@ class VLLMServerManager:
             return None
 
     def get_new_logs(self) -> List[str]:
+        """
+        Retrieves newly accumulated server stdout log lines.
+
+        Returns:
+            List[str]: List of unread stdout log strings.
+        """
         return self.streamer.pop_logs()
 
     def get_server_status(self) -> Dict[str, Any]:
+        """
+        Gathers complete server status report.
+
+        Returns:
+            Dict[str, Any]: Dictionary with 'host', 'healthy', 'models', 'pid'.
+        """
         healthy = self.check_health()
         models = self.get_models() if healthy else []
         status = VLLMServerStatus(

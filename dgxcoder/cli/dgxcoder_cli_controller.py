@@ -1,3 +1,11 @@
+"""
+DGXCoder Command Line Interface (CLI) Controller.
+
+This module provides the DGXCoderCLIController class which parses command line arguments
+for subcommands (`init`, `chat`, `run`, `status`, `serve`, `index`, `mcp`, `download`, `web`),
+renders Rich terminal user interfaces, and coordinates backend component execution.
+"""
+
 import argparse
 import os
 import sys
@@ -16,13 +24,17 @@ from dgxcoder.context_engine import ContextEngine
 from dgxcoder.mcp_server import main as run_mcp_server
 from dgxcoder.web_canvas import start_web_canvas_server
 
+# Global Rich console instance for styled terminal outputs
 console: Final[Console] = Console()
 
 class DGXCoderCLIController:
-    """Class-based Controller for DGXCoder CLI operations and Rich UI rendering."""
+    """
+    Controller class for DGXCoder CLI operations, Rich status panels, and subcommand routing.
+    """
 
     @classmethod
     def display_header(cls) -> None:
+        """Renders styled Rich header panel displaying DGXCoder branding and GB10 target architecture."""
         console.print(Panel.fit(
             "[bold green]⚡ DGXCoder[/bold green] - Autonomous Local Agentic Coding Engine\n"
             "[dim]Exclusive Target Hardware: NVIDIA GB10 (Blackwell Architecture | 128 GB Unified Memory)[/dim]",
@@ -31,6 +43,10 @@ class DGXCoderCLIController:
 
     @classmethod
     def handle_status(cls) -> None:
+        """
+        Executes `dgxcoder status` command, displaying hardware metrics, vLLM health, Goose config,
+        and context engine index telemetry in formatted Rich panels.
+        """
         cls.display_header()
         hw = detect_gb10_hardware()
         config = DGXCoderConfig()
@@ -40,6 +56,7 @@ class DGXCoderCLIController:
         ctx_engine = ContextEngine()
         ctx_summary = ctx_engine.get_summary() if ctx_engine.load_index() else None
 
+        # 1. NVIDIA GB10 Hardware Telemetry Panel
         hw_table = Table(show_header=False, box=None)
         hw_table.add_column("Property", style="bold cyan")
         hw_table.add_column("Value", style="white")
@@ -55,6 +72,7 @@ class DGXCoderCLIController:
 
         console.print(Panel(hw_table, title="[bold]🖥️ NVIDIA GB10 Hardware Status[/bold]", border_style="blue"))
 
+        # 2. vLLM Server & Goose Agent Status Panel
         agent_table = Table(show_header=False, box=None)
         agent_table.add_column("Property", style="bold cyan")
         agent_table.add_column("Value", style="white")
@@ -80,6 +98,7 @@ class DGXCoderCLIController:
 
         console.print(Panel(agent_table, title="[bold]🤖 vLLM & Goose Agent Status[/bold]", border_style="magenta"))
 
+        # 3. Context Engine Index Panel
         if ctx_summary:
             ctx_table = Table(show_header=False, box=None)
             ctx_table.add_column("Property", style="bold cyan")
@@ -93,6 +112,12 @@ class DGXCoderCLIController:
 
     @classmethod
     def build_parser(cls) -> argparse.ArgumentParser:
+        """
+        Constructs ArgumentParser with subcommands for DGXCoder CLI operations.
+
+        Returns:
+            argparse.ArgumentParser: Configured argument parser object.
+        """
         parser = argparse.ArgumentParser(
             prog="dgxcoder",
             description="DGXCoder: Autonomous local agentic coding engine powered by Goose & NVIDIA GB10"
@@ -102,6 +127,7 @@ class DGXCoderCLIController:
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
         subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
+        # Command: dgxcoder init
         init_parser = subparsers.add_parser("init", help="Initialize .dgxcoder project workspace and Goose MCP config")
         init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
@@ -109,6 +135,7 @@ class DGXCoderCLIController:
         init_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
+        # Command: dgxcoder chat
         chat_parser = subparsers.add_parser("chat", help="Launch interactive Goose pair programming session")
         chat_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
@@ -116,6 +143,7 @@ class DGXCoderCLIController:
         chat_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         chat_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
+        # Command: dgxcoder run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task with Goose")
         run_parser.add_argument("prompt", type=str, help="Task prompt for Goose agent")
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
@@ -124,8 +152,10 @@ class DGXCoderCLIController:
         run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose Goose debug output")
 
+        # Command: dgxcoder status
         subparsers.add_parser("status", help="Display local GB10 hardware & Goose connection status")
 
+        # Command: dgxcoder serve
         serve_parser = subparsers.add_parser("serve", help="Launch local vLLM server optimized for GB10 unified memory")
         serve_parser.add_argument("--model", default=None, help="Model name to serve")
         serve_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
@@ -137,16 +167,20 @@ class DGXCoderCLIController:
         serve_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
         serve_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
 
+        # Command: dgxcoder index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
         index_parser.add_argument("--dir", default=None, help="Directory to index")
         index_parser.add_argument("--force", action="store_true", help="Force reindexing")
 
+        # Command: dgxcoder mcp
         subparsers.add_parser("mcp", help="Run stdio MCP server for JetBrains & VS Code extensions")
 
+        # Command: dgxcoder download
         download_parser = subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
 
+        # Command: dgxcoder web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
 
@@ -154,6 +188,7 @@ class DGXCoderCLIController:
 
     @classmethod
     def run_cli(cls) -> None:
+        """Main execution entrypoint for CLI command parsing and subcommand dispatching."""
         parser = cls.build_parser()
         args = parser.parse_args()
 
@@ -161,6 +196,7 @@ class DGXCoderCLIController:
             parser.print_help()
             sys.exit(0)
 
+        # Handle stdio MCP server command immediately
         if args.command == "mcp":
             run_mcp_server()
             sys.exit(0)
@@ -190,6 +226,7 @@ class DGXCoderCLIController:
         )
         runner = GooseRunner(config=config)
 
+        # Dispatch subcommand logic
         if args.command == "download":
             cls.display_header()
             if getattr(args, "all", False):
@@ -267,3 +304,7 @@ class DGXCoderCLIController:
                     time.sleep(1)
             except KeyboardInterrupt:
                 console.print("\n[yellow]Stopping Web Canvas UI...[/yellow]")
+
+def main() -> None:
+    """Standalone CLI main function."""
+    DGXCoderCLIController.run_cli()

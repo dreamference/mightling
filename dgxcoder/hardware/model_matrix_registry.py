@@ -1,9 +1,19 @@
+"""
+Model Matrix Registry for DGXCoder.
+
+This module provides the ModelMatrixRegistry class which acts as the single source of truth
+for supported LLMs, speculative decoding draft models, and short alias resolution.
+"""
+
 from typing import Dict, Optional, Final
 from dgxcoder.hardware.model_spec import ModelSpec
 
 class ModelMatrixRegistry:
-    """Manages qualified LLM and speculative decoding draft model specifications."""
+    """
+    Registry holding qualified models for NVIDIA GB10 hardware and short alias resolution logic.
+    """
 
+    # Static registry of supported target models and speculative draft models
     MATRIX: Final[Dict[str, ModelSpec]] = {
         "qwen2.5-coder-32b": ModelSpec(
             name="Qwen 2.5 Coder 32B",
@@ -99,6 +109,15 @@ class ModelMatrixRegistry:
 
     @classmethod
     def resolve_hf_repo(cls, model_key: str) -> str:
+        """
+        Resolves short model alias (e.g. 'qwen2.5-coder-32b') to official HuggingFace repository ID.
+
+        Args:
+            model_key (str): Short model alias or full repo string.
+
+        Returns:
+            str: Official HuggingFace repository identifier (or original string if unmapped).
+        """
         if not model_key:
             return model_key
         spec = cls.MATRIX.get(model_key.lower())
@@ -106,4 +125,13 @@ class ModelMatrixRegistry:
 
     @classmethod
     def get_spec(cls, model_key: str) -> Optional[ModelSpec]:
+        """
+        Retrieves ModelSpec for given short alias.
+
+        Args:
+            model_key (str): Short model name key.
+
+        Returns:
+            Optional[ModelSpec]: ModelSpec object or None if key is unrecognized.
+        """
         return cls.MATRIX.get(model_key.lower())

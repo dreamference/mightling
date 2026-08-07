@@ -1,17 +1,38 @@
+"""
+Python AST Symbol Extractor for Context Engine.
+
+This module provides the ASTSymbolExtractor class which uses Python's native `ast` module
+to parse code files and extract class and function definitions.
+"""
+
 import ast
 from pathlib import Path
 from typing import List
 from dgxcoder.context_engine.code_symbol import CodeSymbol
 
 class ASTSymbolExtractor:
-    """Parses code AST tree structures to extract symbol definitions."""
+    """
+    Parser class extracting Python classes, functions, async functions, signatures, and docstrings.
+    """
 
     @classmethod
     def extract_python_ast(cls, file_path: Path, rel_path: str, content: str) -> List[CodeSymbol]:
+        """
+        Parses Python source content using `ast.parse` and extracts top-level/nested definitions.
+
+        Args:
+            file_path (Path): Path to source file.
+            rel_path (str): Relative workspace path.
+            content (str): Complete file content string.
+
+        Returns:
+            List[CodeSymbol]: Extracted CodeSymbol objects.
+        """
         symbols: List[CodeSymbol] = []
         try:
             tree = ast.parse(content, filename=str(file_path))
             for node in ast.walk(tree):
+                # Extract Class Definitions
                 if isinstance(node, ast.ClassDef):
                     doc = ast.get_docstring(node)
                     symbols.append(CodeSymbol(
@@ -23,6 +44,7 @@ class ASTSymbolExtractor:
                         signature=f"class {node.name}",
                         docstring=doc
                     ))
+                # Extract Function & Async Function Definitions
                 elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     doc = ast.get_docstring(node)
                     args = [a.arg for a in node.args.args]
@@ -37,5 +59,6 @@ class ASTSymbolExtractor:
                         docstring=doc
                     ))
         except Exception:
+            # Silently pass syntax errors for partial/malformed code files
             pass
         return symbols

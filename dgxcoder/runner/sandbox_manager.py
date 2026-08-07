@@ -1,11 +1,36 @@
+"""
+Rootless Subagent Container Sandbox Launcher.
+
+This module provides the SandboxManager class for wrapping subagent shell commands in rootless
+container sandboxes (Apptainer, Podman, Docker) for secure execution.
+"""
+
 import shutil
 from typing import List
 
 class SandboxManager:
-    """Generates subagent container sandbox launcher prefixes for unprivileged execution."""
+    """
+    Manager class generating container command prefixes for isolated subagent execution.
+    """
 
     @classmethod
     def get_prefix(cls, mode: str, cwd: str) -> List[str]:
+        """
+        Generates command prefix array for rootless container execution.
+
+        Modes supported:
+        - `apptainer`: Rootless HPC container isolation (`apptainer exec --writable-tmpfs`)
+        - `podman`: Rootless container isolation (`podman run --rm -it ...`)
+        - `docker`: Standard container isolation (`docker run --rm -it ...`)
+        - `none`: Native un-sandboxed host execution (`[]`)
+
+        Args:
+            mode (str): Sandbox mode selection string.
+            cwd (str): Current working directory path to mount into container workspace.
+
+        Returns:
+            List[str]: Container launcher command prefix list.
+        """
         mode = mode.lower()
         if mode == "apptainer":
             if shutil.which("apptainer"):

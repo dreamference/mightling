@@ -1,3 +1,10 @@
+"""
+Configuration File Serialization & Storage Manager.
+
+This module provides the ConfigFileStorageManager class handling loading and saving
+DGXCoder configuration dictionaries to YAML or JSON formats.
+"""
+
 import json
 from pathlib import Path
 from typing import Dict, Any
@@ -8,10 +15,21 @@ except ImportError:
     yaml = None
 
 class ConfigFileStorageManager:
-    """Handles serialization and deserialization of DGXCoder YAML and JSON configurations."""
+    """
+    Storage manager handling YAML/JSON parsing, serialization, and disk writing.
+    """
 
     @classmethod
     def load_config_dict(cls, path: Path) -> Dict[str, Any]:
+        """
+        Loads configuration key-value dictionary from YAML or JSON file.
+
+        Args:
+            path (Path): File path to load.
+
+        Returns:
+            Dict[str, Any]: Configuration dictionary loaded from file (or empty dict on error/missing).
+        """
         if not path.exists():
             return {}
         try:
@@ -26,6 +44,16 @@ class ConfigFileStorageManager:
 
     @classmethod
     def save_config_dict(cls, path: Path, data: Dict[str, Any]) -> Path:
+        """
+        Saves configuration key-value dictionary to YAML or JSON file on disk.
+
+        Args:
+            path (Path): Target file path.
+            data (Dict[str, Any]): Dictionary of configuration options to serialize.
+
+        Returns:
+            Path: Path object pointing to written file.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
         if yaml and path.suffix in (".yaml", ".yml"):
             with open(path, "w", encoding="utf-8") as f:

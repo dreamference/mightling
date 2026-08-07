@@ -1,8 +1,33 @@
+"""
+vLLM Launch Options Data Structure for DGXCoder.
+
+This module provides the VLLMLaunchOptions dataclass which encapsulates parameters for
+launching vLLM OpenAI API server processes on NVIDIA GB10 hardware.
+"""
+
 from dataclasses import dataclass
 from typing import Optional
 
 @dataclass
 class VLLMLaunchOptions:
+    """
+    Data model defining options for starting a local vLLM OpenAI-compatible API server.
+
+    Attributes:
+        model (str): Primary model name or HuggingFace repo ID.
+        port (int): Port number for HTTP OpenAI endpoint (default 8000).
+        quantization (Optional[str]): Quantization method ('fp8', 'int8', 'awq', etc.).
+        max_model_len (int): Maximum model context length (tokens).
+        gpu_memory_utilization (float): Fraction of GPU memory allocated to vLLM KV cache (0.90 = 90%).
+        draft_model (Optional[str]): Optional speculative decoding draft model.
+        num_speculative_tokens (int): Number of draft tokens proposed per speculative step.
+        hf_token (Optional[str]): HuggingFace API authorization token.
+        enable_prefix_caching (bool): Enable automatic prompt prefix KV-cache reuse.
+        enable_chunked_prefill (bool): Enable chunked prefill execution for low generation latency.
+        num_scheduler_steps (int): Multi-step scheduling iteration count.
+        attention_backend (str): Attention implementation backend ('FLASHINFER', 'FLASH_ATTN', 'auto').
+        kv_cache_dtype (str): Precision datatype for KV cache ('auto', 'fp8').
+    """
     model: str = "qwen2.5-coder-32b"
     port: int = 8000
     quantization: Optional[str] = None

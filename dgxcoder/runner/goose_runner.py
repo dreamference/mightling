@@ -1,3 +1,11 @@
+"""
+Goose AI Agent Session Runner & vLLM Readiness Supervisor.
+
+This module provides the GooseRunner class which auto-launches local vLLM servers when offline,
+polls server health endpoints while streaming real-time startup logs, verifies Goose installation,
+and executes interactive pair-programming sessions or autonomous coding tasks.
+"""
+
 import os
 import subprocess
 import sys
@@ -9,25 +17,50 @@ from dgxcoder.runner.goose_installer import GooseInstaller
 from dgxcoder.runner.sandbox_manager import SandboxManager
 
 class GooseRunner:
-    """Orchestrates Goose AI agent sessions on NVIDIA GB10 hardware."""
+    """
+    Supervisor class managing vLLM endpoint polling, Goose installation, container sandbox prefixes,
+    and agent task execution.
+    """
 
     def __init__(self, config: Optional[DGXCoderConfig] = None):
+        """
+        Initializes GooseRunner with configuration and vLLM server manager instances.
+
+        Args:
+            config (Optional[DGXCoderConfig]): Configuration instance (defaults to DGXCoderConfig()).
+        """
         self.config: DGXCoderConfig = config or DGXCoderConfig()
         self.vllm_manager: VLLMServerManager = VLLMServerManager(host=self.config.vllm_host)
 
     def get_goose_executable(self) -> Optional[str]:
+        """Delegates to GooseInstaller."""
         return GooseInstaller.get_goose_executable()
 
     def is_goose_installed(self) -> bool:
+        """Delegates to GooseInstaller."""
         return GooseInstaller.is_installed()
 
     def install_goose(self) -> bool:
+        """Delegates to GooseInstaller."""
         return GooseInstaller.install_if_missing()
 
     def get_sandbox_command_prefix(self) -> List[str]:
+        """Delegates to SandboxManager."""
         return SandboxManager.get_prefix(self.config.sandbox, os.getcwd())
 
     def wait_for_vllm(self, poll_interval: float = 1.0, max_wait: Optional[float] = None, auto_launch: bool = True) -> bool:
+        """
+        Waits for local vLLM HTTP endpoint to become healthy. If offline and auto_launch=True,
+        automatically starts local vLLM server and streams startup logs in real time.
+
+        Args:
+            poll_interval (float): Polling loop interval in seconds.
+            max_wait (Optional[float]): Maximum wait duration in seconds before timing out.
+            auto_launch (bool): Automatically launch vLLM server if not running.
+
+        Returns:
+            bool: True if vLLM endpoint becomes online and healthy, False on failure/cancel.
+        """
         try:
             if self.vllm_manager.check_health(timeout=0.5):
                 return True
@@ -65,6 +98,7 @@ class GooseRunner:
         start_time = time.time()
         try:
             while True:
+                # Retrieve and print newly accumulated startup logs from vLLM stdout
                 new_logs = self.vllm_manager.get_new_logs()
                 for log_line in new_logs:
                     print(f"  [vLLM] {log_line}")
@@ -95,6 +129,16 @@ class GooseRunner:
             return False
 
     def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:
+        """
+        Executes an interactive Goose pair-programming session or autonomous coding task.
+
+        Args:
+            prompt (Optional[str]): Task prompt text. If provided, executes non-interactive `goose run --text <prompt>`.
+            debug (bool): Enable verbose Goose debug logging.
+
+        Returns:
+            int: Subprocess exit code (0 for success).
+        """
         env = os.environ.copy()
         env.update(self.config.get_env_vars())
         
@@ -108,10 +152,12 @@ class GooseRunner:
         if not valid:
             print(f"⚠️ Warning: {msg}")
 
+        # Auto-launch or wait for local vLLM server
         if not self.vllm_manager.check_health():
             if not self.wait_for_vllm():
                 return 1
 
+        # Provision Goose CLI binary if missing
         if not self.is_goose_installed():
             self.install_goose()
 
