@@ -11,7 +11,7 @@
 FROM nvcr.io/nvidia/vllm:26.07-py3
 
 
-# Install tensorizer optional dependencies for fast model weight loading
+# Install tensorizer optional dependencies for fast modelAd weight loading
 RUN pip install "vllm[tensorizer]"
 RUN pip install ray
 #this should be done as the last step to xgrammar is not overriden

@@ -247,6 +247,14 @@ class DGXCoderCLIController:
         logs_parser = subparsers.add_parser("show_request_logs", help="Tail the vLLM Docker container logs")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
+        # Command: dgxcoder benchmark_server
+        bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
+        bench_parser.add_argument("--port", type=int, default=8000, help="Port of the server to benchmark")
+        bench_parser.add_argument("--model", default=DEFAULT_MODEL, help="Model name to benchmark")
+        bench_parser.add_argument("--dataset-path", default="/opt/vllm/vllm-src/benchmarks/sonnet.txt", help="Path to the dataset")
+        bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
+        bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
+
         # Command: dgxcoder web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -513,6 +521,38 @@ class DGXCoderCLIController:
                 vllm_mgr.show_request_logs(port=args.port)
             except KeyboardInterrupt:
                 print("\nStopped tailing logs.")
+
+        elif args.command == "benchmark_server":
+            cls.display_header()
+            import subprocess
+            from dgxcoder.hardware import resolve_model_hf_repo
+            hf_repo = resolve_model_hf_repo(args.model)
+            
+            cmd = [
+                "docker", "exec", "-it", f"dgxcoder-vllm-{args.port}",
+                "vllm", "bench", "serve",
+                "--backend", "openai-chat",
+                "--base-url", f"http://localhost:{args.port}",
+                "--endpoint", "/v1/chat/completions",
+                "--model", hf_repo,
+                "--dataset-name", "sonnet",
+                "--dataset-path", args.dataset_path,
+                "--sonnet-input-len", "4000",
+                "--sonnet-prefix-len", "2000",
+                "--sonnet-output-len", "512",
+                "--num-prompts", str(args.num_prompts),
+                "--max-concurrency", str(args.max_concurrency),
+                "--temperature", "0",
+                "--ignore-eos"
+            ]
+            
+            print(f"🚀 Running benchmark on {hf_repo} via {args.dataset_path}...")
+            try:
+                subprocess.run(cmd, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Benchmark failed: {e}")
+            except KeyboardInterrupt:
+                print("\n⏹️  Benchmark cancelled.")
 
         elif args.command == "index":
             cls.display_header()
