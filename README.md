@@ -81,16 +81,16 @@ DGXCoder automatically applies an optimized **NVIDIA GB10 launch recipe** when s
 | :--- | :--- | :--- |
 | **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | Pinned NGC vLLM container with Blackwell SM121 support |
 | **Context Length (`--max-model-len`)** | `131072` | 128K context window for large codebase context |
-| **Memory Ratio (`--gpu-memory-utilization`)** | `0.5` | 50% memory utilization tuned for GB10 unified memory |
+| **Memory Ratio (`--gpu-memory-utilization`)** | `0.3` | 30% memory utilization tuned for GB10 unified memory |
 | **KV Cache Dtype (`--kv-cache-dtype`)** | `fp8` | FP8 quantized KV cache for high token capacity |
 | **Attention Backend (`--attention-backend`)** | `flashinfer` | Blackwell-optimized FlashInfer attention kernels |
-| **MoE Backend (`--moe-backend`)** | `marlin` | Marlin MoE backend for SM121 execution compatibility |
+| **MoE Backend (`--moe-backend`)** | `flashinfer_b12x` | Blackwell-optimized FlashInfer b12x MoE backend |
 | **Tool Parser (`--tool-call-parser`)** | `qwen3_xml` | Qwen 3.6 XML tool call parser |
 | **Reasoning Parser (`--reasoning-parser`)** | `qwen3` | Qwen 3.6 reasoning channel parser |
 | **Max Batched Tokens (`--max-num-batched-tokens`)** | `32768` | Batched tokens limit for chunked prefill |
-| **Speculation (`--speculative-config`)** | `{"method": "mtp", "num_speculative_tokens": 3}` | MTP (Multi-Token Prediction) with 3 draft tokens |
+| **Speculation (`--speculative-config`)** | `{"method": "mtp", "num_speculative_tokens": 3, "moe_backend": "triton"}` | MTP (Multi-Token Prediction) with 3 draft tokens and Triton backend |
 | **Cache & Prefill** | `--enable-prefix-caching --enable-chunked-prefill` | Multi-turn prefix reuse & fast TTFT prefill chunking |
-| **Container Environment (`-e`)** | `VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x`<br>`VLLM_MARLIN_USE_ATOMIC_ADD=1` | Directs process to SM121 FlashInfer b12x NVFP4 GEMM kernels |
+| **Container Environment (`-e`)** | `VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x`<br>`VLLM_MARLIN_USE_ATOMIC_ADD=1`<br>`VLLM_DISABLED_KERNELS=MarlinNvFp4LinearKernel` | Directs process to SM121 FlashInfer b12x NVFP4 GEMM kernels |
 
 ---
 

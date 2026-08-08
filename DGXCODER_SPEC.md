@@ -31,6 +31,7 @@
     - [4.3.5. OpenHands (`--agent openhands`)](#435-openhands-agent-openhands)
   - [4.4. Codebase Context Engine (AST + SQLite / FTS5)](#44-codebase-context-engine-ast--sqlite--fts5)
   - [4.5. Session Startup Process](#45-session-startup-process)
+    - [4.5.1. Failure Modes](#451-failure-modes)
   - [4.6. Goose-vLLM Integration](#46-goose-vllm-integration)
     - [4.6.1. Endpoint Wiring](#461-endpoint-wiring)
     - [4.6.2. Real Shell Execution](#462-real-shell-execution)
@@ -55,7 +56,9 @@
     - [4.9.4. Download CLI](#494-download-cli)
     - [4.9.5. Best-Effort Policy](#495-best-effort-policy)
   - [4.10. Docker vLLM Architecture](#410-docker-vllm-architecture)
+    - [4.10.1. vLLM Runtime Images](#4101-vllm-runtime-images)
   - [4.11. Docker Agent Architecture](#411-docker-agent-architecture)
+    - [4.11.1. OpenHands Agent Image](#4111-openhands-agent-image)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dgxcoder` CLI Suite](#51-dgxcoder-cli-suite)
     - [5.1.1. `dgxcoder init`](#511-dgxcoder-init)
@@ -74,12 +77,20 @@
   - [5.2. IDE Integration via Stdio MCP](#52-ide-integration-via-stdio-mcp)
   - [5.3. Web Canvas UI & Telemetry Pane](#53-web-canvas-ui--telemetry-pane)
 - [6. System Requirements & Setup](#6-system-requirements--setup)
-  - [Requirements](#requirements)
-  - [Identifying Your Hardware Variant](#identifying-your-hardware-variant)
-  - [Quickstart Installation](#quickstart-installation)
-  - [Helper Scripts](#helper-scripts)
+  - [6.1. Requirements](#requirements)
+  - [6.2. Identifying Your Hardware Variant](#identifying-your-hardware-variant)
+  - [6.3. Quickstart Installation](#quickstart-installation)
+  - [6.4. Helper Scripts](#helper-scripts)
 - [7. Roadmap & Implementation Verification](#7-roadmap--implementation-verification)
 - [8. Codebase Architecture & Source Reference](#8-codebase-architecture--source-reference)
+  - [8.1. dgxcoder/hardware/](#81-dgxcoderhardware)
+  - [8.2. dgxcoder/config/](#82-dgxcoderconfig)
+  - [8.3. dgxcoder/runner/](#83-dgxcoderrunner)
+  - [8.4. dgxcoder/vllm_server/](#84-dgxcodervllm_server)
+  - [8.5. dgxcoder/context_engine/](#85-dgxcodercontext_engine)
+  - [8.6. dgxcoder/mcp_server/](#86-dgxcodermcp_server)
+  - [8.7. dgxcoder/web_canvas.py](#87-dgxcoderweb_canvaspy)
+  - [8.8. dgxcoder/cli/](#88-dgxcodercli)
 - [9. vLLM Parameters for Default Model](#9-vllm-parameters-for-default-model)
 
 ---
@@ -146,13 +157,14 @@ Aliases and HuggingFace repos are defined in `ModelMatrixRegistry.MATRIX` (`dgxc
 | :------------------------ | :---------------------------- | :--------- | :--------------------------- | :-------------- | :----------- | :------- |
 | `qwen3.6-35b-a3b-nvfp4`   | Qwen 3.6 35B-A3B (**default**) | 35B (3B active) | NVFP4                     | ~25 - 60 GB     | ✅            | ✅       |
 | `qwen2.5-coder-32b`       | Qwen 2.5 Coder 32B            | 32B        | BF16 / INT8 / FP8 / AWQ      | ~35 - 64 GB     | ✅            | ✅       |
+| `qwen2.5-coder-72b`       | Qwen 2.5 Coder 72B            | 72B        | INT8 / FP8 / INT4            | ~45 - 80 GB     | ✅            | ✅       |
 | `qwen2.5-coder-1.5b`      | Qwen 2.5 Coder 1.5B (Draft)   | 1.5B       | BF16 / FP16 / INT8           | ~3.5 - 6 GB     | ✅            | ✅ Draft |
 | `qwen2.5-coder-3b`        | Qwen 2.5 Coder 3B (Draft)     | 3.0B       | BF16 / FP16 / INT8           | ~6.5 - 10 GB    | ✅            | ✅ Draft |
 | `deepseek-r1-distill-32b` | DeepSeek-R1-Distill-Qwen-32B  | 32B        | BF16 / INT8 / FP8 / AWQ      | ~35 - 64 GB     | ✅            | ✅       |
-| `deepseek-r1-distill-70b` | DeepSeek-R1-Distill-Llama-70B | 70B        | BF16 / INT8 / FP8 / AWQ      | ~45 - 80 GB     | ✅            | ✅       |
-| `llama-3.3-70b`           | Llama 3.3 70B Instruct        | 70B        | BF16 / INT8 / FP8 / AWQ      | ~45 - 80 GB     | ✅            | ✅       |
+| `deepseek-r1-distill-70b` | DeepSeek-R1-Distill-Llama-70B | 70B        | INT8 / FP8 / INT4            | ~45 - 80 GB     | ✅            | ✅       |
+| `llama-3.3-70b`           | Llama 3.3 70B Instruct        | 70B        | BF16 / INT8 / FP8 / AWQ      | ~75 - 80 GB     | ✅            | ✅       |
 | `starcoder2-15b`          | StarCoder2 15B                | 15B        | BF16 / FP16                  | ~20 - 30 GB     | ❌            | ✅       |
-| `deepseek-v3-671b`        | DeepSeek-V3 671B (MoE)        | 671B       | AWQ                          | ~350 GB         | ✅            | ❌       |
+| `deepseek-v3-671b`        | DeepSeek-V3 671B (MoE)        | 671B       | INT4                         | ~350 GB         | ✅            | ❌       |
 
 HF repo examples: `nvidia/Qwen3.6-35B-A3B-NVFP4`, `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`, `meta-llama/Llama-3.3-70B-Instruct`, `bigcode/starcoder2-15b`.
 
@@ -234,17 +246,20 @@ Recognised keys mirror `build_launch_command` parameters, plus:
 | `extra_args` | Verbatim flags appended to the launch command, for recipe settings without a first-class parameter. |
 
 The default model's recipe is `ModelMatrixRegistry.MATRIX['qwen3.6-35b-a3b-nvfp4'].launch_overrides`
-and follows NVIDIA's published DGX Spark recipe: 131072 (`131k`) context, `gpu_memory_utilization` 0.5,
+and follows NVIDIA's published DGX Spark recipe: 131072 (`131k`) context, `gpu_memory_utilization` 0.3,
 FP8 KV cache, FlashInfer attention, `qwen3_xml` tool parser, `qwen3` reasoning parser,
-`32768` max batched tokens, MTP speculation (`num_speculative_tokens: 3`), `--max-num-seqs 4`, tensorizer disabled (`use_tensorizer: False`).
+`8192` max batched tokens, `flashinfer_b12x` MoE backend, MTP speculation (`num_speculative_tokens: 3`, `moe_backend: triton`),
+`--max-num-seqs 4`, tensorizer disabled (`use_tensorizer: False`). Required env vars: `VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x`,
+`VLLM_MARLIN_USE_ATOMIC_ADD=1`, `VLLM_DISABLED_KERNELS=MarlinNvFp4LinearKernel`.
 
 
 #### 4.2.4. Configuration & Base Flags
 - **Base Launch Flags**: `--host 0.0.0.0 --port <port> --max-model-len 16384 --gpu-memory-utilization 0.50 --trust-remote-code --async-scheduling --load-format fastsafetensors` plus the optional flags above. (A low `0.50` default prevents OOMs on the 128GB unified memory SoC).
+- **Default num_speculative_tokens**: `8`
 
 #### 4.2.5. Readiness Polling & Live Streaming
 - `dgxcoder start_server` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
-- The monitor thread constantly pipes raw vLLM container logs to stdout, prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`), tracks loading stages from logs, and polls `/v1/models` until healthy.
+- The monitor thread constantly pipes raw vLLM container logs to stdout, prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`), tracks loading stages from logs, and polls `/v1/models` until healthy. `VLLMStartupMonitor` provides additional memory-growth tracking and stall detection with explicit progress percentages (`~X% (Y/Z GB since start)`).
 - `start_server` exits once the health check passes (server keeps running in background).
 
 #### 4.2.6. Instant Signal Handling
@@ -382,7 +397,7 @@ dgxcoder chat | run [--agent goose]
 
 Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadingMonitor` thread (live log piping + 10s Docker memory stats + stage detection + health polling), prints progress, and **exits once the model health check passes** (the vLLM server/container continues running). Uses CLI `--model` (defaults to `qwen3.6-35b-a3b-nvfp4`) and other tuning flags from config. No agent runner is started.
 
-#### Failure Modes
+#### 4.5.1. Failure Modes
 
 - **vLLM launch failure**: Hint to run `dgxcoder start_server --model <model>`; `chat`/`run` exit `1`.
 - **Process crash during wait**: Drain remaining logs; return failure.
@@ -553,9 +568,9 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 | **`status`**                | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index                                       |
 | **`start_server`**          | Launch local vLLM server optimized for GB10                                                                      |
 | **`stop_server`**           | Stop the running vLLM Docker container                                                                           |
-| **`endpoints`**             | Lists all vLLM/OpenAI-compatible REST endpoints + credentials                                                    |
 | **`index`**                 | AST + FTS5 + TF-IDF workspace index                                                                              |
 | **`mcp`**                   | Stdio MCP server for IDE companion tools                                                                         |
+| **`endpoints`**             | Lists all vLLM/OpenAI-compatible REST endpoints + credentials                                                    |
 | **`web`**                   | Web Canvas UI on port 8501 (default)                                                                             |
 | **`download`**              | Pre-download model weights to HF cache                                                                           |
 | **`clear-cache`**           | Clear both HF and tensorizer model caches                                                                        |
@@ -595,7 +610,7 @@ dgxcoder run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] 
 ##### 5.1.4. `dgxcoder status`
 
 - **Behavior**: Panels for:
-  - **Hardware**: GB10 qualification, GPU name, driver, total/used/available unified memory, architecture (no VRAM row).
+  - **Hardware**: GB10 qualification, GPU name, driver, total/used/available unified memory, VRAM usage, architecture.
   - **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`/`aider`/`continue`/`openhands`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose CLI, Cline extension, Aider CLI, Continue extension, OpenHands Docker image readiness, config paths.
   - **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
@@ -722,14 +737,14 @@ Registered in Goose config as stdio extension (`cmd: dgxcoder`, `args: [mcp]`). 
 
 ## 6. System Requirements & Setup
 
-### Requirements
+### 6.1. Requirements
 
 - **System**: 1x NVIDIA GB10 (Blackwell, 128 GB Unified Memory) — or host with ≥100 GB RAM for detection fallback
 - **OS**: Linux ARM64 (Ubuntu 22.04 LTS or compatible)
 - **Drivers**: NVIDIA Linux Driver 580+ / CUDA 13.x (typical GB10 stack)
 - **Dependencies**: Python 3.10+, PyYAML, Rich, Requests; optional Docker (vLLM fallback + OpenHands); optional VS Code/`codium` (Cline, Continue); optional `aider-chat` (Aider)
 
-### Identifying Your Hardware Variant
+### 6.2. Identifying Your Hardware Variant
 
 ```bash
 nvidia-smi --query-gpu=name --format=csv
@@ -738,7 +753,7 @@ free -h
 
 Qualified when GPU name contains `GB10`/`BLACKWELL`, or when total memory ≥ ~100 GiB per detection heuristic.
 
-### Quickstart Installation
+### 6.3. Quickstart Installation
 
 ```bash
 git clone https://github.com/dgxcoder/dgxcoder.git
@@ -756,7 +771,7 @@ dgxcoder chat
 
 Note: runtime Goose auto-install uses `releases/download/stable/…`; the install script uses `releases/latest/…`.
 
-### Helper Scripts
+### 6.4. Helper Scripts
 
 | Script                                                     | Role                                                                                           |
 | :--------------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
@@ -885,13 +900,13 @@ Detailed specification of parameters generated by `VLLMServerManager.build_launc
 | **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | `DEFAULT_VLLM_IMAGE` | NGC container pinned with Blackwell SM121 driver & library compatibility. |
 | `--model` | `nvidia/Qwen3.6-35B-A3B-NVFP4` | `ModelMatrixRegistry.resolve_hf_repo` | HuggingFace repository ID for default NVFP4 weights. |
 | `--max-model-len` | `131072` | `launch_overrides["max_model_len"]` | Context window size (128K tokens). |
-| `--gpu-memory-utilization` | `0.5` | `launch_overrides["gpu_memory_utilization"]` | 50% memory reservation for GB10 unified memory pool. |
+| `--gpu-memory-utilization` | `0.3` | `launch_overrides["gpu_memory_utilization"]` | 30% memory reservation for GB10 unified memory pool. |
 | `--kv-cache-dtype` | `fp8` | `launch_overrides["kv_cache_dtype"]` | Enables FP8 quantization for key-value cache tensors. |
 | `--attention-backend` | `flashinfer` | `launch_overrides["attention_backend"]` | Blackwell-optimized FlashInfer attention implementation. |
 | `--tool-call-parser` | `qwen3_xml` | `launch_overrides["tool_call_parser"]` | Qwen 3.6 XML tool call parser (`<tool_call>`). |
 | `--reasoning-parser` | `qwen3` | `launch_overrides["reasoning_parser"]` | Qwen 3.6 reasoning channel parser. |
-| `--max-num-batched-tokens` | `32768` | `launch_overrides["max_num_batched_tokens"]` | Max batched token count for chunked prefill iterations. |
-| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | `launch_overrides["speculative_config"]` | In-checkpoint Multi-Token Prediction (3 speculative tokens/step). |
+| `--max-num-batched-tokens` | `8192` | `launch_overrides["max_num_batched_tokens"]` | Max batched token count for chunked prefill iterations. |
+| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3, "moe_backend": "triton"}` | `launch_overrides["speculative_config"]` | In-checkpoint Multi-Token Prediction (3 speculative tokens/step). |
 | `--enable-prefix-caching` | *(boolean flag)* | `DEFAULT_PREFIX_CACHING=True` | Automatic KV cache prefix reuse across multi-turn sessions. |
 | `--enable-chunked-prefill` | *(boolean flag)* | `DEFAULT_CHUNKED_PREFILL=True` | Prefill chunking for responsive TTFT during long prompt processing. |
 | `--max-num-seqs` | `4` | `launch_overrides["extra_args"]` | Caps maximum concurrent sequence count at 4. |
