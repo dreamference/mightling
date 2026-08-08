@@ -1,5 +1,6 @@
 """Tests for Red-Black Tree implementation."""
 import pytest
+import random
 from dgxcoder.data_structures.red_black_tree import RedBlackTree
 
 
@@ -71,31 +72,42 @@ class TestRedBlackTree:
         for key in keys:
             self.tree.insert(key)
         
-        assert self._is_red_black(self.tree.root)
-        assert self._is_balanced(self.tree.root)
+        assert self._is_red_black(self.tree, self.tree.root)
+        assert self._is_balanced(self.tree, self.tree.root)
 
-    def _is_red_black(self, node):
-        if node is None or node == self.tree.TNULL:
+    def test_random_operations(self):
+        for _ in range(1000):
+            tree = RedBlackTree()
+            num_keys = random.randint(10, 100)
+            keys = random.sample(range(-500, 500), num_keys)
+            for key in keys:
+                tree.insert(key)
+            assert self._is_red_black(tree, tree.root)
+            assert self._is_balanced(tree, tree.root)
+            assert tree.inorder() == sorted(keys)
+
+    def _is_red_black(self, tree, node):
+        if node is None or node == tree.TNULL:
             return True
         if node.color == 'RED':
-            if node.left != self.tree.TNULL and node.left.color == 'RED':
+            if node.left != tree.TNULL and node.left.color == 'RED':
                 return False
-            if node.right != self.tree.TNULL and node.right.color == 'RED':
+            if node.right != tree.TNULL and node.right.color == 'RED':
                 return False
-        return self._is_red_black(node.left) and self._is_red_black(node.right)
+        return self._is_red_black(tree, node.left) and self._is_red_black(tree, node.right)
 
-    def _is_balanced(self, node):
-        if node is None or node == self.tree.TNULL:
+    def _is_balanced(self, tree, node):
+        if node is None or node == tree.TNULL:
             return 1
-        left_black = self._black_height(node.left)
-        right_black = self._black_height(node.right)
+        left_black = self._black_height(tree, node.left)
+        right_black = self._black_height(tree, node.right)
         if left_black != right_black:
             return False
         return True
 
-    def _black_height(self, node):
-        if node is None or node == self.tree.TNULL:
+    def _black_height(self, tree, node):
+        if node is None or node == tree.TNULL:
             return 0
         if node.color == 'BLACK':
-            return 1 + self._black_height(node.left)
-        return self._black_height(node.left)
+            return 1 + self._black_height(tree, node.left)
+        return self._black_height(tree, node.left)
