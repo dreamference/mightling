@@ -1,7 +1,9 @@
 """
 Red-Black Tree implementation in Python.
 """
-from typing import Optional
+from __future__ import annotations
+
+from typing import Iterator, Optional
 
 
 class RBNode:
@@ -9,60 +11,57 @@ class RBNode:
     def __init__(self, key: int, color: str = 'RED'):
         self.key = key
         self.color = color  # 'RED' or 'BLACK'
-        self.left: Optional['RBNode'] = None
-        self.right: Optional['RBNode'] = None
-        self.parent: Optional['RBNode'] = None
+        self.left: Optional[RBNode] = None
+        self.right: Optional[RBNode] = None
+        self.parent: Optional[RBNode] = None
+
+    def __repr__(self) -> str:
+        return f"RBNode(key={self.key}, color={self.color})"
 
 
 class RedBlackTree:
     """
     A Red-Black Tree data structure providing O(log n) insert, delete, and search operations.
-    Uses a sentinel node (TNULL) to simplify boundary conditions.
+    Maintains balance through color properties and rotations.
     """
     def __init__(self):
-        self.TNULL = RBNode(None, 'BLACK')  # Sentinel node
-        self.TNULL.parent = None
-        self.root: Optional[RBNode] = self.TNULL
+        self.root: Optional[RBNode] = None
+        self._size: int = 0
 
     def insert(self, key: int) -> None:
+        if self.root is None:
+            self.root = RBNode(key, 'BLACK')
+            self._size += 1
+            return
+
         node = RBNode(key, 'RED')
-        node.parent = None
-        node.left = self.TNULL
-        node.right = self.TNULL
-        node.color = 'RED'
+        parent = None
+        current = self.root
 
-        y: Optional[RBNode] = None
-        x: Optional[RBNode] = self.root
-
-        while x != self.TNULL:
-            y = x
-            if node.key < x.key:
-                x = x.left
+        while current is not None:
+            parent = current
+            if key < current.key:
+                current = current.left
+            elif key > current.key:
+                current = current.right
             else:
-                x = x.right
+                # Duplicate keys are ignored to maintain strict ordering
+                return
 
-        node.parent = y
-        if y is None:
-            self.root = node
-        elif node.key < y.key:
-            y.left = node
+        node.parent = parent
+        if key < parent.key:
+            parent.left = node
         else:
-            y.right = node
-
-        if node.parent is None:
-            node.color = 'BLACK'
-            return
-
-        if node.parent.parent is None:
-            return
+            parent.right = node
 
         self._fix_insert(node)
+        self._size += 1
 
     def _fix_insert(self, k: RBNode) -> None:
         while k != self.root and k.color != 'BLACK' and k.parent.color == 'RED':
-            if k == k.parent.parent.left:
+            if k == k.parent.left:
                 y = k.parent.parent.right
-                if y.color == 'RED':
+                if y and y.color == 'RED':
                     k.parent.color = 'BLACK'
                     y.color = 'BLACK'
                     k.parent.parent.color = 'RED'
@@ -76,7 +75,7 @@ class RedBlackTree:
                     self._right_rotate(k.parent.parent)
             else:
                 y = k.parent.parent.left
-                if y.color == 'RED':
+                if y and y.color == 'RED':
                     k.parent.color = 'BLACK'
                     y.color = 'BLACK'
                     k.parent.parent.color = 'RED'
@@ -93,7 +92,7 @@ class RedBlackTree:
     def _left_rotate(self, x: RBNode) -> None:
         y = x.right
         x.right = y.left
-        if y.left != self.TNULL:
+        if y.left:
             y.left.parent = x
         y.parent = x.parent
         if x.parent is None:
@@ -108,7 +107,7 @@ class RedBlackTree:
     def _right_rotate(self, x: RBNode) -> None:
         y = x.left
         x.left = y.right
-        if y.right != self.TNULL:
+        if y.right:
             y.right.parent = x
         y.parent = x.parent
         if x.parent is None:
@@ -121,121 +120,134 @@ class RedBlackTree:
         x.parent = y
 
     def delete(self, key: int) -> None:
-        self._delete_node(self.root, key)
-
-    def _delete_node(self, node: Optional[RBNode], key: int) -> None:
-        if node == self.TNULL:
+        node = self.search(key)
+        if node is None:
             return
-        if key == node.key:
-            self._delete_node_impl(node)
-        elif key < node.key:
-            self._delete_node(node.left, key)
-        else:
-            self._delete_node(node.right, key)
+        self._delete_node_impl(node)
+        self._size -= 1
 
     def _delete_node_impl(self, z: RBNode) -> None:
         y = z
         y_original_color = y.color
-        if z.left == self.TNULL:
+        if z.left is None:
             x = z.right
             self._rb_transplant(z, z.right)
-        elif z.right == self.TNULL:
+        elif z.right is None:
             x = z.left
             self._rb_transplant(z, z.left)
         else:
             y = z.right
-            while y.left != self.TNULL:
+            while y.left is not None:
                 y = y.left
             if y.parent != z:
                 x = y.right
                 self._rb_transplant(y, y.right)
                 y.right = z.right
-                y.right.parent = y
+                if y.right:
+                    y.right.parent = y
             else:
                 x = y.right
             y.color = z.color
             self._rb_transplant(z, y)
             y.left = z.left
-            y.left.parent = y
+            if y.left:
+                y.left.parent = y
             y.right = z.right
-            y.right.parent = y
+            if y.right:
+                y.right.parent = y
 
         if y_original_color == 'BLACK':
             self._fix_delete(x)
 
-    def _rb_transplant(self, u: RBNode, v: RBNode) -> None:
+    def _rb_transplant(self, u: RBNode, v: Optional[RBNode]) -> None:
         if u.parent is None:
             self.root = v
         elif u == u.parent.left:
             u.parent.left = v
         else:
             u.parent.right = v
-        if v != self.TNULL:
+        if v:
             v.parent = u.parent
 
-    def _fix_delete(self, x: RBNode) -> None:
-        while x != self.root and x.color == 'BLACK':
+    def _fix_delete(self, x: Optional[RBNode]) -> None:
+        while x != self.root and x and x.color == 'BLACK':
             if x == x.parent.left:
                 w = x.parent.right
-                if w.color == 'RED':
+                if w and w.color == 'RED':
                     w.color = 'BLACK'
                     x.parent.color = 'RED'
                     self._left_rotate(x.parent)
                     w = x.parent.right
-                if w.left.color == 'BLACK' and w.right.color == 'BLACK':
+                if (w.left is None or w.left.color == 'BLACK') and (w.right is None or w.right.color == 'BLACK'):
                     w.color = 'RED'
                     x = x.parent
                 else:
-                    if w.right.color == 'BLACK':
-                        w.left.color = 'BLACK'
+                    if w.right is None or w.right.color == 'BLACK':
+                        if w.left:
+                            w.left.color = 'BLACK'
                         w.color = 'RED'
                         self._right_rotate(w)
                         w = x.parent.right
                     w.color = x.parent.color
                     x.parent.color = 'BLACK'
-                    w.right.color = 'BLACK'
+                    if w.right:
+                        w.right.color = 'BLACK'
                     self._left_rotate(x.parent)
                     x = self.root
             else:
                 w = x.parent.left
-                if w.color == 'RED':
+                if w and w.color == 'RED':
                     w.color = 'BLACK'
                     x.parent.color = 'RED'
                     self._right_rotate(x.parent)
                     w = x.parent.left
-                if w.right.color == 'BLACK' and w.left.color == 'BLACK':
+                if (w.right is None or w.right.color == 'BLACK') and (w.left is None or w.left.color == 'BLACK'):
                     w.color = 'RED'
                     x = x.parent
                 else:
-                    if w.left.color == 'BLACK':
-                        w.right.color = 'BLACK'
+                    if w.left is None or w.left.color == 'BLACK':
+                        if w.right:
+                            w.right.color = 'BLACK'
                         w.color = 'RED'
                         self._left_rotate(w)
                         w = x.parent.left
                     w.color = x.parent.color
                     x.parent.color = 'BLACK'
-                    w.left.color = 'BLACK'
+                    if w.left:
+                        w.left.color = 'BLACK'
                     self._right_rotate(x.parent)
                     x = self.root
-        x.color = 'BLACK'
+        if x:
+            x.color = 'BLACK'
 
     def search(self, key: int) -> Optional[RBNode]:
-        return self._search(self.root, key)
+        current = self.root
+        while current is not None:
+            if key == current.key:
+                return current
+            elif key < current.key:
+                current = current.left
+            else:
+                current = current.right
+        return None
 
-    def _search(self, node: Optional[RBNode], key: int) -> Optional[RBNode]:
-        if node == self.TNULL or key == node.key:
-            return node
-        if key < node.key:
-            return self._search(node.left, key)
-        return self._search(node.right, key)
+    def __contains__(self, key: int) -> bool:
+        return self.search(key) is not None
+
+    def __len__(self) -> int:
+        return self._size
+
+    def __iter__(self) -> Iterator[int]:
+        return self._inorder_iter(self.root)
+
+    def _inorder_iter(self, node: Optional[RBNode]) -> Iterator[int]:
+        if node:
+            yield from self._inorder_iter(node.left)
+            yield node.key
+            yield from self._inorder_iter(node.right)
 
     def inorder(self) -> list[int]:
-        result = []
-        self._inorder(self.root, result)
-        return result
+        return list(self)
 
-    def _inorder(self, node: Optional[RBNode], result: list[int]) -> None:
-        if node != self.TNULL:
-            self._inorder(node.left, result)
-            result.append(node.key)
-            self._inorder(node.right, result)
+    def __repr__(self) -> str:
+        return f"RedBlackTree(size={self._size}, keys={self.inorder()})"

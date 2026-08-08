@@ -461,6 +461,9 @@ class VLLMServerManager:
             "--trust-remote-code",
             "--async-scheduling",
             "--load-format", "fastsafetensors",
+            "--enable-log-requests",
+            "--enable-log-outputs",
+            "--max-log-len", "2048",
         ]
 
         if enable_prefix_caching:
@@ -529,6 +532,7 @@ class VLLMServerManager:
             for env_key, env_val in sorted(recipe.get("env", {}).items()):
                 cmd.extend(["-e", f"{env_key}={env_val}"])
             cmd.extend(["-e", "CUTE_DSL_ARCH=sm_121a"])
+            cmd.extend(["-e", "VLLM_LOGGING_LEVEL=DEBUG"])
             cmd.extend(["--entrypoint", "vllm", docker_image, "serve", hf_model] + base_args)
         else:
             raise RuntimeError(
@@ -723,6 +727,14 @@ class VLLMServerManager:
         print(f"🗑️ Removing vLLM container: {container_name}")
         subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"✅ Container {container_name} removed.")
+
+    def show_request_logs(self, port: int = 8000) -> None:
+        """
+        Tails the vLLM Docker container logs for the given port.
+        """
+        container_name = f"dgxcoder-vllm-{port}"
+        print(f"📄 Tailing logs for vLLM container: {container_name} (Ctrl+C to exit)")
+        subprocess.run(["docker", "logs", "-f", container_name])
 
     def get_new_logs(self) -> List[str]:
         """

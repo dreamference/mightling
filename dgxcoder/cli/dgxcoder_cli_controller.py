@@ -243,6 +243,10 @@ class DGXCoderCLIController:
         remove_parser = subparsers.add_parser("remove_server", help="Remove the vLLM Docker container")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
 
+        # Command: dgxcoder show_request_logs
+        logs_parser = subparsers.add_parser("show_request_logs", help="Tail the vLLM Docker container logs")
+        logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
+
         # Command: dgxcoder web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -462,8 +466,9 @@ class DGXCoderCLIController:
                         print("🧪 Running NVFP4 kernel backend canary test...")
                         try:
                             import requests
+                            served_model = resolve_model_hf_repo(args.model)
                             resp = requests.post(f"{vllm_mgr.host}/v1/completions", json={
-                                "model": args.model,
+                                "model": served_model,
                                 "prompt": "Hello",
                                 "max_tokens": 10
                             }, timeout=10)
@@ -500,6 +505,14 @@ class DGXCoderCLIController:
             cls.display_header()
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             vllm_mgr.remove_server(port=args.port)
+
+        elif args.command == "show_request_logs":
+            cls.display_header()
+            vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+            try:
+                vllm_mgr.show_request_logs(port=args.port)
+            except KeyboardInterrupt:
+                print("\nStopped tailing logs.")
 
         elif args.command == "index":
             cls.display_header()

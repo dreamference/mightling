@@ -54,6 +54,10 @@ class ModelMatrixRegistry:
                     "--tensor-parallel-size", "1",
                     "--dtype", "auto",
                 ],
+                "env": {
+                    "VLLM_NVFP4_GEMM_BACKEND": "flashinfer-b12x",
+                    "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+                },
             },
         ),
         "qwen2.5-coder-32b": ModelSpec(
