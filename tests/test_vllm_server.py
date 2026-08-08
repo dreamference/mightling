@@ -40,8 +40,9 @@ def test_nvfp4_recipe_env_crosses_container_boundary():
     cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
     assert "VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x" in cmd
     assert "VLLM_MARLIN_USE_ATOMIC_ADD=1" in cmd
+    assert "VLLM_DISABLED_KERNELS=MarlinNvFp4LinearKernel" in cmd
     # -e must precede the image name, or docker treats it as a container argument
-    for var in ("VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x", "VLLM_MARLIN_USE_ATOMIC_ADD=1"):
+    for var in ("VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x", "VLLM_MARLIN_USE_ATOMIC_ADD=1", "VLLM_DISABLED_KERNELS=MarlinNvFp4LinearKernel"):
         assert cmd[cmd.index(var) - 1] == "-e"
         assert cmd.index(var) < cmd.index(DEFAULT_VLLM_IMAGE)
 
