@@ -67,13 +67,15 @@
     - [5.1.4. `dgxcoder status`](#514-dgxcoder-status)
     - [5.1.5. `dgxcoder start_server`](#515-dgxcoder-start_server)
     - [5.1.6. `dgxcoder stop_server`](#516-dgxcoder-stop_server)
-    - [5.1.7. `dgxcoder index`](#517-dgxcoder-index)
-    - [5.1.8. `dgxcoder mcp`](#518-dgxcoder-mcp)
-    - [5.1.9. `dgxcoder endpoints`](#519-dgxcoder-endpoints)
-    - [5.1.10. `dgxcoder web`](#5110-dgxcoder-web)
-    - [5.1.11. `dgxcoder download`](#5111-dgxcoder-download)
-    - [5.1.12. `dgxcoder clear-cache`](#5112-dgxcoder-clear-cache)
-    - [5.1.13. `dgxcoder clear-tensorize-cache`](#5113-dgxcoder-clear-tensorize-cache)
+    - [5.1.7. `dgxcoder remove_server`](#517-dgxcoder-remove_server)
+    - [5.1.8. `dgxcoder show_request_logs`](#518-dgxcoder-show_request_logs)
+    - [5.1.9. `dgxcoder index`](#519-dgxcoder-index)
+    - [5.1.10. `dgxcoder mcp`](#5110-dgxcoder-mcp)
+    - [5.1.11. `dgxcoder endpoints`](#5111-dgxcoder-endpoints)
+    - [5.1.12. `dgxcoder web`](#5112-dgxcoder-web)
+    - [5.1.13. `dgxcoder download`](#5113-dgxcoder-download)
+    - [5.1.14. `dgxcoder clear-cache`](#5114-dgxcoder-clear-cache)
+    - [5.1.15. `dgxcoder clear-tensorize-cache`](#5115-dgxcoder-clear-tensorize-cache)
   - [5.2. IDE Integration via Stdio MCP](#52-ide-integration-via-stdio-mcp)
   - [5.3. Web Canvas UI & Telemetry Pane](#53-web-canvas-ui--telemetry-pane)
 - [6. System Requirements & Setup](#6-system-requirements--setup)
@@ -547,7 +549,7 @@ DGXCoder uses Docker for the optional OpenHands agent UI. All Docker operations 
 
 ### 5.1. `dgxcoder` CLI Suite
 
-Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal UI. **13** subcommands.
+Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal UI. **15** subcommands.
 
 #### Global Options
 
@@ -568,6 +570,8 @@ Implemented by `DGXCoderCLIController` (`dgxcoder/cli/`). Rich-powered terminal 
 | **`status`**                | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index                                       |
 | **`start_server`**          | Launch local vLLM server optimized for GB10                                                                      |
 | **`stop_server`**           | Stop the running vLLM Docker container                                                                           |
+| **`remove_server`**         | Remove the vLLM Docker container                                                                                 |
+| **`show_request_logs`**     | Tail the vLLM Docker container logs                                                                              |
 | **`index`**                 | AST + FTS5 + TF-IDF workspace index                                                                              |
 | **`mcp`**                   | Stdio MCP server for IDE companion tools                                                                         |
 | **`endpoints`**             | Lists all vLLM/OpenAI-compatible REST endpoints + credentials                                                    |
@@ -621,6 +625,17 @@ dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--dr
 ```
 
 - **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). Function calling for Goose is enabled **by default** (`--enable-auto-tool-choice`), with `--tool-call-parser` automatically resolved per-model. `--max-num-batched-tokens 8192` is passed automatically when `--enable-chunked-prefill` (default) to improve TTFT on large codebase prompts. See [start_server variant](#dgxcoder-start_server-variant).
+- **Docker Command**: Executes `docker rm -f dgxcoder-vllm-<port>` followed by:
+  ```bash
+  docker run --ipc=host --network host --name dgxcoder-vllm-<port> --gpus all \
+    -v ~/.cache/huggingface:/root/.cache/huggingface \
+    -v ~/.cache/dgxcoder:/root/.cache/dgxcoder \
+    -e HF_TOKEN=<token> \
+    -e CUTE_DSL_ARCH=sm_121a \
+    -e VLLM_LOGGING_LEVEL=DEBUG \
+    [recipe-specific environment variables] \
+    --entrypoint vllm <image> serve <model_id> [vllm-flags]
+  ```
 - **Example**: `dgxcoder start_server --model qwen3.6-35b-a3b-nvfp4 --port 8000`
 
 ##### 5.1.6. `dgxcoder stop_server`
@@ -628,10 +643,27 @@ dgxcoder start_server [--model MODEL] [--port PORT] [--quantization QUANT] [--dr
 dgxcoder stop_server [--port PORT]
 ```
 
-- **Behavior**: Stops and removes the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running). `--port` defaults to 8000.
+- **Behavior**: Stops the Docker container `dgxcoder-vllm-<port>` (safe no-op if not running). `--port` defaults to 8000.
+- **Docker Command**: `docker stop dgxcoder-vllm-<port>`
 - **Example**: `dgxcoder stop_server --port 8000`
 
-##### 5.1.7. `dgxcoder index`
+##### 5.1.7. `dgxcoder remove_server`
+```text
+dgxcoder remove_server [--port PORT]
+```
+- **Behavior**: Forces removal of the Docker container `dgxcoder-vllm-<port>`.
+- **Docker Command**: `docker rm -f dgxcoder-vllm-<port>`
+- **Example**: `dgxcoder remove_server --port 8000`
+
+##### 5.1.8. `dgxcoder show_request_logs`
+```text
+dgxcoder show_request_logs [--port PORT]
+```
+- **Behavior**: Tails the logs of the running vLLM container.
+- **Docker Command**: `docker logs -f dgxcoder-vllm-<port>`
+- **Example**: `dgxcoder show_request_logs --port 8000`
+
+##### 5.1.9. `dgxcoder index`
 
 ```text
 dgxcoder index [--dir PATH] [--force]
@@ -640,16 +672,16 @@ dgxcoder index [--dir PATH] [--force]
 - **Behavior**: Indexes workspace (Python AST + FTS5 + TF-IDF + nomic-embed-text semantic embeddings); persists `.dgxcoder/context_index.json` and `.dgxcoder/context.db` (vec0 table).
 - **Example**: `dgxcoder index --force`
 
-##### 5.1.8. `dgxcoder mcp`
+##### 5.1.10. `dgxcoder mcp`
 
 - **Behavior**: Stdio JSON-RPC MCP server. Tools: `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`. IDE fields live in in-process `IDEState` (empty unless populated by a companion); `workspace_search_code` uses `ContextEngine.search_code`.
 
-##### 5.1.9. `dgxcoder endpoints`
+##### 5.1.11. `dgxcoder endpoints`
 
 - **Behavior**: Prints two Rich tables: (1) all standard OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`, etc.) with HTTP methods and short descriptions; (2) credentials showing base URL, optional API key (enabled via `--api-key` on start_server), and `Authorization: Bearer <key>` when used. Note: `--served-model-name` is never set, so external clients must use the full HF repo paths returned by `/v1/models`. Intended for quick copy-paste into external clients.
 - **Example**: `dgxcoder endpoints`
 
-##### 5.1.10. `dgxcoder web`
+##### 5.1.12. `dgxcoder web`
 
 ```text
 dgxcoder web [--port PORT]
@@ -658,7 +690,7 @@ dgxcoder web [--port PORT]
 - **Behavior**: HTTP server on `0.0.0.0:{port}` (default `8501`). Serves static Glassmorphism SPA + `GET /api/status` (`hardware`, `vllm`, `context`). Memory gauge updates from telemetry; Mermaid diagram and diff pane are **static placeholders**; KV gauge shows fixed `45%` width when vLLM is healthy.
 - **Example**: `dgxcoder web --port 8501`
 
-##### 5.1.11. `dgxcoder download`
+##### 5.1.13. `dgxcoder download`
 ```text
 dgxcoder download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 ```
@@ -666,12 +698,12 @@ dgxcoder download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 - **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. `--tensorize` (disabled by default) also converts the model to tensorizer format. Also invoked automatically from `init` and `start_server`.
 - **Example**: `dgxcoder download --model qwen3.6-35b-a3b-nvfp4`
 
-##### 5.1.12. `dgxcoder clear-cache`
+##### 5.1.14. `dgxcoder clear-cache`
 
 - **Behavior**: Clears both Hugging Face (`~/.cache/huggingface`) and tensorizer (`~/.cache/dgxcoder`) parent cache directories using `shutil.rmtree`. Invokes `ModelDownloader.clear_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
 - **Example**: `dgxcoder clear-cache`
 
-##### 5.1.13. `dgxcoder clear-tensorize-cache`
+##### 5.1.15. `dgxcoder clear-tensorize-cache`
 
 - **Behavior**: Clears only the tensorizer cache directory (`~/.cache/dgxcoder/tensorizer` parent). Invokes `ModelDownloader.clear_tensorizer_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
 - **Example**: `dgxcoder clear-tensorize-cache`
@@ -886,7 +918,7 @@ HTTP SPA + `/api/status` telemetry.
 
 ### 8.8. `dgxcoder/cli/`
 
-`DGXCoderCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`) (13 subcommands: `init`, `chat`, `run`, `status`, `start_server`, `stop_server`, `index`, `mcp`, `endpoints`, `web`, `download`, `clear-cache`, `clear-tensorize-cache`).
+`DGXCoderCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`) (15 subcommands: `init`, `chat`, `run`, `status`, `start_server`, `stop_server`, `remove_server`, `show_request_logs`, `index`, `mcp`, `endpoints`, `web`, `download`, `clear-cache`, `clear-tensorize-cache`).
 
 
 ---
