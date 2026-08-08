@@ -57,6 +57,7 @@ class ModelMatrixRegistry:
                 "env": {
                     "VLLM_NVFP4_GEMM_BACKEND": "flashinfer-b12x",
                     "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+                    "VLLM_DISABLED_KERNELS": "MarlinNvFp4LinearKernel",
                 },
             },
         ),
