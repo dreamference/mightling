@@ -45,7 +45,6 @@ class ModelMatrixRegistry:
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
                 "max_num_batched_tokens": 8192,
-                "moe_backend": "flashinfer_b12x",
                 # MTP ships inside this checkpoint. Without it NVFP4 lands at the low end of the
                 # published throughput range, so it is part of the recipe rather than a tuning extra.
                 "speculative_config": {"method": "mtp", "num_speculative_tokens": 3, "moe_backend": "triton"},

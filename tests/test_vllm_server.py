@@ -31,7 +31,6 @@ def test_nvfp4_model_applies_registry_launch_recipe():
     assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.3"
     assert cmd[cmd.index("--kv-cache-dtype") + 1] == "fp8"
     assert cmd[cmd.index("--attention-backend") + 1] == "flashinfer"
-    assert cmd[cmd.index("--moe-backend") + 1] == "flashinfer_b12x"
     assert cmd[cmd.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
     
