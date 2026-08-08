@@ -39,3 +39,4 @@ ENV/
 .dgxcoder/
 .antigravity/
 .gemini/
+.aider*
