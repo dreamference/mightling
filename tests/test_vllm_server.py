@@ -28,7 +28,7 @@ def test_nvfp4_model_applies_registry_launch_recipe():
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
     assert cmd[cmd.index("--max-model-len") + 1] == "131072"
-    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.5"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.3"
     assert cmd[cmd.index("--kv-cache-dtype") + 1] == "fp8"
     assert cmd[cmd.index("--attention-backend") + 1] == "flashinfer"
     assert cmd[cmd.index("--moe-backend") + 1] == "flashinfer_b12x"
