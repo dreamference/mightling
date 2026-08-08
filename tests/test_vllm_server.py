@@ -34,6 +34,11 @@ def test_nvfp4_model_applies_registry_launch_recipe():
     assert cmd[cmd.index("--moe-backend") + 1] == "flashinfer_b12x"
     assert cmd[cmd.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
+    
+    import json
+    spec_config_json = cmd[cmd.index("--speculative-config") + 1]
+    spec_config = json.loads(spec_config_json)
+    assert spec_config["num_speculative_tokens"] == 3
 
 def test_nvfp4_recipe_env_crosses_container_boundary():
     mgr = VLLMServerManager()
