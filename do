@@ -1,7 +1,7 @@
-dgxcoder
-dgxcoder.egg-info
-DGXCODER_RESEARCH_PAPER.md
-DGXCODER_SPEC.md
+neurr
+neurr.egg-info
+NEURR_RESEARCH_PAPER.md
+NEURR_SPEC.md
 do
 docs
 mkdocs.yml

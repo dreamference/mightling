@@ -1,4 +1,4 @@
-from dgxcoder.hardware import (
+from neurr.hardware import (
     detect_gb10_hardware,
     get_system_memory,
     check_model_compatibility,
@@ -28,20 +28,20 @@ def test_check_model_compatibility():
     assert "exceeds" in msg_large.lower()
 
 def test_check_speculative_compatibility():
-    from dgxcoder.hardware import check_speculative_compatibility
+    from neurr.hardware import check_speculative_compatibility
     valid, msg = check_speculative_compatibility("qwen2.5-coder-32b", "qwen2.5-coder-1.5b")
     assert valid is True
     assert "Speculative Decoding Qualified" in msg or "Compatible" in msg
 
 def test_default_model_is_registered_and_gb10_compatible():
-    from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+    from neurr.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
     assert spec.compatible_gb10 is True
     assert spec.hf_repo_id == "nvidia/Qwen3.6-35B-A3B-NVFP4"
 
 def test_launch_overrides_are_isolated_per_call():
-    from dgxcoder.hardware import get_model_launch_overrides
-    from dgxcoder.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+    from neurr.hardware import get_model_launch_overrides
+    from neurr.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
     first = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
     first["max_model_len"] = 1
     assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS)["max_model_len"] == 131072
@@ -49,14 +49,14 @@ def test_launch_overrides_are_isolated_per_call():
     assert get_model_launch_overrides("some/unknown-repo") == {}
 
 def test_declares_own_quantization():
-    from dgxcoder.hardware import model_declares_own_quantization
+    from neurr.hardware import model_declares_own_quantization
     assert model_declares_own_quantization("qwen3.6-35b-a3b-nvfp4") is True
     assert model_declares_own_quantization("qwen2.5-coder-72b") is False
     assert model_declares_own_quantization("some/unknown-repo") is False
 
 def test_flexible_model_alias_resolution():
-    from dgxcoder.hardware import resolve_model_hf_repo, get_model_launch_overrides, model_declares_own_quantization
-    from dgxcoder.hardware.model_matrix_registry import ModelMatrixRegistry
+    from neurr.hardware import resolve_model_hf_repo, get_model_launch_overrides, model_declares_own_quantization
+    from neurr.hardware.model_matrix_registry import ModelMatrixRegistry
 
     aliases = [
         "qwen3.6-35b-a3b-nvfp4",
@@ -73,14 +73,14 @@ def test_flexible_model_alias_resolution():
         assert model_declares_own_quantization(name) is True
 
 def test_download_model_functions():
-    from dgxcoder.hardware import is_model_downloaded, download_model, resolve_model_hf_repo
+    from neurr.hardware import is_model_downloaded, download_model, resolve_model_hf_repo
     repo = resolve_model_hf_repo("qwen2.5-coder-32b")
     assert repo == "Qwen/Qwen2.5-Coder-32B-Instruct"
     is_dl = is_model_downloaded("qwen2.5-coder-32b")
     assert isinstance(is_dl, bool)
 
 def test_tensorizer_functions(tmp_path, monkeypatch):
-    from dgxcoder.hardware import is_model_tensorized, get_tensorized_path, ModelDownloader
+    from neurr.hardware import is_model_tensorized, get_tensorized_path, ModelDownloader
     
     # Test checking non-existent model tensorization
     assert is_model_tensorized("qwen2.5-coder-32b") is False or isinstance(is_model_tensorized("qwen2.5-coder-32b"), bool)

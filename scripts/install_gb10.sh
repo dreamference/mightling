@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Installing DGXCoder & Goose Agent Runtime on NVIDIA GB10 ==="
+echo "=== Installing Neurr & Goose Agent Runtime on NVIDIA GB10 ==="
 
 # Check for goose CLI
 if ! command -v goose &> /dev/null; then
@@ -17,7 +17,7 @@ fi
 # Install python package in editable mode with dependencies
 pip install -e .
 
-echo "🚀 Initializing DGXCoder Goose configuration & indexing workspace..."
-dgxcoder init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
+echo "🚀 Initializing Neurr Goose configuration & indexing workspace..."
+neurr init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
 
-echo "🎉 DGXCoder Installation & GB10 Setup Complete!"
+echo "🎉 Neurr Installation & GB10 Setup Complete!"

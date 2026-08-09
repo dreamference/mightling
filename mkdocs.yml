@@ -1,6 +1,6 @@
-site_name: DGXCoder Documentation
+site_name: Neurr Documentation
 site_description: Autonomous Local Agentic Pair Programmer for NVIDIA GB10
-repo_url: https://github.com/dgxcoder/dgxcoder
+repo_url: https://github.com/neurr/neurr
 theme:
   name: material
   palette:

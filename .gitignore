@@ -35,8 +35,8 @@ ENV/
 *.swp
 *.swo
 
-# DGXCoder / Antigravity
-.dgxcoder/
+# Neurr / Antigravity
+.neurr/
 .antigravity/
 .gemini/
 .aider*
