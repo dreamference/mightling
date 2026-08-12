@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="neurr",
+    name="dreamng",
     version="1.2.0",
     packages=find_packages(),
     install_requires=[
@@ -15,7 +15,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "neurr=neurr.cli:main",
+            "dreamng=dreamng.cli:main",
         ],
     },
 )

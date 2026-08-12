@@ -1,6 +1,6 @@
-site_name: Neurr Documentation
+site_name: Dreamng Documentation
 site_description: Autonomous Local Agentic Pair Programmer for NVIDIA GB10
-repo_url: https://github.com/neurr/neurr
+repo_url: https://github.com/dreamng/dreamng
 theme:
   name: material
   palette:

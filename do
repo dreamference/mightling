@@ -1,7 +1,7 @@
-neurr
-neurr.egg-info
-NEURR_RESEARCH_PAPER.md
-NEURR_SPEC.md
+dreamng
+dreamng.egg-info
+DREAMNG_RESEARCH_PAPER.md
+DREAMNG_SPEC.md
 do
 docs
 mkdocs.yml

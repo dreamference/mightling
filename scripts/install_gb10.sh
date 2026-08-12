@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Installing Neurr & Goose Agent Runtime on NVIDIA GB10 ==="
+echo "=== Installing Dreamng & Goose Agent Runtime on NVIDIA GB10 ==="
 
 # Check for goose CLI
 if ! command -v goose &> /dev/null; then
@@ -17,7 +17,7 @@ fi
 # Install python package in editable mode with dependencies
 pip install -e .
 
-echo "🚀 Initializing Neurr Goose configuration & indexing workspace..."
-neurr init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
+echo "🚀 Initializing Dreamng Goose configuration & indexing workspace..."
+dreamng init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
 
-echo "🎉 Neurr Installation & GB10 Setup Complete!"
+echo "🎉 Dreamng Installation & GB10 Setup Complete!"

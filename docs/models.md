@@ -23,13 +23,13 @@ All models listed below are qualified for single-node **NVIDIA GB10** workstatio
 
 ## vLLM Parameters for Default Model (`qwen3.6-35b-a3b-nvfp4`)
 
-When starting the local inference server using the default model (`qwen3.6-35b-a3b-nvfp4`), `Neurr` applies a specialized per-model launch recipe (`ModelMatrixRegistry.MATRIX['qwen3.6-35b-a3b-nvfp4'].launch_overrides`) tuned specifically for NVIDIA GB10 (Blackwell SM121) hardware.
+When starting the local inference server using the default model (`qwen3.6-35b-a3b-nvfp4`), `Dreamng` applies a specialized per-model launch recipe (`ModelMatrixRegistry.MATRIX['qwen3.6-35b-a3b-nvfp4'].launch_overrides`) tuned specifically for NVIDIA GB10 (Blackwell SM121) hardware.
 
 ### 1. Model & Container Identity
 
 | Parameter | Value | Description |
 | :--- | :--- | :--- |
-| **Model Alias** | `qwen3.6-35b-a3b-nvfp4` | Primary default short alias passed to `neurr init / start_server / chat`. |
+| **Model Alias** | `qwen3.6-35b-a3b-nvfp4` | Primary default short alias passed to `dreamng init / start_server / chat`. |
 | **HuggingFace Repo ID** | `nvidia/Qwen3.6-35B-A3B-NVFP4` | Official HuggingFace repository containing NVFP4 weights. |
 | **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | Pinned NGC vLLM container image with Blackwell SM121 kernel support. |
 
@@ -66,4 +66,4 @@ Blackwell SM121 MoE kernel routing is set via environment variables passed into 
 
 ---
 
-See [NEURR_SPEC.md](../NEURR_SPEC.md#427-per-model-launch-recipes) for full implementation details.
+See [DREAMNG_SPEC.md](../DREAMNG_SPEC.md#427-per-model-launch-recipes) for full implementation details.

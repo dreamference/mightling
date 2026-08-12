@@ -1,12 +1,12 @@
 import json
-from neurr.mcp_server import MCPServer
+from dreamng.mcp_server import MCPServer
 
 def test_mcp_initialize():
     server = MCPServer()
     req = {"jsonrpc": "2.0", "id": 1, "method": "initialize"}
     resp = server.handle_request(req)
     assert resp["id"] == 1
-    assert resp["result"]["serverInfo"]["name"] == "neurr-mcp-server"
+    assert resp["result"]["serverInfo"]["name"] == "dreamng-mcp-server"
 
 def test_mcp_list_tools():
     server = MCPServer()

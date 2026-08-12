@@ -1,5 +1,5 @@
 # Architecture
 
-Neurr runs entirely locally on NVIDIA GB10.
+Dreamng runs entirely locally on NVIDIA GB10.
 
-See detailed architecture in [NEURR_SPEC.md](../NEURR_SPEC.md#8-codebase-architecture--source-reference).
+See detailed architecture in [DREAMNG_SPEC.md](../DREAMNG_SPEC.md#8-codebase-architecture--source-reference).
