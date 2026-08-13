@@ -261,7 +261,7 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--reasoning-parser", default=None, help="Reasoning-channel parser for models that emit separate thinking output (e.g. qwen3)")
         start_server_parser.add_argument("--moe-backend", default=None, help="Mixture-of-experts kernel backend (e.g. marlin, flashinfer-b12x); GB10 requires an SM121-safe choice")
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
-        start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
+        start_server_parser.add_argument("--guided-decoding-backend", default="xgrammar", help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: False)")
         start_server_parser.add_argument("--docker-image", default=DEFAULT_VLLM_IMAGE, help="Docker image for vLLM (default: nvcr.io/nvidia/vllm:26.07-py3)")
         # Command: dream server stop

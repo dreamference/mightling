@@ -39,7 +39,7 @@ HERMES_TOOL_CALL_PROMPT: Final[str] = (
 )
 
 
-DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "outlines"
+DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
 DEFAULT_CAVE_MODE: Final[bool] = False
 DEFAULT_USE_TENSORIZER: Final[bool] = False
 
