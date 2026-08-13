@@ -1,0 +1,13 @@
+vllm_host = "http://localhost:8000"
+model = "qwen3.6-35b-a3b-nvfp4"
+num_speculative_tokens = 8
+sandbox = "none"
+agent_runner = "aider"
+enable_prefix_caching = true
+enable_chunked_prefill = true
+num_scheduler_steps = 8
+attention_backend = "auto"
+kv_cache_dtype = "fp8"
+cave_mode = false
+guided_decoding_backend = "outlines"
+use_tensorizer = false

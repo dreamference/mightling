@@ -122,7 +122,7 @@ dream run "Refactor database pool to use async pg" --sandbox apptainer
 dream status
 
 # 5. Launch local vLLM GB10 server with MTP Speculative Decoding
-dream server_start --model qwen3.6-35b-a3b-nvfp4 --port 8000
+dream server start --model qwen3.6-35b-a3b-nvfp4 --port 8000
 
 # 6. Index codebase AST & vector context
 dream index --force

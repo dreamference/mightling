@@ -65,17 +65,17 @@
     - [5.1.2. `dream chat`](#512-dreamference-chat)
     - [5.1.3. `dream run`](#513-dreamference-run)
     - [5.1.4. `dream status`](#514-dreamference-status)
-    - [5.1.5. `dream server_start`](#515-dreamference-start_server)
+    - [5.1.5. `dream server start`](#515-dreamference-start_server)
     - [5.1.6. `dream server stop`](#516-dreamference-stop_server)
     - [5.1.7. `dream server remove`](#517-dreamference-remove_server)
-    - [5.1.8. `dream show_request_logs`](#518-dreamference-show_request_logs)
+    - [5.1.8. `dream logs request`](#518-dreamference-show_request_logs)
     - [5.1.9. `dream index`](#519-dreamference-index)
     - [5.1.10. `dream mcp`](#5110-dreamference-mcp)
     - [5.1.11. `dream endpoints`](#5111-dreamference-endpoints)
     - [5.1.12. `dream web`](#5112-dreamference-web)
-    - [5.1.13. `dream download`](#5113-dreamference-download)
-    - [5.1.14. `dream clear-cache`](#5114-dreamference-clear-cache)
-    - [5.1.15. `dream clear-tensorize-cache`](#5115-dreamference-clear-tensorize-cache)
+    - [5.1.13. `dream model download`](#5113-dreamference-download)
+    - [5.1.14. `dream clear cache`](#5114-dreamference-clear-cache)
+    - [5.1.15. `dream clear tensorize-cache`](#5115-dreamference-clear-tensorize-cache)
   - [5.2. IDE Integration via Stdio MCP](#52-ide-integration-via-stdio-mcp)
   - [5.3. Web Canvas UI & Telemetry Pane](#53-web-canvas-ui--telemetry-pane)
 - [6. System Requirements & Setup](#6-system-requirements--setup)
@@ -260,9 +260,9 @@ FP8 KV cache, FlashInfer attention, `qwen3_xml` tool parser, `qwen3` reasoning p
 - **Default num_speculative_tokens**: `8`
 
 #### 4.2.5. Readiness Polling & Live Streaming
-- `dream server_start` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
+- `dream server start` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
 - The monitor thread constantly pipes raw vLLM container logs to stdout, prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`), tracks loading stages from logs, and polls `/v1/models` until healthy. `VLLMStartupMonitor` provides additional memory-growth tracking and stall detection with explicit progress percentages (`~X% (Y/Z GB since start)`).
-- `server_start` exits once the health check passes (server keeps running in background).
+- `server start` exits once the health check passes (server keeps running in background).
 
 #### 4.2.6. Instant Signal Handling
 - Poll loop sleeps in short intervals so `Ctrl+C` is handled promptly.
@@ -395,13 +395,13 @@ dream chat | run [--agent goose]
 3. Pull `ghcr.io/all-hands-ai/openhands:main` if missing.
 4. `docker rm -f dreamference-openhands`; run container on port **3000** with workspace + docker.sock mounts and LLM env pointing at local vLLM. Prompt unused.
 
-#### `dream server_start` Variant
+#### `dream server start` Variant
 
 Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadingMonitor` thread (live log piping + 10s Docker memory stats + stage detection + health polling), prints progress, and **exits once the model health check passes** (the vLLM server/container continues running). Uses CLI `--model` (defaults to `qwen3.6-35b-a3b-nvfp4`) and other tuning flags from config. No agent runner is started.
 
 #### 4.5.1. Failure Modes
 
-- **vLLM launch failure**: Hint to run `dream server_start --model <model>`; `chat`/`run` exit `1`.
+- **vLLM launch failure**: Hint to run `dream server start --model <model>`; `chat`/`run` exit `1`.
 - **Process crash during wait**: Drain remaining logs; return failure.
 - **Ctrl+C during wait**: Cancel without starting the agent.
 - **Goose install failure**: Print manual curl install command; exit `1`.
@@ -431,7 +431,7 @@ Always registers the `jetbrains_mcp` stdio extension (`dream mcp`).
 `ensure_goose_config` performs a targeted deep-merge of the `extensions` dict so `developer` + `jetbrains_mcp` are never overwritten when the user already has an `extensions` section in `~/.config/goose/config.yaml`.
 
 #### 4.6.5. vLLM Side
-`server_start` passes `--enable-auto-tool-choice` plus the parser resolved for the target model,
+`server start` passes `--enable-auto-tool-choice` plus the parser resolved for the target model,
 satisfying Goose function-calling requirements without extra flags. Parser resolution order is
 explicit `--tool-call-parser` → the model's `launch_overrides` recipe → a family guess from the model
 name (`mistral` → `mistral`, otherwise `hermes`). Parser choice is not a per-family constant: Qwen 2.5
@@ -495,7 +495,7 @@ Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external 
 - Primary cache: `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if `HF_HOME` set).
 - Pre-download via `huggingface_hub.snapshot_download` (preferred) or `huggingface-cli download` fallback.
 - `download_model()` and `download_all_models()` check `is_model_downloaded()` first; only fetch if missing.
-- Invoked automatically by `init`, `server_start`, and explicit `download` command.
+- Invoked automatically by `init`, `server start`, and explicit `model download` command.
 
 #### 4.9.2. Tensorizer Behavior
 - Secondary cache: `~/.cache/dreamference/tensorizer/`.
@@ -504,11 +504,11 @@ Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external 
 - Used by vLLM server when `--tensorize` flag is enabled (default off) for faster loading on GB10.
 
 #### 4.9.3. Cache Management Commands
-- `dream clear-cache`: removes both HF and tensorizer parent directories.
-- `dream clear-tensorize-cache`: removes only the tensorizer cache directory.
+- `dream clear cache`: removes both HF and tensorizer parent directories.
+- `dream clear tensorize-cache`: removes only the tensorizer cache directory.
 
 #### 4.9.4. Download CLI
-`dream download` supports `--model`, `--all`, `--tensorize/--no-tensorize`.
+`dream model download` supports `--model`, `--all`, `--tensorize/--no-tensorize`.
 
 #### 4.9.5. Best-Effort Policy
 All operations are best-effort; failures fall back to on-demand fetch by vLLM.
@@ -526,7 +526,7 @@ Dreamference uses Docker for the primary vLLM inference runtime. All Docker oper
     RUN pip install "vllm[tensorizer]"
     ```
   - This custom image is tagged as `dreamference-vllm-tensorizer:26.07-py3`.
-  - Used by default in `build_launch_command` and `server_start`.
+  - Used by default in `build_launch_command` and `server start`.
   - Provides tensorizer support for fast GB10 model loading.
   - Container name pattern: `dreamference-vllm-<port>`; pre-removed before launch.
   - Launch form: `docker run --rm --name ... --gpus all -p {port}:{port} -v ~/.cache/huggingface:/root/.cache/huggingface [-e HF_TOKEN=…] dreamference-vllm-tensorizer:26.07-py3 <hf_repo> …`
@@ -568,17 +568,17 @@ Implemented by `DreamferenceCLIController` (`dreamference/cli/`). Rich-powered t
 | **`chat`**                  | Interactive session for selected agent (Goose / Aider CLI, or VS Code / OpenHands UI)                            |
 | **`run`**                   | Non-interactive task where supported (Goose `--text`, Aider `--message`; others launch UI and may ignore prompt) |
 | **`status`**                | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index                                       |
-| **`server_start`**          | Launch local vLLM server optimized for GB10                                                                      |
+| **`server start`**          | Launch local vLLM server optimized for GB10                                                                      |
 | **`server stop`**           | Stop the running vLLM Docker container                                                                           |
 | **`server remove`**         | Remove the vLLM Docker container                                                                                 |
-| **`show_request_logs`**     | Tail the vLLM Docker container logs                                                                              |
+| **`logs request`**     | Tail the vLLM Docker container logs                                                                              |
 | **`index`**                 | AST + FTS5 + TF-IDF workspace index                                                                              |
 | **`mcp`**                   | Stdio MCP server for IDE companion tools                                                                         |
 | **`endpoints`**             | Lists all vLLM/OpenAI-compatible REST endpoints + credentials                                                    |
 | **`web`**                   | Web Canvas UI on port 8501 (default)                                                                             |
-| **`download`**              | Pre-download model weights to HF cache                                                                           |
-| **`clear-cache`**           | Clear both HF and tensorizer model caches                                                                        |
-| **`clear-tensorize-cache`** | Clear only the tensorizer model cache                                                                            |
+| **`model download`**              | Pre-download model weights to HF cache                                                                           |
+| **`clear cache`**           | Clear both HF and tensorizer model caches                                                                        |
+| **`clear tensorize-cache`** | Clear only the tensorizer model cache                                                                            |
 
 #### Command Specification Subsections
 
@@ -618,10 +618,10 @@ dream run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--
   - **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`/`aider`/`continue`/`openhands`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose CLI, Cline extension, Aider CLI, Continue extension, OpenHands Docker image readiness, config paths.
   - **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
-##### 5.1.5. `dream server_start`
+##### 5.1.5. `dream server start`
 
 ```text
-dream server_start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--hf-token …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--tensorize/--no-tensorize]
+dream server start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--hf-token …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--tensorize/--no-tensorize]
 ```
 
 - **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). Function calling for Goose is enabled **by default** (`--enable-auto-tool-choice`), with `--tool-call-parser` automatically resolved per-model. `--max-num-batched-tokens 8192` is passed automatically when `--enable-chunked-prefill` (default) to improve TTFT on large codebase prompts. See [start_server variant](#dreamference-start_server-variant).
@@ -636,7 +636,7 @@ dream server_start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft
     [recipe-specific environment variables] \
     --entrypoint vllm <image> serve <model_id> [vllm-flags]
   ```
-- **Example**: `dream server_start --model qwen3.6-35b-a3b-nvfp4 --port 8000`
+- **Example**: `dream server start --model qwen3.6-35b-a3b-nvfp4 --port 8000`
 
 ##### 5.1.6. `dream server stop`
 ```text
@@ -655,13 +655,13 @@ dream server remove [--port PORT]
 - **Docker Command**: `docker rm -f dreamference-vllm-<port>`
 - **Example**: `dream server remove --port 8000`
 
-##### 5.1.8. `dream show_request_logs`
+##### 5.1.8. `dream logs request`
 ```text
-dream show_request_logs [--port PORT]
+dream logs request [--port PORT]
 ```
 - **Behavior**: Tails the logs of the running vLLM container.
 - **Docker Command**: `docker logs -f dreamference-vllm-<port>`
-- **Example**: `dream show_request_logs --port 8000`
+- **Example**: `dream logs request --port 8000`
 
 ##### 5.1.9. `dream index`
 
@@ -690,23 +690,23 @@ dream web [--port PORT]
 - **Behavior**: HTTP server on `0.0.0.0:{port}` (default `8501`). Serves static Glassmorphism SPA + `GET /api/status` (`hardware`, `vllm`, `context`). Memory gauge updates from telemetry; Mermaid diagram and diff pane are **static placeholders**; KV gauge shows fixed `45%` width when vLLM is healthy.
 - **Example**: `dream web --port 8501`
 
-##### 5.1.13. `dream download`
+##### 5.1.13. `dream model download`
 ```text
-dream download [--model MODEL] [--all] [--tensorize/--no-tensorize]
+dream model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 ```
 
-- **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. `--tensorize` (disabled by default) also converts the model to tensorizer format. Also invoked automatically from `init` and `server_start`.
-- **Example**: `dream download --model qwen3.6-35b-a3b-nvfp4`
+- **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. `--tensorize` (disabled by default) also converts the model to tensorizer format. Also invoked automatically from `init` and `server start`.
+- **Example**: `dream model download --model qwen3.6-35b-a3b-nvfp4`
 
-##### 5.1.14. `dream clear-cache`
+##### 5.1.14. `dream clear cache`
 
 - **Behavior**: Clears both Hugging Face (`~/.cache/huggingface`) and tensorizer (`~/.cache/dreamference`) parent cache directories using `shutil.rmtree`. Invokes `ModelDownloader.clear_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
-- **Example**: `dream clear-cache`
+- **Example**: `dream clear cache`
 
-##### 5.1.15. `dream clear-tensorize-cache`
+##### 5.1.15. `dream clear tensorize-cache`
 
 - **Behavior**: Clears only the tensorizer cache directory (`~/.cache/dreamference/tensorizer` parent). Invokes `ModelDownloader.clear_tensorizer_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
-- **Example**: `dream clear-tensorize-cache`
+- **Example**: `dream clear tensorize-cache`
 
 #### Configuration Hierarchy & Resolution Order
 
@@ -811,14 +811,14 @@ Note: runtime Goose auto-install uses `releases/download/stable/…`; the instal
 | `scripts/run_vllm_gb10.sh [MODEL] [PORT] [DRAFT] [TOKENS]` | Thin foreground Python-module vLLM launch (no prefix-cache / chunked-prefill / kv-cache flags) |
 | `scripts/run_goose.sh`                                     | Sets Goose OpenAI env vars and runs `goose session`                                            |
 
-Prefer `dream server_start` / `dream chat` for full GB10-tuned behavior.
+Prefer `dream server start` / `dream chat` for full GB10-tuned behavior.
 
 ---
 
 ## 7. Roadmap & Implementation Verification
 
 - [x] **Phase 1: NVIDIA GB10 Exclusive Specification** — model matrix & unified-memory targeting
-- [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine** — multi-tier vLLM, live logs, weight pre-download, CLI suite including `download`
+- [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine** — multi-tier vLLM, live logs, weight pre-download, CLI suite including `model download`
 - [x] **Phase 3: Agentic Engine, Provisioning & MCP** — Goose auto-install, stdio MCP tools, multi-agent runners (Cline, Aider, Continue, OpenHands)
 - [x] **Phase 4: Context Engine & Web Canvas** — parallel AST, SQLite/FTS5, TF-IDF (in-process), Web Canvas telemetry UI
 - [x] **Phase 5: Modular Package Layout** — split packages under `dreamference/{hardware,config,runner,vllm_server,context_engine,mcp_server,cli}/` with shim modules for stable imports
@@ -918,7 +918,7 @@ HTTP SPA + `/api/status` telemetry.
 
 ### 8.8. `dreamference/cli/`
 
-`DreamferenceCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`) (15 subcommands: `init`, `chat`, `run`, `status`, `server_start`, `server stop`, `server remove`, `show_request_logs`, `index`, `mcp`, `endpoints`, `web`, `download`, `clear-cache`, `clear-tensorize-cache`).
+`DreamferenceCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`) (15 subcommands: `init`, `chat`, `run`, `status`, `server start`, `server stop`, `server remove`, `logs request`, `index`, `mcp`, `endpoints`, `web`, `model download`, `clear cache`, `clear tensorize-cache`).
 
 
 ---
