@@ -227,21 +227,22 @@ class DreamferenceConfig:
         out_path = target_path or self.config_file_path
         data: Dict[str, Any] = {
             "vllm_host": self.vllm_host,
-            "model": self.model,
-            "draft_model": self.draft_model,
-            "num_speculative_tokens": self.num_speculative_tokens,
-            "sandbox": self.sandbox,
             "agent_runner": self.agent_runner,
-            "hf_token": self.hf_token,
-            "enable_prefix_caching": self.enable_prefix_caching,
-            "enable_chunked_prefill": self.enable_chunked_prefill,
-            "num_scheduler_steps": self.num_scheduler_steps,
-            "attention_backend": self.attention_backend,
-            "kv_cache_dtype": self.kv_cache_dtype,
-            "cave_mode": self.cave_mode,
-            "guided_decoding_backend": self.guided_decoding_backend,
-            "use_tensorizer": self.use_tensorizer,
         }
+        if self.model and self.model != DEFAULT_MODEL: data["model"] = self.model
+        if self.draft_model is not None: data["draft_model"] = self.draft_model
+        if self.num_speculative_tokens != DEFAULT_SPECULATIVE_TOKENS: data["num_speculative_tokens"] = self.num_speculative_tokens
+        if self.sandbox != DEFAULT_SANDBOX: data["sandbox"] = self.sandbox
+        if self.hf_token is not None: data["hf_token"] = self.hf_token
+        if self.enable_prefix_caching != DEFAULT_PREFIX_CACHING: data["enable_prefix_caching"] = self.enable_prefix_caching
+        if self.enable_chunked_prefill != DEFAULT_CHUNKED_PREFILL: data["enable_chunked_prefill"] = self.enable_chunked_prefill
+        if self.num_scheduler_steps != DEFAULT_SCHEDULER_STEPS: data["num_scheduler_steps"] = self.num_scheduler_steps
+        if self.attention_backend != DEFAULT_ATTENTION_BACKEND: data["attention_backend"] = self.attention_backend
+        if self.kv_cache_dtype != DEFAULT_KV_CACHE_DTYPE: data["kv_cache_dtype"] = self.kv_cache_dtype
+        if self.cave_mode != DEFAULT_CAVE_MODE: data["cave_mode"] = self.cave_mode
+        if self.guided_decoding_backend != DEFAULT_GUIDED_DECODING_BACKEND: data["guided_decoding_backend"] = self.guided_decoding_backend
+        if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
+
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 
     def resolve_tool_call_parser(self) -> str:

@@ -837,11 +837,18 @@ class DreamferenceCLIController:
                 download_model(config.model, hf_token=config.hf_token, auto_tensorize=auto_t)
                 if config.draft_model:
                     download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
-            saved_config_path = config.save_config()
+            from dreamference.config.config_generator import generate_default_init_config
+            from dreamference.config.config_path_resolver import ConfigPathResolver
+            
+            target_config_path = getattr(args, "config", None)
+            resolved_path = ConfigPathResolver.resolve_path(target_config_path)
+            saved_config_path = generate_default_init_config(resolved_path)
             config.ensure_goose_config()
             ctx_engine = ContextEngine()
             summary = ctx_engine.index_workspace(force_reindex=True)
 
+            from rich.console import Console
+            console = Console()
             console.print("[bold green]✅ Dreamference workspace initialized successfully![/bold green]")
             console.print(f"   [cyan]Dreamference Config:[/cyan] {saved_config_path}")
             console.print(f"   [cyan]Active Agent:[/cyan]    {config.agent_runner.upper()} (Default: GOOSE)")
