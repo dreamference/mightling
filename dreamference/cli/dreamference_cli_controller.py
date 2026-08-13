@@ -211,6 +211,8 @@ class DreamferenceCLIController:
         main_model_set_parser = main_model_subparsers.add_parser("set", help="Set the main model")
         main_model_set_parser.add_argument("model_name", type=str, help="Name of the model to set as main")
 
+        main_model_inspect_parser = main_model_subparsers.add_parser("inspect", help="Inspect the currently running main model by running sample prompts")
+
         # Command: dream model download
         # Command: dream model list
         model_subparsers.add_parser("list", help="List available model names and HuggingFace repos")
@@ -396,6 +398,254 @@ class DreamferenceCLIController:
                 out_console.print(f"[bold green]✅ Main model set to '{args.model_name}'[/bold green]")
                 out_console.print(f"   [cyan]Config saved to:[/cyan] {saved_path}")
                 sys.exit(0)
+            elif args.main_model_command == "inspect":
+                cls.display_header()
+                from rich.console import Console
+                from rich.table import Table
+                import requests
+                import time
+
+                out_console = Console()
+                out_console.print("[bold cyan]🔍 Inspecting Main Model[/bold cyan]")
+
+                vllm_host = config.vllm_host
+                api_base = f"{vllm_host}/v1/chat/completions"
+                api_key = "gb10-local-token"
+
+                # Try to get the running model from the server first
+                model_name = config.model
+                max_model_len = "Unknown"
+                try:
+                    models_response = requests.get(f"{vllm_host}/v1/models", timeout=5)
+                    if models_response.status_code == 200:
+                        models_data = models_response.json()
+                        if models_data.get("data"):
+                            model_name = models_data["data"][0]["id"]
+                            max_model_len = str(models_data["data"][0].get("max_model_len", "Unknown"))
+                except requests.exceptions.RequestException:
+                    pass # Fallback to config.model
+
+                if not model_name:
+                    out_console.print("[bold red]❌ No main model set in configuration and server is unreachable.[/bold red]")
+                    sys.exit(1)
+
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+
+                # Check reasoning capability
+                is_reasoning = False
+                payload_reasoning = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "How many Rs are in strawberry? Think step by step."}],
+                    "max_tokens": 50,
+                    "temperature": 0.0
+                }
+                try:
+                    r_response = requests.post(api_base, json=payload_reasoning, headers=headers, timeout=15)
+                    if r_response.status_code == 200:
+                        msg = r_response.json().get("choices", [{}])[0].get("message", {})
+                        content = msg.get("content") or ""
+                        if "<think>" in content or msg.get("reasoning_content") or msg.get("reasoning"):
+                            is_reasoning = True
+                except Exception:
+                    pass
+
+                # Check supported roles
+                supported_roles = []
+                test_roles = {
+                    "system": [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": "Hi"}],
+                    "user": [{"role": "user", "content": "Hi"}],
+                    "assistant": [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}, {"role": "user", "content": "Next"}],
+                    "tool": [{"role": "user", "content": "Do it"}, {"role": "assistant", "content": "doing", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "test", "arguments": "{}"}}]}, {"role": "tool", "content": "done", "tool_call_id": "call_1"}]
+                }
+                for role, msgs in test_roles.items():
+                    payload_role = {
+                        "model": model_name,
+                        "messages": msgs,
+                        "max_tokens": 1,
+                    }
+                    try:
+                        resp = requests.post(api_base, json=payload_role, headers=headers, timeout=5)
+                        if resp.status_code == 200:
+                            supported_roles.append(role)
+                    except Exception:
+                        pass
+                roles_str = ", ".join(supported_roles) if supported_roles else "Unknown"
+
+                # Check ChatML tag support
+                supports_chatml = False
+                payload_chatml = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "Print the ChatML tag '<|im_start|>' exactly as written."}],
+                    "max_tokens": 100,
+                    "temperature": 0.0
+                }
+                try:
+                    c_response = requests.post(api_base, json=payload_chatml, headers=headers, timeout=15)
+                    if c_response.status_code == 200:
+                        msg = c_response.json().get("choices", [{}])[0].get("message", {})
+                        content = msg.get("content") or ""
+                        if "<|im_start|>" in content:
+                            supports_chatml = True
+                except Exception:
+                    pass
+
+                # Check antArtifact support
+                supports_artifact = False
+                payload_artifact = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "Create a one line python script and wrap it in <antArtifact> tags."}],
+                    "max_tokens": 100,
+                    "temperature": 0.0
+                }
+                try:
+                    a_response = requests.post(api_base, json=payload_artifact, headers=headers, timeout=15)
+                    if a_response.status_code == 200:
+                        msg = a_response.json().get("choices", [{}])[0].get("message", {})
+                        content = msg.get("content") or ""
+                        if "<antArtifact" in content:
+                            supports_artifact = True
+                except Exception:
+                    pass
+
+                # Check tags supported by the model by asking it directly
+                supported_tags = []
+                payload_tags = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "Analyze your own architecture and output the exact XML tags you use for tool calling, reasoning, and artifacts (e.g. <tool_call>, <think>, <answer>). Output ONLY a comma separated list of tags, with no other text."}],
+                    "max_tokens": 50,
+                    "temperature": 0.0,
+                    "top_p": 0.01,
+                    "seed": 42
+                }
+                try:
+                    t_response = requests.post(api_base, json=payload_tags, headers=headers, timeout=15)
+                    if t_response.status_code == 200:
+                        msg = t_response.json().get("choices", [{}])[0].get("message", {})
+                        content = msg.get("content") or ""
+                        import re
+                        tags = re.findall(r'<\|?[a-zA-Z0-9_]+\|?>', content)
+                        unique_tags = sorted(list(set(tags)))
+                        supported_tags = unique_tags
+                except Exception:
+                    pass
+                tags_str = ", ".join(supported_tags) if supported_tags else "None detected"
+                # Check Streaming & TTFT
+                supports_streaming = False
+                ttft = 0.0
+                payload_stream = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "Say 'Test'"}],
+                    "max_tokens": 5,
+                    "temperature": 0.0,
+                    "stream": True
+                }
+                try:
+                    start_stream = time.time()
+                    s_response = requests.post(api_base, json=payload_stream, headers=headers, timeout=15, stream=True)
+                    if s_response.status_code == 200:
+                        for line in s_response.iter_lines():
+                            if line:
+                                decoded_line = line.decode('utf-8')
+                                if decoded_line.startswith("data: ") and decoded_line != "data: [DONE]":
+                                    ttft = time.time() - start_stream
+                                    supports_streaming = True
+                                    break
+                except Exception:
+                    pass
+
+                # Check if model is MoE via HF config
+                is_moe = "Unknown"
+                try:
+                    hf_resp = requests.get(f"https://huggingface.co/{model_name}/raw/main/config.json", timeout=3)
+                    if hf_resp.status_code == 200:
+                        model_cfg = hf_resp.json()
+                        moe_keys = ["num_experts_per_tok", "num_local_experts", "moe_dim", "n_routed_experts", "num_experts"]
+                        if any(k in model_cfg for k in moe_keys) or "moe" in model_cfg.get("model_type", "").lower():
+                            is_moe = "Yes"
+                        else:
+                            is_moe = "No"
+                except Exception:
+                    name_lower = model_name.lower()
+                    if any(x in name_lower for x in ["moe", "mixtral", "deepseek-coder-v2", "deepseek-v3", "deepseek-r1"]):
+                        is_moe = "Yes (heuristic)"
+
+                out_console.print(f"   [cyan]Model:[/cyan]    {model_name}")
+                out_console.print(f"   [cyan]Endpoint:[/cyan] {api_base}")
+                out_console.print(f"   [cyan]Context:[/cyan]     {max_model_len} tokens")
+                out_console.print(f"   [cyan]Architecture:[/cyan] {is_moe} (MoE)")
+                out_console.print(f"   [cyan]Roles:[/cyan]       {roles_str}")
+                out_console.print(f"   [cyan]Tags:[/cyan]        {tags_str}")
+                out_console.print(f"   [cyan]Reasoning:[/cyan] {'Yes' if is_reasoning else 'No'}")
+                out_console.print(f"   [cyan]antArtifact:[/cyan] {'Yes' if supports_artifact else 'No'}")
+                out_console.print(f"   [cyan]ChatML:[/cyan]      {'Yes' if supports_chatml else 'No'}")
+                if supports_streaming:
+                    out_console.print(f"   [cyan]Streaming:[/cyan]   Yes (TTFT: {ttft:.3f}s)")
+                else:
+                    out_console.print(f"   [cyan]Streaming:[/cyan]   No")
+                out_console.print("")
+
+                sample_prompts = [
+                    "Say 'Hello, World!'",
+                    "What is 2 + 2? Answer in one word.",
+                ]
+
+                table = Table(show_header=True, header_style="bold magenta")
+                table.add_column("Prompt")
+                table.add_column("Status")
+                table.add_column("Latency (s)")
+                table.add_column("Tokens/sec")
+                table.add_column("Response snippet")
+
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+
+                for prompt in sample_prompts:
+                    payload = {
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 1000,
+                        "temperature": 0.0
+                    }
+                    start_time = time.time()
+                    try:
+                        response = requests.post(api_base, json=payload, headers=headers, timeout=15)
+                        latency = time.time() - start_time
+                        if response.status_code == 200:
+                            data = response.json()
+                            msg = data.get("choices", [{}])[0].get("message", {})
+                            content = msg.get("content") or ""
+                            reasoning = msg.get("reasoning_content") or msg.get("reasoning") or ""
+                            
+                            display_text = ""
+                            if reasoning:
+                                display_text += f"<think>{reasoning}</think> "
+                            display_text += content
+                            
+                            if not display_text.strip():
+                                display_text = str(msg)
+                                
+                            snippet = display_text.replace("\n", " ").strip()
+                            
+                            usage = data.get("usage", {})
+                            comp_tokens = usage.get("completion_tokens", 0)
+                            tps = comp_tokens / latency if latency > 0 else 0
+                            tps_str = f"{tps:.1f}" if comp_tokens > 0 else "N/A"
+                            
+                            table.add_row(prompt, "[green]OK[/green]", f"{latency:.2f}", tps_str, snippet)
+                        else:
+                            table.add_row(prompt, f"[red]Error {response.status_code}[/red]", f"{latency:.2f}", "N/A", response.text.replace("\n", " ")[:50])
+                    except requests.exceptions.RequestException as e:
+                        latency = time.time() - start_time
+                        table.add_row(prompt, "[red]Failed[/red]", f"{latency:.2f}", "N/A", str(e).replace("\n", " ")[:50])
+
+                out_console.print(table)
+                sys.exit(0)
+
 
         elif args.command == "init":
             cls.display_header()
