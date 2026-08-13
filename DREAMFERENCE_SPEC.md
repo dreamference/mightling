@@ -463,7 +463,7 @@ Result: `dream chat` / `run` produce a fully-functional Goose session that can e
 6. Write JSON cache `.dreamference/context_index.json` (symbols + metadata only) and close DB.
 
 #### 4.7.4. Hybrid Search
-`search_code` combines FTS5 rank + TF-IDF score + cosine similarity from stored embeddings (weighted ×3). Returns top-k files with symbols and paths. Used by MCP `workspace_search_code` tool.
+`search_code` combines FTS5 rank + TF-IDF score + cosine similarity from stored embeddings (weighted ×3.0). Returns top-k files with symbols and paths. Used by MCP `workspace_search_code` tool.
 
 #### 4.7.5. Cache Behavior
 Without `--force`, `load_index()` returns cached summary instantly; FTS5 + vector queries still work from SQLite even if TF-IDF/embeddings are cold.
@@ -549,7 +549,7 @@ Dreamference uses Docker for the optional OpenHands agent UI. All Docker operati
 
 ### 5.1. `dreamference` CLI Suite
 
-Implemented by `DreamferenceCLIController` (`dreamference/cli/`). Rich-powered terminal UI. **15** subcommands.
+Implemented by `DreamferenceCLIController` (`dreamference/cli/`). Rich-powered terminal UI. **19** subcommands.
 
 #### Global Options
 
@@ -564,20 +564,23 @@ Implemented by `DreamferenceCLIController` (`dreamference/cli/`). Rich-powered t
 
 | Subcommand                  | Description                                                                                                      |
 | :-------------------------- | :--------------------------------------------------------------------------------------------------------------- |
-| **`init`**                  | Pre-download models, save `dreamference.toml`, write Goose config, force-index workspace                     |
+| **`init`**                  | Pre-download models, generate sparse `dreamference.toml`, write Goose config, force-index workspace                     |
 | **`chat`**                  | Interactive session for selected agent (Goose / Aider CLI, or VS Code / OpenHands UI)                            |
 | **`run`**                   | Non-interactive task where supported (Goose `--text`, Aider `--message`; others launch UI and may ignore prompt) |
 | **`status`**                | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index                                       |
 | **`server start`**          | Launch local vLLM server optimized for GB10                                                                      |
 | **`server stop`**           | Stop the running vLLM Docker container                                                                           |
 | **`server remove`**         | Remove the vLLM Docker container                                                                                 |
-| **`logs request`**     | Tail the vLLM Docker container logs                                                                              |
+| **`logs request`**          | Tail the vLLM Docker container logs                                                                              |
+| **`benchmark_server`**      | Run vLLM serve benchmark using Sonnet dataset                                                                    |
 | **`index`**                 | AST + FTS5 + TF-IDF workspace index                                                                              |
 | **`mcp`**                   | Stdio MCP server for IDE companion tools                                                                         |
 | **`endpoints`**             | Lists all vLLM/OpenAI-compatible REST endpoints + credentials                                                    |
 | **`web`**                   | Web Canvas UI on port 8501 (default)                                                                             |
-| **`model list`, `model download`**              | Pre-download model weights to HF cache                                                                           |
-| **`clear model-cache`**           | Clear both HF and tensorizer model caches                                                                        |
+| **`model list`, `model download`** | Pre-download model weights to HF cache                                                                           |
+| **`main-model set`**        | Dynamically configure the active primary model                                                                   |
+| **`main-model inspect`**    | Inspect the active primary model's capabilities with prompt probes                                               |
+| **`clear model-cache`**     | Clear both HF and tensorizer model caches                                                                        |
 | **`clear tensorize-cache`** | Clear only the tensorizer model cache                                                                            |
 
 #### Command Specification Subsections
@@ -588,8 +591,19 @@ Implemented by `DreamferenceCLIController` (`dreamference/cli/`). Rich-powered t
 dream init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--sandbox …] [--agent …] [--hf-token …]
 ```
 
-- **Behavior**: Downloads primary/draft weights → `save_config()` → `ensure_goose_config()` → `ContextEngine.index_workspace(force_reindex=True)`.
+- **Behavior**: Downloads primary/draft weights → generates minimal sparse `dreamference.toml` via `config_generator` → `ensure_goose_config()` → `ContextEngine.index_workspace(force_reindex=True)`.
 - **Example**: `dream init --model qwen3.6-35b-a3b-nvfp4 --agent goose`
+
+##### 5.1.1b. `dream main-model`
+
+```text
+dream main-model set <model_name>
+dream main-model inspect
+```
+
+- **Behavior (`set`)**: Modifies `dreamference.toml` to lock in a new primary model alias/repo.
+- **Behavior (`inspect`)**: Runs an automated suite of prompt probes against the running model to detect its features (tool calling, JSON mode, reasoning tags, ChatML, TTFT streaming, MoE architecture, and prompt latency) and outputs a detailed markdown table.
+- **Example**: `dream main-model inspect`
 
 ##### 5.1.2. `dream chat`
 
@@ -721,7 +735,7 @@ dream model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 vllm_host: http://localhost:8000
 model: qwen3.6-35b-a3b-nvfp4
 draft_model: null
-num_speculative_tokens: 8
+num_speculative_tokens: 5
 sandbox: none
 agent_runner: goose
 hf_token: null
@@ -740,7 +754,7 @@ kv_cache_dtype: fp8
 | `DREAMFERENCE_VLLM_HOST`                 | vLLM endpoint URL                                                         | `http://localhost:8000` |
 | `DREAMFERENCE_MODEL`                     | Primary model alias                                                       | `qwen3.6-35b-a3b-nvfp4` |
 | `DREAMFERENCE_DRAFT_MODEL`               | Draft model alias                                                         | unset                   |
-| `DREAMFERENCE_SPECULATIVE_TOKENS`        | Speculative token count                                                   | `8`                     |
+| `DREAMFERENCE_SPECULATIVE_TOKENS`        | Speculative token count                                                   | `5`                     |
 | `DREAMFERENCE_SANDBOX`                   | Sandbox engine                                                            | `none`                  |
 | `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | Agent runner (`goose` \| `cline` \| `aider` \| `continue` \| `openhands`) | `goose`                 |
 | `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN`     | HuggingFace token                                                         | unset                   |
