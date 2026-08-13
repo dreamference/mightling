@@ -1,8 +1,9 @@
 <div align="center">
+<img src="images/dfe-logo-light.svg" alt="Dreamference Logo" width="600">
 
 # 🚀 Dreamference
 
-### **The Autonomous Local Agentic Pair Programmer for NVIDIA GB10**
+### **The Ultimate Autonomous AI Pair Programmer for NVIDIA GB10 Blackwell**
 
 [![Hardware Qualified](https://img.shields.io/badge/NVIDIA%20GB10-128GB%20Unified%20Memory-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](https://nvidia.com)
 [![Agent Runtime](https://img.shields.io/badge/Agent-AAIF%20Goose%201.45%2B-0052CC?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/aaif-goose/goose)
@@ -24,6 +25,16 @@
 **Dreamference** is a state-of-the-art, open-source local AI pair programmer designed specifically to harness the massive **128 GB Unified LPDDR5X Memory** architecture of single-node **NVIDIA GB10 (Blackwell)** systems. 
 
 Powered by the **AAIF Goose Agentic Engine** and **vLLM Dual-Model Speculative Decoding**, Dreamference turns your local GB10 workstation into an autonomous software engineering powerhouse capable of writing code, running unit tests, refactoring multi-file repositories, and resolving bugs with zero network egress.
+
+---
+
+## 🏆 Why Dreamference?
+
+*   **🛡️ Absolute Sovereignty**: 100% local execution. Your code never leaves your NVIDIA GB10 workstation. Perfect for high-security enterprise and proprietary environments.
+*   **⚡ Blackwell Optimized**: Custom vLLM launch recipes tuned specifically for the GB10 (SM121) architecture, leveraging **FlashInfer** and **NVFP4** quantization.
+*   **🤖 Multi-Agent Freedom**: Use the default **Goose** agent or switch seamlessly to **Aider**, **Cline**, **Continue**, or **OpenHands** with a single flag.
+*   **📚 Deep Context Intelligence**: Air-gapped AST symbol indexing combined with hybrid TF-IDF and dense vector search for lightning-fast codebase navigation.
+*   **🚀 Insane Speed**: Achieve 2x-3x higher throughput with dual-model speculative decoding and Blackwell-optimized kernels.
 
 ---
 
@@ -111,7 +122,7 @@ dream run "Refactor database pool to use async pg" --sandbox apptainer
 dream status
 
 # 5. Launch local vLLM GB10 server with MTP Speculative Decoding
-dream start_server --model qwen3.6-35b-a3b-nvfp4 --port 8000
+dream server_start --model qwen3.6-35b-a3b-nvfp4 --port 8000
 
 # 6. Index codebase AST & vector context
 dream index --force
@@ -159,6 +170,16 @@ flowchart TD
 ## 📜 License
 
 Distributed under the **Apache 2.0 License**. See `LICENSE` for details.
+
+---
+
+## 🤝 Community & Contribution
+
+Dreamference is built by and for the **NVIDIA Blackwell** developer community. We believe in the power of open-source local AI.
+
+*   **🐛 Found a Bug?**: Open an issue! We prioritize Blackwell-specific hardware issues and model compatibility.
+*   **💡 Feature Request?**: We'd love to hear it. Multi-agent support and optimization recipes are our top focus.
+*   **🌟 Star the Repo**: Help us make Dreamference viral!
 
 ---
 

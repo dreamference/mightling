@@ -86,7 +86,7 @@ class GooseRunner:
             return False
 
         print(f"❌ Local vLLM server at {self.config.vllm_host} is not running.")
-        print(f"💡 Start vLLM in another terminal via: `dream start_server`")
+        print(f"💡 Start vLLM in another terminal via: `dream server_start`")
         return False
 
 

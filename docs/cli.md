@@ -5,6 +5,6 @@ See the full list of commands in the [Technical Specification](../DREAMFERENCE_S
 Key commands:
 - `dream init`
 - `dream chat`
-- `dream start_server`
-- `dream stop_server`
+- `dream server_start`
+- `dream server stop`
 - `dream endpoints`

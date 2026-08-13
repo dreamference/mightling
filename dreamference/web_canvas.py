@@ -59,8 +59,14 @@ CANVAS_HTML = """<!DOCTYPE html>
       align-items: center;
       gap: 0.75rem;
       font-weight: 700;
-      font-size: 1.3rem;
+      font-size: 1.5rem;
       letter-spacing: -0.5px;
+      color: var(--accent-green);
+    }
+    .brand span {
+      background: linear-gradient(90deg, #fff, var(--accent-green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
     .brand-badge {
       background: linear-gradient(135deg, var(--accent-green), var(--accent-teal));

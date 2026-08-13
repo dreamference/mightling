@@ -2,7 +2,7 @@
 Dreamference Command Line Interface (CLI) Controller.
 
 This module provides the DreamferenceCLIController class which parses command line arguments
-for subcommands (`init`, `chat`, `run`, `status`, `start_server`, `index`, `mcp`, `download`, `web`),
+for subcommands (`init`, `chat`, `run`, `status`, `server_start`, `index`, `mcp`, `download`, `web`),
 renders Rich terminal user interfaces, and coordinates backend component execution.
 """
 
@@ -191,8 +191,8 @@ class DreamferenceCLIController:
         # Command: dream status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
 
-        # Command: dream start_server
-        start_server_parser = subparsers.add_parser("start_server", help="Launch local vLLM server optimized for GB10 unified memory")
+        # Command: dream server_start
+        start_server_parser = subparsers.add_parser("server_start", help="Launch local vLLM server optimized for GB10 unified memory")
         start_server_parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model name to serve (default: {DEFAULT_MODEL}; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
         start_server_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
@@ -235,12 +235,16 @@ class DreamferenceCLIController:
         # Command: dream endpoints
         subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
 
-        # Command: dream stop_server
-        stop_parser = subparsers.add_parser("stop_server", help="Stop the running vLLM Docker container")
+        # Command: dream server
+        server_parser = subparsers.add_parser("server", help="Manage the vLLM server")
+        server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operations")
+
+        # Command: dream server stop
+        stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM Docker container")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
 
-        # Command: dream remove_server
-        remove_parser = subparsers.add_parser("remove_server", help="Remove the vLLM Docker container")
+        # Command: dream server remove
+        remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM Docker container")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
 
         # Command: dream show_request_logs
@@ -415,7 +419,7 @@ class DreamferenceCLIController:
             console.print(cred_table)
             print("\n💡 Use with any OpenAI-compatible client by pointing base_url to the endpoint above.")
 
-        elif args.command == "start_server":
+        elif args.command == "server_start":
             cls.display_header()
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             
@@ -504,15 +508,15 @@ class DreamferenceCLIController:
             finally:
                 monitor.stop()
 
-        elif args.command == "stop_server":
-            cls.display_header()
-            vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
-            vllm_mgr.stop_server(port=args.port)
-
-        elif args.command == "remove_server":
-            cls.display_header()
-            vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
-            vllm_mgr.remove_server(port=args.port)
+        elif args.command == "server":
+            if args.server_command == "stop":
+                cls.display_header()
+                vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+                vllm_mgr.stop_server(port=args.port)
+            elif args.server_command == "remove":
+                cls.display_header()
+                vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+                vllm_mgr.remove_server(port=args.port)
 
         elif args.command == "show_request_logs":
             cls.display_header()
@@ -575,4 +579,8 @@ class DreamferenceCLIController:
 
 def main() -> None:
     """Standalone CLI main function."""
-    DreamferenceCLIController.run_cli()
+    try:
+        DreamferenceCLIController.run_cli()
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
+        sys.exit(0)

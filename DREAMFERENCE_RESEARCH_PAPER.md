@@ -49,7 +49,7 @@ Dreamference differentiates itself from existing open-source coding agents (Cont
 | Hardware Co-design               | Blackwell-specific flags (FP8 KV cache, 8 speculative tokens, scheduler steps, guided decoding) | Generic LLM backends with no SoC-specific tuning      |
 | Shell Execution                  | Native `/bin/bash` via per-session temporary config + `allow_shell: true` | Simulated JSON tool calls (`{"name":"shell"}`)        |
 | Context Retrieval                | Hybrid lexical–semantic search (FTS5 + TF-IDF + nomic-embed-text + sqlite-vec) | Pure lexical / keyword search only                    |
-| Server Lifecycle                 | Automatic `dream start_server` when local vLLM is offline             | Manual server provisioning required                   |
+| Server Lifecycle                 | Automatic `dream server_start` when local vLLM is offline             | Manual server provisioning required                   |
 | First-turn Latency (TTFT)        | Active pre-warming of Goose system prompt after health check             | Cold-start attention computation on every new session |
 | Output Style                     | “Cave Mode” prompt injection for terse, command-only responses           | Verbose explanations and reasoning by default         |
 | Tool-call Reliability            | Guided decoding (`outlines`) eliminates malformed JSON tool calls        | Sampling-based generation prone to parse failures     |
@@ -83,7 +83,7 @@ NVIDIA GB10 (128 GB Unified Memory)
 ### 4.3 Agent Runtime
 - Per-session temporary Goose config in `/tmp/dreamference` with `developer` extension (`allow_shell: true`).
 - `GOOSE_ALLOW_SHELL=1` and Cave-Mode prompt injection.
-- Automatic `start_server` invocation when local vLLM is offline.
+- Automatic `server_start` invocation when local vLLM is offline.
 
 ---
 
