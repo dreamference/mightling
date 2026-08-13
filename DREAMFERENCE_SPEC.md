@@ -61,21 +61,23 @@
     - [4.11.1. OpenHands Agent Image](#4111-openhands-agent-image)
 - [5. Client Interfaces & Developer Experience](#5-client-interfaces--developer-experience)
   - [5.1. `dreamference` CLI Suite](#51-dreamference-cli-suite)
-    - [5.1.1. `dream init`](#511-dreamference-init)
-    - [5.1.2. `dream chat`](#512-dreamference-chat)
-    - [5.1.3. `dream run`](#513-dreamference-run)
-    - [5.1.4. `dream status`](#514-dreamference-status)
-    - [5.1.5. `dream server start`](#515-dreamference-start_server)
-    - [5.1.6. `dream server stop`](#516-dreamference-stop_server)
-    - [5.1.7. `dream server remove`](#517-dreamference-remove_server)
-    - [5.1.8. `dream logs request`](#518-dreamference-show_request_logs)
-    - [5.1.9. `dream index`](#519-dreamference-index)
-    - [5.1.10. `dream mcp`](#5110-dreamference-mcp)
-    - [5.1.11. `dream endpoints`](#5111-dreamference-endpoints)
-    - [5.1.12. `dream web`](#5112-dreamference-web)
-    - [5.1.13. `dream model download`](#5113-dreamference-download)
-    - [5.1.14. `dream clear model-cache`](#5114-dreamference-clear-cache)
-    - [5.1.15. `dream clear tensorize-cache`](#5115-dreamference-clear-tensorize-cache)
+    - [5.1.1. `dream init`](#511-dream-init)
+    - [5.1.2. `dream main-model`](#512-dream-main-model)
+    - [5.1.3. `dream chat`](#513-dream-chat)
+    - [5.1.4. `dream run`](#514-dream-run)
+    - [5.1.5. `dream status`](#515-dream-status)
+    - [5.1.6. `dream server start`](#516-dream-server-start)
+    - [5.1.7. `dream server stop`](#517-dream-server-stop)
+    - [5.1.8. `dream server remove`](#518-dream-server-remove)
+    - [5.1.9. `dream logs request`](#519-dream-logs-request)
+    - [5.1.10. `dream benchmark_server`](#5110-dream-benchmark_server)
+    - [5.1.11. `dream index`](#5111-dream-index)
+    - [5.1.12. `dream mcp`](#5112-dream-mcp)
+    - [5.1.13. `dream endpoints`](#5113-dream-endpoints)
+    - [5.1.14. `dream web`](#5114-dream-web)
+    - [5.1.15. `dream model list`, `dream model download`](#5115-dream-model-list-dream-model-download)
+    - [5.1.16. `dream clear model-cache`](#5116-dream-clear-model-cache)
+    - [5.1.17. `dream clear tensorize-cache`](#5117-dream-clear-tensorize-cache)
   - [5.2. IDE Integration via Stdio MCP](#52-ide-integration-via-stdio-mcp)
   - [5.3. Web Canvas UI & Telemetry Pane](#53-web-canvas-ui--telemetry-pane)
 - [6. System Requirements & Setup](#6-system-requirements--setup)
@@ -594,7 +596,7 @@ dream init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--san
 - **Behavior**: Downloads primary/draft weights → generates minimal sparse `dreamference.toml` via `config_generator` → `ensure_goose_config()` → `ContextEngine.index_workspace(force_reindex=True)`.
 - **Example**: `dream init --model qwen3.6-35b-a3b-nvfp4 --agent goose`
 
-##### 5.1.1b. `dream main-model`
+##### 5.1.2. `dream main-model`
 
 ```text
 dream main-model set <model_name>
@@ -605,7 +607,7 @@ dream main-model inspect
 - **Behavior (`inspect`)**: Runs an automated suite of prompt probes against the running model to detect its features (tool calling, JSON mode, reasoning tags, ChatML, TTFT streaming, MoE architecture, and prompt latency) and outputs a detailed markdown table.
 - **Example**: `dream main-model inspect`
 
-##### 5.1.2. `dream chat`
+##### 5.1.3. `dream chat`
 
 ```text
 dream chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aider|continue|openhands] [--sandbox …] [--hf-token …] [--debug] [--cave]
@@ -616,7 +618,7 @@ dream chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aide
 - **Cave Mode (`--cave`)**: When enabled, Dreamference injects the strict Cave Mode system prompt ("You are in Cave Mode...") into Goose `instructions` or `.clinerules` for Cline. Forces terse, command-only output.
 - **Example**: `dream chat --agent aider --debug`
 
-##### 5.1.3. `dream run`
+##### 5.1.4. `dream run`
 
 ```text
 dream run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug] [--cave]
@@ -625,14 +627,14 @@ dream run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--
 - **Behavior**: Same runner selection. Goose: `goose run --text "<prompt>"`. Aider: `aider … --message "<prompt>"`. Cline: prints prompt and opens VS Code. Continue / OpenHands: launch UI; prompt unused.
 - **Example**: `dream run "Refactor database connection pool to use async pg" --agent goose`
 
-##### 5.1.4. `dream status`
+##### 5.1.5. `dream status`
 
 - **Behavior**: Panels for:
   - **Hardware**: GB10 qualification, GPU name, driver, total/used/available unified memory, VRAM usage, architecture.
   - **vLLM & Agent**: endpoint health, served models, active agent (`goose`/`cline`/`aider`/`continue`/`openhands`), configured/draft model, sandbox, HF token presence, prefix/chunked label, `num_scheduler_steps`, `kv_cache_dtype`, Goose CLI, Cline extension, Aider CLI, Continue extension, OpenHands Docker image readiness, config paths.
   - **Context**: indexed file count, AST symbol count, JSON + SQLite paths (if index loaded).
 
-##### 5.1.5. `dream server start`
+##### 5.1.6. `dream server start`
 
 ```text
 dream server start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--hf-token …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--tensorize/--no-tensorize]
@@ -652,7 +654,7 @@ dream server start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft
   ```
 - **Example**: `dream server start --model qwen3.6-35b-a3b-nvfp4 --port 8000`
 
-##### 5.1.6. `dream server stop`
+##### 5.1.7. `dream server stop`
 ```text
 dream server stop [--port PORT]
 ```
@@ -661,7 +663,7 @@ dream server stop [--port PORT]
 - **Docker Command**: `docker stop dreamference-vllm-<port>`
 - **Example**: `dream server stop --port 8000`
 
-##### 5.1.7. `dream server remove`
+##### 5.1.8. `dream server remove`
 ```text
 dream server remove [--port PORT]
 ```
@@ -669,7 +671,7 @@ dream server remove [--port PORT]
 - **Docker Command**: `docker rm -f dreamference-vllm-<port>`
 - **Example**: `dream server remove --port 8000`
 
-##### 5.1.8. `dream logs request`
+##### 5.1.9. `dream logs request`
 ```text
 dream logs request [--port PORT]
 ```
@@ -677,7 +679,16 @@ dream logs request [--port PORT]
 - **Docker Command**: `docker logs -f dreamference-vllm-<port>`
 - **Example**: `dream logs request --port 8000`
 
-##### 5.1.9. `dream index`
+##### 5.1.10. `dream benchmark_server`
+
+```text
+dream benchmark_server [--port PORT]
+```
+
+- **Behavior**: Run vLLM serve benchmark using Sonnet dataset on the running server container.
+- **Example**: `dream benchmark_server --port 8000`
+
+##### 5.1.11. `dream index`
 
 ```text
 dream index [--dir PATH] [--force]
@@ -686,16 +697,16 @@ dream index [--dir PATH] [--force]
 - **Behavior**: Indexes workspace (Python AST + FTS5 + TF-IDF + nomic-embed-text semantic embeddings); persists `.dreamference/context_index.json` and `.dreamference/context.db` (vec0 table).
 - **Example**: `dream index --force`
 
-##### 5.1.10. `dream mcp`
+##### 5.1.12. `dream mcp`
 
 - **Behavior**: Stdio JSON-RPC MCP server. Tools: `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`, `workspace_search_code`. IDE fields live in in-process `IDEState` (empty unless populated by a companion); `workspace_search_code` uses `ContextEngine.search_code`.
 
-##### 5.1.11. `dream endpoints`
+##### 5.1.13. `dream endpoints`
 
 - **Behavior**: Prints two Rich tables: (1) all standard OpenAI-compatible endpoints (`/v1/models`, `/v1/chat/completions`, etc.) with HTTP methods and short descriptions; (2) credentials showing base URL, optional API key (enabled via `--api-key` on start_server), and `Authorization: Bearer <key>` when used. Note: `--served-model-name` is never set, so external clients must use the full HF repo paths returned by `/v1/models`. Intended for quick copy-paste into external clients.
 - **Example**: `dream endpoints`
 
-##### 5.1.12. `dream web`
+##### 5.1.14. `dream web`
 
 ```text
 dream web [--port PORT]
@@ -704,7 +715,7 @@ dream web [--port PORT]
 - **Behavior**: HTTP server on `0.0.0.0:{port}` (default `8501`). Serves static Glassmorphism SPA + `GET /api/status` (`hardware`, `vllm`, `context`). Memory gauge updates from telemetry; Mermaid diagram and diff pane are **static placeholders**; KV gauge shows fixed `45%` width when vLLM is healthy.
 - **Example**: `dream web --port 8501`
 
-##### 5.1.13. `dream model download`
+##### 5.1.15. `dream model list`, `dream model download`
 ```text
 dream model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 ```
@@ -712,12 +723,12 @@ dream model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 - **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. `--tensorize` (disabled by default) also converts the model to tensorizer format. Also invoked automatically from `init` and `server start`.
 - **Example**: `dream model download --model qwen3.6-35b-a3b-nvfp4`
 
-##### 5.1.14. `dream clear model-cache`
+##### 5.1.16. `dream clear model-cache`
 
 - **Behavior**: Clears both Hugging Face (`~/.cache/huggingface`) and tensorizer (`~/.cache/dreamference`) parent cache directories using `shutil.rmtree`. Invokes `ModelDownloader.clear_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
 - **Example**: `dream clear model-cache`
 
-##### 5.1.15. `dream clear tensorize-cache`
+##### 5.1.17. `dream clear tensorize-cache`
 
 - **Behavior**: Clears only the tensorizer cache directory (`~/.cache/dreamference/tensorizer` parent). Invokes `ModelDownloader.clear_tensorizer_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
 - **Example**: `dream clear tensorize-cache`
