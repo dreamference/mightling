@@ -2,23 +2,23 @@
 Configuration Path Resolver for Dreamference.
 
 This module provides the ConfigPathResolver class which enforces the resolution order for
-locating `.dreamference/config.yaml` or custom configuration paths.
+locating `.dreamference/config.toml` or custom configuration paths.
 """
 
 import os
 from pathlib import Path
 from typing import Optional, Final
 
-LOCAL_DREAMFERENCE_CONFIG_PATH: Final[Path] = Path(".dreamference") / "config.yaml"
-GLOBAL_DREAMFERENCE_CONFIG_PATH: Final[Path] = Path.home() / ".config" / "dreamference" / "config.yaml"
+LOCAL_DREAMFERENCE_CONFIG_PATH: Final[Path] = Path("dreamference.toml")
+GLOBAL_DREAMFERENCE_CONFIG_PATH: Final[Path] = Path.home() / ".config" / "dreamference" / "config.toml"
 
 class ConfigPathResolver:
     """
     Resolver utility determining the active configuration file path according to 4-tier precedence:
     1. Explicit `--config <path>` CLI parameter
     2. `DREAMFERENCE_CONFIG_PATH` environment variable
-    3. Project local `.dreamference/config.yaml` or `.dreamference/config.json`
-    4. Global user home `~/.config/dreamference/config.yaml`
+    3. Project local `dreamference.toml` or `dreamference.json`
+    4. Global user home `~/.config/dreamference/config.toml`
     """
 
     @classmethod
@@ -42,7 +42,7 @@ class ConfigPathResolver:
         if LOCAL_DREAMFERENCE_CONFIG_PATH.exists():
             return LOCAL_DREAMFERENCE_CONFIG_PATH.resolve()
 
-        local_json = Path(".dreamference") / "config.json"
+        local_json = Path("dreamference.json")
         if local_json.exists():
             return local_json.resolve()
 

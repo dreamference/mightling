@@ -14,15 +14,20 @@ try:
 except ImportError:
     yaml = None
 
+try:
+    import toml
+except ImportError:
+    toml = None
+
 class ConfigFileStorageManager:
     """
-    Storage manager handling YAML/JSON parsing, serialization, and disk writing.
+    Storage manager handling YAML/JSON/TOML parsing, serialization, and disk writing.
     """
 
     @classmethod
     def load_config_dict(cls, path: Path) -> Dict[str, Any]:
         """
-        Loads configuration key-value dictionary from YAML or JSON file.
+        Loads configuration key-value dictionary from YAML, JSON, or TOML file.
 
         Args:
             path (Path): File path to load.
@@ -34,7 +39,9 @@ class ConfigFileStorageManager:
             return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
-                if yaml and path.suffix in (".yaml", ".yml"):
+                if toml and path.suffix == ".toml":
+                    return toml.load(f)
+                elif yaml and path.suffix in (".yaml", ".yml"):
                     return yaml.safe_load(f) or {}
                 else:
                     return json.load(f) or {}
@@ -45,7 +52,7 @@ class ConfigFileStorageManager:
     @classmethod
     def save_config_dict(cls, path: Path, data: Dict[str, Any]) -> Path:
         """
-        Saves configuration key-value dictionary to YAML or JSON file on disk.
+        Saves configuration key-value dictionary to YAML, JSON, or TOML file on disk.
 
         Args:
             path (Path): Target file path.
@@ -55,7 +62,10 @@ class ConfigFileStorageManager:
             Path: Path object pointing to written file.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        if yaml and path.suffix in (".yaml", ".yml"):
+        if toml and path.suffix == ".toml":
+            with open(path, "w", encoding="utf-8") as f:
+                toml.dump(data, f)
+        elif yaml and path.suffix in (".yaml", ".yml"):
             with open(path, "w", encoding="utf-8") as f:
                 yaml.dump(data, f, default_flow_style=False)
         else:

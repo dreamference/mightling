@@ -236,7 +236,7 @@ class DreamferenceCLIController:
         subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
 
         # Command: dream server
-        server_parser = subparsers.add_parser("server", help="Manage the vLLM server")
+        server_parser = subparsers.add_parser("server", help="Stop or remove the vLLM server container")
         server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operations")
 
         # Command: dream server stop

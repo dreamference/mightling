@@ -6,6 +6,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         "pyyaml>=6.0",
+        "toml>=0.10.2",
         "rich>=13.0.0",
         "requests>=2.28.0",
         "sentence-transformers>=3.0.0",
