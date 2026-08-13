@@ -205,6 +205,16 @@ class DreamferenceCLIController:
         
 
 
+        # Command: dream main-model
+        main_model_parser = subparsers.add_parser("main-model", help="Main model operations")
+        main_model_subparsers = main_model_parser.add_subparsers(dest="main_model_command", help="Main model commands")
+        main_model_set_parser = main_model_subparsers.add_parser("set", help="Set the main model")
+        main_model_set_parser.add_argument("model_name", type=str, help="Name of the model to set as main")
+
+        # Command: dream model download
+        # Command: dream model list
+        model_subparsers.add_parser("list", help="List available model names and HuggingFace repos")
+        
         # Command: dream model download
         download_parser = model_subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
@@ -217,8 +227,8 @@ class DreamferenceCLIController:
         clear_parser = subparsers.add_parser("clear", help="Clear operations")
         clear_subparsers = clear_parser.add_subparsers(dest="clear_command", help="Clear commands")
         
-        # Command: dream clear cache
-        clear_subparsers.add_parser("cache", help="Clear local HuggingFace and tensorizer model caches")
+        # Command: dream clear model-cache
+        clear_subparsers.add_parser("model-cache", help="Clear local HuggingFace and tensorizer model caches")
         
         # Command: dream clear tensorize-cache
         clear_subparsers.add_parser("tensorize-cache", help="Clear local tensorizer model cache only")
@@ -343,20 +353,49 @@ class DreamferenceCLIController:
             runner = GooseRunner(config=config)
 
         # Dispatch subcommand logic
-        if args.command == "download":
-            cls.display_header()
-            auto_t = getattr(args, "tensorize", False)
-            if getattr(args, "all", False):
-                download_all_models(hf_token=config.hf_token, auto_tensorize=auto_t)
-            else:
-                target_model = args.model or config.model
-                if target_model:
-                    download_model(target_model, hf_token=config.hf_token, auto_tensorize=auto_t)
-                    if config.draft_model:
-                        download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
+        if args.command == "model":
+            if args.model_command == "list":
+                cls.display_header()
+                from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+                from rich.console import Console
+                from rich.table import Table
+                
+                console = Console()
+                table = Table(title="Available Dreamference Models")
+                table.add_column("Model Name", style="cyan", no_wrap=True)
+                table.add_column("HuggingFace Repo ID", style="magenta")
+                
+                for key, spec in ModelMatrixRegistry.MATRIX.items():
+                    table.add_row(key, spec.hf_repo_id)
+                
+                console.print(table)
+                sys.exit(0)
+
+            elif args.model_command == "download":
+                cls.display_header()
+                auto_t = getattr(args, "tensorize", False)
+                if getattr(args, "all", False):
+                    download_all_models(hf_token=config.hf_token, auto_tensorize=auto_t)
                 else:
-                    print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dream init --model <model_name>'")
-            sys.exit(0)
+                    target_model = args.model or config.model
+                    if target_model:
+                        download_model(target_model, hf_token=config.hf_token, auto_tensorize=auto_t)
+                        if config.draft_model:
+                            download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
+                    else:
+                        print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dream init --model <model_name>'")
+                sys.exit(0)
+
+        elif args.command == "main-model":
+            if args.main_model_command == "set":
+                cls.display_header()
+                from rich.console import Console
+                out_console = Console()
+                config.model = args.model_name
+                saved_path = config.save_config()
+                out_console.print(f"[bold green]✅ Main model set to '{args.model_name}'[/bold green]")
+                out_console.print(f"   [cyan]Config saved to:[/cyan] {saved_path}")
+                sys.exit(0)
 
         elif args.command == "init":
             cls.display_header()
@@ -394,7 +433,7 @@ class DreamferenceCLIController:
         elif args.command == "clear":
 
 
-            if args.clear_command == "cache":
+            if args.clear_command == "model-cache":
                 cls.display_header()
                 clear_model_cache()
                 sys.exit(0)
