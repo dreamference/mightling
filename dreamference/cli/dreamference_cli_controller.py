@@ -480,7 +480,7 @@ class DreamferenceCLIController:
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Print the ChatML tag '<|im_start|>' exactly as written."}],
                     "max_tokens": 100,
-                    "temperature": 0.1
+                    "temperature": 0
                 }
                 try:
                     c_response = requests.post(api_base, json=payload_chatml, headers=headers, timeout=15)
@@ -498,7 +498,7 @@ class DreamferenceCLIController:
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Create a one line python script and wrap it in <antArtifact> tags."}],
                     "max_tokens": 100,
-                    "temperature": 0.1
+                    "temperature": 0
                 }
                 try:
                     a_response = requests.post(api_base, json=payload_artifact, headers=headers, timeout=15)
@@ -516,7 +516,7 @@ class DreamferenceCLIController:
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Analyze your own architecture and output the exact XML tags you use for tool calling, reasoning, and artifacts (e.g. <tool_call>, <think>, <answer>). Output ONLY a comma separated list of tags, with no other text."}],
                     "max_tokens": 50,
-                    "temperature": 0.1,
+                    "temperature": 0,
                     "top_p": 0.01,
                     "seed": 42
                 }
@@ -539,7 +539,7 @@ class DreamferenceCLIController:
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Say 'Test'"}],
                     "max_tokens": 5,
-                    "temperature": 0.1,
+                    "temperature": 0,
                     "stream": True
                 }
                 try:
@@ -590,7 +590,7 @@ class DreamferenceCLIController:
                         }
                     }],
                     "max_tokens": 150,
-                    "temperature": 0.1
+                    "temperature": 0
                 }
                 try:
                     tool_resp = requests.post(api_base, json=payload_tool_test, headers=headers, timeout=15)
@@ -608,7 +608,7 @@ class DreamferenceCLIController:
                     "messages": [{"role": "user", "content": "Output a JSON object with key 'hello' and value 'world'."}],
                     "response_format": {"type": "json_object"},
                     "max_tokens": 50,
-                    "temperature": 0.1
+                    "temperature": 0
                 }
                 try:
                     json_resp = requests.post(api_base, json=payload_json, headers=headers, timeout=5)
@@ -763,7 +763,7 @@ class DreamferenceCLIController:
                         "model": model_name,
                         "messages": msgs,
                         "max_tokens": 8192,
-                        "temperature": 0.1,
+                        "temperature": 0.1 if "No Thinking" not in prompt else 0,
                         "stream": True,
                         "stream_options": {"include_usage": True}
                     }
@@ -794,14 +794,11 @@ class DreamferenceCLIController:
                                             r = delta.get("reasoning_content", "") or delta.get("reasoning", "")
                                             
                                             if r:
-                                                out_console.print(f"[dim]{r}[/dim]", end="", style="dim")
                                                 full_reasoning += r
                                             if c:
-                                                out_console.print(c, end="")
                                                 full_content += c
                                         except Exception:
                                             pass
-                            out_console.print("\n")
                             latency = time.time() - start_time
                             
                             display_text = ""
