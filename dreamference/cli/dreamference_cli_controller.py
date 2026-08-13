@@ -2,7 +2,7 @@
 Dreamference Command Line Interface (CLI) Controller.
 
 This module provides the DreamferenceCLIController class which parses command line arguments
-for subcommands (`init`, `chat`, `run`, `status`, `server_start`, `index`, `mcp`, `download`, `web`),
+for subcommands (`init`, `chat`, `run`, `status`, `server start`, `index`, `mcp`, `model download`, `web`),
 renders Rich terminal user interfaces, and coordinates backend component execution.
 """
 
@@ -191,8 +191,42 @@ class DreamferenceCLIController:
         # Command: dream status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
 
-        # Command: dream server_start
-        start_server_parser = subparsers.add_parser("server_start", help="Launch local vLLM server optimized for GB10 unified memory")
+        # Command: dream index
+        index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
+        index_parser.add_argument("--dir", default=None, help="Directory to index")
+        index_parser.add_argument("--force", action="store_true", help="Force reindexing")
+
+        # Command: dream mcp
+        subparsers.add_parser("mcp", help="Run stdio MCP server for JetBrains & VS Code extensions")
+
+        # Command: dream model
+        model_parser = subparsers.add_parser("model", help="Model operations")
+        model_subparsers = model_parser.add_subparsers(dest="model_command", help="Model commands")
+        
+
+
+        # Command: dream model download
+        download_parser = model_subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
+        download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
+        download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
+        download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=False, help="Auto-convert model to tensorize format after download (default: False)")
+        # Command: dream clear-cache
+        subparsers.add_parser("clear-cache", help="Clear local HuggingFace and tensorizer model caches")
+
+        # Command: dream clear-tensorize-cache
+        subparsers.add_parser("clear-tensorize-cache", help="Clear local tensorizer model cache only")
+
+        # Command: dream endpoints
+        subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
+
+        # Command: dream server
+        server_parser = subparsers.add_parser("server", help="Manage the vLLM server container (start, stop, remove)")
+        server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operations")
+
+
+
+        # Command: dream server start
+        start_server_parser = server_subparsers.add_parser("start", help="Launch local vLLM server optimized for GB10 unified memory")
         start_server_parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model name to serve (default: {DEFAULT_MODEL}; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
         start_server_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
@@ -211,34 +245,6 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: False)")
         start_server_parser.add_argument("--docker-image", default=DEFAULT_VLLM_IMAGE, help="Docker image for vLLM (default: nvcr.io/nvidia/vllm:26.07-py3)")
-
-        # Command: dream index
-        index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
-        index_parser.add_argument("--dir", default=None, help="Directory to index")
-        index_parser.add_argument("--force", action="store_true", help="Force reindexing")
-
-        # Command: dream mcp
-        subparsers.add_parser("mcp", help="Run stdio MCP server for JetBrains & VS Code extensions")
-
-        # Command: dream download
-        download_parser = subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
-        download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
-        download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
-        download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=False, help="Auto-convert model to tensorize format after download (default: False)")
-
-        # Command: dream clear-cache
-        subparsers.add_parser("clear-cache", help="Clear local HuggingFace and tensorizer model caches")
-
-        # Command: dream clear-tensorize-cache
-        subparsers.add_parser("clear-tensorize-cache", help="Clear local tensorizer model cache only")
-
-        # Command: dream endpoints
-        subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
-
-        # Command: dream server
-        server_parser = subparsers.add_parser("server", help="Stop or remove the vLLM server container")
-        server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operations")
-
         # Command: dream server stop
         stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM Docker container")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
@@ -247,9 +253,13 @@ class DreamferenceCLIController:
         remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM Docker container")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
 
-        # Command: dream show_request_logs
-        logs_parser = subparsers.add_parser("show_request_logs", help="Tail the vLLM Docker container logs")
-        logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
+        # Command: dream logs
+        logs_parser = subparsers.add_parser("logs", help="View logs")
+        logs_subparsers = logs_parser.add_subparsers(dest="logs_command", help="Log commands")
+        
+        # Command: dream logs request
+        request_logs_parser = logs_subparsers.add_parser("request", help="Tail the vLLM Docker container logs")
+        request_logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
@@ -419,96 +429,97 @@ class DreamferenceCLIController:
             console.print(cred_table)
             print("\n💡 Use with any OpenAI-compatible client by pointing base_url to the endpoint above.")
 
-        elif args.command == "server_start":
-            cls.display_header()
-            vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
-            
-            # Start monitoring thread before server launch
-            from dreamference.hardware import get_model_launch_overrides
-            recipe_env_keys = set(get_model_launch_overrides(args.model).get("env", {}).keys())
-            monitor = create_model_loading_monitor(vllm_mgr, recipe_env_keys=recipe_env_keys)
-            monitor.start()
-            
-            print(f"📊 Model Loading Monitor: Tracking initialization progress for '{args.model}'...\n")
-            
-            try:
-                # Start vLLM server in background to allow progress monitoring
-                vllm_mgr.start_server(
-                    model=args.model,
-                    port=args.port,
-                    quantization=args.quantization,
-                    draft_model=args.draft_model,
-                    num_speculative_tokens=args.num_speculative_tokens,
-                    hf_token=config.hf_token,
-                    enable_prefix_caching=config.enable_prefix_caching,
-                    enable_chunked_prefill=config.enable_chunked_prefill,
-                    num_scheduler_steps=config.num_scheduler_steps,
-                    attention_backend=config.attention_backend,
-                    kv_cache_dtype=config.kv_cache_dtype,
-                    api_key=args.api_key,
-                    enable_auto_tool_choice=args.enable_auto_tool_choice,
-                    tool_call_parser=args.tool_call_parser,
-                    reasoning_parser=getattr(args, "reasoning_parser", None),
-                    moe_backend=getattr(args, "moe_backend", None),
-                    max_num_batched_tokens=args.max_num_batched_tokens,
-                    guided_decoding_backend=args.guided_decoding_backend or config.guided_decoding_backend,
-                    use_tensorizer=getattr(args, "tensorize", None),
-                    background=True,
-                    docker_image=getattr(args, "docker_image", DEFAULT_VLLM_IMAGE)
-                )
-                
-                # Print progress while server is initializing
-                import time
-                last_status = None
-                while not monitor.server_ready and vllm_mgr.process and vllm_mgr.process.poll() is None:
-                    current_status = monitor.get_status()
-                    # Only print if status changed to avoid spam
-                    if current_status['stages_reached'] != last_status:
-                        monitor.print_progress()
-                        last_status = current_status['stages_reached']
-                    time.sleep(1)
-                
-                # Server is ready
-                if monitor.server_ready:
-                    print(f"\n✅ Server Ready! API running at {vllm_mgr.host}")
-                    print(f"   Model: {args.model}")
-                    print(f"   Loaded in: {monitor.get_status()['elapsed_seconds']:.1f} seconds\n")
-
-                    if "nvfp4" in args.model.lower():
-                        print("🧪 Running NVFP4 kernel backend canary test...")
-                        try:
-                            import requests
-                            served_model = resolve_model_hf_repo(args.model)
-                            resp = requests.post(f"{vllm_mgr.host}/v1/completions", json={
-                                "model": served_model,
-                                "prompt": "Hello",
-                                "max_tokens": 10
-                            }, timeout=10)
-                            if resp.status_code == 200:
-                                text = resp.json()["choices"][0]["text"].strip()
-                                if text and all(c == "!" for c in text if c.strip()):
-                                    print("❌ NVFP4 Canary Failed: Output corrupted (all '!'). Wrong SM12x CUTLASS backend selected.")
-                                else:
-                                    print("✅ NVFP4 Canary Passed: Output is healthy.")
-                            else:
-                                print(f"⚠️  NVFP4 Canary skipped: API returned {resp.status_code}")
-                        except Exception as e:
-                            print(f"⚠️  NVFP4 Canary failed to execute: {e}")
-                
-                # Do not block: exit after health check passes (server keeps running)
-                    
-            except KeyboardInterrupt:
-                print("\n⏹️  Shutting down server...")
-                if vllm_mgr.process:
-                    vllm_mgr.process.terminate()
-                    try:
-                        vllm_mgr.process.wait(timeout=5)
-                    except:
-                        vllm_mgr.process.kill()
-            finally:
-                monitor.stop()
-
         elif args.command == "server":
+
+
+            if args.server_command == "start":
+                cls.display_header()
+                vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+            
+                # Start monitoring thread before server launch
+                from dreamference.hardware import get_model_launch_overrides
+                recipe_env_keys = set(get_model_launch_overrides(args.model).get("env", {}).keys())
+                monitor = create_model_loading_monitor(vllm_mgr, recipe_env_keys=recipe_env_keys)
+                monitor.start()
+            
+                print(f"📊 Model Loading Monitor: Tracking initialization progress for '{args.model}'...\n")
+            
+                try:
+                    # Start vLLM server in background to allow progress monitoring
+                    vllm_mgr.start_server(
+                        model=args.model,
+                        port=args.port,
+                        quantization=args.quantization,
+                        draft_model=args.draft_model,
+                        num_speculative_tokens=args.num_speculative_tokens,
+                        hf_token=config.hf_token,
+                        enable_prefix_caching=config.enable_prefix_caching,
+                        enable_chunked_prefill=config.enable_chunked_prefill,
+                        num_scheduler_steps=config.num_scheduler_steps,
+                        attention_backend=config.attention_backend,
+                        kv_cache_dtype=config.kv_cache_dtype,
+                        api_key=args.api_key,
+                        enable_auto_tool_choice=args.enable_auto_tool_choice,
+                        tool_call_parser=args.tool_call_parser,
+                        reasoning_parser=getattr(args, "reasoning_parser", None),
+                        moe_backend=getattr(args, "moe_backend", None),
+                        max_num_batched_tokens=args.max_num_batched_tokens,
+                        guided_decoding_backend=args.guided_decoding_backend or config.guided_decoding_backend,
+                        use_tensorizer=getattr(args, "tensorize", None),
+                        background=True,
+                        docker_image=getattr(args, "docker_image", DEFAULT_VLLM_IMAGE)
+                    )
+                
+                    # Print progress while server is initializing
+                    import time
+                    last_status = None
+                    while not monitor.server_ready and vllm_mgr.process and vllm_mgr.process.poll() is None:
+                        current_status = monitor.get_status()
+                        # Only print if status changed to avoid spam
+                        if current_status['stages_reached'] != last_status:
+                            monitor.print_progress()
+                            last_status = current_status['stages_reached']
+                        time.sleep(1)
+                
+                    # Server is ready
+                    if monitor.server_ready:
+                        print(f"\n✅ Server Ready! API running at {vllm_mgr.host}")
+                        print(f"   Model: {args.model}")
+                        print(f"   Loaded in: {monitor.get_status()['elapsed_seconds']:.1f} seconds\n")
+
+                        if "nvfp4" in args.model.lower():
+                            print("🧪 Running NVFP4 kernel backend canary test...")
+                            try:
+                                import requests
+                                served_model = resolve_model_hf_repo(args.model)
+                                resp = requests.post(f"{vllm_mgr.host}/v1/completions", json={
+                                    "model": served_model,
+                                    "prompt": "Hello",
+                                    "max_tokens": 10
+                                }, timeout=10)
+                                if resp.status_code == 200:
+                                    text = resp.json()["choices"][0]["text"].strip()
+                                    if text and all(c == "!" for c in text if c.strip()):
+                                        print("❌ NVFP4 Canary Failed: Output corrupted (all '!'). Wrong SM12x CUTLASS backend selected.")
+                                    else:
+                                        print("✅ NVFP4 Canary Passed: Output is healthy.")
+                                else:
+                                    print(f"⚠️  NVFP4 Canary skipped: API returned {resp.status_code}")
+                            except Exception as e:
+                                print(f"⚠️  NVFP4 Canary failed to execute: {e}")
+                
+                    # Do not block: exit after health check passes (server keeps running)
+                    
+                except KeyboardInterrupt:
+                    print("\n⏹️  Shutting down server...")
+                    if vllm_mgr.process:
+                        vllm_mgr.process.terminate()
+                        try:
+                            vllm_mgr.process.wait(timeout=5)
+                        except:
+                            vllm_mgr.process.kill()
+                finally:
+                    monitor.stop()
             if args.server_command == "stop":
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
@@ -518,7 +529,7 @@ class DreamferenceCLIController:
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.remove_server(port=args.port)
 
-        elif args.command == "show_request_logs":
+        elif args.command == "logs request":
             cls.display_header()
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             try:

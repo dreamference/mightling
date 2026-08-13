@@ -138,13 +138,13 @@ dream web --port 8501
 Dreamference uses a **4-Tier Configuration Hierarchy**:
 1. **CLI Flags**: `--config`, `--model`, `--draft-model`, `--sandbox` *(Highest Priority)*
 2. **Environment Variables**: `DREAMFERENCE_MODEL`, `DREAMFERENCE_DRAFT_MODEL`, `DREAMFERENCE_SANDBOX`
-3. **Config File**: `.dreamference/config.yaml` or `~/.config/dreamference/config.yaml`
+3. **Config File**: `dreamference.toml` or `~/.config/dreamference/config.toml`
 4. **Built-in System Defaults** *(Lowest Priority)*
 
-### Example `.dreamference/config.yaml`:
-```yaml
-vllm_host: http://localhost:8000
-model: qwen3.6-35b-a3b-nvfp4
+### Example `dreamference.toml`:
+```toml
+vllm_host = "http://localhost:8000
+model = "qwen3.6-35b-a3b-nvfp4
 draft_model: null
 num_speculative_tokens: 8
 sandbox: apptainer

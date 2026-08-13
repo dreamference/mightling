@@ -564,7 +564,7 @@ Implemented by `DreamferenceCLIController` (`dreamference/cli/`). Rich-powered t
 
 | Subcommand                  | Description                                                                                                      |
 | :-------------------------- | :--------------------------------------------------------------------------------------------------------------- |
-| **`init`**                  | Pre-download models, save `.dreamference/config.yaml`, write Goose config, force-index workspace                     |
+| **`init`**                  | Pre-download models, save `dreamference.toml`, write Goose config, force-index workspace                     |
 | **`chat`**                  | Interactive session for selected agent (Goose / Aider CLI, or VS Code / OpenHands UI)                            |
 | **`run`**                   | Non-interactive task where supported (Goose `--text`, Aider `--message`; others launch UI and may ignore prompt) |
 | **`status`**                | Rich panels: hardware, vLLM/agent readiness (all 5 runners), context index                                       |
@@ -621,7 +621,7 @@ dream run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--
 ##### 5.1.5. `dream server_start`
 
 ```text
-dream server_start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--num-speculative-tokens N] [--hf-token …] [--attention-backend …] [--kv-cache-dtype …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--guided-decoding-backend BACKEND] [--tensorize/--no-tensorize]
+dream server_start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--hf-token …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--tensorize/--no-tensorize]
 ```
 
 - **Behavior**: Starts vLLM in background + `ModelLoadingMonitor` (live logs + memory every 10s). Exits cleanly once health check passes (server keeps running). `--api-key KEY` enables optional OpenAI-compatible auth (not set by default). Function calling for Goose is enabled **by default** (`--enable-auto-tool-choice`), with `--tool-call-parser` automatically resolved per-model. `--max-num-batched-tokens 8192` is passed automatically when `--enable-chunked-prefill` (default) to improve TTFT on large codebase prompts. See [start_server variant](#dreamference-start_server-variant).
@@ -712,7 +712,7 @@ dream download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 
 1. **CLI parameters** (`--config`, `--model`, `--agent`, `--sandbox`, …) — highest
 2. **Environment variables** (`DREAMFERENCE_*`, `HF_TOKEN`, …)
-3. **Config file** — `.dreamference/config.yaml` (or `.json`) if present, else `~/.config/dreamference/config.yaml`, else default path `.dreamference/config.yaml`
+3. **Config file** — `dreamference.toml` (or `.json`) if present, else `~/.config/dreamference/dreamference.toml`, else default path `dreamference.toml`
 4. **Built-in defaults** — lowest
 
 #### Dreamference Config File (defaults example)
