@@ -74,7 +74,7 @@
     - [5.1.11. `dream endpoints`](#5111-dreamference-endpoints)
     - [5.1.12. `dream web`](#5112-dreamference-web)
     - [5.1.13. `dream model download`](#5113-dreamference-download)
-    - [5.1.14. `dream clear cache`](#5114-dreamference-clear-cache)
+    - [5.1.14. `dream clear model-cache`](#5114-dreamference-clear-cache)
     - [5.1.15. `dream clear tensorize-cache`](#5115-dreamference-clear-tensorize-cache)
   - [5.2. IDE Integration via Stdio MCP](#52-ide-integration-via-stdio-mcp)
   - [5.3. Web Canvas UI & Telemetry Pane](#53-web-canvas-ui--telemetry-pane)
@@ -495,7 +495,7 @@ Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external 
 - Primary cache: `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if `HF_HOME` set).
 - Pre-download via `huggingface_hub.snapshot_download` (preferred) or `huggingface-cli download` fallback.
 - `download_model()` and `download_all_models()` check `is_model_downloaded()` first; only fetch if missing.
-- Invoked automatically by `init`, `server start`, and explicit `model download` command.
+- Invoked automatically by `init`, `server start`, and explicit `model list`, `model download` command.
 
 #### 4.9.2. Tensorizer Behavior
 - Secondary cache: `~/.cache/dreamference/tensorizer/`.
@@ -504,7 +504,7 @@ Lightweight unit tests; tmp_path fixtures for filesystem isolation; no external 
 - Used by vLLM server when `--tensorize` flag is enabled (default off) for faster loading on GB10.
 
 #### 4.9.3. Cache Management Commands
-- `dream clear cache`: removes both HF and tensorizer parent directories.
+- `dream clear model-cache`: removes both HF and tensorizer parent directories.
 - `dream clear tensorize-cache`: removes only the tensorizer cache directory.
 
 #### 4.9.4. Download CLI
@@ -576,8 +576,8 @@ Implemented by `DreamferenceCLIController` (`dreamference/cli/`). Rich-powered t
 | **`mcp`**                   | Stdio MCP server for IDE companion tools                                                                         |
 | **`endpoints`**             | Lists all vLLM/OpenAI-compatible REST endpoints + credentials                                                    |
 | **`web`**                   | Web Canvas UI on port 8501 (default)                                                                             |
-| **`model download`**              | Pre-download model weights to HF cache                                                                           |
-| **`clear cache`**           | Clear both HF and tensorizer model caches                                                                        |
+| **`model list`, `model download`**              | Pre-download model weights to HF cache                                                                           |
+| **`clear model-cache`**           | Clear both HF and tensorizer model caches                                                                        |
 | **`clear tensorize-cache`** | Clear only the tensorizer model cache                                                                            |
 
 #### Command Specification Subsections
@@ -698,10 +698,10 @@ dream model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 - **Behavior**: Pre-downloads into `~/.cache/huggingface/hub/`. Without `--all`, downloads `args.model or config.model` and optional draft. `--all` iterates **sequentially** over all `compatible_gb10` matrix entries. `--tensorize` (disabled by default) also converts the model to tensorizer format. Also invoked automatically from `init` and `server start`.
 - **Example**: `dream model download --model qwen3.6-35b-a3b-nvfp4`
 
-##### 5.1.14. `dream clear cache`
+##### 5.1.14. `dream clear model-cache`
 
 - **Behavior**: Clears both Hugging Face (`~/.cache/huggingface`) and tensorizer (`~/.cache/dreamference`) parent cache directories using `shutil.rmtree`. Invokes `ModelDownloader.clear_cache()`. Prints status messages (`🗑️`, `ℹ️`, `✅`).
-- **Example**: `dream clear cache`
+- **Example**: `dream clear model-cache`
 
 ##### 5.1.15. `dream clear tensorize-cache`
 
@@ -818,7 +818,7 @@ Prefer `dream server start` / `dream chat` for full GB10-tuned behavior.
 ## 7. Roadmap & Implementation Verification
 
 - [x] **Phase 1: NVIDIA GB10 Exclusive Specification** — model matrix & unified-memory targeting
-- [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine** — multi-tier vLLM, live logs, weight pre-download, CLI suite including `model download`
+- [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine** — multi-tier vLLM, live logs, weight pre-download, CLI suite including `model list`, `model download`
 - [x] **Phase 3: Agentic Engine, Provisioning & MCP** — Goose auto-install, stdio MCP tools, multi-agent runners (Cline, Aider, Continue, OpenHands)
 - [x] **Phase 4: Context Engine & Web Canvas** — parallel AST, SQLite/FTS5, TF-IDF (in-process), Web Canvas telemetry UI
 - [x] **Phase 5: Modular Package Layout** — split packages under `dreamference/{hardware,config,runner,vllm_server,context_engine,mcp_server,cli}/` with shim modules for stable imports
@@ -918,7 +918,7 @@ HTTP SPA + `/api/status` telemetry.
 
 ### 8.8. `dreamference/cli/`
 
-`DreamferenceCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`) (15 subcommands: `init`, `chat`, `run`, `status`, `server start`, `server stop`, `server remove`, `logs request`, `index`, `mcp`, `endpoints`, `web`, `model download`, `clear cache`, `clear tensorize-cache`).
+`DreamferenceCLIController` — argparse, Rich status, subcommand dispatch (`main()` → `run_cli()`) (15 subcommands: `init`, `chat`, `run`, `status`, `server start`, `server stop`, `server remove`, `logs request`, `index`, `mcp`, `endpoints`, `web`, `model list`, `model download`, `clear model-cache`, `clear tensorize-cache`).
 
 
 ---
