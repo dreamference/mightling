@@ -1,8 +1,8 @@
-# Dreamng Documentation
+# Dreamference Documentation
 
 **The Autonomous Local Agentic Pair Programmer for NVIDIA GB10**
 
-Welcome to the official documentation for Dreamng.
+Welcome to the official documentation for Dreamference.
 
 ## Quick Links
 - [Installation](installation.md)
@@ -10,4 +10,4 @@ Welcome to the official documentation for Dreamng.
 - [Architecture](architecture.md)
 - [Model Matrix](models.md)
 
-For the full technical specification, see [DREAMNG_SPEC.md](../DREAMNG_SPEC.md).
+For the full technical specification, see [DREAMFERENCE_SPEC.md](../DREAMFERENCE_SPEC.md).

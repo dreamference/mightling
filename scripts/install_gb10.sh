@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Installing Dreamng & Goose Agent Runtime on NVIDIA GB10 ==="
+echo "=== Installing Dreamference & Goose Agent Runtime on NVIDIA GB10 ==="
 
 # Check for goose CLI
 if ! command -v goose &> /dev/null; then
@@ -17,7 +17,7 @@ fi
 # Install python package in editable mode with dependencies
 pip install -e .
 
-echo "🚀 Initializing Dreamng Goose configuration & indexing workspace..."
-dreamng init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
+echo "🚀 Initializing Dreamference Goose configuration & indexing workspace..."
+dream init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
 
-echo "🎉 Dreamng Installation & GB10 Setup Complete!"
+echo "🎉 Dreamference Installation & GB10 Setup Complete!"

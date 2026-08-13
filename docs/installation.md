@@ -2,10 +2,10 @@
 
 ## 1-Line Automatic Installer
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dreamng/dreamng/main/scripts/install_gb10.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dreamference/dreamference/main/scripts/install_gb10.sh | bash
 ```
 
 ## Quickstart
 ```bash
-dreamng chat
+dream chat
 ```

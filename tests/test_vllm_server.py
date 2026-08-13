@@ -1,6 +1,6 @@
 import time
-from dreamng.vllm_server import VLLMServerManager, VLLMStartupMonitor, VLLMServerStatus
-from dreamng.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
+from dreamference.vllm_server import VLLMServerManager, VLLMStartupMonitor, VLLMServerStatus
+from dreamference.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
 
 def test_vllm_build_launch_command_default():
     mgr = VLLMServerManager(host="http://localhost:8000")
@@ -88,7 +88,7 @@ def test_self_declaring_quantization_is_not_overridden():
     assert "--quantization" not in mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
 
 def test_nvfp4_model_opts_out_of_tensorizer(monkeypatch):
-    from dreamng.hardware.model_downloader import ModelDownloader
+    from dreamference.hardware.model_downloader import ModelDownloader
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "image_has_tensorizer", lambda img: True)
     monkeypatch.setattr(ModelDownloader, "is_model_tensorized", lambda key: True)
@@ -226,7 +226,7 @@ def test_vllm_startup_monitor_memory_progress_percent():
     assert any("~40%" in line for line in logs)
 
 def test_vllm_build_launch_command_tensorizer(monkeypatch, tmp_path):
-    from dreamng.hardware.model_downloader import ModelDownloader
+    from dreamference.hardware.model_downloader import ModelDownloader
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "image_has_tensorizer", lambda img: True)
 
@@ -247,14 +247,14 @@ def test_vllm_build_launch_command_tensorizer(monkeypatch, tmp_path):
 
 def test_vllm_build_launch_command_tensorizer_docker(monkeypatch, tmp_path):
     import os
-    from dreamng.hardware.model_downloader import ModelDownloader
+    from dreamference.hardware.model_downloader import ModelDownloader
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "image_has_tensorizer", lambda img: True)
     monkeypatch.setattr("shutil.which", lambda name: None)
     monkeypatch.setattr(mgr, "is_vllm_installed", lambda: False)
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
 
-    tpath = os.path.expanduser("~/.cache/dreamng/tensorizer/test/model.tensors")
+    tpath = os.path.expanduser("~/.cache/dreamference/tensorizer/test/model.tensors")
     monkeypatch.setattr(ModelDownloader, "is_model_tensorized", lambda key: True)
     monkeypatch.setattr(ModelDownloader, "get_tensorized_path", lambda key: tpath)
 
@@ -263,7 +263,7 @@ def test_vllm_build_launch_command_tensorizer_docker(monkeypatch, tmp_path):
     assert "--load-format" in cmd
     assert "--model-loader-extra-config" in cmd
     cfg_idx = cmd.index("--model-loader-extra-config")
-    assert "/root/.cache/dreamng/tensorizer/test/model.tensors" in cmd[cfg_idx + 1]
+    assert "/root/.cache/dreamference/tensorizer/test/model.tensors" in cmd[cfg_idx + 1]
 
 
 
@@ -302,7 +302,7 @@ def test_start_server_forwards_guided_decoding_backend(monkeypatch):
     captured = {}
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
     monkeypatch.setattr(mgr, "ensure_docker_image", lambda img=DEFAULT_VLLM_IMAGE: True)
-    monkeypatch.setattr("dreamng.hardware.download_model", lambda *a, **k: None)
+    monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: None)
 
     def fake_build(**kwargs):
         captured.update(kwargs)
@@ -341,7 +341,7 @@ def test_detect_image_vllm_version_parses_and_caches(monkeypatch):
     VLLMServerManager._image_probe_cache.clear()
 
 def test_default_image_is_pinned_not_latest():
-    assert DEFAULT_VLLM_IMAGE == "dreamng-vllm-tensorizer:26.07-py3"
+    assert DEFAULT_VLLM_IMAGE == "dreamference-vllm-tensorizer:26.07-py3"
     assert not DEFAULT_VLLM_IMAGE.endswith(":latest")
 
 def test_probe_image_reports_tensorizer(monkeypatch):
@@ -374,7 +374,7 @@ def test_probe_image_failure_is_conservative(monkeypatch):
 def test_ensure_docker_image_present(monkeypatch):
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "is_image_present", lambda img: True)
-    assert mgr.ensure_docker_image("dreamng-vllm-tensorizer:26.07-py3") is True
+    assert mgr.ensure_docker_image("dreamference-vllm-tensorizer:26.07-py3") is True
 
 def test_ensure_docker_image_builds_if_missing(monkeypatch):
     mgr = VLLMServerManager()
@@ -396,8 +396,8 @@ def test_ensure_docker_image_builds_if_missing(monkeypatch):
     monkeypatch.setattr(mgr, "is_image_present", mock_is_image_present)
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    assert mgr.ensure_docker_image("dreamng-vllm-tensorizer:26.07-py3") is True
+    assert mgr.ensure_docker_image("dreamference-vllm-tensorizer:26.07-py3") is True
     assert len(build_calls) == 1
     assert "docker" in build_calls[0]
     assert "build" in build_calls[0]
-    assert "dreamng-vllm-tensorizer:26.07-py3" in build_calls[0]
+    assert "dreamference-vllm-tensorizer:26.07-py3" in build_calls[0]

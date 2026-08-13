@@ -1,7 +1,7 @@
-dreamng
-dreamng.egg-info
-DREAMNG_RESEARCH_PAPER.md
-DREAMNG_SPEC.md
+dreamference
+dreamference.egg-info
+DREAMFERENCE_RESEARCH_PAPER.md
+DREAMFERENCE_SPEC.md
 do
 docs
 mkdocs.yml

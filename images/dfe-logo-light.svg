@@ -1,0 +1,29 @@
+<svg viewBox="-90 0 430 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DREAMNG logo">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&amp;display=swap');</style>
+
+  <!-- throughput dashes -->
+  <g stroke="#242A32" stroke-width="9" stroke-linecap="round" fill="none">
+    <line x1="-6"  y1="80"  x2="-54" y2="85"  opacity=".9"/>
+    <line x1="-14" y1="100" x2="-80" y2="107" opacity=".55"/>
+    <line x1="-4"  y1="120" x2="-44" y2="124" opacity=".3"/>
+  </g>
+
+  <!-- faceted puffin -->
+  <g>
+    <polygon points="96,64 52,14 78,16 134,56" fill="#242A32"/>
+    <polygon points="96,64 78,16 134,56" fill="#2E3947"/>
+    <polygon points="28,96 70,70 130,56 176,44 196,52 196,92 182,100 140,118 90,122 44,112" fill="#242A32"/>
+    <polygon points="130,56 176,44 168,86" fill="#2C3745"/>
+    <polygon points="70,70 130,56 118,92" fill="#28323F"/>
+    <polygon points="178,99 140,116 92,120 58,110 102,103 148,95" fill="#FFFFFF"/>
+    <polygon points="196,52 196,92 172,86 174,54" fill="#FFFFFF"/>
+    <polygon points="184,58 189,63 184,68 179,63" fill="#242A32"/>
+    <polygon points="196,52 250,74 196,72" fill="#FF6B35"/>
+    <polygon points="196,72 250,74 196,92" fill="#E4572E"/>
+    <polygon points="98,121 112,131 118,119" fill="#FF6B35"/>
+  </g>
+
+  <text x="125" y="224" text-anchor="middle"
+        font-family="'Space Grotesk',system-ui,sans-serif" font-weight="700"
+        font-size="40" letter-spacing="4" fill="#242A32">DREAMFERENCE</text>
+</svg>

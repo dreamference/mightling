@@ -35,8 +35,8 @@ ENV/
 *.swp
 *.swo
 
-# Dreamng / Antigravity
-.dreamng/
+# Dreamference / Antigravity
+.dreamference/
 .antigravity/
 .gemini/
 .aider*

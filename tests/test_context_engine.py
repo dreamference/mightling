@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from dreamng.context_engine import ContextEngine
+from dreamference.context_engine import ContextEngine
 
 def test_context_engine_indexing(tmp_path):
     py_file = tmp_path / "sample.py"

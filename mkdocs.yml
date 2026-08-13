@@ -1,6 +1,6 @@
-site_name: Dreamng Documentation
+site_name: Dreamference Documentation
 site_description: Autonomous Local Agentic Pair Programmer for NVIDIA GB10
-repo_url: https://github.com/dreamng/dreamng
+repo_url: https://github.com/dreamference/dreamference
 theme:
   name: material
   palette:

@@ -1,10 +1,10 @@
 # CLI Reference
 
-See the full list of commands in the [Technical Specification](../DREAMNG_SPEC.md#51-dreamng-cli-suite).
+See the full list of commands in the [Technical Specification](../DREAMFERENCE_SPEC.md#51-dreamference-cli-suite).
 
 Key commands:
-- `dreamng init`
-- `dreamng chat`
-- `dreamng start_server`
-- `dreamng stop_server`
-- `dreamng endpoints`
+- `dream init`
+- `dream chat`
+- `dream start_server`
+- `dream stop_server`
+- `dream endpoints`
