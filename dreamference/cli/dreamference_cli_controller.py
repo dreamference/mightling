@@ -630,6 +630,63 @@ class DreamferenceCLIController:
                 except Exception:
                     pass
 
+                # Check Optimizations
+                opt_fa3 = "No"
+                opt_flashinfer = "No"
+                opt_tensorizer = "No"
+                opt_triton = "Default"
+                opt_trt_llm = "No"
+                
+                try:
+                    import subprocess
+                    import json
+                    # Parse port from api_base or host
+                    from urllib.parse import urlparse
+                    parsed_url = urlparse(api_base)
+                    port = parsed_url.port or 8000
+                    container_name = f"dreamference-vllm-{port}"
+                    
+                    insp_res = subprocess.run(["docker", "inspect", container_name], capture_output=True, text=True)
+                    if insp_res.returncode == 0:
+                        insp_data = json.loads(insp_res.stdout)
+                        if insp_data:
+                            env = insp_data[0].get("Config", {}).get("Env", [])
+                            cmd = insp_data[0].get("Config", {}).get("Cmd", [])
+                            image = insp_data[0].get("Config", {}).get("Image", "")
+                            
+                            # FA3
+                            pip_fa_res = subprocess.run(["docker", "exec", container_name, "pip", "show", "flash-attn", "flash_attn", "flash-attn-3"], capture_output=True, text=True)
+                            if "Version: 3" in pip_fa_res.stdout or "flash-attn-3" in pip_fa_res.stdout:
+                                opt_fa3 = "Yes"
+                                
+                            # FlashInfer
+                            if "--attention-backend" in cmd:
+                                idx = cmd.index("--attention-backend")
+                                if idx + 1 < len(cmd) and cmd[idx + 1] == "flashinfer":
+                                    opt_flashinfer = "Yes"
+                                    
+                            # Tensorizer
+                            if "tensorizer" in image.lower() or "--tensorize" in cmd or ("--load-format" in cmd and "tensorizer" in cmd):
+                                opt_tensorizer = "Yes"
+                                
+                            # Triton Nightly
+                            for e in env:
+                                if e.startswith("PYTORCH_TRITON_VERSION="):
+                                    ver = e.split("=")[1]
+                                    if "+git" in ver or "nightly" in ver:
+                                        opt_triton = "Yes (Nightly)"
+                                    else:
+                                        opt_triton = f"No ({ver})"
+                                    break
+                                    
+                            # TensorRT-LLM
+                            if "--backend" in cmd:
+                                idx = cmd.index("--backend")
+                                if idx + 1 < len(cmd) and cmd[idx + 1] == "tensorrt-llm":
+                                    opt_trt_llm = "Yes"
+                except Exception:
+                    pass
+
                 out_console.print(f"   [cyan]Model:[/cyan]    {model_name}")
                 out_console.print(f"   [cyan]Endpoint:[/cyan] {api_base}")
                 out_console.print(f"   [cyan]Context:[/cyan]     {max_model_len} tokens")
@@ -646,6 +703,13 @@ class DreamferenceCLIController:
                     out_console.print(f"   [cyan]Streaming:[/cyan]   Yes (TTFT: {ttft:.3f}s)")
                 else:
                     out_console.print(f"   [cyan]Streaming:[/cyan]   No")
+                out_console.print("")
+                out_console.print("[bold yellow]🚀 Performance Optimizations[/bold yellow]")
+                out_console.print(f"   [cyan]FlashAttention-3:[/cyan] {opt_fa3}")
+                out_console.print(f"   [cyan]FlashInfer:[/cyan]       {opt_flashinfer}")
+                out_console.print(f"   [cyan]Tensorizer:[/cyan]       {opt_tensorizer}")
+                out_console.print(f"   [cyan]Triton Compiler:[/cyan]  {opt_triton}")
+                out_console.print(f"   [cyan]TensorRT-LLM:[/cyan]     {opt_trt_llm}")
                 out_console.print("")
 
                 sample_prompts = [
