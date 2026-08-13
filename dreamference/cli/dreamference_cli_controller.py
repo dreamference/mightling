@@ -704,6 +704,23 @@ class DreamferenceCLIController:
                 else:
                     out_console.print(f"   [cyan]Streaming:[/cyan]   No")
                 out_console.print("")
+                hardware_gpus = []
+                try:
+                    import subprocess
+                    smi_res = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True)
+                    if smi_res.returncode == 0:
+                        hardware_gpus = [g.strip() for g in smi_res.stdout.strip().split("\n") if g.strip()]
+                except Exception:
+                    pass
+                
+                gpu_count = len(hardware_gpus)
+                gpu_names = ", ".join(hardware_gpus) if gpu_count > 0 else "None detected"
+
+                out_console.print("[bold yellow]🖥️  Hardware Information[/bold yellow]")
+                out_console.print(f"   [cyan]GPU Count:[/cyan]       {gpu_count}")
+                out_console.print(f"   [cyan]GPU Models:[/cyan]      {gpu_names}")
+                out_console.print("")
+                
                 out_console.print("[bold yellow]🚀 Performance Optimizations[/bold yellow]")
                 out_console.print(f"   [cyan]FlashAttention-3:[/cyan] {opt_fa3}")
                 out_console.print(f"   [cyan]FlashInfer:[/cyan]       {opt_flashinfer}")
