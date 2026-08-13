@@ -210,11 +210,18 @@ class DreamferenceCLIController:
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
         download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=False, help="Auto-convert model to tensorize format after download (default: False)")
-        # Command: dream clear-cache
-        subparsers.add_parser("clear-cache", help="Clear local HuggingFace and tensorizer model caches")
-
         # Command: dream clear-tensorize-cache
         subparsers.add_parser("clear-tensorize-cache", help="Clear local tensorizer model cache only")
+
+        # Command: dream clear
+        clear_parser = subparsers.add_parser("clear", help="Clear operations")
+        clear_subparsers = clear_parser.add_subparsers(dest="clear_command", help="Clear commands")
+        
+        # Command: dream clear cache
+        clear_subparsers.add_parser("cache", help="Clear local HuggingFace and tensorizer model caches")
+        
+        # Command: dream clear tensorize-cache
+        clear_subparsers.add_parser("tensorize-cache", help="Clear local tensorizer model cache only")
 
         # Command: dream endpoints
         subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
@@ -351,16 +358,6 @@ class DreamferenceCLIController:
                     print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dream init --model <model_name>'")
             sys.exit(0)
 
-        elif args.command == "clear-cache":
-            cls.display_header()
-            clear_model_cache()
-            sys.exit(0)
-
-        elif args.command == "clear-tensorize-cache":
-            cls.display_header()
-            clear_tensorizer_cache()
-            sys.exit(0)
-
         elif args.command == "init":
             cls.display_header()
             auto_t = config.use_tensorizer
@@ -394,6 +391,18 @@ class DreamferenceCLIController:
         elif args.command == "status":
             cls.handle_status()
 
+        elif args.command == "clear":
+
+
+            if args.clear_command == "cache":
+                cls.display_header()
+                clear_model_cache()
+                sys.exit(0)
+
+            elif args.clear_command == "tensorize-cache":
+                cls.display_header()
+                clear_tensorizer_cache()
+                sys.exit(0)
         elif args.command == "endpoints":
             cls.display_header()
             from rich.table import Table
