@@ -270,11 +270,15 @@ def test_vllm_build_launch_command_tensorizer_docker(monkeypatch, tmp_path):
 
 
 
-def test_guided_decoding_omitted_by_default():
+def test_guided_decoding_default_backend(monkeypatch):
+    from dreamference.config.dreamference_config import DEFAULT_GUIDED_DECODING_BACKEND
     mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "detect_image_vllm_version", lambda image: (0, 12))
     cmd = mgr.build_launch_command(model="qwen2.5-coder-32b")
     assert "--guided-decoding-backend" not in cmd
-    assert "--structured-outputs-config.backend" not in cmd
+    assert "--structured-outputs-config.backend" in cmd
+    idx = cmd.index("--structured-outputs-config.backend")
+    assert cmd[idx + 1] == DEFAULT_GUIDED_DECODING_BACKEND
 
 def test_guided_decoding_modern_flag(monkeypatch):
     mgr = VLLMServerManager()
