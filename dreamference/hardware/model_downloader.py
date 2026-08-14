@@ -199,14 +199,29 @@ class ModelDownloader:
                     # Serialization loads the full checkpoint, so it carries the same freeze risk as
                     # serving it: unreclaimable driver-pinned pages starve the host with no OOM kill
                     # to end it. Bound the container's cgroup so the kernel has something it can kill.
+                    #
+                    # Anchored to the checkpoint rather than to total memory, for the same reason
+                    # the serving cap is: `total - reserve` is a ceiling this job cannot reach, so
+                    # it bounds nothing and the host starves underneath it. Serialization's working
+                    # set is the checkpoint plus the buffers it is written through, so that is what
+                    # the cap is built from — still clamped by the host reserve.
                     from dreamference.vllm_server.vllm_server_manager import (
+                        CONTAINER_MEM_HEADROOM_GB,
                         CONTAINER_OOM_SCORE_ADJ,
                         HOST_MEMORY_RESERVE_GB,
+                        VLLMServerManager,
                     )
                     from dreamference.hardware.hardware_manager import HardwareManager
+                    total_mem_gb = HardwareManager.detect_gb10_hardware().total_unified_memory_gb
+                    weights_gb = VLLMServerManager._estimate_model_weights_gb(model_key)
+                    host_ceiling_gb = total_mem_gb - HOST_MEMORY_RESERVE_GB
+                    # A zero estimate means neither the snapshot nor the registry knows this model.
+                    # Fall back to the ceiling rather than capping at the headroom alone, which
+                    # would kill every serialization on a model we simply failed to size.
                     container_mem_gb = max(
                         1.0,
-                        HardwareManager.detect_gb10_hardware().total_unified_memory_gb - HOST_MEMORY_RESERVE_GB,
+                        min(weights_gb + CONTAINER_MEM_HEADROOM_GB, host_ceiling_gb)
+                        if weights_gb else host_ceiling_gb,
                     )
 
                     cmd = [

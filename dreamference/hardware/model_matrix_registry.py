@@ -34,9 +34,15 @@ class ModelMatrixRegistry:
                 "Default. At 78 GB this checkpoint is 64% of a GB10's unified memory, and the weights "
                 "the driver pins are unreclaimable, so overshooting does not earn an OOM kill — the "
                 "host livelocks in reclaim until the power button. That froze this machine six times "
-                "on 2026-08-14 at every gpu_memory_utilization from 0.9 down to 0.3, which is why "
-                "the fraction is not the lever: what bounds the damage is the container's cgroup "
-                "memory cap. Tensorizer is deliberately not enabled here — NVFP4 checkpoints opt "
+                "on 2026-08-14 at every gpu_memory_utilization from 0.9 down to 0.3 — but not "
+                "because the fraction is irrelevant. It has two bounds and those runs violated one "
+                "or the other: below ~0.64 the arena is smaller than the weights, so the load "
+                "overruns a budget it was never given, and above ~0.76 the arena plus the load's "
+                "transient peak exceeds what is actually free. Both are now checked before launch "
+                "rather than discovered by reset. The cgroup cap is the backstop, not the primary "
+                "bound, and only became one once it was sized against the arena — at total-minus- "
+                "reserve it sat above anything the container could reach and never fired. "
+                "Tensorizer is deliberately not enabled here — NVFP4 checkpoints opt "
                 "out of it, and it would not help regardless, since it does no O_DIRECT or fadvise "
                 "and so never bypasses the page cache."
             ),
@@ -47,13 +53,21 @@ class ModelMatrixRegistry:
                 # shorter context buys back roughly 15-20 GB of headroom exactly when it is scarcest.
                 # Raise it once a load completes cleanly and the steady-state footprint is known.
                 "max_model_len": 32768,
-                # Must exceed 0.64 to hold the weights at all, and stay under 0.90 to leave the
-                # host its 12 GB reserve. 0.85 clears both on paper but only by 18.2 GB, and a
-                # GNOME session with an IDE open wants ~18.4 — so it failed the availability gate
-                # by 0.2 GB. 0.80 gives the desktop ~24 GB of room and still leaves ~19.5 GB of
-                # arena above the weights for KV and activations, which is ample at 32k context
-                # with max-num-seqs 4. Raise it toward 0.85 only when loading headless.
-                "gpu_memory_utilization": 0.80,
+                # Must exceed 0.64 to hold the 77.8 GB of weights at all. The ceiling is not the
+                # 12 GB host reserve, though — it is what is actually free at launch, minus the
+                # peak the load passes through on its way to steady state (see
+                # LOAD_TRANSIENT_FRACTION). 0.80 satisfied every static check and still froze the
+                # machine on 2026-08-14: 97.3 GB of arena against 104.5 GB available left 7.2 GB
+                # to absorb the page cache for a 77.8 GB checkpoint, and it did not.
+                #
+                # 0.72 puts the arena at 87.6 GB — 9.8 GB above the weights for KV and
+                # activations, ample at 32k context with max-num-seqs 4 — and clears the gate by
+                # ~5 GB with a browser and an IDE open. That margin is the point: the gate's own
+                # answer here is 0.76, which passes by 0.4 GB and would fail again the moment
+                # anything on the desktop grows. Erring low costs KV cache and fails loudly if
+                # overdone; erring high costs the power button. Raise it only when loading
+                # headless, where ~17 GB of desktop comes back.
+                "gpu_memory_utilization": 0.72,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
                 "tool_call_parser": "qwen3_xml",

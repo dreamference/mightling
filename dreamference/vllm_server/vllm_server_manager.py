@@ -31,6 +31,46 @@ DEFAULT_GPU_MEMORY_UTILIZATION: Final[float] = 0.50
 # page cache to stream weights. On unified memory every byte vLLM pins is a byte the compositor,
 # journald and the input stack no longer have.
 HOST_MEMORY_RESERVE_GB: Final[float] = 12.0
+# Extra memory a load needs *transiently*, beyond the arena it settles into: page cache for the
+# shards being streamed, the loader's staging buffers, and the host's own growth while it waits.
+# Expressed as a fraction of checkpoint size because that is what it scales with — a 78 GB
+# checkpoint churns an order of magnitude more cache than an 8 GB one.
+#
+# 0.15 is calibrated against the 2026-08-14 14:11 freeze, which is the tightest known-bad point:
+# a 78 GB checkpoint into a 97.3 GB arena with 105.8 GB available, i.e. 8.5 GB of slack, took the
+# machine down. 0.15 x 78 = 11.7 GB required, so that launch is refused. Raise it if a load ever
+# freezes with this gate satisfied; do not lower it without a load that failed for room to spare.
+LOAD_TRANSIENT_FRACTION: Final[float] = 0.15
+# Floor for the above, so a small checkpoint still leaves the host something to breathe with.
+MIN_LOAD_TRANSIENT_GB: Final[float] = 4.0
+# Slack between the arena and the container's cgroup cap. The cap only means something if it sits
+# *below* the point at which the host dies and *above* the arena vLLM legitimately needs; sized
+# against total memory it did neither. This is what turns hitting the cap into a dead container
+# rather than a dead machine, so it covers the container's own transient loading overhead only.
+CONTAINER_MEM_HEADROOM_GB: Final[float] = 8.0
+# earlyoom arguments that actually arm it on this hardware, and the command that installs them.
+#
+# `-s 100` is the load-bearing part: earlyoom acts only when available memory *and* free swap are
+# both under their minimums, and driver-pinned pages never reach swap, so any lower value is a
+# gate that can never open. `-r 60` replaces the stock hourly report, so the journal carries a
+# memory trace into the next freeze instead of one line an hour.
+#
+# `-m 5,2` rather than the stock 10: on this hardware a *healthy* load sits below 10% for its
+# entire duration. The driver pins the whole arena at CUDA init, before any weights are read —
+# vLLM logs `worker requested memory: 87.57GiB` and `non_torch_memory=19.76GiB` at 0/9 shards —
+# so MemAvailable collapses within seconds of launch and stays there. Measured on 2026-08-14 it
+# troughed at 9.82%, 9.79% and 9.90% across three consecutive loads, and stock earlyoom SIGTERMed
+# EngineCore every time. A free-memory percentage cannot tell a working load from a dying one
+# here; both look the same. That distinction is the PSI watchdog's job (see psi_watchdog), and
+# earlyoom's is to be the last resort before a livelock, which 5% still comfortably is.
+EARLYOOM_ARGS: Final[str] = '-m 5,2 -s 100 -r 60'
+# Above this, earlyoom's memory threshold kills healthy loads rather than dying ones — see the
+# measured troughs above. Checked as well as the swap gate, since either misconfiguration makes
+# the handler worse than useless: one never fires, the other fires on every successful launch.
+MAX_EARLYOOM_MEM_PCT: Final[float] = 6.0
+EARLYOOM_CONFIGURE_CMD: Final[str] = (
+    f"printf '%s\\n' 'EARLYOOM_ARGS=\"{EARLYOOM_ARGS}\"' | sudo tee /etc/default/earlyoom"
+)
 # Swap below this leaves the kernel no cheap way to shed cold anonymous pages under load, which
 # is when it starts stalling on reclaim instead. Advisory only — a small swap is a warning, not a
 # refusal, since it degrades the odds rather than guaranteeing a hang.
@@ -51,6 +91,10 @@ MIN_FREE_KBYTES: Final[int] = 1_048_576
 # handing the stall to whoever allocated next.
 WATERMARK_SCALE_FACTOR: Final[int] = 200
 DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
+# Let vLLM pick the weight loader. See the resolution site in build_launch_command for why this
+# is not fastsafetensors: without GDS — which GB10 does not have — it double-resides the
+# checkpoint in host RAM, which on unified memory is the whole memory budget.
+DEFAULT_LOAD_FORMAT: Final[str] = "auto"
 
 # Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
 
@@ -478,7 +522,6 @@ class VLLMServerManager:
             "--gpu-memory-utilization", str(gpu_memory_utilization),
             "--trust-remote-code",
             "--async-scheduling",
-            "--load-format", "fastsafetensors",
             "--enable-log-requests",
             "--enable-log-outputs",
             "--max-log-len", "2048",
@@ -510,6 +553,19 @@ class VLLMServerManager:
         docker_available = self.is_docker_available()
         is_docker_launch = docker_available  # Always prefer Docker when available
 
+        # One resolved loader, emitted once. This used to hardcode fastsafetensors here and append
+        # a second --load-format for tensorizer below, leaving two copies of the flag on the
+        # command line and the winner decided by argparse rather than by intent.
+        #
+        # The default is vLLM's own choice rather than fastsafetensors, because fastsafetensors
+        # is a pessimisation on this hardware: it is built around GDS, the GB10 platform has no
+        # GDS support ("GDS is not supported in this platform but nogds is False"), and its
+        # fallback stages every shard through host bounce buffers. On unified memory the bounce
+        # buffer and the destination tensor are the same physical RAM, so a 78 GB checkpoint is
+        # resident twice at the peak. vLLM's default mmaps the shards instead, which is
+        # page-cache backed and therefore reclaimable.
+        load_format = resolved(None, "load_format", DEFAULT_LOAD_FORMAT)
+
         # Ask the image whether it can import tensorizer. The image name says nothing about this.
         if use_tensorizer and is_model_tensorized(model):
             has_tensorizer = self.image_has_tensorizer(docker_image)
@@ -526,8 +582,13 @@ class VLLMServerManager:
                         dgx_cache_host = os.path.expanduser("~/.cache/dreamference")
                         if t_uri.startswith(dgx_cache_host):
                             t_uri = t_uri.replace(dgx_cache_host, "/root/.cache/dreamference", 1)
-                    base_args.extend(["--load-format", "tensorizer"])
+                    load_format = "tensorizer"
                     base_args.extend(["--model-loader-extra-config", json.dumps({"tensorizer_uri": t_uri, "tensorizer_dir": None})])
+
+        # 'auto' is vLLM's own default, so passing it explicitly only adds noise to the command
+        # line and to any future diff of it.
+        if load_format and load_format != "auto":
+            base_args.extend(["--load-format", load_format])
 
         if docker_available:
             hf_cache = os.path.expanduser("~/.cache/huggingface")
@@ -547,10 +608,21 @@ class VLLMServerManager:
             # bounded scope it *can* kill, turning a power-button reset into a dead container.
             # --memory-swap equal to --memory disables container swap: swapping 70+ GB of weights
             # to a 16 GB swapfile is what drags the desktop under before the cap is ever reached.
+            #
+            # Size it against the arena, not against total memory. `total - reserve` produced a
+            # 110 GB cap for a 97.3 GB arena on 2026-08-14 — a ceiling the container could never
+            # reach, so it bounded nothing and the host froze underneath it. Anchored to the arena
+            # the cap is reachable by construction, and hitting it kills the container instead.
+            # Still clamped by the host reserve, so a reckless recipe cannot raise it back out of
+            # range.
             from dreamference.hardware.hardware_manager import HardwareManager
+            total_mem_gb = HardwareManager.detect_gb10_hardware().total_unified_memory_gb
             container_mem_gb = max(
                 1.0,
-                HardwareManager.detect_gb10_hardware().total_unified_memory_gb - HOST_MEMORY_RESERVE_GB,
+                min(
+                    total_mem_gb * float(gpu_memory_utilization) + CONTAINER_MEM_HEADROOM_GB,
+                    total_mem_gb - HOST_MEMORY_RESERVE_GB,
+                ),
             )
 
             cmd = [
@@ -633,17 +705,9 @@ class VLLMServerManager:
         # kernel grinds in reclaim instead of ending anything. systemd-oomd and earlyoom watch PSI
         # pressure and act *before* that point, which is the only thing that reliably breaks the
         # livelock from inside.
-        if not cls._oom_handler_active():
-            problems.append(
-                "No userspace OOM handler is running.\n"
-                "   Loading a large model on unified memory can starve the host without ever\n"
-                "   tripping the kernel OOM killer — the pages the driver pins are unreclaimable\n"
-                "   and belong to no killable process, so the machine livelocks instead of\n"
-                "   dropping the server. A PSI-driven handler ends it before that.\n"
-                "     sudo systemctl enable --now systemd-oomd\n"
-                "   or, covering every cgroup without per-slice opt-in:\n"
-                "     sudo apt install earlyoom && sudo systemctl enable --now earlyoom"
-            )
+        oom_problem = cls._oom_handler_problem()
+        if oom_problem:
+            problems.append(oom_problem)
 
         # Swap is where the kernel puts cold anonymous pages when it needs room. Too little and it
         # has nowhere to shed them to, so it stalls on reclaim instead.
@@ -698,29 +762,181 @@ class VLLMServerManager:
             )
             sys.exit(1)
 
-    @staticmethod
-    def _oom_handler_active() -> bool:
+    @classmethod
+    def _oom_handler_problem(cls) -> Optional[str]:
         """
-        Reports whether a userspace OOM handler is running.
+        Reports why no userspace OOM handler will act on this host, if none will.
 
         Checks systemd-oomd and earlyoom, the two PSI-driven handlers packaged on Ubuntu. Either
-        one is sufficient; the point is only that *something* will act on memory pressure before
-        the kernel livelocks in reclaim.
+        one is sufficient in principle; the point is that *something* acts on memory pressure
+        before the kernel livelocks in reclaim.
+
+        A running unit is not the same as an armed one, which is what the 2026-08-14 14:11 freeze
+        cost a power button to establish. earlyoom was active throughout and never so much as
+        logged: it only acts when available memory *and* free swap are both under their minimums,
+        and the pages that starve this host are driver-pinned and unswappable, so free swap sits
+        at 100% and the conjunction can never be satisfied. Adding a 64 GB swapfile that morning
+        made it strictly worse — a small swap could at least fill. So earlyoom's actual argv is
+        checked, not merely its unit state.
 
         Returns:
-            bool: True if systemd-oomd or earlyoom is active, False otherwise.
+            Optional[str]: A description and fix, or None if a handler is running and armed.
         """
-        for unit in ("systemd-oomd", "earlyoom"):
-            try:
-                result = subprocess.run(
-                    ["systemctl", "is-active", "--quiet", unit],
-                    timeout=5,
-                )
-                if result.returncode == 0:
-                    return True
-            except (OSError, subprocess.SubprocessError):
+        if cls._unit_is_active("systemd-oomd"):
+            return None
+
+        earlyoom_argv = cls._process_argv("earlyoom")
+        if earlyoom_argv is not None:
+            fault = cls._earlyoom_fault(earlyoom_argv)
+            if fault is None:
+                return None
+            return (
+                f"earlyoom is running but is misconfigured for this hardware.\n"
+                f"   {fault}\n"
+                f"   Install arguments that work here, and report every minute so the next\n"
+                f"   freeze leaves a trail:\n"
+                f"     {EARLYOOM_CONFIGURE_CMD}\n"
+                f"     sudo systemctl restart earlyoom\n"
+                f"   Current arguments: {' '.join(earlyoom_argv[1:]) or '(none)'}"
+            )
+
+        return (
+            "No userspace OOM handler is running.\n"
+            "   Loading a large model on unified memory can starve the host without ever\n"
+            "   tripping the kernel OOM killer — the pages the driver pins are unreclaimable\n"
+            "   and belong to no killable process, so the machine livelocks instead of\n"
+            "   dropping the server. A PSI-driven handler ends it before that.\n"
+            "     sudo systemctl enable --now systemd-oomd\n"
+            "   or, covering every cgroup without per-slice opt-in:\n"
+            "     sudo apt install earlyoom\n"
+            "     # then arm it — the stock swap gate leaves it unable to fire on this hardware\n"
+            f"     {EARLYOOM_CONFIGURE_CMD}\n"
+            "     sudo systemctl enable --now earlyoom"
+        )
+
+    @staticmethod
+    def _unit_is_active(unit: str) -> bool:
+        """
+        Reports whether a systemd unit is active.
+
+        Args:
+            unit (str): Unit name, without the .service suffix.
+
+        Returns:
+            bool: True if systemctl reports the unit active, False otherwise or on error.
+        """
+        try:
+            return subprocess.run(
+                ["systemctl", "is-active", "--quiet", unit], timeout=5
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    @staticmethod
+    def _process_argv(name: str) -> Optional[List[str]]:
+        """
+        Returns the argv of a running process, found by executable name.
+
+        Read from /proc directly rather than via pgrep, because the arguments are the whole point:
+        a unit file's ExecStart still contains the unexpanded `$EARLYOOM_ARGS`, so only the live
+        process knows what the daemon is actually enforcing.
+
+        Args:
+            name (str): Executable basename to match, e.g. 'earlyoom'.
+
+        Returns:
+            Optional[List[str]]: The process's argv, or None if no such process is running.
+        """
+        try:
+            entries = os.listdir("/proc")
+        except OSError:
+            return None
+
+        for entry in entries:
+            if not entry.isdigit():
                 continue
-        return False
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as f:
+                    raw = f.read()
+            except OSError:
+                # Process exited between listdir and open, or belongs to another user.
+                continue
+            argv = [part.decode(errors="replace") for part in raw.split(b"\0") if part]
+            if argv and os.path.basename(argv[0]) == name:
+                return argv
+        return None
+
+    @staticmethod
+    def _earlyoom_flag_value(argv: List[str], flag: str) -> Optional[float]:
+        """
+        Reads a numeric earlyoom flag, in either the separated or attached form.
+
+        Args:
+            argv (List[str]): earlyoom's argv, including argv[0].
+            flag (str): Flag to read, e.g. '-m'.
+
+        Returns:
+            Optional[float]: The SIGTERM component of the value — `-m 10,5` means SIGTERM at 10%
+            and SIGKILL at 5%, and the SIGTERM point is the one reached first, so it governs.
+            None if the flag is absent or unparseable.
+        """
+        for index, arg in enumerate(argv):
+            if arg == flag:
+                value = argv[index + 1] if index + 1 < len(argv) else ""
+            elif arg.startswith(flag) and len(arg) > len(flag):
+                value = arg[len(flag):]
+            else:
+                continue
+            try:
+                return float(value.split(",")[0])
+            except ValueError:
+                return None
+        return None
+
+    @classmethod
+    def _earlyoom_fault(cls, argv: List[str]) -> Optional[str]:
+        """
+        Reports why earlyoom's thresholds are wrong for this hardware, if they are.
+
+        Two ways to get this wrong, and the stock configuration manages both:
+
+        * The swap gate. earlyoom acts only when available memory *and* free swap are below their
+          minimums, and the pages that exhaust this host are driver-pinned and never reach swap,
+          so free swap stays pegged near 100% and any `-s` under 100 holds it shut forever. This
+          is why it was silent through the 2026-08-14 freeze.
+        * The memory threshold. A healthy load on this hardware runs its whole duration under
+          10% available, because the driver pins the arena at CUDA init before any weights are
+          read. Stock `-m 10` therefore kills every successful launch, which it did three times
+          in a row before this was calibrated.
+
+        Args:
+            argv (List[str]): earlyoom's argv, including argv[0].
+
+        Returns:
+            Optional[str]: A one-line description of the fault, or None if the thresholds work.
+        """
+        swap_pct = cls._earlyoom_flag_value(argv, "-s")
+        swap_kib = cls._earlyoom_flag_value(argv, "-S")
+        gate_open = (
+            (swap_pct is not None and swap_pct >= 100.0)
+            or (swap_kib is not None and swap_kib >= cls._swap_total_gb() * (1024 ** 2))
+        )
+        if not gate_open:
+            return (
+                f"Its swap gate ({'-s %g' % swap_pct if swap_pct is not None else 'default -s 10'}) "
+                f"means it can never fire: it acts only when memory AND free swap are both low, "
+                f"and driver-pinned pages never reach swap, so free swap stays at 100%."
+            )
+
+        mem_pct = cls._earlyoom_flag_value(argv, "-m")
+        mem_pct = 10.0 if mem_pct is None else mem_pct
+        if mem_pct > MAX_EARLYOOM_MEM_PCT:
+            return (
+                f"Its memory threshold (-m {mem_pct:g}) kills healthy loads: the driver pins the "
+                f"whole arena at CUDA init, so a working load sits under 10% available for its "
+                f"entire duration and earlyoom SIGTERMs the engine every time."
+            )
+        return None
 
     @staticmethod
     def _sysctl_int(name: str) -> Optional[int]:
@@ -1008,13 +1224,33 @@ class VLLMServerManager:
                 f"({actual_free_gb:.2f} GB now available)."
             )
 
-        # And the arena has to be free right now, not merely installed.
-        if actual_free_gb < arena_gb:
+        # And the arena has to be free right now, not merely installed — with room to spare for
+        # the load itself.
+        #
+        # This gate used to compare the arena against MemAvailable alone, and that is what let the
+        # 2026-08-14 14:11 freeze through: a 97.30 GB arena against 105.83 GB available passed
+        # with 8.5 GB to spare, and the machine still needed the power button. The arena is the
+        # steady state, not the peak. Streaming a 78 GB checkpoint through fastsafetensors churns
+        # page cache, the loader stages tensors before they are pinned, and the desktop keeps
+        # growing throughout — all of it out of whatever is left over. Budget for the peak.
+        transient_gb = max(MIN_LOAD_TRANSIENT_GB, weights_gb * LOAD_TRANSIENT_FRACTION)
+        required_gb = arena_gb + transient_gb
+        if actual_free_gb < required_gb:
+            # The arena is a fraction of total memory, so the fix is expressed as the fraction
+            # that would fit — otherwise the operator is left to work backwards from four numbers.
+            max_utilization = max(0.0, (actual_free_gb - transient_gb) / actual_total_gb)
             _abort(
                 "Not enough memory to start vLLM.",
-                f"   Required:    {arena_gb:.2f} GB\n"
+                f"   Arena:       {arena_gb:.2f} GB "
+                f"({gpu_memory_utilization:.2f} x {actual_total_gb:.2f} GB total)\n"
+                f"   Load peak:   {transient_gb:.2f} GB (page cache and staging for "
+                f"{weights_gb:.2f} GB of weights)\n"
+                f"   Required:    {required_gb:.2f} GB\n"
                 f"   Available:   {actual_free_gb:.2f} GB\n"
-                f"   Missing:     {arena_gb - actual_free_gb:.2f} GB",
+                f"   Missing:     {required_gb - actual_free_gb:.2f} GB\n\n"
+                f"The arena alone would fit; the load peak is what does not. Either free memory on\n"
+                f"the host (closing the desktop session recovers the most), or lower this model's\n"
+                f"gpu_memory_utilization to at most {max_utilization:.2f}.",
             )
 
         # Step 1: Pre-download model weights into local cache and convert to tensorize format.
@@ -1086,12 +1322,13 @@ class VLLMServerManager:
         # ends the container first.
         self.watchdog = None
         if cmd and cmd[0] == "docker":
-            def _report(pressure: float, held_for_s: float) -> None:
+            def _report(reason: str, pressure: float, window_s: float) -> None:
                 print(
-                    f"\n🛑 Aborting load: memory stalled {pressure:.0f}% of the last 10s for "
-                    f"{held_for_s:.0f}s straight.\n"
+                    f"\n🛑 Aborted the load: memory stalled {pressure:.0f}% of the last "
+                    f"{window_s:.0f}s ({reason}).\n"
                     f"   Every task on the host was blocked on memory — the state that precedes a\n"
-                    f"   freeze. Killing '{container_name}' to give the memory back.\n"
+                    f"   freeze. '{container_name}' has been killed to give the memory back.\n"
+                    f"   Lower this model's gpu_memory_utilization before retrying.\n"
                 )
 
             self.watchdog = MemoryPressureWatchdog(container_name, on_trip=_report)

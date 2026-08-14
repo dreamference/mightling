@@ -1,4 +1,6 @@
 import pytest
+import signal
+import subprocess
 import time
 from dreamference.vllm_server import VLLMServerManager, VLLMStartupMonitor, VLLMServerStatus
 from dreamference.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
@@ -420,56 +422,142 @@ def test_ensure_docker_image_builds_if_missing(monkeypatch):
 # --- memory pressure watchdog ---
 
 def _watchdog_with_readings(monkeypatch, readings):
-    """Builds a watchdog whose pressure samples come from `readings`, and records docker kills."""
+    """
+    Builds a watchdog whose pressure samples come from `readings`, and records docker calls.
+
+    `readings` are (avg10, avg60) pairs. Once exhausted the host reads as healthy, so a watchdog
+    that has not tripped by then simply keeps idling rather than replaying the last sample.
+    """
     from dreamference.vllm_server import psi_watchdog
 
     seq = list(readings)
     monkeypatch.setattr(
-        psi_watchdog, "read_memory_pressure_full_avg10",
-        lambda: seq.pop(0) if seq else 0.0,
+        psi_watchdog, "read_memory_pressure_full",
+        lambda: seq.pop(0) if seq else (0.0, 0.0),
     )
-    killed = []
-    monkeypatch.setattr(
-        psi_watchdog.subprocess, "run",
-        lambda cmd, **kw: killed.append(cmd),
-    )
+    docker_calls = []
+
+    def _fake_run(cmd, **kw):
+        docker_calls.append(cmd)
+        # Stand in for `docker inspect`: no such container, so the cgroup never resolves and the
+        # watchdog falls back to `docker kill`. Cgroup resolution is covered separately.
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(psi_watchdog.subprocess, "run", _fake_run)
     wd = psi_watchdog.MemoryPressureWatchdog(
-        "test-container", limit_pct=60.0, trip_duration_s=0.05, sample_interval_s=0.01,
+        "test-container", limit_pct=60.0, trip_duration_s=0.05,
+        sustained_pct=25.0, sample_interval_s=0.01,
     )
-    return wd, killed
+    return wd, docker_calls
 
 def test_watchdog_kills_container_on_sustained_pressure(monkeypatch):
-    wd, killed = _watchdog_with_readings(monkeypatch, [90.0] * 40)
+    wd, docker_calls = _watchdog_with_readings(monkeypatch, [(90.0, 0.0)] * 40)
     assert wd.start() is True
     wd._thread.join(timeout=5)
     assert wd.tripped is True
-    assert killed and killed[0] == ["docker", "kill", "test-container"]
+    assert ["docker", "kill", "test-container"] in docker_calls
 
 def test_watchdog_ignores_pressure_that_does_not_persist(monkeypatch):
-    # Alternating spikes: never stays above the limit long enough to trip.
-    wd, killed = _watchdog_with_readings(monkeypatch, [90.0, 0.0] * 40)
+    # Alternating spikes with a calm minute behind them: never stays above the limit long enough
+    # to trip the fast rule, and avg60 stays clear of the sustained rule.
+    wd, docker_calls = _watchdog_with_readings(monkeypatch, [(90.0, 0.0), (0.0, 0.0)] * 40)
     assert wd.start() is True
     wd._thread.join(timeout=1)
     wd.stop()
     assert wd.tripped is False
-    assert killed == []
+    assert ["docker", "kill", "test-container"] not in docker_calls
 
-def test_watchdog_reports_pressure_and_duration_before_killing(monkeypatch):
+def test_watchdog_trips_on_sustained_avg60_that_never_spikes(monkeypatch):
+    # The shape the fast rule cannot see: avg10 dips below the limit on every other sample, so its
+    # clock resets forever, while avg60 shows a minute of the machine getting nothing done. This
+    # is the case that made a second rule necessary rather than just a shorter timer.
+    wd, docker_calls = _watchdog_with_readings(monkeypatch, [(70.0, 30.0), (10.0, 30.0)] * 40)
+    assert wd.start() is True
+    wd._thread.join(timeout=5)
+    assert wd.tripped is True
+    assert ["docker", "kill", "test-container"] in docker_calls
+
+def test_watchdog_reports_which_rule_fired(monkeypatch):
     from dreamference.vllm_server import psi_watchdog
 
-    wd, killed = _watchdog_with_readings(monkeypatch, [75.0] * 40)
+    wd, _ = _watchdog_with_readings(monkeypatch, [(75.0, 0.0)] * 40)
     seen = []
-    wd._on_trip = lambda pressure, held: seen.append((pressure, held))
+    wd._on_trip = lambda reason, pressure, window: seen.append((reason, pressure, window))
     wd.start()
     wd._thread.join(timeout=5)
     assert wd.tripped is True
-    assert seen and seen[0][0] == 75.0
-    assert seen[0][1] >= wd.trip_duration_s
+    assert seen and seen[0][0] == psi_watchdog.TRIP_REASON_SPIKE
+    assert seen[0][1] == 75.0
+    assert seen[0][2] >= wd.trip_duration_s
+
+def test_watchdog_kills_cgroup_pids_without_forking(monkeypatch, tmp_path):
+    # The point of resolving the cgroup ahead of time: the trip path must not need docker, which
+    # under a reclaim stall may never get scheduled.
+    from dreamference.vllm_server import psi_watchdog
+
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("4242\n4243\n")
+
+    wd, docker_calls = _watchdog_with_readings(monkeypatch, [(90.0, 0.0)] * 40)
+    wd._cgroup_procs = str(procs)
+    signalled = []
+    monkeypatch.setattr(psi_watchdog.os, "kill", lambda pid, sig: signalled.append((pid, sig)))
+
+    assert wd.start() is True
+    wd._thread.join(timeout=5)
+    assert wd.tripped is True
+    assert signalled == [(4242, signal.SIGKILL), (4243, signal.SIGKILL)]
+    assert ["docker", "kill", "test-container"] not in docker_calls
+
+def test_watchdog_stops_retrying_cgroup_resolution(monkeypatch):
+    # Resolution costs a fork and the loop runs for the life of the server, so a container whose
+    # cgroup never appears must not mean `docker inspect` once a second for hours.
+    from dreamference.vllm_server import psi_watchdog
+
+    wd, docker_calls = _watchdog_with_readings(monkeypatch, [(0.0, 0.0)] * 500)
+    assert wd.start() is True
+    time.sleep(0.5)
+    wd.stop()
+    inspects = [c for c in docker_calls if "inspect" in c]
+    assert len(inspects) == psi_watchdog.MAX_CGROUP_RESOLVE_ATTEMPTS
+
+def test_watchdog_survives_a_raising_sample(monkeypatch):
+    # An exception must cost one reading, not the whole guard: a watchdog that has silently
+    # stopped watching is worse than one that never started, because nothing reports its absence.
+    from dreamference.vllm_server import psi_watchdog
+
+    calls = {"n": 0}
+
+    def _flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise OSError("transient")
+        return (90.0, 0.0)
+
+    monkeypatch.setattr(psi_watchdog, "read_memory_pressure_full", lambda: (0.0, 0.0))
+    wd = psi_watchdog.MemoryPressureWatchdog(
+        "test-container", limit_pct=60.0, trip_duration_s=0.05,
+        sustained_pct=25.0, sample_interval_s=0.01,
+    )
+    monkeypatch.setattr(psi_watchdog.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr=""))
+    assert wd.start() is True
+    monkeypatch.setattr(psi_watchdog, "read_memory_pressure_full", _flaky)
+    wd._thread.join(timeout=5)
+    assert wd.tripped is True
+
+def test_watchdog_trip_deadline_fits_inside_the_freeze_window(monkeypatch):
+    # The 2026-08-14 reset came 20s after the first stalled frame. avg10 is itself a 10s decaying
+    # average and needs ~10s to climb to the limit, so anything but a short hold cannot act in
+    # time — which is exactly why the previous 15s hold never fired.
+    from dreamference.vllm_server import psi_watchdog
+
+    assert 10.0 + psi_watchdog.PSI_TRIP_DURATION_S <= 20.0
 
 def test_watchdog_declines_to_start_without_psi(monkeypatch):
     from dreamference.vllm_server import psi_watchdog
 
-    monkeypatch.setattr(psi_watchdog, "read_memory_pressure_full_avg10", lambda: None)
+    monkeypatch.setattr(psi_watchdog, "read_memory_pressure_full", lambda: None)
     wd = psi_watchdog.MemoryPressureWatchdog("test-container")
     assert wd.start() is False
     assert wd.tripped is False
@@ -481,7 +569,7 @@ def _pass_all_host_checks(monkeypatch):
     from dreamference.vllm_server import vllm_server_manager as vsm
 
     monkeypatch.setattr(vsm.shutil, "which", lambda name: "/usr/bin/sar")
-    monkeypatch.setattr(VLLMServerManager, "_oom_handler_active", staticmethod(lambda: True))
+    monkeypatch.setattr(VLLMServerManager, "_oom_handler_problem", classmethod(lambda cls: None))
     monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: vsm.MIN_SWAP_GB))
     monkeypatch.setattr(
         VLLMServerManager, "_sysctl_int",
@@ -514,14 +602,19 @@ def test_host_safety_blocks_on_genuinely_small_swap(monkeypatch):
 
 def test_host_safety_blocks_without_oom_handler(monkeypatch):
     _pass_all_host_checks(monkeypatch)
-    monkeypatch.setattr(VLLMServerManager, "_oom_handler_active", staticmethod(lambda: False))
+    monkeypatch.setattr(
+        VLLMServerManager, "_oom_handler_problem", classmethod(lambda cls: "no handler")
+    )
     with pytest.raises(SystemExit):
         VLLMServerManager.check_host_safety()
 
 def test_host_safety_reports_every_failure_at_once(monkeypatch, capsys):
     vsm = _pass_all_host_checks(monkeypatch)
     monkeypatch.setattr(vsm.shutil, "which", lambda name: None)
-    monkeypatch.setattr(VLLMServerManager, "_oom_handler_active", staticmethod(lambda: False))
+    monkeypatch.setattr(
+        VLLMServerManager, "_oom_handler_problem",
+        classmethod(lambda cls: "No userspace OOM handler is running."),
+    )
     monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: 1.0))
     monkeypatch.setattr(VLLMServerManager, "_sysctl_int", staticmethod(lambda name: 1))
     with pytest.raises(SystemExit):
@@ -530,6 +623,114 @@ def test_host_safety_reports_every_failure_at_once(monkeypatch, capsys):
     assert "5 host safety checks failed" in out
     for expected in ("sysstat", "OOM handler", "Swap", "vm.min_free_kbytes", "vm.watermark_scale_factor"):
         assert expected in out
+
+# --- earlyoom arming ---
+#
+# earlyoom was active and silent through the 2026-08-14 14:11 freeze: it acts only when available
+# memory AND free swap are both low, and driver-pinned pages never reach swap. A running unit is
+# therefore not evidence of an armed one, and only the swap gate distinguishes them.
+
+@pytest.mark.parametrize("argv, fault", [
+    (["/usr/bin/earlyoom", "-r", "3600"], "swap"),              # the config that froze the host
+    (["/usr/bin/earlyoom"], "swap"),                             # no flags: defaults to -s 10
+    (["/usr/bin/earlyoom", "-m", "5", "-s", "10"], "swap"),      # explicitly gated
+    (["/usr/bin/earlyoom", "-s", "50,100"], "swap"),             # SIGTERM point still gated
+    (["/usr/bin/earlyoom", "-s", "wat"], "swap"),                # unparseable: assume gated
+    # Swap gate open, but the memory threshold kills healthy loads. This is the configuration
+    # that SIGTERMed EngineCore three times on 2026-08-14 at 9.82%, 9.79% and 9.90% available.
+    (["/usr/bin/earlyoom", "-m", "10", "-s", "100"], "memory"),
+    (["/usr/bin/earlyoom", "-s", "100"], "memory"),              # -m absent: defaults to 10
+    # Both right.
+    (["/usr/bin/earlyoom", "-m", "5,2", "-s", "100", "-r", "60"], None),
+    (["/usr/bin/earlyoom", "-m5,2", "-s100"], None),             # attached-value form
+    (["/usr/bin/earlyoom", "-m", "5", "-s", "100,100"], None),   # SIGTERM point governs
+])
+def test_earlyoom_faults_cover_both_thresholds(argv, fault):
+    result = VLLMServerManager._earlyoom_fault(argv)
+    if fault is None:
+        assert result is None
+    else:
+        assert result is not None and fault in result
+
+def test_earlyoom_absolute_swap_floor_counts_as_ungated(monkeypatch):
+    # -S is an absolute KiB floor rather than a percentage; it opens the gate once it exceeds
+    # total swap, since free swap can then never be above it.
+    monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: 64.0))
+    opened = VLLMServerManager._earlyoom_fault(["earlyoom", "-m", "5", "-S", str(65 * 1024 ** 2)])
+    gated = VLLMServerManager._earlyoom_fault(["earlyoom", "-m", "5", "-S", str(1024 ** 2)])
+    assert opened is None
+    assert gated is not None and "swap" in gated
+
+def test_shipped_earlyoom_args_pass_the_check():
+    # The arguments the hint tells the operator to install must themselves satisfy the check, or
+    # following the instructions leaves the gate failing.
+    import shlex
+    from dreamference.vllm_server.vllm_server_manager import EARLYOOM_ARGS
+
+    assert VLLMServerManager._earlyoom_fault(["earlyoom", *shlex.split(EARLYOOM_ARGS)]) is None
+
+def test_earlyoom_threshold_clears_the_measured_load_trough():
+    # Three consecutive loads on 2026-08-14 troughed at 9.82%, 9.79% and 9.90% available while
+    # perfectly healthy. The threshold has to sit below all of them with room to spare, or the
+    # handler kills what it is meant to protect.
+    from dreamference.vllm_server.vllm_server_manager import MAX_EARLYOOM_MEM_PCT
+
+    assert MAX_EARLYOOM_MEM_PCT < 9.79
+
+def test_running_but_gated_earlyoom_is_reported_as_a_problem(monkeypatch):
+    monkeypatch.setattr(VLLMServerManager, "_unit_is_active", staticmethod(lambda unit: False))
+    monkeypatch.setattr(
+        VLLMServerManager, "_process_argv",
+        staticmethod(lambda name: ["/usr/bin/earlyoom", "-r", "3600"]),
+    )
+    problem = VLLMServerManager._oom_handler_problem()
+    assert problem is not None
+    assert "misconfigured" in problem
+    # The operator has to be able to see what it is running with, or the claim is unfalsifiable.
+    assert "-r 3600" in problem
+
+def test_armed_earlyoom_satisfies_the_gate(monkeypatch):
+    monkeypatch.setattr(VLLMServerManager, "_unit_is_active", staticmethod(lambda unit: False))
+    monkeypatch.setattr(
+        VLLMServerManager, "_process_argv",
+        staticmethod(lambda name: ["/usr/bin/earlyoom", "-m", "5,2", "-s", "100"]),
+    )
+    assert VLLMServerManager._oom_handler_problem() is None
+
+def test_systemd_oomd_satisfies_the_gate_without_earlyoom(monkeypatch):
+    monkeypatch.setattr(
+        VLLMServerManager, "_unit_is_active", staticmethod(lambda unit: unit == "systemd-oomd")
+    )
+    monkeypatch.setattr(VLLMServerManager, "_process_argv", staticmethod(lambda name: None))
+    assert VLLMServerManager._oom_handler_problem() is None
+
+def test_earlyoom_configure_command_is_valid_shell():
+    # The first version of this hint was `sed -i 's|^EARLYOOM_ARGS=.*|...--prefer \x27(a|b)$\x27...|'`,
+    # which fails two ways at once: `|` is both the sed delimiter and the regex alternation, and
+    # `\x27` is not a quote escape in sed or in bash. It looked right and errored on paste. Parse
+    # it the way a shell would, and check it survives a round trip through the file it writes.
+    import shlex
+    from dreamference.vllm_server.vllm_server_manager import (
+        EARLYOOM_ARGS, EARLYOOM_CONFIGURE_CMD,
+    )
+
+    tokens = shlex.split(EARLYOOM_CONFIGURE_CMD)  # raises ValueError on unbalanced quotes
+    assert tokens[0] == "printf"
+    assert "sudo" in tokens and "tee" in tokens
+    assert tokens[-1] == "/etc/default/earlyoom"
+
+    # The line printf writes must be exactly what /etc/default/earlyoom is sourced for.
+    written = next(t for t in tokens if t.startswith("EARLYOOM_ARGS="))
+    assert written == f'EARLYOOM_ARGS="{EARLYOOM_ARGS}"'
+    # And those args must be the ones that actually arm it, or the hint is cosmetic.
+    assert VLLMServerManager._earlyoom_fault(["earlyoom", *shlex.split(EARLYOOM_ARGS)]) is None
+
+def test_no_handler_at_all_is_reported(monkeypatch):
+    monkeypatch.setattr(VLLMServerManager, "_unit_is_active", staticmethod(lambda unit: False))
+    monkeypatch.setattr(VLLMServerManager, "_process_argv", staticmethod(lambda name: None))
+    problem = VLLMServerManager._oom_handler_problem()
+    assert problem is not None
+    assert "No userspace OOM handler" in problem
 
 def test_host_safety_ignores_sysctls_the_kernel_does_not_expose(monkeypatch):
     _pass_all_host_checks(monkeypatch)
