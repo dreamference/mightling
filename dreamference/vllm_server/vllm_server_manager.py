@@ -62,6 +62,9 @@ class VLLMServerManager:
         self.host: str = host.rstrip("/")
         self.process: Optional[subprocess.Popen] = None
         self.streamer: VLLMLogStreamer = VLLMLogStreamer()
+        
+        from dreamference.vllm_server.diagnostics import ContainerDiagnostics
+        self.diagnostics = ContainerDiagnostics(self.host)
 
     def check_health(self, timeout: float = 0.5) -> bool:
         """
@@ -102,24 +105,12 @@ class VLLMServerManager:
 
     def get_container_reserved_memory(self) -> Optional[str]:
         """
-        Returns reserved memory usage of the Docker container (if running via docker).
-        Uses docker stats --no-stream to get current memory usage.
+        Returns reserved memory usage and CPU usage of the Docker container (if running via docker).
+        Delegates to ContainerDiagnostics.
         """
-        if not self.process or not shutil.which("docker"):
+        if not self.process:
             return None
-        try:
-            # Extract port from host for container name
-            port = self.host.split(":")[-1] if ":" in self.host else "8000"
-            container_name = f"dreamference-vllm-{port}"
-            result = subprocess.run(
-                ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", container_name],
-                capture_output=True, text=True, timeout=2
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception:
-            pass
-        return None
+        return self.diagnostics.get_diagnostics_line()
 
     def is_vllm_installed(self) -> bool:
         """
@@ -516,12 +507,18 @@ class VLLMServerManager:
             dgx_cache = os.path.expanduser("~/.cache/dreamference")
             os.makedirs(hf_cache, exist_ok=True)
             os.makedirs(dgx_cache, exist_ok=True)
+            
+            # Limit to 0.7 of total CPU cores to prevent GNOME freezes during model load
+            total_cpus = os.cpu_count() or 1
+            cpus_limit = max(1.0, total_cpus * 0.7)
+            
             cmd = [
                 "docker", "run",
                 "--ipc=host",
                 "--network", "host",
                 "--name", f"dreamference-vllm-{port}",
                 "--gpus", "all",
+                f"--cpus={cpus_limit:.1f}",
                 "-v", f"{hf_cache}:/root/.cache/huggingface",
                 "-v", f"{dgx_cache}:/root/.cache/dreamference",
             ]

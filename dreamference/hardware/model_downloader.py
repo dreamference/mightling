@@ -186,8 +186,13 @@ class ModelDownloader:
                     from dreamference.vllm_server.vllm_server_manager import VLLMServerManager, DEFAULT_VLLM_IMAGE
                     if VLLMServerManager().ensure_docker_image(DEFAULT_VLLM_IMAGE):
                         print(f"   Using {DEFAULT_VLLM_IMAGE} Docker container for model weight serialization...")
+                        
+                    total_cpus = os.cpu_count() or 1
+                    cpus_limit = max(1.0, total_cpus * 0.7)
+                    
                     cmd = [
                         "docker", "run", "--rm", "--gpus", "all",
+                        f"--cpus={cpus_limit:.1f}",
                         "-v", f"{hf_cache}:/root/.cache/huggingface",
                         "-v", f"{dgx_cache}:/root/.cache/dreamference",
                         "--entrypoint", "python3",
