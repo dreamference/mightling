@@ -199,7 +199,10 @@ class ModelDownloader:
                     # Serialization loads the full checkpoint, so it carries the same freeze risk as
                     # serving it: unreclaimable driver-pinned pages starve the host with no OOM kill
                     # to end it. Bound the container's cgroup so the kernel has something it can kill.
-                    from dreamference.vllm_server.vllm_server_manager import HOST_MEMORY_RESERVE_GB
+                    from dreamference.vllm_server.vllm_server_manager import (
+                        CONTAINER_OOM_SCORE_ADJ,
+                        HOST_MEMORY_RESERVE_GB,
+                    )
                     from dreamference.hardware.hardware_manager import HardwareManager
                     container_mem_gb = max(
                         1.0,
@@ -211,6 +214,7 @@ class ModelDownloader:
                         f"--cpus={cpus_limit:.1f}",
                         f"--memory={container_mem_gb:.0f}g",
                         f"--memory-swap={container_mem_gb:.0f}g",
+                        f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
                         "-v", f"{hf_cache}:/root/.cache/huggingface",
                         "-v", f"{dgx_cache}:/root/.cache/dreamference",
                         "--entrypoint", "python3",

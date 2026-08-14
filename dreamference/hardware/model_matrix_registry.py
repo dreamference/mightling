@@ -48,8 +48,12 @@ class ModelMatrixRegistry:
                 # Raise it once a load completes cleanly and the steady-state footprint is known.
                 "max_model_len": 32768,
                 # Must exceed 0.64 to hold the weights at all, and stay under 0.90 to leave the
-                # host its reserve. 0.85 sits between them with ~25 GB left for KV and activations.
-                "gpu_memory_utilization": 0.85,
+                # host its 12 GB reserve. 0.85 clears both on paper but only by 18.2 GB, and a
+                # GNOME session with an IDE open wants ~18.4 — so it failed the availability gate
+                # by 0.2 GB. 0.80 gives the desktop ~24 GB of room and still leaves ~19.5 GB of
+                # arena above the weights for KV and activations, which is ample at 32k context
+                # with max-num-seqs 4. Raise it toward 0.85 only when loading headless.
+                "gpu_memory_utilization": 0.80,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
                 "tool_call_parser": "qwen3_xml",

@@ -1,3 +1,4 @@
+import pytest
 import time
 from dreamference.vllm_server import VLLMServerManager, VLLMStartupMonitor, VLLMServerStatus
 from dreamference.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
@@ -303,11 +304,20 @@ def test_start_server_forwards_guided_decoding_backend(monkeypatch):
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
     monkeypatch.setattr(mgr, "ensure_docker_image", lambda img=DEFAULT_VLLM_IMAGE: True)
     monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: None)
-    # Host-safety gates depend on machine state (sysstat, OOM handler, page cache) that says
-    # nothing about argument forwarding, so pin them rather than letting the test track whichever
-    # box it runs on.
+    # Host-safety and memory gates depend on machine state (sysstat, OOM handler, page cache, and
+    # how much RAM happens to be free right now) that says nothing about argument forwarding, so
+    # pin them rather than letting the test track whichever box it runs on.
+    from dreamference.hardware.hardware_telemetry import HardwareTelemetry
     monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
     monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
+    monkeypatch.setattr(
+        "dreamference.hardware.hardware_manager.HardwareManager.detect_gb10_hardware",
+        classmethod(lambda cls: HardwareTelemetry(
+            is_gb10=True, gpu_name="NVIDIA GB10", driver_version="0", arch="aarch64",
+            total_unified_memory_gb=128.0, available_memory_gb=128.0,
+            used_memory_gb=0.0, vram_gb=0.0,
+        )),
+    )
 
     def fake_build(**kwargs):
         captured.update(kwargs)
@@ -406,3 +416,122 @@ def test_ensure_docker_image_builds_if_missing(monkeypatch):
     assert "docker" in build_calls[0]
     assert "build" in build_calls[0]
     assert "dreamference-vllm-tensorizer:26.07-py3" in build_calls[0]
+
+# --- memory pressure watchdog ---
+
+def _watchdog_with_readings(monkeypatch, readings):
+    """Builds a watchdog whose pressure samples come from `readings`, and records docker kills."""
+    from dreamference.vllm_server import psi_watchdog
+
+    seq = list(readings)
+    monkeypatch.setattr(
+        psi_watchdog, "read_memory_pressure_full_avg10",
+        lambda: seq.pop(0) if seq else 0.0,
+    )
+    killed = []
+    monkeypatch.setattr(
+        psi_watchdog.subprocess, "run",
+        lambda cmd, **kw: killed.append(cmd),
+    )
+    wd = psi_watchdog.MemoryPressureWatchdog(
+        "test-container", limit_pct=60.0, trip_duration_s=0.05, sample_interval_s=0.01,
+    )
+    return wd, killed
+
+def test_watchdog_kills_container_on_sustained_pressure(monkeypatch):
+    wd, killed = _watchdog_with_readings(monkeypatch, [90.0] * 40)
+    assert wd.start() is True
+    wd._thread.join(timeout=5)
+    assert wd.tripped is True
+    assert killed and killed[0] == ["docker", "kill", "test-container"]
+
+def test_watchdog_ignores_pressure_that_does_not_persist(monkeypatch):
+    # Alternating spikes: never stays above the limit long enough to trip.
+    wd, killed = _watchdog_with_readings(monkeypatch, [90.0, 0.0] * 40)
+    assert wd.start() is True
+    wd._thread.join(timeout=1)
+    wd.stop()
+    assert wd.tripped is False
+    assert killed == []
+
+def test_watchdog_reports_pressure_and_duration_before_killing(monkeypatch):
+    from dreamference.vllm_server import psi_watchdog
+
+    wd, killed = _watchdog_with_readings(monkeypatch, [75.0] * 40)
+    seen = []
+    wd._on_trip = lambda pressure, held: seen.append((pressure, held))
+    wd.start()
+    wd._thread.join(timeout=5)
+    assert wd.tripped is True
+    assert seen and seen[0][0] == 75.0
+    assert seen[0][1] >= wd.trip_duration_s
+
+def test_watchdog_declines_to_start_without_psi(monkeypatch):
+    from dreamference.vllm_server import psi_watchdog
+
+    monkeypatch.setattr(psi_watchdog, "read_memory_pressure_full_avg10", lambda: None)
+    wd = psi_watchdog.MemoryPressureWatchdog("test-container")
+    assert wd.start() is False
+    assert wd.tripped is False
+
+# --- host safety gate ---
+
+def _pass_all_host_checks(monkeypatch):
+    """Makes every host safety check pass, so individual tests can fail exactly one."""
+    from dreamference.vllm_server import vllm_server_manager as vsm
+
+    monkeypatch.setattr(vsm.shutil, "which", lambda name: "/usr/bin/sar")
+    monkeypatch.setattr(VLLMServerManager, "_oom_handler_active", staticmethod(lambda: True))
+    monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: vsm.MIN_SWAP_GB))
+    monkeypatch.setattr(
+        VLLMServerManager, "_sysctl_int",
+        staticmethod(lambda name: {
+            "vm.min_free_kbytes": vsm.MIN_FREE_KBYTES,
+            "vm.watermark_scale_factor": vsm.WATERMARK_SCALE_FACTOR,
+        }[name]),
+    )
+    return vsm
+
+def test_host_safety_passes_when_everything_is_configured(monkeypatch):
+    _pass_all_host_checks(monkeypatch)
+    VLLMServerManager.check_host_safety()  # must not raise
+
+def test_host_safety_tolerates_mkswap_header_shortfall(monkeypatch):
+    # `fallocate -l 64G` + mkswap reports a hair under the nominal size; that must still pass,
+    # or the check can never be satisfied however large the swapfile is made.
+    vsm = _pass_all_host_checks(monkeypatch)
+    monkeypatch.setattr(
+        VLLMServerManager, "_swap_total_gb", staticmethod(lambda: vsm.MIN_SWAP_GB - 0.001)
+    )
+    VLLMServerManager.check_host_safety()  # must not raise
+
+def test_host_safety_blocks_on_genuinely_small_swap(monkeypatch):
+    _pass_all_host_checks(monkeypatch)
+    monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: 16.0))
+    with pytest.raises(SystemExit) as exc:
+        VLLMServerManager.check_host_safety()
+    assert exc.value.code == 1
+
+def test_host_safety_blocks_without_oom_handler(monkeypatch):
+    _pass_all_host_checks(monkeypatch)
+    monkeypatch.setattr(VLLMServerManager, "_oom_handler_active", staticmethod(lambda: False))
+    with pytest.raises(SystemExit):
+        VLLMServerManager.check_host_safety()
+
+def test_host_safety_reports_every_failure_at_once(monkeypatch, capsys):
+    vsm = _pass_all_host_checks(monkeypatch)
+    monkeypatch.setattr(vsm.shutil, "which", lambda name: None)
+    monkeypatch.setattr(VLLMServerManager, "_oom_handler_active", staticmethod(lambda: False))
+    monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: 1.0))
+    monkeypatch.setattr(VLLMServerManager, "_sysctl_int", staticmethod(lambda name: 1))
+    with pytest.raises(SystemExit):
+        VLLMServerManager.check_host_safety()
+    out = capsys.readouterr().out
+    assert "5 host safety checks failed" in out
+    for expected in ("sysstat", "OOM handler", "Swap", "vm.min_free_kbytes", "vm.watermark_scale_factor"):
+        assert expected in out
+
+def test_host_safety_ignores_sysctls_the_kernel_does_not_expose(monkeypatch):
+    _pass_all_host_checks(monkeypatch)
+    monkeypatch.setattr(VLLMServerManager, "_sysctl_int", staticmethod(lambda name: None))
+    VLLMServerManager.check_host_safety()  # must not raise

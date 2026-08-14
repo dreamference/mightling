@@ -18,6 +18,7 @@ from typing import Dict, Any, Optional, List, Final
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS as DEFAULT_MODEL
 from dreamference.vllm_server.vllm_server_status import VLLMServerStatus
 from dreamference.vllm_server.vllm_log_streamer import VLLMLogStreamer
+from dreamference.vllm_server.psi_watchdog import MemoryPressureWatchdog
 from dreamference.config.dreamference_config import (
     DreamferenceConfig,
     DEFAULT_GUIDED_DECODING_BACKEND,
@@ -34,6 +35,21 @@ HOST_MEMORY_RESERVE_GB: Final[float] = 12.0
 # is when it starts stalling on reclaim instead. Advisory only — a small swap is a warning, not a
 # refusal, since it degrades the odds rather than guaranteeing a hang.
 MIN_SWAP_GB: Final[float] = 64.0
+# Nominates the vLLM container as the OOM killer's preferred victim. The memory cap bounds how
+# much the container can take, but says nothing about who dies when the host runs short — and the
+# default leaves the compositor as plausible a target as the server. Positive values need no
+# privilege (only lowering below zero does), and children inherit it, so the engine workers that
+# actually hold the weights are covered. 800 rather than the 1000 maximum: a strongly preferred
+# victim, without being so eager that a transient spike takes the server down for no reason.
+CONTAINER_OOM_SCORE_ADJ: Final[int] = 800
+# ~1 GB of emergency free pages. The stock value scales with memory size but is only ~44 MB on this
+# 128 GB machine, which a loader pulling gigabytes per second blows through between reclaim passes —
+# at which point allocators enter direct reclaim and stall.
+MIN_FREE_KBYTES: Final[int] = 1_048_576
+# Tenths of a percent of memory between the low and high watermarks. The default of 10 (0.1%, about
+# 128 MB here) gives kswapd almost no runway; 200 (2%) lets it reclaim in the background instead of
+# handing the stall to whoever allocated next.
+WATERMARK_SCALE_FACTOR: Final[int] = 200
 DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
 
 # Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
@@ -70,6 +86,9 @@ class VLLMServerManager:
         self.host: str = host.rstrip("/")
         self.process: Optional[subprocess.Popen] = None
         self.streamer: VLLMLogStreamer = VLLMLogStreamer()
+        # Armed at launch and left armed for the life of the container: a serving process that
+        # stalls the whole host is as dangerous as one that stalls while loading.
+        self.watchdog: Optional[MemoryPressureWatchdog] = None
         
         from dreamference.vllm_server.diagnostics import ContainerDiagnostics
         self.diagnostics = ContainerDiagnostics(self.host)
@@ -543,6 +562,7 @@ class VLLMServerManager:
                 f"--cpus={cpus_limit:.1f}",
                 f"--memory={container_mem_gb:.0f}g",
                 f"--memory-swap={container_mem_gb:.0f}g",
+                f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
                 "-v", f"{hf_cache}:/root/.cache/huggingface",
                 "-v", f"{dgx_cache}:/root/.cache/dreamference",
             ]
@@ -586,24 +606,26 @@ class VLLMServerManager:
         because both pin the same tens of GB. Every check here failed open before 2026-08-14, when
         six loads in one hour took the machine down hard enough to need the power button.
 
-        Refuses to proceed when sysstat is missing (no post-mortem survives a hard reset) or when
-        no userspace OOM handler is running (nothing ends the livelock from inside). Warns, but
-        does not refuse, on small swap: it worsens the odds rather than guaranteeing a hang.
+        Every condition here is blocking. They are reported together rather than one at a time,
+        because each fix needs a separate sudo and discovering them serially would mean five
+        edit-rerun cycles to get to a first load.
 
         Raises:
-            SystemExit: If sysstat is absent or no OOM handler is active.
+            SystemExit: If any check fails.
         """
+        problems: List[str] = []
+
         # sysstat's sar/sadc history is the only record of memory and I/O pressure that outlives a
         # hard reset. Without it a freeze leaves nothing to diagnose from.
         if shutil.which("sar") is None:
-            print(
-                "\n❌ sysstat is not installed.\n"
+            problems.append(
+                "sysstat is not installed.\n"
                 "   Loading a model can freeze the machine, and sysstat's sar/sadc history is the\n"
-                "   only post-mortem evidence that survives a hard reset.\n\n"
-                "Install it with:\n"
-                "   sudo apt install sysstat && sudo sed -i 's/^ENABLED=.*/ENABLED=\"true\"/' /etc/default/sysstat && sudo systemctl enable --now sysstat\n"
+                "   only post-mortem evidence that survives a hard reset.\n"
+                "     sudo apt install sysstat\n"
+                "     sudo sed -i 's/^ENABLED=.*/ENABLED=\"true\"/' /etc/default/sysstat\n"
+                "     sudo systemctl enable --now sysstat"
             )
-            sys.exit(1)
 
         # An OOM handler is the difference between a dead container and a dead machine. Every
         # freeze on 2026-08-14 shared one trait: the kernel OOM killer never ran. Driver-pinned
@@ -612,28 +634,69 @@ class VLLMServerManager:
         # pressure and act *before* that point, which is the only thing that reliably breaks the
         # livelock from inside.
         if not cls._oom_handler_active():
-            print(
-                "\n❌ No userspace OOM handler is running.\n"
+            problems.append(
+                "No userspace OOM handler is running.\n"
                 "   Loading a large model on unified memory can starve the host without ever\n"
                 "   tripping the kernel OOM killer — the pages the driver pins are unreclaimable\n"
                 "   and belong to no killable process, so the machine livelocks instead of\n"
-                "   dropping the server. A PSI-driven handler ends it before that.\n\n"
-                "Enable one of:\n"
-                "   sudo systemctl enable --now systemd-oomd\n"
-                "   sudo apt install earlyoom && sudo systemctl enable --now earlyoom\n"
+                "   dropping the server. A PSI-driven handler ends it before that.\n"
+                "     sudo systemctl enable --now systemd-oomd\n"
+                "   or, covering every cgroup without per-slice opt-in:\n"
+                "     sudo apt install earlyoom && sudo systemctl enable --now earlyoom"
             )
-            sys.exit(1)
 
+        # Swap is where the kernel puts cold anonymous pages when it needs room. Too little and it
+        # has nowhere to shed them to, so it stalls on reclaim instead.
+        # 1% tolerance: mkswap reserves a header page, so a file created at exactly the target size
+        # reports slightly under it. Without this, `fallocate -l 64G` yields 63.99 GB and the check
+        # can never pass however large the file is made.
         swap_gb = cls._swap_total_gb()
-        if swap_gb < MIN_SWAP_GB:
-            print(
-                f"\n⚠️  Swap is {swap_gb:.1f} GB; {MIN_SWAP_GB:.0f} GB or more is recommended before\n"
-                f"   loading a large model. Swap is what lets the kernel shed cold anonymous pages\n"
-                f"   slowly instead of stalling, and it costs only disk. To enlarge it:\n"
+        if swap_gb < MIN_SWAP_GB * 0.99:
+            problems.append(
+                f"Swap is {swap_gb:.2f} GB; {MIN_SWAP_GB:.0f} GB or more is required.\n"
+                f"   Swap is what lets the kernel shed cold anonymous pages slowly instead of\n"
+                f"   stalling, and it costs only disk.\n"
                 f"     sudo swapoff /swap.img\n"
                 f"     sudo fallocate -l {MIN_SWAP_GB:.0f}G /swap.img && sudo chmod 600 /swap.img\n"
-                f"     sudo mkswap /swap.img && sudo swapon /swap.img\n"
+                f"     sudo mkswap /swap.img && sudo swapon /swap.img"
             )
+
+        # Reclaim headroom. Both of these decide how early kswapd starts freeing pages relative to
+        # how fast a loader can consume them. At stock values on a 128 GB box the gap between "we
+        # should reclaim" and "we are out" is small enough that a 78 GB load crosses it faster than
+        # reclaim can respond, which is the direct-reclaim stall the freezes were made of. Raising
+        # them buys the kernel room to work ahead instead of blocking allocators.
+        for name, wanted, why in (
+            (
+                "vm.min_free_kbytes",
+                MIN_FREE_KBYTES,
+                "keeps a larger emergency pool so allocations do not stall waiting on reclaim",
+            ),
+            (
+                "vm.watermark_scale_factor",
+                WATERMARK_SCALE_FACTOR,
+                "starts background reclaim earlier, so kswapd stays ahead of the loader",
+            ),
+        ):
+            current = cls._sysctl_int(name)
+            if current is not None and current < wanted:
+                problems.append(
+                    f"{name} is {current}; {wanted} or more is required\n"
+                    f"   ({why}).\n"
+                    f"     sudo sysctl -w {name}={wanted}\n"
+                    f"     echo '{name}={wanted}' | sudo tee -a /etc/sysctl.d/99-dreamference.conf"
+                )
+
+        if problems:
+            listed = "\n\n".join(f"{i}. {p}" for i, p in enumerate(problems, 1))
+            print(
+                f"\n❌ Refusing to load: {len(problems)} host safety "
+                f"{'check' if len(problems) == 1 else 'checks'} failed.\n\n"
+                f"{listed}\n\n"
+                f"These guard against the freeze mode this hardware is prone to: unreclaimable\n"
+                f"driver-pinned pages starving the host with no OOM kill to end it.\n"
+            )
+            sys.exit(1)
 
     @staticmethod
     def _oom_handler_active() -> bool:
@@ -658,6 +721,23 @@ class VLLMServerManager:
             except (OSError, subprocess.SubprocessError):
                 continue
         return False
+
+    @staticmethod
+    def _sysctl_int(name: str) -> Optional[int]:
+        """
+        Reads an integer sysctl from /proc/sys without shelling out.
+
+        Args:
+            name (str): Dotted sysctl name, e.g. 'vm.min_free_kbytes'.
+
+        Returns:
+            Optional[int]: The value, or None if the knob is absent or unreadable.
+        """
+        try:
+            with open("/proc/sys/" + name.replace(".", "/"), "r") as f:
+                return int(f.read().strip())
+        except (OSError, ValueError):
+            return None
 
     @staticmethod
     def _swap_total_gb() -> float:
@@ -1000,6 +1080,25 @@ class VLLMServerManager:
         else:
             print(f"   HuggingFace Token: Not configured (cache-only mode)")
 
+        # Guard the load itself. The preflight checks are static and the cgroup cap only bounds
+        # what the container can take; neither can see the host sliding into a reclaim livelock,
+        # which is the state that actually required the power button. This watches for it and
+        # ends the container first.
+        self.watchdog = None
+        if cmd and cmd[0] == "docker":
+            def _report(pressure: float, held_for_s: float) -> None:
+                print(
+                    f"\n🛑 Aborting load: memory stalled {pressure:.0f}% of the last 10s for "
+                    f"{held_for_s:.0f}s straight.\n"
+                    f"   Every task on the host was blocked on memory — the state that precedes a\n"
+                    f"   freeze. Killing '{container_name}' to give the memory back.\n"
+                )
+
+            self.watchdog = MemoryPressureWatchdog(container_name, on_trip=_report)
+            if not self.watchdog.start():
+                self.watchdog = None
+                print("⚠️  Kernel does not expose /proc/pressure/memory; load is unguarded.")
+
         if background:
             self.process = subprocess.Popen(
                 cmd,
@@ -1012,7 +1111,11 @@ class VLLMServerManager:
             self.streamer.start_streaming(self.process.stdout)
             return self.process
         else:
-            subprocess.run(cmd, check=True, env=env)
+            try:
+                subprocess.run(cmd, check=True, env=env)
+            finally:
+                if self.watchdog is not None:
+                    self.watchdog.stop()
             return None
 
     def stop_server(self, port: int = 8000) -> None:
@@ -1022,6 +1125,10 @@ class VLLMServerManager:
         """
         container_name = f"dreamference-vllm-{port}"
         print(f"🛑 Stopping vLLM container: {container_name}")
+        # Disarm first, so the watchdog cannot race the shutdown and report a kill of its own.
+        if self.watchdog is not None:
+            self.watchdog.stop()
+            self.watchdog = None
         subprocess.run(["docker", "stop", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"✅ Container {container_name} stopped.")
 
