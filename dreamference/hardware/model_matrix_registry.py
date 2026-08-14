@@ -70,6 +70,9 @@ class ModelMatrixRegistry:
                 "gpu_memory_utilization": 0.72,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
+                # Marlin MoE kernels rather than the CUTLASS FP4 path, which is compiled for SM120
+                # and silently emits garbage on the GB10's SM121.
+                "moe_backend": "marlin",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
                 # Self-speculation off the MTP head shipped in this checkpoint. 785 mtp.* tensors
@@ -91,7 +94,7 @@ class ModelMatrixRegistry:
                 # Lossless by construction — the full model verifies every proposal and keeps it
                 # only if it matches what it would have produced, so a bad head costs speed, not
                 # quality.
-                "speculative_config": {"method": "mtp", "num_speculative_tokens": 1},
+                "speculative_config": {"method": "mtp", "num_speculative_tokens": 1, "moe_backend": "triton"},
                 "extra_args": [
                     "--max-num-seqs", "4",
                     "--tensor-parallel-size", "1",
