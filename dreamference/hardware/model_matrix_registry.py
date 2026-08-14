@@ -27,14 +27,29 @@ class ModelMatrixRegistry:
             name="Qwen 3.5 122B-A10B (NVFP4)",
             params_b=122.0,
             supported_precisions=["NVFP4"],
-            min_memory_gb=60.0,
+            min_memory_gb=78.0,
             max_memory_gb=120.0,
             compatible_gb10=True,
-            notes="Default.",
+            notes=(
+                "Default. At 78 GB this checkpoint is 64% of a GB10's unified memory, and the weights "
+                "the driver pins are unreclaimable, so overshooting does not earn an OOM kill — the "
+                "host livelocks in reclaim until the power button. That froze this machine six times "
+                "on 2026-08-14 at every gpu_memory_utilization from 0.9 down to 0.3, which is why "
+                "the fraction is not the lever: what bounds the damage is the container's cgroup "
+                "memory cap. Tensorizer is deliberately not enabled here — NVFP4 checkpoints opt "
+                "out of it, and it would not help regardless, since it does no O_DIRECT or fadvise "
+                "and so never bypasses the page cache."
+            ),
             hf_repo_id="nvidia/Qwen3.5-122B-A10B-NVFP4",
             launch_overrides={
-                "max_model_len": 131072,
-                "gpu_memory_utilization": 0.3,
+                # 32k rather than the checkpoint's full 131072: the KV reservation is claimed during
+                # the load, which is the only phase that has ever taken this machine down, and the
+                # shorter context buys back roughly 15-20 GB of headroom exactly when it is scarcest.
+                # Raise it once a load completes cleanly and the steady-state footprint is known.
+                "max_model_len": 32768,
+                # Must exceed 0.64 to hold the weights at all, and stay under 0.90 to leave the
+                # host its reserve. 0.85 sits between them with ~25 GB left for KV and activations.
+                "gpu_memory_utilization": 0.85,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
                 "tool_call_parser": "qwen3_xml",

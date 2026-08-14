@@ -26,6 +26,14 @@ from dreamference.config.dreamference_config import (
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 DEFAULT_MAX_MODEL_LEN: Final[int] = 16384
 DEFAULT_GPU_MEMORY_UTILIZATION: Final[float] = 0.50
+# Memory held back from the vLLM container so the host keeps a responsive desktop and enough
+# page cache to stream weights. On unified memory every byte vLLM pins is a byte the compositor,
+# journald and the input stack no longer have.
+HOST_MEMORY_RESERVE_GB: Final[float] = 12.0
+# Swap below this leaves the kernel no cheap way to shed cold anonymous pages under load, which
+# is when it starts stalling on reclaim instead. Advisory only — a small swap is a warning, not a
+# refusal, since it degrades the odds rather than guaranteeing a hang.
+MIN_SWAP_GB: Final[float] = 64.0
 DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
 
 # Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
@@ -508,10 +516,24 @@ class VLLMServerManager:
             os.makedirs(hf_cache, exist_ok=True)
             os.makedirs(dgx_cache, exist_ok=True)
             
-            # Limit to 0.7 of total CPU cores to prevent GNOME freezes during model load
+            # Leave the host some CPU so the desktop keeps scheduling during model load.
             total_cpus = os.cpu_count() or 1
             cpus_limit = max(1.0, total_cpus * 0.7)
-            
+
+            # The memory cap is what actually stops a hard freeze. On unified memory the weights
+            # vLLM pins come out of the same pool as the compositor's, and the kernel cannot
+            # reclaim driver-pinned pages — so it livelocks in reclaim instead of OOM-killing
+            # anything (journals from the freezes show NVRM NV_ERR_NO_MEMORY and page-cache
+            # flushing, but no oom-kill). Capping the container's cgroup gives the kernel a
+            # bounded scope it *can* kill, turning a power-button reset into a dead container.
+            # --memory-swap equal to --memory disables container swap: swapping 70+ GB of weights
+            # to a 16 GB swapfile is what drags the desktop under before the cap is ever reached.
+            from dreamference.hardware.hardware_manager import HardwareManager
+            container_mem_gb = max(
+                1.0,
+                HardwareManager.detect_gb10_hardware().total_unified_memory_gb - HOST_MEMORY_RESERVE_GB,
+            )
+
             cmd = [
                 "docker", "run",
                 "--ipc=host",
@@ -519,6 +541,8 @@ class VLLMServerManager:
                 "--name", f"dreamference-vllm-{port}",
                 "--gpus", "all",
                 f"--cpus={cpus_limit:.1f}",
+                f"--memory={container_mem_gb:.0f}g",
+                f"--memory-swap={container_mem_gb:.0f}g",
                 "-v", f"{hf_cache}:/root/.cache/huggingface",
                 "-v", f"{dgx_cache}:/root/.cache/dreamference",
             ]
@@ -552,6 +576,139 @@ class VLLMServerManager:
             cmd.extend(str(a) for a in extra_args)
 
         return cmd
+
+    @staticmethod
+    def _oom_handler_active() -> bool:
+        """
+        Reports whether a userspace OOM handler is running.
+
+        Checks systemd-oomd and earlyoom, the two PSI-driven handlers packaged on Ubuntu. Either
+        one is sufficient; the point is only that *something* will act on memory pressure before
+        the kernel livelocks in reclaim.
+
+        Returns:
+            bool: True if systemd-oomd or earlyoom is active, False otherwise.
+        """
+        for unit in ("systemd-oomd", "earlyoom"):
+            try:
+                result = subprocess.run(
+                    ["systemctl", "is-active", "--quiet", unit],
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    return True
+            except (OSError, subprocess.SubprocessError):
+                continue
+        return False
+
+    @staticmethod
+    def _swap_total_gb() -> float:
+        """
+        Reads total configured swap in GB from /proc/meminfo.
+
+        Returns:
+            float: Total swap in GB, or 0.0 if /proc/meminfo is unreadable.
+        """
+        try:
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    if line.startswith("SwapTotal:"):
+                        return int(line.split()[1]) / (1024 ** 2)
+        except (OSError, ValueError, IndexError):
+            pass
+        return 0.0
+
+    @staticmethod
+    def _evict_model_page_cache(model: str) -> float:
+        """
+        Drops the model's shards from the page cache ahead of a load.
+
+        A failed or repeated launch leaves tens of GB of shard pages cached — 98 GB was resident
+        when this machine last froze. Those pages are clean and reclaimable in principle, but
+        reclaiming them *while* the loader streams the same files is what turns a slow load into a
+        livelock. Evicting first means the loader starts against free memory instead of racing
+        reclaim for it.
+
+        Uses posix_fadvise(POSIX_FADV_DONTNEED), which needs no privileges and touches only this
+        model's files, rather than /proc/sys/vm/drop_caches, which needs root and evicts globally.
+
+        Args:
+            model (str): Model key or alias whose snapshot should be evicted.
+
+        Returns:
+            float: Approximate GB of file data the eviction was requested for.
+        """
+        from dreamference.hardware import ModelDownloader
+
+        try:
+            snapshot_dir = ModelDownloader.get_model_snapshot_dir(model)
+        except Exception:
+            snapshot_dir = None
+        if not snapshot_dir:
+            return 0.0
+
+        evicted_bytes = 0
+        for path in sorted(snapshot_dir.rglob("*")):
+            try:
+                if not path.is_file():
+                    continue
+                size = path.stat().st_size
+                fd = os.open(path, os.O_RDONLY)
+            except OSError:
+                continue
+            try:
+                # length 0 means "to end of file"; DONTNEED is advisory and silently declines to
+                # drop pages that are still mapped or dirty, so this can only ever help.
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                evicted_bytes += size
+            except (OSError, AttributeError):
+                pass
+            finally:
+                os.close(fd)
+
+        return evicted_bytes / (1024 ** 3)
+
+    @staticmethod
+    def _estimate_model_weights_gb(model: str) -> float:
+        """
+        Estimates the resident weight footprint of a model in GB.
+
+        Prefers the on-disk size of the downloaded HuggingFace snapshot, which is exact for the
+        quantized checkpoints this project serves. Falls back to the registry's declared minimum
+        when the model has not been fetched yet, so the check still has a number to work with on
+        a first run.
+
+        Args:
+            model (str): Model key or alias to size.
+
+        Returns:
+            float: Estimated weight footprint in GB, or 0.0 if neither source knows the model.
+        """
+        from dreamference.hardware import ModelDownloader, ModelMatrixRegistry
+
+        try:
+            snapshot_dir = ModelDownloader.get_model_snapshot_dir(model)
+        except Exception:
+            snapshot_dir = None
+
+        if snapshot_dir:
+            total_bytes = 0
+            # Snapshots are trees of symlinks into the blob store; follow them so the shards are
+            # counted at full size rather than as zero-byte links.
+            for path in snapshot_dir.rglob("*"):
+                try:
+                    if path.is_file():
+                        total_bytes += path.stat().st_size
+                except OSError:
+                    continue
+            if total_bytes:
+                return total_bytes / (1024 ** 3)
+
+        try:
+            spec = ModelMatrixRegistry.get_spec(model)
+        except Exception:
+            spec = None
+        return float(spec.min_memory_gb) if spec else 0.0
 
     def start_server(
         self,
@@ -627,38 +784,141 @@ class VLLMServerManager:
                 "Current system does not meet the target specs."
             )
 
-        # Check memory availability
-        import subprocess
-        import sys
+        # sysstat provides sar/sadc, which is the only record of memory and I/O pressure that
+        # survives a hard reset. Model load has frozen this box hard enough to need the power
+        # button, and without sysstat there is nothing to read afterwards — so refuse to start.
+        if shutil.which("sar") is None:
+            print(
+                "\n❌ sysstat is not installed.\n"
+                "   Loading a model can freeze the machine, and sysstat's sar/sadc history is the\n"
+                "   only post-mortem evidence that survives a hard reset.\n\n"
+                "Install it with:\n"
+                "   sudo apt install sysstat && sudo sed -i 's/^ENABLED=.*/ENABLED=\"true\"/' /etc/default/sysstat && sudo systemctl enable --now sysstat\n"
+            )
+            sys.exit(1)
+
+        # An OOM handler is the difference between a dead container and a dead machine. Every
+        # freeze on 2026-08-14 shared one trait: the kernel OOM killer never ran. Driver-pinned
+        # pages are unreclaimable and are not charged to any process the killer would pick, so the
+        # kernel grinds in reclaim instead of ending anything. systemd-oomd and earlyoom watch PSI
+        # pressure and act *before* that point, which is the only thing that reliably breaks the
+        # livelock from inside.
+        if not self._oom_handler_active():
+            print(
+                "\n❌ No userspace OOM handler is running.\n"
+                "   Loading a large model on unified memory can starve the host without ever\n"
+                "   tripping the kernel OOM killer — the pages the driver pins are unreclaimable\n"
+                "   and belong to no killable process, so the machine livelocks instead of\n"
+                "   dropping the server. A PSI-driven handler ends it before that.\n\n"
+                "Enable one of:\n"
+                "   sudo systemctl enable --now systemd-oomd\n"
+                "   sudo apt install earlyoom && sudo systemctl enable --now earlyoom\n"
+            )
+            sys.exit(1)
+
+        swap_gb = self._swap_total_gb()
+        if swap_gb < MIN_SWAP_GB:
+            print(
+                f"\n⚠️  Swap is {swap_gb:.1f} GB; {MIN_SWAP_GB:.0f} GB or more is recommended before\n"
+                f"   loading a large model. Swap is what lets the kernel shed cold anonymous pages\n"
+                f"   slowly instead of stalling, and it costs only disk. To enlarge it:\n"
+                f"     sudo swapoff /swap.img\n"
+                f"     sudo fallocate -l {MIN_SWAP_GB:.0f}G /swap.img && sudo chmod 600 /swap.img\n"
+                f"     sudo mkswap /swap.img && sudo swapon /swap.img\n"
+            )
+
+        # Check memory availability.
+        #
+        # The budget that matters is the weight footprint, not a fraction of installed memory:
+        # gpu_memory_utilization sizes the KV/activation arena vLLM carves out, and scaling total
+        # memory by it says nothing about whether the checkpoint itself fits. A 78 GB checkpoint
+        # under a 0.3 recipe used to "require" ~38 GB and sail through this gate.
         from dreamference.hardware import get_model_launch_overrides
         overrides = get_model_launch_overrides(model)
         gpu_memory_utilization = overrides.get("gpu_memory_utilization", 0.9)
-        
+
         actual_total_gb = hw.total_unified_memory_gb
         actual_free_gb = hw.available_memory_gb
 
-        required_mem = actual_total_gb * gpu_memory_utilization
+        weights_gb = self._estimate_model_weights_gb(model)
+        if draft_model:
+            weights_gb += self._estimate_model_weights_gb(draft_model)
 
-        if actual_free_gb < required_mem:
-            missing_mem = required_mem - actual_free_gb
+        # vLLM sizes its whole allocation — weights included — as a fraction of total memory,
+        # so this arena is the ceiling on everything the server will pin.
+        arena_gb = actual_total_gb * gpu_memory_utilization
+
+        def _abort(headline: str, detail: str) -> None:
             try:
                 ps_output = subprocess.check_output(
-                    ["ps", "-eo", "pid,user,%mem,rss,cmd", "--sort=-%mem"], 
+                    ["ps", "-eo", "pid,user,%mem,rss,cmd", "--sort=-%mem"],
                     text=True
                 )
-                lines = ps_output.splitlines()
-                top_procs = "\n".join(lines[:11])
+                top_procs = "\n".join(ps_output.splitlines()[:11])
             except Exception:
                 top_procs = "Could not retrieve process list."
-                
-            print(
-                f"\n❌ Not enough memory to start vLLM.\n"
-                f"   Required:  {required_mem:.2f} GB\n"
-                f"   Available: {actual_free_gb:.2f} GB\n"
-                f"   Missing:   {missing_mem:.2f} GB\n\n"
-                f"Top memory consuming processes:\n{top_procs}\n"
-            )
+            print(f"\n❌ {headline}\n{detail}\n\nTop memory consuming processes:\n{top_procs}\n")
             sys.exit(1)
+
+        # Weights are pinned by the driver and therefore unreclaimable, so they have to fit
+        # alongside the host's reserve on their own. This is a static floor only: it cannot model
+        # the reclaim storm that actually froze this machine, which is what the container's cgroup
+        # memory cap in build_launch_command is there to bound.
+        if weights_gb and weights_gb > actual_total_gb - HOST_MEMORY_RESERVE_GB:
+            _abort(
+                f"'{model}' is too large to load on this machine.",
+                f"   Weights:     {weights_gb:.2f} GB\n"
+                f"   Usable:      {actual_total_gb - HOST_MEMORY_RESERVE_GB:.2f} GB "
+                f"({actual_total_gb:.2f} GB total - {HOST_MEMORY_RESERVE_GB:.2f} GB host reserve)\n\n"
+                f"gpu_memory_utilization does not govern this — the weights overrun memory before the\n"
+                f"arena is consulted, so lowering it will not help. Serve a smaller checkpoint.",
+            )
+
+        # The checkpoint also has to fit the arena it will be loaded into, or vLLM's own budget is
+        # incoherent: a 78 GB checkpoint under a 0.3 recipe asks for an arena less than half its
+        # own weights. The `total * utilization` check this replaced could not see that.
+        if weights_gb and weights_gb >= arena_gb:
+            _abort(
+                f"Model weights do not fit the configured memory arena for '{model}'.",
+                f"   Weights:     {weights_gb:.2f} GB\n"
+                f"   Arena:       {arena_gb:.2f} GB "
+                f"({gpu_memory_utilization:.2f} x {actual_total_gb:.2f} GB total)\n\n"
+                f"This recipe's gpu_memory_utilization is too low to hold its own weights — it needs\n"
+                f"at least {weights_gb / actual_total_gb:.2f}. Fix the recipe rather than the machine.",
+            )
+
+        # The arena has to leave the host enough to stay alive. Driver-pinned pages are not
+        # reclaimable, so an arena that crowds the host does not get an OOM kill — it freezes.
+        if actual_total_gb - arena_gb < HOST_MEMORY_RESERVE_GB:
+            _abort(
+                f"Memory arena leaves too little for the host.",
+                f"   Arena:       {arena_gb:.2f} GB "
+                f"({gpu_memory_utilization:.2f} x {actual_total_gb:.2f} GB total)\n"
+                f"   Host left:   {actual_total_gb - arena_gb:.2f} GB\n"
+                f"   Reserve:     {HOST_MEMORY_RESERVE_GB:.2f} GB\n\n"
+                f"Lower gpu_memory_utilization to at most "
+                f"{(actual_total_gb - HOST_MEMORY_RESERVE_GB) / actual_total_gb:.2f} for this machine.",
+            )
+
+        # Hand the loader free memory rather than memory it has to reclaim out from under itself.
+        # Done before the availability check below so that check scores the state the loader will
+        # actually see, not the state a previous failed attempt left behind.
+        evicted_gb = self._evict_model_page_cache(model)
+        if evicted_gb:
+            actual_free_gb = HardwareManager.detect_gb10_hardware().available_memory_gb
+            print(
+                f"🧹 Dropped ~{evicted_gb:.2f} GB of cached shards for '{model}' "
+                f"({actual_free_gb:.2f} GB now available)."
+            )
+
+        # And the arena has to be free right now, not merely installed.
+        if actual_free_gb < arena_gb:
+            _abort(
+                "Not enough memory to start vLLM.",
+                f"   Required:    {arena_gb:.2f} GB\n"
+                f"   Available:   {actual_free_gb:.2f} GB\n"
+                f"   Missing:     {arena_gb - actual_free_gb:.2f} GB",
+            )
 
         # Step 1: Pre-download model weights into local cache and convert to tensorize format.
         # Resolve the tensorizer decision up front: some checkpoints opt out in their registry recipe,

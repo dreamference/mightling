@@ -189,10 +189,22 @@ class ModelDownloader:
                         
                     total_cpus = os.cpu_count() or 1
                     cpus_limit = max(1.0, total_cpus * 0.7)
-                    
+
+                    # Serialization loads the full checkpoint, so it carries the same freeze risk as
+                    # serving it: unreclaimable driver-pinned pages starve the host with no OOM kill
+                    # to end it. Bound the container's cgroup so the kernel has something it can kill.
+                    from dreamference.vllm_server.vllm_server_manager import HOST_MEMORY_RESERVE_GB
+                    from dreamference.hardware.hardware_manager import HardwareManager
+                    container_mem_gb = max(
+                        1.0,
+                        HardwareManager.detect_gb10_hardware().total_unified_memory_gb - HOST_MEMORY_RESERVE_GB,
+                    )
+
                     cmd = [
                         "docker", "run", "--rm", "--gpus", "all",
                         f"--cpus={cpus_limit:.1f}",
+                        f"--memory={container_mem_gb:.0f}g",
+                        f"--memory-swap={container_mem_gb:.0f}g",
                         "-v", f"{hf_cache}:/root/.cache/huggingface",
                         "-v", f"{dgx_cache}:/root/.cache/dreamference",
                         "--entrypoint", "python3",
