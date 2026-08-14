@@ -303,9 +303,10 @@ def test_start_server_forwards_guided_decoding_backend(monkeypatch):
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
     monkeypatch.setattr(mgr, "ensure_docker_image", lambda img=DEFAULT_VLLM_IMAGE: True)
     monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: None)
-    # Host-safety gates depend on machine state (OOM handler, page cache) that says nothing about
-    # argument forwarding, so pin them rather than letting the test track the developer's box.
-    monkeypatch.setattr(mgr, "_oom_handler_active", lambda: True)
+    # Host-safety gates depend on machine state (sysstat, OOM handler, page cache) that says
+    # nothing about argument forwarding, so pin them rather than letting the test track whichever
+    # box it runs on.
+    monkeypatch.setattr(VLLMServerManager, "check_host_safety", classmethod(lambda cls: None))
     monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
 
     def fake_build(**kwargs):

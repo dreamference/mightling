@@ -147,6 +147,12 @@ class ModelDownloader:
             print(f"✅ Model '{model_key}' is already saved in tensorize format ({tpath}).")
             return True
 
+        # Serialization loads the whole checkpoint, so it carries the same freeze risk as serving
+        # it and has to clear the same gate — reachable directly via `dream model download`, which
+        # never passes through start_server.
+        from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
+        VLLMServerManager.check_host_safety()
+
         # Ensure HF snapshot exists
         if not cls.is_model_downloaded(model_key):
             print(f"📥 Pre-downloading HF weights for '{model_key}' prior to tensorization...")

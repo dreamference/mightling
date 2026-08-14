@@ -577,6 +577,64 @@ class VLLMServerManager:
 
         return cmd
 
+    @classmethod
+    def check_host_safety(cls) -> None:
+        """
+        Verifies the host can survive loading a large model, and exits with instructions if not.
+
+        Applies to anything that materialises a full checkpoint — serving it or serialising it —
+        because both pin the same tens of GB. Every check here failed open before 2026-08-14, when
+        six loads in one hour took the machine down hard enough to need the power button.
+
+        Refuses to proceed when sysstat is missing (no post-mortem survives a hard reset) or when
+        no userspace OOM handler is running (nothing ends the livelock from inside). Warns, but
+        does not refuse, on small swap: it worsens the odds rather than guaranteeing a hang.
+
+        Raises:
+            SystemExit: If sysstat is absent or no OOM handler is active.
+        """
+        # sysstat's sar/sadc history is the only record of memory and I/O pressure that outlives a
+        # hard reset. Without it a freeze leaves nothing to diagnose from.
+        if shutil.which("sar") is None:
+            print(
+                "\n❌ sysstat is not installed.\n"
+                "   Loading a model can freeze the machine, and sysstat's sar/sadc history is the\n"
+                "   only post-mortem evidence that survives a hard reset.\n\n"
+                "Install it with:\n"
+                "   sudo apt install sysstat && sudo sed -i 's/^ENABLED=.*/ENABLED=\"true\"/' /etc/default/sysstat && sudo systemctl enable --now sysstat\n"
+            )
+            sys.exit(1)
+
+        # An OOM handler is the difference between a dead container and a dead machine. Every
+        # freeze on 2026-08-14 shared one trait: the kernel OOM killer never ran. Driver-pinned
+        # pages are unreclaimable and are not charged to any process the killer would pick, so the
+        # kernel grinds in reclaim instead of ending anything. systemd-oomd and earlyoom watch PSI
+        # pressure and act *before* that point, which is the only thing that reliably breaks the
+        # livelock from inside.
+        if not cls._oom_handler_active():
+            print(
+                "\n❌ No userspace OOM handler is running.\n"
+                "   Loading a large model on unified memory can starve the host without ever\n"
+                "   tripping the kernel OOM killer — the pages the driver pins are unreclaimable\n"
+                "   and belong to no killable process, so the machine livelocks instead of\n"
+                "   dropping the server. A PSI-driven handler ends it before that.\n\n"
+                "Enable one of:\n"
+                "   sudo systemctl enable --now systemd-oomd\n"
+                "   sudo apt install earlyoom && sudo systemctl enable --now earlyoom\n"
+            )
+            sys.exit(1)
+
+        swap_gb = cls._swap_total_gb()
+        if swap_gb < MIN_SWAP_GB:
+            print(
+                f"\n⚠️  Swap is {swap_gb:.1f} GB; {MIN_SWAP_GB:.0f} GB or more is recommended before\n"
+                f"   loading a large model. Swap is what lets the kernel shed cold anonymous pages\n"
+                f"   slowly instead of stalling, and it costs only disk. To enlarge it:\n"
+                f"     sudo swapoff /swap.img\n"
+                f"     sudo fallocate -l {MIN_SWAP_GB:.0f}G /swap.img && sudo chmod 600 /swap.img\n"
+                f"     sudo mkswap /swap.img && sudo swapon /swap.img\n"
+            )
+
     @staticmethod
     def _oom_handler_active() -> bool:
         """
@@ -784,48 +842,7 @@ class VLLMServerManager:
                 "Current system does not meet the target specs."
             )
 
-        # sysstat provides sar/sadc, which is the only record of memory and I/O pressure that
-        # survives a hard reset. Model load has frozen this box hard enough to need the power
-        # button, and without sysstat there is nothing to read afterwards — so refuse to start.
-        if shutil.which("sar") is None:
-            print(
-                "\n❌ sysstat is not installed.\n"
-                "   Loading a model can freeze the machine, and sysstat's sar/sadc history is the\n"
-                "   only post-mortem evidence that survives a hard reset.\n\n"
-                "Install it with:\n"
-                "   sudo apt install sysstat && sudo sed -i 's/^ENABLED=.*/ENABLED=\"true\"/' /etc/default/sysstat && sudo systemctl enable --now sysstat\n"
-            )
-            sys.exit(1)
-
-        # An OOM handler is the difference between a dead container and a dead machine. Every
-        # freeze on 2026-08-14 shared one trait: the kernel OOM killer never ran. Driver-pinned
-        # pages are unreclaimable and are not charged to any process the killer would pick, so the
-        # kernel grinds in reclaim instead of ending anything. systemd-oomd and earlyoom watch PSI
-        # pressure and act *before* that point, which is the only thing that reliably breaks the
-        # livelock from inside.
-        if not self._oom_handler_active():
-            print(
-                "\n❌ No userspace OOM handler is running.\n"
-                "   Loading a large model on unified memory can starve the host without ever\n"
-                "   tripping the kernel OOM killer — the pages the driver pins are unreclaimable\n"
-                "   and belong to no killable process, so the machine livelocks instead of\n"
-                "   dropping the server. A PSI-driven handler ends it before that.\n\n"
-                "Enable one of:\n"
-                "   sudo systemctl enable --now systemd-oomd\n"
-                "   sudo apt install earlyoom && sudo systemctl enable --now earlyoom\n"
-            )
-            sys.exit(1)
-
-        swap_gb = self._swap_total_gb()
-        if swap_gb < MIN_SWAP_GB:
-            print(
-                f"\n⚠️  Swap is {swap_gb:.1f} GB; {MIN_SWAP_GB:.0f} GB or more is recommended before\n"
-                f"   loading a large model. Swap is what lets the kernel shed cold anonymous pages\n"
-                f"   slowly instead of stalling, and it costs only disk. To enlarge it:\n"
-                f"     sudo swapoff /swap.img\n"
-                f"     sudo fallocate -l {MIN_SWAP_GB:.0f}G /swap.img && sudo chmod 600 /swap.img\n"
-                f"     sudo mkswap /swap.img && sudo swapon /swap.img\n"
-            )
+        self.check_host_safety()
 
         # Check memory availability.
         #
