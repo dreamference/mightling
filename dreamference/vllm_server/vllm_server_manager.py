@@ -1417,19 +1417,51 @@ class VLLMServerManager:
         Gathers complete server status report.
 
         Returns:
-            Dict[str, Any]: Dictionary with 'host', 'healthy', 'models', 'pid'.
+            Dict[str, Any]: Dictionary with 'host', 'healthy', 'models', 'pid', 'loading_status'.
         """
         healthy = self.check_health()
         models = self.get_models() if healthy else []
+        
+        loading_status = None
+        if not healthy:
+            import subprocess
+            port = self.host.split(":")[-1] if ":" in self.host else "8000"
+            container_name = f"dreamference-vllm-{port}"
+            try:
+                res = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", container_name], capture_output=True, text=True)
+                if res.stdout.strip() == "true":
+                    log_res = subprocess.run(["docker", "logs", "--tail", "100", container_name], capture_output=True, text=True)
+                    logs = log_res.stdout + "\n" + log_res.stderr
+                    for line in reversed(logs.splitlines()):
+                        line_lower = line.lower()
+                        if "loading safetensors checkpoint shards" in line_lower:
+                            loading_status = line.strip()
+                            break
+                        elif "warm up the model" in line_lower or "warming up" in line_lower:
+                            loading_status = "Warming up model (CUDA graphs)..."
+                            break
+                        elif "loading model" in line_lower or "load model" in line_lower:
+                            loading_status = "Loading model weights into GPU memory..."
+                            break
+                        elif "downloading" in line_lower or "hf_hub_download" in line_lower:
+                            loading_status = "Downloading model components..."
+                            break
+                    if not loading_status:
+                        loading_status = "Initializing container..."
+            except Exception:
+                pass
+
         status = VLLMServerStatus(
             host=self.host,
             healthy=healthy,
             models=models,
-            pid=self.process.pid if self.process else None
+            pid=self.process.pid if self.process else None,
+            loading_status=loading_status
         )
         return {
             "host": status.host,
             "healthy": status.healthy,
             "models": status.models,
-            "pid": status.pid
+            "pid": status.pid,
+            "loading_status": status.loading_status
         }

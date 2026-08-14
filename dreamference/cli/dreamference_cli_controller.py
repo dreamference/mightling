@@ -85,7 +85,12 @@ class DreamferenceCLIController:
         agent_table.add_column("Property", style="bold cyan")
         agent_table.add_column("Value", style="white")
 
-        vllm_str = f"[green]Online ({config.vllm_host})[/green]" if vllm_status["healthy"] else f"[red]Offline ({config.vllm_host})[/red]"
+        if vllm_status["healthy"]:
+            vllm_str = f"[green]Online ({config.vllm_host})[/green]"
+        elif vllm_status.get("loading_status"):
+            vllm_str = f"[yellow]Starting ({vllm_status['loading_status']})[/yellow]"
+        else:
+            vllm_str = f"[red]Offline ({config.vllm_host})[/red]"
         goose_str = "[green]Installed[/green]" if goose_runner.is_goose_installed() else "[yellow]Not Found[/yellow]"
         cline_str = "[green]Extension Ready[/green]" if ClineInstaller.is_cline_extension_installed() else "[yellow]Extension Available[/yellow]"
         aider_str = "[green]CLI Ready[/green]" if AiderInstaller.is_installed() else "[yellow]CLI Available[/yellow]"

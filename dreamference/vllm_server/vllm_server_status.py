@@ -23,3 +23,4 @@ class VLLMServerStatus:
     healthy: bool
     models: List[str]
     pid: Optional[int]
+    loading_status: Optional[str] = None
