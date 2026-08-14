@@ -408,6 +408,14 @@ class DreamferenceCLIController:
                 out_console = Console()
                 out_console.print("[bold cyan]🔍 Inspecting Main Model[/bold cyan]")
 
+                # One session for every probe against the local server, rather than the module
+                # level requests.get/post helpers. Each of those builds a throwaway Session with
+                # its own connection pool and never closes it, so eleven probes left eleven
+                # sockets in CLOSE-WAIT for the life of the process — visible in `ss` after any
+                # `dream main-model inspect`. A shared session also reuses the one connection
+                # instead of reconnecting per probe. External hosts stay on the module API.
+                session = requests.Session()
+
                 vllm_host = config.vllm_host
                 api_base = f"{vllm_host}/v1/chat/completions"
                 api_key = "gb10-local-token"
@@ -416,7 +424,7 @@ class DreamferenceCLIController:
                 model_name = config.model
                 max_model_len = "Unknown"
                 try:
-                    models_response = requests.get(f"{vllm_host}/v1/models", timeout=5)
+                    models_response = session.get(f"{vllm_host}/v1/models", timeout=5)
                     if models_response.status_code == 200:
                         models_data = models_response.json()
                         if models_data.get("data"):
@@ -443,7 +451,7 @@ class DreamferenceCLIController:
                     "temperature": 0.1
                 }
                 try:
-                    r_response = requests.post(api_base, json=payload_reasoning, headers=headers, timeout=15)
+                    r_response = session.post(api_base, json=payload_reasoning, headers=headers, timeout=15)
                     if r_response.status_code == 200:
                         msg = r_response.json().get("choices", [{}])[0].get("message", {})
                         content = msg.get("content") or ""
@@ -467,7 +475,7 @@ class DreamferenceCLIController:
                         "max_tokens": 1,
                     }
                     try:
-                        resp = requests.post(api_base, json=payload_role, headers=headers, timeout=5)
+                        resp = session.post(api_base, json=payload_role, headers=headers, timeout=5)
                         if resp.status_code == 200:
                             supported_roles.append(role)
                     except Exception:
@@ -483,7 +491,7 @@ class DreamferenceCLIController:
                     "temperature": 0
                 }
                 try:
-                    c_response = requests.post(api_base, json=payload_chatml, headers=headers, timeout=15)
+                    c_response = session.post(api_base, json=payload_chatml, headers=headers, timeout=15)
                     if c_response.status_code == 200:
                         msg = c_response.json().get("choices", [{}])[0].get("message", {})
                         content = msg.get("content") or ""
@@ -501,7 +509,7 @@ class DreamferenceCLIController:
                     "temperature": 0
                 }
                 try:
-                    a_response = requests.post(api_base, json=payload_artifact, headers=headers, timeout=15)
+                    a_response = session.post(api_base, json=payload_artifact, headers=headers, timeout=15)
                     if a_response.status_code == 200:
                         msg = a_response.json().get("choices", [{}])[0].get("message", {})
                         content = msg.get("content") or ""
@@ -521,7 +529,7 @@ class DreamferenceCLIController:
                     "seed": 42
                 }
                 try:
-                    t_response = requests.post(api_base, json=payload_tags, headers=headers, timeout=15)
+                    t_response = session.post(api_base, json=payload_tags, headers=headers, timeout=15)
                     if t_response.status_code == 200:
                         msg = t_response.json().get("choices", [{}])[0].get("message", {})
                         content = msg.get("content") or ""
@@ -544,15 +552,22 @@ class DreamferenceCLIController:
                 }
                 try:
                     start_stream = time.time()
-                    s_response = requests.post(api_base, json=payload_stream, headers=headers, timeout=15, stream=True)
-                    if s_response.status_code == 200:
-                        for line in s_response.iter_lines():
-                            if line:
-                                decoded_line = line.decode('utf-8')
-                                if decoded_line.startswith("data: ") and decoded_line != "data: [DONE]":
-                                    ttft = time.time() - start_stream
-                                    supports_streaming = True
-                                    break
+                    # `with` rather than a bare call: this probe measures time-to-first-token and
+                    # then breaks, deliberately abandoning the rest of the body. A streamed
+                    # response whose body is never finished holds its connection open, and the
+                    # server's FIN then leaves the socket in CLOSE-WAIT for the life of the
+                    # process — `dream main-model inspect` was leaking one per probe.
+                    with session.post(
+                        api_base, json=payload_stream, headers=headers, timeout=15, stream=True
+                    ) as s_response:
+                        if s_response.status_code == 200:
+                            for line in s_response.iter_lines():
+                                if line:
+                                    decoded_line = line.decode('utf-8')
+                                    if decoded_line.startswith("data: ") and decoded_line != "data: [DONE]":
+                                        ttft = time.time() - start_stream
+                                        supports_streaming = True
+                                        break
                 except Exception:
                     pass
 
@@ -593,7 +608,7 @@ class DreamferenceCLIController:
                     "temperature": 0
                 }
                 try:
-                    tool_resp = requests.post(api_base, json=payload_tool_test, headers=headers, timeout=15)
+                    tool_resp = session.post(api_base, json=payload_tool_test, headers=headers, timeout=15)
                     if tool_resp.status_code == 200:
                         msg = tool_resp.json().get("choices", [{}])[0].get("message", {})
                         if "tool_calls" in msg and msg["tool_calls"]:
@@ -611,7 +626,7 @@ class DreamferenceCLIController:
                     "temperature": 0
                 }
                 try:
-                    json_resp = requests.post(api_base, json=payload_json, headers=headers, timeout=5)
+                    json_resp = session.post(api_base, json=payload_json, headers=headers, timeout=5)
                     if json_resp.status_code == 200:
                         supports_json = True
                 except Exception:
@@ -620,7 +635,7 @@ class DreamferenceCLIController:
                 # Check KV Cache metrics
                 kv_cache_usage = "Unknown"
                 try:
-                    metrics_resp = requests.get(f"{vllm_host}/metrics", timeout=2)
+                    metrics_resp = session.get(f"{vllm_host}/metrics", timeout=2)
                     if metrics_resp.status_code == 200:
                         import re
                         match = re.search(r'vllm:kv_cache_usage_perc\{[^}]+\}\s+([0-9.]+)', metrics_resp.text)
@@ -770,9 +785,12 @@ class DreamferenceCLIController:
                     if "kwargs" in p_data:
                         payload.update(p_data["kwargs"])
                     start_time = time.time()
+                    # Bound before the try so the finally below can close it unconditionally —
+                    # if the post itself raises, the name would otherwise be undefined there.
+                    response = None
                     try:
                         out_console.print(f"[bold green]▶ Running Prompt:[/bold green] {prompt}")
-                        response = requests.post(api_base, json=payload, headers=headers, timeout=15, stream=True)
+                        response = session.post(api_base, json=payload, headers=headers, timeout=15, stream=True)
                         if response.status_code == 200:
                             import json
                             full_content = ""
@@ -825,8 +843,17 @@ class DreamferenceCLIController:
                         latency = time.time() - start_time
                         out_console.print(f"[red]Failed: {e}[/red]\n")
                         table.add_row(prompt, "[red]Failed[/red]", f"{latency:.2f}", "N/A", str(e).replace("\n", " ")[:50])
+                    finally:
+                        # Streamed responses do not release their connection until the body is
+                        # finished or the response is closed, and neither is guaranteed here: a
+                        # non-200 skips the iteration entirely, and a mid-stream error leaves it
+                        # part-read. Without this the sockets sit in CLOSE-WAIT until the process
+                        # exits — harmless for one run, unbounded for anything that loops.
+                        if response is not None:
+                            response.close()
 
                 out_console.print(table)
+                session.close()
                 sys.exit(0)
 
 
