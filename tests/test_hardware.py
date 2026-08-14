@@ -37,14 +37,17 @@ def test_default_model_is_registered_and_gb10_compatible():
     from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
     assert spec.compatible_gb10 is True
-    assert spec.hf_repo_id == "nvidia/Qwen3.6-35B-A3B-NVFP4"
+    assert spec.hf_repo_id == "nvidia/Qwen3.5-122B-A10B-NVFP4"
 
 def test_launch_overrides_are_isolated_per_call():
     from dreamference.hardware import get_model_launch_overrides
     from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+    # Read the expected value from the registry rather than repeating it: this test is about
+    # mutation isolation, and hardcoding the recipe's value makes it fail on every retune.
+    original = MODEL_MATRIX[DEFAULT_MODEL_ALIAS].launch_overrides["max_model_len"]
     first = get_model_launch_overrides(DEFAULT_MODEL_ALIAS)
     first["max_model_len"] = 1
-    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS)["max_model_len"] == 131072
+    assert get_model_launch_overrides(DEFAULT_MODEL_ALIAS)["max_model_len"] == original
     assert get_model_launch_overrides("qwen2.5-coder-32b") == {}
     assert get_model_launch_overrides("some/unknown-repo") == {}
 
