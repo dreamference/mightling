@@ -65,9 +65,29 @@ class CodexRunner:
         os.makedirs(codex_config_dir, exist_ok=True)
         codex_config_path = os.path.join(codex_config_dir, "config.toml")
         
+        catalog_path = os.path.join(codex_config_dir, "model_catalog.json")
+        if not os.path.exists(catalog_path):
+            catalog_content = f"""{{
+  "models": [
+    {{
+      "id": "{hf_model}",
+      "slug": "{hf_model}",
+      "display_name": "{hf_model}",
+      "max_context_window": 131072,
+      "supported_reasoning_levels": ["none"],
+      "default_reasoning_level": "none",
+      "shell_type": "default",
+      "visibility": "public",
+      "truncation_policy": "none",
+      "auto_compact_token_limit": 131072
+    }}
+  ]
+}}"""
+            with open(catalog_path, "w") as f:
+                f.write(catalog_content)
+
         provider_config = f"""
-oss = true
-oss_provider = "openai-custom"
+model_catalog_json = "{catalog_path}"
 
 [model_providers.openai-custom]
 name = "openai-custom"
@@ -80,9 +100,14 @@ base_url = "{api_base}"
             if "openai-custom" not in existing_config:
                 with open(codex_config_path, "a") as f:
                     f.write("\n" + provider_config)
+            elif "model_catalog_json" not in existing_config:
+                # Add it if missing but openai-custom is present
+                with open(codex_config_path, "a") as f:
+                    f.write(f'\nmodel_catalog_json = "{catalog_path}"\n')
         else:
             with open(codex_config_path, "w") as f:
                 f.write(provider_config)
+
 
         env = os.environ.copy()
         # Codex CLI doesn't use OPENAI_API_KEY natively for custom providers, but we set it just in case

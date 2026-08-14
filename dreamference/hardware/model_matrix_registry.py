@@ -111,7 +111,7 @@ class ModelMatrixRegistry:
                 # Lossless by construction — the full model verifies every proposal and keeps it
                 # only if it matches what it would have produced, so a bad head costs speed, not
                 # quality.
-                "speculative_config": {"method": "mtp", "num_speculative_tokens": 1, "moe_backend": "triton"},
+                # "speculative_config": {"method": "mtp", "num_speculative_tokens": 1, "moe_backend": "triton"},
                 "extra_args": [
                     "--max-num-seqs", "4",
                     "--tensor-parallel-size", "1",

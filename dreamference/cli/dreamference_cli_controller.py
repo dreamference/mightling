@@ -280,8 +280,13 @@ class DreamferenceCLIController:
         remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM Docker container")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
 
+        # Command: dream server logs
+        server_logs_parser = server_subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
+        server_logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
+
         # Command: dream logs
         logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
+        logs_parser.add_argument("target", nargs="?", choices=["server"], help="Optional target to tail logs for")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
         # Command: dream codex
@@ -1079,6 +1084,13 @@ class DreamferenceCLIController:
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.remove_server(port=args.port)
+            elif args.server_command == "logs":
+                cls.display_header()
+                vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+                try:
+                    vllm_mgr.show_request_logs(port=args.port)
+                except KeyboardInterrupt:
+                    print("\nStopped tailing logs.")
 
         elif args.command == "codex":
             import subprocess

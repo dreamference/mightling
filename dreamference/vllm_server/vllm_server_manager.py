@@ -662,6 +662,8 @@ class VLLMServerManager:
                 cmd.extend(["-e", f"{env_key}={env_val}"])
             cmd.extend(["-e", "CUTE_DSL_ARCH=sm_121a"])
             cmd.extend(["-e", "VLLM_LOGGING_LEVEL=DEBUG"])
+            cmd.extend(["-e", "VLLM_DEBUG_LOG_API_SERVER_RESPONSE=1"])
+            cmd.extend(["-e", "VLLM_DEBUG_LOG_API_SERVER_REQUEST=1"])
             cmd.extend(["--entrypoint", "vllm", docker_image, "serve", hf_model] + base_args)
         else:
             raise RuntimeError(
@@ -1353,14 +1355,26 @@ class VLLMServerManager:
                 print("⚠️  Kernel does not expose /proc/pressure/memory; load is unguarded.")
 
         if background:
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                env=env
-            )
+            if cmd and cmd[0] == "docker":
+                cmd.insert(2, "-d")
+                subprocess.run(cmd, check=True, env=env)
+                self.process = subprocess.Popen(
+                    ["docker", "logs", "-f", container_name],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=env
+                )
+            else:
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=env
+                )
             self.streamer.start_streaming(self.process.stdout)
             return self.process
         else:
