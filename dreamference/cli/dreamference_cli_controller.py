@@ -416,6 +416,20 @@ class DreamferenceCLIController:
                 # instead of reconnecting per probe. External hosts stay on the module API.
                 session = requests.Session()
 
+                # Capability probes ask a short factual question and grep the answer, so the
+                # model's thinking channel is not merely wasted budget — it silently breaks them.
+                # A reasoning model opens <think> immediately, the reasoning parser buffers that
+                # span until its closing tag, and a probe capped at 50-100 tokens truncates first.
+                # The parser then flushes nothing: both `content` and `reasoning_content` come back
+                # empty with finish_reason='length', and every probe reads that as "unsupported".
+                # Measured on Qwen3.5-122B: the antArtifact probe reported No at 100 and 400
+                # tokens, and the correct answer in 34 with thinking off. `Tags: None detected`
+                # was the same false negative at max_tokens 50.
+                #
+                # Unknown chat_template_kwargs are simply unused variables to a Jinja template, so
+                # this is inert on models that do not have a thinking channel to disable.
+                no_thinking = {"chat_template_kwargs": {"enable_thinking": False}}
+
                 vllm_host = config.vllm_host
                 api_base = f"{vllm_host}/v1/chat/completions"
                 api_key = "gb10-local-token"
@@ -488,7 +502,8 @@ class DreamferenceCLIController:
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Print the ChatML tag '<|im_start|>' exactly as written."}],
                     "max_tokens": 100,
-                    "temperature": 0
+                    "temperature": 0,
+                    **no_thinking
                 }
                 try:
                     c_response = session.post(api_base, json=payload_chatml, headers=headers, timeout=15)
@@ -506,7 +521,8 @@ class DreamferenceCLIController:
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Create a one line python script and wrap it in <antArtifact> tags."}],
                     "max_tokens": 100,
-                    "temperature": 0
+                    "temperature": 0,
+                    **no_thinking
                 }
                 try:
                     a_response = session.post(api_base, json=payload_artifact, headers=headers, timeout=15)
@@ -526,7 +542,8 @@ class DreamferenceCLIController:
                     "max_tokens": 50,
                     "temperature": 0,
                     "top_p": 0.01,
-                    "seed": 42
+                    "seed": 42,
+                    **no_thinking
                 }
                 try:
                     t_response = session.post(api_base, json=payload_tags, headers=headers, timeout=15)
@@ -623,7 +640,8 @@ class DreamferenceCLIController:
                     "messages": [{"role": "user", "content": "Output a JSON object with key 'hello' and value 'world'."}],
                     "response_format": {"type": "json_object"},
                     "max_tokens": 50,
-                    "temperature": 0
+                    "temperature": 0,
+                    **no_thinking
                 }
                 try:
                     json_resp = session.post(api_base, json=payload_json, headers=headers, timeout=5)
