@@ -92,7 +92,7 @@ base_url = "{api_base}"
             codex_bin,
             "--oss",
             "--local-provider", "openai-custom",
-            "--model", f"openai-custom/{hf_model}"
+            "--model", hf_model
         ]
 
         if prompt:
