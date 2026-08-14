@@ -70,8 +70,25 @@ class ModelMatrixRegistry:
                 "gpu_memory_utilization": 0.72,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
-                # Marlin MoE kernels rather than the CUTLASS FP4 path, which is compiled for SM120
-                # and silently emits garbage on the GB10's SM121.
+                # Marlin, because every FlashInfer FP4 expert path on this box is SM120 code. That
+                # is broader than the CUTLASS caveat in the 35b notes below: flashinfer_b12x fails
+                # here too, and for the same reason. Measured 2026-08-14 —
+                # `--moe-backend flashinfer_b12x` passes the oracle's arch check
+                # ("Using 'FLASHINFER_B12X' NvFp4 MoE backend"), loads all 9 shards, compiles, and
+                # then dies in the KV-profiling forward:
+                #
+                #   flashinfer/fused_moe/cute_dsl/b12x_moe.py -> launch_sm120_moe
+                #   RuntimeError: CUDA Error: cudaErrorInvalidValue
+                #   kernel 'MoEDynamicKernel...' launch shared memory exceeds curr[ent limit]
+                #
+                # The dispatch entry point is named launch_sm120_moe: the kernel is built for
+                # SM120's shared-memory budget and asks for more than SM121 grants, so the launch
+                # is rejected. The oracle only checks the arch family, which is why selection
+                # succeeds and launch does not.
+                #
+                # This one fails loudly, unlike the CUTLASS corruption — a failed load, not bad
+                # output. Do not re-try the FlashInfer FP4 backends here without first confirming
+                # the shared-memory request against SM121's per-block limit.
                 "moe_backend": "marlin",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
@@ -100,6 +117,18 @@ class ModelMatrixRegistry:
                     "--tensor-parallel-size", "1",
                     "--dtype", "auto",
                 ],
+                # Marlin accumulates partial products per thread block and reduces them at the end.
+                # The atomic-add reduction is the faster path when the block count is high, which it
+                # is here: 256 experts at intermediate_size 1024 makes every expert GEMM small and
+                # numerous. Set on the 35b recipe since before this model was added; carried over
+                # now that the 122b is on marlin too, for the same reason.
+                #
+                # Not bit-identical run to run — atomic float adds commit in nondeterministic order.
+                # That is a throughput-for-reproducibility trade, so unset it before chasing any bug
+                # that needs identical outputs across runs.
+                "env": {
+                    "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+                },
             },
         ),
         "qwen3.6-35b-a3b-nvfp4": ModelSpec(
