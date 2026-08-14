@@ -150,7 +150,22 @@ class VLLMServerManager:
         try:
             url = f"{self.host}/v1/models"
             resp = requests.get(url, timeout=timeout)
-            return resp.status_code == 200
+            if resp.status_code != 200:
+                return False
+                
+            # Extra check: ensure completions endpoint is actually ready
+            import urllib.request
+            import json
+            chat_url = f"{self.host}/v1/chat/completions"
+            payload = {
+                "model": resp.json().get("data", [{}])[0].get("id", ""),
+                "messages": [{"role": "user", "content": "hello"}],
+                "max_tokens": 1
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(chat_url, data=data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as chat_resp:
+                return chat_resp.status == 200
         except Exception:
             return False
 
@@ -629,6 +644,7 @@ class VLLMServerManager:
                 "docker", "run",
                 "--ipc=host",
                 "--network", "host",
+                "--restart", "unless-stopped",
                 "--name", f"dreamference-vllm-{port}",
                 "--gpus", "all",
                 f"--cpus={cpus_limit:.1f}",

@@ -22,7 +22,8 @@ from dreamference.runner import (
     GooseRunner, ClineRunner, ClineInstaller,
     AiderRunner, AiderInstaller,
     ContinueRunner, ContinueInstaller,
-    OpenHandsRunner, OpenHandsInstaller
+    OpenHandsRunner, OpenHandsInstaller,
+    CodexRunner, CodexInstaller
 )
 from dreamference.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache
 from dreamference.vllm_server import VLLMServerManager, DEFAULT_VLLM_IMAGE
@@ -90,10 +91,11 @@ class DreamferenceCLIController:
         aider_str = "[green]CLI Ready[/green]" if AiderInstaller.is_installed() else "[yellow]CLI Available[/yellow]"
         continue_str = "[green]Extension Ready[/green]" if ContinueInstaller.is_continue_extension_installed() else "[yellow]Extension Available[/yellow]"
         openhands_str = "[green]Docker Image Ready[/green]" if OpenHandsInstaller.is_image_downloaded() else "[yellow]Docker Available[/yellow]"
+        codex_str = "[green]CLI Ready[/green]" if CodexInstaller.is_installed() else "[yellow]CLI Available[/yellow]"
 
         agent_table.add_row("Local vLLM Server", vllm_str)
         agent_table.add_row("Active Served Models", ", ".join(vllm_status["models"]) if vllm_status["models"] else "None (vLLM idle)")
-        agent_table.add_row("Active Agent Runner", f"[bold green]{config.agent_runner.upper()}[/bold green] (Default: GOOSE)")
+        agent_table.add_row("Active Agent Runner", f"[bold green]{config.agent_runner.upper()}[/bold green] (Default: CODEX)")
         agent_table.add_row("Configured Model", config.model)
         from dreamference.hardware import is_model_tensorized
         tensorize_str = "[bold green]Saved & Active (.tensors)[/bold green]" if is_model_tensorized(config.model) else "[yellow]Standard Weights (HF Cache)[/yellow]"
@@ -121,6 +123,7 @@ class DreamferenceCLIController:
         agent_table.add_row("Aider CLI Runtime", aider_str)
         agent_table.add_row("Continue IDE Runtime", continue_str)
         agent_table.add_row("OpenHands Docker Runtime", openhands_str)
+        agent_table.add_row("Codex CLI Runtime", codex_str)
         agent_table.add_row("Dreamference Config Path", str(config.config_file_path))
         agent_table.add_row("Goose Config Path", str(config.config_path))
 
@@ -150,7 +153,7 @@ class DreamferenceCLIController:
             prog="dream",
             description="Dreamference: Autonomous local agentic coding engine powered by Goose, Cline, Aider, Continue, OpenHands & NVIDIA GB10"
         )
-        agent_choices = ["goose", "cline", "aider", "continue", "openhands"]
+        agent_choices = ["goose", "cline", "aider", "continue", "openhands", "codex"]
 
         parser.add_argument("--config", default=None, help="Path to custom Dreamference config file (.yaml or .json)")
         parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
@@ -273,12 +276,14 @@ class DreamferenceCLIController:
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
 
         # Command: dream logs
-        logs_parser = subparsers.add_parser("logs", help="View logs")
-        logs_subparsers = logs_parser.add_subparsers(dest="logs_command", help="Log commands")
-        
-        # Command: dream logs request
-        request_logs_parser = logs_subparsers.add_parser("request", help="Tail the vLLM Docker container logs")
-        request_logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
+        logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
+        logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
+
+        # Command: dream codex
+        codex_parser = subparsers.add_parser("codex", help="Codex server operations")
+        codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Codex commands")
+        codex_subparsers.add_parser("start", help="Start the Codex comic server in the background")
+        codex_subparsers.add_parser("stop", help="Stop the Codex comic server")
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
@@ -351,6 +356,8 @@ class DreamferenceCLIController:
             runner = ContinueRunner(config=config)
         elif config.agent_runner == "openhands":
             runner = OpenHandsRunner(config=config)
+        elif config.agent_runner == "codex":
+            runner = CodexRunner(config=config)
         else:
             runner = GooseRunner(config=config)
 
@@ -1029,6 +1036,7 @@ class DreamferenceCLIController:
                             print("🧪 Running NVFP4 kernel backend canary test...")
                             try:
                                 import requests
+                                from dreamference.hardware import resolve_model_hf_repo
                                 served_model = resolve_model_hf_repo(args.model)
                                 resp = requests.post(f"{vllm_mgr.host}/v1/completions", json={
                                     "model": served_model,
@@ -1067,7 +1075,25 @@ class DreamferenceCLIController:
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.remove_server(port=args.port)
 
-        elif args.command == "logs request":
+        elif args.command == "codex":
+            import subprocess
+            from dreamference.runner.codex_installer import CodexInstaller
+            codex_bin = CodexInstaller.get_codex_executable() or "codex"
+            if args.codex_command == "start":
+                print("🚀 Starting OpenAI Codex app-server daemon...")
+                subprocess.Popen(
+                    [codex_bin, "app-server", "daemon", "start"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                print("✅ Codex app-server daemon started.")
+            elif args.codex_command == "stop":
+                print("🛑 Stopping OpenAI Codex app-server daemon...")
+                subprocess.call([codex_bin, "app-server", "daemon", "stop"])
+                print("✅ Codex app-server daemon stopped.")
+
+        elif args.command == "logs":
             cls.display_header()
             vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             try:

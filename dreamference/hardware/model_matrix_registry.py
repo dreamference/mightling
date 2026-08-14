@@ -67,7 +67,7 @@ class ModelMatrixRegistry:
                 # anything on the desktop grows. Erring low costs KV cache and fails loudly if
                 # overdone; erring high costs the power button. Raise it only when loading
                 # headless, where ~17 GB of desktop comes back.
-                "gpu_memory_utilization": 0.72,
+                "gpu_memory_utilization": 0.70,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
                 # Marlin, because every FlashInfer FP4 expert path on this box is SM120 code. That

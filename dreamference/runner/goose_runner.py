@@ -69,32 +69,45 @@ class GooseRunner:
                 known = True
         return total if known else None
 
-    def wait_for_vllm(self, poll_interval: float = 1.0, max_wait: Optional[float] = None, auto_launch: bool = False) -> bool:
+    def wait_for_vllm(self, poll_interval: float = 1.0, max_wait: Optional[float] = 600.0, auto_launch: bool = False) -> bool:
         """
         Checks if local vLLM HTTP endpoint is online and healthy.
-        If offline, prints an error and instructions to start vLLM, then returns False immediately.
+        If offline, prints an error and instructions to start vLLM, then polls until it is available.
 
         Returns:
             bool: True if vLLM endpoint is online and healthy, False otherwise.
         """
-        try:
-            if self.vllm_manager.check_health(timeout=1.0):
-                self._pre_warm_goose_prompt()
-                return True
-        except (KeyboardInterrupt, SystemExit):
-            print("\n🛑 Cancelled checking vLLM server.")
-            return False
+        import time
+        import sys
+        start_time = time.time()
+        print(f"⏳ Waiting for local vLLM server at {self.config.vllm_host} to become available...")
+        
+        while True:
+            try:
+                if self.vllm_manager.check_health(timeout=1.0):
+                    if self._pre_warm_goose_prompt():
+                        print("\n✅ vLLM server is online and ready!")
+                        return True
+            except (KeyboardInterrupt, SystemExit):
+                print("\n🛑 Cancelled checking vLLM server.")
+                return False
+                
+            if max_wait is not None and (time.time() - start_time) > max_wait:
+                print(f"\n❌ Timed out waiting for vLLM server after {max_wait} seconds.")
+                print(f"💡 Start vLLM in another terminal via: `dream server_start`")
+                return False
+                
+            sys.stdout.write(".")
+            sys.stdout.flush()
+            time.sleep(poll_interval)
 
-        print(f"❌ Local vLLM server at {self.config.vllm_host} is not running.")
-        print(f"💡 Start vLLM in another terminal via: `dream server_start`")
-        return False
 
-
-    def _pre_warm_goose_prompt(self) -> None:
+    def _pre_warm_goose_prompt(self) -> bool:
         """
         Silently pre-warms the FP8 KV cache with Goose's static system prompt + MCP tool schemas.
         Sends a max_tokens=1 chat completion immediately after vLLM health check succeeds.
         This eliminates first-turn TTFT delay for the massive Goose context.
+        Returns True if successful, False if the server is not fully ready to generate completions.
         """
         try:
             url = f"{self.config.vllm_host}/v1/chat/completions"
@@ -110,9 +123,12 @@ class GooseRunner:
             }
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=10):
-                pass  # silent success; KV cache now primed
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    return True
+                return False
         except Exception:
+            return False
             pass  # pre-warm is best-effort; never block startup
 
     def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:

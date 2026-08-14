@@ -1,2 +1,2 @@
 vllm_host = "http://localhost:8000"
-agent_runner = "aider"
+agent_runner = "codex"
