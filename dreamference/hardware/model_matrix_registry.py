@@ -72,6 +72,26 @@ class ModelMatrixRegistry:
                 "attention_backend": "flashinfer",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
+                # Self-speculation off the MTP head shipped in this checkpoint. 785 mtp.* tensors
+                # sit in the safetensors index and were being loaded and ignored, because
+                # speculative_config was unset.
+                #
+                # Decode here is hard memory-bandwidth-bound: measured 11.0-11.2 tok/s on every
+                # one of seven inspect prompts regardless of length, and aggregate throughput
+                # doubled to 22 with a second concurrent stream — batching is nearly free, so the
+                # per-token cost is dominated by reading weights, not by compute. That is exactly
+                # the regime speculation pays in, since verifying k proposed tokens costs about
+                # one weight read rather than k.
+                #
+                # num_speculative_tokens 1, not the 3 used by the qwen3.6-35b recipe below: this
+                # checkpoint declares mtp_num_hidden_layers=1, so there is a single head and one
+                # proposal per step is what it can actually predict. Asking for 3 drives the head
+                # autoregressively and acceptance collapses.
+                #
+                # Lossless by construction — the full model verifies every proposal and keeps it
+                # only if it matches what it would have produced, so a bad head costs speed, not
+                # quality.
+                "speculative_config": {"method": "mtp", "num_speculative_tokens": 1},
                 "extra_args": [
                     "--max-num-seqs", "4",
                     "--tensor-parallel-size", "1",
