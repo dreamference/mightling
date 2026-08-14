@@ -630,6 +630,39 @@ class VLLMServerManager:
                 "Current system does not meet the target specs."
             )
 
+        # Check memory availability
+        import subprocess
+        import sys
+        from dreamference.hardware import get_model_launch_overrides
+        overrides = get_model_launch_overrides(model)
+        gpu_memory_utilization = overrides.get("gpu_memory_utilization", 0.9)
+        
+        actual_total_gb = hw.total_unified_memory_gb
+        actual_free_gb = hw.available_memory_gb
+
+        required_mem = actual_total_gb * gpu_memory_utilization
+
+        if actual_free_gb < required_mem:
+            missing_mem = required_mem - actual_free_gb
+            try:
+                ps_output = subprocess.check_output(
+                    ["ps", "-eo", "pid,user,%mem,rss,cmd", "--sort=-%mem"], 
+                    text=True
+                )
+                lines = ps_output.splitlines()
+                top_procs = "\n".join(lines[:11])
+            except Exception:
+                top_procs = "Could not retrieve process list."
+                
+            print(
+                f"\n❌ Not enough memory to start vLLM.\n"
+                f"   Required:  {required_mem:.2f} GB\n"
+                f"   Available: {actual_free_gb:.2f} GB\n"
+                f"   Missing:   {missing_mem:.2f} GB\n\n"
+                f"Top memory consuming processes:\n{top_procs}\n"
+            )
+            sys.exit(1)
+
         # Step 1: Pre-download model weights into local cache and convert to tensorize format.
         # Resolve the tensorizer decision up front: some checkpoints opt out in their registry recipe,
         # and converting one anyway would burn time and disk on an artifact the launcher will not use.

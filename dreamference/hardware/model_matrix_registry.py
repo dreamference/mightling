@@ -34,7 +34,7 @@ class ModelMatrixRegistry:
             hf_repo_id="nvidia/Qwen3.5-122B-A10B-NVFP4",
             launch_overrides={
                 "max_model_len": 131072,
-                "gpu_memory_utilization": 0.9,
+                "gpu_memory_utilization": 0.85,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
                 "tool_call_parser": "qwen3_xml",
