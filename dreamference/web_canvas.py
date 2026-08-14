@@ -228,7 +228,7 @@ CANVAS_HTML = """<!DOCTYPE html>
         <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.6; margin-top: 1rem;">
           <div><b>Target GPU:</b> <span id="gpuName">NVIDIA GB10</span></div>
           <div><b>vLLM Host:</b> <span id="vllmHost">http://localhost:8000</span></div>
-          <div><b>Active Model:</b> <span id="activeModel">qwen3.6-35b-a3b-nvfp4</span></div>
+          <div><b>Active Model:</b> <span id="activeModel">qwen3.5-122b-a10b-nvfp4</span></div>
           <div><b>Indexed Files:</b> <span id="indexedFiles">0</span></div>
         </div>
       </div>
@@ -254,7 +254,7 @@ CANVAS_HTML = """<!DOCTYPE html>
 
         document.getElementById('gpuName').innerText = data.hardware.gpu_name || "NVIDIA GB10";
         document.getElementById('vllmHost').innerText = data.vllm.host;
-        document.getElementById('activeModel').innerText = data.vllm.models[0] || "qwen3.6-35b-a3b-nvfp4";
+        document.getElementById('activeModel').innerText = data.vllm.models[0] || "qwen3.5-122b-a10b-nvfp4";
         document.getElementById('indexedFiles').innerText = data.context.total_indexed_files;
       } catch (e) {
         console.error("Failed to fetch status:", e);

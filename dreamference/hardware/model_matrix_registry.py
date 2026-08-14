@@ -14,7 +14,7 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset({"NVFP4", "MXFP4", "AWQ"
 
 # Single source of truth for the model Dreamference serves when nothing else is specified. Imported by
 # the config layer and the vLLM launcher so the two cannot drift apart.
-DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.6-35b-a3b-nvfp4"
+DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-nvfp4"
 
 class ModelMatrixRegistry:
     """
@@ -23,6 +23,29 @@ class ModelMatrixRegistry:
 
     # Static registry of supported target models and speculative draft models
     MATRIX: Final[Dict[str, ModelSpec]] = {
+        "qwen3.5-122b-a10b-nvfp4": ModelSpec(
+            name="Qwen 3.5 122B-A10B (NVFP4)",
+            params_b=122.0,
+            supported_precisions=["NVFP4"],
+            min_memory_gb=60.0,
+            max_memory_gb=120.0,
+            compatible_gb10=True,
+            notes="Default.",
+            hf_repo_id="nvidia/Qwen3.5-122B-A10B-NVFP4",
+            launch_overrides={
+                "max_model_len": 131072,
+                "gpu_memory_utilization": 0.9,
+                "kv_cache_dtype": "fp8",
+                "attention_backend": "flashinfer",
+                "tool_call_parser": "qwen3_xml",
+                "reasoning_parser": "qwen3",
+                "extra_args": [
+                    "--max-num-seqs", "4",
+                    "--tensor-parallel-size", "1",
+                    "--dtype", "auto",
+                ],
+            },
+        ),
         "qwen3.6-35b-a3b-nvfp4": ModelSpec(
             name="Qwen 3.6 35B-A3B (NVFP4)",
             params_b=35.0,
