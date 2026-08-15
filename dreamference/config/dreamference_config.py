@@ -93,8 +93,23 @@ class DreamferenceConfig:
             )
         )
 
-        # 2. Main target LLM model name served on vLLM
-        self.model: str = (
+        # 2. Main target LLM model name served on vLLM.
+        #
+        # `_model_pinned` records whether this value was *chosen* or merely defaulted to, which is
+        # not the same question as whether it currently differs from the default. save_config()
+        # needs the distinction: a model that happens to equal today's DEFAULT_MODEL is still an
+        # explicit choice, and dropping it from the file on that basis silently re-points the
+        # workspace the next time the default moves. Anything that arrived from a constructor
+        # argument, the environment, or the config file counts as chosen; only falling all the way
+        # through to DEFAULT_MODEL does not.
+        self._model_pinned: bool = (
+            model is not None
+            or os.getenv("DREAMFERENCE_MODEL") is not None
+            or "model" in self.file_data
+        )
+        # Assigned to the backing field rather than through the property: resolution is not a
+        # choice, and going through the setter here would mark every config as pinned.
+        self._model: str = (
             model
             if model is not None
             else os.getenv(
@@ -214,6 +229,32 @@ class DreamferenceConfig:
         # Path to official Goose config file
         self.config_path: Path = GOOSE_CONFIG_PATH
 
+    @property
+    def model(self) -> str:
+        """
+        The main target LLM served on vLLM.
+
+        Returns:
+            str: Model alias, HuggingFace repo ID, or display name.
+        """
+        return self._model
+
+    @model.setter
+    def model(self, value: str) -> None:
+        """
+        Sets the model and records that it was chosen deliberately.
+
+        Assigning a model is what `dream main-model set` does, and it is a pin by definition — the
+        caller named this model. That has to be remembered separately from the value itself, or
+        save_config() cannot tell a deliberate choice from a value that merely matches today's
+        default, and would drop the former on the floor.
+
+        Args:
+            value (str): Model alias, HuggingFace repo ID, or display name.
+        """
+        self._model = value
+        self._model_pinned = True
+
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
         Saves current active configuration parameters to YAML or JSON config file.
@@ -229,7 +270,13 @@ class DreamferenceConfig:
             "vllm_host": self.vllm_host,
             "agent_runner": self.agent_runner,
         }
-        if self.model and self.model != DEFAULT_MODEL: data["model"] = self.model
+        # Written whenever the model was chosen, not merely whenever it differs from the default.
+        # The two came apart the moment DEFAULT_MODEL changed: a workspace pinned to what was then
+        # the default had written no `model` key at all, so it silently followed the default to a
+        # different checkpoint. Every other field below can be re-derived from its default; this
+        # one carries intent.
+        if self.model and (self._model_pinned or self.model != DEFAULT_MODEL):
+            data["model"] = self.model
         if self.draft_model is not None: data["draft_model"] = self.draft_model
         if self.num_speculative_tokens != DEFAULT_SPECULATIVE_TOKENS: data["num_speculative_tokens"] = self.num_speculative_tokens
         if self.sandbox != DEFAULT_SANDBOX: data["sandbox"] = self.sandbox

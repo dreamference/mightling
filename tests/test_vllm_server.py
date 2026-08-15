@@ -86,6 +86,16 @@ def test_dflash_recipe_emits_drafter_speculative_config():
     assert spec["attention_backend"] == "FLASH_ATTN"
     assert "--speculative-model" not in cmd
 
+def test_dflash_recipe_disables_thinking():
+    # Not cosmetic: this checkpoint's chat_template.jinja prefills '<think>\n' into every
+    # assistant turn unless enable_thinking is explicitly false, so leaving the flag off makes the
+    # model reason before every tool call. The JSON has to survive as one argv element.
+    import json
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    payload = cmd[cmd.index("--default-chat-template-kwargs") + 1]
+    assert json.loads(payload) == {"enable_thinking": False}
+
 def test_dflash_recipe_vetoes_prefix_caching():
     # This recipe cannot run with prefix caching: the drafter's larger attention page makes
     # vLLM's hash granularity the LCM of two KV group block sizes, and the coordinator aborts on
@@ -132,6 +142,79 @@ def test_optional_arguments_default_to_unset_not_to_a_value():
     # A model without a recipe still gets the module fallback.
     cmd = mgr.build_launch_command(model="qwen2.5-coder-32b")
     assert cmd[cmd.index("--max-num-batched-tokens") + 1] == "8192"
+
+def test_vllm_cache_root_is_mounted_for_every_model():
+    # Without this the torch.compile cache lives in the container's own layer and dies with it, so
+    # every restart pays the full compile again. It has to land inside a mounted volume, and no
+    # model's recipe env may take it over -- a per-model cache root would defeat the sharing.
+    from dreamference.vllm_server.vllm_server_manager import CONTAINER_VLLM_CACHE_ROOT
+    mgr = VLLMServerManager()
+    for model in ("qwen3.5-122b-a10b-int4-dflash", "qwen3.6-35b-a3b-nvfp4", "qwen2.5-coder-32b"):
+        cmd = mgr.build_launch_command(model=model)
+        var = f"VLLM_CACHE_ROOT={CONTAINER_VLLM_CACHE_ROOT}"
+        assert var in cmd, model
+        assert cmd[cmd.index(var) - 1] == "-e"
+        assert cmd.index(var) < cmd.index(DEFAULT_VLLM_IMAGE)
+        # The cache root must sit under a path the -v flags actually bind, or it is container-local
+        # again and the flag is a lie.
+        mounts = [cmd[i + 1].split(":")[1] for i, a in enumerate(cmd) if a == "-v"]
+        assert any(CONTAINER_VLLM_CACHE_ROOT.startswith(m) for m in mounts), mounts
+
+def test_compile_cache_signature_tracks_speculative_depth():
+    # vLLM's own compile cache key omits num_speculative_tokens, so this signature is the only
+    # thing standing between a retuned n and a stale compiled graph.
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+    from dreamference.hardware.model_spec import ModelSpec
+    import copy
+
+    sig = VLLMServerManager._compile_cache_signature
+    baseline = sig("qwen3.5-122b-a10b-int4-dflash")
+    assert "dflash" in baseline and "8" in baseline
+
+    spec = ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"]
+    retuned = copy.deepcopy(spec.launch_overrides)
+    retuned["speculative_config"]["num_speculative_tokens"] = 12
+    patched = ModelSpec(
+        name=spec.name,
+        params_b=spec.params_b,
+        supported_precisions=list(spec.supported_precisions),
+        min_memory_gb=spec.min_memory_gb,
+        max_memory_gb=spec.max_memory_gb,
+        compatible_gb10=spec.compatible_gb10,
+        notes=spec.notes,
+        hf_repo_id=spec.hf_repo_id,
+        launch_overrides=retuned,
+    )
+    original = ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"]
+    try:
+        ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"] = patched
+        assert sig("qwen3.5-122b-a10b-int4-dflash") != baseline
+    finally:
+        ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"] = original
+
+    # A model that does not speculate still gets a stable, non-empty signature.
+    assert sig("qwen2.5-coder-32b") == sig("qwen2.5-coder-32b")
+
+def test_preflight_gate_scores_the_utilization_that_will_actually_launch():
+    # The gate in start_server and the arena in build_launch_command have to come from one number.
+    # They did not: 0.9 against 0.50, so every model without a recipe was judged against an arena
+    # roughly twice the one it would be given, and aborted on a load that fits.
+    import inspect
+    from dreamference.vllm_server import vllm_server_manager as vsm
+
+    source = inspect.getsource(vsm.VLLMServerManager.start_server)
+    assert 'overrides.get("gpu_memory_utilization", 0.9)' not in source
+    assert "DEFAULT_GPU_MEMORY_UTILIZATION" in source
+
+    mgr = VLLMServerManager()
+    for model in ("qwen2.5-coder-32b", "starcoder2-15b"):
+        cmd = mgr.build_launch_command(model=model)
+        launched = float(cmd[cmd.index("--gpu-memory-utilization") + 1])
+        from dreamference.hardware import get_model_launch_overrides
+        gated = get_model_launch_overrides(model).get(
+            "gpu_memory_utilization", vsm.DEFAULT_GPU_MEMORY_UTILIZATION
+        )
+        assert launched == gated, model
 
 def test_autoround_checkpoint_gets_no_quantization_flag():
     # AutoRound declares quant_method in its own config.json, so an inferred --quantization would
@@ -523,14 +606,29 @@ def _watchdog_with_readings(monkeypatch, readings):
     def _fake_run(cmd, **kw):
         docker_calls.append(cmd)
         # Stand in for `docker inspect`: no such container, so the cgroup never resolves and the
-        # watchdog falls back to `docker kill`. Cgroup resolution is covered separately.
-        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        # watchdog falls back through to the CLI. Cgroup resolution is covered separately.
+        # `docker kill` succeeds, because a kill that reports failure now suppresses the trip
+        # callback -- see test_watchdog_does_not_claim_a_kill_that_failed.
+        rc = 0 if cmd[:2] == ["docker", "kill"] else 1
+        return subprocess.CompletedProcess(cmd, rc, stdout="", stderr="")
 
     monkeypatch.setattr(psi_watchdog.subprocess, "run", _fake_run)
+    # The socket path would otherwise reach the real dockerd during tests. Default it to "did not
+    # work" so these cases exercise the CLI fallback exactly as they did before.
+    socket_calls = []
+
+    def _fake_socket_kill(self):
+        socket_calls.append(self._container_id or self.container_name)
+        return False
+
+    monkeypatch.setattr(
+        psi_watchdog.MemoryPressureWatchdog, "_kill_via_docker_socket", _fake_socket_kill
+    )
     wd = psi_watchdog.MemoryPressureWatchdog(
         "test-container", limit_pct=60.0, trip_duration_s=0.05,
         sustained_pct=25.0, sample_interval_s=0.01,
     )
+    wd._socket_calls = socket_calls
     return wd, docker_calls
 
 def test_watchdog_kills_container_on_sustained_pressure(monkeypatch):
@@ -575,7 +673,8 @@ def test_watchdog_reports_which_rule_fired(monkeypatch):
 
 def test_watchdog_kills_cgroup_pids_without_forking(monkeypatch, tmp_path):
     # The point of resolving the cgroup ahead of time: the trip path must not need docker, which
-    # under a reclaim stall may never get scheduled.
+    # under a reclaim stall may never get scheduled. Only available when this process may actually
+    # signal the container -- i.e. running as root -- which _direct_kill_ok records.
     from dreamference.vllm_server import psi_watchdog
 
     procs = tmp_path / "cgroup.procs"
@@ -583,14 +682,98 @@ def test_watchdog_kills_cgroup_pids_without_forking(monkeypatch, tmp_path):
 
     wd, docker_calls = _watchdog_with_readings(monkeypatch, [(90.0, 0.0)] * 40)
     wd._cgroup_procs = str(procs)
+    wd._direct_kill_ok = True
     signalled = []
     monkeypatch.setattr(psi_watchdog.os, "kill", lambda pid, sig: signalled.append((pid, sig)))
 
     assert wd.start() is True
     wd._thread.join(timeout=5)
     assert wd.tripped is True
+    assert wd.killed is True
     assert signalled == [(4242, signal.SIGKILL), (4243, signal.SIGKILL)]
     assert ["docker", "kill", "test-container"] not in docker_calls
+    assert wd._socket_calls == []
+
+def test_watchdog_probes_whether_it_may_signal_before_relying_on_it(monkeypatch, tmp_path):
+    # `dream` runs as an ordinary user and the container's processes run as root, so reading
+    # cgroup.procs succeeds while signalling those PIDs raises EPERM. The probe uses signal 0,
+    # which asks the permission question without delivering anything.
+    from dreamference.vllm_server import psi_watchdog
+
+    wd, _ = _watchdog_with_readings(monkeypatch, [(0.0, 0.0)] * 5)
+
+    monkeypatch.setattr(psi_watchdog.os, "kill", lambda pid, sig: None)
+    wd._probe_direct_kill([4242])
+    assert wd._direct_kill_ok is True
+
+    def _eperm(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(psi_watchdog.os, "kill", _eperm)
+    wd._direct_kill_ok = None
+    wd._probe_direct_kill([4242])
+    assert wd._direct_kill_ok is False
+
+def test_watchdog_uses_docker_socket_when_it_cannot_signal(monkeypatch, tmp_path):
+    # The normal case. Signalling is not permitted, so the kill has to go through dockerd -- but
+    # over its socket, which costs a connect and a write, not a fork and exec of the CLI.
+    from dreamference.vllm_server import psi_watchdog
+
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("4242\n")
+
+    wd, docker_calls = _watchdog_with_readings(monkeypatch, [(90.0, 0.0)] * 40)
+    wd._cgroup_procs = str(procs)
+    wd._direct_kill_ok = False
+    wd._container_id = "deadbeef"
+    monkeypatch.setattr(
+        psi_watchdog.MemoryPressureWatchdog, "_kill_via_docker_socket",
+        lambda self: wd._socket_calls.append(self._container_id) or True,
+    )
+
+    assert wd.start() is True
+    wd._thread.join(timeout=5)
+    assert wd.tripped is True
+    assert wd.killed is True
+    assert wd._socket_calls == ["deadbeef"]
+    # The CLI is the last resort and must not be reached once the socket has done the job.
+    assert ["docker", "kill", "test-container"] not in docker_calls
+
+def test_watchdog_does_not_claim_a_kill_that_failed(monkeypatch, tmp_path):
+    # The regression that mattered: EPERM was swallowed by the same handler that ignores
+    # already-dead PIDs, so an unprivileged watchdog killed nothing, ran the on_trip callback --
+    # whose message says the container "has been killed to give the memory back" -- and left the
+    # host to freeze while the operator went looking elsewhere.
+    from dreamference.vllm_server import psi_watchdog
+
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("4242\n")
+
+    wd, _ = _watchdog_with_readings(monkeypatch, [(90.0, 0.0)] * 40)
+    wd._cgroup_procs = str(procs)
+    wd._direct_kill_ok = True
+
+    def _eperm(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(psi_watchdog.os, "kill", _eperm)
+    # Socket and CLI both unavailable too, so nothing can kill it.
+    monkeypatch.setattr(
+        psi_watchdog.MemoryPressureWatchdog, "_kill_via_docker_socket", lambda self: False
+    )
+    monkeypatch.setattr(
+        psi_watchdog.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr=""),
+    )
+
+    reported = []
+    wd._on_trip = lambda reason, pressure, window: reported.append(reason)
+
+    assert wd.start() is True
+    wd._thread.join(timeout=5)
+    assert wd.tripped is True
+    assert wd.killed is False
+    assert reported == []
 
 def test_watchdog_stops_retrying_cgroup_resolution(monkeypatch):
     # Resolution costs a fork and the loop runs for the life of the server, so a container whose

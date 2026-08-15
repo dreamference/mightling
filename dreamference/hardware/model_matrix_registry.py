@@ -47,10 +47,16 @@ class ModelMatrixRegistry:
                 "instead of running a head autoregressively, so acceptance is not capped the way "
                 "MTP's is. That cap is the entire reason this entry exists — the NVFP4 recipe below "
                 "declares mtp_num_hidden_layers=1 and so proposes exactly one token per step, while "
-                "the upstream DGX Spark measurements put DFlash at ~8.7 accepted tokens per step on "
-                "real agent traffic (vs 2.9 for MTP-2) and ~5.4 on code (vs 2.8). That is the "
-                "difference between ~11 tok/s and the ~80 tok/s the thread reports, and agent "
-                "traffic is exactly this project's workload.\n\n"
+                "the upstream DGX Spark measurements put DFlash at 8.66 accepted tokens per step on "
+                "real agent traffic (vs 2.88 for MTP-2) and 5.4 on code (vs 2.77). Agent traffic is "
+                "exactly this project's workload.\n\n"
+                "Two throughput numbers, kept apart because they are not the same measurement. "
+                "Upstream's own like-for-like on one machine: 28.2 tok/s for this INT4 checkpoint "
+                "with no speculation, ~81 tok/s for it with DFlash on real agent turns. Separately, "
+                "this machine measured 11.0-11.2 tok/s on the NVFP4 checkpoint with speculative_config "
+                "unset. Those two baselines are different checkpoints under different recipes, so "
+                "the honest expectation here is upstream's ~3x on agent traffic applied to whatever "
+                "this box actually does — not a jump from 11 to 81.\n\n"
                 "Source: https://forums.developer.nvidia.com/t/"
                 "dflash-for-qwen3-5-122b-a10b-80-tok-s-on-1x-spark/374328 and the recipe it "
                 "publishes at https://github.com/Entrpi/qwen3.5-122B-A10B-on-spark "
@@ -83,6 +89,17 @@ class ModelMatrixRegistry:
                 "architectures, detected quantization='inc' without being told, clamped the "
                 "drafter's 262144 down to this entry's max_model_len, and reported "
                 "method='dflash' n=8 parallel_drafting=True with async scheduling still enabled.\n\n"
+                "Flags in reply #53's verbatim `vllm serve` line that this recipe does not carry, "
+                "so the gap is a record rather than an omission: --served-model-name qwen (the "
+                "runners here address the model by its HF repo ID, which is what vLLM serves it as); "
+                "--limit-mm-per-prompt '{\"image\":20}' and --generation-config auto (image input "
+                "and generation defaults, neither used by a coding agent); "
+                "--override-generation-config '{\"temperature\":0.0,...}' (that is a server-side "
+                "default the agent overrides per request anyway); and --ulimit memlock=-1:-1 on the "
+                "container, which upstream needs because fastsafetensors stages shards through "
+                "pinned host buffers — this recipe does not use fastsafetensors, and the container "
+                "here runs at Docker's default 8 MB memlock, which the NVFP4 entry has loaded under "
+                "without trouble.\n\n"
                 "NOT yet verified: a real load. Every number here is either measured upstream on "
                 "another GB10 or derived from this machine's own memory arithmetic. Treat the "
                 "first launch as supervised — this is the checkpoint class that froze this host "
@@ -172,10 +189,19 @@ class ModelMatrixRegistry:
                 "speculative_config": {
                     "method": "dflash",
                     "model": "z-lab/Qwen3.5-122B-A10B-DFlash",
-                    # 8, not serve.sh's default of 12. Reply #48 in the source thread — the post
-                    # this entry was added from — reports n=8 outperforming n=12 on code and JSON
-                    # workloads (82.2 and 78.7 tok/s). Drafting past what the target will accept
-                    # costs a wasted verify.
+                    # 8, not serve.sh's default of 12, because reply #48 — the post this entry was
+                    # added from — runs 8 and calls it "the best compromise for mixed Hermes
+                    # traffic". That is a compromise, not a win: upstream's own FINDINGS puts the
+                    # task-dependent optimum at "prose -> 4, agent/code -> 12+", and the poster's
+                    # spec-bench at n=8 shows structured output accepting 99.6-100% of the block
+                    # with tau pinned at 8.0 — the window is saturated, so tool-call traffic is
+                    # leaving throughput on the table. Prose is the other end: acceptance 19-38%,
+                    # where every unaccepted draft is a wasted verify.
+                    #
+                    # 8 is kept because it is what the linked configuration actually ran for two
+                    # weeks. If this box's traffic turns out to be mostly tool calls and code,
+                    # raising this to 12 is the first tuning move to try, and max_num_batched_tokens
+                    # below has to move with it.
                     "num_speculative_tokens": 8,
                     "attention_backend": "FLASH_ATTN",
                 },
@@ -185,6 +211,25 @@ class ModelMatrixRegistry:
                     "--max-num-seqs", "3",
                     "--tensor-parallel-size", "1",
                     "--dtype", "auto",
+                    # Thinking off, matching reply #48. This is not a no-op: the checkpoint's own
+                    # chat_template.jinja prefills '<think>\n' into every assistant turn unless
+                    # enable_thinking is explicitly false, in which case it emits an empty
+                    # '<think>\n\n</think>' instead. So the shipped default makes the model open
+                    # every agent turn with a reasoning block, and an agent turn is mostly tool
+                    # calls. #48 ran two weeks of agent traffic this way without a single
+                    # tool-call formatting or parsing error.
+                    #
+                    # reasoning_parser stays set regardless: it costs nothing when there is no
+                    # reasoning to split, and it keeps working if a client re-enables thinking
+                    # per request, which this only changes the default for.
+                    #
+                    # Upstream also passes its own patched Jinja file here (--chat-template
+                    # /host/unsloth.jinja). That is deliberately not copied: reply #53 describes
+                    # it as "a small vLLM/Jinja compatibility adjustment for tool-call arguments",
+                    # and shipping a third-party template would put the prompt format outside this
+                    # repo. If tool-call arguments turn out to mis-render, that template is the
+                    # first place to look.
+                    "--default-chat-template-kwargs", '{"enable_thinking": false}',
                 ],
                 "env": {
                     # vLLM's memory profiler over-reserves for the CUDA graph pool (~0.7 GiB

@@ -30,6 +30,7 @@ Two things are load-bearing about the timing, both learned from the 14:11 reset 
 
 import os
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -63,6 +64,13 @@ CGROUP_PROCS_CANDIDATES: Final[Tuple[str, ...]] = (
 
 TRIP_REASON_SPIKE: Final[str] = "avg10"
 TRIP_REASON_SUSTAINED: Final[str] = "avg60"
+
+# Docker's control socket, used as a kill path when signalling the container's PIDs directly is not
+# permitted — which is the normal case, because `dream` runs as an ordinary user and the container's
+# processes run as root. Talking to the socket costs a connect and one small write; it does not fork
+# or exec, which is what rules out the `docker` CLI on a stalling host.
+DEFAULT_DOCKER_SOCKET: Final[str] = "/var/run/docker.sock"
+DOCKER_KILL_TIMEOUT_S: Final[float] = 10.0
 
 # How many times to try turning the container name into a cgroup path before settling for the
 # `docker kill` fallback. Resolution costs a fork, and the loop runs for the life of the server —
@@ -142,12 +150,22 @@ class MemoryPressureWatchdog:
         self.sustained_pct = sustained_pct
         self.sample_interval_s = sample_interval_s
         self.tripped = False
+        self.killed = False
         self._on_trip = on_trip
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         # Resolved lazily while the host is healthy, so that tripping never has to fork.
         self._cgroup_procs: Optional[str] = None
         self._resolve_attempts = 0
+        # The container's full ID, kept from the same `docker inspect` that finds the cgroup. The
+        # socket kill path addresses the container by ID, and resolving it at trip time would mean
+        # the fork this class exists to avoid.
+        self._container_id: Optional[str] = None
+        # Whether this process may actually signal the container's processes. Probed while healthy
+        # rather than assumed: reading cgroup.procs needs no privilege, but signalling the root-owned
+        # processes it lists does, so "I can see the PIDs" and "I can kill them" are different
+        # questions and the code used to conflate them.
+        self._direct_kill_ok: Optional[bool] = None
 
     def start(self) -> bool:
         """
@@ -255,14 +273,41 @@ class MemoryPressureWatchdog:
         container_id = result.stdout.strip()
         if not container_id:
             return
+        self._container_id = container_id
         for template in CGROUP_PROCS_CANDIDATES:
             path = template.format(id=container_id)
             if os.path.exists(path):
                 self._cgroup_procs = path
                 # Read it once so the dentry and inode are warm and the trip-path read cannot
                 # itself block on I/O that the stall has made slow.
-                self._read_cgroup_pids()
+                self._probe_direct_kill(self._read_cgroup_pids())
                 return
+
+    def _probe_direct_kill(self, pids: List[int]) -> None:
+        """
+        Determines whether this process is allowed to signal the container's processes.
+
+        Signal 0 asks the kernel the permission question without delivering anything, so this is
+        free and safe to run against a healthy container. The answer is almost always no: the
+        container runs as root and `dream` does not, so `os.kill` raises EPERM. Knowing that in
+        advance is what lets `_kill` choose a path that works instead of discovering the problem
+        while the host is stalling — which is what happened before, silently, because EPERM was
+        swallowed by the same handler that ignores already-dead PIDs.
+
+        Args:
+            pids (List[int]): PIDs currently in the container's cgroup.
+        """
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+                self._direct_kill_ok = True
+                return
+            except PermissionError:
+                self._direct_kill_ok = False
+                return
+            except OSError:
+                # Process exited between the read and the probe; try the next one.
+                continue
 
     def _read_cgroup_pids(self) -> List[int]:
         """
@@ -293,39 +338,121 @@ class MemoryPressureWatchdog:
         # Kill before reporting. Printing means acquiring a lock and touching stdout, and under
         # this much stall that can take seconds the host does not have; the memory has to come
         # back first and the explanation can follow.
-        self._kill()
+        self.killed = self._kill()
 
-        if self._on_trip is not None:
+        if self.killed and self._on_trip is not None:
             try:
                 self._on_trip(reason, pressure, held_for_s)
             except Exception:
                 pass
+        elif not self.killed:
+            # Never claim a kill that did not happen. The caller's message says the memory has been
+            # given back, and acting on that when the container is still running is worse than the
+            # silence — it sends the operator looking for a different cause while the host freezes.
+            try:
+                print(
+                    f"\n🛑 Memory stalled {pressure:.0f}% of the last {held_for_s:.0f}s ({reason}) "
+                    f"and every path to kill '{self.container_name}' failed.\n"
+                    f"   The container is still running and the host is still at risk. Kill it now:\n"
+                    f"     docker kill {self.container_name}\n"
+                )
+            except Exception:
+                pass
 
-    def _kill(self) -> None:
+    def _kill(self) -> bool:
         """
         Frees the container's memory as fast as the host allows.
 
-        SIGKILL straight to the cgroup's PIDs rather than a graceful stop or `docker kill`: under
-        this much stall a shutdown handler may never get scheduled, and asking dockerd to do it
-        means waiting on a daemon that is stalled for the same reason everything else is. Falls
-        back to `docker kill` only when the cgroup could not be resolved, which is better than
-        nothing even though it is the slow path.
+        Three paths, in order of how much the host has to be working for them to succeed:
+
+        1. SIGKILL straight to the cgroup's PIDs. No allocation, no fork, no daemon — but only
+           available when this process may signal them, which means running as root.
+        2. A kill request written to Docker's control socket. One connect and one small write, no
+           process creation. This is the path that actually runs in normal use.
+        3. The `docker` CLI. Forks and execs a large Go binary and waits on dockerd, which is the
+           work least likely to be scheduled during a reclaim livelock — so it is the last resort,
+           not the fallback it used to be.
+
+        The previous version returned after step 1 whenever the cgroup listed any PIDs, treating a
+        successful *read* as a successful *kill*. Since EPERM was caught alongside "process already
+        gone", an unprivileged watchdog killed nothing, reported a kill, and left the host to freeze.
+
+        Returns:
+            bool: True if one of the paths reports having killed the container.
         """
-        pids = self._read_cgroup_pids()
-        if pids:
+        if self._direct_kill_ok:
+            pids = self._read_cgroup_pids()
+            signalled = False
             for pid in pids:
                 try:
                     os.kill(pid, signal.SIGKILL)
-                except (OSError, ProcessLookupError):
+                    signalled = True
+                except PermissionError:
+                    # Permission was probed while healthy, so this means it changed underneath us.
+                    # Stop trusting the fast path and fall through to the socket.
+                    self._direct_kill_ok = False
+                    signalled = False
+                    break
+                except OSError:
                     continue
-            return
+            if signalled:
+                return True
+
+        if self._kill_via_docker_socket():
+            return True
 
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["docker", "kill", self.container_name],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=30,
             )
         except (OSError, subprocess.SubprocessError):
-            pass
+            return False
+        return getattr(result, "returncode", 1) == 0
+
+    def _kill_via_docker_socket(self) -> bool:
+        """
+        Asks dockerd to SIGKILL the container over its unix socket, without forking.
+
+        Addressed by container ID when one was resolved and by name otherwise; the Engine API
+        accepts either. Everything here is deliberately hand-rolled rather than routed through an
+        HTTP client library, because the point is to make exactly one connect and one write while
+        the machine is stalling.
+
+        Returns:
+            bool: True if dockerd acknowledged the kill (204, or 2xx generally).
+        """
+        docker_host = os.getenv("DOCKER_HOST", "")
+        if docker_host.startswith("unix://"):
+            sock_path = docker_host[len("unix://"):]
+        elif docker_host:
+            # A TCP or ssh endpoint; this path only speaks to a local socket.
+            return False
+        else:
+            sock_path = DEFAULT_DOCKER_SOCKET
+
+        target = self._container_id or self.container_name
+        request = (
+            f"POST /containers/{target}/kill?signal=SIGKILL HTTP/1.1\r\n"
+            f"Host: docker\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        ).encode()
+
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.settimeout(DOCKER_KILL_TIMEOUT_S)
+                sock.connect(sock_path)
+                sock.sendall(request)
+                status = sock.recv(64)
+        except (OSError, socket.timeout):
+            return False
+
+        # b'HTTP/1.1 204 No Content' on success; 404 if it already exited, which is not a failure
+        # of this watchdog but is not a kill either.
+        parts = status.split(b" ", 2)
+        if len(parts) < 2 or not parts[1].isdigit():
+            return False
+        return 200 <= int(parts[1]) < 300

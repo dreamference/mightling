@@ -96,6 +96,15 @@ DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
 # checkpoint in host RAM, which on unified memory is the whole memory budget.
 DEFAULT_LOAD_FORMAT: Final[str] = "auto"
 
+# Where vLLM keeps everything it can rebuild but would rather not: the torch.compile artefacts
+# above all. It defaults to ~/.cache/vllm *inside* the container, which is a fresh tmpfs-like layer
+# on every `docker run`, so each restart recompiled the graph from scratch — 8-12 minutes of a
+# silent container before the port opens. Pointing it inside the already-mounted dreamference cache
+# makes it survive restarts without needing a second volume.
+CONTAINER_VLLM_CACHE_ROOT: Final[str] = "/root/.cache/dreamference/vllm"
+# Host-side view of the same directory, used to invalidate the compile cache before a launch.
+VLLM_CACHE_HOME: Final[Path] = Path.home() / ".cache" / "dreamference" / "vllm"
+
 # Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
 
 # Pinned vLLM runtime container built from project Dockerfile with tensorizer support.
@@ -630,6 +639,7 @@ class VLLMServerManager:
             dgx_cache = os.path.expanduser("~/.cache/dreamference")
             os.makedirs(hf_cache, exist_ok=True)
             os.makedirs(dgx_cache, exist_ok=True)
+            os.makedirs(VLLM_CACHE_HOME, exist_ok=True)
             
             # Leave the host some CPU so the desktop keeps scheduling during model load.
             total_cpus = os.cpu_count() or 1
@@ -680,6 +690,10 @@ class VLLMServerManager:
             # environment rather than CLI flags, so the recipe's env has to cross the container boundary.
             for env_key, env_val in sorted(recipe.get("env", {}).items()):
                 cmd.extend(["-e", f"{env_key}={env_val}"])
+            # Persist torch.compile output across container lifetimes. This lands inside the
+            # dreamference cache volume mounted just above, so no extra -v is needed; the recipe
+            # env above cannot override it, since a per-model cache root would defeat the point.
+            cmd.extend(["-e", f"VLLM_CACHE_ROOT={CONTAINER_VLLM_CACHE_ROOT}"])
             cmd.extend(["-e", "CUTE_DSL_ARCH=sm_121a"])
             cmd.extend(["-e", "VLLM_LOGGING_LEVEL=DEBUG"])
             cmd.extend(["-e", "VLLM_DEBUG_LOG_API_SERVER_RESPONSE=1"])
@@ -1102,6 +1116,101 @@ class VLLMServerManager:
             spec = None
         return float(spec.min_memory_gb) if spec else 0.0
 
+    @classmethod
+    def _compile_cache_signature(cls, model: str) -> str:
+        """
+        Builds the identity of the compiled graph for a model, for the factors vLLM does not hash.
+
+        vLLM names its compile cache directory after a hash of the engine config, the traced source
+        files and the compiler version, so almost any change already lands in a fresh directory.
+        `SpeculativeConfig.compute_hash()` is the gap: it contributes only whether the method needs
+        auxiliary hidden states and which layers they come from, so retuning `num_speculative_tokens`
+        — the first tuning move the DFlash recipe suggests — leaves the key unchanged and the stale
+        graph eligible for reuse. Upstream hit the same thing and clears on a `profile:nspec`
+        signature; this is that signature.
+
+        Args:
+            model (str): Model alias, HF repo ID, or display name.
+
+        Returns:
+            str: Opaque signature string; a change means the cached graph must not be reused.
+        """
+        from dreamference.hardware import get_model_launch_overrides, resolve_model_hf_repo
+
+        spec = get_model_launch_overrides(model).get("speculative_config") or {}
+        return "|".join(
+            str(part)
+            for part in (
+                resolve_model_hf_repo(model),
+                spec.get("method", "none"),
+                spec.get("num_speculative_tokens", 0),
+            )
+        )
+
+    @classmethod
+    def _reset_stale_compile_cache(cls, model: str, docker_image: str = DEFAULT_VLLM_IMAGE) -> bool:
+        """
+        Drops the persisted torch.compile cache when the graph it holds no longer matches the recipe.
+
+        Removal runs inside the vLLM image rather than on the host: the cache is written by a
+        container running as root into a directory the host user only owns the top of, so a
+        host-side rmtree fails on the first root-owned subdirectory. Failure here is not fatal —
+        the worst case is a recompile or a stale hit, neither of which justifies blocking a launch —
+        so problems are reported and swallowed.
+
+        Args:
+            model (str): Model whose recipe defines the expected signature.
+            docker_image (str): Image used to perform the removal (any image with the mount works).
+
+        Returns:
+            bool: True if a stale cache was found and cleared.
+        """
+        signature = cls._compile_cache_signature(model)
+        sig_file = VLLM_CACHE_HOME / ".compile_signature"
+
+        try:
+            previous = sig_file.read_text().strip() if sig_file.exists() else ""
+        except OSError:
+            previous = ""
+
+        if previous == signature:
+            return False
+
+        cleared = False
+        if previous and (VLLM_CACHE_HOME / "torch_compile_cache").exists():
+            print(
+                f"🧹 Speculative depth or target changed since the last launch "
+                f"({previous} -> {signature}); dropping the torch.compile cache, because vLLM's own "
+                f"cache key does not cover num_speculative_tokens."
+            )
+            try:
+                subprocess.run(
+                    [
+                        "docker", "run", "--rm",
+                        "-v", f"{os.path.expanduser('~/.cache/dreamference')}:/root/.cache/dreamference",
+                        "--entrypoint", "rm", docker_image,
+                        "-rf", f"{CONTAINER_VLLM_CACHE_ROOT}/torch_compile_cache",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=120,
+                )
+                cleared = True
+            except (subprocess.SubprocessError, OSError) as exc:
+                print(
+                    f"⚠️  Could not clear the compile cache ({exc}). If this launch behaves oddly "
+                    f"after a speculative-depth change, remove {VLLM_CACHE_HOME}/torch_compile_cache "
+                    f"by hand."
+                )
+
+        try:
+            VLLM_CACHE_HOME.mkdir(parents=True, exist_ok=True)
+            sig_file.write_text(signature)
+        except OSError:
+            pass
+
+        return cleared
+
     def start_server(
         self,
         model: str = DEFAULT_MODEL,
@@ -1186,7 +1295,15 @@ class VLLMServerManager:
         # under a 0.3 recipe used to "require" ~38 GB and sail through this gate.
         from dreamference.hardware import get_model_launch_overrides, get_speculative_draft_repo
         overrides = get_model_launch_overrides(model)
-        gpu_memory_utilization = overrides.get("gpu_memory_utilization", 0.9)
+        # Same fallback the launch builder uses, and it has to stay that way. This read used to
+        # default to 0.9 against build_launch_command's 0.50, so every model without a recipe — most
+        # of the registry — was gated against a 109 GB arena it would never be given, aborted on a
+        # 61 GB launch that fits comfortably, and was told to lower a gpu_memory_utilization it does
+        # not have. A gate that scores a different configuration than the one that runs is not a
+        # gate.
+        gpu_memory_utilization = overrides.get(
+            "gpu_memory_utilization", DEFAULT_GPU_MEMORY_UTILIZATION
+        )
 
         actual_total_gb = hw.total_unified_memory_gb
         actual_free_gb = hw.available_memory_gb
@@ -1314,6 +1431,11 @@ class VLLMServerManager:
             # checkpoint, and this one is named by HF repo ID rather than by the registry alias
             # the tensorizer cache keys on.
             download_model(recipe_draft_model, hf_token=hf_token, auto_tensorize=False)
+
+        # The compile cache persists across container lifetimes now, which means it also outlives
+        # the recipe that produced it. Reconcile the two before the graph is loaded rather than
+        # after.
+        self._reset_stale_compile_cache(model, docker_image=docker_image)
 
         # Step 2: Build launch command
         cmd = self.build_launch_command(
