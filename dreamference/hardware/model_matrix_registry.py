@@ -108,6 +108,20 @@ class ModelMatrixRegistry:
             ),
             hf_repo_id="Intel/Qwen3.5-122B-A10B-int4-AutoRound",
             launch_overrides={
+                # This model brings its own vLLM. The project's pinned image cannot run it: the
+                # load on 2026-08-15 reached 100% of the weights and then died in KV-cache
+                # profiling on the page-size unification assert described at attention_backend
+                # below, which needs a source patch upstream ships as runtime/patch_unify2.py.
+                #
+                # Rather than fork the project image for one model, the recipe pins the image the
+                # source thread itself publishes and measures on (reply #53 records the digest
+                # sha256:be9e05a11da6e72607ab6f3e960993b253b673af0727005122a3266129a518e3 and
+                # vLLM 0.23.0+aeon.sm121a.dflash). Every other model keeps DEFAULT_VLLM_IMAGE.
+                #
+                # This is third-party and unpinned by digest here only because the tag is already
+                # date-and-build stamped. It runs with --gpus all and the host network, like every
+                # other image this project launches — worth knowing before adopting it.
+                "docker_image": "ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix",
                 # 262144 is the checkpoint's native max and what the upstream recipe serves. The
                 # arena below leaves ~12 GiB above the weights, and this checkpoint's KV runs about
                 # 24 KiB/token, so 131072 costs ~3.1 GiB of that and 262144 would cost ~6.3 GiB —
@@ -139,11 +153,17 @@ class ModelMatrixRegistry:
                 "kv_cache_dtype": "auto",
                 # FA2, not FlashInfer. The DFlash drafter is non-causal and needs FLASH_ATTN; the
                 # target is put on the same backend so both KV layouts come from one implementation.
-                # FLASH_ATTN also opts into indexes_kv_by_block_stride, which is what lets vLLM
-                # 0.24 pad the drafter's larger attention page to unify it with the target's
-                # hybrid GDN/mamba page. On 0.23 that padding needed a monkeypatch
-                # (runtime/patch_unify2.py upstream); it is upstream in the pinned image, checked
-                # in kv_cache_utils.unify_kv_cache_spec_page_size on 2026-08-15.
+                # FLASH_ATTN also opts into indexes_kv_by_block_stride, which vLLM 0.24 uses to pad
+                # an attention page that does not divide the target's hybrid GDN/mamba page.
+                #
+                # That padding is NOT enough for this pair, and an earlier version of this comment
+                # claimed otherwise. The load on 2026-08-15 disproved it: weights reached 100%, then
+                # profiling died in kv_cache_utils.unify_kv_cache_spec_page_size at
+                # `assert new_spec.page_size_bytes == max_page_size`. The padding branch is an
+                # `elif` guarding only the *non-divisible* case, while the assert sits after both
+                # branches — so a drafter page that divides a padded max_page_size takes the
+                # scaling branch, lands just under it, and trips the assert. This is the failure
+                # upstream's runtime/patch_unify2.py exists to fix, and it is still live in 0.24.
                 "attention_backend": "flash_attn",
                 # moe_backend deliberately unset. The NVFP4 entry pins marlin because every
                 # FlashInfer FP4 expert path on this box is SM120 code; that argument is about FP4

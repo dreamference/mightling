@@ -216,6 +216,41 @@ def test_preflight_gate_scores_the_utilization_that_will_actually_launch():
         )
         assert launched == gated, model
 
+def test_config_defaults_do_not_outrank_the_model_recipe():
+    # The CLI hands config values to start_server as explicit caller arguments, which by design
+    # outrank the registry recipe. Any concrete default in the config layer is therefore an
+    # override of every model's recipe, not a fallback. kv_cache_dtype defaulted to 'fp8' and so
+    # made every recipe's entry unreachable -- invisibly, because the NVFP4 recipes ask for fp8
+    # too. The first model that wanted 'auto' got fp8 and failed to start: FlashAttention rejects
+    # an fp8 KV cache.
+    from dreamference.config.dreamference_config import DEFAULT_KV_CACHE_DTYPE
+    from dreamference.config import DreamferenceConfig
+
+    assert DEFAULT_KV_CACHE_DTYPE is None
+    config_value = DreamferenceConfig().kv_cache_dtype
+    assert config_value is None
+
+    mgr = VLLMServerManager()
+    expected = {
+        "qwen3.5-122b-a10b-int4-dflash": "auto",
+        "qwen3.5-122b-a10b-nvfp4": "fp8",
+        "qwen3.6-35b-a3b-nvfp4": "fp8",
+    }
+    for model, dtype in expected.items():
+        cmd = mgr.build_launch_command(model=model, kv_cache_dtype=config_value)
+        assert cmd[cmd.index("--kv-cache-dtype") + 1] == dtype, model
+
+def test_flash_attn_is_never_paired_with_fp8_kv_cache():
+    # vLLM refuses this combination outright, so a recipe that asks for both cannot start:
+    #   "Selected backend FLASH_ATTN is not valid ... Reason: ['kv_cache_dtype not supported']"
+    from dreamference.hardware import MODEL_MATRIX
+
+    for alias, spec in MODEL_MATRIX.items():
+        recipe = spec.launch_overrides
+        backend = str(recipe.get("attention_backend", "")).upper()
+        if backend == "FLASH_ATTN":
+            assert recipe.get("kv_cache_dtype", "auto") != "fp8", alias
+
 def test_autoround_checkpoint_gets_no_quantization_flag():
     # AutoRound declares quant_method in its own config.json, so an inferred --quantization would
     # override vLLM's detection with a guess derived from the model name.

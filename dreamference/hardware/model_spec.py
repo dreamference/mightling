@@ -29,6 +29,12 @@ class ModelSpec:
             an error. Keys mirror `build_launch_command` parameter names, plus 'env' (a Dict[str, str] of
             environment variables exported into the vLLM container). Explicit caller arguments always win
             over these values; they only fill in what the caller left unset.
+
+            'docker_image' is among those keys: a model may pin the vLLM build it runs on, because the
+            engine is part of a recipe just as much as the flags are. A checkpoint whose KV geometry
+            needs a patch its own upstream ships cannot be served by whatever image the rest of the
+            matrix uses, and pinning it per model is cheaper than forking one image to suit every model.
+            Unset means DEFAULT_VLLM_IMAGE.
     """
     name: str
     params_b: float

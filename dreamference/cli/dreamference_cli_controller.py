@@ -113,7 +113,7 @@ class DreamferenceCLIController:
         agent_table.add_row("HuggingFace Auth Token", hf_token_str)
         agent_table.add_row("Prefix Caching / Chunked", "[bold green]Enabled (Blackwell GB10 Optimized)[/bold green]")
         agent_table.add_row("Multi-Step Scheduling", f"{config.num_scheduler_steps} steps/iter")
-        agent_table.add_row("KV Cache Dtype", config.kv_cache_dtype)
+        agent_table.add_row("KV Cache Dtype", config.kv_cache_dtype or "from model recipe")
         agent_table.add_row("Tool Call Parser", config.resolve_tool_call_parser())
         # Surfaced because on GB10 (SM121) the wrong MoE kernel does not error — it produces
         # corrupt output — so the selected backend is worth being able to read off `status`.
@@ -271,7 +271,7 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--max-num-batched-tokens", type=int, default=None, help="Max tokens per batch for chunked prefill (GB10 optimization)")
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: False)")
-        start_server_parser.add_argument("--docker-image", default=DEFAULT_VLLM_IMAGE, help="Docker image for vLLM (default: nvcr.io/nvidia/vllm:26.07-py3)")
+        start_server_parser.add_argument("--docker-image", default=None, help="Docker image for vLLM. Unset uses the model's own docker_image recipe entry, then the pinned default")
         # Command: dream server stop
         stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM Docker container")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
@@ -1022,7 +1022,7 @@ class DreamferenceCLIController:
                         guided_decoding_backend=args.guided_decoding_backend or config.guided_decoding_backend,
                         use_tensorizer=getattr(args, "tensorize", None),
                         background=True,
-                        docker_image=getattr(args, "docker_image", DEFAULT_VLLM_IMAGE)
+                        docker_image=getattr(args, "docker_image", None)
                     )
                 
                     # Print progress while server is initializing

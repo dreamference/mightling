@@ -273,6 +273,22 @@ class VLLMServerManager:
         if self.is_image_present(docker_image):
             return True
 
+        # A registry-qualified reference belongs to somebody else and has to be fetched, not built.
+        # Building it would tag this project's own Dockerfile output with a third-party name and
+        # then launch it believing it was theirs — which, now that recipes can pin their own image,
+        # is a live possibility rather than a hypothetical.
+        if "/" in docker_image:
+            print(f"📦 Docker image '{docker_image}' not found locally. Pulling...")
+            try:
+                subprocess.run(["docker", "pull", docker_image], check=True)
+            except (subprocess.CalledProcessError, OSError) as e:
+                print(f"❌ Failed to pull Docker image '{docker_image}': {e}")
+                return False
+            if self.is_image_present(docker_image):
+                print(f"✅ Pulled Docker image '{docker_image}'.")
+                return True
+            return False
+
         project_root = Path(__file__).resolve().parent.parent.parent
         dockerfile_path = project_root / "Dockerfile"
 
@@ -452,7 +468,10 @@ class VLLMServerManager:
         max_num_batched_tokens: Optional[int] = None,
         guided_decoding_backend: Optional[str] = None,
         use_tensorizer: Optional[bool] = None,
-        docker_image: str = DEFAULT_VLLM_IMAGE,
+        # None so the model's recipe can pin its own image. A concrete default here would shadow
+        # `docker_image` in launch_overrides exactly the way the old 8192 shadowed
+        # max_num_batched_tokens.
+        docker_image: Optional[str] = None,
     ) -> List[str]:
         """
         Constructs the shell command array to launch vLLM OpenAI API server.
@@ -494,7 +513,8 @@ class VLLMServerManager:
                 calls ('auto', 'xgrammar', 'guidance'). When None, no flag is emitted and vLLM applies its
                 own default ('auto').
             use_tensorizer (Optional[bool]): Pass model in tensorize (.tensors) format to vLLM if available.
-            docker_image (str): Docker image to launch vLLM in (default: pinned DEFAULT_VLLM_IMAGE).
+            docker_image (Optional[str]): Docker image to launch vLLM in. None falls back to the
+                model's `docker_image` recipe entry, then to the pinned DEFAULT_VLLM_IMAGE.
 
         Returns:
             List[str]: Complete executable command list.
@@ -533,6 +553,10 @@ class VLLMServerManager:
         use_tensorizer = resolved(use_tensorizer, "use_tensorizer", False)
         guided_decoding_backend = resolved(guided_decoding_backend, "guided_decoding_backend", DEFAULT_GUIDED_DECODING_BACKEND)
         max_num_batched_tokens = resolved(max_num_batched_tokens, "max_num_batched_tokens", 8192)
+        # Resolved before anything inspects the image: image_has_tensorizer and
+        # build_structured_outputs_args both probe it, and probing the wrong one produces flags
+        # built for a vLLM that is not the one about to run.
+        docker_image = resolved(docker_image, "docker_image", DEFAULT_VLLM_IMAGE)
         if not attention_backend or attention_backend == "auto":
             attention_backend = recipe.get("attention_backend", "auto")
 
@@ -1233,7 +1257,9 @@ class VLLMServerManager:
         guided_decoding_backend: Optional[str] = None,
         use_tensorizer: Optional[bool] = None,
         background: bool = True,
-        docker_image: str = DEFAULT_VLLM_IMAGE,
+        # None so a model's recipe may pin its own image; resolved once below and then used
+        # for the pull, the compile-cache reset and the launch alike.
+        docker_image: Optional[str] = None,
     ) -> Optional[subprocess.Popen]:
         """
         Pre-downloads model weights, saves in tensorize format, and starts local vLLM OpenAI API server.
@@ -1259,7 +1285,8 @@ class VLLMServerManager:
             guided_decoding_backend (Optional[str]): Structured-outputs backend; None leaves vLLM's default.
             use_tensorizer (Optional[bool]): Convert and load model using tensorize (.tensors) format.
             background (bool): If True, run asynchronously as Popen subprocess.
-            docker_image (str): Docker image to launch vLLM in (default: DEFAULT_VLLM_IMAGE).
+            docker_image (Optional[str]): Docker image to launch vLLM in. None falls back to the
+                model's `docker_image` recipe entry, then to the pinned DEFAULT_VLLM_IMAGE.
 
         Returns:
             Optional[subprocess.Popen]: Popen object if background=True, else None.
@@ -1270,10 +1297,18 @@ class VLLMServerManager:
                 "Please ensure Docker is installed and the daemon is running (`docker ps` must succeed)."
             )
 
+        # Resolved here rather than left to build_launch_command, because everything below this
+        # line — the pull, the compile-cache signature, the tensorizer probe — has to be about the
+        # same image the server will actually run.
+        from dreamference.hardware import get_model_launch_overrides as _recipe_for_image
+        if docker_image is None:
+            docker_image = _recipe_for_image(model).get("docker_image", DEFAULT_VLLM_IMAGE)
+
         if not self.ensure_docker_image(docker_image):
             raise RuntimeError(
-                f"Docker image '{docker_image}' is missing locally and could not be built. "
-                "Please check the Dockerfile or Docker daemon status."
+                f"Docker image '{docker_image}' is missing locally and could not be obtained. "
+                "A registry-qualified image is pulled; the project's own image is built from the "
+                "Dockerfile. Check the Docker daemon and network."
             )
 
         # GB10 hardware check

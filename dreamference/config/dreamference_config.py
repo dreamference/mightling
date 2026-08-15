@@ -26,7 +26,11 @@ DEFAULT_PREFIX_CACHING: Final[bool] = True
 DEFAULT_CHUNKED_PREFILL: Final[bool] = True
 DEFAULT_SCHEDULER_STEPS: Final[int] = 8
 DEFAULT_ATTENTION_BACKEND: Final[str] = "auto"
-DEFAULT_KV_CACHE_DTYPE: Final[str] = "fp8"
+# None, not a dtype: this value is handed to the launcher as an explicit caller argument, so any
+# concrete default here overrides every model's own kv_cache_dtype recipe. The choice belongs to
+# the model — fp8 halves KV but is not accepted by every attention backend — so the config layer
+# stays silent unless the operator says otherwise.
+DEFAULT_KV_CACHE_DTYPE: Final[Optional[str]] = None
 DEFAULT_ENABLE_AUTO_TOOL_CHOICE: Final[bool] = True
 DEFAULT_TOOL_CALL_PARSER: Final[str] = "hermes"
 DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
@@ -200,7 +204,17 @@ class DreamferenceConfig:
             else self.file_data.get("attention_backend", DEFAULT_ATTENTION_BACKEND)
         )
 
-        self.kv_cache_dtype: str = str(
+        # None means "unset — whatever the model's recipe asks for", and the str() coercion that
+        # used to wrap this had to go with it, since it turned None into the string "None".
+        #
+        # This field is passed straight into start_server, where a non-None value counts as an
+        # explicit caller choice and outranks the registry recipe. Defaulting it to a concrete
+        # 'fp8' therefore made every model's kv_cache_dtype recipe entry unreachable through the
+        # CLI — silently, because the two NVFP4 recipes ask for fp8 anyway. The first model that
+        # wanted something else got fp8 regardless and failed to load: FlashAttention rejects an
+        # fp8 KV cache outright ("Selected backend FLASH_ATTN is not valid for this configuration.
+        # Reason: ['kv_cache_dtype not supported']").
+        self.kv_cache_dtype: Optional[str] = (
             kv_cache_dtype
             if kv_cache_dtype is not None
             else self.file_data.get("kv_cache_dtype", DEFAULT_KV_CACHE_DTYPE)
