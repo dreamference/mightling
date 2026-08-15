@@ -66,7 +66,7 @@ def test_dflash_recipe_emits_drafter_speculative_config():
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
     assert cmd[cmd.index("--max-model-len") + 1] == "131072"
-    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.7"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.68"
     assert cmd[cmd.index("--attention-backend") + 1] == "flash_attn"
     assert cmd[cmd.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"

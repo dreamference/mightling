@@ -35,6 +35,12 @@ from dreamference.web_canvas import start_web_canvas_server
 # Global Rich console instance for styled terminal outputs
 console: Final[Console] = Console()
 
+# Where `dream benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
+# sonnet_dataset.py rather than read out of the image or fetched, because images disagree about
+# where they keep it and this project is meant to work without a network.
+SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
+SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
+
 class DreamferenceCLIController:
     """
     Controller class for Dreamference CLI operations, Rich status panels, and subcommand routing.
@@ -48,6 +54,51 @@ class DreamferenceCLIController:
             "[dim]Exclusive Target Hardware: NVIDIA GB10 (Blackwell Architecture | 128 GB Unified Memory)[/dim]",
             border_style="green"
         ))
+
+    @classmethod
+    def _provision_sonnet_dataset(cls, container: str) -> "str | None":
+        """
+        Makes vLLM's sonnet benchmark dataset available inside a running server container.
+
+        Written from the literal in `sonnet_dataset` to a host file and copied in, rather than
+        located inside the image. Images disagree about where they keep it — the project image
+        under /opt/vllm, the DFlash image under /vllm-workspace — and a benchmark that has to know
+        each image's layout breaks every time a model pins a new one. The container is already
+        running with fixed mounts, so `docker cp` is what gets a host file across the boundary.
+
+        Rewritten on every run rather than cached: the file is 22 KB, and a stale or truncated
+        /tmp copy would silently change what is being measured.
+
+        Args:
+            container (str): Name of the running vLLM container to copy the dataset into.
+
+        Returns:
+            str | None: Path to the dataset *inside* the container, or None if it could not be
+                provisioned, in which case the reason has already been printed.
+        """
+        import subprocess
+
+        from dreamference.cli.sonnet_dataset import SONNET_TEXT
+
+        host_path = SONNET_HOST_PATH
+        try:
+            with open(host_path, "w", encoding="utf-8") as handle:
+                handle.write(SONNET_TEXT)
+        except OSError as e:
+            print(f"❌ Could not stage the sonnet dataset at {host_path}: {e}")
+            return None
+
+        copy = subprocess.run(
+            ["docker", "cp", host_path, f"{container}:{SONNET_CONTAINER_PATH}"],
+            capture_output=True, text=True,
+        )
+        if copy.returncode != 0:
+            print(
+                f"❌ Could not copy the dataset into '{container}': "
+                f"{copy.stderr.strip() or copy.stdout.strip()}"
+            )
+            return None
+        return SONNET_CONTAINER_PATH
 
     @classmethod
     def handle_status(cls) -> None:
@@ -299,7 +350,7 @@ class DreamferenceCLIController:
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
         bench_parser.add_argument("--port", type=int, default=8000, help="Port of the server to benchmark")
         bench_parser.add_argument("--model", default=DEFAULT_MODEL, help="Model name to benchmark")
-        bench_parser.add_argument("--dataset-path", default="/opt/vllm/vllm-src/benchmarks/sonnet.txt", help="Path to the dataset")
+        bench_parser.add_argument("--dataset-path", default=None, help="Path to the sonnet dataset inside the container. Unset probes the known locations for the image the server is running")
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
@@ -1123,16 +1174,31 @@ class DreamferenceCLIController:
             import subprocess
             from dreamference.hardware import resolve_model_hf_repo
             hf_repo = resolve_model_hf_repo(args.model)
-            
+            container = f"dreamference-vllm-{args.port}"
+
+            # The dataset used to be read from a path baked into one image's layout, which broke
+            # the moment a model pinned a different image (the DFlash entry keeps it under
+            # /vllm-workspace, the project image under /opt/vllm). Rather than guess where each
+            # image hides it, fetch the canonical copy from vLLM upstream and hand it to whatever
+            # container is running. One source of truth, no per-image knowledge.
+            dataset_path = args.dataset_path
+            if dataset_path is None:
+                dataset_path = cls._provision_sonnet_dataset(container)
+                if dataset_path is None:
+                    sys.exit(1)
+
+            # -t only when there is a terminal to attach to, so this stays runnable from a script.
+            exec_flags = ["-i", "-t"] if sys.stdout.isatty() else ["-i"]
+
             cmd = [
-                "docker", "exec", "-it", f"dreamference-vllm-{args.port}",
+                "docker", "exec", *exec_flags, container,
                 "vllm", "bench", "serve",
                 "--backend", "openai-chat",
                 "--base-url", f"http://localhost:{args.port}",
                 "--endpoint", "/v1/chat/completions",
                 "--model", hf_repo,
                 "--dataset-name", "sonnet",
-                "--dataset-path", args.dataset_path,
+                "--dataset-path", dataset_path,
                 "--sonnet-input-len", "4000",
                 "--sonnet-prefix-len", "2000",
                 "--sonnet-output-len", "512",
@@ -1142,7 +1208,7 @@ class DreamferenceCLIController:
                 "--ignore-eos"
             ]
             
-            print(f"🚀 Running benchmark on {hf_repo} via {args.dataset_path}...")
+            print(f"🚀 Running benchmark on {hf_repo} via {dataset_path}...")
             try:
                 subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:

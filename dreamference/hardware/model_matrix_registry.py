@@ -113,15 +113,18 @@ class ModelMatrixRegistry:
                 # profiling on the page-size unification assert described at attention_backend
                 # below, which needs a source patch upstream ships as runtime/patch_unify2.py.
                 #
-                # Rather than fork the project image for one model, the recipe pins the image the
-                # source thread itself publishes and measures on (reply #53 records the digest
-                # sha256:be9e05a11da6e72607ab6f3e960993b253b673af0727005122a3266129a518e3 and
-                # vLLM 0.23.0+aeon.sm121a.dflash). Every other model keeps DEFAULT_VLLM_IMAGE.
+                # The base is the image the source thread publishes and measures on (reply #53:
+                # ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix, digest
+                # sha256:be9e05a11da6e72607ab6f3e960993b253b673af0727005122a3266129a518e3,
+                # vLLM 0.23.0+aeon.sm121a.dflash) — but that image alone does not start either.
+                # It failed here on 2026-08-15 at the same assert the project image did, because
+                # upstream's serve.sh patches the image at container start rather than shipping it
+                # patched. Dockerfile.dflash bakes that one patch in; see runtime/patch_kv_unify.py.
                 #
-                # This is third-party and unpinned by digest here only because the tag is already
-                # date-and-build stamped. It runs with --gpus all and the host network, like every
-                # other image this project launches — worth knowing before adopting it.
-                "docker_image": "ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix",
+                # Third-party base, run with --gpus all and the host network like every image this
+                # project launches — worth knowing before adopting it. Every other model keeps
+                # DEFAULT_VLLM_IMAGE.
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-unifyfix",
                 # 262144 is the checkpoint's native max and what the upstream recipe serves. The
                 # arena below leaves ~12 GiB above the weights, and this checkpoint's KV runs about
                 # 24 KiB/token, so 131072 costs ~3.1 GiB of that and 262144 would cost ~6.3 GiB —
@@ -138,14 +141,21 @@ class ModelMatrixRegistry:
                 # the desktop — upstream measures headless, and this box runs a session that costs
                 # ~17 GB.
                 #
-                # 0.70 is what the arithmetic supports with that session up: 121.63 GB total, so
-                # the arena is 85.1 GB against 71.4 GiB of target shards plus 1.4 GiB of drafter.
-                # That leaves ~12.3 GiB above the weights for KV and activations, and it clears
-                # start_server's load-peak gate (arena + 15% of weights = 96.1 GB) against ~98.6 GB
-                # free with ~2.5 GB to spare. 0.72 clears the same gate by 0.1 GB, which is not a
-                # margin. Raise this only when loading headless, where the desktop's ~17 GB comes
-                # back.
-                "gpu_memory_utilization": 0.70,
+                # 0.68, arrived at by being wrong once. 0.70 was set from a reading of 98.45 GB
+                # available and cleared the load-peak gate by 2.37 GB; an hour later the desktop
+                # had grown ~2.5 GB and the same recipe was refused by 0.16 GB — the gate did its
+                # job, but a margin that thin is a coin toss against a browser.
+                #
+                # At 0.68 the arena is 82.7 GB against 71.4 GiB of target shards plus 1.4 GiB of
+                # drafter: 9.8 GiB above the weights for KV, activations and CUDA graphs, which at
+                # ~24 KiB/token covers this entry's 131072 context (~3.1 GiB) with room over. The
+                # gate then wants 93.7 GB against ~95.9 GB available — 2.2 GB of slack that a few
+                # more browser tabs cannot eat.
+                #
+                # The direction of error is deliberate. Erring low costs KV cache and fails
+                # loudly; erring high costs the power button. Raise this only when loading
+                # headless, where the desktop's ~17 GB comes back.
+                "gpu_memory_utilization": 0.68,
                 # Unset (bf16 KV), matching the recipe the upstream throughput numbers were taken
                 # on. The NVFP4 entry runs fp8 KV; that would halve KV per token here, but it is
                 # untested against DFlash's drafter KV geometry and the arena above does not need
