@@ -329,8 +329,17 @@ class VLLMServerManager:
             return self._image_probe_cache[docker_image]
 
         result: Dict[str, Any] = {"vllm_version": None, "has_tensorizer": False}
-        if not self.ensure_docker_image(docker_image):
-            self._image_probe_cache[docker_image] = result
+        # Probing reports on an image; it does not go and get one. This used to call
+        # ensure_docker_image, which was harmless while that only ever built a local Dockerfile —
+        # but once recipes could pin a registry image, and ensure_docker_image learned to pull,
+        # merely *building a command* for a model whose image was not yet on disk started a
+        # multi-gigabyte download. Acquisition belongs to start_server, which does it deliberately
+        # and once.
+        #
+        # The unprobed result is deliberately not cached: the image is usually absent only until
+        # start_server pulls it, and a cached "unknown" would outlive the reason for it and pick
+        # the wrong flag spelling for the rest of the process.
+        if not self.is_image_present(docker_image):
             return result
 
         script = (

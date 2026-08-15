@@ -154,7 +154,9 @@ def test_vllm_cache_root_is_mounted_for_every_model():
         var = f"VLLM_CACHE_ROOT={CONTAINER_VLLM_CACHE_ROOT}"
         assert var in cmd, model
         assert cmd[cmd.index(var) - 1] == "-e"
-        assert cmd.index(var) < cmd.index(DEFAULT_VLLM_IMAGE)
+        # The image is whatever this model resolved to, which is no longer one global constant.
+        image = cmd[cmd.index("--entrypoint") + 2]
+        assert cmd.index(var) < cmd.index(image)
         # The cache root must sit under a path the -v flags actually bind, or it is container-local
         # again and the flag is a lie.
         mounts = [cmd[i + 1].split(":")[1] for i, a in enumerate(cmd) if a == "-v"]
@@ -250,6 +252,61 @@ def test_flash_attn_is_never_paired_with_fp8_kv_cache():
         backend = str(recipe.get("attention_backend", "")).upper()
         if backend == "FLASH_ATTN":
             assert recipe.get("kv_cache_dtype", "auto") != "fp8", alias
+
+def test_each_model_may_pin_its_own_vllm_image():
+    # The engine is part of a recipe, not a global: a checkpoint whose KV geometry needs a patch
+    # its own upstream ships cannot run on the image the rest of the matrix uses.
+    from dreamference.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
+    from dreamference.hardware import MODEL_MATRIX
+    import inspect
+
+    # Same shadowing rule as every other optional argument.
+    sig = inspect.signature(VLLMServerManager.build_launch_command)
+    assert sig.parameters["docker_image"].default is None
+
+    mgr = VLLMServerManager()
+    pinned = MODEL_MATRIX["qwen3.5-122b-a10b-int4-dflash"].launch_overrides["docker_image"]
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    assert cmd[cmd.index("--entrypoint") + 2] == pinned
+
+    # A model with no pin still gets the project default...
+    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    assert cmd[cmd.index("--entrypoint") + 2] == DEFAULT_VLLM_IMAGE
+
+    # ...and an explicit caller argument still outranks the recipe.
+    cmd = mgr.build_launch_command(
+        model="qwen3.5-122b-a10b-int4-dflash", docker_image="someone/else:tag"
+    )
+    assert cmd[cmd.index("--entrypoint") + 2] == "someone/else:tag"
+
+def test_registry_images_are_pulled_not_built(monkeypatch):
+    # ensure_docker_image builds from the project Dockerfile, which is right for the project's own
+    # image and catastrophic for anyone else's: it would tag this repo's build with a third-party
+    # name and launch it believing it was theirs.
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_image_present", lambda img: False)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    mgr.ensure_docker_image("ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix")
+    assert calls and calls[0][:2] == ["docker", "pull"]
+    assert not any("build" in c for c in calls[0])
+
+def test_building_a_command_never_fetches_an_image(monkeypatch):
+    # probe_image used to call ensure_docker_image, so once recipes could pin a registry image and
+    # ensure_docker_image learned to pull, merely building a command for a model whose image was
+    # not on disk started a multi-gigabyte download -- in tests, too.
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_image_present", lambda img: False)
+    monkeypatch.setattr(
+        mgr, "ensure_docker_image",
+        lambda img: pytest.fail(f"build_launch_command tried to fetch {img}"),
+    )
+    mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
 
 def test_autoround_checkpoint_gets_no_quantization_flag():
     # AutoRound declares quant_method in its own config.json, so an inferred --quantization would
@@ -551,7 +608,8 @@ def test_detect_image_vllm_version_parses_and_caches(monkeypatch):
         calls.append(a)
         return Result()
 
-    monkeypatch.setattr(mgr, "ensure_docker_image", lambda img: True)
+    # probe_image reports on an image, it does not fetch one, so presence is what it checks.
+    monkeypatch.setattr(mgr, "is_image_present", lambda img: True)
     monkeypatch.setattr("subprocess.run", fake_run)
     assert mgr.detect_image_vllm_version("some-image:tag") == (0, 12)
     assert mgr.detect_image_vllm_version("some-image:tag") == (0, 12)
@@ -570,7 +628,8 @@ def test_probe_image_reports_tensorizer(monkeypatch):
         returncode = 0
         stdout = "vllm=0.13.0\ntensorizer=False\n"
 
-    monkeypatch.setattr(mgr, "ensure_docker_image", lambda img: True)
+    # probe_image reports on an image, it does not fetch one, so presence is what it checks.
+    monkeypatch.setattr(mgr, "is_image_present", lambda img: True)
     monkeypatch.setattr("subprocess.run", lambda *a, **k: Result())
     assert mgr.image_has_tensorizer("img:tag") is False
     assert mgr.detect_image_vllm_version("img:tag") == (0, 13)
@@ -583,7 +642,8 @@ def test_probe_image_failure_is_conservative(monkeypatch):
     def boom(*a, **k):
         raise OSError("docker missing")
 
-    monkeypatch.setattr(mgr, "ensure_docker_image", lambda img: True)
+    # probe_image reports on an image, it does not fetch one, so presence is what it checks.
+    monkeypatch.setattr(mgr, "is_image_present", lambda img: True)
     monkeypatch.setattr("subprocess.run", boom)
     assert mgr.image_has_tensorizer("img:tag") is False
     assert mgr.detect_image_vllm_version("img:tag") is None
