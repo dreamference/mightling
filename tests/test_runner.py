@@ -45,3 +45,40 @@ def test_agent_runner_choices():
     for agent in ["goose", "cline", "aider", "continue", "openhands"]:
         cfg = DreamferenceConfig(agent_runner=agent)
         assert cfg.agent_runner == agent
+
+def test_codex_config_keeps_top_level_keys_out_of_tables(tmp_path, monkeypatch):
+    # TOML scopes a bare key to the most recent [section] above it, so appending a top-level key
+    # to a file that already has tables silently reparents it. Codex writes its own
+    # [tui.model_availability_nux] table -- whose values must be integers -- and appending
+    # model_catalog_json after it produced "invalid type: string ... expected u32" and a CLI that
+    # would not start.
+    import tomllib
+    from dreamference.config import DreamferenceConfig
+    from dreamference.runner import CodexRunner
+
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # A config shaped like the one Codex leaves behind: tables only, no top-level keys.
+    (codex_home / "config.toml").write_text(
+        '[model_providers.openai-custom]\n'
+        'name = "openai-custom"\n'
+        'base_url = "http://localhost:8000/v1"\n'
+        '\n'
+        '[tui.model_availability_nux]\n'
+        '"gpt-5.6-sol" = 3\n'
+    )
+
+    from dreamference.runner import CodexInstaller
+    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/bin/true"))
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: 0)
+    runner.run_session()
+
+    parsed = tomllib.loads((codex_home / "config.toml").read_text())
+    assert parsed["model_catalog_json"].endswith("model_catalog.json")
+    # The pre-existing table must be untouched, and must not have adopted the key.
+    assert parsed["tui"]["model_availability_nux"] == {"gpt-5.6-sol": 3}

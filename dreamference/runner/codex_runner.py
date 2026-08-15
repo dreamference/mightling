@@ -86,27 +86,49 @@ class CodexRunner:
             with open(catalog_path, "w") as f:
                 f.write(catalog_content)
 
-        provider_config = f"""
-model_catalog_json = "{catalog_path}"
-
+        # Two pieces of config, and they cannot be written the same way. `model_catalog_json` is a
+        # top-level key; a table header is not. TOML scopes every bare key to the most recent
+        # `[section]` above it, so appending a top-level key to a file that already has sections
+        # silently reparents it. That is exactly what happened here: appending
+        # `model_catalog_json = "..."` after Codex's own `[tui.model_availability_nux]` table made
+        # it a member of that table, whose values must be integers, and Codex then refused to start
+        # with `invalid type: string ... expected u32`. A key that belongs at the top has to be
+        # written at the top.
+        catalog_key = f'model_catalog_json = "{catalog_path}"\n'
+        provider_block = f"""
 [model_providers.openai-custom]
 name = "openai-custom"
 base_url = "{api_base}"
 """
-        
+
         if os.path.exists(codex_config_path):
             with open(codex_config_path, "r") as f:
                 existing_config = f.read()
+
+            lines = existing_config.splitlines(keepends=True)
+            changed = False
+
+            if "model_catalog_json" not in existing_config:
+                # Before the first table header, which is the only region where a bare key is
+                # unambiguously top-level.
+                first_table = next(
+                    (i for i, line in enumerate(lines) if line.lstrip().startswith("[")),
+                    len(lines),
+                )
+                lines.insert(first_table, catalog_key)
+                changed = True
+
             if "openai-custom" not in existing_config:
-                with open(codex_config_path, "a") as f:
-                    f.write("\n" + provider_config)
-            elif "model_catalog_json" not in existing_config:
-                # Add it if missing but openai-custom is present
-                with open(codex_config_path, "a") as f:
-                    f.write(f'\nmodel_catalog_json = "{catalog_path}"\n')
+                # A table header carries its own scope, so appending one is safe.
+                lines.append(provider_block)
+                changed = True
+
+            if changed:
+                with open(codex_config_path, "w") as f:
+                    f.writelines(lines)
         else:
             with open(codex_config_path, "w") as f:
-                f.write(provider_config)
+                f.write(catalog_key + provider_block)
 
 
         env = os.environ.copy()
