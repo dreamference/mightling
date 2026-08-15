@@ -61,6 +61,85 @@ def test_nvfp4_recipe_emits_self_speculation_and_extra_args():
     assert "--speculative-model" not in cmd
     assert cmd[cmd.index("--max-num-seqs") + 1] == "4"
 
+def test_dflash_recipe_emits_drafter_speculative_config():
+    import json
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    assert cmd[cmd.index("--max-model-len") + 1] == "131072"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.7"
+    assert cmd[cmd.index("--attention-backend") + 1] == "flash_attn"
+    assert cmd[cmd.index("--tool-call-parser") + 1] == "qwen3_xml"
+    assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
+    assert cmd[cmd.index("--max-num-seqs") + 1] == "3"
+    # The prefill chunk carries the draft-token reservation vLLM takes out of it:
+    # max_num_seqs * (num_speculative_tokens - 1) on top of the 8192 the recipe wants prefill to
+    # actually get. If either of those is retuned, this number moves with them.
+    spec_slots = 3 * (8 - 1)
+    assert cmd[cmd.index("--max-num-batched-tokens") + 1] == str(8192 + spec_slots)
+
+    # A drafter that lives in the recipe still goes out as --speculative-config, not as the
+    # --speculative-model pair, which is reserved for a drafter the caller named.
+    spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
+    assert spec["method"] == "dflash"
+    assert spec["model"] == "z-lab/Qwen3.5-122B-A10B-DFlash"
+    assert spec["num_speculative_tokens"] == 8
+    assert spec["attention_backend"] == "FLASH_ATTN"
+    assert "--speculative-model" not in cmd
+
+def test_dflash_recipe_vetoes_prefix_caching():
+    # This recipe cannot run with prefix caching: the drafter's larger attention page makes
+    # vLLM's hash granularity the LCM of two KV group block sizes, and the coordinator aborts on
+    # the group that does not divide it. A True from config must not be able to re-enable it, and
+    # 'off' has to be stated rather than omitted, since vLLM's own default is on.
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(
+        model="qwen3.5-122b-a10b-int4-dflash",
+        enable_prefix_caching=True,
+    )
+    assert "--no-enable-prefix-caching" in cmd
+    assert "--enable-prefix-caching" not in cmd
+
+def test_prefix_caching_off_is_stated_not_omitted():
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", enable_prefix_caching=False)
+    assert "--no-enable-prefix-caching" in cmd
+    # A model whose recipe says nothing still honours the caller in both directions.
+    on = mgr.build_launch_command(model="qwen2.5-coder-32b", enable_prefix_caching=True)
+    assert "--enable-prefix-caching" in on
+    assert "--no-enable-prefix-caching" not in on
+
+def test_optional_arguments_default_to_unset_not_to_a_value():
+    # A literal default on an optional argument satisfies the recipe resolver before the recipe is
+    # read, so the model's own value never lands. max_num_batched_tokens carried 8192 as a
+    # signature default and was pinned there for every model; it only went unnoticed because the
+    # one recipe that set it asked for 8192 too.
+    import inspect
+    sig = inspect.signature(VLLMServerManager.build_launch_command)
+    for name in (
+        "max_model_len",
+        "gpu_memory_utilization",
+        "kv_cache_dtype",
+        "attention_backend",
+        "moe_backend",
+        "max_num_batched_tokens",
+        "tool_call_parser",
+        "reasoning_parser",
+        "use_tensorizer",
+    ):
+        assert sig.parameters[name].default is None, f"{name} shadows the registry recipe"
+
+    mgr = VLLMServerManager()
+    # A model without a recipe still gets the module fallback.
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b")
+    assert cmd[cmd.index("--max-num-batched-tokens") + 1] == "8192"
+
+def test_autoround_checkpoint_gets_no_quantization_flag():
+    # AutoRound declares quant_method in its own config.json, so an inferred --quantization would
+    # override vLLM's detection with a guess derived from the model name.
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    assert "--quantization" not in cmd
+
 def test_explicit_arguments_win_over_registry_recipe():
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(

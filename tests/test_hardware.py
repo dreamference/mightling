@@ -37,7 +37,45 @@ def test_default_model_is_registered_and_gb10_compatible():
     from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
     assert spec.compatible_gb10 is True
-    assert spec.hf_repo_id == "nvidia/Qwen3.5-122B-A10B-NVFP4"
+    assert spec.hf_repo_id == "Intel/Qwen3.5-122B-A10B-int4-AutoRound"
+
+def test_default_model_speculates_against_a_downloadable_drafter():
+    # The DFlash drafter is named inside the recipe rather than passed as an argument, which is
+    # the only reason start_server can see it at all: it has to be fetched before the load and
+    # counted against memory alongside the target. A recipe that names a drafter the registry
+    # cannot size would put a 0 GB drafter into the pre-flight gates.
+    from dreamference.hardware import get_speculative_draft_repo, MODEL_MATRIX
+    from dreamference.hardware.model_matrix_registry import (
+        DEFAULT_MODEL_ALIAS,
+        ModelMatrixRegistry,
+    )
+    draft_repo = get_speculative_draft_repo(DEFAULT_MODEL_ALIAS)
+    assert draft_repo == "z-lab/Qwen3.5-122B-A10B-DFlash"
+    draft_spec = ModelMatrixRegistry.get_spec(draft_repo)
+    assert draft_spec is not None
+    assert draft_spec.min_memory_gb > 0
+
+    spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
+    assert spec.launch_overrides["speculative_config"]["method"] == "dflash"
+    # Self-speculating and non-speculating models must not report a separate drafter.
+    assert get_speculative_draft_repo("qwen3.6-35b-a3b-nvfp4") is None
+    assert get_speculative_draft_repo("qwen2.5-coder-32b") is None
+    assert get_speculative_draft_repo("some/unknown-repo") is None
+
+def test_default_model_weights_fit_its_own_arena():
+    # The recipe's gpu_memory_utilization has a floor the flag itself does not express: vLLM sizes
+    # the whole allocation, weights included, as a fraction of total memory, so an arena smaller
+    # than the checkpoint is an incoherent budget that start_server aborts on. Guard the two ends
+    # rather than the exact value, so retuning does not fail this.
+    from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+    spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
+    gb10_total_gb = 121.63
+    arena_gb = gb10_total_gb * spec.launch_overrides["gpu_memory_utilization"]
+    assert arena_gb > spec.min_memory_gb
+    # And it has to leave the host its reserve, or the overshoot freezes the machine instead of
+    # earning an OOM kill.
+    from dreamference.vllm_server.vllm_server_manager import HOST_MEMORY_RESERVE_GB
+    assert gb10_total_gb - arena_gb >= HOST_MEMORY_RESERVE_GB
 
 def test_launch_overrides_are_isolated_per_call():
     from dreamference.hardware import get_model_launch_overrides

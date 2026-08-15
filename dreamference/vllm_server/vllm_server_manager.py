@@ -436,7 +436,11 @@ class VLLMServerManager:
         tool_call_parser: Optional[str] = None,
         reasoning_parser: Optional[str] = None,
         moe_backend: Optional[str] = None,
-        max_num_batched_tokens: Optional[int] = 8192,
+        # None, not 8192. Every optional argument here means "unset, fall back to the model's
+        # recipe"; a literal default would satisfy `resolved()` before the recipe is ever
+        # consulted, which is what silently pinned this at 8192 for every model regardless of what
+        # its launch_overrides asked for. The 8192 fallback lives in `resolved()` below.
+        max_num_batched_tokens: Optional[int] = None,
         guided_decoding_backend: Optional[str] = None,
         use_tensorizer: Optional[bool] = None,
         docker_image: str = DEFAULT_VLLM_IMAGE,
@@ -463,7 +467,9 @@ class VLLMServerManager:
             draft_model (Optional[str]): Speculative decoding draft model.
             num_speculative_tokens (int): Proposed draft tokens per iteration.
             hf_token (Optional[str]): HuggingFace token.
-            enable_prefix_caching (bool): Flag to enable prefix KV cache.
+            enable_prefix_caching (bool): Flag to enable prefix KV cache. A recipe carrying
+                `enable_prefix_caching: False` overrides a True passed here, because that setting
+                records a checkpoint that cannot run with it rather than a preference.
             enable_chunked_prefill (bool): Flag to enable chunked prefill.
             num_scheduler_steps (int): Multi-step scheduling iteration count.
             attention_backend (Optional[str]): Attention implementation backend.
@@ -521,6 +527,15 @@ class VLLMServerManager:
         if not attention_backend or attention_backend == "auto":
             attention_backend = recipe.get("attention_backend", "auto")
 
+        # Prefix caching is the one knob a recipe may veto outright rather than merely default.
+        # The others express a preference the caller is free to overrule; this one can express an
+        # impossibility. A hybrid GDN/mamba target fronted by a drafter with a larger attention
+        # page ends up with KV cache groups whose block sizes do not divide the hash granularity,
+        # and vLLM's coordinator aborts at startup rather than degrading — so a config-level
+        # `enable_prefix_caching = true` has to lose to the checkpoint that cannot honour it.
+        if recipe.get("enable_prefix_caching") is False:
+            enable_prefix_caching = False
+
         # 70B/72B checkpoints published in BF16 need an explicit FP8 request to fit GB10. Checkpoints
         # that are already quantized announce their format in config.json, so adding a guess here would
         # override vLLM's own detection with a value derived from nothing but the model name.
@@ -544,6 +559,11 @@ class VLLMServerManager:
 
         if enable_prefix_caching:
             base_args.append("--enable-prefix-caching")
+        else:
+            # Stated in the negative rather than omitted. vLLM's CacheConfig defaults
+            # enable_prefix_caching to True, so leaving the flag off asks for whatever vLLM
+            # prefers — which for every model here is "on". Turning it off has to be said.
+            base_args.append("--no-enable-prefix-caching")
         if enable_chunked_prefill:
             base_args.append("--enable-chunked-prefill")
             if max_num_batched_tokens and max_num_batched_tokens > 0:
@@ -1100,7 +1120,7 @@ class VLLMServerManager:
         tool_call_parser: Optional[str] = None,
         reasoning_parser: Optional[str] = None,
         moe_backend: Optional[str] = None,
-        max_num_batched_tokens: Optional[int] = 8192,
+        max_num_batched_tokens: Optional[int] = None,
         guided_decoding_backend: Optional[str] = None,
         use_tensorizer: Optional[bool] = None,
         background: bool = True,
@@ -1164,16 +1184,24 @@ class VLLMServerManager:
         # gpu_memory_utilization sizes the KV/activation arena vLLM carves out, and scaling total
         # memory by it says nothing about whether the checkpoint itself fits. A 78 GB checkpoint
         # under a 0.3 recipe used to "require" ~38 GB and sail through this gate.
-        from dreamference.hardware import get_model_launch_overrides
+        from dreamference.hardware import get_model_launch_overrides, get_speculative_draft_repo
         overrides = get_model_launch_overrides(model)
         gpu_memory_utilization = overrides.get("gpu_memory_utilization", 0.9)
 
         actual_total_gb = hw.total_unified_memory_gb
         actual_free_gb = hw.available_memory_gb
 
+        # A drafter can arrive two ways and both are resident at once with the target. The caller
+        # can name one, or the model's own recipe can bring one (DFlash). The recipe's was
+        # invisible here until 2026-08-15, which under-counted the footprint by the drafter's size
+        # and — worse — left it out of the pre-download below, so vLLM would fetch it from inside
+        # the container during the load, the one phase where this host cannot afford surprises.
+        recipe_draft_model = get_speculative_draft_repo(model)
+        draft_models = [m for m in (draft_model, recipe_draft_model) if m]
+
         weights_gb = self._estimate_model_weights_gb(model)
-        if draft_model:
-            weights_gb += self._estimate_model_weights_gb(draft_model)
+        for extra_model in draft_models:
+            weights_gb += self._estimate_model_weights_gb(extra_model)
 
         # vLLM sizes its whole allocation — weights included — as a fraction of total memory,
         # so this arena is the ceiling on everything the server will pin.
@@ -1281,6 +1309,11 @@ class VLLMServerManager:
         download_model(model, hf_token=hf_token, auto_tensorize=tensorize)
         if draft_model:
             download_model(draft_model, hf_token=hf_token, auto_tensorize=tensorize)
+        if recipe_draft_model:
+            # Not tensorized, unlike a caller-named drafter: the format buys nothing on a 1-2 GiB
+            # checkpoint, and this one is named by HF repo ID rather than by the registry alias
+            # the tensorizer cache keys on.
+            download_model(recipe_draft_model, hf_token=hf_token, auto_tensorize=False)
 
         # Step 2: Build launch command
         cmd = self.build_launch_command(

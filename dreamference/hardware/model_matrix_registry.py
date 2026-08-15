@@ -10,11 +10,18 @@ from dreamference.hardware.model_spec import ModelSpec
 
 # Quantization formats that a checkpoint declares in its own config.json. vLLM auto-detects these,
 # and passing an explicit --quantization alongside them fights that detection.
-SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset({"NVFP4", "MXFP4", "AWQ", "GPTQ"})
+#
+# 'AUTOROUND-INT4' is spelled out rather than folded into a bare 'INT4' because the two mean
+# different things in this table: several entries list 'INT4' to say "could be served in INT4",
+# which declares nothing, while an AutoRound checkpoint ships
+# quantization_config.quant_method='auto-round' in config.json and needs no flag.
+SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
+    {"NVFP4", "MXFP4", "AWQ", "GPTQ", "AUTOROUND-INT4"}
+)
 
 # Single source of truth for the model Dreamference serves when nothing else is specified. Imported by
 # the config layer and the vLLM launcher so the two cannot drift apart.
-DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-nvfp4"
+DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-int4-dflash"
 
 class ModelMatrixRegistry:
     """
@@ -23,6 +30,170 @@ class ModelMatrixRegistry:
 
     # Static registry of supported target models and speculative draft models
     MATRIX: Final[Dict[str, ModelSpec]] = {
+        "qwen3.5-122b-a10b-int4-dflash": ModelSpec(
+            name="Qwen 3.5 122B-A10B (INT4 AutoRound + DFlash)",
+            params_b=122.0,
+            supported_precisions=["AUTOROUND-INT4"],
+            # The target shards alone, 71.4 GiB. The DFlash drafter is NOT folded in here:
+            # start_server resolves it from speculative_config and adds its own spec's size, so
+            # counting it twice would inflate every pre-flight gate.
+            min_memory_gb=71.5,
+            max_memory_gb=120.0,
+            compatible_gb10=True,
+            notes=(
+                "Default. Same 122B-A10B weights as the NVFP4 entry below, but served as Intel's "
+                "AutoRound INT4 checkpoint with the z-lab DFlash drafter in front of it. DFlash is "
+                "block-speculative: it drafts a whole block of tokens in one parallel forward "
+                "instead of running a head autoregressively, so acceptance is not capped the way "
+                "MTP's is. That cap is the entire reason this entry exists — the NVFP4 recipe below "
+                "declares mtp_num_hidden_layers=1 and so proposes exactly one token per step, while "
+                "the upstream DGX Spark measurements put DFlash at ~8.7 accepted tokens per step on "
+                "real agent traffic (vs 2.9 for MTP-2) and ~5.4 on code (vs 2.8). That is the "
+                "difference between ~11 tok/s and the ~80 tok/s the thread reports, and agent "
+                "traffic is exactly this project's workload.\n\n"
+                "Source: https://forums.developer.nvidia.com/t/"
+                "dflash-for-qwen3-5-122b-a10b-80-tok-s-on-1x-spark/374328 and the recipe it "
+                "publishes at https://github.com/Entrpi/qwen3.5-122B-A10B-on-spark "
+                "(runtime/serve.sh). Three of that recipe's settings are deliberately NOT copied "
+                "here; each divergence is explained at the flag it belongs to below "
+                "(gpu_memory_utilization, load_format, enable_prefix_caching).\n\n"
+                "Checkpoint choice: serve.sh's own default target, not the INT4+FP8 hybrid the "
+                "thread's later posts benchmark. The hybrid needs two source patches to vLLM's INC "
+                "quantization layer (patch_inc_hybrid.py, patch_int8_lmhead_v3.py) that are not "
+                "upstream and would have to be baked into this project's image, and by the "
+                "thread's own numbers they buy ~6% end-to-end and ~0% once DFlash acceptance is "
+                "high — which is the regime an agent runs in. Not worth carrying two monkeypatches "
+                "for, and one of them no longer applies anyway: it rewrites "
+                "quantization/inc.py, which is a package in the pinned image's vLLM rather than "
+                "the single module it patches.\n\n"
+                "Verified against this project's pinned image on 2026-08-15 rather than assumed: "
+                "vLLM 0.24.0 there registers DFlashDraftModel -> qwen3_dflash, accepts "
+                "method='dflash' in --speculative-config, and sets parallel_drafting for it. The "
+                "drafter's config.json declares architectures=['DFlashDraftModel'], which is the "
+                "name that registry entry keys on. The target's architecture "
+                "(Qwen3_5MoeForConditionalGeneration) is registered there too, and its "
+                "quant_method='auto-round' with packing_format='auto_round:auto_gptq' is one of the "
+                "two formats INCConfig.SUPPORTED_FORMATS claims and reroutes to the 'inc' backend. "
+                "--async-scheduling stays on: vLLM refuses it for most speculative methods, but "
+                "EagleModelTypes nests DFlashModelTypes, so 'dflash' is on the allowed list. No "
+                "image change is needed to launch this.\n\n"
+                "NOT yet verified: a real load. Every number here is either measured upstream on "
+                "another GB10 or derived from this machine's own memory arithmetic. Treat the "
+                "first launch as supervised — this is the checkpoint class that froze this host "
+                "six times on 2026-08-14, and the pre-flight gates in start_server are what stand "
+                "between a bad recipe and the power button."
+            ),
+            hf_repo_id="Intel/Qwen3.5-122B-A10B-int4-AutoRound",
+            launch_overrides={
+                # 262144 is the checkpoint's native max and what the upstream recipe serves. The
+                # arena below leaves ~12 GiB above the weights, and this checkpoint's KV runs about
+                # 24 KiB/token, so 131072 costs ~3.1 GiB of that and 262144 would cost ~6.3 GiB —
+                # affordable, but it halves what is left for activations and CUDA graphs, and the
+                # KV reservation is claimed during the load, which is the only phase that has ever
+                # taken this machine down. 131072 is 4x what the NVFP4 entry dares and still leaves
+                # ~9 GiB of slack. Raise to 262144 once a load has completed cleanly and the
+                # steady-state footprint is known.
+                "max_model_len": 131072,
+                # The upstream recipe ships 0.82 and calls it validated. It is not validated *here*.
+                # 0.80 passed every static check on this machine on 2026-08-14 and still froze it:
+                # driver-pinned weights are unreclaimable, so overshoot livelocks the host in
+                # reclaim instead of earning an OOM kill. The difference is not the hardware, it is
+                # the desktop — upstream measures headless, and this box runs a session that costs
+                # ~17 GB.
+                #
+                # 0.70 is what the arithmetic supports with that session up: 121.63 GB total, so
+                # the arena is 85.1 GB against 71.4 GiB of target shards plus 1.4 GiB of drafter.
+                # That leaves ~12.3 GiB above the weights for KV and activations, and it clears
+                # start_server's load-peak gate (arena + 15% of weights = 96.1 GB) against ~98.6 GB
+                # free with ~2.5 GB to spare. 0.72 clears the same gate by 0.1 GB, which is not a
+                # margin. Raise this only when loading headless, where the desktop's ~17 GB comes
+                # back.
+                "gpu_memory_utilization": 0.70,
+                # Unset (bf16 KV), matching the recipe the upstream throughput numbers were taken
+                # on. The NVFP4 entry runs fp8 KV; that would halve KV per token here, but it is
+                # untested against DFlash's drafter KV geometry and the arena above does not need
+                # the space. Left explicit so the choice reads as a choice.
+                "kv_cache_dtype": "auto",
+                # FA2, not FlashInfer. The DFlash drafter is non-causal and needs FLASH_ATTN; the
+                # target is put on the same backend so both KV layouts come from one implementation.
+                # FLASH_ATTN also opts into indexes_kv_by_block_stride, which is what lets vLLM
+                # 0.24 pad the drafter's larger attention page to unify it with the target's
+                # hybrid GDN/mamba page. On 0.23 that padding needed a monkeypatch
+                # (runtime/patch_unify2.py upstream); it is upstream in the pinned image, checked
+                # in kv_cache_utils.unify_kv_cache_spec_page_size on 2026-08-15.
+                "attention_backend": "flash_attn",
+                # moe_backend deliberately unset. The NVFP4 entry pins marlin because every
+                # FlashInfer FP4 expert path on this box is SM120 code; that argument is about FP4
+                # kernels and does not transfer. This checkpoint packs auto_round:auto_gptq, so
+                # vLLM's own GPTQ/Marlin selection applies and guessing here would only override it.
+                "tool_call_parser": "qwen3_xml",
+                "reasoning_parser": "qwen3",
+                # 8213, not the upstream recipe's round 8192. vLLM reserves draft-token slots out
+                # of this budget — max_num_seqs * (num_speculative_tokens - 1) = 3 * 7 = 21 — and
+                # warns that the remainder is what prefill actually gets. At 8192 the chunk lands
+                # at 8171; adding the 21 back puts it at exactly 8192. Retuning either
+                # max-num-seqs or num_speculative_tokens changes this number.
+                "max_num_batched_tokens": 8213,
+                # Prefix caching off, and this is the one place the recipe loses something real —
+                # upstream measures ~13x warm-prefix TTFT (2.30s -> 0.18s) with it on, which is
+                # worth a great deal to an agent re-reading the same files every turn.
+                #
+                # It cannot be turned on against the pinned image. With DFlash the drafter's
+                # attention page is ~2x the target's, so page unification scales the target's
+                # mamba+attention block up (2240 -> 4480) while the drafter's group stays at 2240.
+                # kv_cache_utils.resolve_kv_cache_block_sizes then sees a MambaSpec whose
+                # block_size != cache_config.block_size, takes its back-off branch, and forces
+                # hash_block_size to the LCM (4480) — which the drafter's 2240 does not divide, so
+                # HybridKVCacheCoordinator aborts at startup. It is a failed launch, not bad output.
+                #
+                # Upstream fixes this with runtime/patch_prefix_align.py, which makes that back-off
+                # fire only for genuinely non-align mamba and falls through to the GCD. That patch
+                # is NOT in the pinned image: the exact pre-patch source was read out of
+                # kv_cache_utils.py on 2026-08-15 and matches the patch's anchor byte for byte.
+                # With prefix caching off, resolve_kv_cache_block_sizes returns before any of that,
+                # so this setting is what makes the entry start at all.
+                #
+                # To get it back, bake patch_prefix_align.py into this project's image build and
+                # flip this to True.
+                "enable_prefix_caching": False,
+                # load_format left at vLLM's default (mmap). Upstream ships fastsafetensors and
+                # measures 8 min -> 1 min on load, but that finding does not survive this project's:
+                # GB10 has no GDS, so fastsafetensors falls back to staging every shard through
+                # host bounce buffers, and on unified memory the bounce buffer and the destination
+                # are the same physical RAM — a 71 GiB checkpoint resident twice at the peak. The
+                # load peak is precisely what freezes this host. See the load_format comment in
+                # build_launch_command.
+                "speculative_config": {
+                    "method": "dflash",
+                    "model": "z-lab/Qwen3.5-122B-A10B-DFlash",
+                    # 8, not serve.sh's default of 12. Reply #48 in the source thread — the post
+                    # this entry was added from — reports n=8 outperforming n=12 on code and JSON
+                    # workloads (82.2 and 78.7 tok/s). Drafting past what the target will accept
+                    # costs a wasted verify.
+                    "num_speculative_tokens": 8,
+                    "attention_backend": "FLASH_ATTN",
+                },
+                "extra_args": [
+                    # 3, from the upstream recipe. Concurrency is nearly free on this box
+                    # (bandwidth-bound decode batches well), but every stream reserves KV.
+                    "--max-num-seqs", "3",
+                    "--tensor-parallel-size", "1",
+                    "--dtype", "auto",
+                ],
+                "env": {
+                    # vLLM's memory profiler over-reserves for the CUDA graph pool (~0.7 GiB
+                    # estimated against ~0.14 GiB actually captured); disabling the estimate hands
+                    # the difference back to KV and takes the real capture out of the ~36 GB left
+                    # outside the arena at 0.70. Upstream calls this safe at 0.82, where the
+                    # headroom is ~21 GiB — there is far more of it here.
+                    "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
+                    # Same trade as the two entries below: atomic-add reduction is the faster
+                    # Marlin path when the block count is high, at the cost of run-to-run bit
+                    # identity. Unset it before chasing any bug that needs identical outputs.
+                    "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+                },
+            },
+        ),
         "qwen3.5-122b-a10b-nvfp4": ModelSpec(
             name="Qwen 3.5 122B-A10B (NVFP4)",
             params_b=122.0,
@@ -31,7 +202,11 @@ class ModelMatrixRegistry:
             max_memory_gb=120.0,
             compatible_gb10=True,
             notes=(
-                "Default. At 78 GB this checkpoint is 64% of a GB10's unified memory, and the weights "
+                "Previous default, superseded by the INT4 + DFlash entry above on 2026-08-15 — kept "
+                "because its recipe is the one that has actually been loaded on this machine, and it "
+                "is the fallback if DFlash does not come up. Its ceiling is speculative: this "
+                "checkpoint's MTP head declares one hidden layer, so it proposes one token per step. "
+                "At 78 GB this checkpoint is 64% of a GB10's unified memory, and the weights "
                 "the driver pins are unreclaimable, so overshooting does not earn an OOM kill — the "
                 "host livelocks in reclaim until the power button. That froze this machine six times "
                 "on 2026-08-14 at every gpu_memory_utilization from 0.9 down to 0.3 — but not "
@@ -139,7 +314,7 @@ class ModelMatrixRegistry:
             max_memory_gb=60.0,
             compatible_gb10=True,
             notes=(
-                "Default. MoE with ~3B active params — decode speed tracks active params, not total, "
+                "Small-model option. MoE with ~3B active params — decode speed tracks active params, not total, "
                 "which is what the GB10's memory bandwidth rewards. Requires the FlashInfer b12x NVFP4 "
                 "path (vLLM >= the May 2026 SM12x backends); the CUTLASS FP4 path is compiled for SM120 "
                 "and silently emits garbage on SM121. Launch values follow NVIDIA's DGX Spark recipe."
@@ -215,6 +390,28 @@ class ModelMatrixRegistry:
             compatible_gb10=True,
             notes="Supported (INT8/FP8 quantized fit)",
             hf_repo_id="meta-llama/Llama-3.3-70B-Instruct"
+        ),
+        "qwen3.5-122b-a10b-dflash-draft": ModelSpec(
+            name="Qwen 3.5 122B-A10B DFlash Drafter (Draft Model)",
+            params_b=0.8,
+            supported_precisions=["BF16"],
+            # Measured, not estimated: 1.44 GiB is what _estimate_model_weights_gb reports for the
+            # fetched snapshot on 2026-08-15. Rounded up, so the pre-download run and the runs
+            # after it put the same number through the gates.
+            min_memory_gb=1.5,
+            max_memory_gb=2.5,
+            compatible_gb10=True,
+            notes=(
+                "Block-diffusion drafter for the default INT4 + DFlash entry, named by that entry's "
+                "speculative_config rather than served on its own. Listed here so the pre-flight "
+                "memory gates and the pre-download step have a size to work with before it has been "
+                "fetched — _estimate_model_weights_gb falls back to min_memory_gb until the "
+                "snapshot exists on disk, and without an entry the drafter would count as 0 GB on "
+                "the one run where nothing is cached yet. Its config.json declares "
+                "architectures=['DFlashDraftModel'], which is the key vLLM's model registry maps to "
+                "qwen3_dflash."
+            ),
+            hf_repo_id="z-lab/Qwen3.5-122B-A10B-DFlash",
         ),
         "qwen2.5-coder-1.5b": ModelSpec(
             name="Qwen 2.5 Coder 1.5B (Draft Model)",
@@ -318,6 +515,29 @@ class ModelMatrixRegistry:
             return {}
         spec = cls.get_spec(model_key)
         return dict(spec.launch_overrides) if spec else {}
+
+    @classmethod
+    def get_speculative_draft_repo(cls, model_key: str) -> Optional[str]:
+        """
+        Retrieves the separate draft checkpoint a model's recipe speculates against, if any.
+
+        Two kinds of speculation live in `launch_overrides['speculative_config']` and only one of
+        them names a second checkpoint. Self-speculation (MTP, Eagle heads) ships inside the target
+        and has no 'model' key; a drafter like DFlash is its own repository that has to be fetched
+        and counted against memory alongside the target. Callers that pre-download weights or size
+        the pre-flight memory gates need to see the second kind, and it is invisible to them
+        otherwise — the `draft_model` argument on the launcher only covers drafters named by the
+        caller, not ones the recipe brings with it.
+
+        Args:
+            model_key (str): Model alias, HF repo ID, or display name.
+
+        Returns:
+            Optional[str]: HuggingFace repo ID of the recipe's draft model, or None when the model
+                is unknown, speculates against itself, or does not speculate at all.
+        """
+        spec_config = cls.get_launch_overrides(model_key).get("speculative_config") or {}
+        return spec_config.get("model") or None
 
     @classmethod
     def declares_own_quantization(cls, model_key: str) -> bool:

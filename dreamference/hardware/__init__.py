@@ -16,6 +16,9 @@ def resolve_model_hf_repo(model_key: str) -> str:
 def get_model_launch_overrides(model_key: str) -> Dict[str, Any]:
     return ModelMatrixRegistry.get_launch_overrides(model_key)
 
+def get_speculative_draft_repo(model_key: str) -> Optional[str]:
+    return ModelMatrixRegistry.get_speculative_draft_repo(model_key)
+
 def model_declares_own_quantization(model_key: str) -> bool:
     return ModelMatrixRegistry.declares_own_quantization(model_key)
 
@@ -76,6 +79,7 @@ __all__ = [
     "MODEL_MATRIX",
     "resolve_model_hf_repo",
     "get_model_launch_overrides",
+    "get_speculative_draft_repo",
     "model_declares_own_quantization",
     "is_model_downloaded",
     "is_model_tensorized",
