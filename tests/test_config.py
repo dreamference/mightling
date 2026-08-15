@@ -79,3 +79,56 @@ def test_hf_token_config(tmp_path):
 
     config_cli = DreamferenceConfig(config_file=str(cfg_file), hf_token="hf_override_67890")
     assert config_cli.hf_token == "hf_override_67890"
+
+def test_pinning_the_current_default_model_survives_a_default_change(tmp_path):
+    # `dream main-model set X` where X happens to equal today's DEFAULT_MODEL used to write no
+    # `model` key at all, because save_config only recorded non-defaults. The pin then silently
+    # followed the default to a different checkpoint the next time DEFAULT_MODEL moved -- which it
+    # did on 2026-08-15. A chosen model and a defaulted one are different intents.
+    import dreamference.config.dreamference_config as cfg_mod
+
+    cfg_file = tmp_path / "pin.yaml"
+    cfg_file.write_text("vllm_host: http://localhost:8000\n")
+
+    config = DreamferenceConfig(config_file=str(cfg_file))
+    config.model = cfg_mod.DEFAULT_MODEL          # exactly what `main-model set` does
+    config.save_config()
+
+    assert "model" in cfg_file.read_text()
+
+    original_default = cfg_mod.DEFAULT_MODEL
+    try:
+        cfg_mod.DEFAULT_MODEL = "some-future-default"
+        reloaded = DreamferenceConfig(config_file=str(cfg_file))
+        assert reloaded.model == original_default
+    finally:
+        cfg_mod.DEFAULT_MODEL = original_default
+
+def test_unpinned_model_is_not_fossilised_into_the_config(tmp_path):
+    # The other half of the contract: a config nobody pinned must keep tracking the default, or
+    # every `dream init` would freeze whatever model happened to be current that day.
+    import dreamference.config.dreamference_config as cfg_mod
+
+    cfg_file = tmp_path / "unpinned.yaml"
+    cfg_file.write_text("vllm_host: http://localhost:8000\n")
+
+    DreamferenceConfig(config_file=str(cfg_file)).save_config()
+    assert "model" not in cfg_file.read_text()
+
+    original_default = cfg_mod.DEFAULT_MODEL
+    try:
+        cfg_mod.DEFAULT_MODEL = "some-future-default"
+        assert DreamferenceConfig(config_file=str(cfg_file)).model == "some-future-default"
+    finally:
+        cfg_mod.DEFAULT_MODEL = original_default
+
+def test_model_from_config_file_is_preserved_on_resave(tmp_path):
+    # A model read from the file is a pin too, even if it later coincides with the default: the
+    # user wrote it down. Re-saving for an unrelated reason must not drop it.
+    cfg_file = tmp_path / "fromfile.yaml"
+    cfg_file.write_text("model: starcoder2-15b\n")
+
+    config = DreamferenceConfig(config_file=str(cfg_file))
+    config.sandbox = "podman"
+    config.save_config()
+    assert "starcoder2-15b" in cfg_file.read_text()
