@@ -91,6 +91,27 @@ MIN_FREE_KBYTES: Final[int] = 1_048_576
 # handing the stall to whoever allocated next.
 WATERMARK_SCALE_FACTOR: Final[int] = 200
 DEFAULT_KV_CACHE_DTYPE: Final[str] = "auto"
+
+# Sampling defaults pushed onto the server, overriding whatever the checkpoint's
+# generation_config.json asks for.
+#
+# This is not a preference, it is a correctness requirement for the clients this project drives.
+# An OpenAI-compatible request that omits `temperature` does not mean "use zero" — it means "use
+# the server's default", and the served checkpoint ships temperature 0.6 / top_p 0.95 / top_k 20.
+# Codex has no sampling setting at all (`model_reasoning` and `model_verbosity` exist; nothing for
+# temperature), so it can never ask, and every one of its turns sampled at 0.6 until this was set.
+# Measured on 2026-08-15 from the request log: 52 requests at temperature=0.6 against 2 at 0.0,
+# and the only two at 0.0 were probes that passed it explicitly.
+#
+# A server default, not a clamp: a client that does send temperature still wins, so benchmarking
+# and any deliberately creative use keep working.
+DEFAULT_GENERATION_OVERRIDES: Final[Dict[str, Any]] = {
+    "temperature": 0.0,
+    "top_p": 1.0,
+    # 0 disables top-k in vLLM. Leaving it at the checkpoint's 20 would keep sampling from a
+    # truncated distribution even at temperature 0.
+    "top_k": 0,
+}
 # Let vLLM pick the weight loader. See the resolution site in build_launch_command for why this
 # is not fastsafetensors: without GDS — which GB10 does not have — it double-resides the
 # checkpoint in host RAM, which on unified memory is the whole memory budget.
@@ -626,6 +647,12 @@ class VLLMServerManager:
             base_args.extend(["--reasoning-parser", reasoning_parser])
         if guided_decoding_backend:
             base_args.extend(self.build_structured_outputs_args(guided_decoding_backend, docker_image))
+
+        # Resolved like any other recipe key, so a model that genuinely wants the checkpoint's own
+        # sampling can set `generation_overrides` to None and get it.
+        generation_overrides = resolved(None, "generation_overrides", DEFAULT_GENERATION_OVERRIDES)
+        if generation_overrides:
+            base_args.extend(["--override-generation-config", json.dumps(generation_overrides)])
 
         docker_available = self.is_docker_available()
         is_docker_launch = docker_available  # Always prefer Docker when available

@@ -326,6 +326,41 @@ def test_building_a_command_never_fetches_an_image(monkeypatch):
     )
     mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
 
+def test_every_model_serves_deterministic_sampling_by_default():
+    # An OpenAI-compatible request that omits `temperature` asks for the *server's* default, and
+    # the served checkpoint ships 0.6 / top_p 0.95 / top_k 20. Codex has no sampling setting at
+    # all, so it can never ask for zero -- 52 of its requests were measured at 0.6 before this.
+    import json
+    from dreamference.vllm_server.vllm_server_manager import DEFAULT_GENERATION_OVERRIDES
+
+    mgr = VLLMServerManager()
+    for model in ("qwen3.5-122b-a10b-int4-dflash", "qwen3.6-35b-a3b-nvfp4", "qwen2.5-coder-32b"):
+        cmd = mgr.build_launch_command(model=model)
+        payload = json.loads(cmd[cmd.index("--override-generation-config") + 1])
+        assert payload == DEFAULT_GENERATION_OVERRIDES, model
+        assert payload["temperature"] == 0.0
+        # top_k must be disabled too, or zero-temperature still samples from a truncated set.
+        assert payload["top_k"] == 0
+
+def test_a_recipe_can_opt_out_of_the_sampling_override(monkeypatch):
+    # The override is a default, not a clamp: a model whose checkpoint sampling is deliberate can
+    # set generation_overrides to None and keep it.
+    from dreamference.hardware import model_matrix_registry
+
+    real = model_matrix_registry.ModelMatrixRegistry.get_launch_overrides
+
+    def opting_out(cls, model_key):
+        recipe = dict(real(model_key))
+        if model_key == "qwen2.5-coder-32b":
+            recipe["generation_overrides"] = None
+        return recipe
+
+    monkeypatch.setattr(
+        model_matrix_registry.ModelMatrixRegistry, "get_launch_overrides", classmethod(opting_out)
+    )
+    cmd = VLLMServerManager().build_launch_command(model="qwen2.5-coder-32b")
+    assert "--override-generation-config" not in cmd
+
 def test_autoround_checkpoint_gets_no_quantization_flag():
     # AutoRound declares quant_method in its own config.json, so an inferred --quantization would
     # override vLLM's detection with a guess derived from the model name.
