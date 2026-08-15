@@ -1,0 +1,20 @@
+# vLLM image for the DFlash recipe (qwen3.5-122b-a10b-int4-dflash).
+#
+# Separate from the project's main Dockerfile because this model needs a different engine, not
+# different flags: the DGX Spark DFlash recipe is built on the AEON sm121 vLLM below, and the
+# registry entry pins this tag through `launch_overrides['docker_image']`. Every other model keeps
+# DEFAULT_VLLM_IMAGE.
+#
+# The base alone is not sufficient. Upstream's own runtime/serve.sh applies patches to it at
+# container start; the one that decides whether the server starts at all is the KV page-size
+# unification fix, so it is baked in here instead of re-applied on every launch. See
+# runtime/patch_kv_unify.py for what fails without it and why the fix has the shape it does.
+#
+# Keep this tag in sync with the `docker_image` entry in ModelMatrixRegistry.
+FROM ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix
+
+COPY runtime/patch_kv_unify.py /opt/dreamference/patch_kv_unify.py
+
+# Fails the build if the anchor is absent, so a future base-image bump cannot silently produce an
+# image that looks patched and is not.
+RUN python3 /opt/dreamference/patch_kv_unify.py
