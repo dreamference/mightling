@@ -119,12 +119,14 @@ class ModelMatrixRegistry:
                 # vLLM 0.23.0+aeon.sm121a.dflash) — but that image alone does not start either.
                 # It failed here on 2026-08-15 at the same assert the project image did, because
                 # upstream's serve.sh patches the image at container start rather than shipping it
-                # patched. Dockerfile.dflash bakes that one patch in; see runtime/patch_kv_unify.py.
+                # patched. Dockerfile.dflash bakes in both patches it needs — see runtime/patch_kv_unify.py
+                # (decides whether it starts) and runtime/patch_prefix_align.py (decides whether it can
+                # start with prefix caching).
                 #
                 # Third-party base, run with --gpus all and the host network like every image this
                 # project launches — worth knowing before adopting it. Every other model keeps
                 # DEFAULT_VLLM_IMAGE.
-                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-unifyfix",
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-kvfix2",
                 # 262144 is the checkpoint's native max and what the upstream recipe serves. The
                 # arena below leaves ~12 GiB above the weights, and this checkpoint's KV runs about
                 # 24 KiB/token, so 131072 costs ~3.1 GiB of that and 262144 would cost ~6.3 GiB —
@@ -187,28 +189,30 @@ class ModelMatrixRegistry:
                 # at 8171; adding the 21 back puts it at exactly 8192. Retuning either
                 # max-num-seqs or num_speculative_tokens changes this number.
                 "max_num_batched_tokens": 8213,
-                # Prefix caching off, and this is the one place the recipe loses something real —
-                # upstream measures ~13x warm-prefix TTFT (2.30s -> 0.18s) with it on, which is
-                # worth a great deal to an agent re-reading the same files every turn.
+                # Prefix caching ON, which is worth roughly 13x on warm-prefix TTFT upstream
+                # (2.30s -> 0.18s on a 4k prefix) and matters more here than any other single
+                # setting: an agent re-reads the same files every turn, and without this every turn
+                # re-prefills them from scratch.
                 #
-                # It cannot be turned on against the pinned image. With DFlash the drafter's
-                # attention page is ~2x the target's, so page unification scales the target's
-                # mamba+attention block up (2240 -> 4480) while the drafter's group stays at 2240.
-                # kv_cache_utils.resolve_kv_cache_block_sizes then sees a MambaSpec whose
-                # block_size != cache_config.block_size, takes its back-off branch, and forces
-                # hash_block_size to the LCM (4480) — which the drafter's 2240 does not divide, so
-                # HybridKVCacheCoordinator aborts at startup. It is a failed launch, not bad output.
+                # It took two things to enable. Two KV cache groups exist with DFlash — the
+                # drafter's attention page is ~2x the target's — so page unification scales the
+                # target's mamba+attention block up while the drafter's group stays put.
+                # resolve_kv_cache_block_sizes then sees a MambaSpec whose block_size differs from
+                # cache_config.block_size, reads that as unaligned mamba, and forces
+                # hash_block_size to the LCM, which the drafter's group does not divide —
+                # HybridKVCacheCoordinator aborts at startup. runtime/patch_prefix_align.py keys
+                # that back-off on the actual cache mode instead, so the GCD path runs.
                 #
-                # Upstream fixes this with runtime/patch_prefix_align.py, which makes that back-off
-                # fire only for genuinely non-align mamba and falls through to the GCD. That patch
-                # is NOT in the pinned image: the exact pre-patch source was read out of
-                # kv_cache_utils.py on 2026-08-15 and matches the patch's anchor byte for byte.
-                # With prefix caching off, resolve_kv_cache_block_sizes returns before any of that,
-                # so this setting is what makes the entry start at all.
+                # The second thing is that vLLM's own default would still have turned this off:
+                # ModelConfig.is_prefix_caching_supported() returns False for hybrid attention.
+                # That value is only consulted when enable_prefix_caching is None, so stating True
+                # explicitly overrides it — which is what the launcher now does.
                 #
-                # To get it back, bake patch_prefix_align.py into this project's image build and
-                # flip this to True.
-                "enable_prefix_caching": False,
+                # No --mamba-cache-mode flag is needed. vLLM sets the mode itself once prefix
+                # caching is on ('all' when the model supports mamba prefix caching, 'align'
+                # otherwise) and requires chunked prefill for align, which this recipe already
+                # enables.
+                "enable_prefix_caching": True,
                 # load_format left at vLLM's default (mmap). Upstream ships fastsafetensors and
                 # measures 8 min -> 1 min on load, but that finding does not survive this project's:
                 # GB10 has no GDS, so fastsafetensors falls back to staging every shard through

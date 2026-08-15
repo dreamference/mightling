@@ -5,6 +5,7 @@ This module provides the CodexRunner class which checks local vLLM endpoint heal
 provisions Codex CLI, and launches interactive or automated Codex sessions.
 """
 
+import json
 import os
 import subprocess
 from typing import Optional, List
@@ -12,7 +13,7 @@ from typing import Optional, List
 from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.codex_installer import CodexInstaller
-from dreamference.hardware import resolve_model_hf_repo
+from dreamference.hardware import resolve_model_hf_repo, get_model_launch_overrides
 
 class CodexRunner:
     """
@@ -65,26 +66,53 @@ class CodexRunner:
         os.makedirs(codex_config_dir, exist_ok=True)
         codex_config_path = os.path.join(codex_config_dir, "config.toml")
         
+        # Codex will not talk to a model it has no catalog entry for, and the entry has to match
+        # this schema exactly — it is parsed by serde with named structs, so a field of the wrong
+        # shape is a hard startup failure rather than an ignored key. The shape below was
+        # established against codex-cli 0.147.0 by feeding it candidates until it stopped
+        # complaining; the non-obvious parts are:
+        #
+        #   * supported_reasoning_levels is a list of {effort, description} structs, not strings.
+        #   * visibility is one of list|hide|none — not "public".
+        #   * truncation_policy is a {mode, limit} struct, where mode is bytes|tokens.
+        #   * base_instructions is required in practice: without it (or
+        #     model_messages.instructions_template) Codex rejects the model after the JSON parses.
+        #
+        # Rewritten on every launch rather than written once. It used to be created only when
+        # absent, so changing the served model left a catalog still advertising the previous one —
+        # after the default moved to the DFlash entry, Codex was being handed a stale NVFP4 id and
+        # a 32k context window for a model serving 131k.
         catalog_path = os.path.join(codex_config_dir, "model_catalog.json")
-        if not os.path.exists(catalog_path):
-            catalog_content = f"""{{
-  "models": [
-    {{
-      "id": "{hf_model}",
-      "slug": "{hf_model}",
-      "display_name": "{hf_model}",
-      "max_context_window": 131072,
-      "supported_reasoning_levels": ["none"],
-      "default_reasoning_level": "none",
-      "shell_type": "default",
-      "visibility": "public",
-      "truncation_policy": "none",
-      "auto_compact_token_limit": 131072
-    }}
-  ]
-}}"""
-            with open(catalog_path, "w") as f:
-                f.write(catalog_content)
+        context_window = int(
+            get_model_launch_overrides(self.config.model).get("max_model_len", 32768)
+        )
+        catalog = {
+            "models": [
+                {
+                    "id": hf_model,
+                    "slug": hf_model,
+                    "display_name": hf_model,
+                    "max_context_window": context_window,
+                    # This model runs with thinking disabled, so it advertises exactly one level.
+                    "supported_reasoning_levels": [
+                        {"effort": "none", "description": "No reasoning"}
+                    ],
+                    "default_reasoning_level": "none",
+                    "shell_type": "default",
+                    "visibility": "list",
+                    "auto_compact_token_limit": context_window,
+                    "supported_in_api": False,
+                    "priority": 0,
+                    "support_verbosity": False,
+                    "supports_parallel_tool_calls": False,
+                    "truncation_policy": {"mode": "tokens", "limit": context_window},
+                    "experimental_supported_tools": [],
+                    "base_instructions": "You are a helpful coding assistant.",
+                }
+            ]
+        }
+        with open(catalog_path, "w") as f:
+            json.dump(catalog, f, indent=2)
 
         # Two pieces of config, and they cannot be written the same way. `model_catalog_json` is a
         # top-level key; a table header is not. TOML scopes every bare key to the most recent

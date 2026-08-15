@@ -96,16 +96,34 @@ def test_dflash_recipe_disables_thinking():
     payload = cmd[cmd.index("--default-chat-template-kwargs") + 1]
     assert json.loads(payload) == {"enable_thinking": False}
 
-def test_dflash_recipe_vetoes_prefix_caching():
-    # This recipe cannot run with prefix caching: the drafter's larger attention page makes
-    # vLLM's hash granularity the LCM of two KV group block sizes, and the coordinator aborts on
-    # the group that does not divide it. A True from config must not be able to re-enable it, and
-    # 'off' has to be stated rather than omitted, since vLLM's own default is on.
+def test_dflash_recipe_states_prefix_caching_explicitly():
+    # Stating it matters as much as the value. vLLM's own default for this model is OFF --
+    # ModelConfig.is_prefix_caching_supported() returns False for hybrid attention -- and that
+    # default is consulted only when the flag is absent. Omitting it would silently lose the
+    # ~13x warm-prefix TTFT the patched image exists to unlock.
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(
-        model="qwen3.5-122b-a10b-int4-dflash",
-        enable_prefix_caching=True,
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    assert "--enable-prefix-caching" in cmd
+    assert "--no-enable-prefix-caching" not in cmd
+
+def test_a_recipe_can_still_veto_prefix_caching(monkeypatch):
+    # The veto path is still load-bearing for any checkpoint whose KV geometry cannot support
+    # prefix caching, so it keeps its own coverage now that the DFlash recipe no longer uses it.
+    from dreamference.hardware import model_matrix_registry
+
+    mgr = VLLMServerManager()
+    real = model_matrix_registry.ModelMatrixRegistry.get_launch_overrides
+
+    def vetoing(cls, model_key):
+        recipe = dict(real(model_key))
+        if model_key == "qwen2.5-coder-32b":
+            recipe["enable_prefix_caching"] = False
+        return recipe
+
+    monkeypatch.setattr(
+        model_matrix_registry.ModelMatrixRegistry, "get_launch_overrides", classmethod(vetoing)
     )
+    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", enable_prefix_caching=True)
     assert "--no-enable-prefix-caching" in cmd
     assert "--enable-prefix-caching" not in cmd
 

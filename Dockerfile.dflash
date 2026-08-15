@@ -14,7 +14,13 @@
 FROM ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix
 
 COPY runtime/patch_kv_unify.py /opt/dreamference/patch_kv_unify.py
+COPY runtime/patch_prefix_align.py /opt/dreamference/patch_prefix_align.py
 
-# Fails the build if the anchor is absent, so a future base-image bump cannot silently produce an
-# image that looks patched and is not.
-RUN python3 /opt/dreamference/patch_kv_unify.py
+# Both fail the build if their anchor is absent, so a future base-image bump cannot silently
+# produce an image that looks patched and is not.
+#
+# patch_kv_unify decides whether the server starts at all; patch_prefix_align decides whether it
+# can start with prefix caching on, which is worth roughly 13x on warm-prefix TTFT for an agent
+# that re-reads the same files every turn.
+RUN python3 /opt/dreamference/patch_kv_unify.py \
+ && python3 /opt/dreamference/patch_prefix_align.py
