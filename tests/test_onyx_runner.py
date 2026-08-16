@@ -378,3 +378,26 @@ def test_brand_asset_install_is_skipped_when_onyx_is_not_running():
          patch("subprocess.run") as run:
         assert OnyxBrandAssets.install() is False
         run.assert_not_called()
+
+
+def test_wordmark_replacement_targets_every_onyx_letter():
+    # The sidebar wordmark is four inline letter paths, not /logotype.png -- which the bundle
+    # never references. Missing one letter leaves a fragment of "onyx" on screen.
+    from dreamference.runner.onyx_brand_assets import (
+        ONYX_WORDMARK_PREFIXES, DREAM_WORDMARK_PATH,
+    )
+
+    assert len(ONYX_WORDMARK_PREFIXES) == 4, "o, n, y and x each need a rule"
+    assert list(ONYX_WORDMARK_PREFIXES.values()).count("DREAM") == 1
+    assert list(ONYX_WORDMARK_PREFIXES.values()).count("HIDE") == 3
+    assert DREAM_WORDMARK_PATH.startswith("M")
+    assert '"' not in DREAM_WORDMARK_PATH, "must survive embedding in the patch script"
+
+
+def test_logo_patch_leaves_unrelated_onyx_strings_alone():
+    # "Onyx" also names the author of builtin skills and the fallback owner of shared agents.
+    # Rewriting those would state something untrue rather than rebrand anything.
+    from dreamference.runner.onyx_brand_assets import ONYX_APP_NAME_STRINGS
+
+    for key in ONYX_APP_NAME_STRINGS:
+        assert "application_name" in key or "return" in key
