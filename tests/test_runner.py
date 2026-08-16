@@ -82,3 +82,40 @@ def test_codex_config_keeps_top_level_keys_out_of_tables(tmp_path, monkeypatch):
     assert parsed["model_catalog_json"].endswith("model_catalog.json")
     # The pre-existing table must be untouched, and must not have adopted the key.
     assert parsed["tui"]["model_availability_nux"] == {"gpt-5.6-sol": 3}
+
+def test_codex_config_stays_valid_toml_after_repeated_writes(tmp_path, monkeypatch):
+    # Every top-level key the runner writes must land above the first [table]. TOML scopes a bare
+    # key to the table above it, so a key appended anywhere else is silently reparented -- which
+    # has now broken this config twice: once into [tui.model_availability_nux] (values must be
+    # u32) and once into [mcp_servers.searxng.env] (values must be strings). Both surfaced only
+    # when Codex refused to start.
+    import tomllib
+    from dreamference.config import DreamferenceConfig
+    from dreamference.runner import CodexRunner, CodexInstaller
+
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # Seed with tables whose value types differ, so a reparented key fails to parse as that type.
+    (codex_home / "config.toml").write_text(
+        '[tui.model_availability_nux]\n"gpt-5.6-sol" = 3\n\n'
+        '[mcp_servers.other.env]\nSOME_URL = "http://example"\n'
+    )
+
+    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/bin/true"))
+    monkeypatch.setattr("subprocess.call", lambda *a, **k: 0)
+
+    # Twice: the second run must not duplicate or reparent anything.
+    runner.run_session()
+    runner.run_session()
+
+    parsed = tomllib.loads((codex_home / "config.toml").read_text())
+    assert isinstance(parsed.get("model_catalog_json"), str)
+    assert parsed.get("suppress_unstable_features_warning") is True
+    # The seeded tables keep their original value types -- nothing was reparented into them.
+    assert parsed["tui"]["model_availability_nux"] == {"gpt-5.6-sol": 3}
+    assert parsed["mcp_servers"]["other"]["env"] == {"SOME_URL": "http://example"}
+    assert parsed["features"]["code_mode"] is True
