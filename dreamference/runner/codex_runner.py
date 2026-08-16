@@ -16,7 +16,6 @@ from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.codex_installer import CodexInstaller
 from dreamference.hardware import resolve_model_hf_repo, get_model_launch_overrides
-from dreamference.mcp_server.web_tools import SEARXNG_URL as SEARXNG_ENDPOINT
 
 class CodexRunner:
     """
@@ -213,31 +212,15 @@ command = "{dream_bin}"
 args = ["mcp"]
 """
 
-        # SearXNG search, via the mcp-searxng wrapper rather than this project's own web_search.
-        # It is fetched by npx on first use, exposes searxng_web_search alongside a URL reader
-        # (web_url_read), and points at the local instance — so the search->read pair arrives from
-        # one server and nothing leaves this machine addressed to a search company.
-        #
-        # Registered under its own table because Codex keys MCP servers by name. Note the
-        # snake_case `mcp_servers`: Codex ignores the `mcpServers` spelling that Claude's JSON
-        # config uses, silently, which is a documented way to lose an afternoon.
-        # Prefer an installed mcp-searxng over `npx -y`, which re-resolves the package on every
-        # session start. Both are fast when the machine is idle, but npx adds a registry lookup at
-        # exactly the moment several MCP servers are racing to initialise.
-        searxng_bin = shutil.which("mcp-searxng")
-        searxng_cmd = (
-            f'command = "{searxng_bin}"\nargs = []'
-            if searxng_bin
-            else 'command = "npx"\nargs = ["-y", "mcp-searxng"]'
-        )
-        searxng_block = f"""
-[mcp_servers.searxng]
-{searxng_cmd}
-startup_timeout_sec = 30
-
-[mcp_servers.searxng.env]
-SEARXNG_URL = "{SEARXNG_ENDPOINT}"
-"""
+        # SearXNG is deliberately NOT registered as an MCP server. It was, via the
+        # mcp-searxng wrapper, and the wiring worked: the server initialised and its four
+        # tools reached the model. What did not work is the model calling them — Codex
+        # exposes MCP tools only inside its `exec` JS runtime as
+        # tools.mcp__searxng__searxng_web_search(...), and this model calls the namespace
+        # directly, gets `unsupported call`, and gives up. Search is reached through
+        # scripts/searxng-search.sh and scripts/websearch instead, which AGENTS.md puts in
+        # the prompt and the model uses correctly. The SearXNG container is still required —
+        # only the MCP wrapper is gone.
 
         # Code mode is what puts MCP tools in reach of this model at all. Without it Codex offers
         # exec_command/write_stdin plus namespace *descriptions*, and the model tries to call the
@@ -248,9 +231,19 @@ SEARXNG_URL = "{SEARXNG_ENDPOINT}"
         # The suppression is a top-level key, so it is written with the catalog key rather than
         # appended after a table -- same TOML scoping rule as model_catalog_json. code_mode is
         # flagged under-development by Codex; the warning is expected, not a symptom.
+        # Without this the workspace-write sandbox blocks all network from shell commands,
+        # including DNS -- the search helpers in AGENTS.md then fail with "Temporary failure in
+        # name resolution" and the model concludes it has no web access. The sandbox still governs
+        # what the agent may write; this only restores outbound network.
+        sandbox_block = """
+[sandbox_workspace_write]
+network_access = true
+"""
+
         features_block = """
 [features]
 code_mode = true
+enable_mcp_apps = false
 """
 
         provider_block = f"""
@@ -285,12 +278,12 @@ base_url = "{api_base}"
                 lines.append(mcp_block)
                 changed = True
 
-            if "mcp_servers.searxng" not in existing_config:
-                lines.append(searxng_block)
-                changed = True
-
             if "code_mode" not in existing_config:
                 lines.append(features_block)
+                changed = True
+
+            if "sandbox_workspace_write" not in existing_config:
+                lines.append(sandbox_block)
                 changed = True
 
             if changed:
@@ -298,7 +291,7 @@ base_url = "{api_base}"
                     f.writelines(lines)
         else:
             with open(codex_config_path, "w") as f:
-                f.write(catalog_key + provider_block + mcp_block + searxng_block + features_block)
+                f.write(catalog_key + provider_block + mcp_block + features_block + sandbox_block)
 
 
         env = os.environ.copy()
@@ -316,7 +309,22 @@ base_url = "{api_base}"
             cmd.extend(["--message", prompt])
 
         if debug:
-            cmd.append("--debug")
+            # Codex has no --debug flag; `debug` is a subcommand (`codex debug models`), so
+            # appending it here made the launch fail outright. Verbosity is controlled by RUST_LOG,
+            # and because the TUI owns stdout the output lands in a file rather than the terminal.
+            #
+            # codex_mcp at trace is the useful part: it is what reports which MCP servers connected,
+            # which were cancelled, and the tool catalog it built from them.
+            env["RUST_LOG"] = os.getenv(
+                "RUST_LOG", "codex_mcp=trace,codex_core=debug,codex_app_server=debug,info"
+            )
+            # Where the output lands depends on which front end runs. `codex exec` writes to
+            # stderr; the TUI owns the terminal, so it writes into ~/.codex/logs_2.sqlite instead
+            # of a file — there is no codex-tui.log to tail.
+            db_path = os.path.join(codex_config_dir, "logs_2.sqlite")
+            print(f"🐞 Debug logging on (RUST_LOG={env['RUST_LOG']})")
+            print(f"   TUI logs go to: {db_path}")
+            print(f"   Read MCP lifecycle with: dream logs mcp")
 
         print(f"🚀 Launching Codex Pair-Programmer on GB10 local endpoint ({self.config.model})...")
         try:

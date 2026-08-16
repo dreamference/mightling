@@ -781,7 +781,9 @@ class DreamferenceCLIController:
 
         # Command: dream logs
         logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
-        logs_parser.add_argument("target", nargs="?", choices=["server"], help="Optional target to tail logs for")
+        logs_parser.add_argument("target", nargs="?", choices=["server", "mcp"],
+                                 help="server: vLLM container logs. mcp: Codex MCP server lifecycle, "
+                                      "read from ~/.codex/logs_2.sqlite (the TUI logs there, not to a file)")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
         # Command: dream codex
@@ -1408,6 +1410,52 @@ class DreamferenceCLIController:
                 session.close()
                 sys.exit(0)
 
+
+        elif args.command == "logs" and getattr(args, "target", None) == "mcp":
+            # Codex's TUI writes tracing into a SQLite database rather than a log file, which makes
+            # the one question worth asking -- did my MCP servers actually come up? -- annoyingly
+            # hard to answer. This pulls out just the lifecycle lines.
+            import sqlite3
+
+            cls.display_header()
+            db = os.path.expanduser("~/.codex/logs_2.sqlite")
+            if not os.path.exists(db):
+                print(f"❌ No Codex log database at {db}. Run a session with `dream chat --debug` first.")
+                sys.exit(1)
+            try:
+                conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+                rows = list(conn.execute("SELECT * FROM logs ORDER BY rowid DESC LIMIT 8000"))
+            except sqlite3.Error as e:
+                print(f"❌ Could not read {db}: {e}")
+                sys.exit(1)
+
+            seen = []
+            for row in rows:
+                text = " ".join(str(x) for x in row)
+                if "server_name=" not in text:
+                    continue
+                marker = next(
+                    (m for m in ("Service initialized as client", "task cancelled",
+                                 "serve finished", "error") if m in text), None
+                )
+                if not marker:
+                    continue
+                start = text.find("server_name=")
+                name = text[start + len("server_name="):].split("}")[0]
+                entry = (name, marker)
+                if entry not in seen:
+                    seen.append(entry)
+
+            if not seen:
+                print("No MCP lifecycle entries found. Run `dream chat --debug` to record some.")
+            else:
+                print("[bold]Codex MCP server lifecycle (most recent first)[/bold]\n")
+                for name, marker in seen:
+                    icon = "✅" if marker == "Service initialized as client" else "⚠️ "
+                    print(f"   {icon} {name:16} {marker}")
+                print("\nNote: a server can initialize and then be cancelled — Codex still reports")
+                print("      it as 'not initialized' in its startup banner.")
+            sys.exit(0)
 
         elif args.command == "init":
             cls.display_header()
