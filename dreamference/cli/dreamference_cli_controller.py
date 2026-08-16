@@ -796,6 +796,22 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
+        # Command: dream search / dream fetch
+        #
+        # These exist because Codex will not expose MCP tools to this model. Six configurations
+        # were tested against codex-cli 0.147.0 — base_instructions, tool_mode, --oss, wire_api,
+        # tool-search deferral and experimental_supported_tools — and every request still
+        # advertised exactly two tools, exec_command and write_stdin. Since the shell is the one
+        # surface the model reliably has, web access is put behind a command it can run there.
+        search_parser = subparsers.add_parser("search", help="Search the web via the local SearXNG instance")
+        search_parser.add_argument("query", nargs="+", help="Search terms")
+        search_parser.add_argument("--max-results", type=int, default=8, help="Results to return")
+        search_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
+
+        fetch_parser = subparsers.add_parser("fetch", help="Fetch a URL and print its readable text")
+        fetch_parser.add_argument("url", help="Absolute http(s) URL")
+        fetch_parser.add_argument("--max-chars", type=int, default=20000, help="Characters to return")
+
         # Command: dream web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -1406,6 +1422,37 @@ class DreamferenceCLIController:
                 session.close()
                 sys.exit(0)
 
+
+        elif args.command == "search":
+            from dreamference.mcp_server.web_tools import WebTools
+            import json as _json
+            payload = WebTools.search(" ".join(args.query), max_results=args.max_results)
+            if args.json:
+                print(_json.dumps(payload, indent=2))
+            elif payload.get("error"):
+                print(f"❌ {payload['error']}")
+                if payload.get("hint"):
+                    print(f"💡 {payload['hint']}")
+                sys.exit(1)
+            else:
+                for answer in payload.get("answers", []):
+                    print(f"► {answer}\n")
+                for i, r in enumerate(payload.get("results", []), 1):
+                    print(f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet'][:300]}\n")
+            sys.exit(0)
+
+        elif args.command == "fetch":
+            from dreamference.mcp_server.web_tools import WebTools
+            payload = WebTools.fetch(args.url, max_chars=args.max_chars)
+            if payload.get("error"):
+                print(f"❌ {payload['error']}")
+                sys.exit(1)
+            if payload.get("title"):
+                print(f"# {payload['title']}\n")
+            print(payload.get("text", ""))
+            if payload.get("truncated"):
+                print(f"\n[truncated at {args.max_chars} chars]")
+            sys.exit(0)
 
         elif args.command == "init":
             cls.display_header()
