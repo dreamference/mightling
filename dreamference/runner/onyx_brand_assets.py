@@ -59,6 +59,41 @@ ONYX_LOGO_PATHS: Final[dict] = {
 # Where Next.js keeps the compiled bundles the above lives in.
 WEB_BUILD_DIR: Final[str] = "/app/.next"
 
+# The word beside the mark is a *second* inline SVG -- four letter paths spelling "onyx" on a
+# 152x64 viewBox -- not the `appName` text and not /logotype.png, which the bundle never
+# references at all. `Logo` lays the two components side by side in a flex row.
+#
+# Replacing letterforms means replacing outlines: this is "Dream" set in DejaVu Sans Bold,
+# converted from the font's glyph outlines to a single path with fontTools and fitted to the same
+# viewBox. It is stored as a constant rather than generated at runtime so the rebrand needs no
+# font-tooling dependency, and because the geometry is fixed once chosen.
+DREAM_WORDMARK_PATH: Final[str] = (
+    "M9.84 22.43V40.98H12.65Q17.46 40.98 20 38.6Q22.53 36.22 22.53 31.67Q22.53 27.15 20.01 24.79Q17.48 22.43 12.65 22.43ZM2 16.5H10.27Q17.2 16.5 20.59 17.49Q23.98 18.47 26.41 20.84Q28.54 22.89 29.58 25.58Q30.62 28.27 30.62 31.67Q30.62 35.12 29.58 37.82Q28.54 40.52 26.41 42.57Q23.96 44.94 20.54 45.92Q17.12 46.91 10.27 46.91H2ZM53.26 30.31Q52.3 29.86 51.35 29.65Q50.4 29.43 49.45 29.43Q46.63 29.43 45.12 31.24Q43.6 33.04 43.6 36.4V46.91H36.31V24.1H43.6V27.84Q45 25.6 46.83 24.57Q48.65 23.55 51.2 23.55Q51.56 23.55 51.99 23.58Q52.42 23.61 53.23 23.71ZM79.66 35.44V37.52H62.61Q62.87 40.09 64.46 41.37Q66.05 42.65 68.9 42.65Q71.2 42.65 73.62 41.97Q76.03 41.29 78.58 39.9V45.53Q75.99 46.5 73.4 47Q70.82 47.5 68.23 47.5Q62.04 47.5 58.6 44.36Q55.17 41.21 55.17 35.52Q55.17 29.94 58.54 26.74Q61.91 23.55 67.82 23.55Q73.2 23.55 76.43 26.78Q79.66 30.02 79.66 35.44ZM72.16 33.02Q72.16 30.94 70.95 29.67Q69.74 28.39 67.78 28.39Q65.66 28.39 64.34 29.59Q63.01 30.78 62.69 33.02ZM95.4 36.64Q93.12 36.64 91.97 37.42Q90.82 38.19 90.82 39.7Q90.82 41.09 91.75 41.87Q92.67 42.65 94.32 42.65Q96.38 42.65 97.79 41.18Q99.19 39.7 99.19 37.48V36.64ZM106.55 33.89V46.91H99.19V43.53Q97.73 45.61 95.89 46.56Q94.06 47.5 91.43 47.5Q87.89 47.5 85.68 45.44Q83.47 43.37 83.47 40.07Q83.47 36.05 86.23 34.18Q88.99 32.31 94.89 32.31H99.19V31.74Q99.19 30 97.83 29.2Q96.46 28.39 93.57 28.39Q91.23 28.39 89.21 28.86Q87.19 29.33 85.46 30.27V24.71Q87.81 24.14 90.17 23.84Q92.53 23.55 94.89 23.55Q101.07 23.55 103.81 25.98Q106.55 28.41 106.55 33.89ZM134.48 27.88Q135.86 25.77 137.77 24.66Q139.67 23.55 141.95 23.55Q145.88 23.55 147.94 25.97Q150 28.39 150 33.02V46.91H142.67V35.02Q142.69 34.75 142.7 34.46Q142.71 34.18 142.71 33.65Q142.71 31.23 141.99 30.14Q141.28 29.05 139.69 29.05Q137.61 29.05 136.48 30.76Q135.35 32.47 135.31 35.71V46.91H127.98V35.02Q127.98 31.23 127.33 30.14Q126.67 29.05 125 29.05Q122.91 29.05 121.76 30.77Q120.62 32.49 120.62 35.69V46.91H113.29V24.1H120.62V27.44Q121.97 25.5 123.71 24.52Q125.45 23.55 127.55 23.55Q129.91 23.55 131.73 24.69Q133.54 25.83 134.48 27.88Z"
+)
+
+# The four "onyx" letters, matched on a prefix because the "o" path is 1.3 KB and only its head is
+# needed to identify it. The first becomes the Dream wordmark; the rest collapse to nothing.
+ONYX_WORDMARK_PREFIXES: Final[dict] = {
+    "M19.1795 51.2136C15.6695 51.2136 12.4353 50.3862": "DREAM",
+    "M42.6413 50.4614V12.4031H50.6891V17.7433L55.5028 12.7039": "HIDE",
+    "M82.3035 64V56.0273H89.9753C91.2288 56.0273 92.2066 55.7264": "HIDE",
+    "M115.657 50.4614L129.045 31.2066L116.033 12.4031H125.435": "HIDE",
+}
+
+# The name beside the mark is text, not an image: the frontend renders
+# `application_name?.trim() || "Onyx"`, and `application_name` is the Enterprise whitelabel
+# setting, so without a licence every render falls through to the literal. These substitutions
+# change that fallback -- a default string in the community-edition bundle -- rather than enabling
+# the paid feature; ENABLE_PAID_ENTERPRISE_EDITION_FEATURES stays off and no `ee/` code runs.
+#
+# Deliberately surgical. The bundle uses the bare string "Onyx" for unrelated things -- the author
+# of a builtin skill, the fallback owner of a shared agent -- and rewriting those would state
+# something untrue rather than rebrand anything.
+ONYX_APP_NAME_STRINGS: Final[dict] = {
+    'application_name?.trim()||"Onyx"': 'application_name?.trim()||"Dream"',
+    '.trim()}return"Onyx"': '.trim()}return"Dream"',
+}
+
 
 
 class OnyxBrandAssets:
@@ -111,7 +146,7 @@ class OnyxBrandAssets:
     @classmethod
     def patch_inline_logo(cls, container: str) -> int:
         """
-        Rewrites the inline sidebar mark in the compiled frontend bundles.
+        Rewrites the inline sidebar mark and the app-name fallback in the compiled bundles.
 
         Runs the substitution inside the container with node rather than copying files out and
         back: the mark is duplicated across a couple of dozen chunks by the bundler, and a
@@ -126,7 +161,7 @@ class OnyxBrandAssets:
         """
         script = (
             "const fs=require('fs'),path=require('path');"
-            f"const MAP={json.dumps(ONYX_LOGO_PATHS)};"
+            f"const MAP={json.dumps({**ONYX_LOGO_PATHS, **ONYX_APP_NAME_STRINGS})};"
             "let changed=0;"
             "const walk=(d,dep)=>{if(dep>8)return;let e=[];"
             "try{e=fs.readdirSync(d,{withFileTypes:true})}catch(x){return}"
@@ -135,6 +170,11 @@ class OnyxBrandAssets:
             "if(!/\\.(js|mjs)$/.test(f.name))continue;"
             "let s='';try{s=fs.readFileSync(p,'utf8')}catch(x){continue}"
             "const o=s;for(const k in MAP)if(s.includes(k))s=s.split(k).join(MAP[k]);"
+            # The wordmark is matched by prefix, so it needs a rewrite of the whole d:"..." rather
+            # than a literal substring swap.
+            f"const PRE={json.dumps(ONYX_WORDMARK_PREFIXES)},DREAM={json.dumps(DREAM_WORDMARK_PATH)};"
+            "s=s.replace(/d:\"(M[^\"]+)\"/g,(m,dd)=>{for(const k in PRE){if(dd.startsWith(k))"
+            "return 'd:\"'+(PRE[k]==='DREAM'?DREAM:'M0 0Z')+'\"'}return m});"
             "if(s!==o){try{fs.writeFileSync(p,s);changed++}catch(x){}}}};"
             f"walk({json.dumps(WEB_BUILD_DIR)},0);console.log(changed);"
         )
