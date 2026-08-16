@@ -122,6 +122,20 @@ class MCPServer:
             diff: str = str(args.get("diff_content", ""))
             return {"status": "success", "message": f"Applied diff overlay to {path}", "diff_applied": diff}
 
+        elif tool_name == "web_search":
+            # requests is blocking, so it goes to a worker thread like the code search below;
+            # otherwise a slow site stalls the whole stdio loop and the IDE tools with it.
+            from dreamference.mcp_server.web_tools import WebTools
+            return await asyncio.to_thread(
+                WebTools.search, str(args.get("query", "")), int(args.get("max_results", 8))
+            )
+
+        elif tool_name == "web_fetch":
+            from dreamference.mcp_server.web_tools import WebTools
+            return await asyncio.to_thread(
+                WebTools.fetch, str(args.get("url", "")), int(args.get("max_chars", 20000))
+            )
+
         elif tool_name == "workspace_search_code":
             query: str = str(args.get("query", ""))
             top_k: int = int(args.get("top_k", 5))

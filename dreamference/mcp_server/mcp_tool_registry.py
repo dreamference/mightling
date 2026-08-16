@@ -66,6 +66,38 @@ class MCPToolRegistry:
                 }
             },
             {
+                "name": "web_search",
+                "description": (
+                    "Searches the public web and returns titles, URLs and snippets. Use this when "
+                    "the answer depends on information newer than the model, then pass a returned "
+                    "URL to web_fetch to read the page."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "max_results": {"type": "integer"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "web_fetch",
+                "description": (
+                    "Fetches an http(s) URL and returns its readable text, with HTML markup "
+                    "stripped. Returns an 'error' field rather than failing when a page cannot be "
+                    "retrieved."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "max_chars": {"type": "integer"}
+                    },
+                    "required": ["url"]
+                }
+            },
+            {
                 "name": "workspace_search_code",
                 "description": "Performs local AST & vector semantic code search in the workspace.",
                 "inputSchema": {

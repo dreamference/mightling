@@ -7,7 +7,9 @@ provisions Codex CLI, and launches interactive or automated Codex sessions.
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 from typing import Optional, List
 
 from dreamference.config import DreamferenceConfig
@@ -123,6 +125,27 @@ class CodexRunner:
         # with `invalid type: string ... expected u32`. A key that belongs at the top has to be
         # written at the top.
         catalog_key = f'model_catalog_json = "{catalog_path}"\n'
+
+        # Web access has to come through MCP, not Codex's own `--search`. That flag enables the
+        # native Responses `web_search` tool, which the *provider* executes — against a local vLLM
+        # there is nothing on the other end, and Codex reports `unsupported call: web_search` no
+        # matter how it is configured. Setting supports_standalone_web_search on the provider and
+        # the standalone_web_search/web_search_request feature flags does not change that; all
+        # three were tried on codex-cli 0.147.0 and the call stayed unsupported.
+        #
+        # An MCP server is executed by Codex itself, so it works regardless of what the model
+        # provider can do. This project already ships one, and it now carries web_search and
+        # web_fetch alongside the IDE tools — see mcp_server/web_tools.py, which is also where the
+        # departure from the air-gapped premise is argued.
+        dream_bin = os.path.join(os.path.dirname(sys.executable), "dream")
+        if not os.path.exists(dream_bin):
+            dream_bin = shutil.which("dream") or dream_bin
+        mcp_block = f"""
+[mcp_servers.dreamference]
+command = "{dream_bin}"
+args = ["mcp"]
+"""
+
         provider_block = f"""
 [model_providers.openai-custom]
 name = "openai-custom"
@@ -151,12 +174,16 @@ base_url = "{api_base}"
                 lines.append(provider_block)
                 changed = True
 
+            if "mcp_servers.dreamference" not in existing_config:
+                lines.append(mcp_block)
+                changed = True
+
             if changed:
                 with open(codex_config_path, "w") as f:
                     f.writelines(lines)
         else:
             with open(codex_config_path, "w") as f:
-                f.write(catalog_key + provider_block)
+                f.write(catalog_key + provider_block + mcp_block)
 
 
         env = os.environ.copy()
