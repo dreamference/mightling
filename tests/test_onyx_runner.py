@@ -401,3 +401,87 @@ def test_logo_patch_leaves_unrelated_onyx_strings_alone():
 
     for key in ONYX_APP_NAME_STRINGS:
         assert "application_name" in key or "return" in key
+
+
+def test_voice_registers_the_local_whisper_endpoint():
+    # Onyx shows no microphone until an STT provider exists, so the button is a registration.
+    from dreamference.runner.onyx_runner import (
+        ONYX_VOICE_PROVIDER_NAME, STT_CONTAINER_URL, STT_MODEL,
+    )
+
+    runner = OnyxRunner()
+    calls = []
+
+    with patch.object(OnyxRunner, "_start_stt_server", return_value=True), \
+         patch.object(OnyxRunner, "_allow_local_voice_endpoint", return_value=True), \
+         patch.object(OnyxRunner, "_get_json", return_value=[]), \
+         patch.object(OnyxRunner, "_request",
+                      side_effect=lambda u, p, c, method="POST": (calls.append((u, p)), ({}, None))[1]):
+        assert runner.enable_voice("http://x/api", "cookie") is True
+
+    url, payload = calls[0]
+    assert url.endswith("/admin/voice/providers")
+    assert payload["provider_type"] == "openai"
+    assert payload["api_base"] == STT_CONTAINER_URL
+    assert payload["stt_model"] == STT_MODEL
+    assert payload["activate_stt"] is True
+    assert payload["name"] == ONYX_VOICE_PROVIDER_NAME
+    assert "id" not in payload
+
+
+def test_voice_updates_an_existing_provider_rather_than_duplicating():
+    from dreamference.runner.onyx_runner import ONYX_VOICE_PROVIDER_NAME
+
+    runner = OnyxRunner()
+    calls = []
+    with patch.object(OnyxRunner, "_start_stt_server", return_value=True), \
+         patch.object(OnyxRunner, "_allow_local_voice_endpoint", return_value=True), \
+         patch.object(OnyxRunner, "_get_json",
+                      return_value=[{"id": 4, "name": ONYX_VOICE_PROVIDER_NAME}]), \
+         patch.object(OnyxRunner, "_request",
+                      side_effect=lambda u, p, c, method="POST": (calls.append((u, p)), ({}, None))[1]):
+        runner.enable_voice("http://x/api", "cookie")
+
+    assert calls[0][1]["id"] == 4
+
+
+def test_voice_is_skipped_when_the_stt_server_will_not_start():
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_start_stt_server", return_value=False), \
+         patch.object(OnyxRunner, "_request") as request:
+        assert runner.enable_voice("http://x/api", "cookie") is False
+        request.assert_not_called()
+
+
+def test_voice_is_skipped_when_onyx_will_not_accept_a_local_endpoint():
+    # Registering against an endpoint Onyx rejects would leave a broken provider behind.
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_start_stt_server", return_value=True), \
+         patch.object(OnyxRunner, "_allow_local_voice_endpoint", return_value=False), \
+         patch.object(OnyxRunner, "_request") as request:
+        assert runner.enable_voice("http://x/api", "cookie") is False
+        request.assert_not_called()
+
+
+def test_configure_can_opt_out_of_voice():
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+         patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
+         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(OnyxRunner, "_find_provider", return_value=None), \
+         patch.object(OnyxRunner, "enable_web_search", return_value=True), \
+         patch.object(OnyxRunner, "apply_branding", return_value=True), \
+         patch.object(OnyxRunner, "enable_voice") as voice:
+        assert runner.configure(enable_voice=False) == 0
+        voice.assert_not_called()
+
+
+def test_voice_patch_targets_the_azure_only_exemption():
+    # The anchor is Onyx's hardcoded exemption; if a future version rewrites that line the patch
+    # must fail visibly rather than silently register a provider Onyx will refuse.
+    from dreamference.runner.onyx_runner import (
+        ONYX_VOICE_SSRF_ANCHOR, ONYX_VOICE_SSRF_PATCH,
+    )
+
+    assert '== "azure"' in ONYX_VOICE_SSRF_ANCHOR
+    assert '"azure", "openai"' in ONYX_VOICE_SSRF_PATCH

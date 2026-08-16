@@ -92,6 +92,37 @@ DREAM_ASSISTANT_DESCRIPTION: Final[str] = (
 # edit the same tree from different directions.
 DREAM_EXCLUDED_TOOLS: Final[frozenset] = frozenset({"coding_agent"})
 
+# Speech-to-text. Onyx has a complete voice subsystem and shows no microphone button until an STT
+# provider is registered, so the button is a configuration question, not a missing feature.
+#
+# The model is transcribed locally by a small Whisper server -- `speaches`, which speaks OpenAI's
+# /v1/audio/transcriptions -- rather than by vLLM: one vLLM instance serves one model, and the
+# main one is busy. It runs on CPU because ctranslate2's CUDA support does not cover SM121, and
+# because dictation-length audio transcribes in seconds on GB10's cores anyway.
+STT_CONTAINER_NAME: Final[str] = "dream-stt"
+STT_IMAGE: Final[str] = "ghcr.io/speaches-ai/speaches:latest-cpu"
+STT_HOST_PORT: Final[int] = 8100
+STT_CONTAINER_URL: Final[str] = "http://dream-stt:8000/v1"
+STT_MODEL: Final[str] = "Systran/faster-whisper-small"
+ONYX_VOICE_PROVIDER_NAME: Final[str] = "dreamference-whisper"
+
+# Onyx validates a voice provider's address and hardcodes the private-network exemption to Azure
+# alone -- `allow_private_network = provider_type.lower() == "azure"` -- without consulting the
+# SSRF Protection setting an admin can change through the API. A local sidecar on the Docker
+# network is therefore refused outright, however the settings are configured.
+#
+# Azure is not a way around it: that provider speaks Azure's Speech REST protocol
+# (/speech/recognition/conversation/cognitiveservices/v1), not OpenAI's. So the exemption is
+# widened by one word instead. The alternative is a shim presenting Azure's protocol in front of
+# Whisper, which needs no patch and survives upgrades -- worth building if this becomes load
+# bearing. Unlike the frontend patches this one is Python, so it needs an api_server restart.
+ONYX_VOICE_SSRF_FILE: Final[str] = "/app/onyx/server/manage/voice/api.py"
+ONYX_VOICE_SSRF_ANCHOR: Final[str] = 'allow_private_network = provider_type.lower() == "azure"'
+ONYX_VOICE_SSRF_PATCH: Final[str] = (
+    'allow_private_network = provider_type.lower() in ("azure", "openai")'
+)
+
+
 
 
 class OnyxRunner:
@@ -265,6 +296,7 @@ class OnyxRunner:
         web_url: str = DEFAULT_ONYX_WEB_URL,
         enable_web: bool = True,
         brand: bool = True,
+        enable_voice: bool = True,
     ) -> int:
         """
         Registers the local vLLM model with Onyx as its default LLM provider.
@@ -280,6 +312,7 @@ class OnyxRunner:
             web_url (str): Base URL of the Onyx deployment.
             enable_web (bool): Whether to also give the default assistant SearXNG web access.
             brand (bool): Whether to rebrand the deployment as Dream.
+            enable_voice (bool): Whether to run a local Whisper server and enable the microphone.
 
         Returns:
             int: 0 on success, non-zero on failure.
@@ -357,9 +390,147 @@ class OnyxRunner:
         if brand:
             self.apply_branding(api, cookie)
 
+        if enable_voice:
+            # After the branding: this one may restart the API server, and a restart mid-way
+            # would strand the other steps.
+            self.enable_voice(api, cookie)
+
         print(f"✅ Onyx is pointed at the local model — open {web_url}")
         print(f"💡 Sign in as {email} / {password}")
         return 0
+
+    def enable_voice(self, api: str, cookie: str) -> bool:
+        """
+        Gives Onyx a microphone by running a local Whisper server and registering it for STT.
+
+        Three steps: start the transcription sidecar and join it to Onyx's network, widen Onyx's
+        private-address exemption so it will accept a local endpoint, and register the provider.
+
+        Args:
+            api (str): Onyx API base URL.
+            cookie (str): Session cookie header value.
+
+        Returns:
+            bool: True if speech-to-text is enabled once this returns.
+        """
+        if not self._start_stt_server():
+            print("⚠️  Could not start the local speech-to-text server — skipping microphone.")
+            return False
+
+        if not self._allow_local_voice_endpoint():
+            print("⚠️  Onyx will not accept a local voice endpoint — skipping microphone.")
+            return False
+
+        payload = {
+            "name": ONYX_VOICE_PROVIDER_NAME,
+            "provider_type": "openai",
+            "api_base": STT_CONTAINER_URL,
+            "api_key": ONYX_PLACEHOLDER_API_KEY,
+            "api_key_changed": True,
+            "stt_model": STT_MODEL,
+            "activate_stt": True,
+        }
+        for provider in self._get_json(f"{api}/admin/voice/providers", cookie) or []:
+            if provider.get("name") == ONYX_VOICE_PROVIDER_NAME:
+                payload["id"] = provider["id"]
+                break
+
+        _, error = self._request(f"{api}/admin/voice/providers", payload, cookie)
+        if error:
+            print(f"⚠️  Could not register the speech-to-text provider: {error}")
+            return False
+        print("🎤 Microphone enabled — speech is transcribed locally by Whisper.")
+        return True
+
+    def _start_stt_server(self) -> bool:
+        """
+        Starts the Whisper sidecar if it is not already running and joins Onyx's network.
+
+        The container restarts with the host and keeps its model in a named volume, so the
+        ~500 MB download happens once rather than on every boot.
+
+        Returns:
+            bool: True if the server is running and reachable from Onyx.
+        """
+        running = subprocess.run(
+            ["docker", "ps", "--filter", f"name={STT_CONTAINER_NAME}", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=30, check=False,
+        ).stdout.split()
+
+        if STT_CONTAINER_NAME not in running:
+            print("🎙️  Starting the local speech-to-text server...")
+            result = subprocess.run(
+                ["docker", "run", "-d", "--name", STT_CONTAINER_NAME,
+                 "--restart", "unless-stopped",
+                 "-p", f"127.0.0.1:{STT_HOST_PORT}:8000",
+                 "-v", f"{STT_CONTAINER_NAME}-cache:/home/ubuntu/.cache/huggingface",
+                 STT_IMAGE],
+                capture_output=True, text=True, timeout=600, check=False,
+            )
+            if result.returncode != 0 and "already in use" not in result.stderr:
+                print(f"⚠️  {result.stderr.strip()[:200]}")
+                return False
+            subprocess.run(["docker", "start", STT_CONTAINER_NAME],
+                           capture_output=True, timeout=60, check=False)
+
+        network = self._onyx_network()
+        if network:
+            subprocess.run(["docker", "network", "connect", network, STT_CONTAINER_NAME],
+                           capture_output=True, timeout=30, check=False)
+
+        # The model downloads on demand; pulling it here keeps the first dictation from timing out.
+        subprocess.run(
+            ["docker", "exec", STT_CONTAINER_NAME, "curl", "-s", "-X", "POST",
+             f"http://127.0.0.1:8000/v1/models/{STT_MODEL}"],
+            capture_output=True, timeout=900, check=False,
+        )
+        return True
+
+    def _allow_local_voice_endpoint(self) -> bool:
+        """
+        Widens Onyx's voice-endpoint address check to accept a local OpenAI-compatible server.
+
+        Restarts the API server, because unlike the frontend bundles this is Python that was
+        already imported.
+
+        Returns:
+            bool: True if the exemption is in place.
+        """
+        containers = subprocess.run(
+            ["docker", "ps", "--filter", "name=api_server", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=30, check=False,
+        ).stdout.split()
+        target = next((c for c in containers if "onyx" in c), None)
+        if not target:
+            return False
+
+        script = (
+            f"p={ONYX_VOICE_SSRF_FILE!r};s=open(p).read();"
+            f"new={ONYX_VOICE_SSRF_PATCH!r};old={ONYX_VOICE_SSRF_ANCHOR!r};"
+            "print('done' if new in s else ('patched' if old in s else 'missing'));"
+            "open(p,'w').write(s.replace(old,new,1)) if (old in s and new not in s) else None"
+        )
+        result = subprocess.run(
+            ["docker", "exec", target, "python3", "-c", script],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        state = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "missing"
+        if state == "done":
+            return True
+        if state != "patched":
+            return False
+
+        print("🔄 Restarting Onyx's API server to pick up the voice endpoint change...")
+        subprocess.run(["docker", "restart", target], capture_output=True, timeout=180, check=False)
+        for _ in range(40):
+            health = subprocess.run(
+                ["docker", "inspect", target, "--format", "{{.State.Health.Status}}"],
+                capture_output=True, text=True, timeout=30, check=False,
+            ).stdout.strip()
+            if health == "healthy":
+                return True
+            time.sleep(5)
+        return False
 
     def apply_branding(self, api: str, cookie: str) -> bool:
         """

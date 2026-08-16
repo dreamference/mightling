@@ -833,6 +833,10 @@ class DreamferenceCLIController:
             "--no-brand", action="store_true",
             help="Skip rebranding the deployment as Dream",
         )
+        onyx_configure_parser.add_argument(
+            "--no-voice", action="store_true",
+            help="Skip the local Whisper server and the microphone button",
+        )
 
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
         onyx_logs_parser = onyx_subparsers.add_parser("logs", help="Show Onyx container logs")
@@ -1532,7 +1536,8 @@ class DreamferenceCLIController:
                 if args.password:
                     kwargs["password"] = args.password
                 sys.exit(onyx_runner.configure(
-                    enable_web=not args.no_web, brand=not args.no_brand, **kwargs
+                    enable_web=not args.no_web, brand=not args.no_brand,
+                    enable_voice=not args.no_voice, **kwargs
                 ))
             elif args.onyx_command == "status":
                 sys.exit(onyx_runner.status())
