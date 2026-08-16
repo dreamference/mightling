@@ -110,9 +110,16 @@ class GooseRunner:
         Returns True if successful, False if the server is not fully ready to generate completions.
         """
         try:
+            from dreamference.hardware import resolve_model_hf_repo
+
             url = f"{self.config.vllm_host}/v1/chat/completions"
             payload = {
-                "model": self.config.model,
+                # The repo ID, not the alias. vLLM serves the model under the name it was launched
+                # with, so a request for "qwen3.5-122b-a10b-int4-dflash" gets a 404 and this
+                # pre-warm never succeeds — which strands every runner in "Waiting for local vLLM
+                # server...", since CodexRunner and the others fall back to this method whenever a
+                # health check is momentarily false.
+                "model": resolve_model_hf_repo(self.config.model),
                 "messages": [
                     {"role": "system", "content": "You are Goose, an autonomous coding agent. You have access to the local filesystem and can execute shell commands."},
                     {"role": "user", "content": "Pre-warm system prompt and MCP tools."}

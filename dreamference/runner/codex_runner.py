@@ -160,6 +160,13 @@ class CodexRunner:
                     "supports_parallel_tool_calls": False,
                     "truncation_policy": {"mode": "tokens", "limit": context_window},
                     "experimental_supported_tools": [],
+                    # Declares Code Mode support. Without it Codex warns "model ... does
+                    # not advertise Code Mode support" and withholds the `exec` tool, which
+                    # is the only surface MCP tools are reachable through — they appear
+                    # inside its JS runtime as tools.mcp__<server>__<tool>(args).
+                    # ToolExposureSurface accepts "code_mode" or "direct"; "direct" is the
+                    # one that leaves MCP unreachable.
+                    "tool_mode": "code_mode",
                     # Codex's own prompt, read out of the installed binary. The one-line
                     # placeholder that used to sit here was the whole system prompt, which left
                     # the model with no description of its tools at all.
@@ -181,7 +188,10 @@ class CodexRunner:
         # it a member of that table, whose values must be integers, and Codex then refused to start
         # with `invalid type: string ... expected u32`. A key that belongs at the top has to be
         # written at the top.
-        catalog_key = f'model_catalog_json = "{catalog_path}"\n'
+        catalog_key = (
+            f'model_catalog_json = "{catalog_path}"\n'
+            "suppress_unstable_features_warning = true\n"
+        )
 
         # Web access has to come through MCP, not Codex's own `--search`. That flag enables the
         # native Responses `web_search` tool, which the *provider* executes — against a local vLLM
@@ -229,6 +239,20 @@ startup_timeout_sec = 30
 SEARXNG_URL = "{SEARXNG_ENDPOINT}"
 """
 
+        # Code mode is what puts MCP tools in reach of this model at all. Without it Codex offers
+        # exec_command/write_stdin plus namespace *descriptions*, and the model tries to call the
+        # namespaces directly -- every spelling of which the router rejects as `unsupported call`.
+        # With it, Codex adds an `exec` tool whose JS runtime exposes each MCP tool as
+        # tools.mcp__<server>__<tool>(args), which is the mechanism an OpenAI-backed session was
+        # observed using successfully.
+        # The suppression is a top-level key, so it is written with the catalog key rather than
+        # appended after a table -- same TOML scoping rule as model_catalog_json. code_mode is
+        # flagged under-development by Codex; the warning is expected, not a symptom.
+        features_block = """
+[features]
+code_mode = true
+"""
+
         provider_block = f"""
 [model_providers.openai-custom]
 name = "openai-custom"
@@ -265,12 +289,16 @@ base_url = "{api_base}"
                 lines.append(searxng_block)
                 changed = True
 
+            if "code_mode" not in existing_config:
+                lines.append(features_block)
+                changed = True
+
             if changed:
                 with open(codex_config_path, "w") as f:
                     f.writelines(lines)
         else:
             with open(codex_config_path, "w") as f:
-                f.write(catalog_key + provider_block + mcp_block + searxng_block)
+                f.write(catalog_key + provider_block + mcp_block + searxng_block + features_block)
 
 
         env = os.environ.copy()
