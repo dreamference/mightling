@@ -35,6 +35,13 @@ class ModelSpec:
             needs a patch its own upstream ships cannot be served by whatever image the rest of the
             matrix uses, and pinning it per model is cheaper than forking one image to suit every model.
             Unset means DEFAULT_VLLM_IMAGE.
+        supports_vision (bool): Whether the checkpoint accepts image input as well as text. Not a
+            launch flag -- vLLM reads this from the checkpoint's own config and needs no telling --
+            but clients do: Onyx refuses an upload with "The current model does not support image
+            input" unless its model entry advertises the capability, so something has to state it.
+            The signal is the checkpoint's architecture (`...ForConditionalGeneration` with a
+            `vision_config`) rather than the name, which is why it is recorded per entry here
+            rather than guessed from the alias.
     """
     name: str
     params_b: float
@@ -45,3 +52,4 @@ class ModelSpec:
     notes: str
     hf_repo_id: str
     launch_overrides: Dict[str, Any] = field(default_factory=dict)
+    supports_vision: bool = False

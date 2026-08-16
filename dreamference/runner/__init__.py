@@ -11,6 +11,9 @@ from dreamference.runner.openhands_installer import OpenHandsInstaller
 from dreamference.runner.openhands_runner import OpenHandsRunner
 from dreamference.runner.codex_installer import CodexInstaller
 from dreamference.runner.codex_runner import CodexRunner
+from dreamference.runner.onyx_brand_assets import OnyxBrandAssets
+from dreamference.runner.onyx_installer import OnyxInstaller
+from dreamference.runner.onyx_runner import OnyxRunner
 
 __all__ = [
     "SandboxManager",
@@ -25,5 +28,8 @@ __all__ = [
     "OpenHandsInstaller",
     "OpenHandsRunner",
     "CodexInstaller",
-    "CodexRunner"
+    "CodexRunner",
+    "OnyxBrandAssets",
+    "OnyxInstaller",
+    "OnyxRunner"
 ]

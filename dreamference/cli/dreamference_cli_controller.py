@@ -800,6 +800,50 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
+        # Command: dream onyx
+        #
+        # A subcommand group rather than an `--agent onyx` runner, because Onyx is a service and
+        # not a terminal session. Every entry in the --agent switch is a CLI that Dreamference
+        # execs and waits on; Onyx is a set of long-lived containers with a lifecycle of its own,
+        # so it mirrors `dream server` instead.
+        onyx_parser = subparsers.add_parser(
+            "onyx", help="Manage the Onyx Lite web chat UI backed by local vLLM"
+        )
+        onyx_subparsers = onyx_parser.add_subparsers(dest="onyx_command", help="Onyx operations")
+
+        onyx_start_parser = onyx_subparsers.add_parser(
+            "start", help="Deploy (or restart) Onyx Lite and wait until it is healthy"
+        )
+        onyx_start_parser.add_argument(
+            "--no-wait", action="store_true", help="Return as soon as containers start"
+        )
+
+        onyx_configure_parser = onyx_subparsers.add_parser(
+            "configure", help="Point Onyx at the local vLLM model as its default provider"
+        )
+        onyx_configure_parser.add_argument(
+            "--email", default=None, help="Onyx admin e-mail (registered if no account exists)"
+        )
+        onyx_configure_parser.add_argument("--password", default=None, help="Onyx admin password")
+        onyx_configure_parser.add_argument(
+            "--no-web", action="store_true",
+            help="Skip registering SearXNG as Onyx's web search provider",
+        )
+        onyx_configure_parser.add_argument(
+            "--no-brand", action="store_true",
+            help="Skip rebranding the deployment as Dream",
+        )
+
+        onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
+        onyx_logs_parser = onyx_subparsers.add_parser("logs", help="Show Onyx container logs")
+        onyx_logs_parser.add_argument(
+            "--follow", "-f", action="store_true", help="Stream new log lines"
+        )
+        onyx_subparsers.add_parser("stop", help="Stop the Onyx containers, keeping their data")
+        onyx_subparsers.add_parser(
+            "uninstall", help="Permanently delete the Onyx deployment and all its data"
+        )
+
         # Command: dream search / dream fetch
         #
         # Web access as CLI subcommands rather than repo scripts, because the agent should find
@@ -1474,6 +1518,33 @@ class DreamferenceCLIController:
                 print("\nNote: a server can initialize and then be cancelled — Codex still reports")
                 print("      it as 'not initialized' in its startup banner.")
             sys.exit(0)
+
+        elif args.command == "onyx":
+            from dreamference.runner import OnyxRunner
+
+            onyx_runner = OnyxRunner(config=config)
+            if args.onyx_command == "start":
+                sys.exit(onyx_runner.start(wait=not args.no_wait))
+            elif args.onyx_command == "configure":
+                kwargs = {}
+                if args.email:
+                    kwargs["email"] = args.email
+                if args.password:
+                    kwargs["password"] = args.password
+                sys.exit(onyx_runner.configure(
+                    enable_web=not args.no_web, brand=not args.no_brand, **kwargs
+                ))
+            elif args.onyx_command == "status":
+                sys.exit(onyx_runner.status())
+            elif args.onyx_command == "logs":
+                sys.exit(onyx_runner.logs(follow=args.follow))
+            elif args.onyx_command == "stop":
+                sys.exit(onyx_runner.stop())
+            elif args.onyx_command == "uninstall":
+                sys.exit(onyx_runner.uninstall())
+            else:
+                onyx_parser.print_help()
+                sys.exit(1)
 
         elif args.command == "search":
             from dreamference.mcp_server.web_tools import WebTools

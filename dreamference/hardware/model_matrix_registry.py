@@ -110,6 +110,9 @@ class ModelMatrixRegistry:
                 "between a bad recipe and the power button."
             ),
             hf_repo_id="Intel/Qwen3.5-122B-A10B-int4-AutoRound",
+            # Qwen3_5MoeForConditionalGeneration with a vision_config: this checkpoint takes
+            # images. Verified against the checkpoint's own config.json, not inferred from the name.
+            supports_vision=True,
             launch_overrides={
                 # This model brings its own vLLM. The project's pinned image cannot run it: the
                 # load on 2026-08-15 reached 100% of the weights and then died in KV-cache
@@ -310,6 +313,9 @@ class ModelMatrixRegistry:
                 "and so never bypasses the page cache."
             ),
             hf_repo_id="nvidia/Qwen3.5-122B-A10B-NVFP4",
+            # Qwen3_5MoeForConditionalGeneration with a vision_config: this checkpoint takes
+            # images. Verified against the checkpoint's own config.json, not inferred from the name.
+            supports_vision=True,
             launch_overrides={
                 # 32k rather than the checkpoint's full 131072: the KV reservation is claimed during
                 # the load, which is the only phase that has ever taken this machine down, and the
@@ -626,6 +632,25 @@ class ModelMatrixRegistry:
         """
         spec_config = cls.get_launch_overrides(model_key).get("speculative_config") or {}
         return spec_config.get("model") or None
+
+    @classmethod
+    def supports_vision(cls, model_key: str) -> bool:
+        """
+        Reports whether the model accepts image input alongside text.
+
+        vLLM needs no telling -- it reads the modality off the checkpoint -- but API clients do.
+        Onyx, for one, refuses an upload with "The current model does not support image input"
+        unless the model entry it holds advertises the capability, so the fact has to travel from
+        this registry into that client's configuration.
+
+        Args:
+            model_key (str): Short model alias, HF repo ID, or display name.
+
+        Returns:
+            bool: True when the checkpoint is vision-capable.
+        """
+        spec = cls.get_spec(model_key) if model_key else None
+        return bool(spec and spec.supports_vision)
 
     @classmethod
     def declares_own_quantization(cls, model_key: str) -> bool:

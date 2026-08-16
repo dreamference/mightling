@@ -142,3 +142,17 @@ def test_tensorizer_functions(tmp_path, monkeypatch):
         if tfile.exists():
             tfile.unlink()
 
+
+
+def test_qwen3_5_moe_entries_are_marked_vision_capable():
+    # Both checkpoints are Qwen3_5MoeForConditionalGeneration with a vision_config, verified
+    # against their own config.json. Clients gate image upload on this, so a wrong value here is
+    # the difference between an upload working and the UI refusing it.
+    from dreamference.hardware import model_supports_vision
+
+    assert model_supports_vision("qwen3.5-122b-a10b-int4-dflash") is True
+    assert model_supports_vision("qwen3.5-122b-a10b-nvfp4") is True
+    assert model_supports_vision("Intel/Qwen3.5-122B-A10B-int4-AutoRound") is True
+    assert model_supports_vision("llama-3.3-70b") is False
+    assert model_supports_vision("qwen2.5-coder-32b") is False
+    assert model_supports_vision("") is False
