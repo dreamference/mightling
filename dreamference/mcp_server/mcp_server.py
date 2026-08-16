@@ -8,8 +8,9 @@ enabling Goose AI Agent, JetBrains, and VS Code companion tools.
 import sys
 import json
 import asyncio
-from typing import Dict, Any, List, Optional, Final
-from dreamference.context_engine import ContextEngine
+from typing import Dict, Any, List, Optional, Final, TYPE_CHECKING
+if TYPE_CHECKING:
+    from dreamference.context_engine import ContextEngine
 from dreamference.mcp_server.ide_state import IDEState
 from dreamference.mcp_server.mcp_tool_registry import MCPToolRegistry
 
@@ -22,8 +23,31 @@ class MCPServer:
     """
 
     def __init__(self):
-        """Initializes MCPServer with ContextEngine instance."""
-        self.context_engine: ContextEngine = ContextEngine()
+        """
+        Initializes the server without building a ContextEngine.
+
+        The engine is constructed on first use instead, because importing it pulls in torch: that
+        cost 0.71 GB of RSS and ~2s at startup, for a tool (`workspace_search_code`) most sessions
+        never call. Codex spawns one of these per session alongside its other MCP servers, and on a
+        box already holding a 73 GB model that was enough to blow the MCP startup timeout —
+        "MCP startup interrupted. The following servers were not initialized: ..." — taking down
+        even Codex's own built-in server with it.
+        """
+        self._context_engine: "Optional[ContextEngine]" = None
+
+    @property
+    def context_engine(self) -> "ContextEngine":
+        """
+        Builds the ContextEngine on first access.
+
+        Returns:
+            ContextEngine: The shared engine, created on demand.
+        """
+        if self._context_engine is None:
+            from dreamference.context_engine import ContextEngine
+
+            self._context_engine = ContextEngine()
+        return self._context_engine
 
     async def handle_request_async(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
