@@ -16,6 +16,7 @@ from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.codex_installer import CodexInstaller
 from dreamference.hardware import resolve_model_hf_repo, get_model_launch_overrides
+from dreamference.mcp_server.web_tools import SEARXNG_URL as SEARXNG_ENDPOINT
 
 class CodexRunner:
     """
@@ -202,6 +203,24 @@ command = "{dream_bin}"
 args = ["mcp"]
 """
 
+        # SearXNG search, via the mcp-searxng wrapper rather than this project's own web_search.
+        # It is fetched by npx on first use, exposes searxng_web_search alongside a URL reader
+        # (web_url_read), and points at the local instance — so the search->read pair arrives from
+        # one server and nothing leaves this machine addressed to a search company.
+        #
+        # Registered under its own table because Codex keys MCP servers by name. Note the
+        # snake_case `mcp_servers`: Codex ignores the `mcpServers` spelling that Claude's JSON
+        # config uses, silently, which is a documented way to lose an afternoon.
+        searxng_block = f"""
+[mcp_servers.searxng]
+command = "npx"
+args = ["-y", "mcp-searxng"]
+startup_timeout_sec = 30
+
+[mcp_servers.searxng.env]
+SEARXNG_URL = "{SEARXNG_ENDPOINT}"
+"""
+
         provider_block = f"""
 [model_providers.openai-custom]
 name = "openai-custom"
@@ -234,12 +253,16 @@ base_url = "{api_base}"
                 lines.append(mcp_block)
                 changed = True
 
+            if "mcp_servers.searxng" not in existing_config:
+                lines.append(searxng_block)
+                changed = True
+
             if changed:
                 with open(codex_config_path, "w") as f:
                     f.writelines(lines)
         else:
             with open(codex_config_path, "w") as f:
-                f.write(catalog_key + provider_block + mcp_block)
+                f.write(catalog_key + provider_block + mcp_block + searxng_block)
 
 
         env = os.environ.copy()
