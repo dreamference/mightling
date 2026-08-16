@@ -211,10 +211,18 @@ args = ["mcp"]
         # Registered under its own table because Codex keys MCP servers by name. Note the
         # snake_case `mcp_servers`: Codex ignores the `mcpServers` spelling that Claude's JSON
         # config uses, silently, which is a documented way to lose an afternoon.
+        # Prefer an installed mcp-searxng over `npx -y`, which re-resolves the package on every
+        # session start. Both are fast when the machine is idle, but npx adds a registry lookup at
+        # exactly the moment several MCP servers are racing to initialise.
+        searxng_bin = shutil.which("mcp-searxng")
+        searxng_cmd = (
+            f'command = "{searxng_bin}"\nargs = []'
+            if searxng_bin
+            else 'command = "npx"\nargs = ["-y", "mcp-searxng"]'
+        )
         searxng_block = f"""
 [mcp_servers.searxng]
-command = "npx"
-args = ["-y", "mcp-searxng"]
+{searxng_cmd}
 startup_timeout_sec = 30
 
 [mcp_servers.searxng.env]

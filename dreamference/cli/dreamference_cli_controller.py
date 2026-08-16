@@ -28,9 +28,7 @@ from dreamference.runner import (
 from dreamference.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache
 from dreamference.vllm_server import VLLMServerManager, DEFAULT_VLLM_IMAGE
 from dreamference.vllm_server.model_loading_monitor import create_model_loading_monitor
-from dreamference.context_engine import ContextEngine
 from dreamference.mcp_server import main as run_mcp_server
-from dreamference.web_canvas import start_web_canvas_server
 
 # Global Rich console instance for styled terminal outputs
 console: Final[Console] = Console()
@@ -549,6 +547,10 @@ class DreamferenceCLIController:
         vllm_mgr = VLLMServerManager(host=config.vllm_host)
         vllm_status = vllm_mgr.get_server_status()
         goose_runner = GooseRunner(config=config)
+        # Imported here, not at module scope: the context engine pulls in torch, which
+        # costs ~2.1s and 0.7 GB. `dream mcp` never needs it, and Codex starts one of
+        # those per session on a box that is already tight on memory.
+        from dreamference.context_engine import ContextEngine
         ctx_engine = ContextEngine()
         ctx_summary = ctx_engine.get_summary() if ctx_engine.load_index() else None
 
@@ -1421,6 +1423,7 @@ class DreamferenceCLIController:
             resolved_path = ConfigPathResolver.resolve_path(target_config_path)
             saved_config_path = generate_default_init_config(resolved_path)
             config.ensure_goose_config()
+            from dreamference.context_engine import ContextEngine
             ctx_engine = ContextEngine()
             summary = ctx_engine.index_workspace(force_reindex=True)
 
@@ -1678,6 +1681,7 @@ class DreamferenceCLIController:
         elif args.command == "index":
             cls.display_header()
             target_dir = args.dir or os.getcwd()
+            from dreamference.context_engine import ContextEngine
             ctx_engine = ContextEngine(workspace_root=target_dir)
             with console.status("[bold green]Indexing workspace AST & vectors...[/bold green]"):
                 summary = ctx_engine.index_workspace(force_reindex=args.force)
@@ -1687,6 +1691,10 @@ class DreamferenceCLIController:
 
         elif args.command == "web":
             cls.display_header()
+            # Lazy for the same reason as the context engine: web_canvas imports it, and
+            # `dream web` is the only subcommand that needs either.
+            from dreamference.web_canvas import start_web_canvas_server
+
             start_web_canvas_server(port=args.port, daemon=False)
             try:
                 while True:
