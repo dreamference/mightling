@@ -32,6 +32,56 @@ class CodexRunner:
         self.config: DreamferenceConfig = config or DreamferenceConfig()
         self.vllm_manager: VLLMServerManager = VLLMServerManager(host=self.config.vllm_host)
 
+    @staticmethod
+    def extract_codex_base_instructions(codex_bin: str) -> Optional[str]:
+        """
+        Recovers Codex's own system prompt from the installed binary.
+
+        The model catalog must supply `base_instructions` (or
+        `model_messages.instructions_template`) or Codex rejects the model outright, and what goes
+        there is the entire system prompt — it is not a label. Writing a one-line placeholder there,
+        as this runner first did, replaces several thousand words describing the harness, the
+        available tools and how to call them. The visible result is a model that has no idea what
+        it can do: it guesses tool names that do not exist, and falls back to shelling out to curl
+        for work a tool was provided for.
+
+        Codex ships those instructions inside its own binary as JSON-escaped strings, so they are
+        read back out rather than copied into this repository. That keeps them matched to whatever
+        Codex version is installed instead of pinned to whatever was current when this was written,
+        and costs about 0.1s to scan a 222 MB binary.
+
+        Args:
+            codex_bin (str): Path to the codex executable.
+
+        Returns:
+            Optional[str]: The longest embedded instruction template, or None if none is found —
+                in which case the caller should fall back rather than ship an empty prompt.
+        """
+        import re
+
+        try:
+            with open(codex_bin, "rb") as handle:
+                blob = handle.read()
+        except OSError:
+            return None
+
+        # Captured with escapes intact so the JSON decoder can undo them; a 500-char floor skips
+        # the short format strings that share the key name.
+        candidates = re.findall(
+            rb'"instructions_template"\s*:\s*"((?:[^"\\]|\\.){500,})"', blob
+        )
+        decoded: List[str] = []
+        for candidate in candidates:
+            try:
+                decoded.append(json.loads(b'"' + candidate + b'"'))
+            except ValueError:
+                continue
+        if not decoded:
+            return None
+        # Longest wins: the shorter variants are trimmed prompts for narrower modes, and a missing
+        # section costs more here than an irrelevant one.
+        return max(decoded, key=len)
+
     def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:
         """
         Ensures vLLM server is online, provisions Codex CLI if missing, and launches Codex task/session.
@@ -109,7 +159,13 @@ class CodexRunner:
                     "supports_parallel_tool_calls": False,
                     "truncation_policy": {"mode": "tokens", "limit": context_window},
                     "experimental_supported_tools": [],
-                    "base_instructions": "You are a helpful coding assistant.",
+                    # Codex's own prompt, read out of the installed binary. The one-line
+                    # placeholder that used to sit here was the whole system prompt, which left
+                    # the model with no description of its tools at all.
+                    "base_instructions": (
+                        self.extract_codex_base_instructions(codex_bin)
+                        or "You are a helpful coding assistant."
+                    ),
                 }
             ]
         }
