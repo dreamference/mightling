@@ -800,6 +800,24 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
+        # Command: dream search / dream fetch
+        #
+        # Web access as CLI subcommands rather than repo scripts, because the agent should find
+        # them from any workspace. These replaced repo scripts that only existed inside this
+        # checkout, paired with an AGENTS.md that is workspace-scoped too — in any other directory
+        # both the instruction and the command vanished. `dream` is on PATH wherever the venv is.
+        #
+        # Not an MCP tool: Codex exposes MCP tools only inside its `exec` JS runtime, and this
+        # model does not reliably wrap calls that way. The shell it always uses correctly.
+        search_parser = subparsers.add_parser("search", help="Search the web via the local SearXNG instance")
+        search_parser.add_argument("query", nargs="+", help="Search terms")
+        search_parser.add_argument("-n", "--max-results", type=int, default=5, help="Results to return")
+        search_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
+
+        fetch_parser = subparsers.add_parser("fetch", help="Fetch a URL and print its readable text")
+        fetch_parser.add_argument("url", help="Absolute http(s) URL")
+        fetch_parser.add_argument("--max-chars", type=int, default=8000, help="Characters to return")
+
         # Command: dream web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -1455,6 +1473,42 @@ class DreamferenceCLIController:
                     print(f"   {icon} {name:16} {marker}")
                 print("\nNote: a server can initialize and then be cancelled — Codex still reports")
                 print("      it as 'not initialized' in its startup banner.")
+            sys.exit(0)
+
+        elif args.command == "search":
+            from dreamference.mcp_server.web_tools import WebTools
+            import json as _json
+
+            payload = WebTools.search(" ".join(args.query), max_results=args.max_results)
+            if payload.get("error"):
+                print(f"❌ {payload['error']}")
+                if payload.get("hint"):
+                    print(f"💡 {payload['hint']}")
+                sys.exit(1)
+            if args.json:
+                print(_json.dumps(payload, indent=2))
+            else:
+                for answer in payload.get("answers", []):
+                    print(f"ANSWER: {answer}\n")
+                for i, r in enumerate(payload.get("results", []), 1):
+                    print(f"{i}. {r['title']}")
+                    print(f"   {r['url']}")
+                    if r.get("snippet"):
+                        print(f"   {r['snippet'][:200]}")
+            sys.exit(0)
+
+        elif args.command == "fetch":
+            from dreamference.mcp_server.web_tools import WebTools
+
+            payload = WebTools.fetch(args.url, max_chars=args.max_chars)
+            if payload.get("error"):
+                print(f"❌ {payload['error']}")
+                sys.exit(1)
+            if payload.get("title"):
+                print(f"# {payload['title']}\n")
+            print(payload.get("text", ""))
+            if payload.get("truncated"):
+                print(f"\n[truncated at {args.max_chars} chars]")
             sys.exit(0)
 
         elif args.command == "init":

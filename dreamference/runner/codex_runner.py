@@ -17,6 +17,42 @@ from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.codex_installer import CodexInstaller
 from dreamference.hardware import resolve_model_hf_repo, get_model_launch_overrides
 
+# Appended to Codex's own system prompt, because web access has to travel with the session rather
+# than with the directory. The equivalent text lives in this repo's AGENTS.md, but AGENTS.md is
+# workspace-scoped: run `dream chat` anywhere else and the instruction is gone. The repo scripts
+# these subcommands replaced had the same problem one level down — a relative path that only
+# resolved here. `dream` is on PATH wherever the venv is, so the commands work from any workspace
+# and the instruction naming them has to travel with the session too.
+#
+# Not an MCP tool: Codex exposes MCP tools only inside its `exec` JS runtime as
+# `tools.mcp__server__tool(...)`, and this model does not reliably wrap calls that way. The shell it
+# always uses correctly.
+WEB_ACCESS_INSTRUCTIONS: str = """
+
+# Web access
+
+You have web access through two shell commands, run like any other command:
+
+    dream search "your query here"        # search; -n N for more results (default 5)
+    dream fetch "https://example.com"     # fetch a page as readable text
+
+Use them whenever the answer depends on something you cannot know from training or from the files
+in front of you: today's weather or tides, current events, release versions, live documentation,
+anything dated. Search first, then `dream fetch` a promising URL when the snippets are not enough.
+
+Do not say you cannot browse the web. You can, through these commands.
+
+Do not use `curl` or `wget` for this. They are frequently blocked by the sandbox and return nothing,
+which looks like the site being down rather than the command being unavailable.
+
+There is no web search *tool* — do not look for one. Search is a shell command, shown above.
+
+Queries go to a SearXNG instance on this machine, which contacts upstream engines on your behalf:
+no API key, no account, and no query addressed to a search company. If it reports the instance is
+unreachable, the error names the command that restarts it.
+"""
+
+
 class CodexRunner:
     """
     Runner class orchestrating Codex sessions connected to local GB10 vLLM endpoints.
@@ -169,9 +205,15 @@ class CodexRunner:
                     # Codex's own prompt, read out of the installed binary. The one-line
                     # placeholder that used to sit here was the whole system prompt, which left
                     # the model with no description of its tools at all.
+                    # Appended, not substituted: the web section has to survive whichever prompt
+                    # the installed Codex ships, and it is the only part of the prompt that
+                    # describes capabilities this harness adds rather than ones Codex provides.
                     "base_instructions": (
-                        self.extract_codex_base_instructions(codex_bin)
-                        or "You are a helpful coding assistant."
+                        (
+                            self.extract_codex_base_instructions(codex_bin)
+                            or "You are a helpful coding assistant."
+                        )
+                        + WEB_ACCESS_INSTRUCTIONS
                     ),
                 }
             ]
@@ -192,35 +234,32 @@ class CodexRunner:
             "suppress_unstable_features_warning = true\n"
         )
 
-        # Web access has to come through MCP, not Codex's own `--search`. That flag enables the
-        # native Responses `web_search` tool, which the *provider* executes — against a local vLLM
-        # there is nothing on the other end, and Codex reports `unsupported call: web_search` no
-        # matter how it is configured. Setting supports_standalone_web_search on the provider and
-        # the standalone_web_search/web_search_request feature flags does not change that; all
-        # three were tried on codex-cli 0.147.0 and the call stayed unsupported.
+        # No MCP servers are registered for Codex, deliberately.
         #
-        # An MCP server is executed by Codex itself, so it works regardless of what the model
-        # provider can do. This project already ships one, and it now carries web_search and
-        # web_fetch alongside the IDE tools — see mcp_server/web_tools.py, which is also where the
-        # departure from the air-gapped premise is argued.
-        dream_bin = os.path.join(os.path.dirname(sys.executable), "dream")
-        if not os.path.exists(dream_bin):
-            dream_bin = shutil.which("dream") or dream_bin
-        mcp_block = f"""
-[mcp_servers.dreamference]
-command = "{dream_bin}"
-args = ["mcp"]
-"""
+        # This project's own MCP server exists for JetBrains/VS Code, and its IDE tools read a
+        # `global_ide_state` that lives inside the server process. Codex spawns its own copy,
+        # so nothing ever populates that state: ide_get_active_editor returns "No active
+        # file", ide_get_open_files returns [], ide_get_diagnostics returns []. ide_open_file
+        # and ide_apply_diff are worse — they report success while mutating private memory no
+        # editor reads. workspace_search_code does work, but Codex already has rg and
+        # ast-grep through the shell and uses them reliably.
+        #
+        # The web tools were the other reason to register it, and they hit the same wall as
+        # searxng did: Codex exposes MCP tools only inside its `exec` JS runtime, and this
+        # model does not wrap calls that way. Search is reached through the `dream search` and
+        # `dream fetch` subcommands, described in WEB_ACCESS_INSTRUCTIONS above.
+        #
+        # `dream mcp` still runs for IDE clients — it is just not wired into Codex.
 
         # SearXNG is deliberately NOT registered as an MCP server. It was, via the
         # mcp-searxng wrapper, and the wiring worked: the server initialised and its four
         # tools reached the model. What did not work is the model calling them — Codex
         # exposes MCP tools only inside its `exec` JS runtime as
         # tools.mcp__searxng__searxng_web_search(...), and this model calls the namespace
-        # directly, gets `unsupported call`, and gives up. Search is reached through
-        # scripts/searxng-search.sh and scripts/websearch instead, which AGENTS.md puts in
-        # the prompt and the model uses correctly. The SearXNG container is still required —
-        # only the MCP wrapper is gone.
+        # directly, gets `unsupported call`, and gives up. Search is reached through the
+        # `dream search` and `dream fetch` subcommands instead, which WEB_ACCESS_INSTRUCTIONS
+        # puts in the prompt and the model uses correctly. The SearXNG container is still
+        # required — only the MCP wrapper is gone.
 
         # Code mode is what puts MCP tools in reach of this model at all. Without it Codex offers
         # exec_command/write_stdin plus namespace *descriptions*, and the model tries to call the
@@ -274,10 +313,6 @@ base_url = "{api_base}"
                 lines.append(provider_block)
                 changed = True
 
-            if "mcp_servers.dreamference" not in existing_config:
-                lines.append(mcp_block)
-                changed = True
-
             if "code_mode" not in existing_config:
                 lines.append(features_block)
                 changed = True
@@ -291,7 +326,7 @@ base_url = "{api_base}"
                     f.writelines(lines)
         else:
             with open(codex_config_path, "w") as f:
-                f.write(catalog_key + provider_block + mcp_block + features_block + sandbox_block)
+                f.write(catalog_key + provider_block + features_block + sandbox_block)
 
 
         env = os.environ.copy()
