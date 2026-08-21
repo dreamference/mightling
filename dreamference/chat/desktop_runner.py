@@ -35,6 +35,22 @@ DESKTOP_PROJECT_DIR: Final[str] = os.path.join(
 # How long to wait for Onyx to answer before deciding it is not running.
 HEALTH_TIMEOUT_SECONDS: Final[int] = 5
 
+# WebKitGTK composites through DMABUF/GBM by default, which means asking the DRM device for a
+# buffer. On this machine that request is refused --
+#
+#     KMS: DRM_IOCTL_MODE_CREATE_DUMB failed: Permission denied
+#     Failed to create GBM buffer of size 2560x1720: Permission denied
+#
+# -- and the process starts, logs those lines, and shows no window at all. Creating a dumb buffer on
+# the KMS node requires an authenticated DRM client, which an ordinary X11 application under the
+# proprietary NVIDIA driver is not; the ACL granting the desktop user rw on /dev/dri/card0 is a
+# different permission and does not help.
+#
+# Disabling the DMABUF renderer falls back to a path that never touches DRM, and the window appears.
+# Set with `setdefault`, so anyone debugging the GPU path can override it from their shell instead
+# of editing this.
+WEBVIEW_ENV: Final[dict] = {"WEBKIT_DISABLE_DMABUF_RENDERER": "1"}
+
 
 class DesktopRunner:
     """
@@ -82,17 +98,22 @@ class DesktopRunner:
     @classmethod
     def _environment(cls) -> dict:
         """
-        Returns an environment with the rustup toolchain on PATH.
+        Returns the environment the Tauri CLI and the built binary run with.
 
-        A rustup installed during this same run is on disk but absent from the inherited PATH, so
-        the build would fail immediately after a successful install without this.
+        Two adjustments. A rustup installed during this same run is on disk but absent from the
+        inherited PATH, so a build straight after a successful install would fail to find cargo.
+        And `WEBVIEW_ENV` turns off WebKitGTK's DMABUF renderer, without which the process starts
+        and no window ever appears -- see that constant for the failure it avoids.
 
         Returns:
-            dict: A copy of the current environment with `~/.cargo/bin` prepended to PATH.
+            dict: A copy of the current environment with `~/.cargo/bin` on PATH and the webview
+                workaround applied.
         """
         environment = dict(os.environ)
         if os.path.isdir(CARGO_BIN) and CARGO_BIN not in environment.get("PATH", ""):
             environment["PATH"] = f"{CARGO_BIN}{os.pathsep}{environment.get('PATH', '')}"
+        for key, value in WEBVIEW_ENV.items():
+            environment.setdefault(key, value)
         return environment
 
     @classmethod
