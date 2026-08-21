@@ -1077,3 +1077,14 @@ def test_gmail_scope_is_read_only():
     from dreamference.chat.gmail_credentials import GMAIL_SCOPE
 
     assert GMAIL_SCOPE.endswith("gmail.readonly")
+
+
+def test_streaming_caret_is_pinned_on_the_class_combination():
+    # The caret has no id, test id or BEM class, and `bg-theme-primary-05` alone is also buttons
+    # and badges. The combination -- a pulsing 8x16 inline block in the primary colour -- is what
+    # identifies it. If Onyx restyles the caret this stops matching, which shows up as a dark caret
+    # coming back rather than as damage elsewhere.
+    from dreamference.chat.onyx_ui_overrides import STREAMING_CURSOR_CSS
+
+    assert ".animate-pulse.bg-theme-primary-05.inline-block.w-2.h-4" in STREAMING_CURSOR_CSS
+    assert "background-color:var(--text-01)" in STREAMING_CURSOR_CSS

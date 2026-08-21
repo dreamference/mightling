@@ -17,7 +17,8 @@
         "minWidth": 720,
         "minHeight": 520,
         "resizable": true,
-        "center": true
+        "center": true,
+        "backgroundColor": "#ffffff"
       }
     ],
     "security": {
@@ -26,7 +27,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
+    "targets": [
+      "deb",
+      "appimage"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -34,7 +38,7 @@
       "icons/icon.png"
     ],
     "category": "Productivity",
-    "shortDescription": "Puffin — local AI assistant",
+    "shortDescription": "Puffin \u2014 local AI assistant",
     "longDescription": "Desktop window onto Puffin, the local Onyx deployment served from this machine."
   }
 }

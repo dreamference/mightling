@@ -502,6 +502,21 @@ CONNECT_BUTTON_CSS: Final[str] = (
     f"{{background-color:{TIFFANY_BLUE_HOVER}}}"
 )
 
+# The block caret that trails a streaming answer, lightened.
+#
+# It renders as `animate-pulse flex-none bg-theme-primary-05 … inline-block w-2 h-4`, so it takes
+# the brand-neutral primary colour and lands as a solid dark block mid-sentence. `--text-01` is the
+# palette's lightest ink (black at 20%), which reads as a caret rather than as a word.
+#
+# This is the one rule keyed on Tailwind utilities, because the caret has no id, test id or BEM
+# class of its own. It is pinned on the *combination* -- a pulsing 8x16 inline block in the primary
+# colour -- since `bg-theme-primary-05` alone is also buttons and badges. If Onyx restyles the
+# caret this stops matching, which shows up as a dark caret returning rather than as damage.
+STREAMING_CURSOR_CSS: Final[str] = (
+    ".animate-pulse.bg-theme-primary-05.inline-block.w-2.h-4"
+    "{background-color:var(--text-01)}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
@@ -513,6 +528,7 @@ UI_OVERRIDES: Final[str] = (
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
+    + STREAMING_CURSOR_CSS
 )
 
 

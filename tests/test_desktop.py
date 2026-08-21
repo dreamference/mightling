@@ -179,3 +179,14 @@ def test_cache_is_cleared_without_signing_the_user_out():
 def test_identifier_comes_from_the_tauri_config():
     # Repeating it here would let the data directory drift from the one the app really uses.
     assert DesktopRunner._app_identifier() == "dev.dreamference.puffin"
+
+
+def test_window_background_is_painted_rather_than_left_black():
+    # A repaint gap shows the window's own background. GTK's default is black, which is what the
+    # black rectangle in the top-left corner was: not drawn *by* anything, but the absence of a
+    # paint over a black ground. Painting it the same white as the UI makes the same gap invisible.
+    # This masks the symptom; it does not prove the gap is gone.
+    with open(os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "tauri.conf.json")) as handle:
+        window = json.load(handle)["app"]["windows"][0]
+
+    assert window["backgroundColor"] == "#ffffff"
