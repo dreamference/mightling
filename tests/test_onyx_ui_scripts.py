@@ -114,3 +114,18 @@ def test_engine_is_marked_before_anything_else_runs():
     # Set before the button logic, so a stylesheet keyed on it applies as early as this runs.
     assert CONNECT_GOOGLE_SCRIPT.index(marker) < CONNECT_GOOGLE_SCRIPT.index("function place")
     assert 'Chrome' in CONNECT_GOOGLE_SCRIPT
+
+
+def test_block_is_written_on_its_own_line():
+    # Turbopack ends its chunks with a `//# debugId=…` line comment and no trailing newline, so a
+    # block appended directly onto the end lands inside that comment and never executes. The script
+    # was silently inert for exactly this reason -- no error, no attribute, no button -- and it took
+    # an offscreen WebKitGTK probe to notice, because nothing about the page looked wrong.
+    with patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "6"
+        OnyxUIScripts.append_scripts("web")
+
+    injected = run.call_args[0][0][-1]
+    assert r"replace(/\n+$/,'')" in injected
+    assert "base+'\\n'+JS" in injected
