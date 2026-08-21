@@ -29,6 +29,7 @@ The complete specification is now organized in the `` directory with audience-sp
 | [**DREAMFERENCE_DOCKER.md**](./DREAMFERENCE_DOCKER.md) | Docker architecture, model caching, tensorization | DevOps, System Admins |
 | [**DREAMFERENCE_CLI.md**](./DREAMFERENCE_CLI.md) | Complete CLI reference (19 commands) | End Users, Developers |
 | [**DREAMFERENCE_SETUP.md**](./DREAMFERENCE_SETUP.md) | Installation, hardware detection, troubleshooting | System Admins, End Users |
+| [**DREAMFERENCE_ONYX.md**](./DREAMFERENCE_ONYX.md) | Onyx local web chat UI deployment, customization & overrides | Developers, DevOps, End Users |
 | [**DREAMFERENCE_CODEBASE.md**](./DREAMFERENCE_CODEBASE.md) | Module architecture & source layout | Developers |
 
 ---
@@ -38,6 +39,7 @@ The complete specification is now organized in the `` directory with audience-sp
 - 🚀 **I want to install Dreamference** → [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md)
 - 💬 **I want to use the CLI** → [DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md)
 - 🤖 **I want to choose an agent** → [DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md)
+- 💬 **I want to run the web chat UI (Onyx/Puffin)** → [DREAMFERENCE_ONYX.md](./DREAMFERENCE_ONYX.md)
 - 📦 **I want to select a model** → [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md)
 - ⚡ **I want to optimize inference** → [DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md)
 - 🐳 **I want to manage Docker** → [DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md)
