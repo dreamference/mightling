@@ -1087,4 +1087,8 @@ def test_streaming_caret_is_pinned_on_the_class_combination():
     from dreamference.chat.onyx_ui_overrides import STREAMING_CURSOR_CSS
 
     assert ".animate-pulse.bg-theme-primary-05.inline-block.w-2.h-4" in STREAMING_CURSOR_CSS
-    assert "background-color:var(--text-01)" in STREAMING_CURSOR_CSS
+    from dreamference.chat.onyx_ui_overrides import TIFFANY_CARET, TIFFANY_TINT
+
+    assert f"background-color:{TIFFANY_CARET}" in STREAMING_CURSOR_CSS
+    # Not the bubble tint: a wash sized for a whole message vanishes at 8x16 pixels.
+    assert TIFFANY_CARET != TIFFANY_TINT

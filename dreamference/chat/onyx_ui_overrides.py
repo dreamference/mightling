@@ -68,6 +68,11 @@ TIFFANY_BLUE_HOVER: Final[str] = "#09A19C"
 # The brand colour at about a tenth strength, for surfaces that are tinted rather than filled.
 TIFFANY_TINT: Final[str] = "#E4F7F6"
 
+# The brand colour at about a third strength, for the streaming caret. `TIFFANY_TINT` is the
+# wrong tool there: a wash chosen to sit under a whole message bubble disappears entirely at
+# 8x16 pixels, and a caret nobody can see is worse than a dark one.
+TIFFANY_CARET: Final[str] = "#A9E7E5"
+
 # A white sidebar with a filled selected row, as Telegram draws it.
 #
 # Onyx tints the sidebar with `--background-tint-02`; only the column itself carries it, so one
@@ -505,8 +510,8 @@ CONNECT_BUTTON_CSS: Final[str] = (
 # The block caret that trails a streaming answer, lightened.
 #
 # It renders as `animate-pulse flex-none bg-theme-primary-05 … inline-block w-2 h-4`, so it takes
-# the brand-neutral primary colour and lands as a solid dark block mid-sentence. `--text-01` is the
-# palette's lightest ink (black at 20%), which reads as a caret rather than as a word.
+# the brand-neutral primary colour and lands as a solid dark block mid-sentence. `TIFFANY_CARET`
+# puts it in the brand's own colour, light enough to read as a caret rather than as a word.
 #
 # This is the one rule keyed on Tailwind utilities, because the caret has no id, test id or BEM
 # class of its own. It is pinned on the *combination* -- a pulsing 8x16 inline block in the primary
@@ -514,7 +519,7 @@ CONNECT_BUTTON_CSS: Final[str] = (
 # caret this stops matching, which shows up as a dark caret returning rather than as damage.
 STREAMING_CURSOR_CSS: Final[str] = (
     ".animate-pulse.bg-theme-primary-05.inline-block.w-2.h-4"
-    "{background-color:var(--text-01)}"
+    f"{{background-color:{TIFFANY_CARET}}}"
 )
 
 # Everything this module injects, in the order it is appended.
