@@ -45,3 +45,6 @@ config/
 
 # Tauri build output
 desktop/src-tauri/target/
+
+# Tauri generated schemas (regenerated on every build)
+desktop/src-tauri/gen/schemas/
