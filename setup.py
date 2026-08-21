@@ -13,6 +13,7 @@ setup(
         "sqlite-vec>=0.1.0",
         "tensorizer>=2.0.0",
         "einops>=0.7.0",
+        "fonttools[woff]>=4.50.0",
     ],
     entry_points={
         "console_scripts": [

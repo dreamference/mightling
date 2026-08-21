@@ -1,7 +1,7 @@
 """
-Dream Brand Asset Generation and Installation for Onyx.
+Puffin Brand Asset Generation and Installation for Onyx.
 
-This module provides the OnyxBrandAssets class, which renders Dream logos and copies them over
+This module provides the OnyxBrandAssets class, which renders Puffin logos and copies them over
 the Onyx web server's static assets.
 
 This is the part of the rebrand that Onyx's settings API cannot reach. `application_name`, the
@@ -27,7 +27,7 @@ from typing import Final, List, Optional, Tuple
 # Where the Next.js server keeps the images it serves from the site root.
 WEB_PUBLIC_DIR: Final[str] = "/app/public"
 
-# Dream's palette: indigo through violet, chosen to stay legible on both the light and dark
+# Puffin's palette: indigo through violet, chosen to stay legible on both the light and dark
 # sidebar without a separate mark for each.
 BRAND_START: Final[Tuple[int, int, int]] = (79, 70, 229)
 BRAND_END: Final[Tuple[int, int, int]] = (147, 51, 234)
@@ -45,12 +45,12 @@ FONT_CANDIDATES: Final[List[str]] = [
 # a 64x64 viewBox, all filled with `var(--theme-primary-05)`.
 #
 # Substituting the path data keeps the component, its sizing and its theme-aware fill, and changes
-# only the geometry: the first path becomes a "D", the other three collapse to a degenerate path
-# that renders nothing. The counter in the "D" is a second subpath wound in the opposite direction,
+# only the geometry: the first path becomes a "P", the other three collapse to a degenerate path
+# that renders nothing. The counter in the "P" is a second subpath wound in the opposite direction,
 # so the default nonzero fill rule punches it out without needing a fill-rule attribute.
 ONYX_LOGO_PATHS: Final[dict] = {
     "M10.4014 13.25L18.875 32L10.3852 50.75L2 32L10.4014 13.25Z":
-        "M14 8H34A24 24 0 0 1 34 56H14ZM22 16V48H34A16 16 0 0 0 34 16H22Z",
+        "M14 8H34A14 14 0 0 1 34 36H22V56H14ZM22 16V28H34A6 6 0 0 0 34 16H22Z",
     "M53.5264 13.25L62 32L53.5102 50.75L45.125 32L53.5264 13.25Z": "M0 0Z",
     "M32 45.125L50.75 53.5625L32 62L13.25 53.5625L32 45.125Z": "M0 0Z",
     "M32 2L50.75 10.4375L32 18.875L13.25 10.4375L32 2Z": "M0 0Z",
@@ -63,18 +63,18 @@ WEB_BUILD_DIR: Final[str] = "/app/.next"
 # 152x64 viewBox -- not the `appName` text and not /logotype.png, which the bundle never
 # references at all. `Logo` lays the two components side by side in a flex row.
 #
-# Replacing letterforms means replacing outlines: this is "Dream" set in DejaVu Sans Bold,
+# Replacing letterforms means replacing outlines: this is "Puffin" set in DejaVu Sans Bold,
 # converted from the font's glyph outlines to a single path with fontTools and fitted to the same
 # viewBox. It is stored as a constant rather than generated at runtime so the rebrand needs no
 # font-tooling dependency, and because the geometry is fixed once chosen.
-DREAM_WORDMARK_PATH: Final[str] = (
-    "M9.84 22.43V40.98H12.65Q17.46 40.98 20 38.6Q22.53 36.22 22.53 31.67Q22.53 27.15 20.01 24.79Q17.48 22.43 12.65 22.43ZM2 16.5H10.27Q17.2 16.5 20.59 17.49Q23.98 18.47 26.41 20.84Q28.54 22.89 29.58 25.58Q30.62 28.27 30.62 31.67Q30.62 35.12 29.58 37.82Q28.54 40.52 26.41 42.57Q23.96 44.94 20.54 45.92Q17.12 46.91 10.27 46.91H2ZM53.26 30.31Q52.3 29.86 51.35 29.65Q50.4 29.43 49.45 29.43Q46.63 29.43 45.12 31.24Q43.6 33.04 43.6 36.4V46.91H36.31V24.1H43.6V27.84Q45 25.6 46.83 24.57Q48.65 23.55 51.2 23.55Q51.56 23.55 51.99 23.58Q52.42 23.61 53.23 23.71ZM79.66 35.44V37.52H62.61Q62.87 40.09 64.46 41.37Q66.05 42.65 68.9 42.65Q71.2 42.65 73.62 41.97Q76.03 41.29 78.58 39.9V45.53Q75.99 46.5 73.4 47Q70.82 47.5 68.23 47.5Q62.04 47.5 58.6 44.36Q55.17 41.21 55.17 35.52Q55.17 29.94 58.54 26.74Q61.91 23.55 67.82 23.55Q73.2 23.55 76.43 26.78Q79.66 30.02 79.66 35.44ZM72.16 33.02Q72.16 30.94 70.95 29.67Q69.74 28.39 67.78 28.39Q65.66 28.39 64.34 29.59Q63.01 30.78 62.69 33.02ZM95.4 36.64Q93.12 36.64 91.97 37.42Q90.82 38.19 90.82 39.7Q90.82 41.09 91.75 41.87Q92.67 42.65 94.32 42.65Q96.38 42.65 97.79 41.18Q99.19 39.7 99.19 37.48V36.64ZM106.55 33.89V46.91H99.19V43.53Q97.73 45.61 95.89 46.56Q94.06 47.5 91.43 47.5Q87.89 47.5 85.68 45.44Q83.47 43.37 83.47 40.07Q83.47 36.05 86.23 34.18Q88.99 32.31 94.89 32.31H99.19V31.74Q99.19 30 97.83 29.2Q96.46 28.39 93.57 28.39Q91.23 28.39 89.21 28.86Q87.19 29.33 85.46 30.27V24.71Q87.81 24.14 90.17 23.84Q92.53 23.55 94.89 23.55Q101.07 23.55 103.81 25.98Q106.55 28.41 106.55 33.89ZM134.48 27.88Q135.86 25.77 137.77 24.66Q139.67 23.55 141.95 23.55Q145.88 23.55 147.94 25.97Q150 28.39 150 33.02V46.91H142.67V35.02Q142.69 34.75 142.7 34.46Q142.71 34.18 142.71 33.65Q142.71 31.23 141.99 30.14Q141.28 29.05 139.69 29.05Q137.61 29.05 136.48 30.76Q135.35 32.47 135.31 35.71V46.91H127.98V35.02Q127.98 31.23 127.33 30.14Q126.67 29.05 125 29.05Q122.91 29.05 121.76 30.77Q120.62 32.49 120.62 35.69V46.91H113.29V24.1H120.62V27.44Q121.97 25.5 123.71 24.52Q125.45 23.55 127.55 23.55Q129.91 23.55 131.73 24.69Q133.54 25.83 134.48 27.88Z"
+PUFFIN_WORDMARK_PATH: Final[str] = (
+    "M12.95 17.96H25.25Q30.73 17.96 33.67 20.4Q36.6 22.83 36.6 27.33Q36.6 31.86 33.67 34.29Q30.73 36.72 25.25 36.72H20.36V46.69H12.95ZM20.36 23.33V31.36H24.46Q26.61 31.36 27.79 30.31Q28.96 29.26 28.96 27.33Q28.96 25.41 27.79 24.37Q26.61 23.33 24.46 23.33ZM41.3 38.3V25.14H48.22V27.3Q48.22 29.05 48.2 31.69Q48.18 34.34 48.18 35.22Q48.18 37.82 48.32 38.97Q48.45 40.11 48.78 40.63Q49.2 41.3 49.89 41.67Q50.57 42.04 51.46 42.04Q53.61 42.04 54.84 40.38Q56.07 38.73 56.07 35.78V25.14H62.96V46.69H56.07V43.57Q54.52 45.46 52.77 46.36Q51.03 47.25 48.93 47.25Q45.2 47.25 43.25 44.96Q41.3 42.67 41.3 38.3ZM83.76 16.75V21.27H79.95Q78.49 21.27 77.91 21.8Q77.34 22.33 77.34 23.64V25.14H83.23V30.07H77.34V46.69H70.45V30.07H67.02V25.14H70.45V23.64Q70.45 20.12 72.41 18.43Q74.37 16.75 78.49 16.75ZM100.91 16.75V21.27H97.1Q95.64 21.27 95.06 21.8Q94.48 22.33 94.48 23.64V25.14H100.37V30.07H94.48V46.69H87.59V30.07H84.17V25.14H87.59V23.64Q87.59 20.12 89.56 18.43Q91.52 16.75 95.64 16.75ZM103.87 25.14H110.76V46.69H103.87ZM103.87 16.75H110.76V22.37H103.87ZM139.05 33.57V46.69H132.12V44.56V36.65Q132.12 33.86 132 32.8Q131.87 31.74 131.56 31.24Q131.16 30.57 130.47 30.19Q129.77 29.82 128.89 29.82Q126.73 29.82 125.5 31.48Q124.27 33.14 124.27 36.09V46.69H117.38V25.14H124.27V28.3Q125.83 26.41 127.58 25.52Q129.33 24.62 131.45 24.62Q135.18 24.62 137.12 26.91Q139.05 29.2 139.05 33.57Z"
 )
 
 # The four "onyx" letters, matched on a prefix because the "o" path is 1.3 KB and only its head is
-# needed to identify it. The first becomes the Dream wordmark; the rest collapse to nothing.
+# needed to identify it. The first becomes the Puffin wordmark; the rest collapse to nothing.
 ONYX_WORDMARK_PREFIXES: Final[dict] = {
-    "M19.1795 51.2136C15.6695 51.2136 12.4353 50.3862": "DREAM",
+    "M19.1795 51.2136C15.6695 51.2136 12.4353 50.3862": "PUFFIN",
     "M42.6413 50.4614V12.4031H50.6891V17.7433L55.5028 12.7039": "HIDE",
     "M82.3035 64V56.0273H89.9753C91.2288 56.0273 92.2066 55.7264": "HIDE",
     "M115.657 50.4614L129.045 31.2066L116.033 12.4031H125.435": "HIDE",
@@ -90,21 +90,21 @@ ONYX_WORDMARK_PREFIXES: Final[dict] = {
 # of a builtin skill, the fallback owner of a shared agent -- and rewriting those would state
 # something untrue rather than rebrand anything.
 ONYX_APP_NAME_STRINGS: Final[dict] = {
-    'application_name?.trim()||"Onyx"': 'application_name?.trim()||"Dream"',
-    '.trim()}return"Onyx"': '.trim()}return"Dream"',
+    'application_name?.trim()||"Onyx"': 'application_name?.trim()||"Puffin"',
+    '.trim()}return"Onyx"': '.trim()}return"Puffin"',
 }
 
 
 
 class OnyxBrandAssets:
     """
-    Renders Dream logo assets and installs them into a running Onyx web server container.
+    Renders Puffin logo assets and installs them into a running Onyx web server container.
     """
 
     @classmethod
     def install(cls, container: Optional[str] = None) -> bool:
         """
-        Renders the Dream assets and copies them over the web server's static files.
+        Renders the Puffin assets and copies them over the web server's static files.
 
         Args:
             container (Optional[str]): Onyx web server container name; discovered if omitted.
@@ -134,7 +134,7 @@ class OnyxBrandAssets:
                     print(f"⚠️  Could not replace {filename}: {result.stderr.strip()[:160]}")
                     return False
         except (OSError, subprocess.SubprocessError) as exc:
-            print(f"⚠️  Could not install Dream logos: {exc}")
+            print(f"⚠️  Could not install Puffin logos: {exc}")
             return False
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -172,9 +172,9 @@ class OnyxBrandAssets:
             "const o=s;for(const k in MAP)if(s.includes(k))s=s.split(k).join(MAP[k]);"
             # The wordmark is matched by prefix, so it needs a rewrite of the whole d:"..." rather
             # than a literal substring swap.
-            f"const PRE={json.dumps(ONYX_WORDMARK_PREFIXES)},DREAM={json.dumps(DREAM_WORDMARK_PATH)};"
+            f"const PRE={json.dumps(ONYX_WORDMARK_PREFIXES)},PUFFIN={json.dumps(PUFFIN_WORDMARK_PATH)};"
             "s=s.replace(/d:\"(M[^\"]+)\"/g,(m,dd)=>{for(const k in PRE){if(dd.startsWith(k))"
-            "return 'd:\"'+(PRE[k]==='DREAM'?DREAM:'M0 0Z')+'\"'}return m});"
+            "return 'd:\"'+(PRE[k]==='PUFFIN'?PUFFIN:'M0 0Z')+'\"'}return m});"
             "if(s!==o){try{fs.writeFileSync(p,s);changed++}catch(x){}}}};"
             f"walk({json.dumps(WEB_BUILD_DIR)},0);console.log(changed);"
         )
@@ -208,7 +208,7 @@ class OnyxBrandAssets:
     @classmethod
     def render(cls, workdir: str) -> dict:
         """
-        Draws every Dream asset at the dimensions Onyx ships.
+        Draws every Puffin asset at the dimensions Onyx ships.
 
         Sizes match the originals because the frontend lays them out against those aspect ratios;
         a square wordmark or an oversized mark reflows the sidebar rather than simply looking
@@ -285,7 +285,7 @@ class OnyxBrandAssets:
     @classmethod
     def _mark(cls, workdir: str, filename: str, size: Tuple[int, int], dark: bool) -> str:
         """
-        Renders the square app mark: a "D" monogram on the gradient tile.
+        Renders the square app mark: a "P" monogram on the gradient tile.
 
         Args:
             workdir (str): Output directory.
@@ -301,11 +301,11 @@ class OnyxBrandAssets:
         image = cls._gradient_square(size, dark)
         draw = ImageDraw.Draw(image)
         font = cls._font(int(size[1] * 0.62))
-        box = draw.textbbox((0, 0), "D", font=font)
+        box = draw.textbbox((0, 0), "P", font=font)
         draw.text(
             ((size[0] - (box[2] - box[0])) / 2 - box[0],
              (size[1] - (box[3] - box[1])) / 2 - box[1]),
-            "D", font=font, fill=(255, 255, 255, 255),
+            "P", font=font, fill=(255, 255, 255, 255),
         )
         path = os.path.join(workdir, filename)
         image.save(path)
@@ -314,7 +314,7 @@ class OnyxBrandAssets:
     @classmethod
     def _wordmark(cls, workdir: str, filename: str, size: Tuple[int, int], dark: bool) -> str:
         """
-        Renders the horizontal "Dream" wordmark on a transparent background.
+        Renders the horizontal "Puffin" wordmark on a transparent background.
 
         Args:
             workdir (str): Output directory.
@@ -336,16 +336,16 @@ class OnyxBrandAssets:
         point = int(size[1] * 0.7)
         while point > 8:
             font = cls._font(point)
-            box = draw.textbbox((0, 0), "Dream", font=font)
+            box = draw.textbbox((0, 0), "Puffin", font=font)
             if box[2] - box[0] <= size[0] * 0.88 and box[3] - box[1] <= size[1] * 0.72:
                 break
             point = int(point * 0.92)
 
-        box = draw.textbbox((0, 0), "Dream", font=font)
+        box = draw.textbbox((0, 0), "Puffin", font=font)
         draw.text(
             ((size[0] - (box[2] - box[0])) / 2 - box[0],
              (size[1] - (box[3] - box[1])) / 2 - box[1]),
-            "Dream", font=font, fill=colour,
+            "Puffin", font=font, fill=colour,
         )
         path = os.path.join(workdir, filename)
         image.save(path)
@@ -366,14 +366,14 @@ class OnyxBrandAssets:
         end = "#%02x%02x%02x" % BRAND_END
         svg = f'''<svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs>
-        <linearGradient id="dream" x1="0" y1="0" x2="0" y2="56" gradientUnits="userSpaceOnUse">
+        <linearGradient id="puffin" x1="0" y1="0" x2="0" y2="56" gradientUnits="userSpaceOnUse">
             <stop stop-color="{start}"/>
             <stop offset="1" stop-color="{end}"/>
         </linearGradient>
     </defs>
-    <rect width="56" height="56" rx="13" fill="url(#dream)"/>
-    <path d="M18 14h9.5c8 0 13.5 5.5 13.5 14s-5.5 14-13.5 14H18V14zm7.5 6.5v15h2c4.6 0 7.5-2.9
-             7.5-7.5s-2.9-7.5-7.5-7.5h-2z" fill="#ffffff"/>
+    <rect width="56" height="56" rx="13" fill="url(#puffin)"/>
+    <path d="M18 14h9.5c7 0 11.5 4.2 11.5 10.5s-4.5 10.5-11.5 10.5h-2v7H18V14zm7.5 6.5v8h2c2.9 0
+             4.5-1.5 4.5-4s-1.6-4-4.5-4h-2z" fill="#ffffff"/>
 </svg>
 '''
         path = os.path.join(workdir, "logo.svg")

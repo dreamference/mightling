@@ -831,7 +831,7 @@ class DreamferenceCLIController:
         )
         onyx_configure_parser.add_argument(
             "--no-brand", action="store_true",
-            help="Skip rebranding the deployment as Dream",
+            help="Skip rebranding the deployment as Puffin",
         )
         onyx_configure_parser.add_argument(
             "--no-voice", action="store_true",

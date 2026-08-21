@@ -26,6 +26,8 @@ from dreamference.hardware import (
     model_supports_vision,
 )
 from dreamference.runner.onyx_brand_assets import OnyxBrandAssets
+from dreamference.runner.onyx_ui_fonts import OnyxUIFonts
+from dreamference.runner.onyx_ui_overrides import OnyxUIOverrides
 from dreamference.runner.onyx_installer import OnyxInstaller
 from dreamference.vllm_server import VLLMServerManager
 
@@ -77,20 +79,20 @@ ONYX_SEARCH_PROVIDER_NAME: Final[str] = "dreamference-searxng"
 # not switch that on. What the community edition does allow is a company name, a custom assistant,
 # and retiring the stock one, which is what this applies. The window title, favicon and the logo in
 # the top-left stay Onyx's.
-DREAM_COMPANY_NAME: Final[str] = "Dream"
-DREAM_COMPANY_DESCRIPTION: Final[str] = (
+PUFFIN_COMPANY_NAME: Final[str] = "Puffin"
+PUFFIN_COMPANY_DESCRIPTION: Final[str] = (
     "Local, air-gapped pair programming on NVIDIA GB10."
 )
-DREAM_ASSISTANT_NAME: Final[str] = "Dream"
-DREAM_ASSISTANT_DESCRIPTION: Final[str] = (
+PUFFIN_ASSISTANT_NAME: Final[str] = "Puffin"
+PUFFIN_ASSISTANT_DESCRIPTION: Final[str] = (
     "Local pair programmer on GB10 — web search, Python, and file reading, "
     "served entirely from this machine."
 )
 
-# Onyx's agentic coding tool, left off the Dream assistant deliberately: Dreamference's own
+# Onyx's agentic coding tool, left off the Puffin assistant deliberately: Dreamference's own
 # terminal agents cover that ground with the same model, and enabling both invites the two to
 # edit the same tree from different directions.
-DREAM_EXCLUDED_TOOLS: Final[frozenset] = frozenset({"coding_agent"})
+PUFFIN_EXCLUDED_TOOLS: Final[frozenset] = frozenset({"coding_agent"})
 
 # Speech-to-text. Onyx has a complete voice subsystem and shows no microphone button until an STT
 # provider is registered, so the button is a configuration question, not a missing feature.
@@ -311,7 +313,7 @@ class OnyxRunner:
             password (str): Admin account password.
             web_url (str): Base URL of the Onyx deployment.
             enable_web (bool): Whether to also give the default assistant SearXNG web access.
-            brand (bool): Whether to rebrand the deployment as Dream.
+            brand (bool): Whether to rebrand the deployment as Puffin.
             enable_voice (bool): Whether to run a local Whisper server and enable the microphone.
 
         Returns:
@@ -534,10 +536,10 @@ class OnyxRunner:
 
     def apply_branding(self, api: str, cookie: str) -> bool:
         """
-        Rebrands the Onyx deployment as Dream as far as the community edition permits.
+        Rebrands the Onyx deployment as Puffin as far as the community edition permits.
 
-        Three changes, all of them free-tier: the company name, a `Dream` assistant carrying the
-        tools this deployment actually has, and retiring Onyx's stock assistant so the Dream one
+        Three changes, all of them free-tier: the company name, a `Puffin` assistant carrying the
+        tools this deployment actually has, and retiring Onyx's stock assistant so the Puffin one
         is what a user lands on.
 
         What is deliberately *not* done: Onyx's whitelabelling -- the application name in the
@@ -552,7 +554,7 @@ class OnyxRunner:
         Returns:
             bool: True if the branding was applied.
         """
-        persona_id = self._upsert_dream_assistant(api, cookie)
+        persona_id = self._upsert_puffin_assistant(api, cookie)
 
         settings = self._get_json(f"{api}/settings", cookie)
         if settings is None:
@@ -560,13 +562,13 @@ class OnyxRunner:
             return False
 
         payload = dict(settings)
-        payload["company_name"] = DREAM_COMPANY_NAME
-        payload["company_description"] = DREAM_COMPANY_DESCRIPTION
-        # Only retire the stock assistant once there is a Dream one to land on instead.
+        payload["company_name"] = PUFFIN_COMPANY_NAME
+        payload["company_description"] = PUFFIN_COMPANY_DESCRIPTION
+        # Only retire the stock assistant once there is a Puffin one to land on instead.
         payload["disable_default_assistant"] = persona_id is not None
         _, error = self._request(f"{api}/admin/settings", payload, cookie, method="PUT")
         if error:
-            print(f"⚠️  Could not apply Dream branding: {error}")
+            print(f"⚠️  Could not apply Puffin branding: {error}")
             return False
 
         # The logos are static files the web server hands out, not an Enterprise setting, so they
@@ -574,16 +576,27 @@ class OnyxRunner:
         # or `deploy install --force` restores Onyx's originals until this runs again.
         logos = OnyxBrandAssets.install()
 
-        print(f"✨ Rebranded as {DREAM_COMPANY_NAME}"
-              + (" with a Dream assistant" if persona_id is not None else "")
-              + (" and Dream logos." if logos else "."))
+        # Typography is the other half of the look, and travels the same way: a rewrite of the
+        # compiled stylesheets plus font files served out of Onyx's own public directory.
+        fonts = OnyxUIFonts.install()
+
+        # Dreamference's own CSS, appended rather than substituted -- currently the reveal-on-hover
+        # message toolbar.
+        OnyxUIOverrides.install()
+
+        print(f"✨ Rebranded as {PUFFIN_COMPANY_NAME}"
+              + (" with a Puffin assistant" if persona_id is not None else "")
+              + (" and Puffin logos." if logos else ".")
+              + (" Telegram typography applied." if fonts else ""))
         if not logos:
             print("💡 Logos unchanged — Onyx's own are still in place.")
+        if not fonts:
+            print("💡 Fonts unchanged — Onyx's own typefaces are still in place.")
         return True
 
-    def _upsert_dream_assistant(self, api: str, cookie: str) -> Optional[int]:
+    def _upsert_puffin_assistant(self, api: str, cookie: str) -> Optional[int]:
         """
-        Creates or updates the Dream assistant and puts it in front of the user.
+        Creates or updates the Puffin assistant and puts it in front of the user.
 
         Onyx's own assistant cannot be renamed -- it is a builtin persona and the API refuses to
         modify one -- so branding it means creating a second, non-builtin assistant and retiring
@@ -599,11 +612,11 @@ class OnyxRunner:
             Optional[int]: The assistant's persona id, or None if it could not be created.
         """
         tools = self._get_json(f"{api}/tool", cookie) or []
-        tool_ids = [t["id"] for t in tools if t.get("name") not in DREAM_EXCLUDED_TOOLS]
+        tool_ids = [t["id"] for t in tools if t.get("name") not in PUFFIN_EXCLUDED_TOOLS]
 
         payload = {
-            "name": DREAM_ASSISTANT_NAME,
-            "description": DREAM_ASSISTANT_DESCRIPTION,
+            "name": PUFFIN_ASSISTANT_NAME,
+            "description": PUFFIN_ASSISTANT_DESCRIPTION,
             "document_set_ids": [],
             "tool_ids": tool_ids,
             "system_prompt": "",
@@ -615,21 +628,21 @@ class OnyxRunner:
 
         existing = None
         for persona in self._get_json(f"{api}/persona", cookie) or []:
-            if persona.get("name") == DREAM_ASSISTANT_NAME and not persona.get("builtin_persona"):
+            if persona.get("name") == PUFFIN_ASSISTANT_NAME and not persona.get("builtin_persona"):
                 existing = persona["id"]
                 break
 
         if existing is None:
             created, error = self._request(f"{api}/persona", payload, cookie)
             if error:
-                print(f"⚠️  Could not create the Dream assistant: {error}")
+                print(f"⚠️  Could not create the Puffin assistant: {error}")
                 return None
             persona_id = (created or {}).get("id")
         else:
             persona_id = existing
             _, error = self._request(f"{api}/persona/{persona_id}", payload, cookie, method="PATCH")
             if error:
-                print(f"⚠️  Could not update the Dream assistant: {error}")
+                print(f"⚠️  Could not update the Puffin assistant: {error}")
                 return None
 
         if persona_id is not None:

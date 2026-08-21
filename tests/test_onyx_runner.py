@@ -7,9 +7,9 @@ from dreamference.runner.onyx_runner import (
     ONYX_PROVIDER_TYPE,
     ONYX_SEARCH_PROVIDER_NAME,
     SEARXNG_CONTAINER_URL,
-    DREAM_ASSISTANT_NAME,
-    DREAM_COMPANY_NAME,
-    DREAM_EXCLUDED_TOOLS,
+    PUFFIN_ASSISTANT_NAME,
+    PUFFIN_COMPANY_NAME,
+    PUFFIN_EXCLUDED_TOOLS,
     DEFAULT_ONYX_EMAIL,
 )
 
@@ -289,17 +289,17 @@ def test_branding_creates_a_dream_assistant_from_available_tools():
         assert runner.apply_branding("http://x/api", "cookie") is True
 
     persona = next(p for u, p, m in calls if u.endswith("/persona"))
-    assert persona["name"] == DREAM_ASSISTANT_NAME
+    assert persona["name"] == PUFFIN_ASSISTANT_NAME
     assert 11 not in persona["tool_ids"], "coding_agent is excluded on purpose"
     assert sorted(persona["tool_ids"]) == [3, 6, 7]
 
     settings = next(p for u, p, m in calls if u.endswith("/admin/settings"))
-    assert settings["company_name"] == DREAM_COMPANY_NAME
+    assert settings["company_name"] == PUFFIN_COMPANY_NAME
     assert settings["disable_default_assistant"] is True
 
 
 def test_branding_updates_the_existing_dream_assistant():
-    # Re-running must not leave a second "Dream" in the assistant list.
+    # Re-running must not leave a second "Puffin" in the assistant list.
     runner = OnyxRunner()
     calls = []
 
@@ -307,7 +307,7 @@ def test_branding_updates_the_existing_dream_assistant():
         if url.endswith("/tool"):
             return [{"id": 7, "name": "open_url"}]
         if url.endswith("/persona"):
-            return [{"id": 9, "name": DREAM_ASSISTANT_NAME, "builtin_persona": False}]
+            return [{"id": 9, "name": PUFFIN_ASSISTANT_NAME, "builtin_persona": False}]
         return {}
 
     with patch.object(OnyxRunner, "_get_json", side_effect=fake_get), \
@@ -384,14 +384,14 @@ def test_wordmark_replacement_targets_every_onyx_letter():
     # The sidebar wordmark is four inline letter paths, not /logotype.png -- which the bundle
     # never references. Missing one letter leaves a fragment of "onyx" on screen.
     from dreamference.runner.onyx_brand_assets import (
-        ONYX_WORDMARK_PREFIXES, DREAM_WORDMARK_PATH,
+        ONYX_WORDMARK_PREFIXES, PUFFIN_WORDMARK_PATH,
     )
 
     assert len(ONYX_WORDMARK_PREFIXES) == 4, "o, n, y and x each need a rule"
-    assert list(ONYX_WORDMARK_PREFIXES.values()).count("DREAM") == 1
+    assert list(ONYX_WORDMARK_PREFIXES.values()).count("PUFFIN") == 1
     assert list(ONYX_WORDMARK_PREFIXES.values()).count("HIDE") == 3
-    assert DREAM_WORDMARK_PATH.startswith("M")
-    assert '"' not in DREAM_WORDMARK_PATH, "must survive embedding in the patch script"
+    assert PUFFIN_WORDMARK_PATH.startswith("M")
+    assert '"' not in PUFFIN_WORDMARK_PATH, "must survive embedding in the patch script"
 
 
 def test_logo_patch_leaves_unrelated_onyx_strings_alone():
@@ -485,3 +485,155 @@ def test_voice_patch_targets_the_azure_only_exemption():
 
     assert '== "azure"' in ONYX_VOICE_SSRF_ANCHOR
     assert '"azure", "openai"' in ONYX_VOICE_SSRF_PATCH
+
+
+def test_every_onyx_face_is_substituted_by_a_font_the_installer_fetches():
+    # A family named here but missing from FONT_SOURCES rewrites Onyx's CSS to point at a file
+    # that is never copied in, which serves a 404 and falls back to the browser's default.
+    from dreamference.runner.onyx_ui_fonts import FACE_SUBSTITUTIONS, FONT_SOURCES
+
+    assert set(FACE_SUBSTITUTIONS) == {"Hanken Grotesk", "KH Teka", "DM Mono"}
+    for filename, _ in FACE_SUBSTITUTIONS.values():
+        assert filename in FONT_SOURCES
+
+
+def test_face_rewrite_keeps_onyxs_own_family_names():
+    # The whole approach rests on this: the family name stays, only the file behind it changes,
+    # so the forty-odd `font-family` declarations elsewhere in the CSS need no edit at all.
+    from dreamference.runner.onyx_ui_fonts import OnyxUIFonts
+
+    with patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "3"
+        assert OnyxUIFonts.patch_css("web") == 3
+
+    script = run.call_args[0][0][-1]
+    assert "font-family:Hanken Grotesk" in script
+    assert "/fonts/Roboto.woff2" in script
+    assert "/fonts/RobotoMono.woff2" in script
+
+
+def test_a_newly_copied_face_restarts_the_web_server():
+    # Next.js builds its static routes from `public/` at boot, so a face copied into a running
+    # container has no URL until the server starts again.
+    from dreamference.runner.onyx_ui_fonts import OnyxUIFonts
+
+    with patch.object(OnyxUIFonts, "ensure_fonts", return_value={"Roboto.woff2": "/tmp/r"}), \
+         patch.object(OnyxUIFonts, "installed_faces", return_value=set()), \
+         patch.object(OnyxUIFonts, "patch_css", return_value=2), \
+         patch.object(OnyxUIFonts, "restart_web_server", return_value=True) as restart, \
+         patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        assert OnyxUIFonts.install("web") is True
+        restart.assert_called_once()
+
+
+def test_faces_already_in_the_container_are_not_recopied_or_restarted():
+    from dreamference.runner.onyx_ui_fonts import OnyxUIFonts
+
+    with patch.object(OnyxUIFonts, "ensure_fonts", return_value={"Roboto.woff2": "/tmp/r"}), \
+         patch.object(OnyxUIFonts, "installed_faces", return_value={"Roboto.woff2"}), \
+         patch.object(OnyxUIFonts, "patch_css", return_value=2), \
+         patch.object(OnyxUIFonts, "restart_web_server") as restart, \
+         patch("subprocess.run") as run:
+        assert OnyxUIFonts.install("web") is True
+        run.assert_not_called()
+        restart.assert_not_called()
+
+
+def test_hover_rule_hides_the_actions_but_not_the_toolbar_they_sit_in():
+    # The toolbar also carries the citation list and the message switcher. Hiding the toolbar
+    # itself would take those with it, which is content disappearing rather than chrome.
+    from dreamference.runner.onyx_ui_overrides import HOVER_TOOLBAR_CSS
+
+    assert ':not([data-testid="AgentMessage/toolbar"])' in HOVER_TOOLBAR_CSS
+    assert '[data-testid="onyx-ai-message"]:hover' in HOVER_TOOLBAR_CSS
+    # No hover on a keyboard, so the controls have to come back on focus too.
+    assert '[data-testid="onyx-ai-message"]:focus-within' in HOVER_TOOLBAR_CSS
+    # Transparent buttons still take clicks without this.
+    assert "pointer-events:none" in HOVER_TOOLBAR_CSS
+
+
+def test_overrides_replace_their_own_previous_block():
+    # The marker opens the block and everything after it belongs to Dreamference, so a re-run cuts
+    # there and rewrites. Appending unconditionally would stack copies; appending only when the
+    # marker is absent would make every later edit to the CSS unappliable.
+    from dreamference.runner.onyx_ui_overrides import (
+        OVERRIDE_MARKER, UI_OVERRIDES, OnyxUIOverrides,
+    )
+
+    assert UI_OVERRIDES.startswith(OVERRIDE_MARKER)
+    assert UI_OVERRIDES.count(OVERRIDE_MARKER) == 1, "the cut point has to be unambiguous"
+    with patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = "38"
+        assert OnyxUIOverrides.append_overrides("web") == 38
+
+    script = run.call_args[0][0][-1]
+    assert "indexOf(MARK)" in script
+    assert "base+CSS" in script
+
+
+def test_selected_sidebar_row_is_specific_enough_to_beat_onyxs_own_rule():
+    # Onyx styles the row with `.interactive[variant][state]`, a class and two attributes. An
+    # override that drops the leading class loses the tie and the row stays grey -- which is
+    # exactly what happened the first time.
+    from dreamference.runner.onyx_ui_overrides import SIDEBAR_CSS, TIFFANY_BLUE
+
+    assert SIDEBAR_CSS.count('.interactive[data-interactive-variant^="sidebar"]') == 3
+    assert f"background-color:{TIFFANY_BLUE}" in SIDEBAR_CSS
+    # Onyx's hover rule carries a pseudo-class, so the plain pair would lose under the pointer.
+    assert ":hover:not([data-disabled])" in SIDEBAR_CSS
+    assert "[data-interaction=hover]:not([data-disabled])" in SIDEBAR_CSS
+    # Label and icons are read from these, not from `color`.
+    assert "--interactive-foreground:#fff" in SIDEBAR_CSS
+    assert "--interactive-foreground-icon:#fff" in SIDEBAR_CSS
+
+
+def test_white_sidebar_is_scoped_to_light_mode():
+    # `--background-tint-02` is what makes the panel dark in dark mode; forcing white unconditionally
+    # would paint a white column into a dark UI.
+    from dreamference.runner.onyx_ui_overrides import SIDEBAR_CSS
+
+    assert (
+        "html:not(.dark) .opal-sidebar-root__column"
+        "{background-color:var(--background-tint-00)}"
+    ) in SIDEBAR_CSS
+
+
+def test_user_bubble_is_white_and_keeps_an_edge():
+    # A white bubble on Onyx's near-white chat background has no edge of its own, so the shadow is
+    # load-bearing rather than decoration -- it is what Telegram uses in place of a fill.
+    from dreamference.runner.onyx_ui_overrides import MESSAGE_BUBBLE_CSS
+
+    # The id is Onyx's own and carries the specificity to beat the Tailwind utility unaided.
+    assert MESSAGE_BUBBLE_CSS.startswith("html:not(.dark) #onyx-human-message ")
+    assert "background-color:var(--background-tint-00)" in MESSAGE_BUBBLE_CSS
+    assert "box-shadow:" in MESSAGE_BUBBLE_CSS
+
+
+def test_chat_canvas_whitens_both_layers_that_paint_the_grey():
+    # `body` carries the tint and so does the app shell stacked on it, via Tailwind's
+    # `.bg-background` alias for the same token. Whitening only `body` repaints a surface nothing
+    # can see and leaves the visible canvas grey -- which is exactly what happened. `.min-h-screen`
+    # narrows it to the canvas: the alias alone also blanks the citation chips, which use it as
+    # their fill.
+    from dreamference.runner.onyx_ui_overrides import CHAT_SURFACE_CSS
+
+    assert "html:not(.dark) body{background-color:var(--background-tint-00)}" in CHAT_SURFACE_CSS
+    assert (
+        "html:not(.dark) .bg-background.min-h-screen"
+        "{background-color:var(--background-tint-00)}"
+    ) in CHAT_SURFACE_CSS
+
+
+def test_hidden_avatar_keeps_the_timeline_rail_in_layout():
+    # The rail is what the message body's indent is measured against. `display:none` would collapse
+    # it and slide the "Thought for Ns" header off the text it labels.
+    from dreamference.runner.onyx_ui_overrides import AGENT_AVATAR_CSS
+
+    assert "visibility:hidden" in AGENT_AVATAR_CSS
+    assert "display:none" not in AGENT_AVATAR_CSS
+    # Matched on the CSS variable the arbitrary-value class is built from, not the escaped class.
+    assert '[class*="--timeline-rail-width"]' in AGENT_AVATAR_CSS
+    assert AGENT_AVATAR_CSS.startswith('[data-testid="onyx-ai-message"] ')
