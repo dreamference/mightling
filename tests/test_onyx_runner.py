@@ -1089,21 +1089,37 @@ def test_scrollbar_defaults_to_visible_and_hides_only_in_the_browser():
     # always there. It is also what the desktop app wants, where hover proved unreliable.
     from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_CSS
 
+    from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_THUMB
+
     assert SIDEBAR_SCROLLBAR_CSS.startswith(
         ".opal-sidebar-body__scroll{scrollbar-width:thin;"
-        "scrollbar-color:rgba(0,0,0,.25) transparent}"
+        f"scrollbar-color:{SIDEBAR_SCROLLBAR_THUMB} var(--background-tint-00)}}"
     )
+    # Only the browser hides it; the desktop app keeps it permanently.
     assert SIDEBAR_SCROLLBAR_CSS.count('html[data-puffin-engine="blink"]') == 2
-    assert "webkit" not in SIDEBAR_SCROLLBAR_CSS
+    assert "data-puffin-engine=\"webkit\"" not in SIDEBAR_SCROLLBAR_CSS
 
 
-def test_scrollbar_uses_standard_properties_only():
-    # `::-webkit-scrollbar` styling is ignored in Blink whenever `scrollbar-color` is set, so those
-    # rules were dead weight -- and one of them, sharing a selector between the track and the
-    # stepper buttons, is what put a grey hairline down the sidebar.
-    from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_CSS
+def test_scrollbar_styles_both_engines_because_they_disagree():
+    # Blink ignores `::-webkit-scrollbar` whenever `scrollbar-color` is set, so the standard
+    # properties do the work there. WebKitGTK honours the pseudo-elements and draws a track
+    # hairline the standard transparent track colour does not remove -- the grey line the desktop
+    # app had and the browser never did. Both paths paint the track transparent.
+    from dreamference.chat.onyx_ui_overrides import (
+        SIDEBAR_SCROLLBAR_CSS, SIDEBAR_SCROLLBAR_THUMB,
+    )
 
-    assert "::-webkit-scrollbar" not in SIDEBAR_SCROLLBAR_CSS
-    # Width is constant across states, so nothing reflows when the pointer enters or leaves.
-    assert SIDEBAR_SCROLLBAR_CSS.count("scrollbar-width") == 1
+    assert "scrollbar-color:" in SIDEBAR_SCROLLBAR_CSS
+    # The trough is painted, not left transparent: WebKitGTK draws its edge on the scrollbar
+    # element, and a transparent trough left that edge showing as a rule beside the thumb.
+    assert "::-webkit-scrollbar{width:8px;background-color:var(--background-tint-00);border:0" in SIDEBAR_SCROLLBAR_CSS
+    assert "::-webkit-scrollbar-track{background-color:var(--background-tint-00);border:0" in SIDEBAR_SCROLLBAR_CSS
+    # A literal white would draw a stripe down a dark sidebar; the token follows the theme.
+    assert "#fff" not in SIDEBAR_SCROLLBAR_CSS.lower()
+    # Separate selectors: sharing one applied display:none to the track and collapsed the
+    # scrollbar into the very hairline this removes.
+    assert "::-webkit-scrollbar-button{display:none}" in SIDEBAR_SCROLLBAR_CSS
+    assert "scrollbar-track,.opal-sidebar-body__scroll::-webkit-scrollbar-button" not in SIDEBAR_SCROLLBAR_CSS
+    # One definition of the thumb weight, used by both engines.
+    assert SIDEBAR_SCROLLBAR_CSS.count(SIDEBAR_SCROLLBAR_THUMB) == 3
     assert "'" not in SIDEBAR_SCROLLBAR_CSS

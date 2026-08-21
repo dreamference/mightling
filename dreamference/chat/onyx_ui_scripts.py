@@ -26,6 +26,14 @@ from dreamference.chat.gmail_search_service import HOST_ORIGIN
 
 # Opens the appended block; everything after it in a chunk is this module's, so a re-run cuts at the
 # marker and rewrites rather than stacking copies.
+#
+# **The block is written on a line of its own, and that is not cosmetic.** Turbopack ends its
+# chunks with a `//# debugId=…` line comment and no trailing newline, so a block appended directly
+# onto the end lands *inside that comment* and never executes. The script was silently inert for
+# exactly this reason -- no error, no attribute set, no button -- until an offscreen WebKitGTK probe
+# showed `data-puffin-engine` unset on a page whose sidebar had clearly rendered. `append_scripts`
+# therefore trims trailing newlines from what it keeps and writes exactly one, which also stops a
+# blank line accumulating per install.
 SCRIPT_MARKER: Final[str] = "/*dreamference-ui-scripts*/"
 
 # Only chunks that render this class get the script.
@@ -125,9 +133,13 @@ class OnyxUIScripts:
             "if(f.isDirectory()){if(!/node_modules|cache/.test(p))walk(p,dep+1);continue}"
             "if(!/\\.(js|mjs)$/.test(f.name))continue;"
             "let s='';try{s=fs.readFileSync(p,'utf8')}catch(x){continue}"
-            "const i=s.indexOf(MARK),base=i<0?s:s.slice(0,i);"
+            "const i=s.indexOf(MARK);"
+            # Trim the trailing newlines as well as the old block, so re-installing neither
+            # stacks blank lines nor leaves the previous version's separator behind.
+            "const base=(i<0?s:s.slice(0,i)).replace(/\\n+$/,'');"
             "if(!base.includes(ANCHOR))continue;"
-            "if(base+JS!==s){try{fs.writeFileSync(p,base+JS)}catch(x){continue}}"
+            "const next=base+'\\n'+JS;"
+            "if(next!==s){try{fs.writeFileSync(p,next)}catch(x){continue}}"
             "carrying++;}};"
             f"walk({json.dumps(WEB_BUILD_DIR)},0);console.log(carrying);"
         )

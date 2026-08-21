@@ -459,26 +459,46 @@ SIDEBAR_CLOSE_CSS: Final[str] = (
 
 # The chat list's scrollbar: permanent in the desktop app, revealed on hover in the browser.
 #
-# The default is the *visible* one, and the hover behaviour is the special case. That is deliberate.
-# Hiding it depends on the engine marker `onyx_ui_scripts.py` writes onto `<html>`, and if that
-# script has not run yet -- or at all -- an "invisible until hover" default leaves a scroll
-# container with no visible affordance whatsoever. Defaulting to visible means the failure mode is
-# a scrollbar that is merely always there, rather than one nobody can find.
+# The default is the *visible* one and the hover behaviour is the special case, deliberately.
+# Hiding depends on the engine marker `onyx_ui_scripts.py` writes onto `<html>`; if that script has
+# not run, an "invisible until hover" default leaves a scroll container with no affordance at all.
+# Defaulting to visible makes the failure mode a scrollbar that is merely always there.
 #
-# Only the standard properties are used. `::-webkit-scrollbar` styling is ignored in Blink whenever
-# `scrollbar-color` is set, so the pseudo-element rules that used to be here were dead weight -- and
-# one of them, sharing a selector between the track and the stepper buttons, is what put a grey
-# hairline down the sidebar in the first place.
+# **Both styling systems are used, because the two engines disagree about which one wins.** Blink
+# ignores `::-webkit-scrollbar` entirely whenever `scrollbar-color` is set, so there the standard
+# properties do the work. WebKitGTK invented those pseudo-elements and honours them, and it draws a
+# track hairline down the container that the standard `transparent` track colour does not remove --
+# that is the grey line in the desktop app which the browser never showed. So the track is painted
+# transparent both ways, and the thumb is given the same weight by both.
 #
-# The width never changes between states, only the colour, so nothing reflows when the pointer
-# enters or leaves.
+# `scrollbar-button` is hidden separately from the track: sharing one selector applied
+# `display:none` to both and collapsed the scrollbar into the hairline this is meant to remove.
+#
+# The trough is painted rather than left transparent, and that is the fix for the line itself.
+# WebKitGTK draws the trough's edge on the *scrollbar* element, not the track, and a transparent
+# trough leaves that edge showing as a 1px rule about ten pixels to the left of the thumb -- which
+# is exactly where it appeared. Painting both the scrollbar and its track in the surface colour
+# hides the edge against the sidebar. `--background-tint-00` rather than a literal white, so it
+# stays correct if the theme changes: this is the one rule here that would otherwise draw a white
+# stripe down a dark sidebar.
+#
+# The width never changes between states, only the colour, so nothing reflows on hover.
+SIDEBAR_SCROLLBAR_THUMB: Final[str] = "rgba(0,0,0,.125)"
 SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     ".opal-sidebar-body__scroll"
-    "{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.25) transparent}"
+    f"{{scrollbar-width:thin;scrollbar-color:{SIDEBAR_SCROLLBAR_THUMB} var(--background-tint-00)}}"
     'html[data-puffin-engine="blink"] .opal-sidebar-body__scroll'
-    "{scrollbar-color:transparent transparent}"
+    "{scrollbar-color:transparent var(--background-tint-00)}"
     'html[data-puffin-engine="blink"] .opal-sidebar-body__scroll:hover'
-    "{scrollbar-color:rgba(0,0,0,.25) transparent}"
+    f"{{scrollbar-color:{SIDEBAR_SCROLLBAR_THUMB} var(--background-tint-00)}}"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar"
+    "{width:8px;background-color:var(--background-tint-00);border:0;box-shadow:none}"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar-track"
+    "{background-color:var(--background-tint-00);border:0;box-shadow:none}"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar-button"
+    "{display:none}"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar-thumb"
+    f"{{background-color:{SIDEBAR_SCROLLBAR_THUMB};border-radius:4px;border:0}}"
 )
 
 # The vertical rule between the sidebar and the chat, removed.
