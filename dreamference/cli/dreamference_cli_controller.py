@@ -1524,7 +1524,7 @@ class DreamferenceCLIController:
             sys.exit(0)
 
         elif args.command == "onyx":
-            from dreamference.runner import OnyxRunner
+            from dreamference.chat import OnyxRunner
 
             onyx_runner = OnyxRunner(config=config)
             if args.onyx_command == "start":

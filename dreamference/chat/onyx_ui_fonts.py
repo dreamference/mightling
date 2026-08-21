@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 from typing import Dict, Final, Optional, Set, Tuple
 
-from dreamference.runner.onyx_brand_assets import WEB_BUILD_DIR, OnyxBrandAssets
+from dreamference.chat.onyx_brand_assets import WEB_BUILD_DIR, OnyxBrandAssets
 
 # Where the host keeps the converted faces between runs, so the fetch happens once per machine.
 FONT_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/fonts")

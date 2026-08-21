@@ -23,7 +23,7 @@ import json
 import subprocess
 from typing import Dict, Final, Optional
 
-from dreamference.runner.onyx_brand_assets import WEB_BUILD_DIR, OnyxBrandAssets
+from dreamference.chat.onyx_brand_assets import WEB_BUILD_DIR, OnyxBrandAssets
 
 # Sidebar tab labels, keyed by the JSX prop so the match cannot stray into unrelated strings.
 #
@@ -37,6 +37,9 @@ LABEL_SUBSTITUTIONS: Final[Dict[str, str]] = {
     # visible placeholder and once as `aria-placeholder`. Matching the quoted phrase catches both,
     # and the phrase is distinctive enough that nothing else in the bundle is a false positive.
     '"How can I help you today?"': '"Message"',
+    # The search palette's placeholder. Projects are hidden, so offering to search them was a
+    # promise the UI no longer keeps.
+    '"Search chat sessions, projects..."': '"Search chat sessions"',
 }
 
 

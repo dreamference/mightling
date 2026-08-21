@@ -25,11 +25,11 @@ from dreamference.hardware import (
     get_model_launch_overrides,
     model_supports_vision,
 )
-from dreamference.runner.onyx_brand_assets import OnyxBrandAssets
-from dreamference.runner.onyx_ui_fonts import OnyxUIFonts
-from dreamference.runner.onyx_ui_labels import OnyxUILabels
-from dreamference.runner.onyx_ui_overrides import OnyxUIOverrides
-from dreamference.runner.onyx_installer import OnyxInstaller
+from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
+from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
+from dreamference.chat.onyx_ui_labels import OnyxUILabels
+from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides
+from dreamference.chat.onyx_installer import OnyxInstaller
 from dreamference.vllm_server import VLLMServerManager
 
 # Onyx's web UI, as published by the stock lite deployment.
@@ -85,10 +85,10 @@ PUFFIN_COMPANY_DESCRIPTION: Final[str] = (
     "Local, air-gapped pair programming on NVIDIA GB10."
 )
 PUFFIN_ASSISTANT_NAME: Final[str] = "Puffin"
-PUFFIN_ASSISTANT_DESCRIPTION: Final[str] = (
-    "Local pair programmer on GB10 — web search, Python, and file reading, "
-    "served entirely from this machine."
-)
+# Empty on purpose. Onyx prints the assistant's description under the composer on the new-chat
+# screen, where a sentence of deployment trivia is noise rather than orientation -- the greeting
+# above it already says what this is.
+PUFFIN_ASSISTANT_DESCRIPTION: Final[str] = ""
 
 # What the assistant is told about itself.
 #
@@ -98,14 +98,20 @@ PUFFIN_ASSISTANT_DESCRIPTION: Final[str] = (
 # through Onyx's one global prompt hook (`user_preferences`, capped at 500 characters) so that
 # assistants the user creates themselves keep their own identity.
 #
+# The last sentence is here because its absence caused a bug. An earlier version opened with
+# "air-gapped", and the model believed it: asked for the weather it explained at length that it had
+# no internet and suggested looking out of the window -- while holding a working web_search tool.
+# The deployment is local, not disconnected, and the prompt now says which.
+#
 # `replace_base_system_prompt` stays false, so this is appended to Onyx's base prompt rather than
 # replacing it -- the base prompt is what tells the model how to use the search and Python tools,
 # and dropping it to introduce a name would be a poor trade.
 PUFFIN_ASSISTANT_INSTRUCTIONS: Final[str] = (
-    "You are Puffin, an AI assistant that runs entirely on this machine — a local, air-gapped "
-    "deployment on NVIDIA GB10 hardware. When you are asked your name, who you are, or what you "
-    "are, say that you are Puffin. Do not describe yourself as a generic assistant and do not "
-    "answer with the name of the model you are served from."
+    "You are Puffin, an AI assistant served by a model running on this machine's own NVIDIA GB10 "
+    "hardware. When you are asked your name, who you are, or what you are, say that you are "
+    "Puffin. Do not describe yourself as a generic assistant and do not answer with the name of "
+    "the model you are served from. You can reach the live web through your search tool: use it "
+    "for anything current, and never tell the user you have no internet access."
 )
 
 # Onyx's agentic coding tool, left off the Puffin assistant deliberately: Dreamference's own

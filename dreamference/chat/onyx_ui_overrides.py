@@ -24,7 +24,7 @@ import json
 import subprocess
 from typing import Final, Optional
 
-from dreamference.runner.onyx_brand_assets import (
+from dreamference.chat.onyx_brand_assets import (
     TIFFANY_BLUE, WEB_BUILD_DIR, OnyxBrandAssets,
 )
 
@@ -188,10 +188,11 @@ MESSAGE_TEXT_CSS: Final[str] = (
 # artwork geometry, the same 64x64 grid `ONYX_LOGO_PATHS` in `onyx_brand_assets.py` already keys
 # its path substitutions to, so the two would break together rather than one silently missing.
 #
-# Scoped to the sidebar header, which leaves the same mark in place on the login page where it is
-# the only branding on screen.
+# Unscoped, because the same mark is drawn in more than one place -- the sidebar header and the
+# foot of the account menu -- and it was asked for gone in both. The wordmark and the favicon carry
+# the brand now; the trade is that the login page loses its mark too.
 SIDEBAR_LOGO_CSS: Final[str] = (
-    '.opal-sidebar-header svg[viewBox="0 0 64 64"]'
+    'svg[viewBox="0 0 64 64"]'
     "{display:none}"
 )
 
@@ -394,6 +395,49 @@ HELP_LINK_CSS: Final[str] = (
     "{display:none}"
 )
 
+# The account avatar in the sidebar footer: a grey disc showing one initial.
+#
+# Onyx draws it as a black disc with two initials. The disc takes `--text-02`, the same token as
+# the name beside it, so the pair reads as one muted unit rather than a black dot on a white panel.
+#
+# Dropping the second initial is the one piece of text manipulation in this file. The initials are
+# computed in JavaScript, so CSS cannot recompute them -- but it can decline to draw them: the span
+# collapses to `font-size:0` and `::first-letter` is given the size back. That works only because
+# Onyx already renders the span as a block; `::first-letter` does not apply to inline boxes.
+#
+# The span also needs `width:100%; text-align:center`: collapsed to zero font size it is a
+# zero-width box, so the disc's flex centring has nothing to centre and the surviving letter sits
+# off to one side.
+#
+# `!important` is needed on exactly one declaration here, and not for want of specificity: Onyx sizes
+# the initials with an *inline* `font-size`, scaled to the disc. That is the same trap as the unread
+# badge, but without the escape -- the badge's inline value reads a custom property, so redefining
+# the property was enough; this one is a literal, and a literal inline declaration can only be
+# outranked. The restored size on `::first-letter` needs no such thing, since inline styles do not
+# reach pseudo-elements.
+SIDEBAR_AVATAR_DISC_CSS: Final[str] = (
+    ".opal-sidebar-root__column"
+    "{--dream-avatar-initial-size:7.2px}"
+    ".opal-sidebar-root__column .bg-background-neutral-inverted-00"
+    "{background-color:var(--text-02)}"
+    ".opal-sidebar-root__column .bg-background-neutral-inverted-00 span"
+    "{font-size:0!important;width:100%;text-align:center}"
+    ".opal-sidebar-root__column .bg-background-neutral-inverted-00 span::first-letter"
+    "{font-size:var(--dream-avatar-initial-size);line-height:1}"
+)
+
+# The account name in the sidebar footer, matched to the section titles.
+#
+# It takes the section titles' size and weight (12px/400, down from Onyx's 14px/500) but black
+# rather than their grey -- the name is the one piece of the footer worth reading. `span.truncate`
+# is the label specifically: the avatar's initials sit in a span too, and this must not reach them.
+SIDEBAR_ACCOUNT_CSS: Final[str] = (
+    '.opal-sidebar-footer .interactive[data-interactive-variant^="sidebar"]'
+    "{--interactive-foreground:#000}"
+    '.opal-sidebar-footer .interactive[data-interactive-variant^="sidebar"] span.truncate'
+    "{font-size:.75rem;font-weight:400}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
@@ -403,6 +447,7 @@ UI_OVERRIDES: Final[str] = (
     + SIDEBAR_HEADER_TEXT_CSS
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
+    + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS
 )
 
 
