@@ -850,6 +850,23 @@ class DreamferenceCLIController:
             "--client-secret", required=True, help="Google OAuth client secret"
         )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
+
+        # Command: dream desktop {run,build,status}
+        #
+        # The desktop shell is a window onto the same deployment `dream onyx` manages, so it is a
+        # sibling command rather than an `--agent` entry: nothing is exec'd and waited on here
+        # except the window itself.
+        desktop_parser = subparsers.add_parser(
+            "desktop", help="Puffin desktop app (a native window onto the local deployment)"
+        )
+        desktop_subparsers = desktop_parser.add_subparsers(
+            dest="desktop_command", help="Desktop app operations"
+        )
+        desktop_subparsers.add_parser("run", help="Open the Puffin desktop window")
+        desktop_subparsers.add_parser("build", help="Build a distributable desktop bundle")
+        desktop_subparsers.add_parser(
+            "status", help="Report whether the desktop app can be built and launched"
+        )
         onyx_logs_parser = onyx_subparsers.add_parser("logs", help="Show Onyx container logs")
         onyx_logs_parser.add_argument(
             "--follow", "-f", action="store_true", help="Stream new log lines"
@@ -1533,6 +1550,19 @@ class DreamferenceCLIController:
                 print("\nNote: a server can initialize and then be cancelled — Codex still reports")
                 print("      it as 'not initialized' in its startup banner.")
             sys.exit(0)
+
+        elif args.command == "desktop":
+            from dreamference.chat import DesktopRunner
+
+            if args.desktop_command == "run":
+                sys.exit(DesktopRunner.run())
+            elif args.desktop_command == "build":
+                sys.exit(DesktopRunner.build())
+            elif args.desktop_command == "status":
+                sys.exit(DesktopRunner.status())
+            else:
+                desktop_parser.print_help()
+                sys.exit(1)
 
         elif args.command == "onyx":
             from dreamference.chat import OnyxRunner

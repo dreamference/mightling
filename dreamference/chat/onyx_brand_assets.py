@@ -239,6 +239,39 @@ class OnyxBrandAssets:
         return assets
 
     @classmethod
+    def render_app_icon(cls, destination: str, size: int) -> bool:
+        """
+        Renders the square Puffin mark to an arbitrary path and size.
+
+        The web UI's own assets are produced by `render()` at the dimensions Onyx expects. This is
+        the same artwork for callers outside it -- the desktop app's icon set -- so that the window
+        icon, the launcher entry and the browser favicon all come from one definition of the mark.
+
+        Args:
+            destination (str): Path to write the PNG to.
+            size (int): Edge length in pixels.
+
+        Returns:
+            bool: True if the file was written.
+        """
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            print("⚠️  Pillow is not installed — cannot render the app icon.")
+            return False
+
+        workdir = tempfile.mkdtemp(prefix="puffin-icon-")
+        try:
+            rendered = cls._mark(workdir, os.path.basename(destination), (size, size))
+            shutil.copyfile(rendered, destination)
+        except OSError as exc:
+            print(f"⚠️  Could not render {destination}: {exc}")
+            return False
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        return True
+
+    @classmethod
     def _font(cls, size: int):
         """
         Loads a bold sans font at the requested size, falling back to PIL's built-in.
