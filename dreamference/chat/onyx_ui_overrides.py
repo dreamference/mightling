@@ -499,6 +499,13 @@ SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     "{display:none}"
     ".opal-sidebar-body__scroll::-webkit-scrollbar-thumb"
     f"{{background-color:{SIDEBAR_SCROLLBAR_THUMB};border-radius:4px;border:0}}"
+    # WebKitGTK draws its scrollbar as engine chrome, outside the page: a `get_snapshot` of the
+    # rendered page has no non-white pixel anywhere near the sidebar's edge, yet the line is on
+    # screen. Nothing in CSS reaches that trough -- the track colour, borders and box-shadow above
+    # all leave it drawn -- so the only remedy the engine honours is to not draw a scrollbar at all.
+    # The list still scrolls by wheel, trackpad and keyboard; it simply has no visible bar.
+    'html[data-puffin-engine="webkit"] .opal-sidebar-body__scroll'
+    "{scrollbar-width:none}"
 )
 
 # The vertical rule between the sidebar and the chat, removed.
@@ -541,6 +548,19 @@ STREAMING_CURSOR_CSS: Final[str] = (
     f"{{background-color:{TIFFANY_CARET}}}"
 )
 
+# The drawn scrollbar's thumb, which `onyx_ui_scripts.py` positions in the desktop app.
+#
+# Only appearance lives here; geometry is the script's job. `display:none` is the resting state --
+# the script flips it per update, so a page where the script never ran shows nothing rather than a
+# stray mispositioned bar. The hover shade gives the thumb drag affordance the flat colour lacks.
+CUSTOM_SCROLLBAR_CSS: Final[str] = (
+    "#puffin-scrollbar"
+    f"{{position:fixed;width:6px;border-radius:3px;z-index:50;display:none;"
+    f"background-color:{SIDEBAR_SCROLLBAR_THUMB}}}"
+    "#puffin-scrollbar:hover,#puffin-scrollbar:active"
+    "{background-color:rgba(0,0,0,.3)}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
@@ -552,7 +572,7 @@ UI_OVERRIDES: Final[str] = (
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
-    + STREAMING_CURSOR_CSS
+    + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS
 )
 
 

@@ -129,3 +129,29 @@ def test_block_is_written_on_its_own_line():
     injected = run.call_args[0][0][-1]
     assert r"replace(/\n+$/,'')" in injected
     assert "base+'\\n'+JS" in injected
+
+
+def test_drawn_scrollbar_replaces_the_suppressed_native_one():
+    # WebKitGTK's native scrollbar carries a trough line no CSS colour reaches, so the stylesheet
+    # sets `scrollbar-width:none` there and this script draws the bar instead. Blink keeps its
+    # native hover-revealed scrollbar, so the script must refuse to run there.
+    from dreamference.chat.onyx_ui_scripts import SCROLLBAR_SCRIPT, UI_SCRIPTS
+
+    assert SCROLLBAR_SCRIPT in UI_SCRIPTS
+    assert "!=='webkit')return" in SCROLLBAR_SCRIPT
+    # Same containment contract as the connect script: guarded, wrapped, run-once.
+    assert SCROLLBAR_SCRIPT.startswith(";(function(){try{")
+    assert SCROLLBAR_SCRIPT.endswith("}catch(e){}})();")
+    assert "window.__puffinScrollbar" in SCROLLBAR_SCRIPT
+
+
+def test_drawn_scrollbar_survives_react_recreating_the_chat_list():
+    # React replaces the chat list wholesale on re-render, so the script re-queries the container
+    # on every update instead of holding a reference that would go stale. Scroll events do not
+    # bubble, so the listener must be in the capture phase.
+    from dreamference.chat.onyx_ui_scripts import SCROLLBAR_SCRIPT
+
+    assert "function sc(){return document.querySelector" in SCROLLBAR_SCRIPT
+    assert "addEventListener('scroll',upd,true)" in SCROLLBAR_SCRIPT
+    # The interval is the fallback for what no event announces: content changing the height.
+    assert "setInterval(upd,1000)" in SCROLLBAR_SCRIPT

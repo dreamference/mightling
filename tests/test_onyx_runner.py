@@ -1097,7 +1097,9 @@ def test_scrollbar_defaults_to_visible_and_hides_only_in_the_browser():
     )
     # Only the browser hides it; the desktop app keeps it permanently.
     assert SIDEBAR_SCROLLBAR_CSS.count('html[data-puffin-engine="blink"]') == 2
-    assert "data-puffin-engine=\"webkit\"" not in SIDEBAR_SCROLLBAR_CSS
+    # WebKitGTK paints its scrollbar as engine chrome that no CSS colour reaches, so the app
+    # suppresses the bar entirely; the browser keeps its hover-revealed one.
+    assert 'html[data-puffin-engine="webkit"] .opal-sidebar-body__scroll{scrollbar-width:none}' in SIDEBAR_SCROLLBAR_CSS
 
 
 def test_scrollbar_styles_both_engines_because_they_disagree():
@@ -1123,3 +1125,15 @@ def test_scrollbar_styles_both_engines_because_they_disagree():
     # One definition of the thumb weight, used by both engines.
     assert SIDEBAR_SCROLLBAR_CSS.count(SIDEBAR_SCROLLBAR_THUMB) == 3
     assert "'" not in SIDEBAR_SCROLLBAR_CSS
+
+
+def test_drawn_scrollbar_rests_hidden_until_the_script_places_it():
+    # `display:none` is the stylesheet's resting state and the script flips it per update, so a
+    # page where the script never ran shows nothing rather than a stray mispositioned bar.
+    from dreamference.chat.onyx_ui_overrides import (
+        CUSTOM_SCROLLBAR_CSS, SIDEBAR_SCROLLBAR_THUMB, UI_OVERRIDES,
+    )
+
+    assert CUSTOM_SCROLLBAR_CSS in UI_OVERRIDES
+    assert "display:none" in CUSTOM_SCROLLBAR_CSS
+    assert SIDEBAR_SCROLLBAR_THUMB in CUSTOM_SCROLLBAR_CSS

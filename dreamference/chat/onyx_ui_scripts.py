@@ -82,8 +82,55 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "}catch(e){}})();"
 )
 
+# A drawn scrollbar for the desktop app.
+#
+# WebKitGTK paints its native scrollbar as engine chrome, with a trough line no CSS colour can
+# reach -- the stylesheet therefore sets `scrollbar-width:none` there, which removes the line and
+# the bar together. This script puts a bar back by drawing one: a single fixed-position thumb,
+# positioned from the scroll container's own geometry, so there is no engine trough to leak.
+#
+# It runs only when the engine marker says webkit; Blink keeps its native hover-revealed
+# scrollbar, which has no such problem. The thumb is re-derived from a fresh `querySelector` on
+# every update because React recreates the chat list wholesale -- holding a reference would mean
+# tracking a corpse after the next re-render. `scroll` is listened for in the capture phase, since
+# scroll events do not bubble. The interval is the fallback for what no event announces: chat
+# titles arriving and changing the scrollable height.
+SCROLLBAR_ID: Final[str] = "puffin-scrollbar"
+SCROLLBAR_MIN_THUMB_PX: Final[int] = 30
+SCROLLBAR_SCRIPT: Final[str] = (
+    ";(function(){try{"
+    "if(window.__puffinScrollbar)return;window.__puffinScrollbar=1;"
+    f'var ID="{SCROLLBAR_ID}",MIN={SCROLLBAR_MIN_THUMB_PX};'
+    "function boot(){"
+    "if(document.documentElement.getAttribute('data-puffin-engine')!=='webkit')return;"
+    "var t=document.createElement('div');t.id=ID;document.body.appendChild(t);"
+    "var drag=null;"
+    "function sc(){return document.querySelector('.opal-sidebar-body__scroll');}"
+    "function geo(s,r){var h=Math.max(MIN,r.height*s.clientHeight/s.scrollHeight);"
+    "return{h:h,top:r.top+(r.height-h)*(s.scrollTop/(s.scrollHeight-s.clientHeight))};}"
+    "function upd(){var s=sc();"
+    "if(!s||s.scrollHeight<=s.clientHeight+1){t.style.display='none';return}"
+    "var r=s.getBoundingClientRect(),g=geo(s,r);"
+    "t.style.display='block';t.style.height=g.h+'px';t.style.top=g.top+'px';"
+    "t.style.left=(r.right-8)+'px';}"
+    "document.addEventListener('scroll',upd,true);"
+    "window.addEventListener('resize',upd);"
+    "setInterval(upd,1000);"
+    "t.addEventListener('mousedown',function(e){var s=sc();if(!s)return;"
+    "drag={y:e.clientY,top:s.scrollTop};e.preventDefault();});"
+    "document.addEventListener('mousemove',function(e){var s=drag&&sc();if(!s)return;"
+    "var r=s.getBoundingClientRect(),g=geo(s,r);"
+    "s.scrollTop=drag.top+(e.clientY-drag.y)*"
+    "((s.scrollHeight-s.clientHeight)/(r.height-g.h));});"
+    "document.addEventListener('mouseup',function(){drag=null});"
+    "upd();}"
+    "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot)}"
+    "else{boot()}"
+    "}catch(e){}})();"
+)
+
 # Everything this module injects.
-UI_SCRIPTS: Final[str] = SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT
+UI_SCRIPTS: Final[str] = SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT + SCROLLBAR_SCRIPT
 
 
 class OnyxUIScripts:
