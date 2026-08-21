@@ -39,16 +39,40 @@ def test_run_refuses_when_the_server_is_down():
         call.assert_not_called()
 
 
-def test_run_stops_at_the_headers_because_installing_them_needs_root():
-    # Rust and the CLI are per-user and installed automatically; the system headers are not, and a
-    # tool that silently sudo's is worse than one that says what it needs.
+def test_run_stops_when_the_system_packages_cannot_be_installed():
+    # Patching `install_system_packages` rather than `has_webview_headers` is deliberate: the
+    # latter would let the real method through and shell out to `sudo apt-get` from a unit test.
     with patch.object(DesktopRunner, "onyx_is_up", return_value=True), \
-         patch.object(DesktopInstaller, "has_webview_headers", return_value=False), \
+         patch.object(DesktopInstaller, "install_system_packages", return_value=False), \
          patch.object(DesktopInstaller, "install_rust") as rust, \
          patch("subprocess.call") as call:
         assert DesktopRunner.run() == 1
         rust.assert_not_called()
         call.assert_not_called()
+
+
+def test_the_password_prompt_comes_before_the_large_download():
+    # Asking for sudo after a several-hundred-megabyte Rust download would be a poor order to fail
+    # in, so the system packages are installed first.
+    order = []
+    with patch.object(DesktopInstaller, "install_system_packages",
+                      side_effect=lambda: order.append("apt") or True), \
+         patch.object(DesktopInstaller, "install_rust",
+                      side_effect=lambda: order.append("rust") or True), \
+         patch.object(DesktopInstaller, "install_tauri_cli",
+                      side_effect=lambda: order.append("cli") or True):
+        assert DesktopRunner.install() == 0
+
+    assert order == ["apt", "rust", "cli"]
+
+
+def test_system_package_install_is_announced_and_skipped_when_already_present():
+    # It is the one step that changes the machine outside this user's home directory, so the
+    # command is printed before it runs -- and not run at all once the headers are there.
+    with patch.object(DesktopInstaller, "has_webview_headers", return_value=True), \
+         patch("subprocess.run") as run:
+        assert DesktopInstaller.install_system_packages() is True
+        run.assert_not_called()
 
 
 def test_build_does_not_require_the_server():
