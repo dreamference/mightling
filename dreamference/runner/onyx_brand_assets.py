@@ -27,17 +27,15 @@ from typing import Final, List, Optional, Tuple
 # Where the Next.js server keeps the images it serves from the site root.
 WEB_PUBLIC_DIR: Final[str] = "/app/public"
 
-# Puffin's palette, built from Tiffany Blue. `TIFFANY_BLUE` is the brand colour's single
-# definition -- `onyx_ui_overrides.py` imports it from here for the selected sidebar row, so the
-# favicon and the UI cannot drift apart.
+# Puffin's palette. `TIFFANY_BLUE` is the brand colour's single definition -- `onyx_ui_overrides.py`
+# imports it from here for the selected sidebar row and the unread badge, so the favicon and the UI
+# cannot drift apart.
 #
-# The mark is a gradient rather than a flat fill, so the scale runs a deeper teal below Tiffany and
-# a paler one above it: light backgrounds get Tiffany into the deep end, dark backgrounds get the
-# pale end into Tiffany, and one mark stays legible on both without a separate asset for each.
+# The mark is a flat fill rather than a gradient, and that is the point: a gradient means only one
+# scanline of the tile is actually Tiffany, so the favicon never quite matched the sidebar row it
+# sits beside. One colour, used everywhere, is the whole brief.
 TIFFANY_BLUE: Final[str] = "#0ABAB5"
 BRAND_START: Final[Tuple[int, int, int]] = (10, 186, 181)
-BRAND_END: Final[Tuple[int, int, int]] = (6, 127, 123)
-BRAND_LIGHT: Final[Tuple[int, int, int]] = (129, 216, 208)
 
 # The wordmark on a dark background: Tiffany lightened to near-white rather than the mark's pale
 # end, which is too close to the sidebar tint to read as type.
@@ -231,8 +229,8 @@ class OnyxBrandAssets:
             dict: Mapping of served filename to the path it was rendered at.
         """
         assets = {
-            "logo.png": cls._mark(workdir, "logo.png", (400, 400), dark=False),
-            "logo-dark.png": cls._mark(workdir, "logo-dark.png", (400, 400), dark=True),
+            "logo.png": cls._mark(workdir, "logo.png", (400, 400)),
+            "logo-dark.png": cls._mark(workdir, "logo-dark.png", (400, 400)),
             "logotype.png": cls._wordmark(workdir, "logotype.png", (2640, 733), dark=False),
             "logotype-dark.png": cls._wordmark(workdir, "logotype-dark.png", (720, 320), dark=True),
             "logo.svg": cls._svg(workdir),
@@ -259,56 +257,44 @@ class OnyxBrandAssets:
         return ImageFont.load_default()
 
     @classmethod
-    def _gradient_square(cls, size: Tuple[int, int], dark: bool):
+    def _brand_tile(cls, size: Tuple[int, int]):
         """
-        Builds the rounded gradient tile both the mark and the favicon are cut from.
+        Builds the rounded Tiffany tile both the mark and the favicon are cut from.
 
         Args:
             size (Tuple[int, int]): Tile dimensions.
-            dark (bool): Whether to render the lighter palette for dark backgrounds.
 
         Returns:
-            Image: An RGBA tile with rounded corners.
+            Image: An RGBA tile with rounded corners, filled with the brand colour exactly.
         """
         from PIL import Image, ImageDraw
 
         width, height = size
-        start = BRAND_LIGHT if dark else BRAND_START
-        end = BRAND_START if dark else BRAND_END
-
-        gradient = Image.new("RGBA", size)
-        draw = ImageDraw.Draw(gradient)
-        for y in range(height):
-            ratio = y / max(height - 1, 1)
-            draw.line(
-                [(0, y), (width, y)],
-                fill=tuple(int(start[i] + (end[i] - start[i]) * ratio) for i in range(3)) + (255,),
-            )
-
-        mask = Image.new("L", size, 0)
-        ImageDraw.Draw(mask).rounded_rectangle(
-            [0, 0, width - 1, height - 1], radius=int(min(size) * 0.23), fill=255
+        tile = Image.new("RGBA", size, (0, 0, 0, 0))
+        ImageDraw.Draw(tile).rounded_rectangle(
+            [0, 0, width - 1, height - 1], radius=int(min(size) * 0.23), fill=BRAND_START + (255,)
         )
-        gradient.putalpha(mask)
-        return gradient
+        return tile
 
     @classmethod
-    def _mark(cls, workdir: str, filename: str, size: Tuple[int, int], dark: bool) -> str:
+    def _mark(cls, workdir: str, filename: str, size: Tuple[int, int]) -> str:
         """
-        Renders the square app mark: a "P" monogram on the gradient tile.
+        Renders the square app mark: a white "P" monogram on the Tiffany tile.
+
+        There is no dark variant: the tile is the brand colour on both themes, and a white monogram
+        reads on it either way.
 
         Args:
             workdir (str): Output directory.
             filename (str): File to write.
             size (Tuple[int, int]): Output dimensions.
-            dark (bool): Whether to use the dark-background palette.
 
         Returns:
             str: Path to the rendered file.
         """
         from PIL import ImageDraw
 
-        image = cls._gradient_square(size, dark)
+        image = cls._brand_tile(size)
         draw = ImageDraw.Draw(image)
         font = cls._font(int(size[1] * 0.62))
         box = draw.textbbox((0, 0), "P", font=font)
@@ -372,16 +358,8 @@ class OnyxBrandAssets:
         Returns:
             str: Path to the rendered file.
         """
-        start = "#%02x%02x%02x" % BRAND_START
-        end = "#%02x%02x%02x" % BRAND_END
         svg = f'''<svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-        <linearGradient id="puffin" x1="0" y1="0" x2="0" y2="56" gradientUnits="userSpaceOnUse">
-            <stop stop-color="{start}"/>
-            <stop offset="1" stop-color="{end}"/>
-        </linearGradient>
-    </defs>
-    <rect width="56" height="56" rx="13" fill="url(#puffin)"/>
+    <rect width="56" height="56" rx="13" fill="{TIFFANY_BLUE}"/>
     <path d="M18 14h9.5c7 0 11.5 4.2 11.5 10.5s-4.5 10.5-11.5 10.5h-2v7H18V14zm7.5 6.5v8h2c2.9 0
              4.5-1.5 4.5-4s-1.6-4-4.5-4h-2z" fill="#ffffff"/>
 </svg>
@@ -404,7 +382,7 @@ class OnyxBrandAssets:
         """
         from PIL import Image
 
-        source = Image.open(cls._mark(workdir, "_favicon_src.png", (256, 256), dark=False))
+        source = Image.open(cls._mark(workdir, "_favicon_src.png", (256, 256)))
         path = os.path.join(workdir, "onyx.ico")
         source.save(path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
         return path

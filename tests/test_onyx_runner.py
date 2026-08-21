@@ -780,3 +780,50 @@ def test_share_button_is_hidden_by_its_own_aria_label():
 
     assert SHARE_BUTTON_CSS == '[aria-label="share-chat-button"]{display:none}'
     assert SHARE_BUTTON_CSS in UI_OVERRIDES
+
+
+def test_composer_model_chip_hands_clicks_back_to_the_icons_beneath_it():
+    # The wrapper is pinned over the full width of the toolbar row. Left clickable it would swallow
+    # every click meant for the attach, settings and Deep Research buttons underneath.
+    from dreamference.runner.onyx_ui_overrides import COMPOSER_MODEL_CSS
+
+    assert 'div:has(>[data-testid="model-selector"])' in COMPOSER_MODEL_CSS
+    assert COMPOSER_MODEL_CSS.count("pointer-events:none") == 2
+    assert '[data-testid="model-selector"]>*{pointer-events:auto}' in COMPOSER_MODEL_CSS
+    # The two measured offsets are named, being the part an upstream composer change invalidates.
+    assert "--dream-composer-toolbar-height:44px" in COMPOSER_MODEL_CSS
+    assert "--dream-composer-actions-width:88px" in COMPOSER_MODEL_CSS
+    # The containing block is named explicitly rather than inherited from whatever ancestor happens
+    # to be positioned -- that was the composer column on a chat page and the whole intro column on
+    # a new-chat page, which put the chip halfway down an empty screen.
+    assert 'div:has(>div>[data-testid="model-selector"]){position:relative}' in COMPOSER_MODEL_CSS
+    assert "bottom:0" in COMPOSER_MODEL_CSS
+
+
+def test_brand_mark_is_exactly_the_tiffany_used_in_the_ui():
+    # A gradient means only one scanline of the favicon is actually Tiffany, so it never quite
+    # matched the sidebar row beside it. One colour, used everywhere.
+    from dreamference.runner.onyx_brand_assets import BRAND_START, TIFFANY_BLUE
+
+    assert "#%02x%02x%02x" % BRAND_START == TIFFANY_BLUE.lower()
+
+
+def test_settings_sections_are_matched_without_the_selector_climbing():
+    # `div:has(> .card)` matches a section and not its ancestors: the container's own children are
+    # sections, not cards, so the child combinator inside :has() stops the match climbing.
+    from dreamference.runner.onyx_ui_overrides import SETTINGS_SECTIONS_CSS
+
+    assert "div:has(>.card)" in SETTINGS_SECTIONS_CSS
+    # Chats goes whole; Memory keeps the "Personal Preferences" label that heads the whole group.
+    assert "div:has(>.card):first-child{display:none}" in SETTINGS_SECTIONS_CSS
+    assert "div:has(>.card):nth-child(2)>.card" in SETTINGS_SECTIONS_CSS
+    assert "div:has(>.card):nth-child(2){display:none}" not in SETTINGS_SECTIONS_CSS
+
+
+def test_selected_row_avatar_is_inverted_on_the_tiffany_fill():
+    # White initials on a black disc read as a hole punched in the fill.
+    from dreamference.runner.onyx_ui_overrides import SIDEBAR_AVATAR_CSS
+
+    assert SIDEBAR_AVATAR_CSS.endswith("{background-color:#fff;color:#000}")
+    # The initials carry their own colour class, so the descendants are recoloured too.
+    assert SIDEBAR_AVATAR_CSS.count(".bg-background-neutral-inverted-00") == 2

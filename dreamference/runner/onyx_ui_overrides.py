@@ -302,6 +302,79 @@ SHARE_BUTTON_CSS: Final[str] = (
     "{display:none}"
 )
 
+# The model chip, moved from its own line above the composer onto the composer's toolbar row,
+# right-aligned ahead of the mic and send buttons.
+#
+# This is the one rule here that is a *layout* change rather than a repaint, and CSS cannot
+# reparent: the chip sits in a wrapper above the composer box, while the toolbar row is inside it.
+# So the wrapper is taken out of flow and pinned over that row instead.
+#
+# The first version anchored to "whatever ancestor happened to be positioned", which was the
+# composer column on a chat page and the whole intro column on a new-chat page -- so the chip landed
+# halfway down an empty screen there. The containing block is now named explicitly: the element that
+# wraps *both* the chip row and the composer box is made `position:relative`, and since the box is
+# its last child, `bottom:0` is the box's own bottom edge on every page and at every input height.
+#
+# Only one measured constant is left -- the width of the mic and send buttons the chip has to clear.
+# It is named because it is the part an upstream composer change would invalidate, and it would fail
+# visibly, as a chip in the wrong place, rather than silently.
+#
+# Pointer events are handed back only to the chip's own children. The wrapper spans the full row,
+# so leaving it clickable would swallow every click meant for the buttons underneath it.
+COMPOSER_MODEL_CSS: Final[str] = (
+    ".opal-root-layout__main"
+    "{--dream-composer-toolbar-height:44px;--dream-composer-actions-width:88px}"
+    'div:has(>div>[data-testid="model-selector"])'
+    "{position:relative}"
+    'div:has(>[data-testid="model-selector"])'
+    "{position:absolute;left:0;right:0;bottom:0;padding:0;margin:0;z-index:2;"
+    "height:var(--dream-composer-toolbar-height);pointer-events:none}"
+    '[data-testid="model-selector"]'
+    "{height:100%;justify-content:flex-end;pointer-events:none;"
+    "padding-right:var(--dream-composer-actions-width)}"
+    '[data-testid="model-selector"]>*'
+    "{pointer-events:auto}"
+)
+
+
+# Chat Preferences: the Chats card and the Memory card, hidden so the settings they hold stay at
+# their defaults. Hidden, not removed, like the rest.
+#
+# The settings page nests four sections in a container, each section a heading plus a `.card`. That
+# `.card` is the handle: `div:has(> .card)` matches a section and *not* its ancestors, because the
+# container's own children are sections rather than cards -- the child combinator inside `:has()`
+# is what keeps the match from climbing.
+#
+# The Chats section goes whole, heading included, since hiding its four rows would leave an empty
+# card behind. Memory is trimmed rather than removed: its heading and card go, but the
+# "Personal Preferences" label above it stays, because that label heads the group that Prompt
+# Shortcuts and Voice also belong to.
+#
+# Both are additionally pinned by position. That is redundant with the structure on purpose: if
+# Onyx reorders these sections the rules stop matching and the settings reappear, which is a
+# visible failure rather than a silent one that hides the wrong card.
+SETTINGS_SECTIONS_CSS: Final[str] = (
+    "div:has(>.card):first-child"
+    "{display:none}"
+    "div:has(>.card):nth-child(2)>div.w-full,"
+    "div:has(>.card):nth-child(2)>.card"
+    "{display:none}"
+)
+
+# The account avatar inside a selected sidebar row, inverted.
+#
+# Onyx draws it as white initials on a black disc, which on the Tiffany fill of a selected row is a
+# heavy black hole. Swapping it to black on white keeps the disc legible against the fill. The
+# initials are recoloured on the disc *and* its descendants because the text carries its own colour
+# class, which `color` on the parent alone would not override.
+SIDEBAR_AVATAR_CSS: Final[str] = (
+    '.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"] '
+    ".bg-background-neutral-inverted-00,"
+    '.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"] '
+    ".bg-background-neutral-inverted-00 *"
+    "{background-color:#fff;color:#000}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
@@ -309,6 +382,7 @@ UI_OVERRIDES: Final[str] = (
     + SIDEBAR_LOGO_CSS + MODEL_SELECTOR_CSS + AGENTS_SECTION_CSS
     + PROJECTS_SECTION_CSS + SEARCH_PROJECTS_CSS + SIDEBAR_TEXT_CSS
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
+    + COMPOSER_MODEL_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS
 )
 
 
