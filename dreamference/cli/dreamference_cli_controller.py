@@ -862,6 +862,9 @@ class DreamferenceCLIController:
         desktop_subparsers = desktop_parser.add_subparsers(
             dest="desktop_command", help="Desktop app operations"
         )
+        desktop_subparsers.add_parser(
+            "install", help="Install the desktop build toolchain (system packages, Rust, Tauri CLI)"
+        )
         desktop_subparsers.add_parser("run", help="Open the Puffin desktop window")
         desktop_subparsers.add_parser("build", help="Build a distributable desktop bundle")
         desktop_subparsers.add_parser(
@@ -1554,7 +1557,9 @@ class DreamferenceCLIController:
         elif args.command == "desktop":
             from dreamference.chat import DesktopRunner
 
-            if args.desktop_command == "run":
+            if args.desktop_command == "install":
+                sys.exit(DesktopRunner.install())
+            elif args.desktop_command == "run":
                 sys.exit(DesktopRunner.run())
             elif args.desktop_command == "build":
                 sys.exit(DesktopRunner.build())

@@ -12,9 +12,11 @@ can install them:
 * **The Tauri CLI** -- taken from npm rather than `cargo install tauri-cli`, because npm ships a
   prebuilt binary for this architecture while cargo would compile it, which is minutes of build for
   a tool that is not the product.
-* **The GTK and WebKit development headers** -- system packages. These need root, and this module
-  deliberately does not try: it prints the one `apt` line to run. A tool that silently sudo's is a
-  worse tool than one that tells you what it needs.
+* **The GTK and WebKit development headers** -- system packages, so installing them needs root.
+  `install_system_packages()` runs `sudo apt-get install`, and the escalation is deliberately
+  *visible*: the command is printed before it runs and sudo prompts on the terminal, so nothing
+  happens to the machine without the operator typing a password. Where sudo cannot prompt -- a
+  non-interactive shell, no tty -- it falls back to printing the line rather than failing obscurely.
 
 The webview itself is *not* bundled. Tauri renders through the platform webview, which is already
 present here as `libwebkit2gtk-4.1` -- the `-dev` package supplies only the headers needed to link
@@ -182,6 +184,49 @@ class DesktopInstaller:
         return cls.has_tauri_cli()
 
     @classmethod
+    def apt_available(cls) -> bool:
+        """
+        Reports whether this is a Debian-family system with apt.
+
+        Returns:
+            bool: True if `apt-get` is on PATH.
+        """
+        return shutil.which("apt-get") is not None
+
+    @classmethod
+    def install_system_packages(cls) -> bool:
+        """
+        Installs the GTK and WebKit development headers with apt, prompting for sudo.
+
+        Returns:
+            bool: True if the headers are present afterwards.
+        """
+        if cls.has_webview_headers():
+            return True
+        if not cls.apt_available() or not shutil.which("sudo"):
+            print("❌ The WebKitGTK development headers are missing and apt is not available here.")
+            print(f"💡 Install the equivalent of: {' '.join(LINUX_BUILD_PACKAGES)}")
+            return False
+
+        # Printed before it runs, because this is the one step that changes the machine outside
+        # this user's home directory.
+        print("📦 Installing the desktop build dependencies (sudo will ask for your password):")
+        print(f"   {cls.header_install_command()}")
+        try:
+            result = subprocess.run(
+                ["sudo", "apt-get", "install", "-y", *LINUX_BUILD_PACKAGES],
+                timeout=1800, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"❌ apt failed: {exc}")
+            return False
+        if result.returncode != 0:
+            print("❌ apt exited non-zero — the headers were not installed.")
+            print(f"💡 Run it yourself, then try again:\n   {cls.header_install_command()}")
+            return False
+        return cls.has_webview_headers()
+
+    @classmethod
     def header_install_command(cls) -> str:
         """
         Returns the command that installs the system build dependencies.
@@ -204,12 +249,12 @@ class DesktopInstaller:
             print("✅ The desktop build toolchain is complete.")
             return True, missing
 
-        print("⚠️  The Puffin desktop app cannot be built yet:")
+        print("⚠️  The Puffin desktop toolchain is incomplete:")
         if "headers" in missing:
-            print("   • WebKitGTK/GTK development headers are missing (needs root):")
-            print(f"     {cls.header_install_command()}")
+            print("   • WebKitGTK/GTK development headers — installed with sudo apt on first build.")
         if "rust" in missing:
-            print("   • No Rust toolchain — `dream desktop build` installs it with rustup.")
+            print("   • No Rust toolchain — installed with rustup on first build.")
         if "tauri-cli" in missing:
-            print("   • No Tauri CLI — `dream desktop build` installs it from npm.")
+            print("   • No Tauri CLI — installed from npm on first build.")
+        print("💡 `dream desktop install` fetches all of it.")
         return False, missing

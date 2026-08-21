@@ -103,9 +103,9 @@ class DesktopRunner:
         Returns:
             bool: True if the toolchain is complete afterwards.
         """
-        if not DesktopInstaller.has_webview_headers():
-            print("❌ The WebKitGTK development headers are missing, and installing them needs root.")
-            print(f"💡 Run this, then try again:\n   {DesktopInstaller.header_install_command()}")
+        # System packages first: they are the step that needs a password, and asking for it after
+        # a several-hundred-megabyte Rust download would be a poor order to fail in.
+        if not DesktopInstaller.install_system_packages():
             return False
         if not DesktopInstaller.install_rust():
             return False
@@ -164,6 +164,16 @@ class DesktopRunner:
             bundle = os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "target", "release", "bundle")
             print(f"✅ Bundles written to {bundle}")
         return code
+
+    @classmethod
+    def install(cls) -> int:
+        """
+        Installs everything the desktop app is built from, without building it.
+
+        Returns:
+            int: 0 if the toolchain is complete afterwards.
+        """
+        return 0 if cls._ensure_toolchain() else 1
 
     @classmethod
     def status(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> int:
