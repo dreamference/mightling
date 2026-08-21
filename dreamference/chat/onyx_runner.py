@@ -29,6 +29,7 @@ from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
 from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
 from dreamference.chat.onyx_ui_labels import OnyxUILabels
 from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides
+from dreamference.chat.onyx_ui_scripts import OnyxUIScripts
 from dreamference.chat.onyx_installer import OnyxInstaller
 from dreamference.vllm_server import VLLMServerManager
 
@@ -105,6 +106,7 @@ ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
 # secret header is what actually protects it.
 GMAIL_CONTAINER_NAME: Final[str] = "dream-gmail"
 GMAIL_CONTAINER_URL: Final[str] = f"http://{GMAIL_CONTAINER_NAME}:8000"
+GMAIL_HOST_PORT: Final[int] = 8767
 GMAIL_SERVICE_IMAGE: Final[str] = "python:3-slim"
 GMAIL_TOOL_NAME: Final[str] = "Gmail"
 GMAIL_TOOL_DESCRIPTION: Final[str] = "Search and read the user's Gmail mailbox."
@@ -663,6 +665,7 @@ class OnyxRunner:
         # rewrites -- which no stylesheet can reach, being text in a JSX call.
         OnyxUIOverrides.install()
         OnyxUILabels.install()
+        OnyxUIScripts.install()
 
         print(f"✨ Rebranded as {PUFFIN_COMPANY_NAME}"
               + (" with a Puffin assistant" if persona_id is not None else "")
@@ -1071,7 +1074,13 @@ class OnyxRunner:
         result = subprocess.run(
             ["docker", "run", "-d", "--name", GMAIL_CONTAINER_NAME,
              "--restart", "unless-stopped", "--network", network,
-             "-v", f"{CREDENTIALS_DIR}:/config:ro",
+             # Read-write: the service writes the refresh token itself when the user completes
+             # consent through the button in the UI.
+             "-v", f"{CREDENTIALS_DIR}:/config",
+             # Also published on loopback, because two callers reach it from outside the Docker
+             # network -- the browser asking whether Gmail is connected, and Google redirecting
+             # back after consent.
+             "-p", f"127.0.0.1:{GMAIL_HOST_PORT}:8000",
              "-e", f"PUFFIN_GMAIL_SECRET={secret}",
              GMAIL_SERVICE_IMAGE, "python3", "/config/service.py"],
             capture_output=True, text=True, timeout=300, check=False,

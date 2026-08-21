@@ -488,6 +488,20 @@ DIVIDER_CSS: Final[str] = (
     "{display:none}"
 )
 
+# The Connect to Google button, which `onyx_ui_scripts.py` injects into the sidebar footer.
+#
+# Styled here rather than inline in the script so the button is described in the same place as the
+# rest of the UI, and so it picks up the brand colour from one definition. It is only in the DOM
+# when a Google client is configured and nobody has consented yet.
+CONNECT_BUTTON_CSS: Final[str] = (
+    "#puffin-connect-google"
+    f"{{display:block;margin:4px 8px 8px;padding:8px 10px;border-radius:8px;"
+    f"background-color:{TIFFANY_BLUE};color:#fff;text-align:center;text-decoration:none;"
+    "font-size:.8125rem;font-weight:500}"
+    "#puffin-connect-google:hover"
+    f"{{background-color:{TIFFANY_BLUE_HOVER}}}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
@@ -498,7 +512,7 @@ UI_OVERRIDES: Final[str] = (
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
-    + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS
+    + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
 )
 
 

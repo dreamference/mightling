@@ -23,6 +23,7 @@ from dreamference.chat.onyx_runner import OnyxRunner
 from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
 from dreamference.chat.onyx_ui_labels import OnyxUILabels
 from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides
+from dreamference.chat.onyx_ui_scripts import OnyxUIScripts
 
 __all__ = [
     "DesktopInstaller",
@@ -35,4 +36,5 @@ __all__ = [
     "OnyxUIFonts",
     "OnyxUILabels",
     "OnyxUIOverrides",
+    "OnyxUIScripts",
 ]
