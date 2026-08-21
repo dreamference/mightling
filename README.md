@@ -8,7 +8,7 @@
 [![Hardware Qualified](https://img.shields.io/badge/NVIDIA%20GB10-128GB%20Unified%20Memory-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](https://nvidia.com)
 [![Agent Runtime](https://img.shields.io/badge/Agent-AAIF%20Goose%201.45%2B-0052CC?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/aaif-goose/goose)
 [![Inference Engine](https://img.shields.io/badge/vLLM-Speculative%20Decoding-FF6F00?style=for-the-badge&logo=python&logoColor=white)](https://github.com/vllm-project/vllm)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg?style=for-the-badge)](LICENSE)
 [![Docs](https://img.shields.io/badge/Docs-GitHub%20Pages-4CAF50?style=for-the-badge)](https://dreamference.github.io/dreamference)
 [![Build Status](https://img.shields.io/badge/Tests-15%20Passed-brightgreen?style=for-the-badge)](tests/)
 
@@ -169,7 +169,21 @@ flowchart TD
 
 ## 📜 License
 
-Distributed under the **Apache 2.0 License**. See `LICENSE` for details.
+Copyright (C) 2026 Dreamference contributors.
+
+Dreamference is free software: you can redistribute it and/or modify it under the terms of the
+**GNU Affero General Public License** as published by the Free Software Foundation, either version
+3 of the License, or (at your option) any later version. The full text is in [`LICENSE`](LICENSE).
+
+The AGPL's [section 13](LICENSE) is the clause that distinguishes it from the GPL: if you run a
+modified version and let users interact with it **over a network**, those users must be offered the
+corresponding source. Dreamference ships a browser chat UI, so that clause is the operative one for
+anyone hosting a fork.
+
+This covers Dreamference's own code. The components it deploys keep their own licences — vLLM
+(Apache 2.0), Onyx (its own terms, including an `ee/` directory that is *not* free software and
+which Dreamference deliberately leaves switched off), and the models, each under the terms of its
+own weights licence.
 
 ---
 

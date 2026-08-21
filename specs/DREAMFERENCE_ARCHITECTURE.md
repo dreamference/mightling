@@ -4,7 +4,7 @@
 > - **Status:** Implemented / Production-Ready
 > - **Target Hardware:** Exclusive to **NVIDIA GB10** (Blackwell architecture with 128 GB Unified Memory)
 > - **Deployment Model:** Single-Node Standalone NVIDIA GB10 System
-> - **License:** Open Source (Apache 2.0)
+> - **License:** Open Source (AGPL-3.0-or-later)
 
 ---
 
@@ -53,7 +53,7 @@ Primary agent runtime is **Goose** (`aaif-goose/goose`). Additional runners sele
 | Feature                | Google Antigravity                | Dreamference                                                                                         |
 | :--------------------- | :-------------------------------- | :----------------------------------------------------------------------------------------------- |
 | **Model Hosting**      | Cloud (Google Vertex AI / Gemini) | **100% On-Premise NVIDIA GB10 System**                                                           |
-| **Source Code**        | Proprietary                       | **Open Source (Apache 2.0)**                                                                     |
+| **Source Code**        | Proprietary                       | **Open Source (AGPL-3.0-or-later)**                                                                     |
 | **Supported Models**   | Gemini 1.5 Pro / Flash, Claude    | **Single-Node Open LLMs (Qwen 2.5 Coder, DeepSeek-R1 Distills, Llama 3.3)**                      |
 | **Inference Hardware** | Cloud TPUs / GPUs                 | **NVIDIA GB10 (Blackwell Architecture)**                                                         |
 | **Data Privacy**       | Cloud Privacy Policy              | **Strict Zero-Egress Air-Gapped Local Execution**                                                |

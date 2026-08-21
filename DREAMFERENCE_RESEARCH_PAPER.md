@@ -4,7 +4,7 @@
 
 **Version 1.2.0**  
 **Target Platform: NVIDIA GB10 (Blackwell Architecture)**  
-**License: Apache 2.0**
+**License: AGPL-3.0-or-later**
 
 ---
 
@@ -141,4 +141,4 @@ For detailed technical specifications, command reference, and implementation det
 
 ---
 
-*© 2026 Dreamference Project – Apache 2.0 License*
+*© 2026 Dreamference Project – GNU Affero General Public License v3.0 or later*

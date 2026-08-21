@@ -3,6 +3,10 @@ from setuptools import setup, find_packages
 setup(
     name="dreamference",
     version="1.2.0",
+    license="AGPL-3.0-or-later",
+    classifiers=[
+        "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    ],
     packages=find_packages(),
     install_requires=[
         "pyyaml>=6.0",
