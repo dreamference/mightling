@@ -62,6 +62,38 @@ DEFAULT_ONYX_PASSWORD: Final[str] = "dreamference"
 # only on 127.0.0.1, so the bridge gateway that reaches vLLM does not reach it -- attaching the
 # container to Onyx's network is what makes it addressable, and exposes no new host port.
 SEARXNG_CONTAINER_NAME: Final[str] = "searxng"
+
+# Google sign-in, alongside the password form rather than instead of it.
+#
+# Onyx used to pick one login method with `AUTH_TYPE`; in 4.5 that single-provider mode was removed
+# (setting `AUTH_TYPE=google_oauth` now only logs a warning and falls back to basic). What replaced
+# it is additive: `OAUTH_ENABLED` is simply `bool(OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET)`, and
+# when true the app mounts a Google router *beside* the password routes. `GET /auth/type` reports
+# `oauth_enabled` and `password_auth_enabled` as separate flags, which is how the login page ends up
+# offering both. So enabling Google is two environment variables and nothing else -- in particular
+# AUTH_TYPE must be left alone.
+#
+# The variables go in the deployment's `.env`, which `onyx-cli` generates and every service reads
+# through `env_file`. That is configuration, not composition: Dreamference still never writes Onyx's
+# compose files, and it touches only these two keys, leaving the rest of the file as found.
+ONYX_ENV_FILE: Final[str] = os.path.expanduser("~/.config/onyx/deployment/.env")
+ONYX_OAUTH_ID_KEY: Final[str] = "OAUTH_CLIENT_ID"
+ONYX_OAUTH_SECRET_KEY: Final[str] = "OAUTH_CLIENT_SECRET"
+
+# Where Google must send the user back. `WEB_DOMAIN` defaults to the same loopback origin the UI is
+# served from, and Onyx builds the callback as `{WEB_DOMAIN}/auth/oauth/callback` -- this string has
+# to be registered on the Google client verbatim or the sign-in fails at the redirect.
+GOOGLE_REDIRECT_URI: Final[str] = f"{DEFAULT_ONYX_WEB_URL}/auth/oauth/callback"
+
+# Onyx's backend posts anonymous usage records -- version, sign-ups, usage, latency, failures -- to
+# `https://telemetry.onyx.app/anonymous_telemetry`, and the switch defaults to *off*:
+# `DISABLE_TELEMETRY = os.environ.get("DISABLE_TELEMETRY", "").lower() == "true"`. An outbound
+# channel that a local deployment never asked for is worth closing, so `configure()` sets it.
+#
+# The backend is the only live channel. The web container already ships `NEXT_TELEMETRY_DISABLED=1`
+# for Next.js's own reporting, and its PostHog and Sentry keys are present but empty, which leaves
+# those SDKs inert -- so there is nothing to switch off there and no point pretending otherwise.
+ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
 SEARXNG_CONTAINER_URL: Final[str] = "http://searxng:8080"
 
 # Onyx ships first-class SearXNG support as a web *search provider*, which is why this module
@@ -345,6 +377,11 @@ class OnyxRunner:
             int: 0 on success, non-zero on failure.
         """
         api = f"{web_url.rstrip('/')}/api"
+
+        # Before anything else, because it recreates the API server: authenticating first would
+        # leave the session cookie pointing at a container that is about to be replaced.
+        self.disable_telemetry()
+
         cookie = self._authenticate(api, email, password)
         if not cookie:
             return 1
@@ -678,6 +715,179 @@ class OnyxRunner:
             self._request(f"{api}/admin/persona/{persona_id}/listed",
                           {"is_listed": True}, cookie, method="PATCH")
         return persona_id
+
+    def enable_google_login(self, client_id: str, client_secret: str) -> bool:
+        """
+        Adds Google sign-in to the login page, keeping the password form.
+
+        Writes the OAuth client credentials into the deployment's `.env` and recreates the API
+        server so it reads them. A restart is deliberately not enough: environment is fixed when a
+        container is created, so `docker restart` would bring the old values straight back.
+
+        Recreating that container also reverts `_allow_local_voice_endpoint()`, which patches a file
+        inside it, so the patch is re-applied afterwards -- it is idempotent and only restarts the
+        container when it actually changed something.
+
+        Args:
+            client_id (str): Google OAuth client ID.
+            client_secret (str): Google OAuth client secret.
+
+        Returns:
+            bool: True if Onyx reports Google sign-in as enabled afterwards.
+        """
+        if not client_id or not client_secret:
+            print("❌ Both a client ID and a client secret are required.")
+            return False
+
+        if not self._write_env_values({
+            ONYX_OAUTH_ID_KEY: client_id,
+            ONYX_OAUTH_SECRET_KEY: client_secret,
+        }):
+            return False
+
+        print("🔄 Recreating Onyx's API server so it picks up the credentials...")
+        if not self._recreate_api_server():
+            return False
+
+        # The voice exemption lives in a file inside that container, so it went with it.
+        self._allow_local_voice_endpoint()
+
+        state = self._get_json(f"{DEFAULT_ONYX_WEB_URL.rstrip('/')}/api/auth/type", cookie=None) or {}
+        if not state.get("oauth_enabled"):
+            print("⚠️  Onyx still reports Google sign-in as disabled — check the credentials.")
+            return False
+
+        print("✅ Google sign-in is enabled"
+              + (" alongside the password form." if state.get("password_auth_enabled")
+                 else ", and the password form is off."))
+        print(f"💡 The Google client must list this redirect URI exactly: {GOOGLE_REDIRECT_URI}")
+        return True
+
+    def disable_telemetry(self) -> bool:
+        """
+        Stops Onyx's backend from posting usage records to its own servers.
+
+        Does nothing when the setting is already in place: applying it means recreating the API
+        server, and `configure()` calls this on every run.
+
+        Returns:
+            bool: True if telemetry is off afterwards.
+        """
+        if not self._env_already_set(ONYX_PRIVACY_ENV):
+            if not self._write_env_values(ONYX_PRIVACY_ENV):
+                return False
+            print("🔕 Disabling Onyx's outbound telemetry...")
+            if not self._recreate_api_server():
+                return False
+            self._allow_local_voice_endpoint()
+        return True
+
+    @classmethod
+    def _env_already_set(cls, values: dict) -> bool:
+        """
+        Reports whether Onyx's `.env` already sets every given key to the given value.
+
+        Args:
+            values (dict): Mapping of environment key to expected value.
+
+        Returns:
+            bool: True if each key is present, uncommented, and already set as asked.
+        """
+        try:
+            with open(ONYX_ENV_FILE) as handle:
+                lines = handle.read().splitlines()
+        except OSError:
+            return False
+
+        for key, value in values.items():
+            wanted = {f"{key}={value}", f'{key}="{value}"'}
+            if not any(line.strip() in wanted for line in lines):
+                return False
+        return True
+
+    @classmethod
+    def _write_env_values(cls, values: dict) -> bool:
+        """
+        Sets keys in Onyx's `.env`, rewriting each in place and leaving every other line alone.
+
+        `onyx-cli` ships the file with the keys present but commented out, so a commented form is
+        treated as the line to replace rather than something to leave and duplicate below.
+
+        Args:
+            values (dict): Mapping of environment key to value.
+
+        Returns:
+            bool: True if the file was written.
+        """
+        try:
+            with open(ONYX_ENV_FILE) as handle:
+                lines = handle.read().splitlines()
+        except OSError as exc:
+            print(f"❌ Could not read Onyx's environment file at {ONYX_ENV_FILE}: {exc}")
+            return False
+
+        for key, value in values.items():
+            entry = f'{key}="{value}"'
+            for index, line in enumerate(lines):
+                stripped = line.lstrip("# ").strip()
+                if stripped.startswith(f"{key}="):
+                    lines[index] = entry
+                    break
+            else:
+                lines.append(entry)
+
+        try:
+            with open(ONYX_ENV_FILE, "w") as handle:
+                handle.write("\n".join(lines) + "\n")
+        except OSError as exc:
+            print(f"❌ Could not write {ONYX_ENV_FILE}: {exc}")
+            return False
+        return True
+
+    @classmethod
+    def _recreate_api_server(cls) -> bool:
+        """
+        Recreates the API server container from the deployment's compose files.
+
+        Returns:
+            bool: True if the container came back healthy.
+        """
+        directory = os.path.dirname(ONYX_ENV_FILE)
+        files: List[str] = []
+        for name in ("docker-compose.yml", "docker-compose.onyx-lite.yml"):
+            path = os.path.join(directory, name)
+            if os.path.exists(path):
+                files += ["-f", path]
+        if not files:
+            print(f"❌ No Onyx compose files found in {directory}.")
+            return False
+
+        result = subprocess.run(
+            ["docker", "compose", *files, "-p", "onyx", "--project-directory", directory,
+             "up", "-d", "--force-recreate", "--no-deps", "api_server"],
+            capture_output=True, text=True, timeout=300, check=False,
+        )
+        if result.returncode != 0:
+            print(f"❌ Could not recreate the API server: {result.stderr.strip()[:200]}")
+            return False
+
+        containers = subprocess.run(
+            ["docker", "ps", "--filter", "name=api_server", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=30, check=False,
+        ).stdout.split()
+        target = next((c for c in containers if "onyx" in c), None)
+        if not target:
+            return False
+        for _ in range(40):
+            health = subprocess.run(
+                ["docker", "inspect", target, "--format", "{{.State.Health.Status}}"],
+                capture_output=True, text=True, timeout=30, check=False,
+            ).stdout.strip()
+            if health == "healthy":
+                return True
+            time.sleep(5)
+        print("⚠️  The API server did not report healthy in time.")
+        return False
 
     def enable_web_search(self, api: str, cookie: str) -> bool:
         """

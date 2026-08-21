@@ -838,6 +838,17 @@ class DreamferenceCLIController:
             help="Skip the local Whisper server and the microphone button",
         )
 
+        # Google sign-in is additive in Onyx 4.5: it appears beside the password form rather than
+        # replacing it, so this is its own command rather than a flag on `configure`.
+        onyx_google_parser = onyx_subparsers.add_parser(
+            "google-auth", help="Add Google sign-in to the login page, keeping username/password"
+        )
+        onyx_google_parser.add_argument(
+            "--client-id", required=True, help="Google OAuth client ID"
+        )
+        onyx_google_parser.add_argument(
+            "--client-secret", required=True, help="Google OAuth client secret"
+        )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
         onyx_logs_parser = onyx_subparsers.add_parser("logs", help="Show Onyx container logs")
         onyx_logs_parser.add_argument(
@@ -1539,6 +1550,10 @@ class DreamferenceCLIController:
                     enable_web=not args.no_web, brand=not args.no_brand,
                     enable_voice=not args.no_voice, **kwargs
                 ))
+            elif args.onyx_command == "google-auth":
+                sys.exit(0 if onyx_runner.enable_google_login(
+                    args.client_id, args.client_secret
+                ) else 1)
             elif args.onyx_command == "status":
                 sys.exit(onyx_runner.status())
             elif args.onyx_command == "logs":

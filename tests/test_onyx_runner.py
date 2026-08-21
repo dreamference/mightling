@@ -882,3 +882,108 @@ def test_assistant_is_not_told_it_is_disconnected():
     assert "air-gapped" not in PUFFIN_ASSISTANT_INSTRUCTIONS
     assert "no internet" in PUFFIN_ASSISTANT_INSTRUCTIONS  # only as the thing never to say
     assert "search tool" in PUFFIN_ASSISTANT_INSTRUCTIONS
+
+
+def test_google_login_is_additive_and_leaves_auth_type_alone():
+    # Onyx 4.5 removed AUTH_TYPE single-provider mode: setting AUTH_TYPE=google_oauth now only logs
+    # a warning and falls back to basic. Google is enabled purely by the two credentials, and
+    # `oauth_enabled`/`password_auth_enabled` are separate flags, so both appear on the login page.
+    from dreamference.chat.onyx_runner import (
+        GOOGLE_REDIRECT_URI, ONYX_OAUTH_ID_KEY, ONYX_OAUTH_SECRET_KEY, OnyxRunner,
+    )
+
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_write_env_values", return_value=True) as write, \
+         patch.object(OnyxRunner, "_recreate_api_server", return_value=True), \
+         patch.object(OnyxRunner, "_allow_local_voice_endpoint", return_value=True), \
+         patch.object(OnyxRunner, "_get_json",
+                      return_value={"oauth_enabled": True, "password_auth_enabled": True}):
+        assert runner.enable_google_login("id.apps.googleusercontent.com", "secret") is True
+
+    written = write.call_args[0][0]
+    assert set(written) == {ONYX_OAUTH_ID_KEY, ONYX_OAUTH_SECRET_KEY}
+    assert "AUTH_TYPE" not in written
+    assert GOOGLE_REDIRECT_URI.endswith("/auth/oauth/callback")
+
+
+def test_google_login_recreates_rather_than_restarts_the_api_server():
+    # Environment is fixed when a container is created, so `docker restart` would bring the old
+    # values straight back. Recreating also reverts the voice patch, which is re-applied after.
+    from dreamference.chat.onyx_runner import OnyxRunner
+
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_write_env_values", return_value=True), \
+         patch.object(OnyxRunner, "_recreate_api_server", return_value=True) as recreate, \
+         patch.object(OnyxRunner, "_allow_local_voice_endpoint", return_value=True) as voice, \
+         patch.object(OnyxRunner, "_get_json", return_value={"oauth_enabled": True}):
+        runner.enable_google_login("id", "secret")
+
+    recreate.assert_called_once()
+    voice.assert_called_once()
+
+
+def test_google_login_refuses_half_a_credential_pair():
+    from dreamference.chat.onyx_runner import OnyxRunner
+
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_write_env_values") as write:
+        assert runner.enable_google_login("id-only", "") is False
+        write.assert_not_called()
+
+
+def test_env_writer_replaces_the_commented_placeholder_rather_than_duplicating_it(tmp_path):
+    # onyx-cli ships the file with these keys present but commented out. Appending instead of
+    # rewriting would leave the commented line above a second, live one.
+    import dreamference.chat.onyx_runner as onyx
+
+    env = tmp_path / ".env"
+    env.write_text("# OAUTH_CLIENT_ID=\nUNRELATED=keep-me\n# OAUTH_CLIENT_SECRET=\n")
+    with patch.object(onyx, "ONYX_ENV_FILE", str(env)):
+        assert onyx.OnyxRunner._write_env_values({"OAUTH_CLIENT_ID": "abc"}) is True
+
+    text = env.read_text()
+    assert 'OAUTH_CLIENT_ID="abc"' in text
+    assert "# OAUTH_CLIENT_ID=" not in text
+    assert "UNRELATED=keep-me" in text
+
+
+def test_telemetry_is_disabled_before_the_session_is_opened():
+    # Applying it recreates the API server, so authenticating first would leave the session cookie
+    # pointing at a container about to be replaced.
+    from dreamference.chat.onyx_runner import OnyxRunner
+
+    order = []
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "disable_telemetry",
+                      side_effect=lambda: order.append("telemetry")), \
+         patch.object(OnyxRunner, "_authenticate",
+                      side_effect=lambda *a, **k: order.append("auth") or None):
+        assert runner.configure() == 1
+
+    assert order == ["telemetry", "auth"]
+
+
+def test_telemetry_switch_is_a_no_op_once_it_is_set():
+    # configure() calls this every run, and applying it means recreating a container.
+    from dreamference.chat.onyx_runner import ONYX_PRIVACY_ENV, OnyxRunner
+
+    assert ONYX_PRIVACY_ENV == {"DISABLE_TELEMETRY": "true"}
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_env_already_set", return_value=True), \
+         patch.object(OnyxRunner, "_write_env_values") as write, \
+         patch.object(OnyxRunner, "_recreate_api_server") as recreate:
+        assert runner.disable_telemetry() is True
+        write.assert_not_called()
+        recreate.assert_not_called()
+
+
+def test_env_matcher_ignores_a_commented_out_key(tmp_path):
+    # The shipped file has these keys commented out; a commented line is not a setting.
+    import dreamference.chat.onyx_runner as onyx
+
+    env = tmp_path / ".env"
+    env.write_text('# DISABLE_TELEMETRY=true\n')
+    with patch.object(onyx, "ONYX_ENV_FILE", str(env)):
+        assert onyx.OnyxRunner._env_already_set({"DISABLE_TELEMETRY": "true"}) is False
+        env.write_text('DISABLE_TELEMETRY="true"\n')
+        assert onyx.OnyxRunner._env_already_set({"DISABLE_TELEMETRY": "true"}) is True
