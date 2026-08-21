@@ -68,10 +68,10 @@ TIFFANY_BLUE_HOVER: Final[str] = "#09A19C"
 # The brand colour at about a tenth strength, for surfaces that are tinted rather than filled.
 TIFFANY_TINT: Final[str] = "#E4F7F6"
 
-# The brand colour at about a sixth strength, for the streaming caret. `TIFFANY_TINT` is the
+# The brand colour at about a twentieth strength, for the streaming caret. `TIFFANY_TINT` is the
 # wrong tool there: a wash chosen to sit under a whole message bubble disappears entirely at
 # 8x16 pixels, and a caret nobody can see is worse than a dark one.
-TIFFANY_CARET: Final[str] = "#D4F3F2"
+TIFFANY_CARET: Final[str] = "#F4FCFC"
 
 # A white sidebar with a filled selected row, as Telegram draws it.
 #
