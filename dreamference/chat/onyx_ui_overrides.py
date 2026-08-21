@@ -465,7 +465,9 @@ SIDEBAR_CLOSE_CSS: Final[str] = (
 #
 # Both engines are addressed because both are in play: Chromium and WebKitGTK take the
 # `::-webkit-scrollbar` pseudo-elements, Firefox takes `scrollbar-color`. `scrollbar-button` is
-# hidden outright -- WebKitGTK draws stepper arrows that no other surface in this UI has.
+# hidden outright -- WebKitGTK draws stepper arrows that no other surface in this UI has -- but the
+# *track* only goes transparent. They were one selector at first, which applied `display:none` to
+# the track as well and collapsed the scrollbar into a grey hairline down the sidebar's edge.
 SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     ".opal-sidebar-body__scroll"
     "{scrollbar-width:thin;scrollbar-color:transparent transparent}"
@@ -473,9 +475,10 @@ SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     "{scrollbar-color:rgba(0,0,0,.25) transparent}"
     ".opal-sidebar-body__scroll::-webkit-scrollbar"
     "{width:8px}"
-    ".opal-sidebar-body__scroll::-webkit-scrollbar-track,"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar-track"
+    "{background:transparent}"
     ".opal-sidebar-body__scroll::-webkit-scrollbar-button"
-    "{background:transparent;display:none}"
+    "{display:none}"
     ".opal-sidebar-body__scroll::-webkit-scrollbar-thumb"
     "{background-color:transparent;border-radius:4px;transition:background-color .15s ease-in-out}"
     ".opal-sidebar-body__scroll:hover::-webkit-scrollbar-thumb"

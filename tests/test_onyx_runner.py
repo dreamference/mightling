@@ -1092,3 +1092,13 @@ def test_streaming_caret_is_pinned_on_the_class_combination():
     assert f"background-color:{TIFFANY_CARET}" in STREAMING_CURSOR_CSS
     # Not the bubble tint: a wash sized for a whole message vanishes at 8x16 pixels.
     assert TIFFANY_CARET != TIFFANY_TINT
+
+
+def test_scrollbar_track_is_transparent_not_removed():
+    # Sharing one selector with `::-webkit-scrollbar-button` applied `display:none` to the track
+    # too, which collapsed the scrollbar into a grey hairline down the sidebar's edge.
+    from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_CSS
+
+    assert "::-webkit-scrollbar-track{background:transparent}" in SIDEBAR_SCROLLBAR_CSS
+    assert "::-webkit-scrollbar-button{display:none}" in SIDEBAR_SCROLLBAR_CSS
+    assert "scrollbar-track,.opal-sidebar-body__scroll::-webkit-scrollbar-button" not in SIDEBAR_SCROLLBAR_CSS
