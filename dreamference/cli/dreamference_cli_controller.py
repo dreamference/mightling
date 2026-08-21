@@ -849,6 +849,13 @@ class DreamferenceCLIController:
         onyx_google_parser.add_argument(
             "--client-secret", required=True, help="Google OAuth client secret"
         )
+        onyx_gmail_parser = onyx_subparsers.add_parser(
+            "gmail", help="Connect Gmail and give the assistant a mailbox search tool"
+        )
+        onyx_gmail_parser.add_argument("--client-id", required=True, help="Google OAuth client ID")
+        onyx_gmail_parser.add_argument(
+            "--client-secret", required=True, help="Google OAuth client secret"
+        )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
 
         # Command: dream desktop {run,build,status}
@@ -1587,6 +1594,10 @@ class DreamferenceCLIController:
                 ))
             elif args.onyx_command == "google-auth":
                 sys.exit(0 if onyx_runner.enable_google_login(
+                    args.client_id, args.client_secret
+                ) else 1)
+            elif args.onyx_command == "gmail":
+                sys.exit(0 if onyx_runner.connect_gmail(
                     args.client_id, args.client_secret
                 ) else 1)
             elif args.onyx_command == "status":

@@ -94,6 +94,23 @@ GOOGLE_REDIRECT_URI: Final[str] = f"{DEFAULT_ONYX_WEB_URL}/auth/oauth/callback"
 # for Next.js's own reporting, and its PostHog and Sentry keys are present but empty, which leaves
 # those SDKs inert -- so there is nothing to switch off there and no point pretending otherwise.
 ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
+
+# Gmail search, registered the same way web search is: a capability Onyx already knows how to call,
+# rather than instructions bolted onto a prompt.
+#
+# It runs as a container on Onyx's network for the same reason SearXNG does -- addressable by name,
+# no new port on the host. That it is on a *private* network is not a security boundary here:
+# Onyx's custom-tool client calls whatever URL the tool names and performs no SSRF validation, so
+# anything else on that network could reach a service holding a live mailbox credential. The shared
+# secret header is what actually protects it.
+GMAIL_CONTAINER_NAME: Final[str] = "dream-gmail"
+GMAIL_CONTAINER_URL: Final[str] = f"http://{GMAIL_CONTAINER_NAME}:8000"
+GMAIL_SERVICE_IMAGE: Final[str] = "python:3-slim"
+GMAIL_TOOL_NAME: Final[str] = "Gmail"
+GMAIL_TOOL_DESCRIPTION: Final[str] = "Search and read the user's Gmail mailbox."
+
+# Kept in step with the service module, which enforces it.
+GMAIL_AUTH_HEADER: Final[str] = "X-Puffin-Gmail-Token"
 SEARXNG_CONTAINER_URL: Final[str] = "http://searxng:8080"
 
 # Onyx ships first-class SearXNG support as a web *search provider*, which is why this module
@@ -888,6 +905,181 @@ class OnyxRunner:
             time.sleep(5)
         print("⚠️  The API server did not report healthy in time.")
         return False
+
+    def connect_gmail(
+        self,
+        client_id: str,
+        client_secret: str,
+        web_url: str = DEFAULT_ONYX_WEB_URL,
+        email: str = DEFAULT_ONYX_EMAIL,
+        password: str = DEFAULT_ONYX_PASSWORD,
+    ) -> bool:
+        """
+        Runs the Google consent flow and registers Gmail search with Onyx.
+
+        Args:
+            client_id (str): Google OAuth client ID.
+            client_secret (str): Google OAuth client secret.
+            web_url (str): Base URL of the Onyx web UI.
+            email (str): Onyx admin email.
+            password (str): Onyx admin password.
+
+        Returns:
+            bool: True if the assistant can search Gmail afterwards.
+        """
+        from dreamference.chat.gmail_credentials import GmailCredentials
+
+        if not GmailCredentials.connect(client_id, client_secret):
+            return False
+
+        api = f"{web_url.rstrip('/')}/api"
+        cookie = self._authenticate(api, email, password)
+        if not cookie:
+            return False
+        if not self.enable_gmail_search(api, cookie):
+            return False
+
+        # The assistant's tools come from `GET /tool`, so re-running the upsert is what actually
+        # puts the new tool in front of the model.
+        self._upsert_puffin_assistant(api, cookie)
+        print("✅ Gmail search is available to the assistant.")
+        return True
+
+    def enable_gmail_search(self, api: str, cookie: str) -> bool:
+        """
+        Gives the assistant Gmail search, as a custom tool pointing at the local Gmail service.
+
+        The tool is registered rather than described in a prompt, which is the same choice web
+        search makes: Onyx's own base prompt already knows how to use a registered tool, and a
+        prompt-level instruction would be capped at the 500 characters `user_preferences` allows.
+
+        Two operations are registered from one OpenAPI document -- searching, and reading one
+        message -- mirroring `web_search` and `open_url`. A search that returned whole bodies would
+        spend the context window on threads the question was not about.
+
+        Args:
+            api (str): Onyx API base URL.
+            cookie (str): Session cookie header value.
+
+        Returns:
+            bool: True if the tool is registered.
+        """
+        from dreamference.chat.gmail_credentials import GmailCredentials
+        from dreamference.chat.gmail_search_service import openapi_definition
+
+        if not GmailCredentials.load():
+            print("⚠️  Gmail is not connected — skipping the Gmail tool.")
+            print("💡 Connect it with: dream onyx gmail --client-id … --client-secret …")
+            return False
+
+        secret = self._gmail_secret()
+        if not secret or not self._start_gmail_service(secret):
+            return False
+
+        payload = {
+            "name": GMAIL_TOOL_NAME,
+            "description": GMAIL_TOOL_DESCRIPTION,
+            "definition": openapi_definition(GMAIL_CONTAINER_URL),
+            "custom_headers": [{"key": GMAIL_AUTH_HEADER, "value": secret}],
+            "passthrough_auth": False,
+        }
+
+        existing = next(
+            (t for t in (self._get_json(f"{api}/tool", cookie) or [])
+             if t.get("display_name") == GMAIL_TOOL_NAME or t.get("name") == GMAIL_TOOL_NAME),
+            None,
+        )
+        if existing:
+            _, error = self._request(
+                f"{api}/admin/tool/custom/{existing['id']}", payload, cookie, method="PUT"
+            )
+        else:
+            _, error = self._request(f"{api}/admin/tool/custom", payload, cookie)
+        if error:
+            print(f"⚠️  Could not register the Gmail tool: {error}")
+            return False
+
+        print("📬 Gmail search registered.")
+        return True
+
+    @classmethod
+    def _gmail_secret(cls) -> Optional[str]:
+        """
+        Returns the shared secret the service and Onyx authenticate with, creating it once.
+
+        Args:
+            None.
+
+        Returns:
+            Optional[str]: The secret, or None if it could not be stored.
+        """
+        import secrets as secrets_module
+
+        from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
+
+        path = os.path.join(CREDENTIALS_DIR, "service-secret")
+        try:
+            if os.path.exists(path):
+                with open(path) as handle:
+                    return handle.read().strip() or None
+            os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
+            secret = secrets_module.token_urlsafe(32)
+            with open(path, "w") as handle:
+                handle.write(secret)
+            os.chmod(path, 0o600)
+            return secret
+        except OSError as exc:
+            print(f"⚠️  Could not store the Gmail service secret: {exc}")
+            return None
+
+    def _start_gmail_service(self, secret: str) -> bool:
+        """
+        Runs the Gmail search service as a container on Onyx's network.
+
+        The service module is copied next to the credentials and the directory mounted as
+        `/config`, rather than mounting the source tree: the container then has no dependency on
+        where Dreamference is checked out, and the image stays a stock `python:3-slim` with nothing
+        installed into it -- which is only possible because the service uses no third-party
+        libraries.
+
+        Args:
+            secret (str): Shared secret the service will require in its auth header.
+
+        Returns:
+            bool: True if the container is running.
+        """
+        import shutil
+
+        from dreamference.chat import gmail_search_service
+        from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
+
+        network = self._onyx_network()
+        if not network:
+            print("⚠️  Onyx's Docker network could not be found.")
+            return False
+
+        try:
+            shutil.copyfile(
+                gmail_search_service.__file__, os.path.join(CREDENTIALS_DIR, "service.py")
+            )
+        except OSError as exc:
+            print(f"⚠️  Could not stage the Gmail service: {exc}")
+            return False
+
+        subprocess.run(["docker", "rm", "-f", GMAIL_CONTAINER_NAME],
+                       capture_output=True, timeout=60, check=False)
+        result = subprocess.run(
+            ["docker", "run", "-d", "--name", GMAIL_CONTAINER_NAME,
+             "--restart", "unless-stopped", "--network", network,
+             "-v", f"{CREDENTIALS_DIR}:/config:ro",
+             "-e", f"PUFFIN_GMAIL_SECRET={secret}",
+             GMAIL_SERVICE_IMAGE, "python3", "/config/service.py"],
+            capture_output=True, text=True, timeout=300, check=False,
+        )
+        if result.returncode != 0:
+            print(f"⚠️  Could not start the Gmail service: {result.stderr.strip()[:200]}")
+            return False
+        return True
 
     def enable_web_search(self, api: str, cookie: str) -> bool:
         """

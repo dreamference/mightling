@@ -855,7 +855,7 @@ def test_avatar_shows_one_initial_without_recomputing_it():
 
     # Onyx sizes the initials with an inline `font-size`, which only !important can outrank -- the
     # same trap as the unread badge, minus the escape, since this one is a literal not a variable.
-    assert "span{font-size:0!important;width:100%;text-align:center}" in SIDEBAR_AVATAR_DISC_CSS
+    assert "span{font-size:0!important;width:100%;text-align:center;" in SIDEBAR_AVATAR_DISC_CSS
     assert "span::first-letter{font-size:var(--dream-avatar-initial-size)" in SIDEBAR_AVATAR_DISC_CSS
     # Collapsed to zero font size the span is a zero-width box, so the disc's flex centring has
     # nothing to centre and the surviving letter sits off to one side.
@@ -1029,3 +1029,51 @@ def test_avatar_initial_has_a_line_box_to_centre_in():
 
     assert "--dream-avatar-disc-size:18px" in SIDEBAR_AVATAR_DISC_CSS
     assert "line-height:var(--dream-avatar-disc-size)" in SIDEBAR_AVATAR_DISC_CSS
+
+
+def test_vertical_divider_is_removed():
+    from dreamference.chat.onyx_ui_overrides import DIVIDER_CSS, UI_OVERRIDES
+
+    assert DIVIDER_CSS == ".opal-divider-line-vertical{display:none}"
+    assert DIVIDER_CSS in UI_OVERRIDES
+
+
+def test_gmail_tool_mirrors_the_web_search_shape():
+    # `gmail_search` finds and `gmail_message` reads, the same split as web_search and open_url. A
+    # search returning whole bodies would spend the context window on threads the question was not
+    # about.
+    from dreamference.chat.gmail_search_service import openapi_definition
+    from dreamference.chat.onyx_runner import GMAIL_CONTAINER_URL
+
+    document = openapi_definition(GMAIL_CONTAINER_URL)
+    operations = [v["get"]["operationId"] for v in document["paths"].values()]
+    assert operations == ["gmail_search", "gmail_message"]
+    assert document["servers"][0]["url"] == GMAIL_CONTAINER_URL
+
+
+def test_gmail_service_secret_is_shared_by_both_sides():
+    # Onyx's custom-tool client performs no SSRF validation and the service sits on a network other
+    # containers share, so this header is the only thing protecting a live mailbox credential.
+    from dreamference.chat.gmail_search_service import AUTH_HEADER
+    from dreamference.chat.onyx_runner import GMAIL_AUTH_HEADER
+
+    assert GMAIL_AUTH_HEADER == AUTH_HEADER
+
+
+def test_gmail_registration_refuses_before_consent():
+    # Registering a tool that points at a service with no credentials would give the model an
+    # action that always fails.
+    from dreamference.chat.onyx_runner import OnyxRunner
+
+    runner = OnyxRunner()
+    with patch("dreamference.chat.gmail_credentials.GmailCredentials.load", return_value=None), \
+         patch.object(OnyxRunner, "_request") as request:
+        assert runner.enable_gmail_search("http://x/api", "cookie") is False
+        request.assert_not_called()
+
+
+def test_gmail_scope_is_read_only():
+    # A search tool has no business holding a credential that could send or delete mail.
+    from dreamference.chat.gmail_credentials import GMAIL_SCOPE
+
+    assert GMAIL_SCOPE.endswith("gmail.readonly")

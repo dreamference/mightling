@@ -129,3 +129,53 @@ def test_webview_environment_lives_in_the_binary_not_the_launcher():
     assert "GTK_THEME" in source
     # Only filled in when unset, so either can still be overridden from the shell.
     assert "var_os(key).is_none()" in source
+
+
+def test_desktop_entry_matches_the_window_class_gnome_sees():
+    # GNOME resolves a running window to its entry through WM_CLASS; with no match it shows an
+    # unnamed generic icon in the dock, which is what it was doing.
+    from dreamference.chat.desktop_runner import DESKTOP_ENTRY_NAME, WINDOW_CLASS
+
+    assert WINDOW_CLASS == "Puffin-desktop"
+    # Tao derives the class from the binary name, so the file is named after the instance too.
+    assert DESKTOP_ENTRY_NAME == "puffin-desktop.desktop"
+
+
+def test_desktop_entry_is_not_written_before_anything_is_built():
+    # The Exec line has to point at a binary; on a first run there is not one yet.
+    with patch.object(DesktopRunner, "binary_path", return_value=None), \
+         patch("builtins.open") as opened:
+        assert DesktopRunner.install_desktop_entry() is False
+        opened.assert_not_called()
+
+
+def test_entry_exec_carries_no_environment():
+    # The webview settings live in the binary, so a launcher-started window behaves exactly like
+    # one started from a shell. An Exec line prefixed with env vars would mean two places to fix.
+    import inspect
+
+    source = inspect.getsource(DesktopRunner.install_desktop_entry)
+    assert "Exec={binary}" in source
+    assert "WEBKIT_DISABLE_DMABUF_RENDERER" not in source
+
+
+def test_cache_is_cleared_without_signing_the_user_out():
+    # Onyx serves stylesheets `immutable` under filenames that never change, so a patched sheet is
+    # invisible to a cached copy. Only the HTTP cache goes -- `cookies` sits beside it, and taking
+    # the whole data directory (which is what clears it by hand) logs the user out.
+    from dreamference.chat.desktop_runner import WEBVIEW_CACHE_DIR_NAME
+
+    assert WEBVIEW_CACHE_DIR_NAME == "WebKitCache"
+    with patch.object(DesktopRunner, "_app_identifier", return_value="dev.dreamference.puffin"), \
+         patch("os.path.isdir", return_value=True), \
+         patch("shutil.rmtree") as rmtree:
+        assert DesktopRunner.clear_webview_cache() is True
+
+    removed = rmtree.call_args[0][0]
+    assert removed.endswith(os.path.join("dev.dreamference.puffin", "WebKitCache"))
+    assert "cookies" not in removed
+
+
+def test_identifier_comes_from_the_tauri_config():
+    # Repeating it here would let the data directory drift from the one the app really uses.
+    assert DesktopRunner._app_identifier() == "dev.dreamference.puffin"

@@ -17,7 +17,9 @@ window opened against a stopped Onyx shows a connection error with no hint of wh
 is checked first and the user is told to run `dream onyx start` instead.
 """
 
+import json
 import os
+import shutil
 import subprocess
 import urllib.error
 import urllib.request
@@ -34,6 +36,28 @@ DESKTOP_PROJECT_DIR: Final[str] = os.path.join(
 
 # How long to wait for Onyx to answer before deciding it is not running.
 HEALTH_TIMEOUT_SECONDS: Final[int] = 5
+
+# Where a desktop entry and its icon go for the current user. A deb would put these under /usr;
+# running from a source checkout, they belong in the XDG user directories instead.
+DESKTOP_ENTRY_DIR: Final[str] = os.path.expanduser("~/.local/share/applications")
+ICON_DIR: Final[str] = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps")
+DESKTOP_ENTRY_NAME: Final[str] = "puffin-desktop.desktop"
+ICON_NAME: Final[str] = "puffin-desktop"
+
+# GNOME matches a running window to its desktop entry by `WM_CLASS`, and shows a generic icon when
+# nothing matches -- which is why the app appeared in the dock as an unnamed placeholder. Tao sets
+# the class from the binary name, so the window reports instance `puffin-desktop` and class
+# `Puffin-desktop`; naming the file after the instance covers the automatic match and
+# `StartupWMClass` covers the explicit one.
+WINDOW_CLASS: Final[str] = "Puffin-desktop"
+
+# WebKitGTK's HTTP cache, inside the webview's data directory. Onyx serves its stylesheets with
+# `immutable` and never changes their filenames, so a patched stylesheet is invisible to anything
+# holding a cached copy -- the browser needs a hard refresh, and the app kept showing UI from
+# before the last `dream onyx configure`. Emptying this on launch costs a few megabytes re-fetched
+# over loopback and removes the whole class of bug. The sibling `cookies` file is left alone, which
+# is what keeps the session: deleting the data directory wholesale signs the user out.
+WEBVIEW_CACHE_DIR_NAME: Final[str] = "WebKitCache"
 
 
 
@@ -138,6 +162,15 @@ class DesktopRunner:
         if not cls._ensure_toolchain():
             return 1
 
+        # Only once something has been built -- on a first run there is no binary to point an
+        # Exec line at yet, and `build()` registers it as soon as there is.
+        if cls.binary_path():
+            cls.install_desktop_entry()
+
+        # Onyx's stylesheets are served `immutable` under filenames that never change, so the
+        # webview would otherwise keep showing the UI as it was before the last configure.
+        cls.clear_webview_cache()
+
         command = cls._tauri_command("dev", "--no-watch")
         if command is None:
             print("❌ No Tauri CLI available.")
@@ -168,9 +201,119 @@ class DesktopRunner:
         print("🔨 Building the Puffin desktop bundle (the first Rust build takes a while)...")
         code = subprocess.call(command, cwd=DESKTOP_PROJECT_DIR, env=cls._environment())
         if code == 0:
+            cls.install_desktop_entry()
             bundle = os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "target", "release", "bundle")
             print(f"✅ Bundles written to {bundle}")
         return code
+
+    @classmethod
+    def _app_identifier(cls) -> Optional[str]:
+        """
+        Reads the bundle identifier out of `tauri.conf.json`.
+
+        Taken from the config rather than repeated here, so the data directory this points at
+        cannot drift away from the one the app actually uses.
+
+        Returns:
+            Optional[str]: The identifier, or None if the config cannot be read.
+        """
+        config = os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "tauri.conf.json")
+        try:
+            with open(config) as handle:
+                return json.load(handle).get("identifier")
+        except (OSError, ValueError):
+            return None
+
+    @classmethod
+    def clear_webview_cache(cls) -> bool:
+        """
+        Empties the webview's HTTP cache, leaving cookies and local storage in place.
+
+        Returns:
+            bool: True if there was a cache and it was removed.
+        """
+        identifier = cls._app_identifier()
+        if not identifier:
+            return False
+        cache = os.path.join(
+            os.path.expanduser("~/.local/share"), identifier, WEBVIEW_CACHE_DIR_NAME
+        )
+        if not os.path.isdir(cache):
+            return False
+        shutil.rmtree(cache, ignore_errors=True)
+        return True
+
+    @classmethod
+    def binary_path(cls) -> Optional[str]:
+        """
+        Locates the compiled desktop binary, preferring a release build.
+
+        Returns:
+            Optional[str]: Path to the binary, or None if it has not been built.
+        """
+        for profile in ("release", "debug"):
+            candidate = os.path.join(
+                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "puffin-desktop"
+            )
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+        return None
+
+    @classmethod
+    def install_desktop_entry(cls) -> bool:
+        """
+        Registers the app with the desktop environment: an icon and a `.desktop` entry.
+
+        Without this the running window has no entry to match, so the dock shows an unnamed generic
+        icon and there is nothing in the applications grid to launch. A deb ships these under
+        `/usr`; from a source checkout they go in the user's XDG directories.
+
+        Returns:
+            bool: True if the entry was written.
+        """
+        binary = cls.binary_path()
+        if not binary:
+            print("❌ The desktop app has not been built yet — nothing to register.")
+            return False
+
+        icon = os.path.join(ICON_DIR, f"{ICON_NAME}.png")
+        try:
+            os.makedirs(DESKTOP_ENTRY_DIR, exist_ok=True)
+            os.makedirs(ICON_DIR, exist_ok=True)
+        except OSError as exc:
+            print(f"⚠️  Could not create the XDG directories: {exc}")
+            return False
+
+        from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
+
+        OnyxBrandAssets.render_app_icon(icon, 256)
+
+        # No environment is set on Exec: the webview settings live in the binary itself, so a
+        # launcher-started window behaves exactly like one started from the shell.
+        entry = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=Puffin\n"
+            "Comment=Local AI assistant served from this machine\n"
+            f"Exec={binary}\n"
+            f"Icon={ICON_NAME}\n"
+            "Terminal=false\n"
+            "Categories=Utility;Development;\n"
+            f"StartupWMClass={WINDOW_CLASS}\n"
+        )
+        try:
+            with open(os.path.join(DESKTOP_ENTRY_DIR, DESKTOP_ENTRY_NAME), "w") as handle:
+                handle.write(entry)
+        except OSError as exc:
+            print(f"⚠️  Could not write the desktop entry: {exc}")
+            return False
+
+        subprocess.run(
+            ["update-desktop-database", DESKTOP_ENTRY_DIR],
+            capture_output=True, timeout=60, check=False,
+        )
+        print(f"🖥️  Registered Puffin with the desktop environment ({DESKTOP_ENTRY_NAME}).")
+        return True
 
     @classmethod
     def install(cls) -> int:
@@ -180,7 +323,11 @@ class DesktopRunner:
         Returns:
             int: 0 if the toolchain is complete afterwards.
         """
-        return 0 if cls._ensure_toolchain() else 1
+        if not cls._ensure_toolchain():
+            return 1
+        if cls.binary_path():
+            cls.install_desktop_entry()
+        return 0
 
     @classmethod
     def status(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> int:

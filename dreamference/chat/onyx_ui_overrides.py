@@ -477,6 +477,17 @@ SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     "{background-color:rgba(0,0,0,.25)}"
 )
 
+# The vertical rule between the sidebar and the chat, removed.
+#
+# `.opal-divider-line-vertical` is Onyx's 1px vertical divider. The rule is unscoped because the
+# sidebar-to-content one is the only place it is visible in this UI -- the model picker's copy is
+# already hidden with the Add Model button. If a future version uses it inside a popover, this is
+# the first rule to narrow.
+DIVIDER_CSS: Final[str] = (
+    ".opal-divider-line-vertical"
+    "{display:none}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
@@ -487,7 +498,7 @@ UI_OVERRIDES: Final[str] = (
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
-    + SIDEBAR_SCROLLBAR_CSS
+    + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS
 )
 
 
