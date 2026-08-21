@@ -35,6 +35,16 @@ ANCHOR_CLASS: Final[str] = "opal-sidebar-footer"
 # the script can find its own work again after a re-render.
 BUTTON_ID: Final[str] = "puffin-connect-google"
 
+# Marks the rendering engine on `<html>` so stylesheets can tell WebKitGTK from Blink.
+#
+# The desktop app renders through WebKitGTK and the browser through Blink, against the same server
+# and therefore the same stylesheets. Mostly that is invisible, but not always: WebKitGTK draws a
+# trough hairline down a scroll container even when `scrollbar-color` paints both parts
+# transparent, so the sidebar had a grey line in the app and none in the browser. CSS has no way to
+# ask which engine it is running in, and there is no honest `@supports` discriminator between the
+# two, so the script sets an attribute and the stylesheet keys off it.
+ENGINE_ATTRIBUTE: Final[str] = "data-puffin-engine"
+
 # How often to re-check. The status can change without a reload -- the user consents in another
 # tab and comes back -- and React re-renders the footer, which would otherwise drop the button.
 POLL_INTERVAL_MS: Final[int] = 5000
@@ -42,6 +52,10 @@ POLL_INTERVAL_MS: Final[int] = 5000
 CONNECT_GOOGLE_SCRIPT: Final[str] = (
     ";(function(){try{"
     "if(window.__puffinConnect)return;window.__puffinConnect=1;"
+    # Blink's user agent contains "Chrome/"; WebKitGTK's does not. Set before anything else, so a
+    # stylesheet depending on it applies as early as this script runs.
+    f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",'
+    '/Chrome\\//.test(navigator.userAgent)?"blink":"webkit");' 
     f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}/oauth/start",ID="{BUTTON_ID}";'
     # Placed at the top of the footer, above the account row, so it reads as a prompt rather than
     # as one more menu entry.

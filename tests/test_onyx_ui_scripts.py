@@ -47,7 +47,10 @@ def test_button_appears_only_when_a_client_is_configured_but_unconnected(tmp_pat
         let appended = null;
         const footer = { prepend: (el) => { appended = el; } };
         global.window = {};
+        global.navigator = { userAgent: 'Mozilla/5.0 AppleWebKit/605.1.15 Safari/605.1.15' };
+        let engine = null;
         global.document = {
+          documentElement: { setAttribute: (k, v) => { engine = k + '=' + v; } },
           readyState: 'complete',
           querySelector: (sel) => sel === '.%s' ? footer : null,
           getElementById: (id) => (appended && appended.id === id) ? appended : null,
@@ -71,6 +74,7 @@ def test_button_appears_only_when_a_client_is_configured_but_unconnected(tmp_pat
           const connected = await scenario({configured: true, connected: true});
           const unconfigured = await scenario({configured: false, connected: false});
           console.log(JSON.stringify({
+            engine,
             shown: shown !== null,
             text: shown && shown.textContent,
             href: shown && shown.href,
@@ -87,6 +91,9 @@ def test_button_appears_only_when_a_client_is_configured_but_unconnected(tmp_pat
     assert result.returncode == 0, result.stderr
     outcome = json.loads(result.stdout.strip().splitlines()[-1])
 
+    # A WebKitGTK user agent has no "Chrome/", so the desktop app is marked as webkit -- which is
+    # what the scrollbar rule keys on.
+    assert outcome["engine"] == "data-puffin-engine=webkit"
     assert outcome["shown"] is True
     assert outcome["text"] == "Connect to Google"
     assert outcome["id"] == BUTTON_ID
@@ -94,3 +101,16 @@ def test_button_appears_only_when_a_client_is_configured_but_unconnected(tmp_pat
     # Nothing to ask for once connected, and nothing to connect to without a client.
     assert outcome["whenConnected"] is False
     assert outcome["whenUnconfigured"] is False
+
+
+def test_engine_is_marked_before_anything_else_runs():
+    # The desktop app renders through WebKitGTK and the browser through Blink, against the same
+    # stylesheets. CSS cannot ask which engine it is in and there is no honest `@supports`
+    # discriminator between the two, so the script puts it on `<html>`.
+    from dreamference.chat.onyx_ui_scripts import ENGINE_ATTRIBUTE
+
+    marker = f'setAttribute("{ENGINE_ATTRIBUTE}"'
+    assert marker in CONNECT_GOOGLE_SCRIPT
+    # Set before the button logic, so a stylesheet keyed on it applies as early as this runs.
+    assert CONNECT_GOOGLE_SCRIPT.index(marker) < CONNECT_GOOGLE_SCRIPT.index("function place")
+    assert 'Chrome' in CONNECT_GOOGLE_SCRIPT

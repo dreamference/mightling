@@ -1010,18 +1010,6 @@ def test_closing_the_sidebar_is_removed_without_stranding_a_folded_one():
     assert "__logo-fold{display:flex}" in SIDEBAR_FOLDED_CSS
 
 
-def test_hidden_scrollbar_keeps_its_gutter():
-    # Collapsing the scrollbar's width would reflow the chat list every time the pointer entered or
-    # left the sidebar -- a worse distraction than the scrollbar. Only the thumb changes colour.
-    from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_CSS
-
-    assert "::-webkit-scrollbar{width:8px}" in SIDEBAR_SCROLLBAR_CSS
-    assert "scrollbar-thumb{background-color:transparent" in SIDEBAR_SCROLLBAR_CSS
-    assert ":hover::-webkit-scrollbar-thumb{background-color:rgba(0,0,0,.25)}" in SIDEBAR_SCROLLBAR_CSS
-    # Firefox takes a different property, and both engines are in play (browser and WebKitGTK).
-    assert "scrollbar-color:transparent transparent" in SIDEBAR_SCROLLBAR_CSS
-
-
 def test_avatar_initial_has_a_line_box_to_centre_in():
     # At font-size 0, `line-height:normal` resolves to zero, so the glyph has no line box and sits
     # high in the circle. The disc's own size supplies one.
@@ -1094,11 +1082,28 @@ def test_streaming_caret_is_pinned_on_the_class_combination():
     assert TIFFANY_CARET != TIFFANY_TINT
 
 
-def test_scrollbar_track_is_transparent_not_removed():
-    # Sharing one selector with `::-webkit-scrollbar-button` applied `display:none` to the track
-    # too, which collapsed the scrollbar into a grey hairline down the sidebar's edge.
+def test_scrollbar_defaults_to_visible_and_hides_only_in_the_browser():
+    # Hiding depends on the engine marker the injected script writes onto <html>. If that has not
+    # run -- or at all -- an "invisible until hover" default leaves a scroll container with no
+    # visible affordance. Defaulting to visible makes the failure mode a scrollbar that is merely
+    # always there. It is also what the desktop app wants, where hover proved unreliable.
     from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_CSS
 
-    assert "::-webkit-scrollbar-track{background:transparent}" in SIDEBAR_SCROLLBAR_CSS
-    assert "::-webkit-scrollbar-button{display:none}" in SIDEBAR_SCROLLBAR_CSS
-    assert "scrollbar-track,.opal-sidebar-body__scroll::-webkit-scrollbar-button" not in SIDEBAR_SCROLLBAR_CSS
+    assert SIDEBAR_SCROLLBAR_CSS.startswith(
+        ".opal-sidebar-body__scroll{scrollbar-width:thin;"
+        "scrollbar-color:rgba(0,0,0,.25) transparent}"
+    )
+    assert SIDEBAR_SCROLLBAR_CSS.count('html[data-puffin-engine="blink"]') == 2
+    assert "webkit" not in SIDEBAR_SCROLLBAR_CSS
+
+
+def test_scrollbar_uses_standard_properties_only():
+    # `::-webkit-scrollbar` styling is ignored in Blink whenever `scrollbar-color` is set, so those
+    # rules were dead weight -- and one of them, sharing a selector between the track and the
+    # stepper buttons, is what put a grey hairline down the sidebar.
+    from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_CSS
+
+    assert "::-webkit-scrollbar" not in SIDEBAR_SCROLLBAR_CSS
+    # Width is constant across states, so nothing reflows when the pointer enters or leaves.
+    assert SIDEBAR_SCROLLBAR_CSS.count("scrollbar-width") == 1
+    assert "'" not in SIDEBAR_SCROLLBAR_CSS

@@ -68,10 +68,10 @@ TIFFANY_BLUE_HOVER: Final[str] = "#09A19C"
 # The brand colour at about a tenth strength, for surfaces that are tinted rather than filled.
 TIFFANY_TINT: Final[str] = "#E4F7F6"
 
-# The brand colour at about a third strength, for the streaming caret. `TIFFANY_TINT` is the
+# The brand colour at about a sixth strength, for the streaming caret. `TIFFANY_TINT` is the
 # wrong tool there: a wash chosen to sit under a whole message bubble disappears entirely at
 # 8x16 pixels, and a caret nobody can see is worse than a dark one.
-TIFFANY_CARET: Final[str] = "#A9E7E5"
+TIFFANY_CARET: Final[str] = "#D4F3F2"
 
 # A white sidebar with a filled selected row, as Telegram draws it.
 #
@@ -457,32 +457,28 @@ SIDEBAR_CLOSE_CSS: Final[str] = (
     "{display:none}"
 )
 
-# The chat list's scrollbar, invisible until the pointer is in the sidebar.
+# The chat list's scrollbar: permanent in the desktop app, revealed on hover in the browser.
 #
-# The gutter stays 8px wide at all times and only the *thumb* changes colour. Hiding the scrollbar
-# by collapsing its width instead would reflow the whole chat list every time the pointer entered
-# or left the sidebar, which is a worse distraction than the scrollbar was.
+# The default is the *visible* one, and the hover behaviour is the special case. That is deliberate.
+# Hiding it depends on the engine marker `onyx_ui_scripts.py` writes onto `<html>`, and if that
+# script has not run yet -- or at all -- an "invisible until hover" default leaves a scroll
+# container with no visible affordance whatsoever. Defaulting to visible means the failure mode is
+# a scrollbar that is merely always there, rather than one nobody can find.
 #
-# Both engines are addressed because both are in play: Chromium and WebKitGTK take the
-# `::-webkit-scrollbar` pseudo-elements, Firefox takes `scrollbar-color`. `scrollbar-button` is
-# hidden outright -- WebKitGTK draws stepper arrows that no other surface in this UI has -- but the
-# *track* only goes transparent. They were one selector at first, which applied `display:none` to
-# the track as well and collapsed the scrollbar into a grey hairline down the sidebar's edge.
+# Only the standard properties are used. `::-webkit-scrollbar` styling is ignored in Blink whenever
+# `scrollbar-color` is set, so the pseudo-element rules that used to be here were dead weight -- and
+# one of them, sharing a selector between the track and the stepper buttons, is what put a grey
+# hairline down the sidebar in the first place.
+#
+# The width never changes between states, only the colour, so nothing reflows when the pointer
+# enters or leaves.
 SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     ".opal-sidebar-body__scroll"
-    "{scrollbar-width:thin;scrollbar-color:transparent transparent}"
-    ".opal-sidebar-body__scroll:hover"
+    "{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.25) transparent}"
+    'html[data-puffin-engine="blink"] .opal-sidebar-body__scroll'
+    "{scrollbar-color:transparent transparent}"
+    'html[data-puffin-engine="blink"] .opal-sidebar-body__scroll:hover'
     "{scrollbar-color:rgba(0,0,0,.25) transparent}"
-    ".opal-sidebar-body__scroll::-webkit-scrollbar"
-    "{width:8px}"
-    ".opal-sidebar-body__scroll::-webkit-scrollbar-track"
-    "{background:transparent}"
-    ".opal-sidebar-body__scroll::-webkit-scrollbar-button"
-    "{display:none}"
-    ".opal-sidebar-body__scroll::-webkit-scrollbar-thumb"
-    "{background-color:transparent;border-radius:4px;transition:background-color .15s ease-in-out}"
-    ".opal-sidebar-body__scroll:hover::-webkit-scrollbar-thumb"
-    "{background-color:rgba(0,0,0,.25)}"
 )
 
 # The vertical rule between the sidebar and the chat, removed.
