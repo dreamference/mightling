@@ -438,6 +438,26 @@ SIDEBAR_ACCOUNT_CSS: Final[str] = (
     "{font-size:.75rem;font-weight:400}"
 )
 
+# The sidebar, hidden until the pointer reaches the left edge.
+#
+# Taking the column out of flow with `position:fixed` is what gives the chat the full window: a
+# width transition would still reserve the space, and Onyx's own folded state is driven by a
+# `data-folded` attribute that JavaScript sets, which no stylesheet can toggle. Sliding it out and
+# back leaves the DOM exactly as it is -- the sidebar stays fully rendered, so nothing about the
+# chat list, the selected row or the account footer changes when it appears.
+#
+# A sliver of it is left on screen (`--dream-sidebar-peek`) rather than hiding it completely,
+# because that sliver is the hover target. With `translateX(-100%)` there would be nothing to point
+# at and no way back to the chat list without a keyboard.
+SIDEBAR_HOVER_CSS: Final[str] = (
+    ".opal-sidebar-root__column"
+    "{--dream-sidebar-peek:10px;position:fixed;left:0;top:0;z-index:60;"
+    "transform:translateX(calc(-100% + var(--dream-sidebar-peek)));"
+    "transition:transform .18s ease-in-out}"
+    ".opal-sidebar-root__column:hover"
+    "{transform:translateX(0);box-shadow:0 0 24px rgba(0,0,0,.12)}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
@@ -447,7 +467,7 @@ UI_OVERRIDES: Final[str] = (
     + SIDEBAR_HEADER_TEXT_CSS
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
-    + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS
+    + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_HOVER_CSS
 )
 
 

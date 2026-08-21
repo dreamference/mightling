@@ -115,17 +115,17 @@ def test_cargo_is_found_in_the_rustup_location_as_well_as_on_path():
         assert DesktopInstaller.cargo_path() == os.path.join(CARGO_BIN, "cargo")
 
 
-def test_webview_workaround_is_applied_but_overridable():
-    # Without it the process starts, logs a DRM permission error and shows no window at all:
-    # WebKitGTK's DMABUF renderer asks the KMS node for a dumb buffer, which an ordinary X11 client
-    # under the proprietary NVIDIA driver is not authenticated to create.
-    from dreamference.chat.desktop_runner import WEBVIEW_ENV
+def test_webview_environment_lives_in_the_binary_not_the_launcher():
+    # A .desktop entry, an AppImage AppRun or a direct execution all bypass the Python launcher, so
+    # both settings are applied in main.rs before Tauri starts the webview. Without them the window
+    # either never appears (DMABUF/DRM refusal) or comes up dark, showing none of the styling --
+    # every rule in onyx_ui_overrides is scoped `html:not(.dark)`.
+    import dreamference.chat.desktop_runner as runner
 
-    assert WEBVIEW_ENV == {"WEBKIT_DISABLE_DMABUF_RENDERER": "1"}
-    with patch.dict(os.environ, {}, clear=False):
-        os.environ.pop("WEBKIT_DISABLE_DMABUF_RENDERER", None)
-        assert DesktopRunner._environment()["WEBKIT_DISABLE_DMABUF_RENDERER"] == "1"
+    assert not hasattr(runner, "WEBVIEW_ENV")
 
-    # An explicit setting wins, so the GPU path can still be debugged from the shell.
-    with patch.dict(os.environ, {"WEBKIT_DISABLE_DMABUF_RENDERER": "0"}, clear=False):
-        assert DesktopRunner._environment()["WEBKIT_DISABLE_DMABUF_RENDERER"] == "0"
+    source = open(os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "src", "main.rs")).read()
+    assert "WEBKIT_DISABLE_DMABUF_RENDERER" in source
+    assert "GTK_THEME" in source
+    # Only filled in when unset, so either can still be overridden from the shell.
+    assert "var_os(key).is_none()" in source

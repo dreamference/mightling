@@ -987,3 +987,15 @@ def test_env_matcher_ignores_a_commented_out_key(tmp_path):
         assert onyx.OnyxRunner._env_already_set({"DISABLE_TELEMETRY": "true"}) is False
         env.write_text('DISABLE_TELEMETRY="true"\n')
         assert onyx.OnyxRunner._env_already_set({"DISABLE_TELEMETRY": "true"}) is True
+
+
+def test_hover_sidebar_leaves_a_target_to_hover():
+    # With translateX(-100%) there is nothing left on screen to point at, and no way back to the
+    # chat list without a keyboard. The peek is the hover target, not decoration.
+    from dreamference.chat.onyx_ui_overrides import SIDEBAR_HOVER_CSS, UI_OVERRIDES
+
+    assert "--dream-sidebar-peek:10px" in SIDEBAR_HOVER_CSS
+    assert "translateX(calc(-100% + var(--dream-sidebar-peek)))" in SIDEBAR_HOVER_CSS
+    # Out of flow, so the chat gets the full window; a width transition would still reserve it.
+    assert "position:fixed" in SIDEBAR_HOVER_CSS
+    assert SIDEBAR_HOVER_CSS in UI_OVERRIDES
