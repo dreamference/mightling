@@ -27,6 +27,7 @@ from dreamference.hardware import (
 )
 from dreamference.runner.onyx_brand_assets import OnyxBrandAssets
 from dreamference.runner.onyx_ui_fonts import OnyxUIFonts
+from dreamference.runner.onyx_ui_labels import OnyxUILabels
 from dreamference.runner.onyx_ui_overrides import OnyxUIOverrides
 from dreamference.runner.onyx_installer import OnyxInstaller
 from dreamference.vllm_server import VLLMServerManager
@@ -87,6 +88,24 @@ PUFFIN_ASSISTANT_NAME: Final[str] = "Puffin"
 PUFFIN_ASSISTANT_DESCRIPTION: Final[str] = (
     "Local pair programmer on GB10 — web search, Python, and file reading, "
     "served entirely from this machine."
+)
+
+# What the assistant is told about itself.
+#
+# Without this the model answers "what is your name?" from its own pretraining -- "I'm an AI
+# assistant" -- because nothing in the request mentions Puffin. Onyx's persona name is a label in
+# the UI; it is not sent to the model. This is, and it goes on the Puffin persona rather than
+# through Onyx's one global prompt hook (`user_preferences`, capped at 500 characters) so that
+# assistants the user creates themselves keep their own identity.
+#
+# `replace_base_system_prompt` stays false, so this is appended to Onyx's base prompt rather than
+# replacing it -- the base prompt is what tells the model how to use the search and Python tools,
+# and dropping it to introduce a name would be a poor trade.
+PUFFIN_ASSISTANT_INSTRUCTIONS: Final[str] = (
+    "You are Puffin, an AI assistant that runs entirely on this machine — a local, air-gapped "
+    "deployment on NVIDIA GB10 hardware. When you are asked your name, who you are, or what you "
+    "are, say that you are Puffin. Do not describe yourself as a generic assistant and do not "
+    "answer with the name of the model you are served from."
 )
 
 # Onyx's agentic coding tool, left off the Puffin assistant deliberately: Dreamference's own
@@ -580,9 +599,10 @@ class OnyxRunner:
         # compiled stylesheets plus font files served out of Onyx's own public directory.
         fonts = OnyxUIFonts.install()
 
-        # Dreamference's own CSS, appended rather than substituted -- currently the reveal-on-hover
-        # message toolbar.
+        # Dreamference's own CSS, appended rather than substituted, and the sidebar label
+        # rewrites -- which no stylesheet can reach, being text in a JSX call.
         OnyxUIOverrides.install()
+        OnyxUILabels.install()
 
         print(f"✨ Rebranded as {PUFFIN_COMPANY_NAME}"
               + (" with a Puffin assistant" if persona_id is not None else "")
@@ -619,7 +639,7 @@ class OnyxRunner:
             "description": PUFFIN_ASSISTANT_DESCRIPTION,
             "document_set_ids": [],
             "tool_ids": tool_ids,
-            "system_prompt": "",
+            "system_prompt": PUFFIN_ASSISTANT_INSTRUCTIONS,
             "task_prompt": "",
             "datetime_aware": True,
             "is_public": True,

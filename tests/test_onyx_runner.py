@@ -637,3 +637,146 @@ def test_hidden_avatar_keeps_the_timeline_rail_in_layout():
     # Matched on the CSS variable the arbitrary-value class is built from, not the escaped class.
     assert '[class*="--timeline-rail-width"]' in AGENT_AVATAR_CSS
     assert AGENT_AVATAR_CSS.startswith('[data-testid="onyx-ai-message"] ')
+
+
+def test_black_message_text_is_done_with_tokens_and_stays_out_of_dark_mode():
+    # The tokens are black-at-alpha in light mode and *white*-at-alpha in dark. Forcing them black
+    # unscoped would render every message invisible on a dark theme.
+    from dreamference.runner.onyx_ui_overrides import MESSAGE_TEXT_CSS
+
+    assert MESSAGE_TEXT_CSS.count("html:not(.dark) ") == 2
+    assert "--text-04:#000" in MESSAGE_TEXT_CSS
+    assert "--text-05:#000" in MESSAGE_TEXT_CSS
+    # Redefining the tokens, not painting descendants: a blanket colour would flatten the syntax
+    # highlighting in code blocks and the link colour along with it.
+    assert "*{color:" not in MESSAGE_TEXT_CSS
+    # --text-03 is the "Thought for Ns" meta label, chrome rather than message text.
+    assert "--text-03" not in MESSAGE_TEXT_CSS
+
+
+def test_assistant_is_told_its_own_name():
+    # Onyx's persona name is a UI label and is never sent to the model, so without this the model
+    # answers "what is your name?" from pretraining -- "I'm an AI assistant".
+    from dreamference.runner.onyx_runner import (
+        PUFFIN_ASSISTANT_INSTRUCTIONS, PUFFIN_ASSISTANT_NAME,
+    )
+
+    assert PUFFIN_ASSISTANT_NAME in PUFFIN_ASSISTANT_INSTRUCTIONS
+
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_get_json", side_effect=[[{"id": 1, "name": "web_search"}], []]), \
+         patch.object(OnyxRunner, "_request", return_value=({"id": 7}, None)) as request:
+        assert runner._upsert_puffin_assistant("http://x/api", "cookie") == 7
+
+    payload = request.call_args_list[0][0][1]
+    assert payload["system_prompt"] == PUFFIN_ASSISTANT_INSTRUCTIONS
+    # Appended to Onyx's base prompt, not in place of it -- the base prompt is what tells the model
+    # how to drive the search and Python tools.
+    assert payload["replace_base_system_prompt"] is False
+
+
+def test_sidebar_mark_is_selected_by_the_artwork_geometry():
+    # The two logo SVGs carry no class or id. The 64x64 viewBox is the same grid
+    # `ONYX_LOGO_PATHS` keys its path substitutions to, so the two break together rather than one
+    # of them silently missing.
+    from dreamference.runner.onyx_brand_assets import ONYX_LOGO_PATHS
+    from dreamference.runner.onyx_ui_overrides import SIDEBAR_LOGO_CSS
+
+    assert 'svg[viewBox="0 0 64 64"]' in SIDEBAR_LOGO_CSS
+    # Scoped to the header, so the login page keeps the only branding it has.
+    assert SIDEBAR_LOGO_CSS.startswith(".opal-sidebar-header ")
+    assert len(ONYX_LOGO_PATHS) == 4, "the 64x64 mark is still four paths"
+
+
+def test_add_model_button_takes_its_divider_with_it():
+    # A divider left behind would put a rule between the model name and nothing at all.
+    from dreamference.runner.onyx_ui_overrides import MODEL_SELECTOR_CSS
+
+    assert '[data-testid="model-selector"]>button:first-child' in MODEL_SELECTOR_CSS
+    assert '[data-testid="model-selector"]>.opal-divider-vertical' in MODEL_SELECTOR_CSS
+
+
+def test_sidebar_labels_match_on_the_jsx_prop_not_the_bare_word():
+    # "New Session" and "Search Chats" also appear in analytics names and aria labels; matching the
+    # bare string would rename things that are not this sidebar.
+    from dreamference.runner.onyx_ui_labels import LABEL_SUBSTITUTIONS
+
+    assert LABEL_SUBSTITUTIONS['children:"New Session"'] == 'children:"New"'
+    assert LABEL_SUBSTITUTIONS['children:"Search Chats"'] == 'children:"Search"'
+    # Every key is a quoted JS string literal, never a bare word -- a bare `New Session` would also
+    # hit analytics event names and aria labels.
+    for key, value in LABEL_SUBSTITUTIONS.items():
+        assert key.endswith('"') and '"' in key
+        assert value.endswith('"')
+
+
+def test_agents_section_is_hidden_by_what_it_contains():
+    # The wrapper is a bare `flex flex-col` with no handle of its own, so the rule selects it via
+    # the one child that carries a test id. Hidden, not removed -- dropping this constant from
+    # UI_OVERRIDES brings the section back on the next configure.
+    from dreamference.runner.onyx_ui_overrides import AGENTS_SECTION_CSS, UI_OVERRIDES
+
+    assert ':has(>[data-testid="AppSidebar/more-agents"])' in AGENTS_SECTION_CSS
+    assert AGENTS_SECTION_CSS.endswith("{display:none}")
+    assert AGENTS_SECTION_CSS in UI_OVERRIDES
+
+
+def test_projects_are_hidden_in_both_places_they_appear():
+    # The sidebar section and the search palette's group. Hidden, not removed, in both.
+    from dreamference.runner.onyx_ui_overrides import (
+        PROJECTS_SECTION_CSS, SEARCH_PROJECTS_CSS, UI_OVERRIDES,
+    )
+
+    assert PROJECTS_SECTION_CSS in UI_OVERRIDES and SEARCH_PROJECTS_CSS in UI_OVERRIDES
+    # The sidebar section is the one that is not the agents section -- it has no handle of its own.
+    assert ':not(:has([data-testid="AppSidebar/more-agents"]))' in PROJECTS_SECTION_CSS
+    # The palette is a flat list, so the heading is hidden separately from the entries.
+    assert '*:has(+[data-command-item="new-project"])' in SEARCH_PROJECTS_CSS
+    assert '[data-command-item^="project-"]' in SEARCH_PROJECTS_CSS
+
+
+def test_sidebar_labels_are_black_without_erasing_dark_mode():
+    # Onyx dims an unselected row to --text-03 (55% black) through the same variable the selected
+    # row recolours. In dark mode that variable is white at partial alpha.
+    from dreamference.runner.onyx_ui_overrides import SIDEBAR_TEXT_CSS
+
+    assert SIDEBAR_TEXT_CSS.count("html:not(.dark) ") == 2
+    assert "--interactive-foreground:#000" in SIDEBAR_TEXT_CSS
+    # The icons beside "New" and "Search" stay a step back from the label.
+    assert "--interactive-foreground-icon" not in SIDEBAR_TEXT_CSS
+
+
+def test_footer_rule_cannot_take_the_composer_with_it():
+    # Some layouts render the composer into the footer slot. Hiding the <footer> outright would
+    # remove the input box, so the rule targets the version line's own span.
+    from dreamference.runner.onyx_ui_overrides import FOOTER_CSS
+
+    assert FOOTER_CSS == ".opal-root-layout__footer span:has(a){display:none}"
+
+
+def test_badge_is_recoloured_through_the_variable_its_inline_style_reads():
+    # The badge's colour is an inline style, which no stylesheet outranks without !important --
+    # but the inline value is var(--action-link-05), so redefining the token is enough.
+    from dreamference.runner.onyx_brand_assets import TIFFANY_BLUE
+    from dreamference.runner.onyx_ui_overrides import NOTIFICATION_BADGE_CSS
+
+    assert f"--action-link-05:{TIFFANY_BLUE}" in NOTIFICATION_BADGE_CSS
+    assert "!important" not in NOTIFICATION_BADGE_CSS
+    # Scoped to the sidebar: the same token is the app's link colour everywhere else.
+    assert NOTIFICATION_BADGE_CSS.startswith(".opal-sidebar-root__column{")
+
+
+def test_collapsed_sidebar_keeps_its_expand_control_visible():
+    # Onyx reveals the expand button on :hover of the column, which on a collapsed sidebar hides
+    # the one control that gets you back.
+    from dreamference.runner.onyx_ui_overrides import SIDEBAR_FOLDED_CSS
+
+    assert "[data-folded=true] .opal-sidebar-header__logo-fold{display:flex}" in SIDEBAR_FOLDED_CSS
+    assert "[data-folded=true] .opal-sidebar-header__logo-rest{display:none}" in SIDEBAR_FOLDED_CSS
+
+
+def test_share_button_is_hidden_by_its_own_aria_label():
+    from dreamference.runner.onyx_ui_overrides import SHARE_BUTTON_CSS, UI_OVERRIDES
+
+    assert SHARE_BUTTON_CSS == '[aria-label="share-chat-button"]{display:none}'
+    assert SHARE_BUTTON_CSS in UI_OVERRIDES

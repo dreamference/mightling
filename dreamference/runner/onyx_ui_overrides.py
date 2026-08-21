@@ -24,7 +24,9 @@ import json
 import subprocess
 from typing import Final, Optional
 
-from dreamference.runner.onyx_brand_assets import WEB_BUILD_DIR, OnyxBrandAssets
+from dreamference.runner.onyx_brand_assets import (
+    TIFFANY_BLUE, WEB_BUILD_DIR, OnyxBrandAssets,
+)
 
 # Opens the appended block. Everything from here to the end of a stylesheet is this module's, so
 # a re-run can cut at the marker and write the current block in place of whatever was there.
@@ -56,11 +58,11 @@ HOVER_TOOLBAR_CSS: Final[str] = (
     "{opacity:1;pointer-events:auto}"
 )
 
-# Tiffany Blue, the colour the selected sidebar row is filled with. White on it is a shade under
-# 2.4:1, which is below WCAG's 4.5:1 for body text -- acceptable on a large, bold, single-line row
-# that also carries a filled background as its own signal, and it is the Telegram treatment
-# (accent fill, white label) rendered in the requested colour.
-TIFFANY_BLUE: Final[str] = "#0ABAB5"
+# The selected sidebar row is filled with the brand colour itself, imported from the brand assets
+# so that the row and the favicon cannot drift apart. White on it is a shade under 2.4:1, which is
+# below WCAG's 4.5:1 for body text -- acceptable on a large, bold, single-line row that also
+# carries a filled background as its own signal, and it is the Telegram treatment (accent fill,
+# white label) rendered in the brand colour.
 TIFFANY_BLUE_HOVER: Final[str] = "#09A19C"
 
 # A white sidebar with a filled selected row, as Telegram draws it.
@@ -152,10 +154,161 @@ AGENT_AVATAR_CSS: Final[str] = (
     "{visibility:hidden}"
 )
 
+# Message text at full black.
+#
+# Onyx's text tokens are black at partial alpha -- `--text-04` is `#000000bf` for body copy and
+# `--text-05` is `#000000e5` for bold -- so message text renders as dark grey rather than black.
+#
+# This redefines the two tokens on the message containers instead of setting `color` on their
+# contents. Nothing here has to outrank anything: `.text-text-04{color:var(--text-04)}` still wins
+# as the rule, custom properties inherit, and the value it resolves is simply ours. Setting `color`
+# instead would mean a selector per element that carries its own text class, and a blanket
+# `*{color:#000}` would flatten the syntax highlighting in code blocks and the link colour with it.
+#
+# `--text-03` is deliberately left alone: that is the "Thought for Ns" meta label, chrome rather
+# than message text. The light-mode scope is not optional here -- in dark mode these same tokens
+# are *white* at partial alpha, and forcing them black would render every message invisible.
+MESSAGE_TEXT_CSS: Final[str] = (
+    'html:not(.dark) [data-testid="onyx-ai-message"],'
+    "html:not(.dark) #onyx-human-message"
+    "{--text-04:#000;--text-05:#000}"
+)
+
+# The sidebar header mark, hidden so the header is just the wordmark.
+#
+# `Logo` lays two inline SVGs side by side -- the 64x64 mark and the 152x64 wordmark -- and neither
+# carries a class or an id worth selecting on. The viewBox does the work instead: it is Onyx's own
+# artwork geometry, the same 64x64 grid `ONYX_LOGO_PATHS` in `onyx_brand_assets.py` already keys
+# its path substitutions to, so the two would break together rather than one silently missing.
+#
+# Scoped to the sidebar header, which leaves the same mark in place on the login page where it is
+# the only branding on screen.
+SIDEBAR_LOGO_CSS: Final[str] = (
+    '.opal-sidebar-header svg[viewBox="0 0 64 64"]'
+    "{display:none}"
+)
+
+# The "Add Model" button beside the model picker, removed.
+#
+# It opens a dialog for registering another LLM provider, which on a single-node deployment serving
+# one local model is a dead end. The button has no test id, so it is pinned as the model picker's
+# first child, and its trailing divider goes with it -- leaving the divider behind would put a
+# rule between the model name and nothing at all.
+MODEL_SELECTOR_CSS: Final[str] = (
+    '[data-testid="model-selector"]>button:first-child,'
+    '[data-testid="model-selector"]>.opal-divider-vertical'
+    "{display:none}"
+)
+
+# The sidebar's Agents section, hidden.
+#
+# Hidden rather than removed: nothing is taken out of Onyx's bundle, and dropping this one constant
+# from `UI_OVERRIDES` brings the section back on the next `dream onyx configure`.
+#
+# The section wrapper is a bare `flex flex-col` with no handle of its own, so it is selected by
+# what it *contains* -- `:has()` on the More Agents entry, which does carry a test id. That reads
+# as "the sidebar body section holding the agents list", which is what it is, and survives the
+# heading being renamed or the entries changing.
+AGENTS_SECTION_CSS: Final[str] = (
+    '.opal-sidebar-body__content>*:has(>[data-testid="AppSidebar/more-agents"])'
+    "{display:none}"
+)
+
+# The sidebar's Projects section, hidden. Same reasoning as the agents one: hidden, not removed.
+#
+# This section has no handle at all -- no id, no test id, no link -- so it is identified as the one
+# `flex flex-col` section of the sidebar body that is *not* the agents section. That is a weaker
+# grip than the rest of this file and worth knowing: a third section of the same shape would be
+# caught by it too.
+PROJECTS_SECTION_CSS: Final[str] = (
+    ".opal-sidebar-body__content>div.flex.flex-col"
+    ':not(:has([data-testid="AppSidebar/more-agents"]))'
+    "{display:none}"
+)
+
+# The Projects group inside the search palette, hidden to match the sidebar.
+#
+# The palette is a flat list -- headings and entries are siblings, not a heading wrapping its
+# group -- so the heading has to be hidden separately from the entries. It carries no attribute of
+# its own, so it is selected as "whatever sits directly above New Project" with `:has(+ …)`, which
+# is precisely what it is. The entries are the New Project action and any `project-<id>` rows.
+SEARCH_PROJECTS_CSS: Final[str] = (
+    '[data-command-menu-list] [data-command-item="new-project"],'
+    '[data-command-menu-list] [data-command-item^="project-"],'
+    '[data-command-menu-list] *:has(+[data-command-item="new-project"])'
+    "{display:none}"
+)
+
+# Sidebar row labels at full black.
+#
+# Onyx dims an unselected row to `--text-03` (`#0000008c`, 55% black) through the same
+# `--interactive-foreground` variable the selected row uses, so chat titles read as grey. This
+# promotes the unselected and filled states to solid black, matching the message text.
+#
+# `--interactive-foreground-icon` is left alone: the request was the session names, and the icons
+# beside "New" and "Search" are chrome that reads better a step back from the label.
+#
+# Light-mode scope for the same reason as the message text -- in dark mode this variable resolves
+# to white at partial alpha, and forcing it black would erase the sidebar.
+SIDEBAR_TEXT_CSS: Final[str] = (
+    'html:not(.dark) .interactive[data-interactive-variant^="sidebar"]'
+    '[data-interactive-state="empty"],'
+    'html:not(.dark) .interactive[data-interactive-variant^="sidebar"]'
+    '[data-interactive-state="filled"]'
+    "{--interactive-foreground:#000}"
+)
+
+# The "Onyx v4.5.6 - Open Source AI Platform" line under the composer, hidden.
+#
+# Targeted as "the span in the page footer that wraps a link" rather than by hiding the `<footer>`
+# outright: on some layouts the composer itself is rendered into that slot, and a rule that would
+# take the input box with it is not one to leave lying around. The version line is the only anchor
+# in there.
+FOOTER_CSS: Final[str] = (
+    ".opal-root-layout__footer span:has(a)"
+    "{display:none}"
+)
+
+# The unread badge in the sidebar, in Tiffany rather than Onyx's blue.
+#
+# The badge carries its colour in an *inline* style, which no stylesheet can outrank without
+# `!important` -- but the inline value is `var(--action-link-05)`, so redefining that variable in
+# the sidebar's scope recolours it with an ordinary rule. Scoped to the sidebar column rather than
+# `:root` because the same token is the app's link colour everywhere else.
+NOTIFICATION_BADGE_CSS: Final[str] = (
+    ".opal-sidebar-root__column"
+    f"{{--action-link-05:{TIFFANY_BLUE}}}"
+)
+
+# The expand control on a collapsed sidebar, always visible.
+#
+# Onyx swaps the two: `__logo-rest` shows at rest and `__logo-fold` -- the "Open Sidebar" button --
+# only appears on `:hover` of the column. On a collapsed sidebar that hides the one control that
+# gets you back, so this pins the swap to the collapsed state instead of the pointer.
+SIDEBAR_FOLDED_CSS: Final[str] = (
+    ".opal-sidebar-root__column[data-folded=true] .opal-sidebar-header__logo-fold"
+    "{display:flex}"
+    ".opal-sidebar-root__column[data-folded=true] .opal-sidebar-header__logo-rest"
+    "{display:none}"
+)
+
+# The chat header's Share button, hidden. Hidden rather than removed, like the agents and projects
+# sections -- drop the constant and it comes back.
+#
+# It is the one control in that header with an `aria-label` of its own, which makes it the rare
+# case where the handle needs no reasoning about structure at all.
+SHARE_BUTTON_CSS: Final[str] = (
+    '[aria-label="share-chat-button"]'
+    "{display:none}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
-    + CHAT_SURFACE_CSS + AGENT_AVATAR_CSS
+    + CHAT_SURFACE_CSS + AGENT_AVATAR_CSS + MESSAGE_TEXT_CSS
+    + SIDEBAR_LOGO_CSS + MODEL_SELECTOR_CSS + AGENTS_SECTION_CSS
+    + PROJECTS_SECTION_CSS + SEARCH_PROJECTS_CSS + SIDEBAR_TEXT_CSS
+    + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
 )
 
 

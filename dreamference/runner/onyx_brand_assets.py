@@ -27,11 +27,21 @@ from typing import Final, List, Optional, Tuple
 # Where the Next.js server keeps the images it serves from the site root.
 WEB_PUBLIC_DIR: Final[str] = "/app/public"
 
-# Puffin's palette: indigo through violet, chosen to stay legible on both the light and dark
-# sidebar without a separate mark for each.
-BRAND_START: Final[Tuple[int, int, int]] = (79, 70, 229)
-BRAND_END: Final[Tuple[int, int, int]] = (147, 51, 234)
-BRAND_LIGHT: Final[Tuple[int, int, int]] = (167, 139, 250)
+# Puffin's palette, built from Tiffany Blue. `TIFFANY_BLUE` is the brand colour's single
+# definition -- `onyx_ui_overrides.py` imports it from here for the selected sidebar row, so the
+# favicon and the UI cannot drift apart.
+#
+# The mark is a gradient rather than a flat fill, so the scale runs a deeper teal below Tiffany and
+# a paler one above it: light backgrounds get Tiffany into the deep end, dark backgrounds get the
+# pale end into Tiffany, and one mark stays legible on both without a separate asset for each.
+TIFFANY_BLUE: Final[str] = "#0ABAB5"
+BRAND_START: Final[Tuple[int, int, int]] = (10, 186, 181)
+BRAND_END: Final[Tuple[int, int, int]] = (6, 127, 123)
+BRAND_LIGHT: Final[Tuple[int, int, int]] = (129, 216, 208)
+
+# The wordmark on a dark background: Tiffany lightened to near-white rather than the mark's pale
+# end, which is too close to the sidebar tint to read as type.
+BRAND_WORDMARK_DARK: Final[Tuple[int, int, int, int]] = (206, 240, 238, 255)
 
 FONT_CANDIDATES: Final[List[str]] = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -329,7 +339,7 @@ class OnyxBrandAssets:
 
         image = Image.new("RGBA", size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        colour = (237, 233, 254, 255) if dark else BRAND_START + (255,)
+        colour = BRAND_WORDMARK_DARK if dark else BRAND_START + (255,)
 
         # Fit the word to the canvas rather than guessing a point size: the two wordmark files
         # ship at very different aspect ratios.
