@@ -39,13 +39,13 @@ def test_scripts_go_only_into_chunks_that_render_the_anchor():
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node is needed to execute the injected script")
-def test_button_appears_only_when_a_client_is_configured_but_unconnected(tmp_path):
+def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
     # The injected script is real JavaScript that runs in a browser, so it is tested by running it
     # -- against a stub DOM, in the three states it distinguishes.
     harness = tmp_path / "harness.js"
     harness.write_text(textwrap.dedent("""
         let appended = null;
-        const footer = { prepend: (el) => { appended = el; } };
+        const footer = { appendChild: (el) => { appended = el; } };
         global.window = {};
         global.navigator = { userAgent: 'Mozilla/5.0 AppleWebKit/605.1.15 Safari/605.1.15' };
         let engine = null;
@@ -98,9 +98,12 @@ def test_button_appears_only_when_a_client_is_configured_but_unconnected(tmp_pat
     assert outcome["text"] == "Connect to Google"
     assert outcome["id"] == BUTTON_ID
     assert outcome["href"].endswith("/oauth/start")
-    # Nothing to ask for once connected, and nothing to connect to without a client.
+    # Nothing left to ask for once connected.
     assert outcome["whenConnected"] is False
-    assert outcome["whenUnconfigured"] is False
+    # But someone who has never configured a client is exactly who the button is for: gating on
+    # `configured` as well showed it only to people already half-way through the setup. The click
+    # is not a dead end -- `/oauth/start` answers an unconfigured request with the command to run.
+    assert outcome["whenUnconfigured"] is True
 
 
 def test_engine_is_marked_before_anything_else_runs():
@@ -155,3 +158,46 @@ def test_drawn_scrollbar_survives_react_recreating_the_chat_list():
     assert "addEventListener('scroll',upd,true)" in SCROLLBAR_SCRIPT
     # The interval is the fallback for what no event announces: content changing the height.
     assert "setInterval(upd,1000)" in SCROLLBAR_SCRIPT
+
+
+def test_button_is_appended_beside_the_account_row_rather_than_above_it():
+    # The footer's one child is the account row, so appending puts the button after the name. The
+    # footer is laid out as a flex row in the stylesheet to make "after" mean "to the right of".
+    from dreamference.chat.onyx_ui_overrides import CONNECT_BUTTON_CSS
+
+    assert "f.appendChild(a)" in CONNECT_GOOGLE_SCRIPT
+    assert "f.prepend(a)" not in CONNECT_GOOGLE_SCRIPT
+    assert ".opal-sidebar-footer{display:flex;align-items:center" in CONNECT_BUTTON_CSS
+
+
+def test_the_account_row_is_selected_structurally_not_by_its_classes():
+    # It is `div > #onyx-user-dropdown > div.relative > button.interactive > …` -- four wrappers of
+    # Onyx's own naming above the name. Keying the flex rule on any of them would break on a
+    # rename; "whatever else is in the footer" does not. `min-width:0` is what lets the row shrink:
+    # a flex item floors at its content width otherwise, and the truncating name span inside would
+    # push the button off the sidebar's edge instead of ellipsing.
+    from dreamference.chat.onyx_ui_overrides import CONNECT_BUTTON_CSS
+
+    assert ".opal-sidebar-footer>*:not(#puffin-connect-google){flex:1 1 auto;min-width:0}" \
+        in CONNECT_BUTTON_CSS
+    assert "interactive" not in CONNECT_BUTTON_CSS
+
+
+def test_the_link_opens_a_new_tab_only_where_new_tabs_work():
+    # Tauri leaves wry's `new_window_req_handler` unset unless a window is built in Rust with
+    # `on_new_window`, and wry only connects WebKitGTK's `create` signal when that handler exists.
+    # A `target=_blank` click in the desktop app is therefore silently inert -- no window, no
+    # error, nothing. The browser keeps the new tab; the app navigates in place.
+    assert "a.target=ENG==='blink'?'_blank':'_self';" in CONNECT_GOOGLE_SCRIPT
+
+
+def test_the_service_pages_offer_a_way_back():
+    # Navigating in place means the OAuth pages replace the chat, and they carry no chrome of their
+    # own. Without this link the desktop user is stranded on a bare paragraph.
+    import inspect
+
+    from dreamference.chat.gmail_search_service import GmailSearchService, ONYX_ORIGIN
+
+    source = inspect.getsource(GmailSearchService.serve)
+    assert '<a href="{ONYX_ORIGIN}/app">Back to Puffin</a>' in source
+    assert ONYX_ORIGIN == "http://localhost:3000"

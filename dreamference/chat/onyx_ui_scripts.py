@@ -41,6 +41,12 @@ ANCHOR_CLASS: Final[str] = "opal-sidebar-footer"
 
 # The element the button is given, so the stylesheet in `onyx_ui_overrides.py` can style it and
 # the script can find its own work again after a re-render.
+#
+# It is appended to the footer rather than prepended, because the footer's one child is the account
+# row -- `div > #onyx-user-dropdown > … > span.truncate` holding the name. Appending puts the button
+# after it, and the stylesheet lays the footer out as a flex row, so the button lands to the right
+# of the name. The layout rule is written against the footer's *children* rather than the account
+# row's own classes: that row is four wrapper divs deep and every one of them is Onyx's to rename.
 BUTTON_ID: Final[str] = "puffin-connect-google"
 
 # Marks the rendering engine on `<html>` so stylesheets can tell WebKitGTK from Blink.
@@ -62,20 +68,29 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "if(window.__puffinConnect)return;window.__puffinConnect=1;"
     # Blink's user agent contains "Chrome/"; WebKitGTK's does not. Set before anything else, so a
     # stylesheet depending on it applies as early as this script runs.
-    f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",'
-    '/Chrome\\//.test(navigator.userAgent)?"blink":"webkit");' 
+    'var ENG=/Chrome\\//.test(navigator.userAgent)?"blink":"webkit";'
+    f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",ENG);'
     f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}/oauth/start",ID="{BUTTON_ID}";'
-    # Placed at the top of the footer, above the account row, so it reads as a prompt rather than
-    # as one more menu entry.
+    # Placed in the footer beside the account row, so it reads as something offered to this user
+    # rather than as one more menu entry.
     "function place(){var f=document.querySelector('.%s');" % ANCHOR_CLASS +
     "if(!f)return;if(document.getElementById(ID))return;"
-    "var a=document.createElement('a');a.id=ID;a.href=U;a.target='_blank';"
-    "a.rel='noopener';a.textContent='Connect to Google';f.prepend(a);}"
+    # A new window is the *browser's* behaviour, not the app's. Tauri leaves wry's
+    # `new_window_req_handler` unset unless a window is built in Rust with `on_new_window`, and wry
+    # only connects WebKitGTK's `create` signal when that handler exists -- so a `target=_blank`
+    # click in the desktop app is silently inert, no window and no error. Navigating in place is
+    # what works there, and the service's pages carry a link back to the chat.
+    "var a=document.createElement('a');a.id=ID;a.href=U;a.target=ENG==='blink'?'_blank':'_self';"
+    "a.rel='noopener';a.textContent='Connect to Google';f.appendChild(a);}"
     "function drop(){var e=document.getElementById(ID);if(e)e.remove();}"
-    # `configured && !connected` is the only state this button is for: with no Google client there
-    # is nothing to connect to, and once connected there is nothing to ask for.
+    # `!connected` is the whole gate. It deliberately does not also require `configured`: someone
+    # who has never set Gmail up at all has *no* Google client stored, and that is exactly the user
+    # the button is for -- gating on `configured` showed it only to people already half-way through.
+    # The unconfigured click is not a dead end either; `/oauth/start` answers it with the command to
+    # run, which is the missing step. `catch(drop)` covers the service being down, where there is
+    # nothing the button could usefully do.
     "function check(){fetch(S).then(function(r){return r.json()}).then(function(s){"
-    "if(s&&s.configured&&!s.connected){place()}else{drop()}}).catch(drop);}"
+    "if(s&&!s.connected){place()}else{drop()}}).catch(drop);}"
     f"function boot(){{check();setInterval(check,{POLL_INTERVAL_MS});}}"
     "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot)}"
     "else{boot()}"

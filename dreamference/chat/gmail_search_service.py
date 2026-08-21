@@ -268,8 +268,10 @@ class GmailSearchService:
 
         Returns:
             Dict[str, Any]: `configured` -- a Google client is stored; `connected` -- someone has
-                consented and there is a refresh token. The Connect button exists for the state
-                where the first is true and the second is not.
+                consented and there is a refresh token. The Connect button keys on `connected`
+                alone, so it is offered to someone who has not configured a client either; both
+                flags are reported because they are different questions and the tool itself needs
+                the first.
         """
         stored = cls.credentials() or {}
         return {
@@ -367,7 +369,14 @@ class GmailSearchService:
                 self.end_headers()
 
             def _page(self, message: str) -> None:
-                body = f"<h2>Puffin</h2><p>{message}</p>".encode()
+                # The link back matters more than it looks. In the browser the button opens a new
+                # tab and this page is disposable, but the desktop app has no new window to open
+                # (see `onyx_ui_scripts.py`), so it navigates in place -- and without a way back
+                # the user is left staring at a bare paragraph with no chrome to return from.
+                body = (
+                    f"<h2>Puffin</h2><p>{message}</p>"
+                    f'<p><a href="{ONYX_ORIGIN}/app">Back to Puffin</a></p>'
+                ).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))

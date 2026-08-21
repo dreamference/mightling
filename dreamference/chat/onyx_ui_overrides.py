@@ -522,13 +522,25 @@ DIVIDER_CSS: Final[str] = (
 # The Connect to Google button, which `onyx_ui_scripts.py` injects into the sidebar footer.
 #
 # Styled here rather than inline in the script so the button is described in the same place as the
-# rest of the UI, and so it picks up the brand colour from one definition. It is only in the DOM
-# when a Google client is configured and nobody has consented yet.
+# rest of the UI, and so it picks up the brand colour from one definition. It is in the DOM
+# whenever nobody has consented to Gmail yet, which for a fresh install is everybody.
+#
+# It sits to the right of the account name, and the footer is turned into a flex row to put it
+# there. **The growing child is selected structurally, not by class.** The account row is
+# `div > #onyx-user-dropdown > div.relative > button.interactive > …`, four wrappers of Onyx's own
+# naming above the name itself; `>*:not(#puffin-connect-google)` says "whatever else is in the
+# footer" and keeps working through a rename. `min-width:0` is what lets it shrink -- a flex item
+# floors at its content width otherwise, and the `span.truncate` inside would push the button off
+# the edge instead of ellipsing a long name.
 CONNECT_BUTTON_CSS: Final[str] = (
+    ".opal-sidebar-footer"
+    "{display:flex;align-items:center;gap:6px}"
+    ".opal-sidebar-footer>*:not(#puffin-connect-google)"
+    "{flex:1 1 auto;min-width:0}"
     "#puffin-connect-google"
-    f"{{display:block;margin:4px 8px 8px;padding:8px 10px;border-radius:8px;"
-    f"background-color:{TIFFANY_BLUE};color:#fff;text-align:center;text-decoration:none;"
-    "font-size:.8125rem;font-weight:500}"
+    f"{{flex:0 0 auto;padding:3px 8px;border-radius:6px;"
+    f"background-color:{TIFFANY_BLUE};color:#fff;text-decoration:none;white-space:nowrap;"
+    "font-size:.6875rem;font-weight:500;line-height:1.45}"
     "#puffin-connect-google:hover"
     f"{{background-color:{TIFFANY_BLUE_HOVER}}}"
 )
