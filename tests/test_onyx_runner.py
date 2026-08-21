@@ -601,14 +601,16 @@ def test_white_sidebar_is_scoped_to_light_mode():
     ) in SIDEBAR_CSS
 
 
-def test_user_bubble_is_white_and_keeps_an_edge():
-    # A white bubble on Onyx's near-white chat background has no edge of its own, so the shadow is
-    # load-bearing rather than decoration -- it is what Telegram uses in place of a fill.
+def test_user_bubble_is_tinted_and_keeps_an_edge():
+    # The tint is faint, so the shadow is still doing most of the work of separating the bubble from
+    # the white canvas.
     from dreamference.runner.onyx_ui_overrides import MESSAGE_BUBBLE_CSS
 
     # The id is Onyx's own and carries the specificity to beat the Tailwind utility unaided.
     assert MESSAGE_BUBBLE_CSS.startswith("html:not(.dark) #onyx-human-message ")
-    assert "background-color:var(--background-tint-00)" in MESSAGE_BUBBLE_CSS
+    from dreamference.runner.onyx_ui_overrides import TIFFANY_TINT
+
+    assert f"background-color:{TIFFANY_TINT}" in MESSAGE_BUBBLE_CSS
     assert "box-shadow:" in MESSAGE_BUBBLE_CSS
 
 
@@ -635,8 +637,10 @@ def test_hidden_avatar_keeps_the_timeline_rail_in_layout():
     assert "visibility:hidden" in AGENT_AVATAR_CSS
     assert "display:none" not in AGENT_AVATAR_CSS
     # Matched on the CSS variable the arbitrary-value class is built from, not the escaped class.
-    assert '[class*="--timeline-rail-width"]' in AGENT_AVATAR_CSS
-    assert AGENT_AVATAR_CSS.startswith('[data-testid="onyx-ai-message"] ')
+    assert AGENT_AVATAR_CSS.startswith('[class*="--timeline-rail-width"]')
+    # Deliberately not scoped to the completed-message test id: Onyx sets that only once a message
+    # finishes, so scoping there left the avatar on screen for the whole time an answer streamed.
+    assert "onyx-ai-message" not in AGENT_AVATAR_CSS
 
 
 def test_black_message_text_is_done_with_tokens_and_stays_out_of_dark_mode():
@@ -782,22 +786,15 @@ def test_share_button_is_hidden_by_its_own_aria_label():
     assert SHARE_BUTTON_CSS in UI_OVERRIDES
 
 
-def test_composer_model_chip_hands_clicks_back_to_the_icons_beneath_it():
-    # The wrapper is pinned over the full width of the toolbar row. Left clickable it would swallow
-    # every click meant for the attach, settings and Deep Research buttons underneath.
-    from dreamference.runner.onyx_ui_overrides import COMPOSER_MODEL_CSS
+def test_model_chip_is_hidden_rather_than_relocated():
+    # Three attempts to move it onto the composer toolbar row are documented in the module; each was
+    # right on one screen and wrong on the other, because the chip is not a descendant of the
+    # composer box and CSS cannot reparent. The wrapper goes, not the chip, so the row collapses
+    # instead of leaving a gap above the composer.
+    from dreamference.runner.onyx_ui_overrides import MODEL_CHIP_CSS, UI_OVERRIDES
 
-    assert 'div:has(>[data-testid="model-selector"])' in COMPOSER_MODEL_CSS
-    assert COMPOSER_MODEL_CSS.count("pointer-events:none") == 2
-    assert '[data-testid="model-selector"]>*{pointer-events:auto}' in COMPOSER_MODEL_CSS
-    # The two measured offsets are named, being the part an upstream composer change invalidates.
-    assert "--dream-composer-toolbar-height:44px" in COMPOSER_MODEL_CSS
-    assert "--dream-composer-actions-width:88px" in COMPOSER_MODEL_CSS
-    # The containing block is named explicitly rather than inherited from whatever ancestor happens
-    # to be positioned -- that was the composer column on a chat page and the whole intro column on
-    # a new-chat page, which put the chip halfway down an empty screen.
-    assert 'div:has(>div>[data-testid="model-selector"]){position:relative}' in COMPOSER_MODEL_CSS
-    assert "bottom:0" in COMPOSER_MODEL_CSS
+    assert MODEL_CHIP_CSS == 'div:has(>[data-testid="model-selector"]){display:none}'
+    assert MODEL_CHIP_CSS in UI_OVERRIDES
 
 
 def test_brand_mark_is_exactly_the_tiffany_used_in_the_ui():
@@ -827,3 +824,26 @@ def test_selected_row_avatar_is_inverted_on_the_tiffany_fill():
     assert SIDEBAR_AVATAR_CSS.endswith("{background-color:#fff;color:#000}")
     # The initials carry their own colour class, so the descendants are recoloured too.
     assert SIDEBAR_AVATAR_CSS.count(".bg-background-neutral-inverted-00") == 2
+
+
+def test_help_link_is_hidden_by_where_it_points():
+    # docs.onyx.app is off-brand and unreachable from an air-gapped machine. The menu entry has no
+    # id, but a link to a specific external host is an unambiguous handle.
+    from dreamference.runner.onyx_ui_overrides import HELP_LINK_CSS, UI_OVERRIDES
+
+    assert HELP_LINK_CSS == '[href^="https://docs.onyx.app"]{display:none}'
+    assert HELP_LINK_CSS in UI_OVERRIDES
+
+
+def test_sidebar_header_matches_the_section_title_colour():
+    # New, Search and the wordmark take `--text-02`, the token "Recents" is drawn in, so navigation
+    # chrome recedes while the chat titles below stay black.
+    from dreamference.runner.onyx_ui_overrides import (
+        SIDEBAR_HEADER_TEXT_CSS, SIDEBAR_TEXT_CSS,
+    )
+
+    assert "--interactive-foreground:var(--text-02)" in SIDEBAR_HEADER_TEXT_CSS
+    # The wordmark is an SVG whose paths carry a fill, so it needs a rule of its own.
+    assert 'svg[viewBox="0 0 152 64"] path{fill:var(--text-02)}' in SIDEBAR_HEADER_TEXT_CSS
+    # ...and the black-text rule is confined to the chat list, or it would fight this one.
+    assert SIDEBAR_TEXT_CSS.count(".opal-sidebar-body__content") == 2

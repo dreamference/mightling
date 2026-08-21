@@ -65,6 +65,9 @@ HOVER_TOOLBAR_CSS: Final[str] = (
 # white label) rendered in the brand colour.
 TIFFANY_BLUE_HOVER: Final[str] = "#09A19C"
 
+# The brand colour at about a tenth strength, for surfaces that are tinted rather than filled.
+TIFFANY_TINT: Final[str] = "#E4F7F6"
+
 # A white sidebar with a filled selected row, as Telegram draws it.
 #
 # Onyx tints the sidebar with `--background-tint-02`; only the column itself carries it, so one
@@ -102,19 +105,19 @@ SIDEBAR_CSS: Final[str] = (
 )
 
 
-# The user's own message bubble, white instead of grey.
+# The user's own message bubble, tinted instead of grey.
 #
-# Onyx fills it with `bg-background-tint-02`, the same raised-surface tint as the sidebar. Telegram
-# puts its message bubbles on a plain white surface and separates them from the page with a soft
-# shadow rather than a fill, which is what this does -- without the shadow a white bubble on the
-# near-white chat background has no edge at all.
+# Onyx fills it with `bg-background-tint-02`, the same raised-surface tint as the sidebar. It is
+# refilled with a light wash of the brand colour, which is what makes the user's own turn findable
+# at a glance down a white page. The shadow stays: the tint is faint enough that without it the
+# bubble would have only the softest edge against the white canvas.
 #
 # `#onyx-human-message` is an id Onyx writes by hand on the message wrapper, so it both scopes the
 # rule to user messages and supplies the specificity to beat the Tailwind utility on its own.
 MESSAGE_BUBBLE_CSS: Final[str] = (
     "html:not(.dark) #onyx-human-message .bg-background-tint-02"
-    "{background-color:var(--background-tint-00);"
-    "box-shadow:0 1px 2px rgba(0,0,0,.08)}"
+    f"{{background-color:{TIFFANY_TINT};"
+    'box-shadow:0 1px 2px rgba(0,0,0,.08)}'
 )
 
 # The chat canvas, white instead of Onyx's `--background-tint-01` grey.
@@ -149,8 +152,12 @@ CHAT_SURFACE_CSS: Final[str] = (
 # `visibility` rather than `display`, because the rail is what the header row and the indented
 # message body are aligned against: removing it from layout slides the "Thought for Ns" header out
 # from over the text it belongs to. Hiding it in place takes the avatar and keeps the grid.
+#
+# The rule is deliberately *not* scoped to `[data-testid="onyx-ai-message"]`. Onyx sets that test id
+# only once a message is complete, so scoping it there left the avatar on screen for the whole time
+# an answer was streaming -- which is when it is most visible.
 AGENT_AVATAR_CSS: Final[str] = (
-    '[data-testid="onyx-ai-message"] [class*="--timeline-rail-width"]'
+    '[class*="--timeline-rail-width"]'
     "{visibility:hidden}"
 )
 
@@ -239,23 +246,43 @@ SEARCH_PROJECTS_CSS: Final[str] = (
     "{display:none}"
 )
 
-# Sidebar row labels at full black.
+# Sidebar row labels at full black -- in the chat list only.
 #
 # Onyx dims an unselected row to `--text-03` (`#0000008c`, 55% black) through the same
 # `--interactive-foreground` variable the selected row uses, so chat titles read as grey. This
 # promotes the unselected and filled states to solid black, matching the message text.
 #
-# `--interactive-foreground-icon` is left alone: the request was the session names, and the icons
-# beside "New" and "Search" are chrome that reads better a step back from the label.
+# Scoped to `.opal-sidebar-body__content`, which is the chat list. New and Search live in the
+# header and are handled by `SIDEBAR_HEADER_TEXT_CSS` instead, at the section-title colour: one
+# selector covering both made the navigation as loud as the content.
+#
+# `--interactive-foreground-icon` is left alone: the request was the session names.
 #
 # Light-mode scope for the same reason as the message text -- in dark mode this variable resolves
 # to white at partial alpha, and forcing it black would erase the sidebar.
 SIDEBAR_TEXT_CSS: Final[str] = (
-    'html:not(.dark) .interactive[data-interactive-variant^="sidebar"]'
-    '[data-interactive-state="empty"],'
-    'html:not(.dark) .interactive[data-interactive-variant^="sidebar"]'
-    '[data-interactive-state="filled"]'
+    "html:not(.dark) .opal-sidebar-body__content "
+    '.interactive[data-interactive-variant^="sidebar"][data-interactive-state="empty"],'
+    "html:not(.dark) .opal-sidebar-body__content "
+    '.interactive[data-interactive-variant^="sidebar"][data-interactive-state="filled"]'
     "{--interactive-foreground:#000}"
+)
+
+# The sidebar header -- New, Search and the Puffin wordmark -- at the section-title colour.
+#
+# `--text-02` is what "Recents" is drawn in, so this is less a colour choice than pointing the
+# header at the token the section titles already use: navigation chrome recedes, the chat titles
+# below stay black, and the two cannot drift apart if the palette changes.
+#
+# The wordmark needs its own rule because it is an inline SVG whose paths carry a fill rather than
+# text inheriting a colour. It is matched on its 152x64 viewBox -- Onyx's own artwork geometry, the
+# same grip `SIDEBAR_LOGO_CSS` uses for the mark beside it.
+SIDEBAR_HEADER_TEXT_CSS: Final[str] = (
+    ".opal-sidebar-header "
+    '.interactive[data-interactive-variant^="sidebar"]'
+    "{--interactive-foreground:var(--text-02)}"
+    '.opal-sidebar-header svg[viewBox="0 0 152 64"] path'
+    "{fill:var(--text-02)}"
 )
 
 # The "Onyx v4.5.6 - Open Source AI Platform" line under the composer, hidden.
@@ -302,40 +329,22 @@ SHARE_BUTTON_CSS: Final[str] = (
     "{display:none}"
 )
 
-# The model chip, moved from its own line above the composer onto the composer's toolbar row,
-# right-aligned ahead of the mic and send buttons.
+# The model chip, hidden. Hidden, not removed -- drop the constant and it comes back.
 #
-# This is the one rule here that is a *layout* change rather than a repaint, and CSS cannot
-# reparent: the chip sits in a wrapper above the composer box, while the toolbar row is inside it.
-# So the wrapper is taken out of flow and pinned over that row instead.
+# It was asked for on the composer's toolbar row first, and three attempts are recorded here because
+# the reason they failed is a property of the DOM rather than of the attempts. CSS cannot reparent,
+# and the chip is not inside the composer box -- it sits in a wrapper above it, and on the new-chat
+# screen it is not even a sibling, a name prompt sits between them. `position:absolute` against an
+# inherited containing block, the same against a named one, and staying in flow with `order` plus a
+# negative margin each landed correctly on the chat page and wrongly on the new-chat page. Moving it
+# for real means moving the element in the composer's JSX inside the bundle.
 #
-# The first version anchored to "whatever ancestor happened to be positioned", which was the
-# composer column on a chat page and the whole intro column on a new-chat page -- so the chip landed
-# halfway down an empty screen there. The containing block is now named explicitly: the element that
-# wraps *both* the chip row and the composer box is made `position:relative`, and since the box is
-# its last child, `bottom:0` is the box's own bottom edge on every page and at every input height.
-#
-# Only one measured constant is left -- the width of the mic and send buttons the chip has to clear.
-# It is named because it is the part an upstream composer change would invalidate, and it would fail
-# visibly, as a chip in the wrong place, rather than silently.
-#
-# Pointer events are handed back only to the chip's own children. The wrapper spans the full row,
-# so leaving it clickable would swallow every click meant for the buttons underneath it.
-COMPOSER_MODEL_CSS: Final[str] = (
-    ".opal-root-layout__main"
-    "{--dream-composer-toolbar-height:44px;--dream-composer-actions-width:88px}"
-    'div:has(>div>[data-testid="model-selector"])'
-    "{position:relative}"
+# The wrapper goes rather than the chip itself, so the row it occupied collapses instead of leaving
+# a gap above the composer.
+MODEL_CHIP_CSS: Final[str] = (
     'div:has(>[data-testid="model-selector"])'
-    "{position:absolute;left:0;right:0;bottom:0;padding:0;margin:0;z-index:2;"
-    "height:var(--dream-composer-toolbar-height);pointer-events:none}"
-    '[data-testid="model-selector"]'
-    "{height:100%;justify-content:flex-end;pointer-events:none;"
-    "padding-right:var(--dream-composer-actions-width)}"
-    '[data-testid="model-selector"]>*'
-    "{pointer-events:auto}"
+    "{display:none}"
 )
-
 
 # Chat Preferences: the Chats card and the Memory card, hidden so the settings they hold stay at
 # their defaults. Hidden, not removed, like the rest.
@@ -375,14 +384,25 @@ SIDEBAR_AVATAR_CSS: Final[str] = (
     "{background-color:#fff;color:#000}"
 )
 
+# The "Help & FAQ" entry in the account menu, hidden.
+#
+# It links to docs.onyx.app, which is both off-brand and unreachable from an air-gapped machine.
+# The link target is the handle: the entry has no id or test id, but a menu item pointing at a
+# specific external host is unambiguous, and a sturdier grip than the item's position.
+HELP_LINK_CSS: Final[str] = (
+    '[href^="https://docs.onyx.app"]'
+    "{display:none}"
+)
+
 # Everything this module injects, in the order it is appended.
 UI_OVERRIDES: Final[str] = (
     OVERRIDE_MARKER + HOVER_TOOLBAR_CSS + SIDEBAR_CSS + MESSAGE_BUBBLE_CSS
     + CHAT_SURFACE_CSS + AGENT_AVATAR_CSS + MESSAGE_TEXT_CSS
     + SIDEBAR_LOGO_CSS + MODEL_SELECTOR_CSS + AGENTS_SECTION_CSS
     + PROJECTS_SECTION_CSS + SEARCH_PROJECTS_CSS + SIDEBAR_TEXT_CSS
+    + SIDEBAR_HEADER_TEXT_CSS
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
-    + COMPOSER_MODEL_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS
+    + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
 )
 
 
