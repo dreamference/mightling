@@ -405,9 +405,11 @@ HELP_LINK_CSS: Final[str] = (
 # collapses to `font-size:0` and `::first-letter` is given the size back. That works only because
 # Onyx already renders the span as a block; `::first-letter` does not apply to inline boxes.
 #
-# The span also needs `width:100%; text-align:center`: collapsed to zero font size it is a
-# zero-width box, so the disc's flex centring has nothing to centre and the surviving letter sits
-# off to one side.
+# The span also needs a box to be centred in. Collapsed to zero font size it has neither width nor
+# height: `width:100%; text-align:center` gives it the first, and `line-height` set to the disc's
+# own size gives it the second. Without the line-height the glyph sits high in the circle, because
+# a zero font-size means `line-height:normal` resolves to zero and there is no line box to centre
+# the letter within.
 #
 # `!important` is needed on exactly one declaration here, and not for want of specificity: Onyx sizes
 # the initials with an *inline* `font-size`, scaled to the disc. That is the same trap as the unread
@@ -417,11 +419,12 @@ HELP_LINK_CSS: Final[str] = (
 # reach pseudo-elements.
 SIDEBAR_AVATAR_DISC_CSS: Final[str] = (
     ".opal-sidebar-root__column"
-    "{--dream-avatar-initial-size:7.2px}"
+    "{--dream-avatar-initial-size:7.2px;--dream-avatar-disc-size:18px}"
     ".opal-sidebar-root__column .bg-background-neutral-inverted-00"
     "{background-color:var(--text-02)}"
     ".opal-sidebar-root__column .bg-background-neutral-inverted-00 span"
-    "{font-size:0!important;width:100%;text-align:center}"
+    "{font-size:0!important;width:100%;text-align:center;"
+    "line-height:var(--dream-avatar-disc-size)}"
     ".opal-sidebar-root__column .bg-background-neutral-inverted-00 span::first-letter"
     "{font-size:var(--dream-avatar-initial-size);line-height:1}"
 )
@@ -438,24 +441,40 @@ SIDEBAR_ACCOUNT_CSS: Final[str] = (
     "{font-size:.75rem;font-weight:400}"
 )
 
-# The sidebar, hidden until the pointer reaches the left edge.
+# The sidebar's collapse control, removed so the sidebar stays open.
 #
-# Taking the column out of flow with `position:fixed` is what gives the chat the full window: a
-# width transition would still reserve the space, and Onyx's own folded state is driven by a
-# `data-folded` attribute that JavaScript sets, which no stylesheet can toggle. Sliding it out and
-# back leaves the DOM exactly as it is -- the sidebar stays fully rendered, so nothing about the
-# chat list, the selected row or the account footer changes when it appears.
+# `aria-label="Close Sidebar"` is the handle -- the button carries nothing else, and the label is
+# written by hand rather than generated. `SIDEBAR_FOLDED_CSS` is what keeps this from being a trap:
+# anyone whose sidebar is *already* collapsed still sees the expand control, so hiding the way in
+# does not strand them with no way back.
+SIDEBAR_CLOSE_CSS: Final[str] = (
+    '[aria-label="Close Sidebar"]'
+    "{display:none}"
+)
+
+# The chat list's scrollbar, invisible until the pointer is in the sidebar.
 #
-# A sliver of it is left on screen (`--dream-sidebar-peek`) rather than hiding it completely,
-# because that sliver is the hover target. With `translateX(-100%)` there would be nothing to point
-# at and no way back to the chat list without a keyboard.
-SIDEBAR_HOVER_CSS: Final[str] = (
-    ".opal-sidebar-root__column"
-    "{--dream-sidebar-peek:10px;position:fixed;left:0;top:0;z-index:60;"
-    "transform:translateX(calc(-100% + var(--dream-sidebar-peek)));"
-    "transition:transform .18s ease-in-out}"
-    ".opal-sidebar-root__column:hover"
-    "{transform:translateX(0);box-shadow:0 0 24px rgba(0,0,0,.12)}"
+# The gutter stays 8px wide at all times and only the *thumb* changes colour. Hiding the scrollbar
+# by collapsing its width instead would reflow the whole chat list every time the pointer entered
+# or left the sidebar, which is a worse distraction than the scrollbar was.
+#
+# Both engines are addressed because both are in play: Chromium and WebKitGTK take the
+# `::-webkit-scrollbar` pseudo-elements, Firefox takes `scrollbar-color`. `scrollbar-button` is
+# hidden outright -- WebKitGTK draws stepper arrows that no other surface in this UI has.
+SIDEBAR_SCROLLBAR_CSS: Final[str] = (
+    ".opal-sidebar-body__scroll"
+    "{scrollbar-width:thin;scrollbar-color:transparent transparent}"
+    ".opal-sidebar-body__scroll:hover"
+    "{scrollbar-color:rgba(0,0,0,.25) transparent}"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar"
+    "{width:8px}"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar-track,"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar-button"
+    "{background:transparent;display:none}"
+    ".opal-sidebar-body__scroll::-webkit-scrollbar-thumb"
+    "{background-color:transparent;border-radius:4px;transition:background-color .15s ease-in-out}"
+    ".opal-sidebar-body__scroll:hover::-webkit-scrollbar-thumb"
+    "{background-color:rgba(0,0,0,.25)}"
 )
 
 # Everything this module injects, in the order it is appended.
@@ -467,7 +486,8 @@ UI_OVERRIDES: Final[str] = (
     + SIDEBAR_HEADER_TEXT_CSS
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
-    + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_HOVER_CSS
+    + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
+    + SIDEBAR_SCROLLBAR_CSS
 )
 
 

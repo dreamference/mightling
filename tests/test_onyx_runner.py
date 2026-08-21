@@ -989,13 +989,43 @@ def test_env_matcher_ignores_a_commented_out_key(tmp_path):
         assert onyx.OnyxRunner._env_already_set({"DISABLE_TELEMETRY": "true"}) is True
 
 
-def test_hover_sidebar_leaves_a_target_to_hover():
-    # With translateX(-100%) there is nothing left on screen to point at, and no way back to the
-    # chat list without a keyboard. The peek is the hover target, not decoration.
-    from dreamference.chat.onyx_ui_overrides import SIDEBAR_HOVER_CSS, UI_OVERRIDES
+def test_sidebar_is_not_auto_hidden():
+    # Briefly auto-hidden on hover, then reverted: the sidebar stays open, and the control that
+    # would close it is hidden instead.
+    import dreamference.chat.onyx_ui_overrides as overrides
 
-    assert "--dream-sidebar-peek:10px" in SIDEBAR_HOVER_CSS
-    assert "translateX(calc(-100% + var(--dream-sidebar-peek)))" in SIDEBAR_HOVER_CSS
-    # Out of flow, so the chat gets the full window; a width transition would still reserve it.
-    assert "position:fixed" in SIDEBAR_HOVER_CSS
-    assert SIDEBAR_HOVER_CSS in UI_OVERRIDES
+    assert not hasattr(overrides, "SIDEBAR_HOVER_CSS")
+    assert "translateX" not in overrides.UI_OVERRIDES
+
+
+def test_closing_the_sidebar_is_removed_without_stranding_a_folded_one():
+    # Hiding the way in would be a trap on its own: SIDEBAR_FOLDED_CSS keeps the expand control
+    # visible for anyone whose sidebar is already collapsed, so there is still a way back.
+    from dreamference.chat.onyx_ui_overrides import (
+        SIDEBAR_CLOSE_CSS, SIDEBAR_FOLDED_CSS, UI_OVERRIDES,
+    )
+
+    assert SIDEBAR_CLOSE_CSS == '[aria-label="Close Sidebar"]{display:none}'
+    assert SIDEBAR_CLOSE_CSS in UI_OVERRIDES
+    assert "__logo-fold{display:flex}" in SIDEBAR_FOLDED_CSS
+
+
+def test_hidden_scrollbar_keeps_its_gutter():
+    # Collapsing the scrollbar's width would reflow the chat list every time the pointer entered or
+    # left the sidebar -- a worse distraction than the scrollbar. Only the thumb changes colour.
+    from dreamference.chat.onyx_ui_overrides import SIDEBAR_SCROLLBAR_CSS
+
+    assert "::-webkit-scrollbar{width:8px}" in SIDEBAR_SCROLLBAR_CSS
+    assert "scrollbar-thumb{background-color:transparent" in SIDEBAR_SCROLLBAR_CSS
+    assert ":hover::-webkit-scrollbar-thumb{background-color:rgba(0,0,0,.25)}" in SIDEBAR_SCROLLBAR_CSS
+    # Firefox takes a different property, and both engines are in play (browser and WebKitGTK).
+    assert "scrollbar-color:transparent transparent" in SIDEBAR_SCROLLBAR_CSS
+
+
+def test_avatar_initial_has_a_line_box_to_centre_in():
+    # At font-size 0, `line-height:normal` resolves to zero, so the glyph has no line box and sits
+    # high in the circle. The disc's own size supplies one.
+    from dreamference.chat.onyx_ui_overrides import SIDEBAR_AVATAR_DISC_CSS
+
+    assert "--dream-avatar-disc-size:18px" in SIDEBAR_AVATAR_DISC_CSS
+    assert "line-height:var(--dream-avatar-disc-size)" in SIDEBAR_AVATAR_DISC_CSS
