@@ -1,0 +1,100 @@
+# Puffin — Google Auth via GOA Client
+
+**Status:** draft · **Owner:** Owner · **Scope:** Gmail + Drive connectors, single-user and multi-account
+
+## 1. Summary
+
+Puffin authenticates Google users with the OAuth client shipped in GNOME Online Accounts (GOA). The client is verified by Google for `mail.google.com` and `drive`, so users see a normal consent screen — no "unverified app" interstitial, no 100-user cap, no 7-day token expiry — and Dreamference never submits its own app for CASA review. Puffin's backend performs the OAuth flow directly; GNOME is not installed or run anywhere.
+
+## 2. Auth ladder
+
+| Account type | Default path | Fallback |
+|---|---|---|
+| Workspace, cooperative admin | Service account + domain-wide delegation (existing Onyx code) | GOA |
+| Workspace, no admin | GOA | BYO OAuth client; IMAP app password |
+| gmail.com | GOA | BYO OAuth client; IMAP app password |
+
+## 3. Credentials
+
+Two strings, held once in instance config, never committed:
+
+```
+GOOGLE_OAUTH_CLIENT_ID      # GOA_GOOGLE_CLIENT_ID
+GOOGLE_OAUTH_CLIENT_SECRET  # GOA_GOOGLE_CLIENT_SECRET
+```
+
+Source: `gnome-online-accounts` build config (`meson_options.txt` / distro build). Document the origin in the ops runbook. Allow override per install so a user can substitute their own client.
+
+## 4. Scopes requested
+
+```
+openid email
+https://mail.google.com/
+https://www.googleapis.com/auth/drive.readonly
+```
+
+Optional, same grant: `calendar.readonly`, `carddav`, `tasks`. Request only what a connector uses; Google narrows to the requested subset of the client's verified scopes.
+
+## 5. Flow
+
+1. **Start.** `POST /api/google/oauth/start` → backend creates `state`, PKCE `code_verifier`, picks a free loopback port `P`, returns the auth URL:
+   `https://accounts.google.com/o/oauth2/v2/auth?client_id=…&redirect_uri=http://localhost:P&response_type=code&scope=…&access_type=offline&prompt=select_account%20consent&code_challenge=…&code_challenge_method=S256&state=…`
+2. **Consent.** Browser shows the Google picker and a consent screen titled "GNOME". Puffin's UI states beforehand: *"The consent screen will say GNOME — Puffin authenticates through the GNOME desktop's Google integration."*
+3. **Redirect.** Google sends the browser to `http://localhost:P/?code=…&state=…`.
+   - **Same host:** backend listener on `P` captures the code; tab shows "Connected".
+   - **Different host (common):** browser shows "localhost refused to connect". Puffin panel instructs: *"Copy the full URL from the address bar and paste it here."* `POST /api/google/oauth/complete {url}` extracts `code`, validates `state`.
+4. **Exchange.** Backend POSTs `code`, `code_verifier`, client id/secret, `redirect_uri` to `https://oauth2.googleapis.com/token`. Stores `refresh_token`, `access_token`, `expires_at`.
+5. **Identify.** `GET https://www.googleapis.com/oauth2/v3/userinfo` → `email`. Never trust a user-typed address.
+6. **Persist.** One credential row per `(puffin_user_id, google_email)`; upsert on repeat.
+
+Listener on `P` is bound to `127.0.0.1`, accepts one request, times out after 10 min.
+
+## 6. Token lifecycle
+
+- Refresh when `expires_at - now < 60s`; persist the new access token so workers share it.
+- Gmail IMAP XOAUTH2: `user=<email>\x01auth=Bearer <token>\x01\x01` via `imaplib.authenticate("XOAUTH2", …)`. Reconnects must fetch a fresh token, never reuse the cached auth string.
+- Error mapping:
+  - `invalid_grant` → user revoked / password change → mark *this* account "reconnect needed".
+  - `invalid_client` / `unauthorized_client` → GOA client rotated or revoked → fleet-wide alert, switch UI to BYO/IMAP fallback.
+  - `403 accessNotConfigured` on `gmail.googleapis.com` → Gmail REST API not enabled in GNOME's project → use IMAP path for Gmail.
+
+## 7. Data access
+
+| Service | Transport | Notes |
+|---|---|---|
+| Gmail | REST API if enabled in GNOME's project (test once at install: `GET /gmail/v1/users/me/messages?maxResults=1`); else IMAP `[Gmail]/All Mail` + `X-GM-RAW` | Same token either way |
+| Drive | REST API (`files.list`, `files.get`, `changes.list`) | Certainly enabled — gvfs uses it |
+| Docs / Sheets / Slides | `files.export` → `text/markdown`, `text/csv`, `text/plain` | No Docs API scope needed |
+| Contacts (optional) | CardDAV `https://www.googleapis.com/carddav/v1/` | |
+
+## 8. Multi-account
+
+- N Google accounts per Puffin user; each a separate credential + connector + sync cursor.
+- Documents tagged `source_account=<google_email>` for provenance, filtering and per-account disconnect.
+- Same Google account under two Puffin users → two independent credentials; no cross-user dedupe.
+- `login_hint=<email>` on reconnect.
+
+## 9. Workspace admin constraints
+
+Tenant "Third-party app access = restricted/blocked" requires the admin to allowlist client "GNOME". Tenant-level Gmail API or IMAP disablement blocks the corresponding transport regardless of auth. Education tenants commonly block both — route to DWD.
+
+## 10. Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| GNOME rotates or Google revokes the client | Low, non-zero (KDE precedent) | All GOA installs lose Google access at once | `invalid_client` detection → alert + automatic fallback UI; BYO client and IMAP app-password paths stay shipped |
+| Gmail REST API not enabled in GNOME's project | Unknown until tested | Gmail on IMAP only (no `history.list`, no snippets) | One-line probe at install; IMAP adapter behind the same interface |
+| Policy: reusing another app's credentials violates Google OAuth policy | Certain | Revocation trigger if Puffin traffic becomes noticeable in GNOME's project | Credentials not committed; per-install override; disclose on connect screen; keep volume per user modest (scoped queries, no full-archive crawls by default) |
+| Consent screen says "GNOME" | Certain | User confusion / phishing suspicion | One-line explanation before the redirect |
+
+## 11. Non-goals
+
+- No Dreamference-owned OAuth client, no CASA.
+- No Admin SDK scopes (`admin.directory.*`) on the GOA path; org-wide permission sync is DWD-only.
+- No Docs API, no Calendar/Tasks write scopes.
+
+## 12. Open items
+
+- [ ] Run the Gmail API probe with a GOA token; decide REST vs IMAP for Gmail.
+- [ ] Confirm `drive.readonly` is accepted as a narrowing of the client's `drive` scope (expected yes).
+- [ ] Draft the connect-screen copy and the paste-back UI.
