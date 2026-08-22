@@ -519,28 +519,21 @@ DIVIDER_CSS: Final[str] = (
     "{display:none}"
 )
 
-# The Connect to Google button, which `onyx_ui_scripts.py` injects into the sidebar footer.
+# The Connect to Google button, which `onyx_ui_scripts.py` injects into Settings -> Connectors.
 #
 # Styled here rather than inline in the script so the button is described in the same place as the
 # rest of the UI, and so it picks up the brand colour from one definition. It is in the DOM
 # whenever nobody has consented to Gmail yet, which for a fresh install is everybody.
 #
-# It sits to the right of the account name, and the footer is turned into a flex row to put it
-# there. **The growing child is selected structurally, not by class.** The account row is
-# `div > #onyx-user-dropdown > div.relative > button.interactive > …`, four wrappers of Onyx's own
-# naming above the name itself; `>*:not(#puffin-connect-google)` says "whatever else is in the
-# footer" and keeps working through a rename. `min-width:0` is what lets it shrink -- a flex item
-# floors at its content width otherwise, and the `span.truncate` inside would push the button off
-# the edge instead of ellipsing a long name.
+# `align-self:flex-start` is the one declaration doing real work. The section it is appended to is
+# `flex flex-col items-center`, so an appended child is centred; the heading and the connector card
+# above it are not, because they carry `w-full` and fill the row instead. Left-aligning the button
+# puts it under the text it belongs to rather than adrift in the middle of the panel.
 CONNECT_BUTTON_CSS: Final[str] = (
-    ".opal-sidebar-footer"
-    "{display:flex;align-items:center;gap:6px}"
-    ".opal-sidebar-footer>*:not(#puffin-connect-google)"
-    "{flex:1 1 auto;min-width:0}"
     "#puffin-connect-google"
-    f"{{flex:0 0 auto;padding:3px 8px;border-radius:6px;"
+    f"{{align-self:flex-start;margin-top:10px;padding:8px 14px;border-radius:8px;"
     f"background-color:{TIFFANY_BLUE};color:#fff;text-decoration:none;white-space:nowrap;"
-    "font-size:.6875rem;font-weight:500;line-height:1.45}"
+    "font-size:.8125rem;font-weight:500}"
     "#puffin-connect-google:hover"
     f"{{background-color:{TIFFANY_BLUE_HOVER}}}"
 )

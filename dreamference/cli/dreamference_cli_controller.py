@@ -837,6 +837,10 @@ class DreamferenceCLIController:
             "--no-voice", action="store_true",
             help="Skip the local Whisper server and the microphone button",
         )
+        onyx_configure_parser.add_argument(
+            "--no-gmail", action="store_true",
+            help="Skip the Gmail service and its search tool",
+        )
 
         # Google sign-in is additive in Onyx 4.5: it appears beside the password form rather than
         # replacing it, so this is its own command rather than a flag on `configure`.
@@ -852,9 +856,12 @@ class DreamferenceCLIController:
         onyx_gmail_parser = onyx_subparsers.add_parser(
             "gmail", help="Connect Gmail and give the assistant a mailbox search tool"
         )
-        onyx_gmail_parser.add_argument("--client-id", required=True, help="Google OAuth client ID")
         onyx_gmail_parser.add_argument(
-            "--client-secret", required=True, help="Google OAuth client secret"
+            "--email", required=True, dest="gmail_address", help="Gmail address to connect"
+        )
+        onyx_gmail_parser.add_argument(
+            "--app-password", required=True,
+            help="Google app password from myaccount.google.com/apppasswords (spaces are ignored)",
         )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
 
@@ -1590,7 +1597,7 @@ class DreamferenceCLIController:
                     kwargs["password"] = args.password
                 sys.exit(onyx_runner.configure(
                     enable_web=not args.no_web, brand=not args.no_brand,
-                    enable_voice=not args.no_voice, **kwargs
+                    enable_voice=not args.no_voice, enable_gmail=not args.no_gmail, **kwargs
                 ))
             elif args.onyx_command == "google-auth":
                 sys.exit(0 if onyx_runner.enable_google_login(
@@ -1598,7 +1605,7 @@ class DreamferenceCLIController:
                 ) else 1)
             elif args.onyx_command == "gmail":
                 sys.exit(0 if onyx_runner.connect_gmail(
-                    args.client_id, args.client_secret
+                    args.gmail_address, args.app_password
                 ) else 1)
             elif args.onyx_command == "status":
                 sys.exit(onyx_runner.status())

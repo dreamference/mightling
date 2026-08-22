@@ -375,6 +375,7 @@ class OnyxRunner:
         enable_web: bool = True,
         brand: bool = True,
         enable_voice: bool = True,
+        enable_gmail: bool = True,
     ) -> int:
         """
         Registers the local vLLM model with Onyx as its default LLM provider.
@@ -391,6 +392,7 @@ class OnyxRunner:
             enable_web (bool): Whether to also give the default assistant SearXNG web access.
             brand (bool): Whether to rebrand the deployment as Puffin.
             enable_voice (bool): Whether to run a local Whisper server and enable the microphone.
+            enable_gmail (bool): Whether to run the Gmail service and register its search tool.
 
         Returns:
             int: 0 on success, non-zero on failure.
@@ -469,6 +471,13 @@ class OnyxRunner:
 
         if enable_web:
             self.enable_web_search(api, cookie)
+
+        # Registered here rather than only from `dream onyx gmail`, because the Connect button that
+        # obtains the Google credentials lives in the UI this tool belongs to. Waiting for consent
+        # would mean a fresh install has no Gmail tool until someone had already finished a flow
+        # they can only start from a page the tool is listed on.
+        if enable_gmail:
+            self.enable_gmail_search(api, cookie)
 
         if brand:
             self.apply_branding(api, cookie)
@@ -911,18 +920,21 @@ class OnyxRunner:
 
     def connect_gmail(
         self,
-        client_id: str,
-        client_secret: str,
+        gmail_address: str,
+        app_password: str,
         web_url: str = DEFAULT_ONYX_WEB_URL,
         email: str = DEFAULT_ONYX_EMAIL,
         password: str = DEFAULT_ONYX_PASSWORD,
     ) -> bool:
         """
-        Runs the Google consent flow and registers Gmail search with Onyx.
+        Connects a mailbox over IMAP and registers Gmail search with Onyx.
+
+        The same connection the Connect to Google button makes from Settings -> Connectors; this is
+        the terminal route to it.
 
         Args:
-            client_id (str): Google OAuth client ID.
-            client_secret (str): Google OAuth client secret.
+            gmail_address (str): The Gmail address to connect.
+            app_password (str): Google app password, with or without the spaces Google displays.
             web_url (str): Base URL of the Onyx web UI.
             email (str): Onyx admin email.
             password (str): Onyx admin password.
@@ -932,7 +944,7 @@ class OnyxRunner:
         """
         from dreamference.chat.gmail_credentials import GmailCredentials
 
-        if not GmailCredentials.connect(client_id, client_secret):
+        if not GmailCredentials.connect(gmail_address, app_password):
             return False
 
         api = f"{web_url.rstrip('/')}/api"
@@ -967,14 +979,14 @@ class OnyxRunner:
         Returns:
             bool: True if the tool is registered.
         """
-        from dreamference.chat.gmail_credentials import GmailCredentials
         from dreamference.chat.gmail_search_service import openapi_definition
 
-        if not GmailCredentials.load():
-            print("⚠️  Gmail is not connected — skipping the Gmail tool.")
-            print("💡 Connect it with: dream onyx gmail --client-id … --client-secret …")
-            return False
-
+        # Registration deliberately does **not** wait for consent. The tool is a service URL and a
+        # shared-secret header; the Google refresh token is read per request, not at registration.
+        # Requiring a stored token here enforced an ordering that is not real, and it was the
+        # reason the tool could not exist before someone had already finished the OAuth flow --
+        # which is backwards, because the Connect button that starts that flow is reached from the
+        # UI this tool lives in. An unconnected search answers with the way to connect.
         secret = self._gmail_secret()
         if not secret or not self._start_gmail_service(secret):
             return False
@@ -1074,6 +1086,13 @@ class OnyxRunner:
         result = subprocess.run(
             ["docker", "run", "-d", "--name", GMAIL_CONTAINER_NAME,
              "--restart", "unless-stopped", "--network", network,
+             # As the invoking user, not root. The service *writes* to the mounted directory now --
+             # a connection made from the UI stores the mailbox credentials from inside the
+             # container -- and a root container writing into a user-owned directory leaves files
+             # their owner cannot read or replace. The same trap the torch.compile cache hit, and
+             # the same fix. Nothing in here needs root: the port is above 1024 and the only path
+             # written is `/config`.
+             "--user", f"{os.getuid()}:{os.getgid()}",
              # Read-write: the service writes the refresh token itself when the user completes
              # consent through the button in the UI.
              "-v", f"{CREDENTIALS_DIR}:/config",

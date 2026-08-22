@@ -22,7 +22,10 @@ import subprocess
 from typing import Final, Optional
 
 from dreamference.chat.onyx_brand_assets import WEB_BUILD_DIR, OnyxBrandAssets
-from dreamference.chat.gmail_search_service import HOST_ORIGIN
+from dreamference.chat.gmail_search_service import (
+    CONNECT_PATH as SERVICE_CONNECT_PATH,
+    HOST_ORIGIN,
+)
 
 # Opens the appended block; everything after it in a chunk is this module's, so a re-run cuts at the
 # marker and rewrites rather than stacking copies.
@@ -37,17 +40,36 @@ from dreamference.chat.gmail_search_service import HOST_ORIGIN
 SCRIPT_MARKER: Final[str] = "/*dreamference-ui-scripts*/"
 
 # Only chunks that render this class get the script.
+#
+# The class is the sidebar footer's, but what it actually identifies is the **app shell** -- the
+# chunk that renders the sidebar, which every `/app/*` route mounts, verified by loading
+# `/app/settings/connectors` and finding the footer present. It is a chunk selector, not the place
+# anything is attached to any more; both scripts below find their own anchors at run time.
 ANCHOR_CLASS: Final[str] = "opal-sidebar-footer"
 
 # The element the button is given, so the stylesheet in `onyx_ui_overrides.py` can style it and
 # the script can find its own work again after a re-render.
-#
-# It is appended to the footer rather than prepended, because the footer's one child is the account
-# row -- `div > #onyx-user-dropdown > … > span.truncate` holding the name. Appending puts the button
-# after it, and the stylesheet lays the footer out as a flex row, so the button lands to the right
-# of the name. The layout rule is written against the footer's *children* rather than the account
-# row's own classes: that row is four wrapper divs deep and every one of them is Onyx's to rename.
 BUTTON_ID: Final[str] = "puffin-connect-google"
+
+# Where the button lives: Onyx's own **Settings → Connectors** page, alongside the connectors it
+# would be one of. The route is matched exactly, so the button exists on that page and nowhere
+# else, and React removes it along with the page on navigation -- there is nothing to clean up.
+CONNECT_PATH: Final[str] = "/app/settings/connectors"
+
+# The section it is appended to, identified by its heading rather than by its classes. The section
+# is `div.flex.flex-col…` holding `div.w-full` (the heading) and an `.opal-card` (the connector
+# list, or the "No connectors set up" placeholder) -- all Tailwind utilities, none of them a name
+# anyone chose. The heading text is the only stable handle on that page, and the `.opal-content-md`
+# structure around it is Onyx's own component. Note the page carries *two* nodes reading
+# "Connectors" -- this one and the settings nav link -- which is why the search is scoped to
+# `.opal-content-md-title-row`.
+SECTION_HEADING: Final[str] = "Connectors"
+
+# How often placement is re-checked, as opposed to the status fetch below. Route changes in this
+# app are client-side, so nothing loads and no event this script can see fires; a short interval is
+# what makes the button appear promptly on arriving at the page. It stays cheap because the first
+# thing it does is compare `location.pathname`, which is false on every other route in the app.
+PLACE_INTERVAL_MS: Final[int] = 500
 
 # Marks the rendering engine on `<html>` so stylesheets can tell WebKitGTK from Blink.
 #
@@ -70,28 +92,35 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     # stylesheet depending on it applies as early as this script runs.
     'var ENG=/Chrome\\//.test(navigator.userAgent)?"blink":"webkit";'
     f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",ENG);'
-    f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}/oauth/start",ID="{BUTTON_ID}";'
-    # Placed in the footer beside the account row, so it reads as something offered to this user
-    # rather than as one more menu entry.
-    "function place(){var f=document.querySelector('.%s');" % ANCHOR_CLASS +
-    "if(!f)return;if(document.getElementById(ID))return;"
+    f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}{SERVICE_CONNECT_PATH}",ID="{BUTTON_ID}";'
+    f'var PATH="{CONNECT_PATH}",HEAD="{SECTION_HEADING}";'
+    "var last=null;"
+    # The Connectors section, or null when this is not that page.
+    "function panel(){if(location.pathname!==PATH)return null;"
+    "var h=document.querySelectorAll('.opal-content-md-title-row span');"
+    "for(var i=0;i<h.length;i++){if(h[i].textContent.trim()===HEAD){"
+    "var w=h[i].closest('div.w-full');return w&&w.parentElement}}return null;}"
+    # `!connected` is the whole gate: either a mailbox is attached or it is not, and the button
+    # exists for the second case. `configured` is still reported by the service and still read
+    # here as part of the same object, but it now says the same thing -- under the old OAuth
+    # transport "a Google client is stored" and "someone has consented" were different questions.
+    "function apply(){var p=panel();if(!p)return;"
+    "var e=document.getElementById(ID);"
+    "if(last&&!last.connected){if(!e){"
+    "var a=document.createElement('a');a.id=ID;a.href=U;"
     # A new window is the *browser's* behaviour, not the app's. Tauri leaves wry's
     # `new_window_req_handler` unset unless a window is built in Rust with `on_new_window`, and wry
     # only connects WebKitGTK's `create` signal when that handler exists -- so a `target=_blank`
     # click in the desktop app is silently inert, no window and no error. Navigating in place is
     # what works there, and the service's pages carry a link back to the chat.
-    "var a=document.createElement('a');a.id=ID;a.href=U;a.target=ENG==='blink'?'_blank':'_self';"
-    "a.rel='noopener';a.textContent='Connect to Google';f.appendChild(a);}"
-    "function drop(){var e=document.getElementById(ID);if(e)e.remove();}"
-    # `!connected` is the whole gate. It deliberately does not also require `configured`: someone
-    # who has never set Gmail up at all has *no* Google client stored, and that is exactly the user
-    # the button is for -- gating on `configured` showed it only to people already half-way through.
-    # The unconfigured click is not a dead end either; `/oauth/start` answers it with the command to
-    # run, which is the missing step. `catch(drop)` covers the service being down, where there is
-    # nothing the button could usefully do.
+    "a.target=ENG==='blink'?'_blank':'_self';a.rel='noopener';"
+    "a.textContent='Connect to Google';p.appendChild(a)}}"
+    "else if(e){e.remove()}}"
+    # `catch` covers the service being down, where there is nothing the button could usefully do.
     "function check(){fetch(S).then(function(r){return r.json()}).then(function(s){"
-    "if(s&&!s.connected){place()}else{drop()}}).catch(drop);}"
-    f"function boot(){{check();setInterval(check,{POLL_INTERVAL_MS});}}"
+    "last=s;apply()}).catch(function(){last=null;apply()});}"
+    f"function boot(){{check();setInterval(check,{POLL_INTERVAL_MS});"
+    f"setInterval(apply,{PLACE_INTERVAL_MS});}}"
     "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot)}"
     "else{boot()}"
     "}catch(e){}})();"

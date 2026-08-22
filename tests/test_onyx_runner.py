@@ -1,4 +1,9 @@
+import contextlib
+import http.client
 import json
+import time
+import urllib.parse
+import urllib.request
 from unittest.mock import patch
 
 from dreamference.chat import OnyxInstaller, OnyxRunner
@@ -1048,23 +1053,146 @@ def test_gmail_service_secret_is_shared_by_both_sides():
     assert GMAIL_AUTH_HEADER == AUTH_HEADER
 
 
-def test_gmail_registration_refuses_before_consent():
-    # Registering a tool that points at a service with no credentials would give the model an
-    # action that always fails.
+def test_gmail_registration_does_not_wait_for_a_mailbox():
+    # It used to refuse until credentials existed, on the reasoning that a tool pointing at an
+    # unconnected service is an action that always fails. The ordering was backwards: the Connect
+    # button lives on Settings -> Connectors, a page that lists the tool, so the tool had to exist
+    # before anyone could connect. An unconnected search answers with the way to connect.
     from dreamference.chat.onyx_runner import OnyxRunner
 
     runner = OnyxRunner()
     with patch("dreamference.chat.gmail_credentials.GmailCredentials.load", return_value=None), \
-         patch.object(OnyxRunner, "_request") as request:
-        assert runner.enable_gmail_search("http://x/api", "cookie") is False
-        request.assert_not_called()
+         patch.object(OnyxRunner, "_gmail_secret", return_value="s3cret"), \
+         patch.object(OnyxRunner, "_start_gmail_service", return_value=True), \
+         patch.object(OnyxRunner, "_get_json", return_value=[]), \
+         patch.object(OnyxRunner, "_request", return_value=({}, None)) as request:
+        assert runner.enable_gmail_search("http://x/api", "cookie") is True
+        assert request.call_args[0][0].endswith("/admin/tool/custom")
 
 
-def test_gmail_scope_is_read_only():
-    # A search tool has no business holding a credential that could send or delete mail.
-    from dreamference.chat.gmail_credentials import GMAIL_SCOPE
+def test_configure_registers_gmail_so_a_fresh_install_has_the_tool():
+    # Registering only from `dream onyx gmail --email …` meant a fresh install had no Gmail tool
+    # until someone had finished a flow they can only start from the page that lists it.
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+         patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
+         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(OnyxRunner, "_find_provider", return_value=None), \
+         patch.object(OnyxRunner, "enable_gmail_search") as gmail:
+        assert runner.configure() == 0
+        gmail.assert_called_once()
 
-    assert GMAIL_SCOPE.endswith("gmail.readonly")
+        gmail.reset_mock()
+        assert runner.configure(enable_gmail=False) == 0
+        gmail.assert_not_called()
+
+
+def test_an_unconnected_search_names_the_place_to_connect():
+    # The string is read by the model and relayed to the user, so it points at the button rather
+    # than at a command they would have to leave the app to run.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    with patch.object(GmailSearchService, "credentials", return_value=None):
+        answer = GmailSearchService.search("anything", 5)
+
+    assert "Settings -> Connectors" in answer["error"]
+    assert "Connect to Google" in answer["error"]
+
+
+def test_the_app_password_is_not_stored_in_the_clear(tmp_path):
+    # An app password is the whole Google account -- IMAP has no scopes -- so it does not sit in a
+    # JSON file as plain text. This is obfuscation with a stated threat model, not key management:
+    # the key is beside the ciphertext because the service is headless, so what it protects against
+    # is a file that travels (a backup, a copied config tree), not local root.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    assert GmailSearchService.save_credentials("me@gmail.com", "abcdefghijklmnop", str(tmp_path))
+    written = (tmp_path / "credentials.json").read_text()
+
+    assert "abcdefghijklmnop" not in written
+    assert GmailSearchService.credentials(str(tmp_path)) == {
+        "email": "me@gmail.com", "app_password": "abcdefghijklmnop",
+    }
+
+
+def test_a_tampered_credentials_file_is_refused_rather_than_half_read(tmp_path):
+    # Encrypt-then-MAC: the tag covers the ciphertext, so a flipped byte reads as "not connected"
+    # rather than as a corrupted password that would fail against Google with a confusing message.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    GmailSearchService.save_credentials("me@gmail.com", "abcdefghijklmnop", str(tmp_path))
+    stored = json.loads((tmp_path / "credentials.json").read_text())
+    stored["app_password"] = "A" + stored["app_password"][1:]
+    (tmp_path / "credentials.json").write_text(json.dumps(stored))
+
+    assert GmailSearchService.credentials(str(tmp_path)) is None
+
+
+def test_the_spaces_google_shows_the_code_with_are_stripped():
+    # Google renders an app password as `xxxx xxxx xxxx xxxx`, and it gets pasted that way far more
+    # often than not. IMAP would simply reject it.
+    from dreamference.chat.gmail_credentials import GmailCredentials
+
+    with patch("dreamference.chat.gmail_search_service.GmailSearchService.verify",
+               return_value=None) as verify, \
+         patch.object(GmailCredentials, "save", return_value=True) as save:
+        assert GmailCredentials.connect("me@gmail.com", "abcd efgh ijkl mnop") is True
+
+    assert verify.call_args[0][1] == "abcdefghijklmnop"
+    assert save.call_args[0][1] == "abcdefghijklmnop"
+
+
+def test_all_mail_is_found_by_its_attribute_not_its_english_name():
+    # `[Gmail]/All Mail` is what every example hard-codes and it is wrong for any account whose
+    # interface language is not English. The `\All` attribute is the same folder in any language.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    class FakeConnection:
+        def list(self):
+            return "OK", [
+                b'(\\HasNoChildren) "/" "INBOX"',
+                b'(\\All \\HasNoChildren) "/" "[Gmail]/&BBIEQQR/BDAEHwQ+BEcEQgQw-"',
+            ]
+
+    assert GmailSearchService._all_mail_folder(FakeConnection()) \
+        == "[Gmail]/&BBIEQQR/BDAEHwQ+BEcEQgQw-"
+
+
+def test_a_mailbox_search_never_marks_anything_read():
+    # The REST API could not mark a message read; IMAP can. A search tool that silently marked
+    # twenty messages as seen would be doing real damage to a mailbox, so every fetch peeks and the
+    # folder is selected read-only.
+    import inspect
+
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    for method in (GmailSearchService._summaries, GmailSearchService.message):
+        source = inspect.getsource(method)
+        assert "BODY.PEEK" in source
+        assert "BODY[" not in source
+    assert "readonly=True" in inspect.getsource(GmailSearchService._open_mailbox)
+
+
+def test_a_non_ascii_query_is_sent_as_a_utf8_literal():
+    # imaplib encodes ordinary arguments as ASCII, so a Cyrillic search would raise before it ever
+    # reached Google -- and this mailbox is partly Russian. A literal also needs no quoting, which
+    # removes the other half of the problem: a query containing a quote or a backslash.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    class FakeConnection:
+        literal = None
+
+        def __init__(self):
+            self.calls = []
+
+        def uid(self, *args):
+            self.calls.append(args)
+            return "OK", [b"7 9"]
+
+    connection = FakeConnection()
+    assert GmailSearchService._search_uids(connection, "от кого:аня") == [b"7", b"9"]
+    assert connection.literal == "от кого:аня".encode("utf-8")
+    assert connection.calls == [("SEARCH", "CHARSET", "UTF-8", "X-GM-RAW")]
 
 
 def test_streaming_caret_is_pinned_on_the_class_combination():
@@ -1137,3 +1265,165 @@ def test_drawn_scrollbar_rests_hidden_until_the_script_places_it():
     assert CUSTOM_SCROLLBAR_CSS in UI_OVERRIDES
     assert "display:none" in CUSTOM_SCROLLBAR_CSS
     assert SIDEBAR_SCROLLBAR_THUMB in CUSTOM_SCROLLBAR_CSS
+
+
+@contextlib.contextmanager
+def _serve_gmail(tmp_path):
+    """
+    Runs the Gmail service on a free port against a temporary config directory.
+
+    The `CONFIG_DIR` patch has to stay active for the life of the server, not just while it starts:
+    the handler resolves the path per request, on the serving thread.
+    """
+    import socket
+    import threading
+
+    import dreamference.chat.gmail_search_service as service
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    with patch.object(service, "CONFIG_DIR", str(tmp_path)):
+        threading.Thread(
+            target=service.GmailSearchService.serve, args=(port, "secret"), daemon=True
+        ).start()
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/status", timeout=1).read()
+                break
+            except OSError:
+                time.sleep(0.05)
+        yield port, service
+
+
+def test_the_connect_click_asks_for_a_mailbox_and_an_app_password(tmp_path):
+    # Two fields and two links, against the four Cloud Console steps the OAuth transport needed.
+    # An app password needs no project, no consent screen and no publishing decision, which is the
+    # whole reason for the move.
+    from dreamference.chat.gmail_search_service import (
+        CONNECT_PATH, GOOGLE_2SV_URL, GOOGLE_APP_PASSWORDS_URL,
+    )
+
+    with _serve_gmail(tmp_path) as (port, _):
+        page = urllib.request.urlopen(
+            f"http://127.0.0.1:{port}{CONNECT_PATH}", timeout=5
+        ).read().decode()
+
+    assert "Connect Gmail" in page
+    assert GOOGLE_2SV_URL in page and GOOGLE_APP_PASSWORDS_URL in page
+    assert 'name="email"' in page and 'name="app_password"' in page
+    # Nothing from the OAuth transport survives in the copy.
+    assert "Cloud" not in page and "consent" not in page
+
+
+def test_the_button_url_it_used_to_point_at_still_works(tmp_path):
+    # Onyx serves its bundles `immutable`, so a browser that has not hard-refreshed still holds a
+    # script aiming at the old path. Three lines of 302 is the difference between "works anyway"
+    # and "the button is broken".
+    from dreamference.chat.gmail_search_service import CONNECT_PATH, LEGACY_START_PATH
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args):
+            return None
+
+    with _serve_gmail(tmp_path) as (port, _):
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request("GET", LEGACY_START_PATH)
+        response = connection.getresponse()
+        status, location = response.status, response.getheader("Location", "")
+        response.read()
+        connection.close()
+
+    assert (status, location) == (302, CONNECT_PATH)
+
+
+def test_a_refused_login_is_shown_on_the_form_rather_than_stored(tmp_path):
+    # The login is attempted before anything is written, so a mistyped code fails where it can be
+    # corrected rather than silently, later, inside a tool call the user never sees.
+    from dreamference.chat.gmail_search_service import CONNECT_PATH, GmailSearchService
+
+    body = urllib.parse.urlencode(
+        {"email": "me@gmail.com", "app_password": "abcd efgh ijkl mnop"}
+    ).encode()
+
+    with _serve_gmail(tmp_path) as (port, service):
+        with patch.object(GmailSearchService, "verify", return_value="Google refused that.") as v:
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            connection.request(
+                "POST", CONNECT_PATH, body,
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            page = connection.getresponse().read().decode()
+            connection.close()
+
+        with patch.object(service, "CONFIG_DIR", str(tmp_path)):
+            assert GmailSearchService.status()["connected"] is False
+
+    assert "Google refused that." in page
+    # Whitespace is stripped before the credentials are ever used, not only before they are stored.
+    assert v.call_args[0][1] == "abcdefghijklmnop"
+
+
+def test_a_good_login_connects_the_mailbox(tmp_path):
+    from dreamference.chat.gmail_search_service import CONNECT_PATH, GmailSearchService
+
+    body = urllib.parse.urlencode(
+        {"email": "me@gmail.com", "app_password": "abcdefghijklmnop"}
+    ).encode()
+
+    with _serve_gmail(tmp_path) as (port, service):
+        with patch.object(GmailSearchService, "verify", return_value=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            connection.request(
+                "POST", CONNECT_PATH, body,
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            page = connection.getresponse().read().decode()
+            connection.close()
+
+        with patch.object(service, "CONFIG_DIR", str(tmp_path)):
+            assert GmailSearchService.status() == {"configured": True, "connected": True}
+
+    assert "Gmail is connected" in page
+
+
+def test_the_form_links_open_where_the_engine_can_open_them(tmp_path):
+    # Tauri leaves wry's `new_window_req_handler` unset, so a `target=_blank` click in the desktop
+    # app is silently inert. The injected script reads an engine marker off `<html>`; this page is
+    # served rather than injected and has none, so it reads the User-Agent instead.
+    from dreamference.chat.gmail_search_service import CONNECT_PATH
+
+    def fetch(agent):
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request("GET", CONNECT_PATH, headers={"User-Agent": agent})
+        page = connection.getresponse().read().decode()
+        connection.close()
+        return page
+
+    with _serve_gmail(tmp_path) as (port, _):
+        blink = fetch("Mozilla/5.0 (X11; Linux) AppleWebKit/537.36 Chrome/141.0 Safari/537.36")
+        webkit = fetch("Mozilla/5.0 (X11; Linux) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15")
+
+    assert 'target="_blank"' in blink and 'target="_self"' not in blink
+    assert 'target="_self"' in webkit and 'target="_blank"' not in webkit
+
+
+def test_the_gmail_container_runs_as_the_invoking_user():
+    # The service writes to the mounted directory now -- a connection made from the UI stores the
+    # credentials from inside the container -- and a root container writing into a user-owned
+    # directory leaves files their owner cannot read or replace. Same trap as the torch.compile
+    # cache, same fix. Nothing in here needs root: the port is above 1024, only `/config` is
+    # written, and stdlib IMAP over TLS was verified working as uid 1000.
+    import os
+
+    runner = OnyxRunner()
+    with patch.object(OnyxRunner, "_onyx_network", return_value="onyx_default"), \
+         patch("shutil.copyfile"), \
+         patch("subprocess.run") as run:
+        run.return_value.returncode = 0
+        assert runner._start_gmail_service("secret") is True
+
+    command = run.call_args_list[-1][0][0]
+    assert "--user" in command
+    assert command[command.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"

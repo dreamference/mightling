@@ -8,8 +8,10 @@ from unittest.mock import patch
 import pytest
 
 from dreamference.chat import OnyxUIScripts
+from dreamference.chat.gmail_search_service import CONNECT_PATH as SERVICE_CONNECT_PATH
 from dreamference.chat.onyx_ui_scripts import (
-    ANCHOR_CLASS, BUTTON_ID, CONNECT_GOOGLE_SCRIPT, SCRIPT_MARKER, UI_SCRIPTS,
+    ANCHOR_CLASS, BUTTON_ID, CONNECT_GOOGLE_SCRIPT, CONNECT_PATH, SCRIPT_MARKER,
+    SECTION_HEADING, UI_SCRIPTS,
 )
 
 
@@ -41,18 +43,24 @@ def test_scripts_go_only_into_chunks_that_render_the_anchor():
 @pytest.mark.skipif(not shutil.which("node"), reason="node is needed to execute the injected script")
 def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
     # The injected script is real JavaScript that runs in a browser, so it is tested by running it
-    # -- against a stub DOM, in the three states it distinguishes.
+    # -- against a stub of the Connectors page, in the three states it distinguishes.
     harness = tmp_path / "harness.js"
     harness.write_text(textwrap.dedent("""
         let appended = null;
-        const footer = { appendChild: (el) => { appended = el; } };
+        const section = { appendChild: (el) => { appended = el; } };
+        const heading = {
+          textContent: '%s',
+          closest: (sel) => sel === 'div.w-full' ? { parentElement: section } : null,
+        };
         global.window = {};
         global.navigator = { userAgent: 'Mozilla/5.0 AppleWebKit/605.1.15 Safari/605.1.15' };
+        global.location = { pathname: '%s' };
         let engine = null;
         global.document = {
           documentElement: { setAttribute: (k, v) => { engine = k + '=' + v; } },
           readyState: 'complete',
-          querySelector: (sel) => sel === '.%s' ? footer : null,
+          querySelectorAll: (sel) =>
+            sel === '.opal-content-md-title-row span' ? [heading] : [],
           getElementById: (id) => (appended && appended.id === id) ? appended : null,
           createElement: () => ({ remove() { appended = null; } }),
           addEventListener: () => {},
@@ -62,8 +70,9 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
         global.fetch = () => Promise.resolve({ json: () => Promise.resolve(served) });
         const script = %s;
 
-        async function scenario(status) {
+        async function scenario(status, pathname) {
           appended = null; global.window = {}; served = status;
+          global.location = { pathname: pathname || '%s' };
           eval(script);
           await new Promise(r => setImmediate(r));
           await new Promise(r => setImmediate(r));
@@ -73,6 +82,7 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
           const shown = await scenario({configured: true, connected: false});
           const connected = await scenario({configured: true, connected: true});
           const unconfigured = await scenario({configured: false, connected: false});
+          const elsewhere = await scenario({configured: false, connected: false}, '/app');
           console.log(JSON.stringify({
             engine,
             shown: shown !== null,
@@ -81,9 +91,12 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
             id: shown && shown.id,
             whenConnected: connected !== null,
             whenUnconfigured: unconfigured !== null,
+            onAnotherPage: elsewhere !== null,
           }));
         })();
-    """) % (ANCHOR_CLASS, json.dumps(CONNECT_GOOGLE_SCRIPT)))
+    """) % (
+        SECTION_HEADING, CONNECT_PATH, json.dumps(CONNECT_GOOGLE_SCRIPT), CONNECT_PATH,
+    ))
 
     result = subprocess.run(
         ["node", str(harness)], capture_output=True, text=True, timeout=60, check=False
@@ -97,13 +110,15 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
     assert outcome["shown"] is True
     assert outcome["text"] == "Connect to Google"
     assert outcome["id"] == BUTTON_ID
-    assert outcome["href"].endswith("/oauth/start")
+    assert outcome["href"].endswith(SERVICE_CONNECT_PATH)
     # Nothing left to ask for once connected.
     assert outcome["whenConnected"] is False
-    # But someone who has never configured a client is exactly who the button is for: gating on
-    # `configured` as well showed it only to people already half-way through the setup. The click
-    # is not a dead end -- `/oauth/start` answers an unconfigured request with the command to run.
+    # `configured` is not part of the gate. It reports the same thing as `connected` now that a
+    # mailbox is either attached or it is not, but under the OAuth transport it did not, and
+    # requiring it showed the button only to people already half-way through the setup.
     assert outcome["whenUnconfigured"] is True
+    # And it belongs to one page, not to the whole app.
+    assert outcome["onAnotherPage"] is False
 
 
 def test_engine_is_marked_before_anything_else_runs():
@@ -115,7 +130,7 @@ def test_engine_is_marked_before_anything_else_runs():
     marker = f'setAttribute("{ENGINE_ATTRIBUTE}"'
     assert marker in CONNECT_GOOGLE_SCRIPT
     # Set before the button logic, so a stylesheet keyed on it applies as early as this runs.
-    assert CONNECT_GOOGLE_SCRIPT.index(marker) < CONNECT_GOOGLE_SCRIPT.index("function place")
+    assert CONNECT_GOOGLE_SCRIPT.index(marker) < CONNECT_GOOGLE_SCRIPT.index("function apply")
     assert 'Chrome' in CONNECT_GOOGLE_SCRIPT
 
 
@@ -160,27 +175,39 @@ def test_drawn_scrollbar_survives_react_recreating_the_chat_list():
     assert "setInterval(upd,1000)" in SCROLLBAR_SCRIPT
 
 
-def test_button_is_appended_beside_the_account_row_rather_than_above_it():
-    # The footer's one child is the account row, so appending puts the button after the name. The
-    # footer is laid out as a flex row in the stylesheet to make "after" mean "to the right of".
+def test_the_button_lives_on_the_connectors_page_beside_onyx_own_connectors():
+    # It was in the sidebar footer first, beside the account name. It belongs with the connectors
+    # it would be one of, and the settings route is where Onyx already lists them.
     from dreamference.chat.onyx_ui_overrides import CONNECT_BUTTON_CSS
 
-    assert "f.appendChild(a)" in CONNECT_GOOGLE_SCRIPT
-    assert "f.prepend(a)" not in CONNECT_GOOGLE_SCRIPT
-    assert ".opal-sidebar-footer{display:flex;align-items:center" in CONNECT_BUTTON_CSS
+    assert CONNECT_PATH == "/app/settings/connectors"
+    assert "location.pathname!==PATH" in CONNECT_GOOGLE_SCRIPT
+    assert "p.appendChild(a)" in CONNECT_GOOGLE_SCRIPT
+    # Nothing is left behind in the footer, in the markup or in the layout.
+    assert "opal-sidebar-footer" not in CONNECT_GOOGLE_SCRIPT
+    assert "opal-sidebar-footer" not in CONNECT_BUTTON_CSS
 
 
-def test_the_account_row_is_selected_structurally_not_by_its_classes():
-    # It is `div > #onyx-user-dropdown > div.relative > button.interactive > …` -- four wrappers of
-    # Onyx's own naming above the name. Keying the flex rule on any of them would break on a
-    # rename; "whatever else is in the footer" does not. `min-width:0` is what lets the row shrink:
-    # a flex item floors at its content width otherwise, and the truncating name span inside would
-    # push the button off the sidebar's edge instead of ellipsing.
-    from dreamference.chat.onyx_ui_overrides import CONNECT_BUTTON_CSS
+def test_the_section_is_found_by_its_heading_rather_than_its_classes():
+    # The section is `div.flex.flex-col…` holding `div.w-full` and an `.opal-card` -- all Tailwind
+    # utilities, none of them a name anyone chose. The heading is the only stable handle, and the
+    # search is scoped to `.opal-content-md-title-row` because the settings nav carries a second
+    # node reading "Connectors".
+    assert SECTION_HEADING == "Connectors"
+    assert "'.opal-content-md-title-row span'" in CONNECT_GOOGLE_SCRIPT
+    assert "closest('div.w-full')" in CONNECT_GOOGLE_SCRIPT
 
-    assert ".opal-sidebar-footer>*:not(#puffin-connect-google){flex:1 1 auto;min-width:0}" \
-        in CONNECT_BUTTON_CSS
-    assert "interactive" not in CONNECT_BUTTON_CSS
+
+def test_placement_is_re_checked_because_route_changes_fire_no_event():
+    # Navigation inside the app is client-side: nothing loads, and no event this script can see
+    # fires. A short interval is what makes the button appear on arriving at the page; it stays
+    # cheap because `panel()` compares `location.pathname` before touching the DOM.
+    from dreamference.chat.onyx_ui_scripts import PLACE_INTERVAL_MS, POLL_INTERVAL_MS
+
+    assert f"setInterval(apply,{PLACE_INTERVAL_MS})" in CONNECT_GOOGLE_SCRIPT
+    # The status fetch stays slow; only the placement check is frequent.
+    assert PLACE_INTERVAL_MS < POLL_INTERVAL_MS
+    assert f"setInterval(check,{POLL_INTERVAL_MS})" in CONNECT_GOOGLE_SCRIPT
 
 
 def test_the_link_opens_a_new_tab_only_where_new_tabs_work():
