@@ -1439,3 +1439,56 @@ def test_connecting_stops_when_there_is_no_account():
          patch.object(OnyxRunner, "_authenticate") as authenticate:
         assert runner.connect_gmail() is False
         authenticate.assert_not_called()
+
+
+def test_goa_account_paths_survive_gvariant_text_format():
+    # Two parsing bugs found against a real account, each of which failed *silently* -- a
+    # well-formed reply containing no path the pattern accepted, which reads exactly like "no
+    # Google account has been added".
+    #
+    # 1. Accounts hang under `/Accounts/`, not directly off the root; the root holds only Manager.
+    # 2. GVariant's text form annotates only the **first** key of a dictionary with its type. Every
+    #    key after it is a bare quoted string -- and the first key is always Manager, never an
+    #    account -- so a pattern requiring `objectpath '…'` matches nothing useful.
+    from dreamference.chat.goa_accounts import GoaAccounts
+
+    reply = (
+        "({objectpath '/org/gnome/OnlineAccounts/Manager': "
+        "{'org.gnome.OnlineAccounts.Manager': @a{sv} {}}, "
+        "'/org/gnome/OnlineAccounts/Accounts/account_1787409151_0': "
+        "{'org.gnome.OnlineAccounts.Account': {'ProviderType': <'google'>}}},)"
+    )
+    with patch.object(GoaAccounts, "_call", return_value=reply):
+        assert GoaAccounts._account_paths() == [
+            "/org/gnome/OnlineAccounts/Accounts/account_1787409151_0"
+        ]
+
+
+def test_a_google_account_is_recognised_from_its_properties():
+    from dreamference.chat.goa_accounts import GoaAccounts
+
+    properties = {
+        "/org/gnome/OnlineAccounts/Accounts/account_1": {
+            "ProviderType": "google", "PresentationIdentity": "owner@gmail.com",
+        },
+        "/org/gnome/OnlineAccounts/Accounts/account_2": {
+            "ProviderType": "imap_smtp", "PresentationIdentity": "work@example.com",
+        },
+    }
+    with patch.object(GoaAccounts, "_account_paths", return_value=list(properties)), \
+         patch.object(GoaAccounts, "_properties", side_effect=lambda p: properties[p]):
+        found = GoaAccounts.google_accounts()
+
+    assert [a["email"] for a in found] == ["owner@gmail.com"]
+
+
+def test_the_access_token_reply_is_parsed_with_its_lifetime():
+    # `('ya29.…', 3599)` -- the token, then seconds until it expires. The lifetime is what the
+    # stored expiry is computed from, so misreading it would leave a token that looks fresh
+    # forever or one that is discarded immediately.
+    from dreamference.chat.goa_accounts import GoaAccounts
+
+    with patch.object(GoaAccounts, "_call", return_value="('ya29.a0Af', 2539)\n"):
+        assert GoaAccounts.access_token("/org/gnome/OnlineAccounts/Accounts/account_1") == (
+            "ya29.a0Af", 2539
+        )
