@@ -113,9 +113,9 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
     assert outcome["href"].endswith(SERVICE_CONNECT_PATH)
     # Nothing left to ask for once connected.
     assert outcome["whenConnected"] is False
-    # `configured` is not part of the gate. It reports the same thing as `connected` now that a
-    # mailbox is either attached or it is not, but under the OAuth transport it did not, and
-    # requiring it showed the button only to people already half-way through the setup.
+    # `configured` is not part of the gate. It reports the same thing as `connected` -- a usable
+    # token either exists or it does not -- and the pair survives only because the script reads
+    # the status object as a whole.
     assert outcome["whenUnconfigured"] is True
     # And it belongs to one page, not to the whole app.
     assert outcome["onAnotherPage"] is False
@@ -219,7 +219,7 @@ def test_the_link_opens_a_new_tab_only_where_new_tabs_work():
 
 
 def test_the_service_pages_offer_a_way_back():
-    # Navigating in place means the OAuth pages replace the chat, and they carry no chrome of their
+    # Navigating in place means the setup page replaces the chat, and it carries no chrome of its
     # own. Without this link the desktop user is stranded on a bare paragraph.
     import inspect
 

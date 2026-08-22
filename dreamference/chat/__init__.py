@@ -17,6 +17,7 @@ from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.chat.desktop_runner import DesktopRunner
 from dreamference.chat.gmail_credentials import GmailCredentials
 from dreamference.chat.gmail_search_service import GmailSearchService
+from dreamference.chat.goa_accounts import GoaAccounts
 from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
 from dreamference.chat.onyx_installer import OnyxInstaller
 from dreamference.chat.onyx_runner import OnyxRunner
@@ -30,6 +31,7 @@ __all__ = [
     "DesktopRunner",
     "GmailCredentials",
     "GmailSearchService",
+    "GoaAccounts",
     "OnyxBrandAssets",
     "OnyxInstaller",
     "OnyxRunner",

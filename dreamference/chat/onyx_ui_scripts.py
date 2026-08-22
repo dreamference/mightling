@@ -100,10 +100,10 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "var h=document.querySelectorAll('.opal-content-md-title-row span');"
     "for(var i=0;i<h.length;i++){if(h[i].textContent.trim()===HEAD){"
     "var w=h[i].closest('div.w-full');return w&&w.parentElement}}return null;}"
-    # `!connected` is the whole gate: either a mailbox is attached or it is not, and the button
-    # exists for the second case. `configured` is still reported by the service and still read
-    # here as part of the same object, but it now says the same thing -- under the old OAuth
-    # transport "a Google client is stored" and "someone has consented" were different questions.
+    # `!connected` is the whole gate: either a usable mailbox credential exists or it does not,
+    # and the button exists for the second case. That deliberately covers the half-finished OAuth
+    # setup -- a Cloud client stored but consent not yet given reports `connected: false`, so the
+    # button stays on screen while the user still has a step to go rather than vanishing part-way.
     "function apply(){var p=panel();if(!p)return;"
     "var e=document.getElementById(ID);"
     "if(last&&!last.connected){if(!e){"

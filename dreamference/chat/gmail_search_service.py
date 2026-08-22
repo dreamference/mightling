@@ -10,18 +10,23 @@ messages and `gmail_message` to read one. The split matters for the same reason 
 mailbox search that returned full bodies would fill the context with ten threads to answer a
 question about one.
 
-**The transport is IMAP, not the Gmail REST API.** The API route needed an OAuth client, which
-means a Google Cloud project, a consent screen and a publishing decision before a single message
-could be read -- three minutes of console work at best, and a branding-review dead end at worst.
-IMAP needs a 16-character app password and nothing else. Two consequences are worth knowing:
+**The transport is IMAP and the credential comes from GNOME Online Accounts.** Two other routes
+were built and removed, and the reasons are worth keeping: a Google **app password** is two minutes
+of work but is unavailable to anyone in Google's Advanced Protection Program or under a Workspace
+admin who has switched them off, and a **Google client of one's own** works for everybody but costs
+a Cloud project, a consent screen, a publishing decision and an unverified-app warning. Both put
+setup work on the user. GOA puts none: the user signs into Google once in GNOME Settings, and every
+desktop application on the machine — Evolution for mail, Nautilus for files, and this — asks GOA
+for a short-lived access token when it needs one.
 
-* **Gmail's search syntax is preserved exactly**, because `X-GM-RAW` hands the query string to the
-  same engine the web UI uses. `from:alice invoice`, `newer_than:7d`, `has:attachment` all still
-  work, so the OpenAPI summaries the model reads did not have to change with the transport.
-* **The credential is no longer read-only.** `gmail.readonly` was a real boundary; an app password
-  is the whole account and IMAP has no scopes. What replaces it is narrower but weaker: the service
-  issues `LOGIN`, `LIST`, `SEARCH` and `FETCH` and nothing else, and every fetch uses `BODY.PEEK`
-  so that reading a message does not mark it read in the user's mailbox.
+Three consequences shape what is left:
+
+* **This service holds no long-lived credential.** GNOME keeps the refresh token. What is stored
+  here is about an hour's worth of access, replaced by a systemd user timer on the host.
+* **There is nothing to submit.** With no password to type and no client to paste, the service
+  serves no forms and accepts no POST at all; `/connect` is a page explaining where to sign in.
+* **Gmail's search syntax is preserved exactly**, because `X-GM-RAW` hands the query to the same
+  engine the web UI uses — `from:alice invoice`, `newer_than:7d`, `has:attachment`.
 
 The module is deliberately **standard library only and self-contained**. It runs inside a stock
 `python:3-slim` container with nothing installed into it, and it is copied next to the credentials
@@ -45,6 +50,7 @@ import json
 import os
 import re
 import secrets
+import time
 import urllib.parse
 from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -54,9 +60,14 @@ from typing import Any, Dict, Final, List, Optional, Tuple
 CONFIG_DIR: Final[str] = os.environ.get("PUFFIN_GMAIL_CONFIG", "/config")
 CREDENTIALS_NAME: Final[str] = "credentials.json"
 
-# The key the stored app password is sealed with. See `_seal`: this is obfuscation with a clear
-# threat model, not a secret-management system.
+# The key the stored token is sealed with. See `_seal`: this is obfuscation with a clear threat
+# model, not a secret-management system.
 KEY_NAME: Final[str] = "credentials.key"
+
+# Written by the host so the setup page can say what GNOME is holding. The service cannot look for
+# itself: GOA lives on the session bus, and this runs in a container that has neither a session bus
+# nor `gdbus` to ask with. One line the host knows and the container does not.
+GNOME_HINT_NAME: Final[str] = "gnome-accounts.json"
 
 # Onyx sends this with every tool call. The service is on a private Docker network, but so is
 # everything else Onyx runs, and a private network is not an authorisation boundary -- the shared
@@ -91,7 +102,7 @@ SERVICE_PORT: Final[int] = 8000
 
 # The service is also published on this loopback port, because the browser reaches it from outside
 # the Docker network: the Onyx page asks whether Gmail is connected so it knows whether to show the
-# Connect button, and the setup form is served from here.
+# Connect button, and the setup page is served from here.
 HOST_PORT: Final[int] = 8767
 HOST_ORIGIN: Final[str] = f"http://localhost:{HOST_PORT}"
 
@@ -99,18 +110,16 @@ HOST_ORIGIN: Final[str] = f"http://localhost:{HOST_PORT}"
 # Onyx UI to this service.
 ONYX_ORIGIN: Final[str] = "http://localhost:3000"
 
-# The setup form: served on GET, submitted to on POST.
+# The setup page. It only ever explains -- there is nothing to submit.
 CONNECT_PATH: Final[str] = "/connect"
 
-# What the button pointed at while the transport was OAuth. Kept as a redirect because Onyx serves
-# its bundles `immutable`, so a browser that has not hard-refreshed still holds a script aiming
-# here -- three lines of 302 is the difference between "works anyway" and "the button is broken".
+# What the button pointed at under earlier designs. Kept as a redirect because Onyx serves its
+# bundles `immutable`, so a browser that has not hard-refreshed still holds a script aiming here.
 LEGACY_START_PATH: Final[str] = "/oauth/start"
 
-# The two Google pages the setup form links to. There is no third: an app password is the whole
-# credential, and unlike an OAuth client it needs no project, no consent screen and no publishing.
-GOOGLE_2SV_URL: Final[str] = "https://myaccount.google.com/signinoptions/two-step-verification"
-GOOGLE_APP_PASSWORDS_URL: Final[str] = "https://myaccount.google.com/apppasswords"
+# Where the user signs into Google. GNOME's Settings panel, opened by URI so the page can link
+# straight at it rather than describing a path through a menu.
+GNOME_SETTINGS_URI: Final[str] = "gnome-control-center://online-accounts"
 
 # What an unconnected search answers with. It names the place the user can act rather than a
 # command they would have to leave the app to run -- the model reads this and relays it.
@@ -118,8 +127,8 @@ NOT_CONNECTED_MESSAGE: Final[str] = (
     "Gmail is not connected. Open Settings -> Connectors in Puffin and choose Connect to Google."
 )
 
-# Enough styling that the setup pages read as part of Puffin rather than as a server error. They
-# are the only pages this project serves directly, and the user arrives at them from a polished UI.
+# Enough styling that the setup page reads as part of Puffin rather than as a server error. It is
+# the only page this project serves directly, and the user arrives at it from a polished UI.
 PAGE_STYLE: Final[str] = (
     "body{margin:0;padding:48px 24px;background:#fff;color:#111;"
     "font-family:Roboto,system-ui,sans-serif;font-size:14px;line-height:1.55}"
@@ -128,12 +137,6 @@ PAGE_STYLE: Final[str] = (
     "p{margin:0 0 14px}"
     "code{background:#f2f4f4;border-radius:4px;padding:1px 5px;font-family:'Roboto Mono',monospace;"
     "font-size:12.5px}"
-    "label{display:block;margin-bottom:4px;font-weight:500}"
-    "input{width:100%;box-sizing:border-box;margin-bottom:14px;padding:9px 10px;"
-    "border:1px solid #d8dcdc;border-radius:8px;font-size:13.5px;font-family:inherit}"
-    "button{padding:9px 16px;border:0;border-radius:8px;background:#0ABAB5;color:#fff;"
-    "font-size:13.5px;font-weight:500;font-family:inherit;cursor:pointer}"
-    "button:hover{background:#0aa8a3}"
     "a{color:#0ABAB5}"
     ".muted{color:#6b7280;font-size:12.5px}"
     "ol{counter-reset:step;list-style:none;padding-left:0;margin:0 0 18px}"
@@ -143,7 +146,7 @@ PAGE_STYLE: Final[str] = (
     "font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center}"
     ".note{margin-top:22px;padding:12px 14px;border-radius:8px;background:#f6f8f8;"
     "color:#4b5563;font-size:12.5px}"
-    ".error{color:#b91c1c}"
+    ".ready{margin:0 0 18px;padding:12px 14px;border-radius:8px;background:#e6f7f7;color:#0a6f6c}"
 )
 
 
@@ -152,7 +155,7 @@ class GmailSearchService:
     Serves Gmail search and message retrieval over HTTP for Onyx's custom tool.
     """
 
-    # ------------------------------------------------------------------ credentials
+    # ------------------------------------------------------------------ storage
 
     @classmethod
     def _key(cls, directory: Optional[str] = None) -> bytes:
@@ -202,17 +205,18 @@ class GmailSearchService:
     @classmethod
     def _seal(cls, plaintext: str, directory: Optional[str] = None) -> str:
         """
-        Encrypts the app password for storage, encrypt-then-MAC.
+        Encrypts the access token for storage, encrypt-then-MAC.
 
         **This is obfuscation with a clear threat model, and it is worth being precise about what
         it buys.** The key sits in the same directory as the ciphertext, because the service is
         headless: anything it can read at startup, an attacker holding that directory can read too.
-        What sealing does prevent is the password being legible in a file that travels -- a backup,
+        What sealing does prevent is a live token being legible in a file that travels -- a backup,
         a `cat` over someone's shoulder, a grep through a copied config tree. It is not a defence
-        against local root, and nothing here pretends otherwise.
+        against local root, and nothing here pretends otherwise. It matters less than it did when
+        this file held an app password: the token inside expires within the hour.
 
         Args:
-            plaintext (str): The app password.
+            plaintext (str): The access token.
             directory (Optional[str]): Credentials directory; the mounted one by default.
 
         Returns:
@@ -228,14 +232,14 @@ class GmailSearchService:
     @classmethod
     def _unseal(cls, blob: str, directory: Optional[str] = None) -> Optional[str]:
         """
-        Recovers a sealed app password, or None if it does not authenticate.
+        Recovers a sealed token, or None if it does not authenticate.
 
         Args:
             blob (str): The value `_seal` produced.
             directory (Optional[str]): Credentials directory; the mounted one by default.
 
         Returns:
-            Optional[str]: The app password, or None.
+            Optional[str]: The token, or None.
         """
         try:
             raw = base64.b64decode(blob.encode("ascii"))
@@ -256,40 +260,63 @@ class GmailSearchService:
             return None
 
     @classmethod
-    def credentials(cls, directory: Optional[str] = None) -> Optional[Dict[str, str]]:
+    def _raw(cls, directory: Optional[str] = None) -> Dict[str, Any]:
         """
-        Reads the stored mailbox credentials.
+        Reads the credentials file as stored, without deciding whether it is usable.
 
         Args:
             directory (Optional[str]): Credentials directory; the mounted one by default.
 
         Returns:
-            Optional[Dict[str, str]]: `email` and `app_password`, or None if not connected.
+            Dict[str, Any]: The stored fields, empty if there are none.
         """
         try:
             with open(os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)) as handle:
                 stored = json.load(handle)
         except (OSError, ValueError):
-            return None
-        address = stored.get("email")
-        sealed = stored.get("app_password")
-        if not address or not sealed:
-            return None
-        password = cls._unseal(sealed, directory)
-        if not password:
-            return None
-        return {"email": address, "app_password": password}
+            return {}
+        return stored if isinstance(stored, dict) else {}
 
     @classmethod
-    def save_credentials(
-        cls, address: str, app_password: str, directory: Optional[str] = None
-    ) -> bool:
+    def credentials(cls, directory: Optional[str] = None) -> Optional[Dict[str, str]]:
         """
-        Stores the mailbox credentials, sealed and readable only by this user.
+        Reads the token the mailbox can actually be opened with.
+
+        An expired token is not a failure to report, it is a stale file -- the timer that should
+        have replaced it did not run. Reporting "not connected" is the honest state and brings the
+        Connect button back.
 
         Args:
-            address (str): The Gmail address.
-            app_password (str): The 16-character app password.
+            directory (Optional[str]): Credentials directory; the mounted one by default.
+
+        Returns:
+            Optional[Dict[str, str]]: `email` and `access_token`, or None.
+        """
+        stored = cls._raw(directory)
+        address = stored.get("email")
+        sealed = stored.get("access_token")
+        if not address or not sealed:
+            return None
+        if float(stored.get("expires_at", 0)) <= time.time():
+            return None
+        token = cls._unseal(sealed, directory)
+        return {"email": address, "access_token": token} if token else None
+
+    @classmethod
+    def save_token(
+        cls, address: str, token: str, lifetime: int, directory: Optional[str] = None
+    ) -> bool:
+        """
+        Stores a GNOME Online Accounts access token for the container to use.
+
+        Written by the host, because GOA lives on the session bus and the service does not. The
+        expiry is recorded rather than the lifetime so that a stale file is recognisable as stale
+        without knowing when it was written.
+
+        Args:
+            address (str): The Google address the token authenticates as.
+            token (str): The access token.
+            lifetime (int): Seconds until it expires, as GOA reported it.
             directory (Optional[str]): Credentials directory; the mounted one by default.
 
         Returns:
@@ -298,11 +325,13 @@ class GmailSearchService:
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
         try:
             with open(path, "w") as handle:
-                json.dump(
-                    {"email": address, "app_password": cls._seal(app_password, directory)},
-                    handle,
-                    indent=2,
-                )
+                json.dump({
+                    "email": address,
+                    "access_token": cls._seal(token, directory),
+                    # A minute of slack, so a token about to expire is not handed to a connection
+                    # that will take a moment to open.
+                    "expires_at": time.time() + max(0, lifetime - 60),
+                }, handle, indent=2)
             os.chmod(path, 0o600)
         except OSError:
             return False
@@ -311,7 +340,7 @@ class GmailSearchService:
     @classmethod
     def forget(cls, directory: Optional[str] = None) -> bool:
         """
-        Removes the stored credentials, which is what disconnecting means here.
+        Removes the stored token, which is what disconnecting means here.
 
         Args:
             directory (Optional[str]): Credentials directory; the mounted one by default.
@@ -328,14 +357,49 @@ class GmailSearchService:
         return True
 
     @classmethod
+    def gnome_accounts(cls, directory: Optional[str] = None) -> List[str]:
+        """
+        Reads the Google addresses the host found in GNOME Online Accounts.
+
+        Args:
+            directory (Optional[str]): Credentials directory; the mounted one by default.
+
+        Returns:
+            List[str]: Addresses, empty if GNOME has none or the host never looked.
+        """
+        try:
+            with open(os.path.join(directory or CONFIG_DIR, GNOME_HINT_NAME)) as handle:
+                found = json.load(handle)
+        except (OSError, ValueError):
+            return []
+        return [str(entry) for entry in found] if isinstance(found, list) else []
+
+    @classmethod
+    def save_gnome_accounts(cls, addresses: List[str], directory: Optional[str] = None) -> bool:
+        """
+        Records what the host saw in GNOME, for the setup page to report.
+
+        Args:
+            addresses (List[str]): Google addresses GOA is holding.
+            directory (Optional[str]): Credentials directory; the mounted one by default.
+
+        Returns:
+            bool: True if the file was written.
+        """
+        try:
+            with open(os.path.join(directory or CONFIG_DIR, GNOME_HINT_NAME), "w") as handle:
+                json.dump(addresses, handle)
+        except OSError:
+            return False
+        return True
+
+    @classmethod
     def status(cls) -> Dict[str, Any]:
         """
         Reports whether the mailbox is connected.
 
-        `configured` and `connected` report the same thing now that there is only one credential to
-        hold -- the pair is kept because the injected UI script and Onyx's page both read it, and
-        because "a client is stored" and "someone has consented" were genuinely different questions
-        under the OAuth transport.
+        Both flags mean the same thing -- a usable token exists -- and the pair is kept because the
+        injected UI script reads it as one object.
 
         Returns:
             Dict[str, Any]: `configured` and `connected`.
@@ -346,36 +410,39 @@ class GmailSearchService:
     # ------------------------------------------------------------------ IMAP
 
     @classmethod
-    def verify(cls, address: str, app_password: str) -> Optional[str]:
+    def _xoauth2(cls, address: str, token: str):
         """
-        Checks the credentials by logging in, so the form fails at the form.
+        Builds the responder imaplib's AUTHENTICATE calls for the XOAUTH2 exchange.
+
+        Two details are the difference between working and hanging, and neither is guessable:
+
+        * **Return raw bytes, not base64.** imaplib encodes whatever the responder returns; a
+          pre-encoded string is encoded twice and Gmail rejects it with an error that reads like a
+          bad password.
+        * **Answer the second challenge with nothing.** On a token Google will not accept, the
+          server does not fail the command -- it sends a continuation challenge carrying a
+          base64 JSON error, and imaplib calls the responder again. The protocol's way to draw out
+          the real `NO` response is an empty reply; returning the credential again instead leaves
+          the exchange going nowhere until the socket timeout, so an expired token would surface
+          as a stall rather than as an error.
 
         Args:
-            address (str): The Gmail address.
-            app_password (str): The app password.
+            address (str): The account the token authenticates as.
+            token (str): A Google access token.
 
         Returns:
-            Optional[str]: None if the login worked, otherwise a message for the user.
+            A callable suitable for `IMAP4.authenticate`.
         """
-        try:
-            connection = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT_SECONDS)
-        except OSError as exc:
-            return f"Could not reach {IMAP_HOST}: {exc}"
-        try:
-            connection.login(address, app_password)
-        except imaplib.IMAP4.error:
-            # Google's own text is unhelpful ("Invalid credentials (Failure)"), and the two things
-            # that actually go wrong are a mistyped code and IMAP being switched off entirely.
-            return ("Google refused that sign-in. Check the address, and that the app password was "
-                    "copied whole — it is 16 characters with no spaces.")
-        except OSError as exc:
-            return f"Could not reach {IMAP_HOST}: {exc}"
-        finally:
-            try:
-                connection.logout()
-            except (imaplib.IMAP4.error, OSError):
-                pass
-        return None
+        payload = f"user={address}\x01auth=Bearer {token}\x01\x01".encode()
+        answered = []
+
+        def respond(_challenge: bytes) -> bytes:
+            if answered:
+                return b""
+            answered.append(True)
+            return payload
+
+        return respond
 
     @classmethod
     def _open_mailbox(cls) -> Tuple[Optional[imaplib.IMAP4_SSL], Optional[str]]:
@@ -390,7 +457,7 @@ class GmailSearchService:
             return None, NOT_CONNECTED_MESSAGE
         try:
             connection = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT_SECONDS)
-            connection.login(stored["email"], stored["app_password"])
+            connection.authenticate("XOAUTH2", cls._xoauth2(stored["email"], stored["access_token"]))
             # Read-only, so that nothing this service does can change the mailbox even by accident.
             connection.select(f'"{cls._all_mail_folder(connection)}"', readonly=True)
         except imaplib.IMAP4.error as exc:
@@ -405,8 +472,8 @@ class GmailSearchService:
         Finds the folder holding every message once, by its special-use attribute.
 
         The English name `[Gmail]/All Mail` is what most examples hard-code, and it is wrong for
-        every account whose interface language is not English -- `[Gmail]/Вся почта` on this one.
-        The `\\All` attribute in the LIST response is the same folder under any language.
+        every account whose interface language is not English. The `\\All` attribute in the LIST
+        response is the same folder under any language.
 
         Args:
             connection (imaplib.IMAP4_SSL): A logged-in connection.
@@ -436,7 +503,7 @@ class GmailSearchService:
         Runs a Gmail search and returns the matching UIDs, newest last.
 
         `X-GM-RAW` hands the string to the same engine the Gmail web UI uses, which is why the
-        tool's documented syntax survived the move off the REST API unchanged.
+        tool's documented syntax survived every change of transport unchanged.
 
         **The query is always sent as a literal with `CHARSET UTF-8`.** imaplib encodes ordinary
         arguments as ASCII, so a Cyrillic or accented search would raise before it ever reached
@@ -495,15 +562,12 @@ class GmailSearchService:
             cls._close(connection)
 
     @classmethod
-    def _summaries(
-        cls, connection: imaplib.IMAP4_SSL, uids: List[bytes]
-    ) -> List[Dict[str, str]]:
+    def _summaries(cls, connection: imaplib.IMAP4_SSL, uids: List[bytes]) -> List[Dict[str, str]]:
         """
         Fetches just the headers a result list needs.
 
-        `BODY.PEEK` rather than `BODY` throughout: the REST API could not mark anything read, but
-        IMAP can, and a search tool that silently marked twenty messages as read would be doing
-        real damage to a mailbox.
+        `BODY.PEEK` rather than `BODY` throughout: a search tool that silently marked twenty
+        messages as read would be doing real damage to a mailbox.
 
         Args:
             connection (imaplib.IMAP4_SSL): A connection with a folder selected.
@@ -707,25 +771,11 @@ class GmailSearchService:
                 self.send_header("Location", location)
                 self.end_headers()
 
-            def _link_target(self) -> str:
-                """
-                Chooses how the Google links open, from the caller's engine.
-
-                Tauri leaves wry's `new_window_req_handler` unset, so WebKitGTK never connects its
-                `create` signal and a `target=_blank` click in the desktop app is silently inert --
-                no window, no error. The injected script solves this by reading an engine marker,
-                but this page is *served* rather than injected and has no marker to read. The
-                User-Agent answers the same question: Blink's contains `Chrome/` and WebKitGTK's
-                does not.
-                """
-                agent = self.headers.get("User-Agent", "")
-                return "_blank" if "Chrome/" in agent else "_self"
-
             def _html(self, inner: str) -> None:
-                # The link back matters more than it looks. In the browser the button opens a new
-                # tab and this page is disposable, but the desktop app has no new window to open,
-                # so it navigates in place -- and without a way back the user is left staring at a
-                # bare paragraph with no chrome to return from.
+                # The link back matters more than it looks. In the browser this page opens in a new
+                # tab and is disposable, but the desktop app has no new window to open, so it
+                # navigates in place -- and without a way back the user is left staring at a bare
+                # paragraph with no chrome to return from.
                 body = (
                     '<!doctype html><html><head><meta charset="utf-8">'
                     '<title>Puffin</title><meta name="viewport" '
@@ -744,43 +794,52 @@ class GmailSearchService:
             def _page(self, message: str) -> None:
                 self._html(f"<h2>Puffin</h2><p>{message}</p>")
 
-            def _setup_form(self, error: str = "", address: str = "") -> None:
+            def _setup_page(self) -> None:
                 """
-                Asks for the mailbox and an app password, which is the whole setup.
+                Explains where to sign in. There is nothing here to submit.
 
-                Two steps rather than the four the OAuth flow needed: no Cloud project, no consent
-                screen, no publishing decision. The app password is a Google credential the user
-                creates in their own account settings, and Google shows it in four groups of four
-                -- which is why the field's value is stripped of whitespace before it is used.
+                The whole design is that the user has one place to manage their Google account --
+                the desktop's own Settings panel -- and Puffin picks up what is there. So this page
+                cannot be a form, and deliberately is not one: it says where to go, and reports
+                what GNOME is currently holding so the user can tell whether the step is done.
+
+                It also cannot be a *button*. GOA lives on the session bus and this page is served
+                from a container that has neither a bus nor `gdbus`, so the host is what actually
+                reads the token, on a timer. What the page can do is tell the user the truth about
+                where things stand.
                 """
-                target = self._link_target()
-                note = f'<p class="error">{html.escape(error)}</p>' if error else ""
+                known = cls.gnome_accounts()
+                if known:
+                    listed = html.escape(", ".join(known))
+                    self._html(
+                        "<h2>Connect Gmail</h2>"
+                        f'<p class="ready">✅ GNOME is signed into Google as <b '
+                        f'style="display:inline">{listed}</b>. Puffin picks the account up '
+                        "automatically — this page will stop appearing within a few minutes.</p>"
+                        "<p>Puffin reads your mail directly from Google over IMAP, using the "
+                        "account your desktop already holds. Nothing passes through Dreamference "
+                        "and there is no password to create.</p>"
+                        '<p class="note">ⓘ In a hurry? Run <code>dream onyx gmail</code> in a '
+                        "terminal to connect now rather than waiting for the next check.</p>"
+                    )
+                    return
                 self._html(
                     "<h2>Connect Gmail</h2>"
-                    "<p>Puffin reads your mail directly from Google over IMAP. Nothing passes "
-                    "through Dreamference.</p>"
+                    "<p>Puffin reads your mail directly from Google over IMAP, using the Google "
+                    "account your desktop already holds. Nothing passes through Dreamference, and "
+                    "there is no password or developer account to create.</p>"
                     "<ol>"
-                    "<li>Turn on 2-Step Verification if you haven’t: "
-                    f'<a href="{GOOGLE_2SV_URL}" target="{target}" rel="noopener">'
-                    "myaccount.google.com/signinoptions/two-step-verification</a></li>"
-                    "<li>Create an app password: "
-                    f'<a href="{GOOGLE_APP_PASSWORDS_URL}" target="{target}" rel="noopener">'
-                    "myaccount.google.com/apppasswords</a> → name it Puffin → Create "
-                    "→ copy the 16-character code.</li>"
+                    "<li>Open <b style=\"display:inline\">Settings → Online Accounts</b> on this "
+                    "machine and sign into Google.</li>"
+                    "<li>That is all. Puffin checks every few minutes and connects itself.</li>"
                     "</ol>"
-                    f"{note}"
-                    f'<form method="post" action="{CONNECT_PATH}">'
-                    '<label for="addr">Gmail address</label>'
-                    '<input id="addr" name="email" type="email" autocomplete="username" required '
-                    f'value="{html.escape(address)}">'
-                    '<label for="pw">App password</label>'
-                    '<input id="pw" name="app_password" type="password" autocomplete="off" '
-                    'required>'
-                    '<button type="submit">Connect</button>'
-                    "</form>"
-                    '<p class="note">ⓘ Work/school account and the app-passwords page says '
-                    "it’s unavailable? Your admin has disabled them — ask them to allow "
-                    "app passwords for your account.</p>"
+                    '<p class="note">ⓘ The Google sign-in page will say <b '
+                    'style="display:inline">GNOME</b> is asking for access. That is correct — '
+                    "your desktop is what holds the account, and Puffin asks it for permission to "
+                    "read your mail. No Puffin credentials are sent to Google.</p>"
+                    '<p class="muted">Running Puffin on a machine with no desktop session? '
+                    "GNOME Online Accounts is not available there, so Gmail search cannot be "
+                    "connected on that host.</p>"
                 )
 
             def do_GET(self) -> None:  # noqa: N802 - name fixed by http.server
@@ -798,7 +857,7 @@ class GmailSearchService:
                     if cls.status()["connected"]:
                         self._page("Gmail is already connected.")
                         return
-                    self._setup_form()
+                    self._setup_page()
                     return
                 if expected and self.headers.get(AUTH_HEADER) != expected:
                     self._reply(401, {"error": "unauthorised"})
@@ -821,44 +880,10 @@ class GmailSearchService:
                     return
                 self._reply(404, {"error": "not found"})
 
-            def do_POST(self) -> None:  # noqa: N802 - name fixed by http.server
-                """
-                Receives the setup form, checks the credentials and stores them.
-
-                The login is attempted *before* anything is written, so a mistyped code fails on
-                the form where it can be corrected rather than silently, later, inside a tool call
-                the user never sees.
-                """
-                if urllib.parse.urlparse(self.path).path != CONNECT_PATH:
-                    self._reply(404, {"error": "not found"})
-                    return
-                try:
-                    length = int(self.headers.get("Content-Length") or 0)
-                except ValueError:
-                    length = 0
-                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
-                address = (form.get("email") or [""])[0].strip()
-                # Google displays the code as `xxxx xxxx xxxx xxxx`, and it is pasted that way far
-                # more often than not. IMAP would simply reject it.
-                app_password = re.sub(r"\s+", "", (form.get("app_password") or [""])[0])
-                if not address or not app_password:
-                    self._setup_form("Both the address and the app password are needed.", address)
-                    return
-                failure = cls.verify(address, app_password)
-                if failure:
-                    self._setup_form(failure, address)
-                    return
-                if not cls.save_credentials(address, app_password):
-                    self._setup_form("Those credentials could not be stored — check the service "
-                                     "logs.", address)
-                    return
-                self._page("Gmail is connected. You can close this tab.")
-
             def log_message(self, *args: object) -> None:
                 """Silenced: request logs would record the user's search terms."""
 
         ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
-
 
 
 def openapi_definition(base_url: str) -> Dict[str, Any]:

@@ -104,6 +104,7 @@ ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
 # Onyx's custom-tool client calls whatever URL the tool names and performs no SSRF validation, so
 # anything else on that network could reach a service holding a live mailbox credential. The shared
 # secret header is what actually protects it.
+GNOME_TOKEN_UNIT: Final[str] = "dreamference-goa"
 GMAIL_CONTAINER_NAME: Final[str] = "dream-gmail"
 GMAIL_CONTAINER_URL: Final[str] = f"http://{GMAIL_CONTAINER_NAME}:8000"
 GMAIL_HOST_PORT: Final[int] = 8767
@@ -920,21 +921,19 @@ class OnyxRunner:
 
     def connect_gmail(
         self,
-        gmail_address: str,
-        app_password: str,
         web_url: str = DEFAULT_ONYX_WEB_URL,
         email: str = DEFAULT_ONYX_EMAIL,
         password: str = DEFAULT_ONYX_PASSWORD,
     ) -> bool:
         """
-        Connects a mailbox over IMAP and registers Gmail search with Onyx.
+        Connects the mailbox through GNOME Online Accounts and registers the search tool.
 
-        The same connection the Connect to Google button makes from Settings -> Connectors; this is
-        the terminal route to it.
+        There is nothing for the user to create. Two other routes were built and removed -- a
+        Google app password, and a Google client of the user's own -- because each put setup work
+        on someone who has already signed into Google on their desktop. This reads the token GNOME
+        is holding, hands it to the service and installs the timer that keeps doing so.
 
         Args:
-            gmail_address (str): The Gmail address to connect.
-            app_password (str): Google app password, with or without the spaces Google displays.
             web_url (str): Base URL of the Onyx web UI.
             email (str): Onyx admin email.
             password (str): Onyx admin password.
@@ -942,10 +941,28 @@ class OnyxRunner:
         Returns:
             bool: True if the assistant can search Gmail afterwards.
         """
-        from dreamference.chat.gmail_credentials import GmailCredentials
+        from dreamference.chat.goa_accounts import GoaAccounts
 
-        if not GmailCredentials.connect(gmail_address, app_password):
+        if not GoaAccounts.available():
+            print("❌ GNOME Online Accounts is not answering on this session.")
+            print("💡 It needs a GNOME desktop session; Gmail search is unavailable on a headless "
+                  "host.")
             return False
+
+        accounts = GoaAccounts.google_accounts()
+        if not accounts:
+            print("❌ No Google account has been added to GNOME.")
+            print("💡 Open Settings → Online Accounts → Google and sign in, then run this again.")
+            return False
+        if len(accounts) > 1:
+            print(f"ℹ️  {len(accounts)} Google accounts in GNOME; using the first, "
+                  f"{accounts[0]['email']}.")
+
+        if not self.refresh_gnome_token(announce=True):
+            return False
+        if not self.install_gnome_token_timer():
+            print("⚠️  The token was stored but the refresh timer could not be installed.")
+            print("💡 Gmail will stop answering in about an hour; re-run this command to renew.")
 
         api = f"{web_url.rstrip('/')}/api"
         cookie = self._authenticate(api, email, password)
@@ -953,11 +970,146 @@ class OnyxRunner:
             return False
         if not self.enable_gmail_search(api, cookie):
             return False
-
-        # The assistant's tools come from `GET /tool`, so re-running the upsert is what actually
-        # puts the new tool in front of the model.
         self._upsert_puffin_assistant(api, cookie)
         print("✅ Gmail search is available to the assistant.")
+        return True
+
+    @classmethod
+    def _record_gnome_accounts(cls) -> None:
+        """
+        Writes what GNOME Online Accounts is holding into the shared credentials directory.
+
+        The container cannot look for itself -- GOA is on the session bus, and a stock
+        `python:3-slim` has neither a bus nor `gdbus` -- so the host leaves it a note.
+        """
+        from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
+        from dreamference.chat.gmail_search_service import GmailSearchService
+        from dreamference.chat.goa_accounts import GoaAccounts
+
+        if not GoaAccounts.available():
+            return
+        try:
+            os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
+        except OSError:
+            return
+        GmailSearchService.save_gnome_accounts(
+            [a["email"] for a in GoaAccounts.google_accounts() if a["email"]], CREDENTIALS_DIR
+        )
+
+    @classmethod
+    def refresh_gnome_token(cls, announce: bool = False) -> bool:
+        """
+        Writes GOA's current access token where the Gmail service can read it.
+
+        Run both by `dream onyx gmail --gnome` and, every half hour, by the systemd user timer that
+        command installs. GOA refreshes the token itself when the one it holds has expired, so this
+        never touches a refresh token and never stores one.
+
+        Args:
+            announce (bool): Whether to print what happened; the timer runs quietly.
+
+        Returns:
+            bool: True if a token was stored.
+        """
+        from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
+        from dreamference.chat.gmail_search_service import GmailSearchService
+        from dreamference.chat.goa_accounts import GoaAccounts
+
+        accounts = GoaAccounts.google_accounts()
+        # Recorded whatever the answer, so the setup form learns when an account appears and stops
+        # offering the route when one is removed.
+        os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
+        GmailSearchService.save_gnome_accounts(
+            [a["email"] for a in accounts if a["email"]], CREDENTIALS_DIR
+        )
+        if not accounts:
+            if announce:
+                print("❌ No Google account has been added to GNOME.")
+            return False
+
+        account = accounts[0]
+        issued = GoaAccounts.access_token(account["path"])
+        if not issued:
+            if announce:
+                print("❌ GNOME would not issue an access token for that account.")
+                print("💡 Open Settings → Online Accounts and check the account is not showing "
+                      "an error; signing in again repairs a revoked grant.")
+            return False
+
+        token, lifetime = issued
+        os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
+        if not GmailSearchService.save_token(
+            account["email"], token, lifetime, CREDENTIALS_DIR
+        ):
+            if announce:
+                print("❌ Could not store the token.")
+            return False
+        if announce:
+            print(f"🔐 {account['email']} connected through GNOME Online Accounts.")
+        return True
+
+    @classmethod
+    def install_gnome_token_timer(cls) -> bool:
+        """
+        Installs the systemd user timer that keeps the stored token current.
+
+        A **user** timer, not a system one: GOA lives on the session bus and only the session owner
+        can ask it anything, so this belongs to the user and starts with their session. A timer
+        rather than a daemon, because the work is one D-Bus call every half hour and a long-lived
+        process would be one more thing to supervise.
+
+        Returns:
+            bool: True if the timer is installed and running.
+        """
+        import shutil
+
+        from dreamference.chat.goa_accounts import REFRESH_INTERVAL_SECONDS, GoaAccounts
+
+        if not shutil.which("systemctl"):
+            return False
+        executable = shutil.which("dream") or ""
+        if not executable:
+            return False
+
+        directory = GoaAccounts.systemd_unit_directory()
+        service = (
+            "[Unit]\n"
+            "Description=Refresh the Google access token Puffin reads Gmail with\n\n"
+            "[Service]\n"
+            "Type=oneshot\n"
+            f"ExecStart={executable} onyx gmail --refresh\n"
+        )
+        timer = (
+            "[Unit]\n"
+            "Description=Keep Puffin's Google access token current\n\n"
+            "[Timer]\n"
+            # `Persistent` so a machine that was asleep refreshes on waking rather than waiting out
+            # the rest of the interval with a token that expired hours ago.
+            f"OnBootSec={REFRESH_INTERVAL_SECONDS}\n"
+            f"OnUnitActiveSec={REFRESH_INTERVAL_SECONDS}\n"
+            "Persistent=true\n\n"
+            "[Install]\n"
+            "WantedBy=timers.target\n"
+        )
+        try:
+            with open(os.path.join(directory, GNOME_TOKEN_UNIT + ".service"), "w") as handle:
+                handle.write(service)
+            with open(os.path.join(directory, GNOME_TOKEN_UNIT + ".timer"), "w") as handle:
+                handle.write(timer)
+        except OSError as exc:
+            print(f"⚠️  Could not write the systemd units: {exc}")
+            return False
+
+        for command in (
+            ["systemctl", "--user", "daemon-reload"],
+            ["systemctl", "--user", "enable", "--now", GNOME_TOKEN_UNIT + ".timer"],
+        ):
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    timeout=60, check=False)
+            if result.returncode != 0:
+                print(f"⚠️  {' '.join(command)} failed: {result.stderr.strip()[:160]}")
+                return False
+        print(f"⏱️  Token refresh scheduled every {REFRESH_INTERVAL_SECONDS // 60} minutes.")
         return True
 
     def enable_gmail_search(self, api: str, cookie: str) -> bool:
@@ -987,6 +1139,11 @@ class OnyxRunner:
         # reason the tool could not exist before someone had already finished the OAuth flow --
         # which is backwards, because the Connect button that starts that flow is reached from the
         # UI this tool lives in. An unconnected search answers with the way to connect.
+        # Note what GNOME is holding while we are here, so the setup form can offer that route to
+        # someone who has never run a Gmail command at all. Cheap, and the alternative is a page
+        # that recommends the hardest of the three paths on a desktop where the easiest is ready.
+        self._record_gnome_accounts()
+
         secret = self._gmail_secret()
         if not secret or not self._start_gmail_service(secret):
             return False

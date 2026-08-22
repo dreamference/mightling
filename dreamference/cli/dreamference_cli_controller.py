@@ -857,11 +857,7 @@ class DreamferenceCLIController:
             "gmail", help="Connect Gmail and give the assistant a mailbox search tool"
         )
         onyx_gmail_parser.add_argument(
-            "--email", required=True, dest="gmail_address", help="Gmail address to connect"
-        )
-        onyx_gmail_parser.add_argument(
-            "--app-password", required=True,
-            help="Google app password from myaccount.google.com/apppasswords (spaces are ignored)",
+            "--refresh", action="store_true", help=argparse.SUPPRESS,
         )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
 
@@ -1604,9 +1600,11 @@ class DreamferenceCLIController:
                     args.client_id, args.client_secret
                 ) else 1)
             elif args.onyx_command == "gmail":
-                sys.exit(0 if onyx_runner.connect_gmail(
-                    args.gmail_address, args.app_password
-                ) else 1)
+                if args.refresh:
+                    # What the systemd user timer runs. Quiet by design: it fires every few
+                    # minutes, and a machine with no Google account in GNOME is not an error.
+                    sys.exit(0 if onyx_runner.refresh_gnome_token() else 1)
+                sys.exit(0 if onyx_runner.connect_gmail() else 1)
             elif args.onyx_command == "status":
                 sys.exit(onyx_runner.status())
             elif args.onyx_command == "logs":
