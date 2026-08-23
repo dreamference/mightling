@@ -327,11 +327,37 @@ SETTINGS_TABS_SCRIPT: Final[str] = (
     "if(tb.s===h)return h;"
     "if(def===null)def=tb.s;}"
     "return def;}"
+    # Cross-route switches ride React's own router: the real route tabs are hidden, not gone,
+    # and display:none does not stop dispatched events -- so clicking one programmatically is a
+    # client-side navigation, where `location.href` would reload the whole document (in the
+    # settings modal, visibly). The hash is applied once the route lands; if it never does, the
+    # hard navigation is the fallback.
+    "function real(route){var nav=document.querySelector(NAV);if(!nav)return null;"
+    "var lbl=null,i;"
+    "for(i=0;i<TABS.length;i++){if(TABS[i].p[0]===route){lbl=TABS[i].l;break}}"
+    "var rows=nav.children;"
+    "for(i=0;i<rows.length;i++){var r=rows[i];"
+    "if(r.id&&r.id.indexOf('puffin-tab-')===0)continue;"
+    "var sp=r.querySelector&&r.querySelector('span[title]');"
+    "if(sp&&sp.getAttribute('title')===lbl)return r;}return null;}"
     "function go(s){var tb=null,i;"
     "for(i=0;i<TABS.length;i++){if(TABS[i].s===s)tb=TABS[i];}"
     "if(!tb)return;"
-    "if(tb.p.indexOf(location.pathname)>=0){location.hash=s;sync();}"
-    "else{location.href=tb.p[0]+'#'+s;}}"
+    "if(tb.p.indexOf(location.pathname)>=0){location.hash=s;sync();return}"
+    "var r=real(tb.p[0]);"
+    "if(!r){location.href=tb.p[0]+'#'+s;return}"
+    # Dispatch on the row's innermost span, not the row: React's handler lives on an inner
+    # element, and an event dispatched on an ancestor bubbles up, never down -- fired at the
+    # wrapper it reaches nothing and the 2s fallback turns into exactly the reload this exists
+    # to avoid.
+    "var tgt=r.querySelector('span[title]')||r;"
+    "['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(ty){"
+    "tgt.dispatchEvent(new MouseEvent(ty,{bubbles:true,cancelable:true,view:window}));});"
+    "var n=0,iv=setInterval(function(){n++;"
+    "if(tb.p.indexOf(location.pathname)>=0){clearInterval(iv);"
+    "history.replaceState(null,'',location.pathname+'#'+s);sync();}"
+    "else if(n>40){clearInterval(iv);location.href=tb.p[0]+'#'+s;}"
+    "},50);}"
     "function make(nav,def){"
     "var src=null,rows=nav.children,i;"
     "for(i=0;i<rows.length;i++){"
