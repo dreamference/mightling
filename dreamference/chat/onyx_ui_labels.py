@@ -40,6 +40,17 @@ LABEL_SUBSTITUTIONS: Final[Dict[str, str]] = {
     # The search palette's placeholder. Projects are hidden, so offering to search them was a
     # promise the UI no longer keeps.
     '"Search chat sessions, projects..."': '"Search chat sessions"',
+    # The settings tab that holds the Google/Gmail connection. Keyed by the `label:` prop of the
+    # settings route table, which also feeds the page heading -- one rewrite renames both. The
+    # injected connect script finds that page by its heading, so `SECTION_HEADING` in
+    # `onyx_ui_scripts.py` must carry the *rewritten* text; the two move together.
+    'label:"Connectors"': 'label:"Google"',
+    # The page heading over that tab's content is a separate literal from the nav label. The
+    # match carries the full prop run because the admin Chat Preferences page renders an
+    # identical heading distinguishable only by its missing `width:"full"`, and an admin table
+    # has a bare "Connectors" column header -- both must stay.
+    'title:"Connectors",sizePreset:"main-content",variant:"section",width:"full"':
+        'title:"Google",sizePreset:"main-content",variant:"section",width:"full"',
 }
 
 

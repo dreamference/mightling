@@ -63,7 +63,10 @@ CONNECT_PATH: Final[str] = "/app/settings/connectors"
 # structure around it is Onyx's own component. Note the page carries *two* nodes reading
 # "Connectors" -- this one and the settings nav link -- which is why the search is scoped to
 # `.opal-content-md-title-row`.
-SECTION_HEADING: Final[str] = "Connectors"
+#
+# "Google" rather than "Connectors" because `onyx_ui_labels.py` rewrites that label; this constant
+# must match what the page *renders after* the rewrite, not what Onyx ships.
+SECTION_HEADING: Final[str] = "Google"
 
 # How often placement is re-checked, as opposed to the status fetch below. Route changes in this
 # app are client-side, so nothing loads and no event this script can see fires; a short interval is

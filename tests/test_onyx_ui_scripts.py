@@ -195,8 +195,9 @@ def test_the_section_is_found_by_its_heading_rather_than_its_classes():
     # The section is `div.flex.flex-col…` holding `div.w-full` and an `.opal-card` -- all Tailwind
     # utilities, none of them a name anyone chose. The heading is the only stable handle, and the
     # search is scoped to `.opal-content-md-title-row` because the settings nav carries a second
-    # node reading "Connectors".
-    assert SECTION_HEADING == "Connectors"
+    # node with the same text. "Google" is the post-rewrite heading -- `onyx_ui_labels.py` renames
+    # the shipped "Connectors" label, and this constant must match what actually renders.
+    assert SECTION_HEADING == "Google"
     assert "'.opal-content-md-title-row span'" in CONNECT_GOOGLE_SCRIPT
     assert "closest('div.w-full')" in CONNECT_GOOGLE_SCRIPT
 

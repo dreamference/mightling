@@ -377,12 +377,14 @@ SETTINGS_SECTIONS_CSS: Final[str] = (
 )
 
 # The Accounts & Access tab in Settings, hidden. Password and MFA management is surplus on a
-# single-user appliance where `dream onyx configure` owns the one account. The href is the
-# anchor -- a route is part of the page's contract and survives rebuilds, unlike any class on
-# the element. Hiding the nav entry does not block the route itself; like every rule here it
-# removes chrome, not capability.
+# single-user appliance where `dream onyx configure` owns the one account. The tab renders as a
+# div stack with no href in the DOM (the route lives only in the router data), so the anchor is
+# the nav's own test id plus the label the span carries verbatim in its `title` attribute; the
+# `.relative` wrapper is the per-tab row, so hiding it removes the hover target and the row's
+# height along with the text. The route itself stays reachable -- chrome removed, not capability.
 ACCOUNTS_ACCESS_CSS: Final[str] = (
-    'a[href="/app/settings/accounts-access"]'
+    '[data-testid="settings-left-tab-navigation"] '
+    '.relative:has(span[title="Accounts & Access"])'
     "{display:none}"
 )
 

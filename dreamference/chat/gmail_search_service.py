@@ -130,7 +130,7 @@ GNOME_SETTINGS_URI: Final[str] = "gnome-control-center://online-accounts"
 # What an unconnected search answers with. It names the place the user can act rather than a
 # command they would have to leave the app to run -- the model reads this and relays it.
 NOT_CONNECTED_MESSAGE: Final[str] = (
-    "Gmail is not connected. Open Settings -> Connectors in Puffin and choose Connect to Google."
+    "Gmail is not connected. Open Settings -> Google in Puffin and choose Connect to Google."
 )
 
 # Enough styling that the setup page reads as part of Puffin rather than as a server error. It is
