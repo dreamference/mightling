@@ -265,9 +265,60 @@ SETTINGS_MODAL_SCRIPT: Final[str] = (
     "}catch(e){}})();"
 )
 
+# Voice as its own settings tab.
+#
+# Onyx renders Voice as the last section of Chat Preferences, and the tab nav comes out of a
+# compiled route table -- there is no route to add. The tab is therefore synthetic: a clone of a
+# real tab row (cloning keeps Onyx's classes, so hover and the selected pill are Onyx's own, and
+# a clone carries none of React's handlers, so clicking it does only what is wired here). It
+# lives at `chat-preferences#voice` -- the same page, with the hash as the mode switch. The
+# script mirrors the mode onto <html> as `VOICE_ATTRIBUTE` because CSS cannot read a URL:
+# `onyx_ui_overrides.py` keys on it to show only the Voice section, restyle the real
+# Chat Preferences pill back to rest, and light the synthetic tab. React recreates the nav
+# wholesale on navigation, so a 500ms interval re-injects the tab whenever it is missing -- the
+# same posture the scrollbar script takes, and unlike it this one must also run inside the
+# settings modal, so it does not bail when framed.
+VOICE_ATTRIBUTE: Final[str] = "data-puffin-voice"
+VOICE_TAB_ID: Final[str] = "puffin-voice-tab"
+VOICE_TAB_SCRIPT: Final[str] = (
+    ";(function(){try{"
+    "if(window.__puffinVoiceTab)return;window.__puffinVoiceTab=1;"
+    f'var TID="{VOICE_TAB_ID}",ATTR="{VOICE_ATTRIBUTE}";'
+    'var NAV=\'[data-testid="settings-left-tab-navigation"]\';'
+    'var PREFS="/app/settings/chat-preferences";'
+    "function mode(){return location.pathname===PREFS&&location.hash==='#voice';}"
+    "function go(){if(location.pathname===PREFS){location.hash='voice';sync();}"
+    "else{location.href=PREFS+'#voice';}}"
+    "function make(nav){"
+    "var src=null,rows=nav.children,i;"
+    "for(i=0;i<rows.length;i++){"
+    "if(rows[i].querySelector&&rows[i].querySelector('span[title]')){src=rows[i];break}}"
+    "if(!src)return null;"
+    "var tab=src.cloneNode(true);tab.id=TID;"
+    "var sp=tab.querySelector('span[title]');"
+    "sp.textContent='Voice';sp.setAttribute('title','Voice');"
+    "tab.addEventListener('click',function(e){"
+    "e.preventDefault();e.stopPropagation();go();},true);"
+    "nav.appendChild(tab);return tab;}"
+    "function sync(){"
+    "if(mode()){document.documentElement.setAttribute(ATTR,'1');}"
+    "else{document.documentElement.removeAttribute(ATTR);}"
+    "var nav=document.querySelector(NAV);if(!nav)return;"
+    "var tab=document.getElementById(TID);"
+    "if(!tab)tab=make(nav);if(!tab)return;"
+    "var ic=tab.querySelector('[data-interactive-state]');"
+    "if(ic)ic.setAttribute('data-interactive-state',mode()?'selected':'empty');}"
+    "window.addEventListener('hashchange',sync);"
+    "setInterval(sync,500);"
+    "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',sync)}"
+    "else{sync()}"
+    "}catch(e){}})();"
+)
+
 # Everything this module injects.
 UI_SCRIPTS: Final[str] = (
     SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT + SCROLLBAR_SCRIPT + SETTINGS_MODAL_SCRIPT
+    + VOICE_TAB_SCRIPT
 )
 
 

@@ -374,6 +374,21 @@ SETTINGS_SECTIONS_CSS: Final[str] = (
     "div:has(>.card):nth-child(2)>div.w-full,"
     "div:has(>.card):nth-child(2)>.card"
     "{display:none}"
+    # On the General tab the second section is Appearance, and the child-hiding rule above
+    # empties it without removing it -- a zero-height flex item that still spends two of the
+    # pane's 32px gaps. It can be collapsed outright, but only there: on Chat Preferences the
+    # same position holds Personal Preferences, so the section that carries a textarea is the
+    # one that must survive. The divider below is Onyx's own line between Appearance and the
+    # Danger Zone, orphaned once Appearance is gone. Both are scoped to the settings pane via
+    # the nav's test id rather than left as bare structural guesses.
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    '>:not([data-testid="settings-left-tab-navigation"])'
+    ">div:has(>.card):nth-child(2):not(:has(textarea))"
+    "{display:none}"
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    '>:not([data-testid="settings-left-tab-navigation"])'
+    ">.opal-divider"
+    "{display:none}"
 )
 
 # The Accounts & Access tab in Settings, hidden. Password and MFA management is surplus on a
@@ -392,9 +407,44 @@ ACCOUNTS_ACCESS_CSS: Final[str] = (
 # iframe and a framed document marks its own <html> with `data-puffin-framed`; without this the
 # modal would contain a miniature copy of the whole app, sidebar and all. Keyed on the attribute
 # rather than on being an iframe because CSS cannot ask.
+#
+# The second half scopes the scrolling: left alone, the framed *document* scrolls, carrying the
+# "Settings" header and the tab nav away with the content. Pinning the body and handing
+# `overflow-y:auto` to the content pane alone needs the whole ancestor chain between them to be
+# a min-height:0 flex column -- and every element on that chain is an anonymous Tailwind div, so
+# the chain is addressed from the one stable handle on the page: each ancestor *containing* the
+# tab nav (`:has(...)`) becomes a flex column, the nav's direct parent (`:has(>...)`) is the row
+# and is excluded from that, and the row's other child is the pane that scrolls. If Onyx renames
+# the test id the rules stop matching and the page scrolls whole again -- visible, not silent.
 SETTINGS_MODAL_SHELL_CSS: Final[str] = (
     "html[data-puffin-framed] .opal-sidebar-root__column"
     "{display:none}"
+    "html[data-puffin-framed],html[data-puffin-framed] body"
+    "{height:100%;overflow:hidden}"
+    "html[data-puffin-framed] body "
+    '*:has([data-testid="settings-left-tab-navigation"])'
+    ':not(:has(>[data-testid="settings-left-tab-navigation"]))'
+    "{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:hidden}"
+    "html[data-puffin-framed] "
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    "{flex:1 1 auto;min-height:0;overflow:hidden}"
+    # `justify-content:flex-start` undoes the pane's own `justify-center`, which is harmless at
+    # natural height but centers overflowing content once the height is constrained -- flexbox
+    # puts the excess *above the scroll start*, where no amount of scrolling reaches it.
+    "html[data-puffin-framed] "
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    '>:not([data-testid="settings-left-tab-navigation"])'
+    "{overflow-y:auto;min-height:0;justify-content:flex-start}"
+    # The pane is itself a flex column, and a flex column with a constrained height *shrinks its
+    # items* to fit rather than overflowing -- the sections compressed into each other instead
+    # of producing a scrollbar. Overflow only exists if the children refuse to shrink. And
+    # `height:auto` undoes the sections' own `h-full`, which resolves to nothing while the pane
+    # is natural-height but inflates every section to one full pane-height once it is
+    # constrained, centering each section's content in its own empty viewport.
+    "html[data-puffin-framed] "
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    '>:not([data-testid="settings-left-tab-navigation"])>*'
+    "{flex-shrink:0;height:auto}"
 )
 
 # The account avatar inside a selected sidebar row, inverted.
