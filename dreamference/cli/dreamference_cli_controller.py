@@ -1600,10 +1600,6 @@ class DreamferenceCLIController:
                     args.client_id, args.client_secret
                 ) else 1)
             elif args.onyx_command == "gmail":
-                if args.refresh:
-                    # What the systemd user timer runs. Quiet by design: it fires every few
-                    # minutes, and a machine with no Google account in GNOME is not an error.
-                    sys.exit(0 if onyx_runner.refresh_gnome_token() else 1)
                 sys.exit(0 if onyx_runner.connect_gmail() else 1)
             elif args.onyx_command == "status":
                 sys.exit(onyx_runner.status())

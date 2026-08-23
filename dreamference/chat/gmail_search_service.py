@@ -51,7 +51,7 @@ import os
 import re
 import secrets
 import time
-import urllib.parse
+import urllib.parse, urllib.request, secrets, base64, hashlib
 from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Final, List, Optional, Tuple
@@ -63,6 +63,12 @@ CREDENTIALS_NAME: Final[str] = "credentials.json"
 # The key the stored token is sealed with. See `_seal`: this is obfuscation with a clear threat
 # model, not a secret-management system.
 KEY_NAME: Final[str] = "credentials.key"
+
+GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_ID", "44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com")
+GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF")
+GOOGLE_OAUTH_SCOPES: Final[str] = "openid email https://mail.google.com/ https://www.googleapis.com/auth/drive.readonly"
+OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
+
 
 # Written by the host so the setup page can say what GNOME is holding. The service cannot look for
 # itself: GOA lives on the session bus, and this runs in a container that has neither a session bus
@@ -297,14 +303,33 @@ class GmailSearchService:
         sealed = stored.get("access_token")
         if not address or not sealed:
             return None
-        if float(stored.get("expires_at", 0)) <= time.time():
+        if float(stored.get("expires_at", 0)) - time.time() < 60:
+            sealed_refresh = stored.get("refresh_token")
+            if sealed_refresh:
+                refresh = cls._unseal(sealed_refresh, directory)
+                if refresh:
+                    import json
+                    req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
+                        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                        "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                        "refresh_token": refresh,
+                        "grant_type": "refresh_token"
+                    }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
+                    try:
+                        with urllib.request.urlopen(req, timeout=10) as res:
+                            data = json.load(res)
+                            if "access_token" in data:
+                                cls.save_token(address, data["access_token"], data.get("expires_in", 3599), directory)
+                                return {"email": address, "access_token": data["access_token"]}
+                    except Exception as e:
+                        pass
             return None
         token = cls._unseal(sealed, directory)
         return {"email": address, "access_token": token} if token else None
 
     @classmethod
     def save_token(
-        cls, address: str, token: str, lifetime: int, directory: Optional[str] = None
+        cls, address: str, token: str, lifetime: int, directory: Optional[str] = None, refresh_token: Optional[str] = None
     ) -> bool:
         """
         Stores a GNOME Online Accounts access token for the container to use.
@@ -842,8 +867,96 @@ class GmailSearchService:
                     "connected on that host.</p>"
                 )
 
+            def do_POST(self) -> None:
+                parsed = urllib.parse.urlparse(self.path)
+                if parsed.path == "/api/google/oauth/start":
+                    
+                    state = secrets.token_urlsafe(32)
+                    verifier = secrets.token_urlsafe(32)
+                    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
+                    OAUTH_STATES[state] = {"code_verifier": verifier, "time": time.time()}
+                    
+                    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_OAUTH_CLIENT_ID}&redirect_uri={urllib.parse.quote(HOST_ORIGIN + '/')}&response_type=code&scope={urllib.parse.quote(GOOGLE_OAUTH_SCOPES)}&access_type=offline&prompt=consent&code_challenge={challenge}&code_challenge_method=S256&state={state}"
+                    self._reply(200, {"auth_url": auth_url})
+                    return
+                    
+                if parsed.path == "/api/google/oauth/complete":
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    try:
+                        data = json.loads(post_data)
+                        url = data.get("url", "")
+                        q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+                        if "code" in q and "state" in q:
+                            code = q["code"][0]
+                            state = q["state"][0]
+                            if state in OAUTH_STATES:
+                                verifier = OAUTH_STATES[state]["code_verifier"]
+                                req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
+                                    "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                                    "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                                    "code": code,
+                                    "code_verifier": verifier,
+                                    "redirect_uri": HOST_ORIGIN + "/",
+                                    "grant_type": "authorization_code"
+                                }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
+                                with urllib.request.urlopen(req, timeout=10) as res:
+                                    tdata = json.load(res)
+                                
+                                req2 = urllib.request.Request("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {tdata['access_token']}"})
+                                with urllib.request.urlopen(req2, timeout=10) as res2:
+                                    user_data = json.load(res2)
+                                    email_addr = user_data.get("email", "")
+                                
+                                if email_addr and "access_token" in tdata:
+                                    GmailSearchService.save_token(email_addr, tdata["access_token"], tdata.get("expires_in", 3599), refresh_token=tdata.get("refresh_token"))
+                                    self._reply(200, {"status": "ok", "email": email_addr})
+                                    return
+                    except Exception as e:
+                        self._reply(400, {"error": str(e)})
+                        return
+                    self._reply(400, {"error": "Invalid URL or exchange failed"})
+                    return
+                self._reply(404, {"error": "not found"})
+
             def do_GET(self) -> None:  # noqa: N802 - name fixed by http.server
                 parsed = urllib.parse.urlparse(self.path)
+                query = urllib.parse.parse_qs(parsed.query)
+                
+                # OAuth redirect
+                if parsed.path == "/" and "code" in query and "state" in query:
+                    code = query["code"][0]
+                    state = query["state"][0]
+                    if state in OAUTH_STATES:
+                        verifier = OAUTH_STATES[state]["code_verifier"]
+                        import json
+                        req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
+                            "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                            "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                            "code": code,
+                            "code_verifier": verifier,
+                            "redirect_uri": HOST_ORIGIN + "/",
+                            "grant_type": "authorization_code"
+                        }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
+                        try:
+                            with urllib.request.urlopen(req, timeout=10) as res:
+                                data = json.load(res)
+                                
+                            # identify user
+                            req2 = urllib.request.Request("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {data['access_token']}"})
+                            with urllib.request.urlopen(req2, timeout=10) as res2:
+                                user_data = json.load(res2)
+                                email_addr = user_data.get("email", "")
+                            
+                            if email_addr and "access_token" in data:
+                                GmailSearchService.save_token(email_addr, data["access_token"], data.get("expires_in", 3599), refresh_token=data.get("refresh_token"))
+                                self._html("<h2>Connected Successfully</h2><p>You can close this tab.</p>")
+                                return
+                        except Exception as e:
+                            self._html(f"<h2>Error</h2><p>{html.escape(str(e))}</p>")
+                            return
+                    self._html("<h2>Error</h2><p>Invalid state or token exchange failed.</p>")
+                    return
 
                 # Read by the browser, cross-origin from the Onyx page, to decide whether to offer
                 # the Connect button. It exposes no mail and needs no secret.

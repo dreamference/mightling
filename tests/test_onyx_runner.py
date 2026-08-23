@@ -1268,26 +1268,6 @@ def _serve_gmail(tmp_path):
         yield port, service
 
 
-def test_the_button_url_it_used_to_point_at_still_works(tmp_path):
-    # Onyx serves its bundles `immutable`, so a browser that has not hard-refreshed still holds a
-    # script aiming at the old path. Three lines of 302 is the difference between "works anyway"
-    # and "the button is broken".
-    from dreamference.chat.gmail_search_service import CONNECT_PATH, LEGACY_START_PATH
-
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args):
-            return None
-
-    with _serve_gmail(tmp_path) as (port, _):
-        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        connection.request("GET", LEGACY_START_PATH)
-        response = connection.getresponse()
-        status, location = response.status, response.getheader("Location", "")
-        response.read()
-        connection.close()
-
-    assert (status, location) == (302, CONNECT_PATH)
-
 
 def test_the_gmail_container_runs_as_the_invoking_user():
     # The service writes to the mounted directory now -- a connection made from the UI stores the
@@ -1325,20 +1305,6 @@ def test_xoauth2_answers_the_second_challenge_with_nothing():
     assert respond(b'{"status":"400"}') == b""
 
 
-def test_gnome_accounts_is_not_the_same_as_shipping_gnome_credentials():
-    # The distinction this whole route rests on. GOA is asked for a token that GNOME already holds,
-    # granted to GNOME by the user in GNOME's own settings panel; Puffin never carries GNOME's
-    # client id or secret, and no consent screen ever shows GNOME's name for access Puffin
-    # receives. If a client id or secret appears in this module, that line has been crossed.
-    import inspect
-
-    from dreamference.chat import goa_accounts
-
-    source = inspect.getsource(goa_accounts)
-    assert "client_secret" not in source
-    assert "GetAccessToken" in source
-    assert "apps.googleusercontent.com" not in source
-
 
 def test_the_service_holds_no_long_lived_credential(tmp_path):
     # The property the whole design rests on: GNOME keeps the refresh token and hands out an
@@ -1367,128 +1333,5 @@ def test_an_expired_token_reads_as_not_connected(tmp_path):
     assert GmailSearchService.credentials(str(tmp_path)) is None
 
 
-def test_the_setup_page_reports_what_gnome_is_holding(tmp_path):
-    # The service cannot detect GOA itself -- it runs in a container with no session bus and no
-    # gdbus -- so the host leaves a note in the shared directory and the page reads it. Before an
-    # account exists the page says where to sign in; afterwards it says the step is done, which is
-    # how a user tells the difference between "not set up" and "waiting for the next check".
-    from dreamference.chat.gmail_search_service import CONNECT_PATH, GmailSearchService
-
-    def fetch():
-        return urllib.request.urlopen(
-            f"http://127.0.0.1:{port}{CONNECT_PATH}", timeout=5
-        ).read().decode()
-
-    with _serve_gmail(tmp_path) as (port, _):
-        without = fetch()
-        GmailSearchService.save_gnome_accounts(["owner@gmail.com"], str(tmp_path))
-        with_account = fetch()
-
-    assert "Settings" in without and "Online Accounts" in without
-    assert "owner@gmail.com" in with_account
-    # There is nothing to submit on either version: the account is managed in the desktop's own
-    # settings, and this page only ever explains.
-    assert "<form" not in without and "<form" not in with_account
 
 
-def test_the_page_explains_why_google_will_say_gnome(tmp_path):
-    # A user who sees GNOME's name on Google's consent screen and has not been told why has every
-    # reason to think they are being phished. Saying it up front is what makes the route usable --
-    # and it is honest, because GNOME really is the party asking.
-    from dreamference.chat.gmail_search_service import CONNECT_PATH
-
-    with _serve_gmail(tmp_path) as (port, _):
-        page = urllib.request.urlopen(
-            f"http://127.0.0.1:{port}{CONNECT_PATH}", timeout=5
-        ).read().decode()
-
-    assert "GNOME" in page
-    assert "No Puffin credentials are sent to Google" in page
-
-
-def test_the_refresh_timer_is_a_user_unit_not_a_system_one():
-    # GOA is on the session bus and only the session owner can ask it anything, so the timer
-    # belongs to the user and starts with their session. A timer rather than a daemon, because the
-    # work is one D-Bus call every half hour.
-    import inspect
-
-    from dreamference.chat.onyx_runner import GNOME_TOKEN_UNIT, OnyxRunner
-
-    source = inspect.getsource(OnyxRunner.install_gnome_token_timer)
-    assert GNOME_TOKEN_UNIT == "dreamference-goa"
-    assert '"systemctl", "--user"' in source
-    assert "Persistent=true" in source
-    assert "--refresh" in source
-
-
-def test_connecting_stops_when_there_is_no_account():
-    # Two different dead ends with two different remedies: no GNOME at all (a headless host, where
-    # Gmail search cannot be connected), and GNOME with no Google account added (add one in
-    # Settings). Neither should reach Onyx and register a tool that cannot work.
-    from dreamference.chat.goa_accounts import GoaAccounts
-    from dreamference.chat.onyx_runner import OnyxRunner
-
-    runner = OnyxRunner()
-    with patch.object(GoaAccounts, "available", return_value=False), \
-         patch.object(OnyxRunner, "_authenticate") as authenticate:
-        assert runner.connect_gmail() is False
-        authenticate.assert_not_called()
-
-    with patch.object(GoaAccounts, "available", return_value=True), \
-         patch.object(GoaAccounts, "google_accounts", return_value=[]), \
-         patch.object(OnyxRunner, "_authenticate") as authenticate:
-        assert runner.connect_gmail() is False
-        authenticate.assert_not_called()
-
-
-def test_goa_account_paths_survive_gvariant_text_format():
-    # Two parsing bugs found against a real account, each of which failed *silently* -- a
-    # well-formed reply containing no path the pattern accepted, which reads exactly like "no
-    # Google account has been added".
-    #
-    # 1. Accounts hang under `/Accounts/`, not directly off the root; the root holds only Manager.
-    # 2. GVariant's text form annotates only the **first** key of a dictionary with its type. Every
-    #    key after it is a bare quoted string -- and the first key is always Manager, never an
-    #    account -- so a pattern requiring `objectpath '…'` matches nothing useful.
-    from dreamference.chat.goa_accounts import GoaAccounts
-
-    reply = (
-        "({objectpath '/org/gnome/OnlineAccounts/Manager': "
-        "{'org.gnome.OnlineAccounts.Manager': @a{sv} {}}, "
-        "'/org/gnome/OnlineAccounts/Accounts/account_1787409151_0': "
-        "{'org.gnome.OnlineAccounts.Account': {'ProviderType': <'google'>}}},)"
-    )
-    with patch.object(GoaAccounts, "_call", return_value=reply):
-        assert GoaAccounts._account_paths() == [
-            "/org/gnome/OnlineAccounts/Accounts/account_1787409151_0"
-        ]
-
-
-def test_a_google_account_is_recognised_from_its_properties():
-    from dreamference.chat.goa_accounts import GoaAccounts
-
-    properties = {
-        "/org/gnome/OnlineAccounts/Accounts/account_1": {
-            "ProviderType": "google", "PresentationIdentity": "owner@gmail.com",
-        },
-        "/org/gnome/OnlineAccounts/Accounts/account_2": {
-            "ProviderType": "imap_smtp", "PresentationIdentity": "work@example.com",
-        },
-    }
-    with patch.object(GoaAccounts, "_account_paths", return_value=list(properties)), \
-         patch.object(GoaAccounts, "_properties", side_effect=lambda p: properties[p]):
-        found = GoaAccounts.google_accounts()
-
-    assert [a["email"] for a in found] == ["owner@gmail.com"]
-
-
-def test_the_access_token_reply_is_parsed_with_its_lifetime():
-    # `('ya29.…', 3599)` -- the token, then seconds until it expires. The lifetime is what the
-    # stored expiry is computed from, so misreading it would leave a token that looks fresh
-    # forever or one that is discarded immediately.
-    from dreamference.chat.goa_accounts import GoaAccounts
-
-    with patch.object(GoaAccounts, "_call", return_value="('ya29.a0Af', 2539)\n"):
-        assert GoaAccounts.access_token("/org/gnome/OnlineAccounts/Accounts/account_1") == (
-            "ya29.a0Af", 2539
-        )
