@@ -66,7 +66,7 @@ KEY_NAME: Final[str] = "credentials.key"
 
 GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_ID", "44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com")
 GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF")
-GOOGLE_OAUTH_SCOPES: Final[str] = "openid email https://mail.google.com/ https://www.googleapis.com/auth/drive.readonly"
+GOOGLE_OAUTH_SCOPES: Final[str] = "https://www.googleapis.com/auth/userinfo.email https://mail.google.com/"
 OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
 
 
@@ -267,96 +267,75 @@ class GmailSearchService:
 
     @classmethod
     def _raw(cls, directory: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Reads the credentials file as stored, without deciding whether it is usable.
-
-        Args:
-            directory (Optional[str]): Credentials directory; the mounted one by default.
-
-        Returns:
-            Dict[str, Any]: The stored fields, empty if there are none.
-        """
+        """Reads credentials file. Migrates old single-account format if needed."""
         try:
             with open(os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)) as handle:
                 stored = json.load(handle)
         except (OSError, ValueError):
-            return {}
-        return stored if isinstance(stored, dict) else {}
+            return {"accounts": {}}
+        if not isinstance(stored, dict):
+            return {"accounts": {}}
+        if "accounts" not in stored:
+            # migrate legacy
+            if "email" in stored and "access_token" in stored:
+                return {"accounts": {stored["email"]: stored}}
+            return {"accounts": {}}
+        return stored
 
     @classmethod
-    def credentials(cls, directory: Optional[str] = None) -> Optional[Dict[str, str]]:
-        """
-        Reads the token the mailbox can actually be opened with.
-
-        An expired token is not a failure to report, it is a stale file -- the timer that should
-        have replaced it did not run. Reporting "not connected" is the honest state and brings the
-        Connect button back.
-
-        Args:
-            directory (Optional[str]): Credentials directory; the mounted one by default.
-
-        Returns:
-            Optional[Dict[str, str]]: `email` and `access_token`, or None.
-        """
+    def credentials(cls, directory: Optional[str] = None) -> List[Dict[str, str]]:
+        """Returns all valid valid accounts."""
+        import json, time, urllib.request, urllib.parse
         stored = cls._raw(directory)
-        address = stored.get("email")
-        sealed = stored.get("access_token")
-        if not address or not sealed:
-            return None
-        if float(stored.get("expires_at", 0)) - time.time() < 60:
-            sealed_refresh = stored.get("refresh_token")
-            if sealed_refresh:
+        valid = []
+        for address, acc in stored.get("accounts", {}).items():
+            sealed = acc.get("access_token")
+            if not sealed: continue
+            
+            if float(acc.get("expires_at", 0)) - time.time() < 60:
+                sealed_refresh = acc.get("refresh_token")
+                if not sealed_refresh: continue
                 refresh = cls._unseal(sealed_refresh, directory)
-                if refresh:
-                    import json
-                    req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
-                        "client_id": GOOGLE_OAUTH_CLIENT_ID,
-                        "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
-                        "refresh_token": refresh,
-                        "grant_type": "refresh_token"
-                    }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
-                    try:
-                        with urllib.request.urlopen(req, timeout=10) as res:
-                            data = json.load(res)
-                            if "access_token" in data:
-                                cls.save_token(address, data["access_token"], data.get("expires_in", 3599), directory)
-                                return {"email": address, "access_token": data["access_token"]}
-                    except Exception as e:
-                        pass
-            return None
-        token = cls._unseal(sealed, directory)
-        return {"email": address, "access_token": token} if token else None
+                if not refresh: continue
+                
+                req = urllib.request.Request("https://oauth2.googleapis.com/token", data=urllib.parse.urlencode({
+                    "client_id": GOOGLE_OAUTH_CLIENT_ID,
+                    "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+                    "refresh_token": refresh,
+                    "grant_type": "refresh_token"
+                }).encode("utf-8"), headers={"Content-Type": "application/x-www-form-urlencoded"})
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as res:
+                        data = json.load(res)
+                        if "access_token" in data:
+                            cls.save_token(address, data["access_token"], data.get("expires_in", 3599), directory, refresh_token=refresh)
+                            valid.append({"email": address, "access_token": data["access_token"]})
+                except Exception:
+                    pass
+            else:
+                token = cls._unseal(sealed, directory)
+                if token:
+                    valid.append({"email": address, "access_token": token})
+        return valid
 
     @classmethod
     def save_token(
         cls, address: str, token: str, lifetime: int, directory: Optional[str] = None, refresh_token: Optional[str] = None
     ) -> bool:
-        """
-        Stores a GNOME Online Accounts access token for the container to use.
-
-        Written by the host, because GOA lives on the session bus and the service does not. The
-        expiry is recorded rather than the lifetime so that a stale file is recognisable as stale
-        without knowing when it was written.
-
-        Args:
-            address (str): The Google address the token authenticates as.
-            token (str): The access token.
-            lifetime (int): Seconds until it expires, as GOA reported it.
-            directory (Optional[str]): Credentials directory; the mounted one by default.
-
-        Returns:
-            bool: True if the file was written.
-        """
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
+        stored = cls._raw(directory)
+        accounts = stored.get("accounts", {})
+        
+        acc = accounts.get(address, {"email": address})
+        acc["access_token"] = cls._seal(token, directory)
+        acc["expires_at"] = time.time() + max(0, lifetime - 60)
+        if refresh_token:
+            acc["refresh_token"] = cls._seal(refresh_token, directory)
+        accounts[address] = acc
+        
         try:
             with open(path, "w") as handle:
-                json.dump({
-                    "email": address,
-                    "access_token": cls._seal(token, directory),
-                    # A minute of slack, so a token about to expire is not handed to a connection
-                    # that will take a moment to open.
-                    "expires_at": time.time() + max(0, lifetime - 60),
-                }, handle, indent=2)
+                json.dump({"accounts": accounts}, handle, indent=2)
             os.chmod(path, 0o600)
         except OSError:
             return False
@@ -420,17 +399,10 @@ class GmailSearchService:
 
     @classmethod
     def status(cls) -> Dict[str, Any]:
-        """
-        Reports whether the mailbox is connected.
-
-        Both flags mean the same thing -- a usable token exists -- and the pair is kept because the
-        injected UI script reads it as one object.
-
-        Returns:
-            Dict[str, Any]: `configured` and `connected`.
-        """
-        connected = cls.credentials() is not None
-        return {"configured": connected, "connected": connected}
+        creds = cls.credentials()
+        connected = len(creds) > 0
+        email = ", ".join(c["email"] for c in creds) if connected else None
+        return {"configured": connected, "connected": connected, "email": email}
 
     # ------------------------------------------------------------------ IMAP
 
@@ -470,26 +442,22 @@ class GmailSearchService:
         return respond
 
     @classmethod
-    def _open_mailbox(cls) -> Tuple[Optional[imaplib.IMAP4_SSL], Optional[str]]:
-        """
-        Connects, authenticates and selects All Mail read-only.
-
-        Returns:
-            Tuple[Optional[imaplib.IMAP4_SSL], Optional[str]]: The connection, or an error message.
-        """
+    def _open_mailboxes(cls) -> Tuple[Dict[str, imaplib.IMAP4_SSL], Optional[str]]:
         stored = cls.credentials()
         if not stored:
-            return None, NOT_CONNECTED_MESSAGE
-        try:
-            connection = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT_SECONDS)
-            connection.authenticate("XOAUTH2", cls._xoauth2(stored["email"], stored["access_token"]))
-            # Read-only, so that nothing this service does can change the mailbox even by accident.
-            connection.select(f'"{cls._all_mail_folder(connection)}"', readonly=True)
-        except imaplib.IMAP4.error as exc:
-            return None, f"Gmail refused the connection: {exc}"
-        except OSError as exc:
-            return None, f"Could not reach {IMAP_HOST}: {exc}"
-        return connection, None
+            return {}, NOT_CONNECTED_MESSAGE
+        connections = {}
+        for cred in stored:
+            try:
+                conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT_SECONDS)
+                conn.authenticate("XOAUTH2", cls._xoauth2(cred["email"], cred["access_token"]))
+                conn.select(f'"{cls._all_mail_folder(conn)}"', readonly=True)
+                connections[cred["email"]] = conn
+            except Exception:
+                continue
+        if not connections:
+            return {}, "Could not connect to any Gmail accounts."
+        return connections, None
 
     @classmethod
     def _all_mail_folder(cls, connection: imaplib.IMAP4_SSL) -> str:

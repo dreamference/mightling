@@ -88,35 +88,34 @@ POLL_INTERVAL_MS: Final[int] = 5000
 CONNECT_GOOGLE_SCRIPT: Final[str] = (
     ";(function(){try{"
     "if(window.__puffinConnect)return;window.__puffinConnect=1;"
-    # Blink's user agent contains "Chrome/"; WebKitGTK's does not. Set before anything else, so a
-    # stylesheet depending on it applies as early as this script runs.
-    'var ENG=/Chrome\\//.test(navigator.userAgent)?"blink":"webkit";'
+    'var ENG=/Chrome\//.test(navigator.userAgent)?"blink":"webkit";'
     f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",ENG);'
     f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}{SERVICE_CONNECT_PATH}",ID="{BUTTON_ID}";'
     f'var PATH="{CONNECT_PATH}",HEAD="{SECTION_HEADING}";'
     "var last=null;"
-    # The Connectors section, or null when this is not that page.
     "function panel(){if(location.pathname!==PATH)return null;"
     "var h=document.querySelectorAll('.opal-content-md-title-row span');"
     "for(var i=0;i<h.length;i++){if(h[i].textContent.trim()===HEAD){"
     "var w=h[i].closest('div.w-full');return w&&w.parentElement}}return null;}"
-    # `!connected` is the whole gate: either a usable mailbox credential exists or it does not,
-    # and the button exists for the second case. That deliberately covers the half-finished OAuth
-    # setup -- a Cloud client stored but consent not yet given reports `connected: false`, so the
-    # button stays on screen while the user still has a step to go rather than vanishing part-way.
     "function apply(){var p=panel();if(!p)return;"
     "var e=document.getElementById(ID);"
-    "if(last&&!last.connected){if(!e){"
+    "if(e)e.remove();"
+    "if(last&&!last.connected){"
     "var a=document.createElement('a');a.id=ID;a.href=U;"
-    # A new window is the *browser's* behaviour, not the app's. Tauri leaves wry's
-    # `new_window_req_handler` unset unless a window is built in Rust with `on_new_window`, and wry
-    # only connects WebKitGTK's `create` signal when that handler exists -- so a `target=_blank`
-    # click in the desktop app is silently inert, no window and no error. Navigating in place is
-    # what works there, and the service's pages carry a link back to the chat.
     "a.target=ENG==='blink'?'_blank':'_self';a.rel='noopener';"
-    "a.textContent='Connect to Google';p.appendChild(a)}}"
-    "else if(e){e.remove()}}"
-    # `catch` covers the service being down, where there is nothing the button could usefully do.
+    "a.textContent='Connect to Google';p.appendChild(a);"
+    "}"
+    "else if(last&&last.connected){"
+    "var div=document.createElement('div');div.id=ID;"
+    "div.style.padding='16px';div.style.background='#f0fdfa';div.style.border='1px solid #14b8a6';div.style.borderRadius='8px';div.style.marginTop='16px';"
+    'div.innerHTML="<h3 style=\'margin:0 0 8px;font-weight:bold;color:#0f766e;\'>✅ Google Connected</h3><p style=\'margin:0;color:#0f766e;\'>Gmail search is active for <b>" + (last.email || "your account") + "</b>.</p>";'
+    "p.appendChild(div);"
+    # Remove the "No connectors set up" text by hiding the previous sibling or children.
+    # Actually just letting it sit there is okay, or we can hide the placeholder:
+    "var cards=p.querySelectorAll('.text-sm.text-gray-500');"
+    "for(var i=0;i<cards.length;i++){if(cards[i].textContent.includes('No connectors'))cards[i].style.display='none';}"
+    "}"
+    "}"
     "function check(){fetch(S).then(function(r){return r.json()}).then(function(s){"
     "last=s;apply()}).catch(function(){last=null;apply()});}"
     f"function boot(){{check();setInterval(check,{POLL_INTERVAL_MS});"
