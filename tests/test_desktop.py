@@ -8,7 +8,7 @@ from dreamference.chat.desktop_runner import DESKTOP_PROJECT_DIR
 
 def test_window_points_at_the_local_deployment_rather_than_a_bundled_copy():
     # The desktop app and the browser render the same server, which is what keeps every patch
-    # `dream onyx configure` applies showing up in both without being ported.
+    # `dream puffin configure` applies showing up in both without being ported.
     with open(os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "tauri.conf.json")) as handle:
         config = json.load(handle)
 

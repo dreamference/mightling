@@ -804,14 +804,17 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
-        # Command: dream onyx
+        # Command: dream puffin
         #
         # A subcommand group rather than an `--agent onyx` runner, because Onyx is a service and
         # not a terminal session. Every entry in the --agent switch is a CLI that Dreamference
         # execs and waits on; Onyx is a set of long-lived containers with a lifecycle of its own,
         # so it mirrors `dream server` instead.
+        # "puffin" is the command's name; "onyx" remains as a compatibility alias, because the
+        # muscle memory and the docs' history both predate the rename.
         onyx_parser = subparsers.add_parser(
-            "onyx", help="Manage the Onyx Lite web chat UI backed by local vLLM"
+            "puffin", aliases=["onyx"],
+            help="Manage the Puffin web chat UI (Onyx Lite) backed by local vLLM"
         )
         onyx_subparsers = onyx_parser.add_subparsers(dest="onyx_command", help="Onyx operations")
 
@@ -871,7 +874,7 @@ class DreamferenceCLIController:
 
         # Command: dream desktop {run,build,status}
         #
-        # The desktop shell is a window onto the same deployment `dream onyx` manages, so it is a
+        # The desktop shell is a window onto the same deployment `dream puffin` manages, so it is a
         # sibling command rather than an `--agent` entry: nothing is exec'd and waited on here
         # except the window itself.
         desktop_parser = subparsers.add_parser(
@@ -1030,7 +1033,7 @@ class DreamferenceCLIController:
                 # A model change is not local to vLLM: Onyx's LLM provider is registered by
                 # name, its vision flag follows the checkpoint, and the image search sidecar
                 # carries the served model id in its environment. Left alone, all three keep
-                # pointing at the previous model until someone remembers `dream onyx configure`
+                # pointing at the previous model until someone remembers `dream puffin configure`
                 # -- so it runs here, when Onyx is up. configure() is idempotent, and skipping
                 # when Onyx is absent keeps `main-model set` usable before any deployment.
                 if not args.no_onyx:
@@ -1610,7 +1613,7 @@ class DreamferenceCLIController:
                 desktop_parser.print_help()
                 sys.exit(1)
 
-        elif args.command == "onyx":
+        elif args.command in ("puffin", "onyx"):
             from dreamference.chat import OnyxRunner
 
             onyx_runner = OnyxRunner(config=config)

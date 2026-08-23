@@ -140,7 +140,7 @@ def test_configure_names_the_served_model_and_its_context_length():
 
 def test_default_admin_email_avoids_reserved_domains():
     # email-validator rejects .local, .localhost, .test and .invalid outright, so a default in
-    # one of those makes the very first `dream onyx configure` fail with a 422.
+    # one of those makes the very first `dream puffin configure` fail with a 422.
     assert not DEFAULT_ONYX_EMAIL.endswith((".local", ".localhost", ".test", ".invalid"))
 
 
@@ -840,11 +840,14 @@ def test_settings_sections_are_matched_without_the_selector_climbing():
     assert "div:has(>.card):nth-child(2){display:none}" not in SETTINGS_SECTIONS_CSS
 
 
-def test_selected_row_avatar_is_inverted_on_the_tiffany_fill():
-    # White initials on a black disc read as a hole punched in the fill.
+def test_selected_row_avatar_keeps_its_rest_look():
+    # This rule once *inverted* the disc for legibility on the Tiffany pill. The footer row no
+    # longer paints on select ("selected" there means the menu is open), so inversion became
+    # white-on-white; the rule now holds the rest look -- grey disc, white initial -- through
+    # the selected state instead.
     from dreamference.chat.onyx_ui_overrides import SIDEBAR_AVATAR_CSS
 
-    assert SIDEBAR_AVATAR_CSS.endswith("{background-color:#fff;color:#000}")
+    assert SIDEBAR_AVATAR_CSS.endswith("{background-color:var(--text-02);color:#fff}")
     # The initials carry their own colour class, so the descendants are recoloured too.
     assert SIDEBAR_AVATAR_CSS.count(".bg-background-neutral-inverted-00") == 2
 
@@ -1020,7 +1023,10 @@ def test_sidebar_is_not_auto_hidden():
     import dreamference.chat.onyx_ui_overrides as overrides
 
     assert not hasattr(overrides, "SIDEBAR_HOVER_CSS")
-    assert "translateX" not in overrides.UI_OVERRIDES
+    # The hover-slide's signature specifically -- a blanket translateX ban started tripping on
+    # the image search progress bar's animation, which slides its own thumb, not the sidebar.
+    assert "translateX(-100%)" not in overrides.UI_OVERRIDES
+    assert ".opal-sidebar-root__column{transform" not in overrides.UI_OVERRIDES
 
 
 def test_closing_the_sidebar_is_removed_without_stranding_a_folded_one():
@@ -1091,7 +1097,7 @@ def test_gmail_registration_does_not_wait_for_a_mailbox():
 
 
 def test_configure_registers_gmail_so_a_fresh_install_has_the_tool():
-    # Registering only from `dream onyx gmail --email …` meant a fresh install had no Gmail tool
+    # Registering only from `dream puffin gmail --email …` meant a fresh install had no Gmail tool
     # until someone had finished a flow they can only start from the page that lists it.
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \

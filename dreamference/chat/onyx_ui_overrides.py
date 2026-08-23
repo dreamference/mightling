@@ -216,7 +216,7 @@ MODEL_SELECTOR_CSS: Final[str] = (
 # The sidebar's Agents section, hidden.
 #
 # Hidden rather than removed: nothing is taken out of Onyx's bundle, and dropping this one constant
-# from `UI_OVERRIDES` brings the section back on the next `dream onyx configure`.
+# from `UI_OVERRIDES` brings the section back on the next `dream puffin configure`.
 #
 # The section wrapper is a bare `flex flex-col` with no handle of its own, so it is selected by
 # what it *contains* -- `:has()` on the More Agents entry, which does carry a test id. That reads
@@ -392,7 +392,7 @@ SETTINGS_SECTIONS_CSS: Final[str] = (
 )
 
 # The Accounts & Access tab in Settings, hidden. Password and MFA management is surplus on a
-# single-user appliance where `dream onyx configure` owns the one account. The tab renders as a
+# single-user appliance where `dream puffin configure` owns the one account. The tab renders as a
 # div stack with no href in the DOM (the route lives only in the router data), so the anchor is
 # the nav's own test id plus the label the span carries verbatim in its `title` attribute; the
 # `.relative` wrapper is the per-tab row, so hiding it removes the hover target and the row's
@@ -552,6 +552,23 @@ SETTINGS_HEADER_ICON_CSS: Final[str] = (
 # themselves while empty (the metadata fetch fills them asynchronously).
 GALLERY_CSS: Final[str] = 'img[src*="/puffin-images/"]{display:none}[data-puffin-gallery] img,#puffin-lightbox img{display:block}p:has(>img[src*="/puffin-images/"]){display:none}[data-puffin-gallery]{display:grid;gap:8px;margin:12px 0;max-width:720px;grid-template-columns:repeat(2,1fr)}[data-puffin-gallery] .puffin-tile{position:relative;overflow:hidden;border-radius:12px;cursor:pointer}[data-puffin-gallery] .puffin-tile img{width:100%;height:100%;object-fit:cover;margin:0;transition:transform .2s}[data-puffin-gallery] .puffin-tile:hover img{transform:scale(1.03)}[data-puffin-gallery] .puffin-badge{position:absolute;right:8px;bottom:8px;background:rgba(17,24,39,.65);color:#fff;font-size:11px;padding:2px 8px;border-radius:8px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}[data-puffin-gallery] .puffin-badge:empty{display:none}[data-puffin-gallery][data-count="1"]{grid-template-columns:1fr;max-width:480px}[data-puffin-gallery][data-count="1"] .puffin-tile img{height:auto;object-fit:contain}[data-puffin-gallery][data-count="2"] .puffin-tile img{aspect-ratio:4/3}[data-puffin-gallery][data-count="3"],[data-puffin-gallery][data-count="4"]{grid-template-columns:2fr 1fr}[data-puffin-gallery][data-count="3"]{grid-auto-rows:150px}[data-puffin-gallery][data-count="3"] .puffin-tile:first-child{grid-row:1/span 2}[data-puffin-gallery][data-count="4"]{grid-auto-rows:110px}[data-puffin-gallery][data-count="4"] .puffin-tile:first-child{grid-row:1/span 3}[data-puffin-gallery][data-large]{display:block;columns:3 180px;column-gap:8px}[data-puffin-gallery][data-large] .puffin-tile{break-inside:avoid;margin-bottom:8px}[data-puffin-gallery][data-large] .puffin-tile img{height:auto;object-fit:unset}#puffin-img-progress{margin:10px 0 4px;max-width:420px}#puffin-img-progress .lbl{font-size:12px;color:#6b7280;margin-bottom:6px}#puffin-img-progress .track{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden}#puffin-img-progress .bar{height:100%;width:35%;border-radius:3px;background:#0ABAB5;animation:puffin-slide 1.2s ease-in-out infinite}@keyframes puffin-slide{0%{transform:translateX(-120%)}100%{transform:translateX(400%)}}'
 
+
+# Log Out below the separator in the account menu, not above it.
+#
+# The menu is a flex column whose children are, in DOM order: email, divider, Settings,
+# Notifications, Help & FAQ (hidden), Log Out, divider, version footer (hidden). Onyx draws
+# the second divider *after* Log Out; moving the destructive action below the line is one
+# flex `order` on the Log Out row -- every sibling keeps order 0, so it alone sorts past the
+# divider, landing visually last (the two hidden rows do not paint). The row carries no
+# test id, so it is pinned as third-from-last -- anchored from the end because appends are
+# rarer than prepends in this menu's history; if Onyx reorders it, the wrong row drops below
+# the line, which is visible, not silent. The menu container is found through the one child
+# that does carry a test id.
+USER_MENU_LOGOUT_CSS: Final[str] = (
+    'div:has(>div>[data-testid="Settings/user-settings"])'
+    ">div:nth-last-child(3)"
+    "{order:1}"
+)
 
 # The account avatar inside a selected sidebar row, inverted.
 #
@@ -788,7 +805,7 @@ UI_OVERRIDES: Final[str] = (
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
     + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS + SYNTHETIC_TABS_CSS
-    + SETTINGS_HEADER_ICON_CSS + GALLERY_CSS
+    + SETTINGS_HEADER_ICON_CSS + GALLERY_CSS + USER_MENU_LOGOUT_CSS
 )
 
 
