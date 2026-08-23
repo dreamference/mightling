@@ -559,12 +559,18 @@ GALLERY_CSS: Final[str] = 'img[src*="/puffin-images/"]{display:none}[data-puffin
 # heavy black hole. Swapping it to black on white keeps the disc legible against the fill. The
 # initials are recoloured on the disc *and* its descendants because the text carries its own colour
 # class, which `color` on the parent alone would not override.
+# History matters here: this rule originally *inverted* the disc to white-on-black-text,
+# because a selected row was a Tiffany pill and the grey disc vanished against it. The footer
+# row no longer paints on select (`SIDEBAR_ACCOUNT_CSS` renders that state as rest -- "selected"
+# there just means the menu is open), so the inversion became white-on-white: an invisible disc
+# beside a bare black letter. The rule now does the opposite of its first job -- it *holds* the
+# rest look through the selected state, same grey disc, same white initial.
 SIDEBAR_AVATAR_CSS: Final[str] = (
     '.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"] '
     ".bg-background-neutral-inverted-00,"
     '.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"] '
     ".bg-background-neutral-inverted-00 *"
-    "{background-color:#fff;color:#000}"
+    "{background-color:var(--text-02);color:#fff}"
 )
 
 # The "Help & FAQ" entry in the account menu, hidden.

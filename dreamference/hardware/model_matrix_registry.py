@@ -285,6 +285,58 @@ class ModelMatrixRegistry:
                 },
             },
         ),
+        "qwen3.5-122b-a10b-hybrid-dflash": ModelSpec(
+            name="Qwen 3.5 122B-A10B (INT4+FP8 hybrid + DFlash + dense-bandwidth stack)",
+            params_b=122.0,
+            supported_precisions=["INT4+FP8-HYBRID"],
+            # bleysg's hybrid export is ~67 GiB -- 4 GiB *smaller* than the Intel INT4 shards,
+            # because the BF16 shared experts it replaces with FP8 shrink more than the FP8
+            # scales add.
+            min_memory_gb=67.3,
+            max_memory_gb=120.0,
+            compatible_gb10=True,
+            notes=(
+                "The int4-dflash entry above plus the dense-bandwidth stack from "
+                "github.com/Entrpi/qwen3.5-122B-A10B-on-spark -- the same lineage the kvfix "
+                "patches came from. Three additions, all baked into the pinned image "
+                "(Dockerfile.dense): FP8 dispatch for the hybrid checkpoint's dense layers, an "
+                "int8 w8a16 Triton GEMV lm-head (which also frees the dead bf16 head, ~1.4 GiB "
+                "back to KV), and FLA sm121 shared-memory tuning. Upstream measures the stack "
+                "at +28% base throughput and ~81 tok/s on real agent turns with DFlash on this "
+                "hardware. Two of upstream's defaults are deliberately NOT carried over, for "
+                "reasons the int4-dflash entry documents at length: gpu_memory_utilization "
+                "stays 0.68 (their 0.82 is headless math; this box runs a desktop and froze at "
+                "0.80), and load_format stays mmap (their fastsafetensors is a double-residency "
+                "load peak without GDS, which is what freezes this host). Added 2026-08-23; has "
+                "not yet served a token on this machine -- the int4-dflash entry remains the "
+                "proven recipe until this one has."
+            ),
+            hf_repo_id="bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid",
+            launch_overrides={
+                # Values mirror the int4-dflash entry above verbatim, comments included by
+                # reference -- one recipe, one place to reason about it. Only the image differs.
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense1",
+                "gpu_memory_utilization": 0.68,
+                "kv_cache_dtype": "auto",
+                "attention_backend": "flash_attn",
+                "tool_call_parser": "qwen3_xml",
+                "reasoning_parser": "qwen3",
+                "max_num_batched_tokens": 8213,
+                "enable_prefix_caching": True,
+                "speculative_config": {
+                    "method": "dflash",
+                    "model": "z-lab/Qwen3.5-122B-A10B-DFlash",
+                    "num_speculative_tokens": 8,
+                    "attention_backend": "FLASH_ATTN",
+                },
+                "extra_args": [
+                    "--max-num-seqs", "3",
+                    "--tensor-parallel-size", "1",
+                    "--dtype", "auto",
+                    "--default-chat-template-kwargs", '{"enable_thinking": false}',
+                ],
+            },
+        ),
         "qwen3.5-122b-a10b-nvfp4": ModelSpec(
             name="Qwen 3.5 122B-A10B (NVFP4)",
             params_b=122.0,

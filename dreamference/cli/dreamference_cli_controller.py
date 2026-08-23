@@ -708,6 +708,10 @@ class DreamferenceCLIController:
         main_model_subparsers = main_model_parser.add_subparsers(dest="main_model_command", help="Main model commands")
         main_model_set_parser = main_model_subparsers.add_parser("set", help="Set the main model")
         main_model_set_parser.add_argument("model_name", type=str, help="Name of the model to set as main")
+        main_model_set_parser.add_argument(
+            "--no-onyx", action="store_true",
+            help="Skip re-registering the model with a running Onyx deployment",
+        )
 
         main_model_inspect_parser = main_model_subparsers.add_parser("inspect", help="Inspect the currently running main model by running sample prompts")
         main_model_inspect_parser.add_argument(
@@ -1022,6 +1026,29 @@ class DreamferenceCLIController:
                 saved_path = config.save_config()
                 out_console.print(f"[bold green]✅ Main model set to '{args.model_name}'[/bold green]")
                 out_console.print(f"   [cyan]Config saved to:[/cyan] {saved_path}")
+
+                # A model change is not local to vLLM: Onyx's LLM provider is registered by
+                # name, its vision flag follows the checkpoint, and the image search sidecar
+                # carries the served model id in its environment. Left alone, all three keep
+                # pointing at the previous model until someone remembers `dream onyx configure`
+                # -- so it runs here, when Onyx is up. configure() is idempotent, and skipping
+                # when Onyx is absent keeps `main-model set` usable before any deployment.
+                if not args.no_onyx:
+                    import subprocess as _subprocess
+
+                    onyx_up = _subprocess.run(
+                        ["docker", "ps", "--filter",
+                         "label=com.docker.compose.service=api_server",
+                         "--format", "{{.Names}}"],
+                        capture_output=True, text=True, timeout=30, check=False,
+                    ).stdout.strip()
+                    if onyx_up:
+                        out_console.print(
+                            "[cyan]🔁 Re-registering the model with Onyx "
+                            "(skip with --no-onyx)...[/cyan]")
+                        from dreamference.chat import OnyxRunner
+
+                        OnyxRunner(config).configure()
                 sys.exit(0)
             elif args.main_model_command == "inspect":
                 cls.display_header()
