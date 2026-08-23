@@ -66,7 +66,7 @@ CONNECT_PATH: Final[str] = "/app/settings/connectors"
 #
 # "Google" rather than "Connectors" because `onyx_ui_labels.py` rewrites that label; this constant
 # must match what the page *renders after* the rewrite, not what Onyx ships.
-SECTION_HEADING: Final[str] = "Google"
+SECTION_HEADING: Final[str] = "Gmail Accounts"
 
 # How often placement is re-checked, as opposed to the status fetch below. Route changes in this
 # app are client-side, so nothing loads and no event this script can see fires; a short interval is
@@ -129,7 +129,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     
     "if(last&&last.connected){"
     "var div=document.createElement('div');div.id=ID+'-card';"
-    "div.style.padding='4px 16px';div.style.background='#fff';div.style.border='1px solid #e5e7eb';div.style.borderRadius='12px';div.style.marginBottom='16px';div.style.marginTop='16px';"
+    "div.style.padding='4px 16px';div.style.background='#fff';div.style.width='100%';div.style.border='1px solid #e5e7eb';div.style.borderRadius='12px';div.style.marginBottom='16px';div.style.marginTop='16px';"
     # One row per connected account, in the language of Onyx's own dialogs (the share sheet's
     # rows): stroke icon, semibold title, muted description, and a quietly bordered action.
     'var html="";'

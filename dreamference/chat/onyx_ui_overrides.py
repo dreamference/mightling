@@ -447,6 +447,43 @@ SETTINGS_MODAL_SHELL_CSS: Final[str] = (
     "{flex-shrink:0;height:auto}"
 )
 
+# Voice as its own settings tab -- the styling half; the tab itself and the `data-puffin-voice`
+# marker are `onyx_ui_scripts.py`'s work. The Voice section is the *last* pane child on
+# Chat Preferences, and that page is recognised by the textarea its Personal Preferences section
+# carries -- the same signature `SETTINGS_SECTIONS_CSS` leans on. Outside voice mode the section
+# is hidden there (it lives under the synthetic tab now); in voice mode it is the only section
+# shown, the real Chat Preferences pill -- selected in Onyx's eyes, since the route matches --
+# is put back to rest, and the synthetic tab is lit in its place.
+VOICE_TAB_CSS: Final[str] = (
+    "html:not([data-puffin-voice]) "
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    '>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">*:last-child"
+    "{display:none}"
+    "html[data-puffin-voice] "
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    '>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">*"
+    "{display:none}"
+    "html[data-puffin-voice] "
+    'div:has(>[data-testid="settings-left-tab-navigation"])'
+    '>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">*:last-child"
+    "{display:flex}"
+    "html[data-puffin-voice] "
+    '[data-testid="settings-left-tab-navigation"] '
+    '.interactive-container[data-interactive-state="selected"]:not(#puffin-voice-tab *)'
+    "{background-color:transparent}"
+    "html[data-puffin-voice] "
+    '[data-testid="settings-left-tab-navigation"] '
+    '.interactive-container[data-interactive-state="selected"]:not(#puffin-voice-tab *) span'
+    "{color:#4b5563}"
+    "html[data-puffin-voice] #puffin-voice-tab .interactive-container"
+    f"{{background-color:{TIFFANY_BLUE}}}"
+    "html[data-puffin-voice] #puffin-voice-tab .interactive-container span"
+    "{color:#fff}"
+)
+
 # The account avatar inside a selected sidebar row, inverted.
 #
 # Onyx draws it as white initials on a black disc, which on the Tiffany fill of a selected row is a
@@ -651,7 +688,7 @@ UI_OVERRIDES: Final[str] = (
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + ACCOUNTS_ACCESS_CSS + SETTINGS_MODAL_SHELL_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
-    + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS
+    + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS + VOICE_TAB_CSS
 )
 
 

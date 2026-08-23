@@ -44,13 +44,20 @@ LABEL_SUBSTITUTIONS: Final[Dict[str, str]] = {
     # settings route table, which also feeds the page heading -- one rewrite renames both. The
     # injected connect script finds that page by its heading, so `SECTION_HEADING` in
     # `onyx_ui_scripts.py` must carry the *rewritten* text; the two move together.
-    'label:"Connectors"': 'label:"Google"',
+    'label:"Connectors"': 'label:"Gmail Accounts"',
+    # Transitional: a container already carrying the earlier "Google" rewrite has no
+    # `label:"Connectors"` left to match. Bare `label:"Google"` is NOT safe -- Onyx uses it for
+    # the Google OAuth method and the web-search provider groups -- so the key carries the href.
+    '{href:"/app/settings/connectors",label:"Google"}':
+        '{href:"/app/settings/connectors",label:"Gmail Accounts"}',
     # The page heading over that tab's content is a separate literal from the nav label. The
     # match carries the full prop run because the admin Chat Preferences page renders an
     # identical heading distinguishable only by its missing `width:"full"`, and an admin table
     # has a bare "Connectors" column header -- both must stay.
     'title:"Connectors",sizePreset:"main-content",variant:"section",width:"full"':
-        'title:"Google",sizePreset:"main-content",variant:"section",width:"full"',
+        'title:"Gmail Accounts",sizePreset:"main-content",variant:"section",width:"full"',
+    'title:"Google",sizePreset:"main-content",variant:"section",width:"full"':
+        'title:"Gmail Accounts",sizePreset:"main-content",variant:"section",width:"full"',
 }
 
 
