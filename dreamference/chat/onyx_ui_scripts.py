@@ -105,7 +105,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "div.style.marginTop='16px';"
     
     "if(last&&last.connected){"
-    "div.innerHTML='<div style="padding:16px;background:#f0fdfa;border:1px solid #14b8a6;border-radius:8px;margin-bottom:16px;"><h3 style="margin:0 0 8px;font-weight:bold;color:#0f766e;">✅ Google Connected</h3><p style="margin:0;color:#0f766e;">Gmail search is active for <b>' + (last.email || 'your account') + '</b>.</p></div>';"
+    'div.innerHTML="<div style=\'padding:16px;background:#f0fdfa;border:1px solid #14b8a6;border-radius:8px;margin-bottom:16px;\'><h3 style=\'margin:0 0 8px;font-weight:bold;color:#0f766e;\'>✅ Google Connected</h3><p style=\'margin:0;color:#0f766e;\'>Gmail search is active for <b>" + (last.email || "your account") + "</b>.</p></div>";'
     "var cards=p.querySelectorAll('.text-sm.text-gray-500');"
     "for(var i=0;i<cards.length;i++){if(cards[i].textContent.includes('No connectors'))cards[i].style.display='none';}"
     "}"
