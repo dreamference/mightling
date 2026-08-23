@@ -7,6 +7,8 @@ import urllib.parse
 import urllib.request
 from unittest.mock import patch
 
+import pytest
+
 from dreamference.chat import OnyxInstaller, OnyxRunner
 from dreamference.chat.onyx_runner import (
     ONYX_PROVIDER_NAME,
@@ -64,6 +66,19 @@ def test_provider_lookup_reads_the_providers_key():
     with patch("urllib.request.urlopen", return_value=_Response()):
         assert runner._find_provider("http://x/api", "cookie", ONYX_PROVIDER_NAME) == 7
         assert runner._find_provider("http://x/api", "cookie", "absent") is None
+
+
+@pytest.fixture(autouse=True)
+def _image_search_without_side_effects(monkeypatch):
+    # configure() enables image search by default, and the real step starts containers and
+    # rewrites the deployment's nginx template -- none of which belongs in a test run. The
+    # *internals* are stubbed rather than the method, so configure tests still exercise the
+    # registration flow against the patched _request, and the dedicated image search tests
+    # override these with their own patches.
+    monkeypatch.setattr(OnyxRunner, "_image_search_secret", classmethod(lambda cls: "test-secret"))
+    monkeypatch.setattr(OnyxRunner, "_start_siglip", lambda self: True)
+    monkeypatch.setattr(OnyxRunner, "_start_image_search_service", lambda self, secret: True)
+    monkeypatch.setattr(OnyxRunner, "_inject_image_route", lambda self: True)
 
 
 def test_configure_creates_then_updates_the_same_provider():
@@ -711,11 +726,15 @@ def test_sidebar_labels_match_on_the_jsx_prop_not_the_bare_word():
 
     assert LABEL_SUBSTITUTIONS['children:"New Session"'] == 'children:"New"'
     assert LABEL_SUBSTITUTIONS['children:"Search Chats"'] == 'children:"Search"'
-    # Every key is a quoted JS string literal, never a bare word -- a bare `New Session` would also
-    # hit analytics event names and aria labels.
+    # Every entry anchors on a quoted JS string literal, never a bare word -- a bare `New
+    # Session` would also hit analytics event names and aria labels. Some keys carry syntax
+    # around the literal (a route object, a call expression), so the invariant is the presence
+    # of a complete quoted literal, not the key's final character.
+    import re
+
     for key, value in LABEL_SUBSTITUTIONS.items():
-        assert key.endswith('"') and '"' in key
-        assert value.endswith('"')
+        assert re.search(r'"[^"]+"', key), key
+        assert re.search(r'"[^"]+"', value), value
 
 
 def test_agents_section_is_hidden_by_what_it_contains():
@@ -1096,7 +1115,7 @@ def test_an_unconnected_search_names_the_place_to_connect():
     with patch.object(GmailSearchService, "credentials", return_value=None):
         answer = GmailSearchService.search("anything", 5)
 
-    assert "Settings -> Connectors" in answer["error"]
+    assert "Settings -> Gmail Accounts" in answer["error"]
     assert "Connect to Google" in answer["error"]
 
 
@@ -1335,3 +1354,47 @@ def test_an_expired_token_reads_as_not_connected(tmp_path):
 
 
 
+
+
+def test_image_search_registers_as_a_custom_tool_with_its_secret_header():
+    # Mirrors the Gmail registration contract: an OpenAPI document (not the spec's bare-URL
+    # sketch -- Onyx's custom-tool API consumes a document), a shared-secret header, and
+    # create-on-absent so a re-run updates instead of duplicating.
+    from dreamference.chat.image_search_service import AUTH_HEADER
+    from dreamference.chat.onyx_runner import IMAGE_SEARCH_CONTAINER_URL, IMAGE_SEARCH_TOOL_NAME
+
+    runner = OnyxRunner()
+    calls = []
+
+    with patch.object(OnyxRunner, "_image_search_secret", return_value="s3cret"), \
+         patch.object(OnyxRunner, "_start_siglip", return_value=True), \
+         patch.object(OnyxRunner, "_start_image_search_service", return_value=True), \
+         patch.object(OnyxRunner, "_inject_image_route", return_value=True), \
+         patch.object(OnyxRunner, "_get_json", return_value=[]), \
+         patch.object(OnyxRunner, "_request",
+                      side_effect=lambda u, p, c, method="POST": (calls.append((u, p, method)), ({}, None))[1]):
+        assert runner.enable_image_search("http://x/api", "cookie") is True
+
+    url, payload, method = calls[0]
+    assert url.endswith("/admin/tool/custom") and method == "POST"
+    assert payload["name"] == IMAGE_SEARCH_TOOL_NAME
+    assert payload["custom_headers"] == [{"key": AUTH_HEADER, "value": "s3cret"}]
+    definition = payload["definition"]
+    assert definition["servers"] == [{"url": IMAGE_SEARCH_CONTAINER_URL}]
+    assert "/search" in definition["paths"]
+
+
+def test_the_nginx_image_route_is_deferred_resolution_and_idempotent():
+    # A literal proxy_pass hostname is resolved at nginx config load; with the sidecar absent
+    # nginx would refuse to start and take the whole UI down with it. The injected route must
+    # therefore use the resolver-plus-variable form, and rewriting the template twice must not
+    # accumulate blocks.
+    template = "server {\n    client_max_body_size 5G;\n    location / {}\n}\n"
+    once = OnyxRunner.apply_image_route(template)
+    assert "resolver 127.0.0.11" in once
+    assert "set $puffin_img" in once
+    assert "proxy_pass $puffin_img;" in once
+    assert "proxy_pass http" not in once
+    assert OnyxRunner.apply_image_route(once) == once
+    # A template without the anchor is left alone rather than guessed at.
+    assert OnyxRunner.apply_image_route("server {}\n") == "server {}\n"

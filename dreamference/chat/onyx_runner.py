@@ -163,7 +163,10 @@ PUFFIN_ASSISTANT_INSTRUCTIONS: Final[str] = (
     "hardware. When you are asked your name, who you are, or what you are, say that you are "
     "Puffin. Do not describe yourself as a generic assistant and do not answer with the name of "
     "the model you are served from. You can reach the live web through your search tool: use it "
-    "for anything current, and never tell the user you have no internet access."
+    "for anything current, and never tell the user you have no internet access. When the user "
+    "asks to see a picture, photo, or image of something, call the image_search tool and place "
+    "the Markdown image embeds it returns into your reply verbatim -- you CAN display images "
+    "this way, so never answer that you are unable to embed or show them."
 )
 
 # Onyx's agentic coding tool, left off the Puffin assistant deliberately: Dreamference's own
@@ -199,13 +202,17 @@ IMAGE_SEARCH_SERVICE_IMAGE: Final[str] = "python:3-slim"
 IMAGE_SEARCH_DATA_DIR: Final[str] = os.path.expanduser("~/.config/dreamference/image-search")
 IMAGE_SEARCH_TOOL_NAME: Final[str] = "Image Search"
 IMAGE_SEARCH_TOOL_DESCRIPTION: Final[str] = (
-    "Search the web for images and embed them in the reply."
+    "Search the web for images and display them inline. ALWAYS use this when the user asks "
+    "for a picture, photo, or image of something; embed the returned Markdown verbatim."
 )
 
 # The SigLIP pre-filter runs in an Infinity embeddings server, CPU-only for the same reason
 # Whisper does: no GPU contention with the served model, and thumbnails are small. Its first
 # start downloads the model weights into a named volume (root-owned is fine here -- the
-# container runs as root and nothing on the host reads the cache).
+# container runs as root and nothing on the host reads the cache). One platform gap, found by
+# running it: Infinity publishes amd64 images only, and GB10 is aarch64 -- there the start
+# fails, the warning names it, and the funnel degrades to its first candidates by design. The
+# vision re-rank (served by vLLM) still runs either way and is the stronger filter.
 SIGLIP_CONTAINER_NAME: Final[str] = "dreamference-siglip"
 SIGLIP_IMAGE: Final[str] = "michaelf34/infinity:latest-cpu"
 SIGLIP_MODEL_ID: Final[str] = "google/siglip-base-patch16-224"
@@ -1265,7 +1272,8 @@ class OnyxRunner:
             capture_output=True, text=True, timeout=300, check=False,
         )
         if result.returncode != 0:
-            print(f"⚠️  SigLIP sidecar not started ({result.stderr.strip()[:120]}) — "
+            reason = " ".join(result.stderr.split())[:120]
+            print(f"⚠️  SigLIP sidecar not started ({reason}) — "
                   "image pre-filtering degrades gracefully.")
             return False
         return True
@@ -1291,7 +1299,6 @@ class OnyxRunner:
         import urllib.request as _request
 
         from dreamference.chat import image_search_service
-        from dreamference.hardware.model_matrix_registry import resolve_model_hf_repo
 
         network = self._onyx_network()
         if not network:
@@ -1404,13 +1411,18 @@ class OnyxRunner:
         if NGINX_IMAGE_ROUTE_BEGIN not in updated:
             print("⚠️  The nginx template has no anchor for the image route.")
             return False
-        if updated != template:
-            try:
-                with open(NGINX_TEMPLATE_PATH, "w") as fh:
-                    fh.write(updated)
-            except OSError as exc:
-                print(f"⚠️  Could not write the nginx template: {exc}")
-                return False
+        if updated == template:
+            # Already installed: no write, and critically no restart -- nginx carries the very
+            # session this configure run is talking through, and restarting it mid-run resets
+            # every later step's connection. Seen live: the tool registration and the whole
+            # branding pass died with ECONNRESET before this guard existed.
+            return True
+        try:
+            with open(NGINX_TEMPLATE_PATH, "w") as fh:
+                fh.write(updated)
+        except OSError as exc:
+            print(f"⚠️  Could not write the nginx template: {exc}")
+            return False
         containers = subprocess.run(
             ["docker", "ps", "--filter", "label=com.docker.compose.service=nginx",
              "--format", "{{.Names}}"],
@@ -1422,7 +1434,19 @@ class OnyxRunner:
             ["docker", "restart", containers[0]],
             capture_output=True, text=True, timeout=120, check=False,
         )
-        return restart.returncode == 0
+        if restart.returncode != 0:
+            return False
+        # And wait for it to answer again before returning, for the same reason: the steps
+        # after this one speak to Onyx through this proxy.
+        import urllib.request as _request
+
+        for _ in range(30):
+            try:
+                with _request.urlopen("http://localhost:3000/api/health", timeout=2):
+                    return True
+            except OSError:
+                time.sleep(1)
+        return False
 
     def enable_web_search(self, api: str, cookie: str) -> bool:
         """

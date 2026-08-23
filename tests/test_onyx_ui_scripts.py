@@ -307,3 +307,48 @@ def test_settings_opens_in_a_modal_instead_of_navigating(tmp_path):
     assert outcome["topMarked"] is False
     assert outcome["framedMarked"] is True
     assert outcome["framedIntercepts"] is False
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node is needed to execute the injected script")
+def test_only_the_image_search_response_json_is_hidden(tmp_path):
+    # The sweep hides the Response payload inside an image_search step and must leave every
+    # other tool's Response block alone -- those stay inspectable.
+    from dreamference.chat.onyx_ui_scripts import IMAGE_TOOL_STEP_SCRIPT
+
+    harness = tmp_path / "harness.js"
+    harness.write_text(textwrap.dedent("""
+        function el(text, children) {
+          const node = { textContent: text, childElementCount: (children || []).length,
+                         parentElement: null, style: {} };
+          (children || []).forEach((c) => { c.parentElement = node; });
+          node.children = children || [];
+          return node;
+        }
+        // step for image_search: header + (label 'Response' inside a box)
+        const imgLabel = el('Response', []);
+        const imgBox = el('Response{json}', [imgLabel]);
+        const imgStep = el('image_search completed Response{json}', [el('image_search completed', []), imgBox]);
+        // step for another tool
+        const otherLabel = el('Response', []);
+        const otherBox = el('Response{json}', [otherLabel]);
+        const otherStep = el('web_search completed Response{json}', [el('web_search completed', []), otherBox]);
+        const all = [imgLabel, imgBox, imgStep, otherLabel, otherBox, otherStep];
+        let tick = null;
+        global.window = {};
+        global.setInterval = (fn) => { tick = fn; return 0; };
+        global.document = { querySelectorAll: () => all };
+        eval(%s);
+        tick();
+        console.log(JSON.stringify({
+          imageHidden: imgBox.style.display === 'none',
+          otherHidden: otherBox.style.display === 'none',
+        }));
+    """) % (json.dumps(IMAGE_TOOL_STEP_SCRIPT),))
+
+    result = subprocess.run(
+        ["node", str(harness)], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout.strip().splitlines()[-1])
+    assert outcome["imageHidden"] is True
+    assert outcome["otherHidden"] is False

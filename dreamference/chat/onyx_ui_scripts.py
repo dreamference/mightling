@@ -438,10 +438,36 @@ SETTINGS_TABS_SCRIPT: Final[str] = (
     "}catch(e){}})();"
 )
 
+# The image_search step's raw JSON, hidden from the reasoning timeline.
+#
+# Onyx renders every custom tool's result as a "Response" block inside the step viewer, and for
+# the image tool that is a JSON blob whose payload the user already sees rendered as images in
+# the answer. There is no data-testid anywhere on the block (verified against the bundle), so
+# this is the one hide that needs text anchoring, which CSS cannot do -- hence a script. It
+# hides the Response box only when an enclosing step mentions image_search, so every other
+# tool's Response stays inspectable. Best-effort by design: a re-render un-hides, the sweep
+# re-hides, and dropping the constant restores the block entirely.
+IMAGE_TOOL_STEP_SCRIPT: Final[str] = (
+    ";(function(){try{"
+    "if(window.__puffinToolJson)return;window.__puffinToolJson=1;"
+    "function sweep(){"
+    "var nodes=document.querySelectorAll('div,span');"
+    "for(var i=0;i<nodes.length;i++){var el=nodes[i];"
+    "if(el.childElementCount!==0||el.textContent!=='Response')continue;"
+    "var box=el.parentElement;"
+    "if(!box||box.__puffinHid)continue;"
+    "var step=box,found=false,d;"
+    "for(d=0;step&&d<5;step=step.parentElement,d++){"
+    "if((step.textContent||'').indexOf('image_search')>=0){found=true;break}}"
+    "if(found){box.__puffinHid=1;box.style.display='none';}}}"
+    "setInterval(sweep,800);"
+    "}catch(e){}})();"
+)
+
 # Everything this module injects.
 UI_SCRIPTS: Final[str] = (
     SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT + SCROLLBAR_SCRIPT + SETTINGS_MODAL_SCRIPT
-    + SETTINGS_TABS_SCRIPT
+    + SETTINGS_TABS_SCRIPT + IMAGE_TOOL_STEP_SCRIPT
 )
 
 
