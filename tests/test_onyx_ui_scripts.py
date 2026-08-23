@@ -62,7 +62,7 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
           querySelectorAll: (sel) =>
             sel === '.opal-content-md-title-row span' ? [heading] : [],
           getElementById: (id) => (appended && appended.id === id) ? appended : null,
-          createElement: () => ({ remove() { appended = null; } }),
+          createElement: () => ({ style: {}, remove() { appended = null; } }),
           addEventListener: () => {},
         };
         global.setInterval = () => 0;
@@ -90,6 +90,7 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
             href: shown && shown.href,
             id: shown && shown.id,
             whenConnected: connected !== null,
+            connectedText: connected && connected.textContent,
             whenUnconfigured: unconfigured !== null,
             onAnotherPage: elsewhere !== null,
           }));
@@ -111,8 +112,10 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
     assert outcome["text"] == "Connect to Google"
     assert outcome["id"] == BUTTON_ID
     assert outcome["href"].endswith(SERVICE_CONNECT_PATH)
-    # Nothing left to ask for once connected.
-    assert outcome["whenConnected"] is False
+    # Once connected, the ask changes rather than disappears: the card lists the linked
+    # accounts and the link offers one more.
+    assert outcome["whenConnected"] is True
+    assert outcome["connectedText"] == "Connect another Google account"
     # `configured` is not part of the gate. It reports the same thing as `connected` -- a usable
     # token either exists or it does not -- and the pair survives only because the script reads
     # the status object as a whole.

@@ -99,7 +99,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "    method: 'POST',"
     "    headers: {'Content-Type': 'application/json'},"
     "    body: JSON.stringify({email: email})"
-    "  }}).then(function(){ check(); });"
+    "  }).then(function(){ check(); });"
     "};"
     
     "function panel(){if(location.pathname!==PATH)return null;"
@@ -112,9 +112,9 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "var ec=document.getElementById(ID+'-card');"
     "if(ec)ec.remove();"
     
-    "for(var i=0;i<p.children.length;i++){"
-    "  if(p.children[i].textContent.includes('No connectors')){"
-    "    p.children[i].style.display='none';"
+    "var kids=p.children||[];for(var i=0;i<kids.length;i++){"
+    "  if(kids[i].textContent&&kids[i].textContent.includes('No connectors')){"
+    "    kids[i].style.display='none';"
     "  }"
     "}"
     
@@ -124,7 +124,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     'var html="<h3 style=\'margin:0 0 12px;font-size:16px;font-weight:bold;color:#0f766e;\'>✅ Google Connected</h3>";'
     "var emails = (last.email || '').split(', ');"
     "for(var i=0;i<emails.length;i++){"
-    '  if(emails[i]) html += "<div style=\'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;\'><p style=\'margin:0;font-size:14px;color:#0f766e;\'>Gmail search is active for <b>" + emails[i] + "</b>.</p><button onclick=\"window.__puffinDisconnect(\'" + emails[i] + "\')\" style=\'background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;font-weight:bold;\'>Disconnect</button></div>";'
+    '  if(emails[i]) html += "<div style=\'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;\'><p style=\'margin:0;font-size:14px;color:#0f766e;\'>Gmail search is active for <b>" + emails[i] + "</b>.</p><button onclick=\'window.__puffinDisconnect(\\"" + emails[i] + "\\")\' style=\'background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;font-weight:bold;\'>Disconnect</button></div>";'
     "}"
     "div.innerHTML=html;"
     "p.appendChild(div);"
