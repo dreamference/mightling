@@ -417,13 +417,13 @@ def test_vllm_build_launch_command_speculative():
 
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(
-        model="qwen2.5-coder-32b",
-        draft_model="qwen2.5-coder-1.5b",
+        model="qwen3.6-35b-a3b-nvfp4",
+        draft_model="qwen3.5-122b-a10b-dflash-draft",
         num_speculative_tokens=5
     )
     assert "--speculative-model" in cmd
     idx = cmd.index("--speculative-model")
-    assert cmd[idx + 1] == "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+    assert cmd[idx + 1] == "z-lab/Qwen3.5-122B-A10B-DFlash"
     assert "--num-speculative-tokens" in cmd
     tokens_idx = cmd.index("--num-speculative-tokens")
     assert cmd[tokens_idx + 1] == "5"
@@ -454,12 +454,12 @@ def test_vllm_build_launch_command_docker(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: None)
     monkeypatch.setattr(mgr, "is_vllm_installed", lambda: False)
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
-    cmd = mgr.build_launch_command(model="qwen2.5-coder-32b", port=8000)
+    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4", port=8000)
     assert "docker" in cmd
     assert DEFAULT_VLLM_IMAGE in cmd
     img_idx = cmd.index(DEFAULT_VLLM_IMAGE)
     assert cmd[img_idx + 1] == "serve"
-    assert cmd[img_idx + 2] == "Qwen/Qwen2.5-Coder-32B-Instruct"
+    assert cmd[img_idx + 2] == "nvidia/Qwen3.6-35B-A3B-NVFP4"
 
 def test_vllm_environment_checks_real():
     mgr = VLLMServerManager()

@@ -201,6 +201,14 @@ class ModelMatrixRegistry:
                 # at 8171; adding the 21 back puts it at exactly 8192. Retuning either
                 # max-num-seqs or num_speculative_tokens changes this number.
                 "max_num_batched_tokens": 8213,
+                # 2026-08-24 isolation result, three controlled trials (hybrid and Intel
+                # checkpoints, dense1 and kvfix2 images, new and old flags): the counter shows
+                # ZERO cross-request hits in every combination -- identical long-prefix request
+                # pairs re-pay their full prefill. The nonzero hit rates once seen in logs were
+                # almost certainly Deep Research abort/retry churn re-querying its own in-flight
+                # prompts. The flag stays on (harmless, and correct if the engine path is ever
+                # fixed), but the 13x figure below is upstream's, not this stack's; treat warm
+                # -prefix TTFT as an open engine-level issue, not a delivered feature.
                 # Prefix caching ON, which is worth roughly 13x on warm-prefix TTFT upstream
                 # (2.30s -> 0.18s on a 4k prefix) and matters more here than any other single
                 # setting: an agent re-reads the same files every turn, and without this every turn
@@ -295,10 +303,7 @@ class ModelMatrixRegistry:
             name="Qwen 3.5 122B-A10B (INT4+FP8 hybrid + DFlash + dense-bandwidth stack)",
             params_b=122.0,
             supported_precisions=["INT4+FP8-HYBRID"],
-            # bleysg's hybrid export is ~67 GiB -- 4 GiB *smaller* than the Intel INT4 shards,
-            # because the BF16 shared experts it replaces with FP8 shrink more than the FP8
-            # scales add.
-            min_memory_gb=67.3,
+            min_memory_gb=71.5,
             max_memory_gb=120.0,
             compatible_gb10=True,
             notes=(
@@ -314,11 +319,15 @@ class ModelMatrixRegistry:
                 "stays 0.68 (their 0.82 is headless math; this box runs a desktop and froze at "
                 "0.80), and load_format stays mmap (their fastsafetensors is a double-residency "
                 "load peak without GDS, which is what freezes this host). The default since "
-                "2026-08-23, promoted the same day it first served: measured post-warmup at "
-                "prose 23.8 / code 49.9 / JSON 53.1 tok/s single-stream. int4-dflash is the "
-                "fallback."
+                "2026-08-23. Repointed from the bleysg hybrid checkpoint back to Intel's INT4 "
+                "on 2026-08-24, per upstream's amortization law (dense FP8-experts gains fall "
+                "to ~0% at agent-level speculative acceptance) and because the bleysg "
+                "checkpoint shipped a prefix-caching regression here: zero cache hits even on "
+                "byte-identical requests, measured 2026-08-23. The int8 lm-head and FLA "
+                "patches still apply; the FP8-experts patch detects no FP8 dense layers and "
+                "stands down. int4-dflash remains the untouched fallback."
             ),
-            hf_repo_id="bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid",
+            hf_repo_id="Intel/Qwen3.5-122B-A10B-int4-AutoRound",
             # Same Qwen3_5MoeForConditionalGeneration architecture and vision_config as the
             # Intel export it is derived from; verified against the checkpoint's config.json,
             # per this field's rule, not inferred from the alias.
@@ -343,14 +352,21 @@ class ModelMatrixRegistry:
                 "attention_backend": "flash_attn",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
-                # 8248 = 8192 + max_num_seqs * (num_speculative_tokens - 1) = 8192 + 8*7; the
-                # draft-slot arithmetic the int4-dflash entry documents, retuned for 8 seqs.
-                "max_num_batched_tokens": 8248,
+                # 8280 = 8192 + max_num_seqs * (num_speculative_tokens - 1) = 8192 + 8*11; the
+                # draft-slot arithmetic the int4-dflash entry documents, retuned for 8 seqs
+                # and the n=12 draft window below.
+                "max_num_batched_tokens": 8280,
                 "enable_prefix_caching": True,
                 "speculative_config": {
                     "method": "dflash",
                     "model": "z-lab/Qwen3.5-122B-A10B-DFlash",
-                    "num_speculative_tokens": 8,
+                    # 12, up from 8 on 2026-08-24. The registry's own rule was "raise to 12
+                    # when the traffic proves tool-call-heavy", and the evidence arrived from
+                    # two directions at once: upstream's Hermes bench (73% tool calls) measures
+                    # median acceptance ~8.3 -- above the entire n=8 window -- at 121.8 tok/s,
+                    # and this box's own metrics still accepted 17% at position 7, the last
+                    # slot n=8 offers.
+                    "num_speculative_tokens": 12,
                     "attention_backend": "FLASH_ATTN",
                 },
                 "extra_args": [

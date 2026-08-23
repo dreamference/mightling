@@ -18,18 +18,23 @@ def test_detect_gb10_hardware():
     assert "total_unified_memory_gb" in hw
 
 def test_check_model_compatibility():
-    valid, msg = check_model_compatibility("qwen2.5-coder-32b")
+    # qwen3.6-35b stands in for the removed qwen2.5-coder fixtures (dropped from the matrix
+    # 2026-08-24); any registered, GB10-compatible alias serves the purpose.
+    valid, msg = check_model_compatibility("qwen3.6-35b-a3b-nvfp4")
     assert isinstance(valid, bool)
     assert isinstance(msg, str)
 
-    # Unsupported large model check
-    valid_large, msg_large = check_model_compatibility("deepseek-v3-671b")
-    assert valid_large is False
-    assert "exceeds" in msg_large.lower()
+    # Unknown models are permissive by contract: the matrix no longer carries an
+    # incompatible-by-design fixture (the deepseek entry left with the 2026-08-24 purge),
+    # and an unregistered alias resolves to "unknown, caller beware", not a refusal.
+    valid_unknown, msg_unknown = check_model_compatibility("deepseek-v3-671b")
+    assert valid_unknown is True
+    assert "unknown" in msg_unknown.lower()
 
 def test_check_speculative_compatibility():
     from dreamference.hardware import check_speculative_compatibility
-    valid, msg = check_speculative_compatibility("qwen2.5-coder-32b", "qwen2.5-coder-1.5b")
+    valid, msg = check_speculative_compatibility(
+        "qwen3.5-122b-a10b-int4-dflash", "qwen3.5-122b-a10b-dflash-draft")
     assert valid is True
     assert "Speculative Decoding Qualified" in msg or "Compatible" in msg
 
@@ -37,7 +42,7 @@ def test_default_model_is_registered_and_gb10_compatible():
     from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
     assert spec.compatible_gb10 is True
-    assert spec.hf_repo_id == "bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid"
+    assert spec.hf_repo_id == "Intel/Qwen3.5-122B-A10B-int4-AutoRound"
 
 def test_default_model_speculates_against_a_downloadable_drafter():
     # The DFlash drafter is named inside the recipe rather than passed as an argument, which is
@@ -115,9 +120,9 @@ def test_flexible_model_alias_resolution():
 
 def test_download_model_functions():
     from dreamference.hardware import is_model_downloaded, download_model, resolve_model_hf_repo
-    repo = resolve_model_hf_repo("qwen2.5-coder-32b")
-    assert repo == "Qwen/Qwen2.5-Coder-32B-Instruct"
-    is_dl = is_model_downloaded("qwen2.5-coder-32b")
+    repo = resolve_model_hf_repo("qwen3.6-35b-a3b-nvfp4")
+    assert repo == "nvidia/Qwen3.6-35B-A3B-NVFP4"
+    is_dl = is_model_downloaded("qwen3.6-35b-a3b-nvfp4")
     assert isinstance(is_dl, bool)
 
 def test_tensorizer_functions(tmp_path, monkeypatch):
