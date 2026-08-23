@@ -530,6 +530,17 @@ SYNTHETIC_TABS_CSS: Final[str] = (
     "{display:none}"
 )
 
+# The sliders icon above the Settings title, dropped. The word says everything the glyph did,
+# and in the settings modal the stacked icon spent ~70px of a height-constrained header on
+# decoration. Scoped by the title span so admin pages sharing `opal-content-xl` keep theirs;
+# the icon row is hidden rather than the icon, because the row carries its own min-height.
+SETTINGS_HEADER_ICON_CSS: Final[str] = (
+    '[aria-label="admin-page-title"] '
+    '.opal-content-xl:has(span[title="Settings"]) '
+    ".opal-content-xl-icon-row"
+    "{display:none}"
+)
+
 # The account avatar inside a selected sidebar row, inverted.
 #
 # Onyx draws it as white initials on a black disc, which on the Tiffany fill of a selected row is a
@@ -759,6 +770,7 @@ UI_OVERRIDES: Final[str] = (
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
     + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS + SYNTHETIC_TABS_CSS
+    + SETTINGS_HEADER_ICON_CSS
 )
 
 
