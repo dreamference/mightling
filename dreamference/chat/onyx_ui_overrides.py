@@ -376,6 +376,16 @@ SETTINGS_SECTIONS_CSS: Final[str] = (
     "{display:none}"
 )
 
+# The Accounts & Access tab in Settings, hidden. Password and MFA management is surplus on a
+# single-user appliance where `dream onyx configure` owns the one account. The href is the
+# anchor -- a route is part of the page's contract and survives rebuilds, unlike any class on
+# the element. Hiding the nav entry does not block the route itself; like every rule here it
+# removes chrome, not capability.
+ACCOUNTS_ACCESS_CSS: Final[str] = (
+    'a[href="/app/settings/accounts-access"]'
+    "{display:none}"
+)
+
 # The account avatar inside a selected sidebar row, inverted.
 #
 # Onyx draws it as white initials on a black disc, which on the Tiffany fill of a selected row is a
@@ -577,7 +587,7 @@ UI_OVERRIDES: Final[str] = (
     + PROJECTS_SECTION_CSS + SEARCH_PROJECTS_CSS + SIDEBAR_TEXT_CSS
     + SIDEBAR_HEADER_TEXT_CSS
     + FOOTER_CSS + NOTIFICATION_BADGE_CSS + SIDEBAR_FOLDED_CSS + SHARE_BUTTON_CSS
-    + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
+    + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + ACCOUNTS_ACCESS_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
     + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS

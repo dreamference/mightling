@@ -16,7 +16,7 @@
 - [7. Local Voice Transcription & SSRF Exemption Patch](#7-local-voice-transcription--ssrf-exemption-patch)
 - [8. Secure Web Search Integration](#8-secure-web-search-integration)
 
----
+--- 
 
 ## 1. Architectural Overview & Deployment Lifecycle
 
