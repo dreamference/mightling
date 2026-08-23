@@ -451,3 +451,11 @@ def test_a_requested_count_larger_than_the_supply_returns_what_exists(tmp_path):
     result = service.search(["q"], count=10)
     lines = [l for l in result["response"].splitlines() if l.startswith("![")]
     assert len(lines) == 2
+
+
+def test_metadata_lookup_names_the_source_for_the_gallery_badges(tmp_path):
+    store = ImageStore(str(tmp_path))
+    file_id = store.persist("http://www.museum.example/a.jpg", _jpeg("red"), "exhibit", 1)
+    row = store.lookup_id(file_id)
+    assert row == {"source_url": "http://www.museum.example/a.jpg", "title": "exhibit"}
+    assert store.lookup_id("0" * 16) is None

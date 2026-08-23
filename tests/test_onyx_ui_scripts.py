@@ -311,37 +311,33 @@ def test_settings_opens_in_a_modal_instead_of_navigating(tmp_path):
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node is needed to execute the injected script")
 def test_only_the_image_search_response_json_is_hidden(tmp_path):
-    # The sweep hides the Response payload inside an image_search step and must leave every
-    # other tool's Response block alone -- those stay inspectable.
+    # The sweep anchors on the payload -- /puffin-images/ plus the tool's response keys --
+    # because only this tool's JSON carries them; every other code block, including other
+    # tools' Response payloads, stays visible.
     from dreamference.chat.onyx_ui_scripts import IMAGE_TOOL_STEP_SCRIPT
 
     harness = tmp_path / "harness.js"
     harness.write_text(textwrap.dedent("""
-        function el(text, children) {
-          const node = { textContent: text, childElementCount: (children || []).length,
-                         parentElement: null, style: {} };
-          (children || []).forEach((c) => { c.parentElement = node; });
-          node.children = children || [];
-          return node;
+        function el(text) {
+          return { textContent: text, style: {}, previousElementSibling: null,
+                   closest: function (sel) { return sel === 'pre' ? this : null; } };
         }
-        // step for image_search: header + (label 'Response' inside a box)
-        const imgLabel = el('Response', []);
-        const imgBox = el('Response{json}', [imgLabel]);
-        const imgStep = el('image_search completed Response{json}', [el('image_search completed', []), imgBox]);
-        // step for another tool
-        const otherLabel = el('Response', []);
-        const otherBox = el('Response{json}', [otherLabel]);
-        const otherStep = el('web_search completed Response{json}', [el('web_search completed', []), otherBox]);
-        const all = [imgLabel, imgBox, imgStep, otherLabel, otherBox, otherStep];
+        const label = el('Response');
+        const ours = el('{"response": "![x](/puffin-images/abc.jpg)", "instructions": "..."}');
+        ours.previousElementSibling = label;
+        const other = el('{"response": "plain web search payload"}');
+        const code = el('print(1)');
         let tick = null;
         global.window = {};
         global.setInterval = (fn) => { tick = fn; return 0; };
-        global.document = { querySelectorAll: () => all };
+        global.document = { querySelectorAll: () => [ours, other, code] };
         eval(%s);
         tick();
         console.log(JSON.stringify({
-          imageHidden: imgBox.style.display === 'none',
-          otherHidden: otherBox.style.display === 'none',
+          oursHidden: ours.style.display === 'none',
+          labelHidden: label.style.display === 'none',
+          otherHidden: other.style.display === 'none',
+          codeHidden: code.style.display === 'none',
         }));
     """) % (json.dumps(IMAGE_TOOL_STEP_SCRIPT),))
 
@@ -350,5 +346,7 @@ def test_only_the_image_search_response_json_is_hidden(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     outcome = json.loads(result.stdout.strip().splitlines()[-1])
-    assert outcome["imageHidden"] is True
+    assert outcome["oursHidden"] is True
+    assert outcome["labelHidden"] is True
     assert outcome["otherHidden"] is False
+    assert outcome["codeHidden"] is False

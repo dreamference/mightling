@@ -443,26 +443,14 @@ SETTINGS_TABS_SCRIPT: Final[str] = (
 # Onyx renders every custom tool's result as a "Response" block inside the step viewer, and for
 # the image tool that is a JSON blob whose payload the user already sees rendered as images in
 # the answer. There is no data-testid anywhere on the block (verified against the bundle), so
-# this is the one hide that needs text anchoring, which CSS cannot do -- hence a script. It
-# hides the Response box only when an enclosing step mentions image_search, so every other
-# tool's Response stays inspectable. Best-effort by design: a re-render un-hides, the sweep
-# re-hides, and dropping the constant restores the block entirely.
-IMAGE_TOOL_STEP_SCRIPT: Final[str] = (
-    ";(function(){try{"
-    "if(window.__puffinToolJson)return;window.__puffinToolJson=1;"
-    "function sweep(){"
-    "var nodes=document.querySelectorAll('div,span');"
-    "for(var i=0;i<nodes.length;i++){var el=nodes[i];"
-    "if(el.childElementCount!==0||el.textContent!=='Response')continue;"
-    "var box=el.parentElement;"
-    "if(!box||box.__puffinHid)continue;"
-    "var step=box,found=false,d;"
-    "for(d=0;step&&d<5;step=step.parentElement,d++){"
-    "if((step.textContent||'').indexOf('image_search')>=0){found=true;break}}"
-    "if(found){box.__puffinHid=1;box.style.display='none';}}}"
-    "setInterval(sweep,800);"
-    "}catch(e){}})();"
-)
+# this is the one hide that needs text anchoring, which CSS cannot do -- hence a script. The
+# anchor is the *payload*, not the chrome: a pre/code whose text carries both /puffin-images/
+# and the tool's response keys can only be this tool's JSON, wherever Onyx chooses to render
+# it -- the first version anchored on the "Response" label and an enclosing step name, and the
+# real DOM defeated it. Other tools' Response blocks stay inspectable. Best-effort by design:
+# a re-render un-hides, the sweep re-hides, and dropping the constant restores the block.
+IMAGE_TOOL_STEP_SCRIPT: Final[str] = ';(function(){try{if(window.__puffinToolJson)return;window.__puffinToolJson=1;function sweep(){var blocks=document.querySelectorAll(\'pre,code\');for(var i=0;i<blocks.length;i++){var el=blocks[i];if(el.__puffinHid)continue;var s=el.textContent||\'\';if(s.indexOf(\'/puffin-images/\')<0)continue;if(s.indexOf(\'"instructions"\')<0&&s.indexOf(\'"response"\')<0)continue;var box=el.closest(\'pre\')||el;box.__puffinHid=1;el.__puffinHid=1;box.style.display=\'none\';var lbl=box.previousElementSibling;if(lbl&&(lbl.textContent||\'\').trim()===\'Response\')lbl.style.display=\'none\';}}setInterval(sweep,800);}catch(e){}})();'
+
 
 # Image search results as a clickable gallery.
 #
@@ -476,65 +464,9 @@ IMAGE_TOOL_STEP_SCRIPT: Final[str] = (
 # connected) and rebuilds. The same interval posture as the scrollbar and tab scripts.
 GALLERY_ATTRIBUTE: Final[str] = "data-puffin-gallery"
 LIGHTBOX_ID: Final[str] = "puffin-lightbox"
-GALLERY_SCRIPT: Final[str] = (
-    ";(function(){try{"
-    "if(window.__puffinGallery)return;window.__puffinGallery=1;"
-    f'var GA="{GALLERY_ATTRIBUTE}",LID="{LIGHTBOX_ID}";'
-    "function lightbox(list,start){"
-    "var old=document.getElementById(LID);if(old)old.remove();"
-    "var i=start;"
-    "var o=document.createElement('div');o.id=LID;"
-    "o.style.cssText='position:fixed;inset:0;z-index:2200;background:rgba(17,24,39,.85);"
-    "display:flex;align-items:center;justify-content:center;';"
-    "var img=document.createElement('img');"
-    "img.style.cssText='max-width:92vw;max-height:92vh;border-radius:12px;"
-    "box-shadow:0 25px 50px -12px rgba(0,0,0,.5);';"
-    "function show(n){i=(n+list.length)%list.length;img.src=list[i].src;img.alt=list[i].alt;}"
-    "function cl(){o.remove();document.removeEventListener('keydown',key,true);}"
-    "function key(e){if(e.key==='Escape'){e.stopPropagation();cl();}"
-    "else if(e.key==='ArrowRight'){show(i+1);}else if(e.key==='ArrowLeft'){show(i-1);}}"
-    "function arrow(txt,side,d){var b=document.createElement('button');b.textContent=txt;"
-    "b.style.cssText='position:absolute;top:50%;'+side+':18px;transform:translateY(-50%);"
-    "width:40px;height:40px;border:none;border-radius:20px;background:rgba(255,255,255,.92);"
-    "color:#111827;font-size:20px;line-height:1;cursor:pointer;';"
-    "b.addEventListener('click',function(e){e.stopPropagation();show(i+d);});return b;}"
-    "o.addEventListener('click',function(e){if(e.target===o)cl();});"
-    "o.appendChild(img);"
-    "if(list.length>1){o.appendChild(arrow('\u2039','left',-1));"
-    "o.appendChild(arrow('\u203a','right',1));}"
-    "document.addEventListener('keydown',key,true);"
-    "show(i);document.body.appendChild(o);}"
-    "function build(items){"
-    "var g=document.createElement('div');g.setAttribute(GA,'1');"
-    "g.setAttribute('data-count',String(items.length));"
-    "if(items.length>4)g.setAttribute('data-large','1');"
-    "items.forEach(function(it,idx){"
-    "var c=document.createElement('img');c.src=it.src;c.alt=it.alt;c.title=it.alt;"
-    "c.addEventListener('click',function(){lightbox(items,idx);});"
-    "g.appendChild(c);});"
-    "return g;}"
-    "function sweep(){"
-    "var gals=document.querySelectorAll('['+GA+']'),i;"
-    "for(i=0;i<gals.length;i++){"
-    "if(!gals[i].__src||!gals[i].__src.isConnected)gals[i].remove();}"
-    "var imgs=document.querySelectorAll('img[src*=\"/puffin-images/\"]');"
-    "var byHost=[],hosts=[];"
-    "for(i=0;i<imgs.length;i++){var im=imgs[i];"
-    "if(im.__puffinDone||im.closest('['+GA+']')||im.closest('#'+LID))continue;"
-    "var host=im.closest('[data-testid=\"onyx-ai-message\"]');"
-    "if(!host)continue;"
-    "var at=hosts.indexOf(host);"
-    "if(at<0){hosts.push(host);byHost.push([im]);}else{byHost[at].push(im);}}"
-    "byHost.forEach(function(group){"
-    "var items=group.map(function(im){return{src:im.src,alt:im.alt||''};});"
-    "var anchor=group[0].closest('p')||group[0];"
-    "var g=build(items);g.__src=group[0];"
-    "anchor.parentElement.insertBefore(g,anchor);"
-    "group.forEach(function(im){im.__puffinDone=1;"
-    "var p=im.closest('p')||im;p.style.display='none';});});}"
-    "setInterval(sweep,800);"
-    "}catch(e){}})();"
-)
+GALLERY_SCRIPT: Final[str] = ";(function(){try{if(window.__puffinGallery)return;window.__puffinGallery=1;var GA='data-puffin-gallery',LID='puffin-lightbox';var BLINK=/Chrome[/]/.test(navigator.userAgent);function msg(el){for(var n=el;n;n=n.parentElement){if(n.getAttribute&&n.getAttribute('data-testid')==='onyx-ai-message')return n;}return null;}function lightbox(list,start){var old=document.getElementById(LID);if(old)old.remove();var i=start,zoomed=false;var o=document.createElement('div');o.id=LID;o.style.cssText='position:fixed;inset:0;z-index:2200;background:rgba(17,24,39,.85);display:flex;align-items:center;justify-content:center;';var wrap=document.createElement('div');wrap.style.cssText='max-width:92vw;max-height:84vh;overflow:auto;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,.5);';var img=document.createElement('img');img.style.cssText='max-width:92vw;max-height:84vh;display:block;cursor:zoom-in;';img.addEventListener('click',function(e){e.stopPropagation();zoomed=!zoomed;img.style.maxWidth=zoomed?'none':'92vw';img.style.maxHeight=zoomed?'none':'84vh';img.style.cursor=zoomed?'zoom-out':'zoom-in';});var cap=document.createElement('div');cap.style.cssText='position:absolute;left:50%;bottom:18px;transform:translateX(-50%);max-width:82vw;background:rgba(17,24,39,.78);color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;display:flex;gap:14px;align-items:center;';var txt=document.createElement('span');txt.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';var num=document.createElement('span');num.style.cssText='opacity:.7;flex-shrink:0;';var src=document.createElement('a');src.textContent='Open original';src.rel='noopener';src.target='_blank';src.style.cssText='color:#fff;text-decoration:underline;flex-shrink:0;';src.addEventListener('click',function(e){e.stopPropagation();});cap.appendChild(txt);cap.appendChild(num);cap.appendChild(src);function show(n){i=(n+list.length)%list.length;var it=list[i];img.src=it.src;img.alt=it.alt;txt.textContent=it.alt;num.textContent=(i+1)+' / '+list.length;if(it.source&&BLINK){src.href=it.source;src.style.display='';}else{src.style.display='none';}}function cl(){o.remove();document.removeEventListener('keydown',key,true);}function key(e){if(e.key==='Escape'){e.stopPropagation();cl();}else if(e.key==='ArrowRight'){show(i+1);}else if(e.key==='ArrowLeft'){show(i-1);}}function arrow(t2,side,d){var b=document.createElement('button');b.textContent=t2;b.style.cssText='position:absolute;top:50%;'+side+':18px;transform:translateY(-50%);width:40px;height:40px;border:none;border-radius:20px;background:rgba(255,255,255,.92);color:#111827;font-size:20px;line-height:1;cursor:pointer;';b.addEventListener('click',function(e){e.stopPropagation();show(i+d);});return b;}o.addEventListener('click',function(e){if(e.target===o)cl();});wrap.appendChild(img);o.appendChild(wrap);o.appendChild(cap);if(list.length>1){o.appendChild(arrow('\\u2039','left',-1));o.appendChild(arrow('\\u203a','right',1));}document.addEventListener('keydown',key,true);show(i);document.body.appendChild(o);}function build(items){var g=document.createElement('div');g.setAttribute(GA,'1');g.setAttribute('data-count',String(items.length));if(items.length>4)g.setAttribute('data-large','1');items.forEach(function(it,idx){var tile=document.createElement('div');tile.className='puffin-tile';var c=document.createElement('img');c.src=it.src;c.alt=it.alt;c.title=it.alt;var badge=document.createElement('span');badge.className='puffin-badge';tile.appendChild(c);tile.appendChild(badge);tile.addEventListener('click',function(){lightbox(items,idx);});g.appendChild(tile);fetch(it.src.replace(/[.]jpg$/,'.json')).then(function(r){return r.json();}).then(function(m){it.source=m.source_url;if(m.host)badge.textContent=m.host;}).catch(function(){});});return g;}function sweep(){var gals=document.querySelectorAll('['+GA+']'),i;for(i=0;i<gals.length;i++){if(!gals[i].__src||!gals[i].__src.isConnected)gals[i].remove();}var all=document.querySelectorAll('img'),imgs=[];for(i=0;i<all.length;i++){if((all[i].getAttribute('src')||'').indexOf('/puffin-images/')>=0)imgs.push(all[i]);}var byHost=[],hosts=[];for(i=0;i<imgs.length;i++){var im=imgs[i];if(im.__puffinDone||im.closest('['+GA+']')||im.closest('#'+LID))continue;var host=msg(im);if(!host)continue;var at=hosts.indexOf(host);if(at<0){hosts.push(host);byHost.push([im]);}else{byHost[at].push(im);}}byHost.forEach(function(group){var items=group.map(function(im){return{src:im.src,alt:im.alt||''};});var anchor=group[0].closest('p')||group[0];var g=build(items);g.__src=group[0];anchor.parentElement.insertBefore(g,anchor);group.forEach(function(im){im.__puffinDone=1;});});}setInterval(sweep,800);}catch(e){}})();"
+
+
 
 # Everything this module injects.
 UI_SCRIPTS: Final[str] = (

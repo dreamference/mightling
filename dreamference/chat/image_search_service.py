@@ -398,6 +398,22 @@ class ImageStore:
             return None
         return {"file_id": row[0], "phash": row[1], "title": row[2]}
 
+    def lookup_id(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Finds a cached image's metadata by its file id.
+
+        Args:
+            file_id (str): The stored image's identifier.
+
+        Returns:
+            Optional[Dict[str, Any]]: ``source_url`` and ``title``, or None.
+        """
+        with self._lock:
+            row = self._db.execute(
+                "SELECT source_url, title FROM images WHERE file_id=?", (file_id,)
+            ).fetchone()
+        return {"source_url": row[0], "title": row[1]} if row else None
+
     def persist(self, source_url: str, payload: bytes, title: str,
                 phash: Optional[int]) -> str:
         """
@@ -1062,6 +1078,18 @@ def serve(port: int = SERVICE_PORT, secret: Optional[str] = None) -> None:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path == "/health":
                 self._reply(200, {"status": "ok"})
+                return
+            meta = re.fullmatch(r"/images/([0-9a-f]{16})\.json", parsed.path)
+            if meta:
+                row = service.store.lookup_id(meta.group(1))
+                if not row:
+                    self._reply(404, {"error": "unknown image"})
+                    return
+                host = urllib.parse.urlparse(row["source_url"]).hostname or ""
+                if host.startswith("www."):
+                    host = host[4:]
+                self._reply(200, {"source_url": row["source_url"],
+                                  "title": row["title"] or "", "host": host})
                 return
             match = re.fullmatch(r"/images/([0-9a-f]{16})\.jpg", parsed.path)
             if match:

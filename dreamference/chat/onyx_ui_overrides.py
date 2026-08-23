@@ -541,42 +541,17 @@ SETTINGS_HEADER_ICON_CSS: Final[str] = (
     "{display:none}"
 )
 
-# The image search gallery -- the styling half; the container and its data-count are built by
-# `onyx_ui_scripts.py`. The mosaic follows the familiar search-results shape: one hero image on
-# the left, tiles stacked right, keyed per count because CSS cannot span a row "n-1 times".
-# RESULT_COUNT is 4, so the variants stop there; a hypothetical larger group falls back to the
-# plain two-column grid, ungracefully but legibly.
-GALLERY_CSS: Final[str] = (
-    "[data-puffin-gallery]"
-    "{display:grid;gap:8px;margin:12px 0;max-width:720px;"
-    "grid-template-columns:repeat(2,1fr)}"
-    "[data-puffin-gallery] img"
-    "{width:100%;height:100%;object-fit:cover;border-radius:12px;cursor:pointer;"
-    "display:block;margin:0}"
-    '[data-puffin-gallery][data-count="1"]'
-    "{grid-template-columns:1fr;max-width:480px}"
-    '[data-puffin-gallery][data-count="1"] img'
-    "{height:auto;object-fit:contain}"
-    '[data-puffin-gallery][data-count="2"] img'
-    "{aspect-ratio:4/3}"
-    '[data-puffin-gallery][data-count="3"],'
-    '[data-puffin-gallery][data-count="4"]'
-    "{grid-template-columns:2fr 1fr}"
-    '[data-puffin-gallery][data-count="3"]'
-    "{grid-auto-rows:150px}"
-    '[data-puffin-gallery][data-count="3"] img:first-child'
-    "{grid-row:1/span 2}"
-    '[data-puffin-gallery][data-count="4"]'
-    "{grid-auto-rows:110px}"
-    '[data-puffin-gallery][data-count="4"] img:first-child'
-    "{grid-row:1/span 3}"
-    # Five or more (a user-requested count): the hero mosaic stops paying for itself, so a
-    # plain three-column tile grid takes over.
-    "[data-puffin-gallery][data-large]"
-    "{grid-template-columns:repeat(3,1fr);grid-auto-rows:140px}"
-    "[data-puffin-gallery][data-large] img:first-child"
-    "{grid-row:auto}"
-)
+# The image search gallery -- the styling half; the tiles, badges and data-count are built by
+# `onyx_ui_scripts.py`. Three commitments: raw /puffin-images/ embeds never paint (the images
+# streamed in one by one and then jumped into a gallery; CSS applies before first paint, so
+# hiding the originals unconditionally and re-showing only the gallery's and lightbox's own
+# copies removes the flash entirely); counts 2-4 get the search-results mosaic, hero left and
+# tiles right, keyed per count because CSS cannot span a row "n-1 times"; and five or more --
+# a user-requested count -- switch to aspect-preserving masonry columns, because object-fit
+# crops behead portraits at tile size. Source badges sit bottom-right per tile and hide
+# themselves while empty (the metadata fetch fills them asynchronously).
+GALLERY_CSS: Final[str] = 'img[src*="/puffin-images/"]{display:none}[data-puffin-gallery] img,#puffin-lightbox img{display:block}p:has(>img[src*="/puffin-images/"]){display:none}[data-puffin-gallery]{display:grid;gap:8px;margin:12px 0;max-width:720px;grid-template-columns:repeat(2,1fr)}[data-puffin-gallery] .puffin-tile{position:relative;overflow:hidden;border-radius:12px;cursor:pointer}[data-puffin-gallery] .puffin-tile img{width:100%;height:100%;object-fit:cover;margin:0;transition:transform .2s}[data-puffin-gallery] .puffin-tile:hover img{transform:scale(1.03)}[data-puffin-gallery] .puffin-badge{position:absolute;right:8px;bottom:8px;background:rgba(17,24,39,.65);color:#fff;font-size:11px;padding:2px 8px;border-radius:8px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}[data-puffin-gallery] .puffin-badge:empty{display:none}[data-puffin-gallery][data-count="1"]{grid-template-columns:1fr;max-width:480px}[data-puffin-gallery][data-count="1"] .puffin-tile img{height:auto;object-fit:contain}[data-puffin-gallery][data-count="2"] .puffin-tile img{aspect-ratio:4/3}[data-puffin-gallery][data-count="3"],[data-puffin-gallery][data-count="4"]{grid-template-columns:2fr 1fr}[data-puffin-gallery][data-count="3"]{grid-auto-rows:150px}[data-puffin-gallery][data-count="3"] .puffin-tile:first-child{grid-row:1/span 2}[data-puffin-gallery][data-count="4"]{grid-auto-rows:110px}[data-puffin-gallery][data-count="4"] .puffin-tile:first-child{grid-row:1/span 3}[data-puffin-gallery][data-large]{display:block;columns:3 180px;column-gap:8px}[data-puffin-gallery][data-large] .puffin-tile{break-inside:avoid;margin-bottom:8px}[data-puffin-gallery][data-large] .puffin-tile img{height:auto;object-fit:unset}'
+
 
 # The account avatar inside a selected sidebar row, inverted.
 #
