@@ -185,6 +185,56 @@ STT_CONTAINER_URL: Final[str] = f"http://{STT_CONTAINER_NAME}:8000/v1"
 STT_MODEL: Final[str] = "Systran/faster-whisper-small"
 ONYX_VOICE_PROVIDER_NAME: Final[str] = "dreamference-whisper"
 
+# Image search, per specs/DREAMFERENCE_IMAGE_SEARCH.md: a sidecar that searches SearXNG's image
+# category, filters and ranks the candidates (SigLIP pre-filter, pHash collapse, a vision pass
+# by the served model), caches the winners locally, and returns Markdown embeds. It follows the
+# Gmail sidecar's shape exactly -- a single staged stdlib file in a stock python image, a
+# user-owned bind mount (a named volume would be root-owned and unwritable under --user, the
+# torch.compile-cache trap again), and a shared-secret header on the tool route. The images are
+# served to the browser through an nginx route injected into the deployment's own template.
+IMAGE_SEARCH_CONTAINER_NAME: Final[str] = "dreamference-image-search"
+IMAGE_SEARCH_CONTAINER_URL: Final[str] = f"http://{IMAGE_SEARCH_CONTAINER_NAME}:8768"
+IMAGE_SEARCH_HOST_PORT: Final[int] = 8768
+IMAGE_SEARCH_SERVICE_IMAGE: Final[str] = "python:3-slim"
+IMAGE_SEARCH_DATA_DIR: Final[str] = os.path.expanduser("~/.config/dreamference/image-search")
+IMAGE_SEARCH_TOOL_NAME: Final[str] = "Image Search"
+IMAGE_SEARCH_TOOL_DESCRIPTION: Final[str] = (
+    "Search the web for images and embed them in the reply."
+)
+
+# The SigLIP pre-filter runs in an Infinity embeddings server, CPU-only for the same reason
+# Whisper does: no GPU contention with the served model, and thumbnails are small. Its first
+# start downloads the model weights into a named volume (root-owned is fine here -- the
+# container runs as root and nothing on the host reads the cache).
+SIGLIP_CONTAINER_NAME: Final[str] = "dreamference-siglip"
+SIGLIP_IMAGE: Final[str] = "michaelf34/infinity:latest-cpu"
+SIGLIP_MODEL_ID: Final[str] = "google/siglip-base-patch16-224"
+SIGLIP_PORT: Final[int] = 9100
+SIGLIP_CONTAINER_URL: Final[str] = f"http://{SIGLIP_CONTAINER_NAME}:{SIGLIP_PORT}"
+
+# The nginx route, injected into the host-side template the deployment's own entrypoint runs
+# envsubst over ($puffin_img and $1 are not in its whitelist, so both survive templating). The
+# deferred-resolution form is load-bearing: a literal proxy_pass hostname is resolved at config
+# load, and if the sidecar is absent nginx refuses to start AT ALL -- the whole UI dies, not
+# just images. With a resolver directive and a variable target, a missing sidecar is a 502 on
+# /puffin-images/ and nothing else. The rewrite exists because a variable proxy_pass does not
+# append the location remainder the way a literal one does.
+NGINX_TEMPLATE_PATH: Final[str] = os.path.expanduser(
+    "~/.config/onyx/data/nginx/app.conf.template")
+NGINX_IMAGE_ROUTE_BEGIN: Final[str] = "# >>> puffin-image-search"
+NGINX_IMAGE_ROUTE_END: Final[str] = "# <<< puffin-image-search"
+NGINX_IMAGE_ROUTE_ANCHOR: Final[str] = "client_max_body_size"
+NGINX_IMAGE_ROUTE: Final[str] = (
+    f"    {NGINX_IMAGE_ROUTE_BEGIN}\n"
+    "    location /puffin-images/ {\n"
+    "        resolver 127.0.0.11 valid=10s;\n"
+    f"        set $puffin_img {IMAGE_SEARCH_CONTAINER_URL};\n"
+    "        rewrite ^/puffin-images/(.*)$ /images/$1 break;\n"
+    "        proxy_pass $puffin_img;\n"
+    "    }\n"
+    f"    {NGINX_IMAGE_ROUTE_END}"
+)
+
 # Onyx validates a voice provider's address and hardcodes the private-network exemption to Azure
 # alone -- `allow_private_network = provider_type.lower() == "azure"` -- without consulting the
 # SSRF Protection setting an admin can change through the API. A local sidecar on the Docker
@@ -377,6 +427,7 @@ class OnyxRunner:
         brand: bool = True,
         enable_voice: bool = True,
         enable_gmail: bool = True,
+        enable_image_search: bool = True,
     ) -> int:
         """
         Registers the local vLLM model with Onyx as its default LLM provider.
@@ -394,6 +445,7 @@ class OnyxRunner:
             brand (bool): Whether to rebrand the deployment as Puffin.
             enable_voice (bool): Whether to run a local Whisper server and enable the microphone.
             enable_gmail (bool): Whether to run the Gmail service and register its search tool.
+            enable_image_search (bool): Whether to run the image search sidecar and its tool.
 
         Returns:
             int: 0 on success, non-zero on failure.
@@ -479,6 +531,9 @@ class OnyxRunner:
         # they can only start from a page the tool is listed on.
         if enable_gmail:
             self.enable_gmail_search(api, cookie)
+
+        if enable_image_search:
+            self.enable_image_search(api, cookie)
 
         if brand:
             self.apply_branding(api, cookie)
@@ -1091,6 +1146,283 @@ class OnyxRunner:
             print(f"⚠️  Could not start the Gmail service: {result.stderr.strip()[:200]}")
             return False
         return True
+
+    def enable_image_search(self, api: str, cookie: str) -> bool:
+        """
+        Gives the assistant web image search, as a custom tool pointing at the image sidecar.
+
+        Mirrors the Gmail registration: an OpenAPI document (Onyx's custom-tool API consumes a
+        document, not a bare URL -- the spec's registration sketch predates that discovery), a
+        shared-secret header, and lookup-then-update so a re-run refreshes rather than
+        duplicates. SigLIP is started best-effort: the funnel degrades to its first candidates
+        without it, and blocking image search on a model download would invert the priorities.
+
+        Args:
+            api (str): Onyx API base URL.
+            cookie (str): Session cookie header value.
+
+        Returns:
+            bool: True if the tool is registered.
+        """
+        from dreamference.chat.image_search_service import AUTH_HEADER, openapi_definition
+
+        secret = self._image_search_secret()
+        if not secret:
+            return False
+        self._start_siglip()
+        if not self._start_image_search_service(secret):
+            return False
+        if not self._inject_image_route():
+            print("⚠️  Nginx route not injected — images will not render in the browser.")
+
+        payload = {
+            "name": IMAGE_SEARCH_TOOL_NAME,
+            "description": IMAGE_SEARCH_TOOL_DESCRIPTION,
+            "definition": openapi_definition(IMAGE_SEARCH_CONTAINER_URL),
+            "custom_headers": [{"key": AUTH_HEADER, "value": secret}],
+            "passthrough_auth": False,
+        }
+        existing = next(
+            (t for t in (self._get_json(f"{api}/tool", cookie) or [])
+             if t.get("display_name") == IMAGE_SEARCH_TOOL_NAME
+             or t.get("name") == IMAGE_SEARCH_TOOL_NAME),
+            None,
+        )
+        if existing:
+            _, error = self._request(
+                f"{api}/admin/tool/custom/{existing['id']}", payload, cookie, method="PUT"
+            )
+        else:
+            _, error = self._request(f"{api}/admin/tool/custom", payload, cookie)
+        if error:
+            print(f"⚠️  Could not register the Image Search tool: {error}")
+            return False
+
+        print("🖼️  Image search registered — results cache locally under /puffin-images/.")
+        return True
+
+    @classmethod
+    def _image_search_secret(cls) -> Optional[str]:
+        """
+        Reads (creating on first use) the shared secret for the image sidecar's tool route.
+
+        Returns:
+            Optional[str]: The secret, or None if the data directory is unusable.
+        """
+        import secrets as _secrets
+
+        path = os.path.join(IMAGE_SEARCH_DATA_DIR, "secret")
+        try:
+            os.makedirs(IMAGE_SEARCH_DATA_DIR, exist_ok=True)
+            if os.path.exists(path):
+                with open(path) as fh:
+                    value = fh.read().strip()
+                if value:
+                    return value
+            value = _secrets.token_urlsafe(32)
+            with open(path, "w") as fh:
+                fh.write(value)
+            os.chmod(path, 0o600)
+            return value
+        except OSError as exc:
+            print(f"⚠️  Could not prepare the image search secret: {exc}")
+            return None
+
+    def _start_siglip(self) -> bool:
+        """
+        Runs the SigLIP embeddings sidecar, best-effort.
+
+        A stopped container is started rather than recreated (its weights volume makes the
+        second start fast), and failure is only a warning: the funnel runs without the
+        pre-filter, just less selectively.
+
+        Returns:
+            bool: True if the container is running or was started.
+        """
+        network = self._onyx_network()
+        if not network:
+            return False
+        running = subprocess.run(
+            ["docker", "ps", "--filter", f"name={SIGLIP_CONTAINER_NAME}",
+             "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=30, check=False,
+        ).stdout.split()
+        if SIGLIP_CONTAINER_NAME in running:
+            return True
+        started = subprocess.run(
+            ["docker", "start", SIGLIP_CONTAINER_NAME],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        if started.returncode == 0:
+            return True
+        result = subprocess.run(
+            ["docker", "run", "-d", "--name", SIGLIP_CONTAINER_NAME,
+             "--restart", "unless-stopped", "--network", network,
+             "-v", f"{SIGLIP_CONTAINER_NAME}-cache:/app/.cache",
+             "-p", f"127.0.0.1:{SIGLIP_PORT}:{SIGLIP_PORT}",
+             SIGLIP_IMAGE,
+             "v2", "--model-id", SIGLIP_MODEL_ID, "--port", str(SIGLIP_PORT)],
+            capture_output=True, text=True, timeout=300, check=False,
+        )
+        if result.returncode != 0:
+            print(f"⚠️  SigLIP sidecar not started ({result.stderr.strip()[:120]}) — "
+                  "image pre-filtering degrades gracefully.")
+            return False
+        return True
+
+    def _start_image_search_service(self, secret: str) -> bool:
+        """
+        Runs the image search sidecar on Onyx's network.
+
+        The service module is staged into the data directory and the directory mounted as
+        `/config`, exactly as the Gmail sidecar does. The one departure: Pillow. The service
+        needs it for decoding and hashing, the stock image lacks it, and the container runs
+        non-root -- so it is pip-installed into /tmp at boot (skipped when already present,
+        which a plain restart preserves). Offline, the install fails and the service runs
+        degraded rather than not at all.
+
+        Args:
+            secret (str): Shared secret the sidecar will require on /search.
+
+        Returns:
+            bool: True if the container answers its health route.
+        """
+        import shutil
+        import urllib.request as _request
+
+        from dreamference.chat import image_search_service
+        from dreamference.hardware.model_matrix_registry import resolve_model_hf_repo
+
+        network = self._onyx_network()
+        if not network:
+            print("⚠️  Onyx's Docker network could not be found.")
+            return False
+        try:
+            os.makedirs(os.path.join(IMAGE_SEARCH_DATA_DIR, "data"), exist_ok=True)
+            shutil.copyfile(
+                image_search_service.__file__,
+                os.path.join(IMAGE_SEARCH_DATA_DIR, "service.py"),
+            )
+        except OSError as exc:
+            print(f"⚠️  Could not stage the image search service: {exc}")
+            return False
+
+        subprocess.run(["docker", "rm", "-f", IMAGE_SEARCH_CONTAINER_NAME],
+                       capture_output=True, timeout=60, check=False)
+        boot = (
+            "export PIP_TARGET=/tmp/pylib PYTHONPATH=/tmp/pylib;"
+            "python3 -c 'import PIL' 2>/dev/null"
+            " || pip install -q --no-cache-dir pillow || true;"
+            "python3 /config/service.py"
+        )
+        result = subprocess.run(
+            ["docker", "run", "-d", "--name", IMAGE_SEARCH_CONTAINER_NAME,
+             "--restart", "unless-stopped", "--network", network,
+             "--user", f"{os.getuid()}:{os.getgid()}",
+             "-v", f"{IMAGE_SEARCH_DATA_DIR}:/config",
+             "-p", f"127.0.0.1:{IMAGE_SEARCH_HOST_PORT}:8768",
+             "-e", f"PUFFIN_IMAGE_SECRET={secret}",
+             "-e", f"PUFFIN_SEARXNG_URL={SEARXNG_CONTAINER_URL}",
+             "-e", f"PUFFIN_SIGLIP_URL={SIGLIP_CONTAINER_URL}",
+             "-e", "PUFFIN_VISION_URL="
+                   f"{self.resolve_container_vllm_url(self.config.vllm_host)}",
+             "-e", f"PUFFIN_VISION_MODEL={resolve_model_hf_repo(self.config.model)}",
+             "-e", "PUFFIN_DATA_DIR=/config/data",
+             IMAGE_SEARCH_SERVICE_IMAGE, "sh", "-c", boot],
+            capture_output=True, text=True, timeout=300, check=False,
+        )
+        if result.returncode != 0:
+            print(f"⚠️  Could not start the image search service: "
+                  f"{result.stderr.strip()[:200]}")
+            return False
+        for _ in range(30):
+            try:
+                with _request.urlopen(
+                        f"http://127.0.0.1:{IMAGE_SEARCH_HOST_PORT}/health", timeout=2):
+                    return True
+            except OSError:
+                time.sleep(1)
+        print("⚠️  The image search service did not become healthy.")
+        return False
+
+    @classmethod
+    def apply_image_route(cls, template_text: str) -> str:
+        """
+        Returns the nginx template with the /puffin-images/ route present exactly once.
+
+        Marker-based, like the stylesheet overrides: any existing block between the markers is
+        cut first, so a re-run rewrites rather than accumulates, and edits to the route are
+        appliable. The block lands directly after the server block's `client_max_body_size`
+        line -- a directive the template has carried across Onyx versions.
+
+        Args:
+            template_text (str): The current template.
+
+        Returns:
+            str: The template with the route installed. Unchanged (and unrouted) if the anchor
+                line is missing, which a caller reports rather than guessing at nginx syntax.
+        """
+        lines = template_text.splitlines()
+        kept, skipping = [], False
+        for line in lines:
+            if NGINX_IMAGE_ROUTE_BEGIN in line:
+                skipping = True
+                continue
+            if NGINX_IMAGE_ROUTE_END in line:
+                skipping = False
+                continue
+            if not skipping:
+                kept.append(line)
+        out = []
+        inserted = False
+        for line in kept:
+            out.append(line)
+            if not inserted and NGINX_IMAGE_ROUTE_ANCHOR in line:
+                out.append(NGINX_IMAGE_ROUTE)
+                inserted = True
+        return "\n".join(out) + ("\n" if template_text.endswith("\n") else "")
+
+    def _inject_image_route(self) -> bool:
+        """
+        Installs the /puffin-images/ route into the deployment's nginx template and restarts
+        nginx to re-run its templating.
+
+        The template is a *host-side* file the nginx entrypoint processes at boot, so the edit
+        survives container recreates -- unlike every patch that writes into a container
+        filesystem. The nginx container is found by its compose service label, never by name.
+
+        Returns:
+            bool: True if the template carries the route and nginx restarted.
+        """
+        try:
+            with open(NGINX_TEMPLATE_PATH) as fh:
+                template = fh.read()
+        except OSError as exc:
+            print(f"⚠️  Could not read the nginx template: {exc}")
+            return False
+        updated = self.apply_image_route(template)
+        if NGINX_IMAGE_ROUTE_BEGIN not in updated:
+            print("⚠️  The nginx template has no anchor for the image route.")
+            return False
+        if updated != template:
+            try:
+                with open(NGINX_TEMPLATE_PATH, "w") as fh:
+                    fh.write(updated)
+            except OSError as exc:
+                print(f"⚠️  Could not write the nginx template: {exc}")
+                return False
+        containers = subprocess.run(
+            ["docker", "ps", "--filter", "label=com.docker.compose.service=nginx",
+             "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=30, check=False,
+        ).stdout.split()
+        if not containers:
+            return False
+        restart = subprocess.run(
+            ["docker", "restart", containers[0]],
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+        return restart.returncode == 0
 
     def enable_web_search(self, api: str, cookie: str) -> bool:
         """
