@@ -170,8 +170,39 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "var a=document.createElement('a');a.id=ID;a.href=U;"
     "a.target=ENG==='blink'?'_blank':'_self';a.rel='noopener';"
     "a.textContent=(last&&last.connected)?'Connect another Google account':'Connect to Google';"
+    # On Blink the consent flow opens as a modal over the page -- an iframe of the service's
+    # connect page, in the settings modal's visual idiom. The click on Authorize inside it still
+    # window.open()s Google in a real tab, because Google refuses to be framed. WebKit keeps the
+    # in-place navigation: `window.open` is inert there and a modal would dead-end at Authorize.
+    "if(ENG==='blink'){a.addEventListener('click',function(e){"
+    "e.preventDefault();e.stopPropagation();openConnect();},true);}"
     "p.appendChild(a);"
     "}"
+    "function openConnect(){"
+    "if(document.getElementById(ID+'-modal'))return;"
+    "var o=document.createElement('div');o.id=ID+'-modal';"
+    "o.style.cssText='position:fixed;inset:0;z-index:2100;background:rgba(17,24,39,.5);"
+    "display:flex;align-items:center;justify-content:center;';"
+    "var pn=document.createElement('div');"
+    "pn.style.cssText='position:relative;width:min(560px,calc(100vw - 48px));"
+    "height:min(540px,calc(100vh - 48px));background:#fff;border-radius:16px;"
+    "box-shadow:0 25px 50px -12px rgba(0,0,0,.25);overflow:hidden;';"
+    "var fr=document.createElement('iframe');fr.src=U;"
+    "fr.style.cssText='width:100%;height:100%;border:0;display:block;';"
+    "var x=document.createElement('button');x.setAttribute('aria-label','Close');"
+    "x.textContent='\u00d7';"
+    "x.style.cssText='position:absolute;top:10px;right:12px;width:32px;height:32px;border:none;"
+    "background:transparent;color:#6b7280;font-size:22px;line-height:1;cursor:pointer;"
+    "border-radius:8px;';"
+    # Closing re-checks status immediately: the user most often closes this right after
+    # completing consent in the Google tab, and the card behind should reflect it at once
+    # rather than on the next 5s poll.
+    "function cl(){o.remove();document.removeEventListener('keydown',esc2,true);check();}"
+    "function esc2(e){if(e.key==='Escape'){e.stopPropagation();cl();}}"
+    "x.addEventListener('click',cl);"
+    "o.addEventListener('mousedown',function(e){if(e.target===o)cl();});"
+    "document.addEventListener('keydown',esc2,true);"
+    "pn.appendChild(fr);pn.appendChild(x);o.appendChild(pn);document.body.appendChild(o);}"
     "function check(){fetch(S).then(function(r){return r.json()}).then(function(s){"
     "last=s;apply()}).catch(function(){last=null;apply()});}"
     f"function boot(){{check();setInterval(check,{POLL_INTERVAL_MS});"

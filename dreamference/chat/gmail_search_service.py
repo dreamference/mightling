@@ -749,6 +749,11 @@ class GmailSearchService:
                     f"<style>{PAGE_STYLE}</style></head><body><main>"
                     f"{inner}"
                     f'<p><a href="{ONYX_ORIGIN}/app">Back to Puffin</a></p>'
+                    # Framed (in the connect modal) the link is surplus -- the modal has its own
+                    # close, and navigating the iframe to the app would nest Puffin inside itself.
+                    "<script>if(window.top!==window.self){var L=document.querySelectorAll('a');"
+                    "for(var i=0;i<L.length;i++){if(L[i].textContent==='Back to Puffin')"
+                    "L[i].style.display='none';}}</script>"
                     "</main></body></html>"
                 ).encode()
                 self.send_response(200)
