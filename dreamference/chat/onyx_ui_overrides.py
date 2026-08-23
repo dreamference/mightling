@@ -530,12 +530,15 @@ DIVIDER_CSS: Final[str] = (
 # above it are not, because they carry `w-full` and fill the row instead. Left-aligning the button
 # puts it under the text it belongs to rather than adrift in the middle of the panel.
 CONNECT_BUTTON_CSS: Final[str] = (
+    # Styled as the standard primary action -- the near-black pill Onyx's own dialogs use
+    # (the share sheet's "Create Share Link") -- rather than the brand teal, which read as
+    # louder than any control Onyx ships on this page.
     "#puffin-connect-google"
-    f"{{align-self:flex-start;margin-top:10px;padding:8px 14px;border-radius:8px;"
-    f"background-color:{TIFFANY_BLUE};color:#fff;text-decoration:none;white-space:nowrap;"
-    "font-size:.8125rem;font-weight:500}"
+    "{align-self:flex-start;margin-top:12px;padding:10px 18px;border-radius:12px;"
+    "background-color:#111827;color:#fff;text-decoration:none;white-space:nowrap;"
+    "font-size:.875rem;font-weight:600}"
     "#puffin-connect-google:hover"
-    f"{{background-color:{TIFFANY_BLUE_HOVER}}}"
+    "{background-color:#1f2937}"
 )
 
 # The block caret that trails a streaming answer, lightened.

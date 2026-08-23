@@ -136,23 +136,37 @@ NOT_CONNECTED_MESSAGE: Final[str] = (
 # Enough styling that the setup page reads as part of Puffin rather than as a server error. It is
 # the only page this project serves directly, and the user arrives at it from a polished UI.
 PAGE_STYLE: Final[str] = (
-    "body{margin:0;padding:48px 24px;background:#fff;color:#111;"
+    # The same neutral idiom as the patched Onyx UI (the share sheet, the connector card):
+    # near-black text, grey secondary, hairline borders, a black pill for the one primary action.
+    "body{margin:0;padding:48px 24px;background:#fff;color:#111827;"
     "font-family:Roboto,system-ui,sans-serif;font-size:14px;line-height:1.55}"
     "main{max-width:520px;margin:0 auto}"
-    "h2{margin:0 0 4px;font-size:20px;font-weight:600}"
+    "h2{margin:0 0 6px;font-size:22px;font-weight:700;letter-spacing:-.01em}"
     "p{margin:0 0 14px}"
-    "code{background:#f2f4f4;border-radius:4px;padding:1px 5px;font-family:'Roboto Mono',monospace;"
+    "code{background:#f3f4f6;border-radius:4px;padding:1px 5px;font-family:'Roboto Mono',monospace;"
     "font-size:12.5px}"
-    "a{color:#0ABAB5}"
-    ".muted{color:#6b7280;font-size:12.5px}"
+    "a{color:#374151;text-decoration:underline}"
+    "a:hover{color:#111827}"
+    ".muted{color:#6b7280;font-size:13px}"
     "ol{counter-reset:step;list-style:none;padding-left:0;margin:0 0 18px}"
     "ol li{margin-bottom:16px;padding-left:30px;position:relative}"
     "ol li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:1px;"
-    "width:20px;height:20px;border-radius:50%;background:#e6f7f7;color:#0a8f8b;"
+    "width:20px;height:20px;border-radius:50%;background:#f3f4f6;color:#374151;"
     "font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center}"
-    ".note{margin-top:22px;padding:12px 14px;border-radius:8px;background:#f6f8f8;"
-    "color:#4b5563;font-size:12.5px}"
-    ".ready{margin:0 0 18px;padding:12px 14px;border-radius:8px;background:#e6f7f7;color:#0a6f6c}"
+    ".note{margin:20px 0;padding:14px 16px;border-radius:12px;background:#f9fafb;"
+    "border:1px solid #e5e7eb;color:#6b7280;font-size:13px}"
+    ".ready{margin:0 0 18px;padding:14px 16px;border-radius:12px;background:#f9fafb;"
+    "border:1px solid #e5e7eb;color:#374151}"
+    ".btn-primary{display:inline-block;padding:10px 18px;border:none;border-radius:12px;"
+    "background:#111827;color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer}"
+    ".btn-primary:hover{background:#1f2937}"
+    ".btn-secondary{display:inline-block;padding:8px 14px;border:1px solid #e5e7eb;border-radius:10px;"
+    "background:#fff;color:#374151;font-size:13px;font-weight:500;font-family:inherit;cursor:pointer}"
+    ".btn-secondary:hover{background:#f9fafb}"
+    "input[type=text]{width:100%;box-sizing:border-box;padding:10px 12px;margin-bottom:10px;"
+    "border:1px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:inherit;color:#111827}"
+    "input[type=text]:focus{outline:2px solid #d1d5db;outline-offset:0;border-color:#d1d5db}"
+    ".divider{margin-top:28px;border-top:1px solid #f3f4f6;padding-top:20px}"
 )
 
 
@@ -756,39 +770,13 @@ class GmailSearchService:
                     <p>Puffin authenticates directly with Google. Your mail and files are read locally.</p>
                     <p class="note">ⓘ The consent screen will say <b style="display:inline">GNOME</b> — Puffin authenticates through the GNOME desktop's Google integration. No Puffin credentials are sent to Google.</p>
                     
-                    <button id="start-btn" style="padding: 8px 16px; background: #0a8f8b; color: white; border: none; border-radius: 4px; cursor: pointer;">Authorize with Google</button>
+                    <button id="start-btn" class="btn-primary">Authorize with Google</button>
                     
-                    <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
-                        <p class="muted">Different host? Browser shows "localhost refused to connect"?<br>Copy the full URL from the address bar and paste it here:</p>
-                        <input type="text" id="paste-url" placeholder="http://localhost:8767/?state=...&code=..." style="width: 100%; padding: 8px; margin-bottom: 8px; box-sizing: border-box;">
-                        <button id="complete-btn" style="padding: 6px 12px; background: #f6f8f8; color: #4b5563; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">Submit URL</button>
-                        <p id="paste-msg" style="color: green; display: none; margin-top: 10px; font-weight: 600;"></p>
-                    </div>
-
                     <script>
                         document.getElementById('start-btn').onclick = async () => {
                             const res = await fetch('/api/google/oauth/start', { method: 'POST' });
                             const data = await res.json();
                             if (data.auth_url) window.open(data.auth_url, '_blank');
-                        };
-                        document.getElementById('complete-btn').onclick = async () => {
-                            const url = document.getElementById('paste-url').value;
-                            if (!url) return;
-                            const res = await fetch('/api/google/oauth/complete', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ url })
-                            });
-                            const data = await res.json();
-                            const msg = document.getElementById('paste-msg');
-                            msg.style.display = 'block';
-                            if (data.status === 'ok') {
-                                msg.textContent = 'Connected as ' + data.email;
-                                msg.style.color = 'green';
-                            } else {
-                                msg.textContent = 'Error: ' + data.error;
-                                msg.style.color = 'red';
-                            }
                         };
                     </script>
                     """
@@ -796,8 +784,10 @@ class GmailSearchService:
 
 
             def do_OPTIONS(self) -> None:
+                # The preflight must name the *page's* origin (Onyx), not this service's own;
+                # answering with HOST_ORIGIN made the browser veto the POST before sending it.
                 self.send_response(204)
-                self.send_header("Access-Control-Allow-Origin", HOST_ORIGIN)
+                self.send_header("Access-Control-Allow-Origin", ONYX_ORIGIN)
                 self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
                 self.end_headers()

@@ -92,7 +92,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",ENG);'
     f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}{SERVICE_CONNECT_PATH}",ID="{BUTTON_ID}";'
     f'var PATH="{CONNECT_PATH}",HEAD="{SECTION_HEADING}";'
-    "var last=null;"
+    "var last=null,lastSig=null;"
     
     "window.__puffinDisconnect = function(email) {"
     f"  fetch('{HOST_ORIGIN}/disconnect', {{"
@@ -106,10 +106,16 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "var h=document.querySelectorAll('.opal-content-md-title-row span');"
     "for(var i=0;i<h.length;i++){if(h[i].textContent.trim()===HEAD){"
     "var w=h[i].closest('div.w-full');return w&&w.parentElement}}return null;}"
+    # Rebuild only when the state changed or React wiped the injected nodes -- the 500ms
+    # re-apply otherwise destroys the card mid-click and the Disconnect button never fires.
     "function apply(){var p=panel();if(!p)return;"
+    "var sig=JSON.stringify(last)+'|'+location.pathname;"
     "var e=document.getElementById(ID);"
-    "if(e)e.remove();"
     "var ec=document.getElementById(ID+'-card');"
+    "var present=e&&(!(last&&last.connected)||ec);"
+    "if(present&&sig===lastSig)return;"
+    "lastSig=sig;"
+    "if(e)e.remove();"
     "if(ec)ec.remove();"
     
     "var kids=p.children||[];for(var i=0;i<kids.length;i++){"
@@ -120,11 +126,17 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     
     "if(last&&last.connected){"
     "var div=document.createElement('div');div.id=ID+'-card';"
-    "div.style.padding='16px';div.style.background='#f0fdfa';div.style.border='1px solid #14b8a6';div.style.borderRadius='8px';div.style.marginBottom='16px';div.style.marginTop='16px';"
-    'var html="<h3 style=\'margin:0 0 12px;font-size:16px;font-weight:bold;color:#0f766e;\'>✅ Google Connected</h3>";'
+    "div.style.padding='4px 16px';div.style.background='#fff';div.style.border='1px solid #e5e7eb';div.style.borderRadius='12px';div.style.marginBottom='16px';div.style.marginTop='16px';"
+    # One row per connected account, in the language of Onyx's own dialogs (the share sheet's
+    # rows): stroke icon, semibold title, muted description, and a quietly bordered action.
+    'var html="";'
     "var emails = (last.email || '').split(', ');"
     "for(var i=0;i<emails.length;i++){"
-    '  if(emails[i]) html += "<div style=\'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;\'><p style=\'margin:0;font-size:14px;color:#0f766e;\'>Gmail search is active for <b>" + emails[i] + "</b>.</p><button onclick=\'window.__puffinDisconnect(\\"" + emails[i] + "\\")\' style=\'background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;font-weight:bold;\'>Disconnect</button></div>";'
+    '  if(emails[i]) html += "<div style=\'display:flex;align-items:center;gap:12px;padding:12px 0;" + (html?"border-top:1px solid #f3f4f6;":"") + "\'>"'
+    '    + "<svg width=\'20\' height=\'20\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'#374151\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\' style=\'flex-shrink:0\'><rect x=\'2\' y=\'4\' width=\'20\' height=\'16\' rx=\'2\'/><path d=\'m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7\'/></svg>"'
+    '    + "<div style=\'flex:1;min-width:0\'><div style=\'font-size:15px;font-weight:600;color:#111827;\'>" + emails[i] + "</div>"'
+    '    + "<div style=\'font-size:13px;color:#6b7280;margin-top:2px;\'>Gmail search is active for this account.</div></div>"'
+    '    + "<button onclick=\'window.__puffinDisconnect(\\"" + emails[i] + "\\")\' style=\'background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px 14px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;flex-shrink:0;\'>Disconnect</button></div>";'
     "}"
     "div.innerHTML=html;"
     "p.appendChild(div);"
