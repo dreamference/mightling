@@ -541,6 +541,43 @@ SETTINGS_HEADER_ICON_CSS: Final[str] = (
     "{display:none}"
 )
 
+# The image search gallery -- the styling half; the container and its data-count are built by
+# `onyx_ui_scripts.py`. The mosaic follows the familiar search-results shape: one hero image on
+# the left, tiles stacked right, keyed per count because CSS cannot span a row "n-1 times".
+# RESULT_COUNT is 4, so the variants stop there; a hypothetical larger group falls back to the
+# plain two-column grid, ungracefully but legibly.
+GALLERY_CSS: Final[str] = (
+    "[data-puffin-gallery]"
+    "{display:grid;gap:8px;margin:12px 0;max-width:720px;"
+    "grid-template-columns:repeat(2,1fr)}"
+    "[data-puffin-gallery] img"
+    "{width:100%;height:100%;object-fit:cover;border-radius:12px;cursor:pointer;"
+    "display:block;margin:0}"
+    '[data-puffin-gallery][data-count="1"]'
+    "{grid-template-columns:1fr;max-width:480px}"
+    '[data-puffin-gallery][data-count="1"] img'
+    "{height:auto;object-fit:contain}"
+    '[data-puffin-gallery][data-count="2"] img'
+    "{aspect-ratio:4/3}"
+    '[data-puffin-gallery][data-count="3"],'
+    '[data-puffin-gallery][data-count="4"]'
+    "{grid-template-columns:2fr 1fr}"
+    '[data-puffin-gallery][data-count="3"]'
+    "{grid-auto-rows:150px}"
+    '[data-puffin-gallery][data-count="3"] img:first-child'
+    "{grid-row:1/span 2}"
+    '[data-puffin-gallery][data-count="4"]'
+    "{grid-auto-rows:110px}"
+    '[data-puffin-gallery][data-count="4"] img:first-child'
+    "{grid-row:1/span 3}"
+    # Five or more (a user-requested count): the hero mosaic stops paying for itself, so a
+    # plain three-column tile grid takes over.
+    "[data-puffin-gallery][data-large]"
+    "{grid-template-columns:repeat(3,1fr);grid-auto-rows:140px}"
+    "[data-puffin-gallery][data-large] img:first-child"
+    "{grid-row:auto}"
+)
+
 # The account avatar inside a selected sidebar row, inverted.
 #
 # Onyx draws it as white initials on a black disc, which on the Tiffany fill of a selected row is a
@@ -770,7 +807,7 @@ UI_OVERRIDES: Final[str] = (
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
     + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS + SYNTHETIC_TABS_CSS
-    + SETTINGS_HEADER_ICON_CSS
+    + SETTINGS_HEADER_ICON_CSS + GALLERY_CSS
 )
 
 

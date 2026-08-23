@@ -464,10 +464,82 @@ IMAGE_TOOL_STEP_SCRIPT: Final[str] = (
     "}catch(e){}})();"
 )
 
+# Image search results as a clickable gallery.
+#
+# Onyx renders the tool's Markdown embeds as full-width images stacked vertically. This script
+# regroups every /puffin-images/ image inside one assistant message into a mosaic -- hero image
+# left, tiles right, the layout `GALLERY_CSS` keys on a data-count attribute -- and opens a
+# lightbox on click, with arrow-key navigation when there is more than one. React's own nodes
+# are never moved: moving them breaks reconciliation with a removeChild error on the next
+# re-render. The originals are hidden in place and *mirrored* into a container of our own; the
+# sweep notices when React has wiped the originals (the mirror's source anchor is no longer
+# connected) and rebuilds. The same interval posture as the scrollbar and tab scripts.
+GALLERY_ATTRIBUTE: Final[str] = "data-puffin-gallery"
+LIGHTBOX_ID: Final[str] = "puffin-lightbox"
+GALLERY_SCRIPT: Final[str] = (
+    ";(function(){try{"
+    "if(window.__puffinGallery)return;window.__puffinGallery=1;"
+    f'var GA="{GALLERY_ATTRIBUTE}",LID="{LIGHTBOX_ID}";'
+    "function lightbox(list,start){"
+    "var old=document.getElementById(LID);if(old)old.remove();"
+    "var i=start;"
+    "var o=document.createElement('div');o.id=LID;"
+    "o.style.cssText='position:fixed;inset:0;z-index:2200;background:rgba(17,24,39,.85);"
+    "display:flex;align-items:center;justify-content:center;';"
+    "var img=document.createElement('img');"
+    "img.style.cssText='max-width:92vw;max-height:92vh;border-radius:12px;"
+    "box-shadow:0 25px 50px -12px rgba(0,0,0,.5);';"
+    "function show(n){i=(n+list.length)%list.length;img.src=list[i].src;img.alt=list[i].alt;}"
+    "function cl(){o.remove();document.removeEventListener('keydown',key,true);}"
+    "function key(e){if(e.key==='Escape'){e.stopPropagation();cl();}"
+    "else if(e.key==='ArrowRight'){show(i+1);}else if(e.key==='ArrowLeft'){show(i-1);}}"
+    "function arrow(txt,side,d){var b=document.createElement('button');b.textContent=txt;"
+    "b.style.cssText='position:absolute;top:50%;'+side+':18px;transform:translateY(-50%);"
+    "width:40px;height:40px;border:none;border-radius:20px;background:rgba(255,255,255,.92);"
+    "color:#111827;font-size:20px;line-height:1;cursor:pointer;';"
+    "b.addEventListener('click',function(e){e.stopPropagation();show(i+d);});return b;}"
+    "o.addEventListener('click',function(e){if(e.target===o)cl();});"
+    "o.appendChild(img);"
+    "if(list.length>1){o.appendChild(arrow('\u2039','left',-1));"
+    "o.appendChild(arrow('\u203a','right',1));}"
+    "document.addEventListener('keydown',key,true);"
+    "show(i);document.body.appendChild(o);}"
+    "function build(items){"
+    "var g=document.createElement('div');g.setAttribute(GA,'1');"
+    "g.setAttribute('data-count',String(items.length));"
+    "if(items.length>4)g.setAttribute('data-large','1');"
+    "items.forEach(function(it,idx){"
+    "var c=document.createElement('img');c.src=it.src;c.alt=it.alt;c.title=it.alt;"
+    "c.addEventListener('click',function(){lightbox(items,idx);});"
+    "g.appendChild(c);});"
+    "return g;}"
+    "function sweep(){"
+    "var gals=document.querySelectorAll('['+GA+']'),i;"
+    "for(i=0;i<gals.length;i++){"
+    "if(!gals[i].__src||!gals[i].__src.isConnected)gals[i].remove();}"
+    "var imgs=document.querySelectorAll('img[src*=\"/puffin-images/\"]');"
+    "var byHost=[],hosts=[];"
+    "for(i=0;i<imgs.length;i++){var im=imgs[i];"
+    "if(im.__puffinDone||im.closest('['+GA+']')||im.closest('#'+LID))continue;"
+    "var host=im.closest('[data-testid=\"onyx-ai-message\"]');"
+    "if(!host)continue;"
+    "var at=hosts.indexOf(host);"
+    "if(at<0){hosts.push(host);byHost.push([im]);}else{byHost[at].push(im);}}"
+    "byHost.forEach(function(group){"
+    "var items=group.map(function(im){return{src:im.src,alt:im.alt||''};});"
+    "var anchor=group[0].closest('p')||group[0];"
+    "var g=build(items);g.__src=group[0];"
+    "anchor.parentElement.insertBefore(g,anchor);"
+    "group.forEach(function(im){im.__puffinDone=1;"
+    "var p=im.closest('p')||im;p.style.display='none';});});}"
+    "setInterval(sweep,800);"
+    "}catch(e){}})();"
+)
+
 # Everything this module injects.
 UI_SCRIPTS: Final[str] = (
     SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT + SCROLLBAR_SCRIPT + SETTINGS_MODAL_SCRIPT
-    + SETTINGS_TABS_SCRIPT + IMAGE_TOOL_STEP_SCRIPT
+    + SETTINGS_TABS_SCRIPT + IMAGE_TOOL_STEP_SCRIPT + GALLERY_SCRIPT
 )
 
 

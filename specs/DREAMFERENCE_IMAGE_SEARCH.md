@@ -1,148 +1,206 @@
 # Puffin Image Search Tool — Technical Specification
 
-**Status:** Draft v13 (Moved from Onyx internal tool to standalone Dreamference Sidecar)
+**Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft)
 **Target:** Puffin (Dreamference Sidecar ecosystem)
-**Estimated effort:** ~5–6 days (tool, thumbnails-first pipeline, SigLIP pre-filter + warm-up/cache, pHash dedupe, speculative caching, vision ranking, source-URL dedupe, GC)
+**Source:** `dreamference/chat/image_search_service.py` (the sidecar), `OnyxRunner.enable_image_search` and siblings in `dreamference/chat/onyx_runner.py` (provisioning, registration, nginx), `GALLERY_SCRIPT`/`GALLERY_CSS` and `IMAGE_TOOL_STEP_SCRIPT` in the UI patch modules (presentation). Tests: `tests/test_image_search_service.py`, plus registration and nginx tests in `tests/test_onyx_runner.py`.
 
 ---
 
 ## 1. Overview
 
-Add a built-in `Image Search` tool that lets the LLM search the internet for images and display them inline in chat. Instead of modifying Onyx's internal Python codebase, this is implemented as an independent **Dreamference Sidecar container (`dream-image-search`)** and registered dynamically via Onyx's Custom Tool REST API (similar to the Gmail integration).
+A built-in `Image Search` tool lets the LLM search the internet for images and display them inline in chat. It is implemented as an independent **Dreamference sidecar container (`dreamference-image-search`, port 8768)** — the `dream-*` names of the v13 draft predate the deployment-wide rename to `dreamference-*` — and registered via Onyx's Custom Tool REST API, mirroring the Gmail integration.
 
-The tool queries the deployment's SearXNG instance (image category) with a **wide candidate pool (up to 30)**, fetches the candidates' **thumbnails in-memory**, **pre-filters them with a local SigLIP model**, **collapses visual near-duplicates with perceptual hashing**, **re-ranks the survivors with the served multimodal model (vision pass)**, and only then **downloads the ranked winners' full images to a dedicated local Docker volume**, deduplicating against previously cached images by source URL. 
+One `POST /search` call runs the whole funnel: SearXNG's image category with a **wide candidate pool (30)**, **in-memory thumbnail fetches** behind a hardened SSRF guard, a **SigLIP pre-filter**, **perceptual-hash collapse** of visual near-duplicates, a **vision rank-and-filter pass** by the served multimodal model (with the shortlist's full downloads already **prefetching speculatively**), then persistence of the winners into a local store that nginx serves back at `/puffin-images/{file_id}.jpg`. Caching locally is the point: hotlinked images die of CORP blocks and link rot; cached ones render permanently.
 
-Results return to the LLM as a JSON response containing Markdown image embeddings (`![alt](/puffin-images/123.jpg)`). Onyx natively renders these. A custom Nginx route injected into Onyx's web proxy serves the images directly from the sidecar.
-
-Caching locally eliminates the two failure modes of hotlinking: cross-origin embedding blocks (CORP/hotlink protection returning 403) and link rot. Images render permanently.
+**Deviation from the v13 draft, adopted deliberately:** the sidecar is **standard library + Pillow, not FastAPI**. It follows the Gmail sidecar exactly — a single staged file in a stock `python:3-slim` container, nothing to install at boot beyond Pillow itself (pip-installed into `/tmp` on start, skipped when present, degraded gracefully when offline). The draft's architecture — endpoints, funnel, hourly GC — is implemented whole; only the web framework differs.
 
 ---
 
-## 2. Architecture
+## 2. The funnel, as implemented
 
 ```
-LLM custom tool call {"queries": ["puffin bird flying"]}
+LLM custom tool call {"queries": ["puffin bird flying"], "count": 6}   (count optional, 1–10, default 4)
         │
         ▼
-Onyx API Server calls POST http://dream-image-search:8768/search
+POST http://dreamference-image-search:8768/search   (X-Puffin-Image-Token shared-secret header)
         │
         ▼
-[Inside dream-image-search container]
-SearXNGClient.search_images (categories=images)
+SearXNG image search (http://dreamference-searxng:8080, format=json)
+round-robin merge across queries, dedupe by image URL, cap 30
         │
         ▼
-round-robin merge, dedupe by image_url, cap CANDIDATE_POOL_SIZE (30)
+DEDUPE LOOKUP (SQLite, by source URL): a known image reuses its cached file and skips all
+network work — but it does NOT skip judgment. Cached candidates ride through the ranking with
+their local file standing in for the thumbnail: an image cached for one query is not thereby
+relevant to the next. (v13 treated the cache as pre-approved; a live person-search re-served
+three unrelated cached images, and that behaviour is now a regression test.)
         │
         ▼
-DEDUPE LOOKUP: check local SQLite DB for source_url
-  → known images reuse existing file_id, skip ALL network work
+THUMB STEP: parallel in-memory fetches, 512 KB / 5 s caps, unfetchable candidates drop out
         │
         ▼
-THUMB STEP: parallel in-memory fetch of thumbnails for the rest
-  → SSRF-guarded, 512 KB / 5 s caps → drop unfetchable candidates
+SIGLIP PRE-FILTER (http://dreamference-siglip:9100, Infinity): cosine-scored, keep the top
+max(8, count+2). DEGRADES to first-N when unavailable — which on GB10 it is: Infinity
+publishes amd64 images only and GB10 is aarch64 (see §7).
         │
         ▼
-SIGLIP PRE-FILTER: embed via the puffin-siglip Infinity sidecar
-  (query text + thumbnail batch) → cosine scored → keep top RANK_CANDIDATES (8)
+PHASH COLLAPSE: hand-rolled 64-bit DCT pHash (Pillow + stdlib, no numpy/imagehash),
+Hamming ≤ 8 merges to the first representative
         │
         ▼
-PHASH COLLAPSE: pHash all kept thumbnails, Hamming ≤ 8 → merge
+RANK-AND-FILTER ─┬─ SPECULATIVE PREFETCH (concurrent)
+   (vision)      │   hardened full downloads of every FRESH shortlist candidate begin when
+                 │   the rank call is dispatched; cached candidates prefetch nothing
+  one OpenAI-compatible vision call to the served vLLM model: shortlist thumbnails + query →
+  strict-JSON array of the MATCHING indices, best first. A successful verdict is a FILTER:
+  indices it leaves out stay out (an empty array is a valid answer), and only a transport or
+  parse failure falls back to the unfiltered order. Even a single candidate is judged — one
+  wrong image confidently embedded is the exact complaint that added filtering.
         │
         ▼
-RANK STEP ─┬─ SPECULATIVE PREFETCH (concurrent)
-  (vision)  │   hardened full downloads of ALL 8 rank candidates
-            │   start when the rank call is dispatched
-  one vision API call to local vLLM: 8 thumbnails + query → strict-JSON ranking
+RECONCILE: winners = verdict ∩ successful downloads, up to `count`; in-flight fetches of
+rank-dropped candidates are cancelled
         │
         ▼
-RECONCILE: verdict ∩ prefetch
-  → cancel in-flight fetches of rank-dropped candidates
+PERSIST: winners re-encoded to JPEG (normalises format, strips non-image payload) into the
+store; phash + source URL + title recorded in SQLite
         │
         ▼
-PERSIST: winners → write to local Docker volume (/data)
-  record phash + source_url in sidecar SQLite DB
-        │
-        ▼
-Return Custom Tool Response (JSON):
-{
-  "response": "![title](/puffin-images/{file_id}.jpg)\n...",
-  "instructions": "Embed these exactly as provided."
-}
-        │
-        ▼
-Onyx receives response, streams to chat.
-Browser requests /puffin-images/{file_id}.jpg
-        │
-        ▼
-Onyx Nginx Proxy routes to http://dream-image-search:8768/images/{file_id}.jpg
+{"response": "![title](/puffin-images/{file_id}.jpg)\n\n…",
+ "instructions": "…include these lines VERBATIM… <the same markdown again>"}
 ```
+
+The `instructions` field restates the Markdown embeds and forbids answering with a bare
+acknowledgement, because a model given only a pointer ("embed the above") has answered `Done`
+and shown nothing. The Puffin persona prompt and the tool's OpenAPI summary reinforce the same
+contract from their side.
 
 ---
 
-## 3. Sidecar Service Design
+## 3. Sidecar service design
 
-The sidecar is a FastAPI Python application (`dream-image-search`) running on port `8768`.
+Single self-contained file, staged to `~/.config/dreamference/image-search/service.py` and
+bind-mounted at `/config` — it runs on the host for imports/tests and as `__main__` in the
+container, like the Gmail service.
 
-### 3.1 Nginx Routing
-In `onyx_runner.py` during `configure`, Dreamference injects a tiny `.conf` snippet into Onyx's Nginx proxy:
+### 3.1 Storage — user-owned bind mount, not a named volume
+
+The container runs `--user uid:gid`, and Docker creates named volumes root-owned — the exact
+permission trap the torch.compile cache documented. The store is therefore a directory under
+the same bind mount: `/config/data/images/*.jpg` plus `/config/data/db.sqlite` (source URL,
+file id, pHash, title, timestamp). **GC:** a background thread deletes images older than 7 days
+hourly and then trims oldest-first to a 2 GB cap; a DB row whose file was collected reads as
+absent and is purged.
+
+### 3.2 Nginx routing — host-side template, deferred resolution
+
+`OnyxRunner._inject_image_route()` rewrites the **host-side**
+`~/.config/onyx/data/nginx/app.conf.template` (marker-based, cut-at-marker idempotent, so the
+edit survives container recreates), inserting after the `client_max_body_size` line:
+
 ```nginx
 location /puffin-images/ {
-    proxy_pass http://dream-image-search:8768/images/;
+    resolver 127.0.0.11 valid=10s;
+    set $puffin_img http://dreamference-image-search:8768;
+    rewrite ^/puffin-images/(.*)$ /images/$1 break;
+    proxy_pass $puffin_img;
 }
 ```
-This elegantly sidesteps CORS/CORP issues and avoids modifying Onyx's internal Postgres FileStore or `access.py` permissions.
 
-### 3.2 Tool Registration
-In `onyx_runner.py`'s `configure_gmail` equivalent, we dynamically register the custom tool:
-```python
-payload = {
-    "name": "Image Search",
-    "description": "Search the web for images. Use when user asks for pictures.",
-    "custom_tool_url": "http://dream-image-search:8768/search",
-}
-# PUT to /api/admin/tool/custom
-```
+Two hard-won constraints:
+- **The deferred form is load-bearing.** A literal `proxy_pass` hostname is resolved at config
+  load; with the sidecar absent, nginx refuses to start *at all* and the whole UI dies.
+  Verified live: with this form and the sidecar stopped, nginx stays healthy and only
+  `/puffin-images/` answers 502. (The `rewrite` exists because a variable `proxy_pass` does not
+  append the location remainder.) `$puffin_img` and `$1` survive the entrypoint's `envsubst`
+  because its variable whitelist names neither.
+- **Never restart nginx when the template is unchanged.** `configure` talks to Onyx *through*
+  this proxy; the first implementation restarted it unconditionally and every later step died
+  with ECONNRESET. On change, nginx is restarted (found by compose service label, never by
+  name) and polled back to health before returning.
 
-### 3.3 The Sidecar Storage (SQLite & File GC)
-The sidecar mounts a local Docker volume `/data`. 
-- `/data/images/` stores the raw JPEGs.
-- `/data/db.sqlite` stores the deduplication metadata (source URL, file ID, pHash, timestamp).
-- **Garbage Collection:** The FastAPI app runs a background `asyncio` task every hour that deletes files older than 7 days (or based on volume size cap). Since images are cached locally and persist for 7 days, they cover the active lifetime of a chat discussion.
+### 3.3 Tool registration
 
----
-
-## 4. Provider & Inference Interactions
-
-Because the sidecar is independent, it communicates with the rest of the stack over standard HTTP:
-
-### 4.1 SearXNG Client
-Queries `http://searxng:8080/search`. Follows the same wide-funnel rules (30 candidates). Includes the same SSRF exemptions for `image_proxy` routing.
-
-### 4.2 SigLIP Pre-Filter
-Queries `http://puffin-siglip:9100/embeddings` (the Infinity sidecar). Identical logic to the original spec: 30 candidates, cosine scoring, keep top 8.
-
-### 4.3 Vision Re-ranking
-Queries the local vLLM API server (`http://api_server:8000/v1/chat/completions` or directly hitting vLLM). Passes the 8 thumbnails as base64 images in an OpenAI-compatible request to get the strict-JSON ranking array.
+The v13 draft's `{"custom_tool_url": …}` sketch does not match Onyx's API. Registration mirrors
+Gmail: an **OpenAPI document** (`openapi_definition()` in the service module, one
+`image_search` POST operation with `queries` and optional `count`) sent to
+`POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate, and
+a `custom_headers` shared secret (`X-Puffin-Image-Token`, generated once into the data
+directory). `dream onyx configure` runs it; `--no-image-search` skips it. Image `GET`s carry no
+secret — the browser is the caller and the ids are unguessable.
 
 ---
 
-## 5. Security & Hardening
+## 4. Provider & inference interactions
 
-The sidecar implements the identical hardened downloader logic for fetching images from the internet:
-- DNS pinning, private-IP SSRF rejection, redirect capping, and magic-byte sniffing. 
-- Prevents malicious image URLs from probing the internal Docker network.
+- **SearXNG** — `SEARXNG_CONTAINER_URL` (the deployment's own instance, JSON API). Relative
+  `thumbnail_src` values are resolved against the SearXNG base.
+- **SigLIP** — `dreamference-siglip`, an Infinity server (`michaelf34/infinity`, CPU,
+  `google/siglip-base-patch16-224`, weights in a named volume), provisioned best-effort by
+  `_start_siglip()`. See §7 for the arm64 gap.
+- **Vision** — the served vLLM model, reached at the runner's existing loopback→bridge-gateway
+  rewrite (`resolve_container_vllm_url`) with the registry-resolved model id; both passed as
+  environment, never recomputed in the sidecar.
 
 ---
 
-## 6. Testing Plan
+## 5. Security & hardening
 
-**Unit Tests (Sidecar):**
-- Mock FastAPI endpoints, SearXNG client, SigLIP scoring, and vLLM ranking.
-- Hardened downloader SSRF assertions.
-- SQLite GC cleanup routines.
+The hardened downloader implements, and the tests assert:
+- **DNS pinning with private-address rejection** — every resolved address is checked
+  (private, loopback, link-local, multicast, reserved, unspecified) and the checked address is
+  the one connected to, so a rebinding answer cannot swap targets between check and connect.
+- **Redirect capping** (3 hops), every hop re-validated.
+- **Streamed size caps** — 512 KB thumbnails, 15 MB full images; over-cap bodies are refused,
+  not truncated.
+- **Magic-byte sniffing** (JPEG/PNG/GIF/WebP) — Content-Type is never trusted.
+- **Exactly one SSRF exemption:** SearXNG's own host, because image results routinely carry
+  `thumbnail_src` as SearXNG's private `/image_proxy` route. Full-size downloads get no
+  exemptions at all. The same private address behind any other hostname stays refused
+  (regression-tested).
 
-**Integration:**
-- `dream onyx configure` successfully registers the tool and injects the Nginx route.
-- Assistant seamlessly uses the tool and renders `![alt](/puffin-images/...)` inline.
-- Grid/Timeline natively supported via Onyx's built-in `CustomToolStart/Delta` packet rendering. 
+---
 
+## 6. Presentation
+
+- **Gallery** (`GALLERY_SCRIPT` + `GALLERY_CSS`): the tool's images inside one assistant
+  message are regrouped into a clickable mosaic — hero image left, tiles right, keyed per
+  count; five or more switch to a three-column tile grid. Clicking opens a lightbox
+  (backdrop/Escape closes, arrows and arrow keys navigate). React's nodes are never moved —
+  moving them breaks reconciliation — the originals are hidden in place and mirrored, and the
+  sweep rebuilds when React re-renders.
+- **Step-viewer JSON** (`IMAGE_TOOL_STEP_SCRIPT`): Onyx renders every custom tool's raw result
+  as a "Response" block in the reasoning timeline. For image_search that JSON duplicates what
+  the user already sees as images, so it is hidden — for this tool only; other tools' Response
+  blocks stay inspectable. Text-anchored by necessity (the block carries no test id), hence a
+  script rather than CSS.
+
+---
+
+## 7. Known platform gap — SigLIP on aarch64
+
+Infinity publishes amd64 images only; GB10 is aarch64, so `dreamference-siglip` cannot start
+there. The start is best-effort, the warning names the reason, and the funnel degrades to its
+first-N candidates — the vision rank-and-filter still runs and is the stronger judgment. On an
+amd64 deployment the provisioning works as written. If the pre-filter becomes load-bearing on
+GB10, the follow-up is a small torch/transformers SigLIP sidecar in the Gmail/image-search
+mould (aarch64 wheels exist for both).
+
+---
+
+## 8. Testing
+
+**Unit (offline, `tests/test_image_search_service.py`):** SSRF assertions (private ranges,
+the single SearXNG exemption, redirect cap, size cap, magic bytes), pHash collapse/separation,
+store dedupe and GC (age + size cap), the funnel with injected fakes (round-robin merge,
+cached-skip-network-but-not-judgment, vision verdict as filter, empty verdict, requested
+count satisfied and gracefully under-satisfied, unfetchable candidates dropping out), and the
+OpenAPI document. The funnel's collaborators are constructor-injected for exactly this.
+
+**Runner (`tests/test_onyx_runner.py`):** registration payload (OpenAPI document + secret
+header, create-then-update), nginx route idempotence and deferred form, configure opt-out. An
+autouse fixture stubs the provisioning internals so the suite never starts containers.
+
+**Live E2E (performed):** `dream onyx configure` registers the tool; a real `/search` returns
+ranked cached embeds; the image serves through `localhost:3000/puffin-images/…` (200,
+`image/jpeg`); nginx survives the sidecar being stopped; a `count: 6` request returns six.
