@@ -531,133 +531,75 @@ class GmailSearchService:
     def search(cls, query: str, limit: int) -> Dict[str, Any]:
         """
         Finds messages matching a Gmail search query.
-
-        Args:
-            query (str): Gmail search syntax, e.g. `from:alice newer_than:7d`.
-            limit (int): Maximum number of messages to return.
-
-        Returns:
-            Dict[str, Any]: `{"messages": [...]}`, each entry carrying the id, sender, subject and
-                date -- enough to choose one to open, and no more.
         """
-        connection, error = cls._open_mailbox()
-        if not connection:
+        connections, error = cls._open_mailboxes()
+        if not connections:
             return {"error": error}
-        try:
-            uids = cls._search_uids(connection, query)
-            if not uids:
-                return {"messages": []}
-            # Newest first: IMAP returns UIDs ascending, and recency is what a mailbox question
-            # almost always means.
-            wanted = list(reversed(uids))[:max(1, min(limit, MAX_RESULT_LIMIT))]
-            return {"messages": cls._summaries(connection, wanted)}
-        finally:
-            cls._close(connection)
-
-    @classmethod
-    def _summaries(cls, connection: imaplib.IMAP4_SSL, uids: List[bytes]) -> List[Dict[str, str]]:
-        """
-        Fetches just the headers a result list needs.
-
-        `BODY.PEEK` rather than `BODY` throughout: a search tool that silently marked twenty
-        messages as read would be doing real damage to a mailbox.
-
-        Args:
-            connection (imaplib.IMAP4_SSL): A connection with a folder selected.
-            uids (List[bytes]): UIDs to describe.
-
-        Returns:
-            List[Dict[str, str]]: One summary per message.
-        """
-        results: List[Dict[str, str]] = []
-        for uid in uids:
+        
+        all_messages = []
+        for email, connection in connections.items():
             try:
-                status, data = connection.uid(
-                    "FETCH", uid.decode("ascii"),
-                    "(X-GM-MSGID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])",
-                )
-            except (imaplib.IMAP4.error, OSError):
-                continue
-            if status != "OK" or not data:
-                continue
-            prefix, headers = b"", b""
-            for item in data:
-                if isinstance(item, tuple):
-                    prefix, headers = item[0], item[1]
-                    break
-            message = email.message_from_bytes(headers)
-            results.append({
-                "id": cls._message_id(prefix),
-                "from": cls._decode_header(message.get("From", "")),
-                "subject": cls._decode_header(message.get("Subject", "")),
-                "date": cls._decode_header(message.get("Date", "")),
-            })
-        return results
-
-    @classmethod
-    def _message_id(cls, prefix: bytes) -> str:
-        """
-        Pulls Gmail's stable message id out of a FETCH response prefix.
-
-        `X-GM-MSGID` is the right id to hand the model rather than the UID: a UID is only
-        meaningful inside one folder of one session, while the Gmail id is stable and searchable.
-
-        Args:
-            prefix (bytes): The untagged FETCH line, e.g. `1 (X-GM-MSGID 1234 BODY[...] {n}`.
-
-        Returns:
-            str: The id, or an empty string.
-        """
-        found = re.search(rb"X-GM-MSGID\s+(\d+)", prefix or b"")
-        return found.group(1).decode("ascii") if found else ""
-
+                uids = cls._search_uids(connection, query)
+                if uids:
+                    messages = cls._fetch_headers(connection, uids[-limit:][::-1])
+                    for m in messages:
+                        m["id"] = f"{email}|{m['id']}"
+                    all_messages.extend(messages)
+            except Exception:
+                pass
+            finally:
+                try:
+                    connection.logout()
+                except Exception:
+                    pass
+        
+        return {"messages": all_messages[:limit]}
+    
     @classmethod
     def message(cls, message_id: str) -> Dict[str, Any]:
-        """
-        Reads one message in full.
-
-        Args:
-            message_id (str): The `X-GM-MSGID` from a search result.
-
-        Returns:
-            Dict[str, Any]: The headers and the plain-text body.
-        """
-        if not message_id.isdigit():
-            return {"error": "That is not a Gmail message id."}
-        connection, error = cls._open_mailbox()
-        if not connection:
+        """Reads one message body."""
+        if "|" in message_id:
+            email, real_id = message_id.split("|", 1)
+        else:
+            email, real_id = None, message_id
+            
+        connections, error = cls._open_mailboxes()
+        if not connections:
             return {"error": error}
-        try:
+            
+        if email and email in connections:
+            conn = connections[email]
             try:
-                status, data = connection.uid("SEARCH", None, "X-GM-MSGID", message_id)
-            except (imaplib.IMAP4.error, OSError):
-                return {"error": "Message not found."}
-            if status != "OK" or not data or not data[0]:
-                return {"error": "Message not found."}
-            uid = data[0].split()[0].decode("ascii")
-            try:
-                status, fetched = connection.uid("FETCH", uid, "(BODY.PEEK[])")
-            except (imaplib.IMAP4.error, OSError):
-                return {"error": "Message could not be read."}
-            raw = b""
-            for item in fetched or []:
-                if isinstance(item, tuple):
-                    raw = item[1]
-                    break
-            if not raw:
-                return {"error": "Message could not be read."}
-            parsed = email.message_from_bytes(raw)
-            return {
-                "id": message_id,
-                "from": cls._decode_header(parsed.get("From", "")),
-                "to": cls._decode_header(parsed.get("To", "")),
-                "subject": cls._decode_header(parsed.get("Subject", "")),
-                "date": cls._decode_header(parsed.get("Date", "")),
-                "body": cls._extract_text(parsed)[:MAX_BODY_CHARACTERS],
-            }
-        finally:
-            cls._close(connection)
+                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                if status == "OK" and data[0]:
+                    uid = data[0].split()[0].decode("ascii")
+                    return cls._fetch_body(conn, uid)
+            except Exception as e:
+                return {"error": str(e)}
+            finally:
+                for c in connections.values():
+                    try:
+                        c.logout()
+                    except:
+                        pass
+            return {"error": "Message not found"}
 
+        for conn in connections.values():
+            try:
+                status, data = conn.uid("SEARCH", None, "X-GM-MSGID", real_id)
+                if status == "OK" and data[0]:
+                    uid = data[0].split()[0].decode("ascii")
+                    res = cls._fetch_body(conn, uid)
+                    if res and "error" not in res:
+                        return res
+            except Exception:
+                pass
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        return {"error": "Message not found"}
     @classmethod
     def _close(cls, connection: imaplib.IMAP4_SSL) -> None:
         """
