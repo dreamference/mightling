@@ -43,7 +43,7 @@ SEARXNG_URL: Final[str] = os.getenv("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.
 # Printed when the instance cannot be reached, because the fix is a single command and the
 # alternative is an agent that quietly believes the web does not exist.
 SEARXNG_START_HINT: Final[str] = (
-    "docker run -d --name searxng --restart unless-stopped -p 127.0.0.1:8888:8080 "
+    "docker run -d --name dreamference-searxng --restart unless-stopped -p 127.0.0.1:8888:8080 "
     "-v ~/.config/searxng:/etc/searxng docker.io/searxng/searxng:latest"
 )
 REQUEST_TIMEOUT_S: Final[float] = 25.0

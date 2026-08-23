@@ -62,7 +62,7 @@ DEFAULT_ONYX_PASSWORD: Final[str] = "dreamference"
 # The name Onyx's containers resolve SearXNG by once it joins their network. SearXNG publishes
 # only on 127.0.0.1, so the bridge gateway that reaches vLLM does not reach it -- attaching the
 # container to Onyx's network is what makes it addressable, and exposes no new host port.
-SEARXNG_CONTAINER_NAME: Final[str] = "searxng"
+SEARXNG_CONTAINER_NAME: Final[str] = "dreamference-searxng"
 
 # Google sign-in, alongside the password form rather than instead of it.
 #
@@ -105,7 +105,7 @@ ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
 # anything else on that network could reach a service holding a live mailbox credential. The shared
 # secret header is what actually protects it.
 GNOME_TOKEN_UNIT: Final[str] = "dreamference-goa"
-GMAIL_CONTAINER_NAME: Final[str] = "dream-gmail"
+GMAIL_CONTAINER_NAME: Final[str] = "dreamference-gmail"
 GMAIL_CONTAINER_URL: Final[str] = f"http://{GMAIL_CONTAINER_NAME}:8000"
 GMAIL_HOST_PORT: Final[int] = 8767
 GMAIL_SERVICE_IMAGE: Final[str] = "python:3-slim"
@@ -114,7 +114,7 @@ GMAIL_TOOL_DESCRIPTION: Final[str] = "Search and read the user's Gmail mailbox."
 
 # Kept in step with the service module, which enforces it.
 GMAIL_AUTH_HEADER: Final[str] = "X-Puffin-Gmail-Token"
-SEARXNG_CONTAINER_URL: Final[str] = "http://searxng:8080"
+SEARXNG_CONTAINER_URL: Final[str] = f"http://{SEARXNG_CONTAINER_NAME}:8080"
 
 # Onyx ships first-class SearXNG support as a web *search provider*, which is why this module
 # configures one instead of appending web instructions to the system prompt the way the Codex
@@ -178,10 +178,10 @@ PUFFIN_EXCLUDED_TOOLS: Final[frozenset] = frozenset({"coding_agent"})
 # /v1/audio/transcriptions -- rather than by vLLM: one vLLM instance serves one model, and the
 # main one is busy. It runs on CPU because ctranslate2's CUDA support does not cover SM121, and
 # because dictation-length audio transcribes in seconds on GB10's cores anyway.
-STT_CONTAINER_NAME: Final[str] = "dream-stt"
+STT_CONTAINER_NAME: Final[str] = "dreamference-stt"
 STT_IMAGE: Final[str] = "ghcr.io/speaches-ai/speaches:latest-cpu"
 STT_HOST_PORT: Final[int] = 8100
-STT_CONTAINER_URL: Final[str] = "http://dream-stt:8000/v1"
+STT_CONTAINER_URL: Final[str] = f"http://{STT_CONTAINER_NAME}:8000/v1"
 STT_MODEL: Final[str] = "Systran/faster-whisper-small"
 ONYX_VOICE_PROVIDER_NAME: Final[str] = "dreamference-whisper"
 

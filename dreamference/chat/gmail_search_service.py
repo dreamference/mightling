@@ -318,6 +318,23 @@ class GmailSearchService:
                     valid.append({"email": address, "access_token": token})
         return valid
 
+
+    @classmethod
+    def delete_token(cls, address: str, directory: Optional[str] = None) -> bool:
+        import os, json
+        path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
+        stored = cls._raw(directory)
+        accounts = stored.get("accounts", {})
+        if address in accounts:
+            del accounts[address]
+            try:
+                with open(path, "w") as handle:
+                    json.dump({"accounts": accounts}, handle, indent=2)
+                return True
+            except OSError:
+                return False
+        return False
+        
     @classmethod
     def save_token(
         cls, address: str, token: str, lifetime: int, directory: Optional[str] = None, refresh_token: Optional[str] = None
@@ -777,6 +794,14 @@ class GmailSearchService:
                     """
                 )
 
+
+            def do_OPTIONS(self) -> None:
+                self.send_response(204)
+                self.send_header("Access-Control-Allow-Origin", HOST_ORIGIN)
+                self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.end_headers()
+
             def do_POST(self) -> None:
                 parsed = urllib.parse.urlparse(self.path)
                 if parsed.path == "/api/google/oauth/start":
@@ -790,6 +815,23 @@ class GmailSearchService:
                     self._reply(200, {"auth_url": auth_url})
                     return
                     
+
+                if parsed.path == "/disconnect":
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    post_data = self.rfile.read(content_length).decode('utf-8')
+                    try:
+                        import json
+                        data = json.loads(post_data)
+                        email = data.get("email")
+                        if email:
+                            success = GmailSearchService.delete_token(email)
+                            self._reply(200, {"status": "ok", "deleted": success})
+                            return
+                    except Exception as e:
+                        self._reply(400, {"error": str(e)})
+                        return
+                    self._reply(400, {"error": "Invalid request"})
+                    return
                 if parsed.path == "/api/google/oauth/complete":
                     content_length = int(self.headers.get('Content-Length', 0))
                     post_data = self.rfile.read(content_length).decode('utf-8')
@@ -877,9 +919,6 @@ class GmailSearchService:
                     self._redirect(CONNECT_PATH)
                     return
                 if parsed.path == CONNECT_PATH:
-                    if cls.status()["connected"]:
-                        self._page("Gmail is already connected.")
-                        return
                     self._setup_page()
                     return
                 if expected and self.headers.get(AUTH_HEADER) != expected:
