@@ -821,50 +821,50 @@ class GmailSearchService:
 
             def _setup_page(self) -> None:
                 """
-                Explains where to sign in. There is nothing here to submit.
-
-                The whole design is that the user has one place to manage their Google account --
-                the desktop's own Settings panel -- and Puffin picks up what is there. So this page
-                cannot be a form, and deliberately is not one: it says where to go, and reports
-                what GNOME is currently holding so the user can tell whether the step is done.
-
-                It also cannot be a *button*. GOA lives on the session bus and this page is served
-                from a container that has neither a bus nor `gdbus`, so the host is what actually
-                reads the token, on a timer. What the page can do is tell the user the truth about
-                where things stand.
+                Serves the HTML for Puffin's own Google OAuth flow.
                 """
-                known = cls.gnome_accounts()
-                if known:
-                    listed = html.escape(", ".join(known))
-                    self._html(
-                        "<h2>Connect Gmail</h2>"
-                        f'<p class="ready">✅ GNOME is signed into Google as <b '
-                        f'style="display:inline">{listed}</b>. Puffin picks the account up '
-                        "automatically — this page will stop appearing within a few minutes.</p>"
-                        "<p>Puffin reads your mail directly from Google over IMAP, using the "
-                        "account your desktop already holds. Nothing passes through Dreamference "
-                        "and there is no password to create.</p>"
-                        '<p class="note">ⓘ In a hurry? Run <code>dream onyx gmail</code> in a '
-                        "terminal to connect now rather than waiting for the next check.</p>"
-                    )
-                    return
                 self._html(
-                    "<h2>Connect Gmail</h2>"
-                    "<p>Puffin reads your mail directly from Google over IMAP, using the Google "
-                    "account your desktop already holds. Nothing passes through Dreamference, and "
-                    "there is no password or developer account to create.</p>"
-                    "<ol>"
-                    "<li>Open <b style=\"display:inline\">Settings → Online Accounts</b> on this "
-                    "machine and sign into Google.</li>"
-                    "<li>That is all. Puffin checks every few minutes and connects itself.</li>"
-                    "</ol>"
-                    '<p class="note">ⓘ The Google sign-in page will say <b '
-                    'style="display:inline">GNOME</b> is asking for access. That is correct — '
-                    "your desktop is what holds the account, and Puffin asks it for permission to "
-                    "read your mail. No Puffin credentials are sent to Google.</p>"
-                    '<p class="muted">Running Puffin on a machine with no desktop session? '
-                    "GNOME Online Accounts is not available there, so Gmail search cannot be "
-                    "connected on that host.</p>"
+                    """
+                    <h2>Connect Google</h2>
+                    <p>Puffin authenticates directly with Google. Your mail and files are read locally.</p>
+                    <p class="note">ⓘ The consent screen will say <b style="display:inline">GNOME</b> — Puffin authenticates through the GNOME desktop's Google integration. No Puffin credentials are sent to Google.</p>
+                    
+                    <button id="start-btn" style="padding: 8px 16px; background: #0a8f8b; color: white; border: none; border-radius: 4px; cursor: pointer;">Authorize with Google</button>
+                    
+                    <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+                        <p class="muted">Different host? Browser shows "localhost refused to connect"?<br>Copy the full URL from the address bar and paste it here:</p>
+                        <input type="text" id="paste-url" placeholder="http://localhost:8767/?state=...&code=..." style="width: 100%; padding: 8px; margin-bottom: 8px; box-sizing: border-box;">
+                        <button id="complete-btn" style="padding: 6px 12px; background: #f6f8f8; color: #4b5563; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">Submit URL</button>
+                        <p id="paste-msg" style="color: green; display: none; margin-top: 10px; font-weight: 600;"></p>
+                    </div>
+
+                    <script>
+                        document.getElementById('start-btn').onclick = async () => {
+                            const res = await fetch('/api/google/oauth/start', { method: 'POST' });
+                            const data = await res.json();
+                            if (data.auth_url) window.open(data.auth_url, '_blank');
+                        };
+                        document.getElementById('complete-btn').onclick = async () => {
+                            const url = document.getElementById('paste-url').value;
+                            if (!url) return;
+                            const res = await fetch('/api/google/oauth/complete', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ url })
+                            });
+                            const data = await res.json();
+                            const msg = document.getElementById('paste-msg');
+                            msg.style.display = 'block';
+                            if (data.status === 'ok') {
+                                msg.textContent = 'Connected as ' + data.email;
+                                msg.style.color = 'green';
+                            } else {
+                                msg.textContent = 'Error: ' + data.error;
+                                msg.style.color = 'red';
+                            }
+                        };
+                    </script>
+                    """
                 )
 
             def do_POST(self) -> None:
