@@ -841,6 +841,10 @@ class DreamferenceCLIController:
             "--no-gmail", action="store_true",
             help="Skip the Gmail service and its search tool",
         )
+        onyx_configure_parser.add_argument(
+            "--no-image-search", action="store_true",
+            help="Skip the image search sidecar and its tool",
+        )
 
         # Google sign-in is additive in Onyx 4.5: it appears beside the password form rather than
         # replacing it, so this is its own command rather than a flag on `configure`.
@@ -1593,7 +1597,8 @@ class DreamferenceCLIController:
                     kwargs["password"] = args.password
                 sys.exit(onyx_runner.configure(
                     enable_web=not args.no_web, brand=not args.no_brand,
-                    enable_voice=not args.no_voice, enable_gmail=not args.no_gmail, **kwargs
+                    enable_voice=not args.no_voice, enable_gmail=not args.no_gmail,
+                    enable_image_search=not args.no_image_search, **kwargs
                 ))
             elif args.onyx_command == "google-auth":
                 sys.exit(0 if onyx_runner.enable_google_login(
