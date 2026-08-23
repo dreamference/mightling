@@ -64,9 +64,14 @@ CONNECT_PATH: Final[str] = "/app/settings/connectors"
 # "Connectors" -- this one and the settings nav link -- which is why the search is scoped to
 # `.opal-content-md-title-row`.
 #
-# "Google" rather than "Connectors" because `onyx_ui_labels.py` rewrites that label; this constant
-# must match what the page *renders after* the rewrite, not what Onyx ships.
+# "Gmail Accounts" rather than "Connectors" because `onyx_ui_labels.py` rewrites that label; this
+# constant must match what the page *renders after* the rewrite, not what Onyx ships. The aliases
+# exist because the heading text and this script travel in *different* chunks, and a browser can
+# hold a fresh copy of one and a stale copy of the other -- seen in the field as a connect card
+# that silently vanished mid-rename. Matching every name the heading has ever had makes a mixed
+# cache degrade to old labels rather than to a missing feature.
 SECTION_HEADING: Final[str] = "Gmail Accounts"
+SECTION_HEADING_ALIASES: Final[tuple] = ("Gmail Accounts", "Google", "Connectors")
 
 # How often placement is re-checked, as opposed to the status fetch below. Route changes in this
 # app are client-side, so nothing loads and no event this script can see fires; a short interval is
@@ -94,7 +99,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     'var ENG=/Chrome\//.test(navigator.userAgent)?"blink":"webkit";'
     f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",ENG);'
     f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}{SERVICE_CONNECT_PATH}",ID="{BUTTON_ID}";'
-    f'var PATH="{CONNECT_PATH}",HEAD="{SECTION_HEADING}";'
+    f'var PATH="{CONNECT_PATH}",HEADS={json.dumps(list(SECTION_HEADING_ALIASES))};'
     "var last=null,lastSig=null;"
     
     "window.__puffinDisconnect = function(email) {"
@@ -105,13 +110,30 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     "  }).then(function(){ check(); });"
     "};"
     
-    "function panel(){if(location.pathname!==PATH)return null;"
+    # In gmail mode the card lives in the Chat Preferences pane, found the way the synthetic-tab
+    # CSS finds it: the settings nav's sibling that holds the Personal Preferences textarea.
+    # `getAttribute` is feature-checked because the test harness stubs a minimal documentElement.
+    "function panel(){"
+    "var de=document.documentElement;"
+    "var sec=de.getAttribute?de.getAttribute('data-puffin-section'):null;"
+    "if(sec==='gmail'&&location.pathname==='/app/settings/chat-preferences'){"
+    "var nav=document.querySelector('[data-testid=\"settings-left-tab-navigation\"]');"
+    "if(!nav||!nav.parentElement)return null;"
+    "var cs=nav.parentElement.children;"
+    "for(var j=0;j<cs.length;j++){"
+    "if(cs[j]!==nav&&cs[j].querySelector&&cs[j].querySelector('textarea'))return cs[j];}"
+    "return null;}"
+    "if(location.pathname!==PATH)return null;"
     "var h=document.querySelectorAll('.opal-content-md-title-row span');"
-    "for(var i=0;i<h.length;i++){if(h[i].textContent.trim()===HEAD){"
+    "for(var i=0;i<h.length;i++){if(HEADS.indexOf(h[i].textContent.trim())>=0){"
     "var w=h[i].closest('div.w-full');return w&&w.parentElement}}return null;}"
     # Rebuild only when the state changed or React wiped the injected nodes -- the 500ms
     # re-apply otherwise destroys the card mid-click and the Disconnect button never fires.
     "function apply(){var p=panel();if(!p)return;"
+    "if(location.pathname==='/app/settings/chat-preferences'&&!document.getElementById(ID+'-head')){"
+    "var hd=document.createElement('div');hd.id=ID+'-head';hd.textContent='Gmail Accounts';"
+    "hd.style.cssText='font-size:16px;font-weight:600;color:#111827;width:100%;';"
+    "p.appendChild(hd);}"
     "var sig=JSON.stringify(last)+'|'+location.pathname;"
     "var e=document.getElementById(ID);"
     "var ec=document.getElementById(ID+'-card');"
@@ -129,7 +151,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     
     "if(last&&last.connected){"
     "var div=document.createElement('div');div.id=ID+'-card';"
-    "div.style.padding='4px 16px';div.style.background='#fff';div.style.width='100%';div.style.border='1px solid #e5e7eb';div.style.borderRadius='12px';div.style.marginBottom='16px';div.style.marginTop='16px';"
+    "div.style.padding='4px 16px';div.style.background='#fff';div.style.width='100%';div.style.border='1px solid #e5e7eb';div.style.borderRadius='12px';var inPrefs=location.pathname==='/app/settings/chat-preferences';div.style.marginTop=inPrefs?'-20px':'16px';div.style.marginBottom=inPrefs?'0':'16px';"
     # One row per connected account, in the language of Onyx's own dialogs (the share sheet's
     # rows): stroke icon, semibold title, muted description, and a quietly bordered action.
     'var html="";'
@@ -265,49 +287,85 @@ SETTINGS_MODAL_SCRIPT: Final[str] = (
     "}catch(e){}})();"
 )
 
-# Voice as its own settings tab.
+# Sections of Chat Preferences promoted to settings tabs of their own.
 #
-# Onyx renders Voice as the last section of Chat Preferences, and the tab nav comes out of a
-# compiled route table -- there is no route to add. The tab is therefore synthetic: a clone of a
-# real tab row (cloning keeps Onyx's classes, so hover and the selected pill are Onyx's own, and
-# a clone carries none of React's handlers, so clicking it does only what is wired here). It
-# lives at `chat-preferences#voice` -- the same page, with the hash as the mode switch. The
-# script mirrors the mode onto <html> as `VOICE_ATTRIBUTE` because CSS cannot read a URL:
-# `onyx_ui_overrides.py` keys on it to show only the Voice section, restyle the real
-# Chat Preferences pill back to rest, and light the synthetic tab. React recreates the nav
-# wholesale on navigation, so a 500ms interval re-injects the tab whenever it is missing -- the
-# same posture the scrollbar script takes, and unlike it this one must also run inside the
-# settings modal, so it does not bail when framed.
-VOICE_ATTRIBUTE: Final[str] = "data-puffin-voice"
-VOICE_TAB_ID: Final[str] = "puffin-voice-tab"
-VOICE_TAB_SCRIPT: Final[str] = (
+# Onyx renders Voice and Prompt Shortcuts as sections of Chat Preferences, and the tab nav comes
+# out of a compiled route table -- there is no route to add. Each tab is therefore synthetic: a
+# clone of a real tab row (cloning keeps Onyx's classes, so hover and the selected pill are
+# Onyx's own, and a clone carries none of React's handlers, so clicking it does only what is
+# wired here). A promoted section lives at `chat-preferences#<slug>` -- the same page, with the
+# hash as the mode switch -- and the active slug is mirrored onto <html> as
+# `SYNTHETIC_SECTION_ATTRIBUTE`, because CSS cannot read a URL: `onyx_ui_overrides.py` keys on it
+# to show only that section, restyle the real Chat Preferences pill back to rest, and light the
+# synthetic tab. React recreates the nav wholesale on navigation, so a 500ms interval re-injects
+# missing tabs -- the same posture the scrollbar script takes -- and unlike the modal script this
+# one must also run inside the settings modal, so it does not bail when framed.
+#
+# Which pane child each slug shows is `onyx_ui_overrides.py`'s side of the contract, pinned by
+# position from the end of the pane; adding an entry here means adding its section rule there.
+SYNTHETIC_SECTION_ATTRIBUTE: Final[str] = "data-puffin-section"
+# (slug, label, routes). A tab's mode is its slug in the hash on one of its routes; the first
+# tab listed for a route is that route's default mode when the hash is empty or unknown, which
+# is what lights "General" on a plain /app/settings landing. All real route tabs are hidden by
+# `onyx_ui_overrides.py`, so this table *is* the settings nav.
+SYNTHETIC_TABS: Final[tuple] = (
+    ("general", "General", ("/app/settings/general", "/app/settings")),
+    ("chat", "Chat Preferences", ("/app/settings/chat-preferences",)),
+    ("gmail", "Gmail Accounts", ("/app/settings/chat-preferences",)),
+    ("shortcuts", "Prompt Shortcuts", ("/app/settings/chat-preferences",)),
+    ("voice", "Voice", ("/app/settings/chat-preferences",)),
+)
+SETTINGS_TABS_SCRIPT: Final[str] = (
     ";(function(){try{"
-    "if(window.__puffinVoiceTab)return;window.__puffinVoiceTab=1;"
-    f'var TID="{VOICE_TAB_ID}",ATTR="{VOICE_ATTRIBUTE}";'
+    "if(window.__puffinSynthTabs)return;window.__puffinSynthTabs=1;"
+    f'var ATTR="{SYNTHETIC_SECTION_ATTRIBUTE}";'
+    f"var TABS={json.dumps([{'s': s, 'l': l, 'p': list(r)} for s, l, r in SYNTHETIC_TABS])};"
     'var NAV=\'[data-testid="settings-left-tab-navigation"]\';'
-    'var PREFS="/app/settings/chat-preferences";'
-    "function mode(){return location.pathname===PREFS&&location.hash==='#voice';}"
-    "function go(){if(location.pathname===PREFS){location.hash='voice';sync();}"
-    "else{location.href=PREFS+'#voice';}}"
-    "function make(nav){"
+    "function cur(){var h=location.hash.slice(1),def=null,i;"
+    "for(i=0;i<TABS.length;i++){var tb=TABS[i];"
+    "if(tb.p.indexOf(location.pathname)<0)continue;"
+    "if(tb.s===h)return h;"
+    "if(def===null)def=tb.s;}"
+    "return def;}"
+    "function go(s){var tb=null,i;"
+    "for(i=0;i<TABS.length;i++){if(TABS[i].s===s)tb=TABS[i];}"
+    "if(!tb)return;"
+    "if(tb.p.indexOf(location.pathname)>=0){location.hash=s;sync();}"
+    "else{location.href=tb.p[0]+'#'+s;}}"
+    "function make(nav,def){"
     "var src=null,rows=nav.children,i;"
     "for(i=0;i<rows.length;i++){"
+    "if(rows[i].id&&rows[i].id.indexOf('puffin-tab-')===0)continue;"
     "if(rows[i].querySelector&&rows[i].querySelector('span[title]')){src=rows[i];break}}"
     "if(!src)return null;"
-    "var tab=src.cloneNode(true);tab.id=TID;"
+    "var tab=src.cloneNode(true);tab.id='puffin-tab-'+def.s;"
     "var sp=tab.querySelector('span[title]');"
-    "sp.textContent='Voice';sp.setAttribute('title','Voice');"
+    "sp.textContent=def.l;sp.setAttribute('title',def.l);"
     "tab.addEventListener('click',function(e){"
-    "e.preventDefault();e.stopPropagation();go();},true);"
+    "e.preventDefault();e.stopPropagation();go(def.s);},true);"
     "nav.appendChild(tab);return tab;}"
-    "function sync(){"
-    "if(mode()){document.documentElement.setAttribute(ATTR,'1');}"
+    "function sync(){var c=cur();"
+    "if(c){document.documentElement.setAttribute(ATTR,c);}"
     "else{document.documentElement.removeAttribute(ATTR);}"
     "var nav=document.querySelector(NAV);if(!nav)return;"
-    "var tab=document.getElementById(TID);"
-    "if(!tab)tab=make(nav);if(!tab)return;"
+    "for(var i=0;i<TABS.length;i++){"
+    "var tab=document.getElementById('puffin-tab-'+TABS[i].s);"
+    "if(!tab)tab=make(nav,TABS[i]);if(!tab)continue;"
     "var ic=tab.querySelector('[data-interactive-state]');"
-    "if(ic)ic.setAttribute('data-interactive-state',mode()?'selected':'empty');}"
+    "if(ic)ic.setAttribute('data-interactive-state',c===TABS[i].s?'selected':'empty');}}"
+    # Leaving a synthetic tab by clicking a real one: Chat Preferences is the same route, so
+    # React's navigation is a no-op that leaves the hash in the URL and the mode stuck on. A
+    # capture click on any real nav row strips the hash first and lets React proceed; for other
+    # tabs the strip is harmless, the route change ends the mode anyway.
+    "document.addEventListener('click',function(e){"
+    "if(!cur())return;"
+    "var nav=document.querySelector(NAV);if(!nav)return;"
+    "var n=e.target,inNav=false,ours=false;"
+    "while(n&&n!==document){"
+    "if(n.id&&n.id.indexOf('puffin-tab-')===0)ours=true;"
+    "if(n===nav){inNav=true;break}n=n.parentNode}"
+    "if(inNav&&!ours){history.replaceState(null,'',location.pathname);sync();}"
+    "},true);"
     "window.addEventListener('hashchange',sync);"
     "setInterval(sync,500);"
     "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',sync)}"
@@ -318,7 +376,7 @@ VOICE_TAB_SCRIPT: Final[str] = (
 # Everything this module injects.
 UI_SCRIPTS: Final[str] = (
     SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT + SCROLLBAR_SCRIPT + SETTINGS_MODAL_SCRIPT
-    + VOICE_TAB_SCRIPT
+    + SETTINGS_TABS_SCRIPT
 )
 
 

@@ -447,41 +447,87 @@ SETTINGS_MODAL_SHELL_CSS: Final[str] = (
     "{flex-shrink:0;height:auto}"
 )
 
-# Voice as its own settings tab -- the styling half; the tab itself and the `data-puffin-voice`
-# marker are `onyx_ui_scripts.py`'s work. The Voice section is the *last* pane child on
-# Chat Preferences, and that page is recognised by the textarea its Personal Preferences section
-# carries -- the same signature `SETTINGS_SECTIONS_CSS` leans on. Outside voice mode the section
-# is hidden there (it lives under the synthetic tab now); in voice mode it is the only section
-# shown, the real Chat Preferences pill -- selected in Onyx's eyes, since the route matches --
-# is put back to rest, and the synthetic tab is lit in its place.
-VOICE_TAB_CSS: Final[str] = (
-    "html:not([data-puffin-voice]) "
-    'div:has(>[data-testid="settings-left-tab-navigation"])'
-    '>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
-    ">*:last-child"
+# Chat Preferences sections promoted to settings tabs -- the styling half; the tabs themselves
+# and the `data-puffin-section` marker are `onyx_ui_scripts.py`'s work (`SYNTHETIC_TABS`). The
+# page is recognised by the textarea its Personal Preferences section carries -- the same
+# signature `SETTINGS_SECTIONS_CSS` leans on. Sections are pinned by position from the *front*
+# of the pane -- the hidden Chats placeholder is child 1, Personal Preferences child 2, Prompt
+# Shortcuts child 3, Voice child 4 -- because the Gmail card is *appended* to the same pane by
+# the connect script, so anything counted from the end moves the moment it arrives. If Onyx
+# reorders the sections the wrong one shows under a tab -- visible, not silent. Outside any
+# synthetic mode everything from child 3 on is hidden (the promoted sections and the injected
+# Gmail elements live under their tabs); in a mode, only that slug's content shows, the real
+# Chat Preferences pill -- selected in Onyx's eyes, the route matches -- is put back to rest,
+# and the synthetic tab is lit in its place. The gmail slug shows the three elements the
+# connect script injects rather than a native section, and the real Connectors route tab is
+# hidden from the nav in favour of the synthetic one -- by every label it has carried, so a
+# stale chunk cannot resurrect it -- while the route itself stays reachable by URL as a
+# fallback.
+SYNTHETIC_TABS_CSS: Final[str] = (
+    "html:not([data-puffin-section]) "
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">*:nth-child(n+3)"
     "{display:none}"
-    "html[data-puffin-voice] "
-    'div:has(>[data-testid="settings-left-tab-navigation"])'
-    '>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    "html[data-puffin-section] "
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
     ">*"
     "{display:none}"
-    "html[data-puffin-voice] "
-    'div:has(>[data-testid="settings-left-tab-navigation"])'
-    '>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
-    ">*:last-child"
+    'html[data-puffin-section="chat"] '
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">*:nth-child(2)"
     "{display:flex}"
-    "html[data-puffin-voice] "
+    'html[data-puffin-section="shortcuts"] '
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">*:nth-child(3)"
+    "{display:flex}"
+    'html[data-puffin-section="voice"] '
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">*:nth-child(4)"
+    "{display:flex}"
+    'html[data-puffin-section="gmail"] '
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">#puffin-connect-google-head"
+    "{display:block}"
+    # Margin zeroing: the card and button carry their own margins for the connectors-page
+    # fallback, which has no flex gap; in this pane the 32px gap is the rhythm every native
+    # section spaces by, and the margins stacked on top of it read as inconsistent indentation.
+    # The card's own margins are inline (the script sets them per context -- an inline style is
+    # unbeatable from here without !important), so only the button's stylesheet margin is
+    # neutralised below; the card pulls itself up 20px in this pane so the heading sits 12px
+    # above it, the .75rem a native section gives its title.
+    'html[data-puffin-section="gmail"] '
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">#puffin-connect-google-card"
+    "{display:block}"
+    'html[data-puffin-section="gmail"] '
+    'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
+    ">#puffin-connect-google"
+    "{display:inline-block;margin-top:0}"
+    "html[data-puffin-section] "
     '[data-testid="settings-left-tab-navigation"] '
-    '.interactive-container[data-interactive-state="selected"]:not(#puffin-voice-tab *)'
+    '.interactive-container[data-interactive-state="selected"]:not([id^="puffin-tab-"] *)'
     "{background-color:transparent}"
-    "html[data-puffin-voice] "
+    "html[data-puffin-section] "
     '[data-testid="settings-left-tab-navigation"] '
-    '.interactive-container[data-interactive-state="selected"]:not(#puffin-voice-tab *) span'
+    '.interactive-container[data-interactive-state="selected"]:not([id^="puffin-tab-"] *) span'
     "{color:#4b5563}"
-    "html[data-puffin-voice] #puffin-voice-tab .interactive-container"
-    f"{{background-color:{TIFFANY_BLUE}}}"
-    "html[data-puffin-voice] #puffin-voice-tab .interactive-container span"
+    'html[data-puffin-section] [id^="puffin-tab-"] '
+    '.interactive-container[data-interactive-state="selected"]'
+    "{background-color:" + TIFFANY_BLUE + "}"
+    'html[data-puffin-section] [id^="puffin-tab-"] '
+    '.interactive-container[data-interactive-state="selected"] span'
     "{color:#fff}"
+    '[data-testid="settings-left-tab-navigation"] '
+    '.relative:has(span[title="General"]):not(#puffin-tab-general),'
+    '[data-testid="settings-left-tab-navigation"] '
+    '.relative:has(span[title="Chat Preferences"]):not(#puffin-tab-chat),'
+    '[data-testid="settings-left-tab-navigation"] '
+    '.relative:has(span[title="Gmail Accounts"]):not(#puffin-tab-gmail),'
+    '[data-testid="settings-left-tab-navigation"] '
+    '.relative:has(span[title="Google"]):not(#puffin-tab-gmail),'
+    '[data-testid="settings-left-tab-navigation"] '
+    '.relative:has(span[title="Connectors"]):not(#puffin-tab-gmail)'
+    "{display:none}"
 )
 
 # The account avatar inside a selected sidebar row, inverted.
@@ -688,7 +734,7 @@ UI_OVERRIDES: Final[str] = (
     + MODEL_CHIP_CSS + SETTINGS_SECTIONS_CSS + ACCOUNTS_ACCESS_CSS + SETTINGS_MODAL_SHELL_CSS + SIDEBAR_AVATAR_CSS + HELP_LINK_CSS
     + SIDEBAR_AVATAR_DISC_CSS + SIDEBAR_ACCOUNT_CSS + SIDEBAR_CLOSE_CSS
     + SIDEBAR_SCROLLBAR_CSS + DIVIDER_CSS + CONNECT_BUTTON_CSS
-    + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS + VOICE_TAB_CSS
+    + STREAMING_CURSOR_CSS + CUSTOM_SCROLLBAR_CSS + SYNTHETIC_TABS_CSS
 )
 
 
