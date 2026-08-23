@@ -819,9 +819,13 @@ class ImageSearchService:
         order = list(range(len(kept)))
         # Even a single candidate goes to the vision pass: it filters as well as orders, and
         # one wrong image confidently embedded is the exact complaint that added filtering.
+        # The thumbnails are downscaled first: at full size (up to 512 KB each, eight of them)
+        # one rank call is a multi-thousand-token multimodal prefill on the shared engine, and
+        # the verdict is no better for the extra pixels. 256px matches what the cached-thumb
+        # path already feeds the ranking.
         if self.ranker is not None and kept:
             try:
-                order = self.ranker.rank(query, [t for _, t in kept])
+                order = self.ranker.rank(query, [self._rank_thumb(t) for _, t in kept])
             except Exception:
                 pass
 
@@ -891,6 +895,28 @@ class ImageSearchService:
 
         fetched = list(self._pool.map(grab, candidates))
         return [(c, t) for c, t in zip(candidates, fetched) if t]
+
+    @staticmethod
+    def _rank_thumb(payload: bytes) -> bytes:
+        """
+        Downscales a thumbnail for the vision rank call.
+
+        Args:
+            payload (bytes): The fetched thumbnail.
+
+        Returns:
+            bytes: A 256px JPEG when Pillow can produce one, the original bytes otherwise.
+        """
+        if Image is None:
+            return payload
+        try:
+            small = Image.open(io.BytesIO(payload)).convert("RGB")
+            small.thumbnail((256, 256))
+            out = io.BytesIO()
+            small.save(out, format="JPEG", quality=80)
+            return out.getvalue()
+        except Exception:
+            return payload
 
     def _fetch_full(self, url: str) -> Optional[bytes]:
         """

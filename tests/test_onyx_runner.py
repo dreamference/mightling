@@ -135,7 +135,13 @@ def test_configure_names_the_served_model_and_its_context_length():
     assert len(models) == 1
     assert models[0]["is_visible"] is True
     assert "/" in models[0]["name"], "should be the HF repo id vLLM serves, not the alias"
-    assert models[0]["max_input_tokens"] == 131072
+    # Whatever the *configured* recipe declares -- hardcoding a number here made the test
+    # fail the first time the main model changed to an entry with a different context cap.
+    from dreamference.config import DreamferenceConfig
+    from dreamference.hardware import get_model_launch_overrides
+
+    expected = get_model_launch_overrides(DreamferenceConfig().model)["max_model_len"]
+    assert models[0]["max_input_tokens"] == expected
 
 
 def test_default_admin_email_avoids_reserved_domains():

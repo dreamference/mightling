@@ -37,7 +37,7 @@ def test_default_model_is_registered_and_gb10_compatible():
     from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
     assert spec.compatible_gb10 is True
-    assert spec.hf_repo_id == "Intel/Qwen3.5-122B-A10B-int4-AutoRound"
+    assert spec.hf_repo_id == "bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid"
 
 def test_default_model_speculates_against_a_downloadable_drafter():
     # The DFlash drafter is named inside the recipe rather than passed as an argument, which is

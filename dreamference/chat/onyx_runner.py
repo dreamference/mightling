@@ -501,6 +501,36 @@ class OnyxRunner:
 
         print(f"🔗 Registering {model_name} with Onyx at {api_base} ...")
         url = f"{api}/admin/llm/provider?is_creation={'false' if existing is not None else 'true'}"
+
+        # A model *change* needs a three-step dance, found the hard way on the first real one:
+        # Onyx refuses an update that removes the model currently stored as the provider's
+        # default ("Cannot remove the default model ... change the default model before
+        # removing"), and the default can only move to a model the provider already lists. So:
+        # union first (old default kept alongside the new model), move the default, then trim
+        # to the new model alone. A same-model re-run skips straight to the plain update.
+        if existing is not None:
+            stored_default = self._provider_default_model(api, cookie, existing)
+            if stored_default and stored_default != model_name:
+                union = dict(payload)
+                # Visible, not hidden: hiding the still-default model trips the same
+                # validation as removing it. It only exists for the one request anyway.
+                union["model_configurations"] = payload["model_configurations"] + [
+                    {"name": stored_default, "is_visible": True,
+                     "max_input_tokens": None, "supports_image_input": False}
+                ]
+                _, error = self._request(url, union, cookie, method="PUT")
+                if error:
+                    print(f"❌ Could not stage the model change: {error}")
+                    return 1
+                _, error = self._request(
+                    f"{api}/admin/llm/default",
+                    {"provider_id": existing, "model_name": model_name},
+                    cookie,
+                )
+                if error:
+                    print(f"❌ Could not move the default model: {error}")
+                    return 1
+
         provider, error = self._request(url, payload, cookie, method="PUT")
         if error:
             print(f"❌ Could not create the LLM provider: {error}")
@@ -1554,6 +1584,36 @@ class OnyxRunner:
                 return json.loads(response.read().decode())
         except (urllib.error.URLError, OSError, ValueError):
             return None
+
+    def _provider_default_model(self, api: str, cookie: str,
+                                provider_id: int) -> Optional[str]:
+        """
+        Returns the default model name stored on an existing provider.
+
+        Args:
+            api (str): Onyx API base URL.
+            cookie (str): Session cookie header value.
+            provider_id (int): The provider to inspect.
+
+        Returns:
+            Optional[str]: The stored default model name, or None if unreadable.
+        """
+        request = urllib.request.Request(
+            f"{api}/admin/llm/provider", headers={"Cookie": cookie}, method="GET"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                listing = json.loads(response.read().decode())
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+        # The listing is not a bare provider array: the defaults ride alongside it, as
+        # {providers: [...], default_text: {provider_id, model_name}, default_vision: {...}}.
+        # The stored default this helper exists to find is `default_text` -- the same record
+        # `fetch_default_llm_model` reads in the removal validation.
+        default = (listing or {}).get("default_text") if isinstance(listing, dict) else None
+        if default and default.get("provider_id") == provider_id:
+            return default.get("model_name")
+        return None
 
     def _find_provider(self, api: str, cookie: str, name: str) -> Optional[int]:
         """

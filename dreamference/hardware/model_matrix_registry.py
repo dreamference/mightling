@@ -21,7 +21,12 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
 
 # Single source of truth for the model Dreamference serves when nothing else is specified. Imported by
 # the config layer and the vLLM launcher so the two cannot drift apart.
-DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-int4-dflash"
+#
+# hybrid-dflash since 2026-08-23: the Intel int4-dflash recipe plus the dense-bandwidth stack,
+# promoted after serving and benchmarking on this machine (prose 23.8 / code 49.9 / JSON 53.1
+# tok/s single-stream at 32k context and eight slots). int4-dflash stays in the matrix as the
+# tested fallback.
+DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-hybrid-dflash"
 
 class ModelMatrixRegistry:
     """
@@ -41,7 +46,8 @@ class ModelMatrixRegistry:
             max_memory_gb=120.0,
             compatible_gb10=True,
             notes=(
-                "Default. Same 122B-A10B weights as the NVFP4 entry below, but served as Intel's "
+                "Fallback (was the default until 2026-08-23). Same 122B-A10B weights as the "
+                "NVFP4 entry below, but served as Intel's "
                 "AutoRound INT4 checkpoint with the z-lab DFlash drafter in front of it. DFlash is "
                 "block-speculative: it drafts a whole block of tokens in one parallel forward "
                 "instead of running a head autoregressively, so acceptance is not capped the way "
@@ -307,21 +313,39 @@ class ModelMatrixRegistry:
                 "reasons the int4-dflash entry documents at length: gpu_memory_utilization "
                 "stays 0.68 (their 0.82 is headless math; this box runs a desktop and froze at "
                 "0.80), and load_format stays mmap (their fastsafetensors is a double-residency "
-                "load peak without GDS, which is what freezes this host). Added 2026-08-23; has "
-                "not yet served a token on this machine -- the int4-dflash entry remains the "
-                "proven recipe until this one has."
+                "load peak without GDS, which is what freezes this host). The default since "
+                "2026-08-23, promoted the same day it first served: measured post-warmup at "
+                "prose 23.8 / code 49.9 / JSON 53.1 tok/s single-stream. int4-dflash is the "
+                "fallback."
             ),
             hf_repo_id="bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid",
+            # Same Qwen3_5MoeForConditionalGeneration architecture and vision_config as the
+            # Intel export it is derived from; verified against the checkpoint's config.json,
+            # per this field's rule, not inferred from the alias.
+            supports_vision=True,
             launch_overrides={
                 # Values mirror the int4-dflash entry above verbatim, comments included by
                 # reference -- one recipe, one place to reason about it. Only the image differs.
                 "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense1",
+                # 32k, not the int4-dflash entry's 131k, for two stacked reasons. The hard one:
+                # this stack's non-KV residency is larger (the int8 lm-head holds both copies
+                # until its lazy first-forward build), and the first load refused loudly --
+                # "one request at max seq len needs 9.03 GiB KV, available 5.78 GiB". The soft
+                # one: this recipe exists for concurrent research/agent traffic, where eight
+                # bounded streams beat one unbounded, and 32k bounds each stream's KV claim.
+                "max_model_len": 32768,
+                "env": {
+                    "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
+                    "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+                },
                 "gpu_memory_utilization": 0.68,
                 "kv_cache_dtype": "auto",
                 "attention_backend": "flash_attn",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
-                "max_num_batched_tokens": 8213,
+                # 8248 = 8192 + max_num_seqs * (num_speculative_tokens - 1) = 8192 + 8*7; the
+                # draft-slot arithmetic the int4-dflash entry documents, retuned for 8 seqs.
+                "max_num_batched_tokens": 8248,
                 "enable_prefix_caching": True,
                 "speculative_config": {
                     "method": "dflash",
@@ -330,7 +354,11 @@ class ModelMatrixRegistry:
                     "attention_backend": "FLASH_ATTN",
                 },
                 "extra_args": [
-                    "--max-num-seqs", "3",
+                    # 8, not the int4-dflash entry's 3: with per-stream KV bounded at 32k the
+                    # pool fits eight, and the measured Deep Research livelock (capacity queue
+                    # -> 60s first-chunk timeout -> abort/retry churn) is a queueing problem
+                    # that slots solve. Decode is bandwidth-bound and batches nearly free.
+                    "--max-num-seqs", "8",
                     "--tensor-parallel-size", "1",
                     "--dtype", "auto",
                     "--default-chat-template-kwargs", '{"enable_thinking": false}',

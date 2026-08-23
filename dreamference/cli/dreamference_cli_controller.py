@@ -753,7 +753,11 @@ class DreamferenceCLIController:
 
         # Command: dream server start
         start_server_parser = server_subparsers.add_parser("start", help="Launch local vLLM server optimized for GB10 unified memory")
-        start_server_parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model name to serve (default: {DEFAULT_MODEL}; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
+        # default=None, resolved to the *configured* model in the handler. A concrete default
+        # here silently outranked `dream main-model set`: the config said one model and
+        # `server start` launched another -- found live, when a recipe switch started the old
+        # checkpoint on the old image and only the /v1/models listing told the truth.
+        start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
         start_server_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
@@ -1777,6 +1781,9 @@ class DreamferenceCLIController:
 
             if args.server_command == "start":
                 cls.display_header()
+                # An explicit --model wins; otherwise the configured main model serves, so
+                # `main-model set` and `server start` can never disagree again.
+                args.model = args.model or config.model
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
             
                 # Start monitoring thread before server launch

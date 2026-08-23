@@ -1,0 +1,26 @@
+# vLLM image for the hybrid dense-bandwidth DFlash recipe (qwen3.5-122b-a10b-hybrid-dflash).
+#
+# Layered on the kvfix2 image rather than the AEON base, so everything that image already
+# bakes (KV page-size unification, mamba prefix-align, blocktable fixes) is inherited rather
+# than re-derived. On top go the three dense-bandwidth patches from
+# github.com/Entrpi/qwen3.5-122B-A10B-on-spark -- the same lineage the kvfix patches came
+# from -- which that repo applies from serve.sh at container start and we bake for the same
+# reason as before: the launch should not depend on a wrapper script running first.
+#
+#   patch_inc_hybrid       FP8 dispatch for the hybrid checkpoint's dense layers (+8.8% there)
+#   patch_int8_lmhead_v3   int8 w8a16 Triton GEMV lm-head (+33% on their bench)
+#   patch_fla_shmem        FLA sm121 large-tile shared-memory tuning
+#
+# All three are sentinel-guarded and fail loudly when their anchor is missing, so a base bump
+# cannot silently produce an image that looks patched and is not.
+#
+# Keep this tag in sync with the `docker_image` entry in ModelMatrixRegistry.
+FROM dreamference-vllm-dflash:0.23.0-aeon-kvfix2
+
+COPY runtime/patch_inc_hybrid.py /opt/dreamference/patch_inc_hybrid.py
+COPY runtime/patch_int8_lmhead_v3.py /opt/dreamference/patch_int8_lmhead_v3.py
+COPY runtime/patch_fla_shmem.py /opt/dreamference/patch_fla_shmem.py
+
+RUN python3 /opt/dreamference/patch_inc_hybrid.py \
+ && python3 /opt/dreamference/patch_int8_lmhead_v3.py \
+ && python3 /opt/dreamference/patch_fla_shmem.py

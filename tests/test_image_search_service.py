@@ -459,3 +459,21 @@ def test_metadata_lookup_names_the_source_for_the_gallery_badges(tmp_path):
     row = store.lookup_id(file_id)
     assert row == {"source_url": "http://www.museum.example/a.jpg", "title": "exhibit"}
     assert store.lookup_id("0" * 16) is None
+
+
+def test_rank_thumbnails_are_downscaled_before_the_vision_call(tmp_path):
+    # Full-size thumbnails made every rank call a multi-thousand-token multimodal prefill on
+    # the shared engine; the verdict is no better for the extra pixels.
+    sizes = {}
+
+    class _MeasuringRanker:
+        def rank(self, query, thumbnails):
+            sizes["bytes"] = [len(t) for t in thumbnails]
+            return list(range(len(thumbnails)))
+
+    cand = _candidate(0)
+    big = _blocky_jpeg(0, size=1024)
+    table = {cand["thumb_url"]: big, cand["image_url"]: big}
+    service, _ = _service(tmp_path, {"q": [cand]}, table, ranker=_MeasuringRanker())
+    service.search(["q"])
+    assert sizes["bytes"] and all(b < len(big) / 4 for b in sizes["bytes"])
