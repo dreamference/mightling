@@ -252,7 +252,9 @@ SETTINGS_MODAL_SCRIPT: Final[str] = (
     "if(window.top!==window.self){"
     f'document.documentElement.setAttribute("{FRAMED_ATTRIBUTE}","1");return}}'
     "function close(){var o=document.getElementById(OID);"
-    "if(o){o.remove();document.removeEventListener('keydown',esc,true);}}"
+    "if(o){o.remove();document.removeEventListener('keydown',esc,true);"
+    "if(window.removeEventListener&&window.__puffinModalMsg){"
+    "window.removeEventListener('message',window.__puffinModalMsg);window.__puffinModalMsg=null;}}}"
     "function esc(e){if(e.key==='Escape'){e.stopPropagation();close();}}"
     "function open(href){close();"
     "var o=document.createElement('div');o.id=OID;"
@@ -262,15 +264,37 @@ SETTINGS_MODAL_SCRIPT: Final[str] = (
     "p.style.cssText='position:relative;width:min(960px,calc(100vw - 48px));"
     "height:min(680px,calc(100vh - 48px));background:#fff;border-radius:16px;"
     "box-shadow:0 25px 50px -12px rgba(0,0,0,.25);overflow:hidden;';"
-    "var fr=document.createElement('iframe');fr.src=href;"
-    "fr.style.cssText='width:100%;height:100%;border:0;display:block;';"
+    # One iframe per settings route, all loaded up front; the one matching the clicked href is
+    # shown. `__puffinTabs` is published by the synthetic-tabs script, which runs after this one
+    # but long before any click. Swapping frames on request is what makes cross-route tab
+    # switches instant -- reloading a single iframe was a visible white flash.
+    "var tabs=window.__puffinTabs||[];var routes=[];"
+    "for(var i=0;i<tabs.length;i++){if(routes.indexOf(tabs[i].p[0])<0)routes.push(tabs[i].p[0]);}"
+    "var cur=href.split('#')[0];if(routes.indexOf(cur)<0)routes.push(cur);"
+    "var frames={};"
+    "routes.forEach(function(rt){"
+    "var fr=document.createElement('iframe');fr.src=rt===cur?href:rt;"
+    "fr.style.cssText='width:100%;height:100%;border:0;display:'+(rt===cur?'block':'none')+';';"
+    "frames[rt]=fr;});"
+    "function onmsg(ev){"
+    "if(ev.origin!==location.origin)return;"
+    "var d=ev.data;if(!d||!d.puffinSettingsNav)return;"
+    "var s=d.puffinSettingsNav,tb=null,i;"
+    "var tl=window.__puffinTabs||[];"
+    "for(i=0;i<tl.length;i++){if(tl[i].s===s)tb=tl[i];}"
+    "if(!tb||!frames[tb.p[0]])return;"
+    "for(var rt in frames){frames[rt].style.display=rt===tb.p[0]?'block':'none';}"
+    # Same-document hash write: replace() with only the fragment differing does not reload.
+    "try{frames[tb.p[0]].contentWindow.location.replace(tb.p[0]+'#'+s);}"
+    "catch(e){frames[tb.p[0]].src=tb.p[0]+'#'+s;}}"
+    "if(window.addEventListener){window.__puffinModalMsg=onmsg;window.addEventListener('message',onmsg);}"
     "var x=document.createElement('button');x.setAttribute('aria-label','Close settings');"
     "x.textContent='\u00d7';"
     "x.style.cssText='position:absolute;top:10px;right:12px;width:32px;height:32px;border:none;"
     "background:transparent;color:#6b7280;font-size:22px;line-height:1;cursor:pointer;"
     "border-radius:8px;';"
     "x.addEventListener('click',close);"
-    "p.appendChild(fr);p.appendChild(x);o.appendChild(p);"
+    "routes.forEach(function(rt){p.appendChild(frames[rt]);});p.appendChild(x);o.appendChild(p);"
     "o.addEventListener('mousedown',function(e){if(e.target===o)close();});"
     "document.addEventListener('keydown',esc,true);"
     "document.body.appendChild(o);}"
@@ -327,37 +351,21 @@ SETTINGS_TABS_SCRIPT: Final[str] = (
     "if(tb.s===h)return h;"
     "if(def===null)def=tb.s;}"
     "return def;}"
-    # Cross-route switches ride React's own router: the real route tabs are hidden, not gone,
-    # and display:none does not stop dispatched events -- so clicking one programmatically is a
-    # client-side navigation, where `location.href` would reload the whole document (in the
-    # settings modal, visibly). The hash is applied once the route lands; if it never does, the
-    # hard navigation is the fallback.
-    "function real(route){var nav=document.querySelector(NAV);if(!nav)return null;"
-    "var lbl=null,i;"
-    "for(i=0;i<TABS.length;i++){if(TABS[i].p[0]===route){lbl=TABS[i].l;break}}"
-    "var rows=nav.children;"
-    "for(i=0;i<rows.length;i++){var r=rows[i];"
-    "if(r.id&&r.id.indexOf('puffin-tab-')===0)continue;"
-    "var sp=r.querySelector&&r.querySelector('span[title]');"
-    "if(sp&&sp.getAttribute('title')===lbl)return r;}return null;}"
+    # Cross-route switches cannot ride React's router from out here: the rows expose no handler
+    # props (verified by walking `__reactProps$*` up the whole chain), dispatched events -- even
+    # faithful PointerEvents -- move nothing, and native pushState+popstate changes the URL
+    # shallowly without rendering the route. Inside the settings modal the answer is
+    # architectural: the modal preloads one iframe per settings route, and a framed document
+    # just asks it to swap -- a postMessage and a hash write, no reload anywhere. At the top
+    # level a cross-route switch is an ordinary page navigation, where a load is normal.
+    "window.__puffinTabs=TABS;"
     "function go(s){var tb=null,i;"
     "for(i=0;i<TABS.length;i++){if(TABS[i].s===s)tb=TABS[i];}"
     "if(!tb)return;"
     "if(tb.p.indexOf(location.pathname)>=0){location.hash=s;sync();return}"
-    "var r=real(tb.p[0]);"
-    "if(!r){location.href=tb.p[0]+'#'+s;return}"
-    # Dispatch on the row's innermost span, not the row: React's handler lives on an inner
-    # element, and an event dispatched on an ancestor bubbles up, never down -- fired at the
-    # wrapper it reaches nothing and the 2s fallback turns into exactly the reload this exists
-    # to avoid.
-    "var tgt=r.querySelector('span[title]')||r;"
-    "['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(ty){"
-    "tgt.dispatchEvent(new MouseEvent(ty,{bubbles:true,cancelable:true,view:window}));});"
-    "var n=0,iv=setInterval(function(){n++;"
-    "if(tb.p.indexOf(location.pathname)>=0){clearInterval(iv);"
-    "history.replaceState(null,'',location.pathname+'#'+s);sync();}"
-    "else if(n>40){clearInterval(iv);location.href=tb.p[0]+'#'+s;}"
-    "},50);}"
+    "if(window.top!==window.self&&window.parent&&window.parent.postMessage){"
+    "try{window.parent.postMessage({puffinSettingsNav:s},location.origin);return}catch(e){}}"
+    "location.href=tb.p[0]+'#'+s;}"
     "function make(nav,def){"
     "var src=null,rows=nav.children,i;"
     "for(i=0;i<rows.length;i++){"
