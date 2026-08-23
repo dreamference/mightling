@@ -444,12 +444,16 @@ SETTINGS_TABS_SCRIPT: Final[str] = (
 # the image tool that is a JSON blob whose payload the user already sees rendered as images in
 # the answer. There is no data-testid anywhere on the block (verified against the bundle), so
 # this is the one hide that needs text anchoring, which CSS cannot do -- hence a script. The
-# anchor is the *payload*, not the chrome: a pre/code whose text carries both /puffin-images/
-# and the tool's response keys can only be this tool's JSON, wherever Onyx chooses to render
-# it -- the first version anchored on the "Response" label and an enclosing step name, and the
-# real DOM defeated it. Other tools' Response blocks stay inspectable. Best-effort by design:
-# a re-render un-hides, the sweep re-hides, and dropping the constant restores the block.
-IMAGE_TOOL_STEP_SCRIPT: Final[str] = ';(function(){try{if(window.__puffinToolJson)return;window.__puffinToolJson=1;function sweep(){var blocks=document.querySelectorAll(\'pre,code\');for(var i=0;i<blocks.length;i++){var el=blocks[i];if(el.__puffinHid)continue;var s=el.textContent||\'\';if(s.indexOf(\'/puffin-images/\')<0)continue;if(s.indexOf(\'"instructions"\')<0&&s.indexOf(\'"response"\')<0)continue;var box=el.closest(\'pre\')||el;box.__puffinHid=1;el.__puffinHid=1;box.style.display=\'none\';var lbl=box.previousElementSibling;if(lbl&&(lbl.textContent||\'\').trim()===\'Response\')lbl.style.display=\'none\';}}setInterval(sweep,800);}catch(e){}})();'
+# anchor is the *payload*, not the chrome: a pre/code whose text carries /puffin-images/ with
+# the tool's response keys -- or, for a block still streaming in, the payload's opening
+# signature ("response" plus "![") -- can only be this tool's JSON, wherever Onyx renders it.
+# The first version anchored on the "Response" label and an enclosing step name, and the real
+# DOM defeated it; the second polled on an interval, and the block flashed for up to 800ms
+# before the tick. This one hides from a MutationObserver, which runs before the frame the
+# inserted node would first paint in, so the block never becomes visible; the interval remains
+# only as a 2s backstop. Other tools' Response blocks stay inspectable, and dropping the
+# constant restores everything.
+IMAGE_TOOL_STEP_SCRIPT: Final[str] = ';(function(){try{if(window.__puffinToolJson)return;window.__puffinToolJson=1;function ours(s){if(s.indexOf(\'/puffin-images/\')>=0&&(s.indexOf(\'"instructions"\')>=0||s.indexOf(\'"response"\')>=0))return true;return s.indexOf(\'"response"\')>=0&&s.indexOf(\'![\')>=0;}function hide(el){var box=(el.closest&&el.closest(\'pre\'))||el;if(box.__puffinHid)return;box.__puffinHid=1;box.style.display=\'none\';var lbl=box.previousElementSibling;if(lbl&&(lbl.textContent||\'\').trim()===\'Response\')lbl.style.display=\'none\';}function sweep(root){var blocks=(root||document).querySelectorAll(\'pre,code\');for(var i=0;i<blocks.length;i++){var el=blocks[i];if(!el.__puffinHid&&ours(el.textContent||\'\'))hide(el);}}function boot(){if(typeof MutationObserver!==\'undefined\'){new MutationObserver(function(muts){for(var i=0;i<muts.length;i++){var m=muts[i];if(m.type===\'characterData\'){var host=m.target.parentElement;if(host&&ours(m.target.data||\'\'))hide(host);continue;}for(var j=0;j<m.addedNodes.length;j++){var n=m.addedNodes[j];if(n.nodeType===1&&n.querySelectorAll)sweep(n);else if(n.nodeType===3&&n.parentElement&&ours(n.data||\'\'))hide(n.parentElement);}}}).observe(document.body,{childList:true,subtree:true,characterData:true});}sweep();setInterval(sweep,2000);}if(document.readyState===\'loading\'){document.addEventListener(\'DOMContentLoaded\',boot);}else{boot();}}catch(e){}})();'
 
 
 # Image search results as a clickable gallery.
