@@ -578,14 +578,24 @@ HELP_LINK_CSS: Final[str] = (
 # reach pseudo-elements.
 SIDEBAR_AVATAR_DISC_CSS: Final[str] = (
     ".opal-sidebar-root__column"
-    "{--dream-avatar-initial-size:7.2px;--dream-avatar-disc-size:18px}"
+    "{--dream-avatar-initial-size:9px;--dream-avatar-disc-size:18px}"
     ".opal-sidebar-root__column .bg-background-neutral-inverted-00"
     "{background-color:var(--text-02)}"
     ".opal-sidebar-root__column .bg-background-neutral-inverted-00 span"
     "{font-size:0!important;width:100%;text-align:center;"
     "line-height:var(--dream-avatar-disc-size)}"
+    # The letter's line box is the full disc height, not `1`: with a 1-height box the glyph
+    # aligns by baseline against the span's 18px strut and lands measurably high (2.5px on an
+    # 18px disc). A disc-height line box centres the glyph by its own half-leading instead.
     ".opal-sidebar-root__column .bg-background-neutral-inverted-00 span::first-letter"
-    "{font-size:var(--dream-avatar-initial-size);line-height:1}"
+    "{font-size:var(--dream-avatar-initial-size);"
+    # The remaining offset comes from baseline metrics -- ascent and descent are not symmetric
+    # around the glyph -- and `vertical-align` is one of the few properties ::first-letter
+    # honours. -3px was dialled in against a live Range measurement of the glyph's box versus
+    # the disc's (0.0px on both axes), not guessed; the response is nonlinear because the line
+    # box redistributes half-leading as the baseline moves.
+    "vertical-align:-3px;"
+    "line-height:var(--dream-avatar-disc-size)}"
 )
 
 # The account name in the sidebar footer, matched to the section titles.
@@ -598,6 +608,20 @@ SIDEBAR_ACCOUNT_CSS: Final[str] = (
     "{--interactive-foreground:#000}"
     '.opal-sidebar-footer .interactive[data-interactive-variant^="sidebar"] span.truncate'
     "{font-size:.75rem;font-weight:400}"
+    # The account row is a popover trigger, and its "selected" state means the menu is open --
+    # not a navigation state. Painting it Tiffany made the row read as stuck-highlighted the
+    # whole time the menu (or the settings modal opened from it) was up, so in the footer that
+    # state renders as rest. The hover variants are overridden too; the Tiffany hover rule
+    # otherwise outranks this on specificity.
+    '.opal-sidebar-footer .interactive[data-interactive-variant^="sidebar"]'
+    '[data-interactive-state="selected"]'
+    "{background-color:transparent;--interactive-foreground:#000;"
+    "--interactive-foreground-icon:currentColor}"
+    '.opal-sidebar-footer .interactive[data-interactive-variant^="sidebar"]'
+    '[data-interactive-state="selected"]:hover:not([data-disabled]),'
+    '.opal-sidebar-footer .interactive[data-interactive-variant^="sidebar"]'
+    '[data-interactive-state="selected"][data-interaction=hover]:not([data-disabled])'
+    "{background-color:transparent}"
 )
 
 # The sidebar's collapse control, removed so the sidebar stays open.
