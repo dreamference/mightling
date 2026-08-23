@@ -590,10 +590,11 @@ class OnyxRunner:
             bool: True if the exemption is in place.
         """
         containers = subprocess.run(
-            ["docker", "ps", "--filter", "name=api_server", "--format", "{{.Names}}"],
+            ["docker", "ps", "--filter", "label=com.docker.compose.service=api_server",
+             "--format", "{{.Names}}"],
             capture_output=True, text=True, timeout=30, check=False,
         ).stdout.split()
-        target = next((c for c in containers if "onyx" in c), None)
+        target = containers[0] if containers else None
         if not target:
             return False
 
@@ -902,10 +903,11 @@ class OnyxRunner:
             return False
 
         containers = subprocess.run(
-            ["docker", "ps", "--filter", "name=api_server", "--format", "{{.Names}}"],
+            ["docker", "ps", "--filter", "label=com.docker.compose.service=api_server",
+             "--format", "{{.Names}}"],
             capture_output=True, text=True, timeout=30, check=False,
         ).stdout.split()
-        target = next((c for c in containers if "onyx" in c), None)
+        target = containers[0] if containers else None
         if not target:
             return False
         for _ in range(40):

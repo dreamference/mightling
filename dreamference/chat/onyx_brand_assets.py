@@ -205,12 +205,14 @@ class OnyxBrandAssets:
         """
         try:
             result = subprocess.run(
-                ["docker", "ps", "--filter", "name=web_server", "--format", "{{.Names}}"],
+                ["docker", "ps", "--filter", "label=com.docker.compose.service=web_server",
+                 "--format", "{{.Names}}"],
                 capture_output=True, text=True, timeout=15, check=False,
             )
         except (OSError, subprocess.SubprocessError):
             return None
-        names = [n for n in result.stdout.split() if "onyx" in n]
+        # The compose service label survives a `docker rename`; the container name does not.
+        names = result.stdout.split()
         return names[0] if names else None
 
     @classmethod
