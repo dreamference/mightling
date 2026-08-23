@@ -58,6 +58,12 @@ LABEL_SUBSTITUTIONS: Final[Dict[str, str]] = {
         'title:"Gmail Accounts",sizePreset:"main-content",variant:"section",width:"full"',
     'title:"Google",sizePreset:"main-content",variant:"section",width:"full"':
         'title:"Gmail Accounts",sizePreset:"main-content",variant:"section",width:"full"',
+    # Not a label but the same mechanism: the "Preferences saved" toast, silenced at its call
+    # sites. `.__silenced?.()` is an optional call on a property nothing defines -- valid JS,
+    # evaluates to undefined, keeps the expression shape wherever the call sits (arrow body,
+    # comma expression, return). The error toast next to it is left alone; failure must stay
+    # loud. Removing this entry restores the toast on the next configure.
+    '.toast.success("Preferences saved")': '.toast.__silenced?.("Preferences saved")',
 }
 
 
