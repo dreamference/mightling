@@ -206,8 +206,69 @@ SCROLLBAR_SCRIPT: Final[str] = (
     "}catch(e){}})();"
 )
 
+# Settings as a modal over the chat rather than a full-page navigation.
+#
+# The user-menu entry is a real anchor (`href="/app/settings"`, unlike the tabs inside the
+# settings page, which are divs), so a capture-phase click listener on `document` sees it before
+# React's root-level handlers and can swallow the navigation: `preventDefault` stops the anchor,
+# `stopPropagation` at document capture stops the router. The route then loads in an iframe
+# inside a fixed overlay -- same-origin, and `frame-ancestors 'self'` permits it.
+#
+# The settings route renders the whole app shell, sidebar and all, which inside a modal would
+# look like a miniature app. The script cannot restyle the framed document from outside, but it
+# also runs *inside* the iframe (the chunks are the same), where `window.top !== window.self` is
+# the discriminator: a framed document marks its own <html> with `FRAMED_ATTRIBUTE` and returns
+# before installing the interceptor, and `SETTINGS_MODAL_CSS` in `onyx_ui_overrides.py` keys the
+# sidebar removal on that attribute. Escape and a backdrop click both close; the synthetic
+# Escape dispatched before opening asks the radix popover holding the menu to fold itself.
+FRAMED_ATTRIBUTE: Final[str] = "data-puffin-framed"
+SETTINGS_MODAL_ID: Final[str] = "puffin-settings-modal"
+SETTINGS_MODAL_SCRIPT: Final[str] = (
+    ";(function(){try{"
+    "if(window.__puffinSettingsModal)return;window.__puffinSettingsModal=1;"
+    f'var OID="{SETTINGS_MODAL_ID}";'
+    "if(window.top!==window.self){"
+    f'document.documentElement.setAttribute("{FRAMED_ATTRIBUTE}","1");return}}'
+    "function close(){var o=document.getElementById(OID);"
+    "if(o){o.remove();document.removeEventListener('keydown',esc,true);}}"
+    "function esc(e){if(e.key==='Escape'){e.stopPropagation();close();}}"
+    "function open(href){close();"
+    "var o=document.createElement('div');o.id=OID;"
+    "o.style.cssText='position:fixed;inset:0;z-index:2000;background:rgba(17,24,39,.5);"
+    "display:flex;align-items:center;justify-content:center;';"
+    "var p=document.createElement('div');"
+    "p.style.cssText='position:relative;width:min(960px,calc(100vw - 48px));"
+    "height:min(680px,calc(100vh - 48px));background:#fff;border-radius:16px;"
+    "box-shadow:0 25px 50px -12px rgba(0,0,0,.25);overflow:hidden;';"
+    "var fr=document.createElement('iframe');fr.src=href;"
+    "fr.style.cssText='width:100%;height:100%;border:0;display:block;';"
+    "var x=document.createElement('button');x.setAttribute('aria-label','Close settings');"
+    "x.textContent='\u00d7';"
+    "x.style.cssText='position:absolute;top:10px;right:12px;width:32px;height:32px;border:none;"
+    "background:transparent;color:#6b7280;font-size:22px;line-height:1;cursor:pointer;"
+    "border-radius:8px;';"
+    "x.addEventListener('click',close);"
+    "p.appendChild(fr);p.appendChild(x);o.appendChild(p);"
+    "o.addEventListener('mousedown',function(e){if(e.target===o)close();});"
+    "document.addEventListener('keydown',esc,true);"
+    "document.body.appendChild(o);}"
+    "document.addEventListener('click',function(e){"
+    "var n=e.target;"
+    "while(n&&n.getAttribute){"
+    "if(n.tagName==='A'){var h=n.getAttribute('href')||'';"
+    "if(h==='/app/settings'||h.indexOf('/app/settings/')===0){"
+    "e.preventDefault();e.stopPropagation();"
+    "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));"
+    "open(h);return;}}"
+    "n=n.parentNode;}"
+    "},true);"
+    "}catch(e){}})();"
+)
+
 # Everything this module injects.
-UI_SCRIPTS: Final[str] = SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT + SCROLLBAR_SCRIPT
+UI_SCRIPTS: Final[str] = (
+    SCRIPT_MARKER + CONNECT_GOOGLE_SCRIPT + SCROLLBAR_SCRIPT + SETTINGS_MODAL_SCRIPT
+)
 
 
 class OnyxUIScripts:

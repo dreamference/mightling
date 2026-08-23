@@ -232,3 +232,78 @@ def test_the_service_pages_offer_a_way_back():
     source = inspect.getsource(GmailSearchService.serve)
     assert '<a href="{ONYX_ORIGIN}/app">Back to Puffin</a>' in source
     assert ONYX_ORIGIN == "http://localhost:3000"
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node is needed to execute the injected script")
+def test_settings_opens_in_a_modal_instead_of_navigating(tmp_path):
+    # Executed for real in both of the states the script distinguishes: at the top level a click
+    # on a settings anchor must be swallowed and become an overlay holding an iframe of the same
+    # route, and inside a frame the script must only mark the document -- the marked state is
+    # what the shell-stripping CSS keys on -- and install no interceptor at all.
+    from dreamference.chat.onyx_ui_scripts import (
+        FRAMED_ATTRIBUTE,
+        SETTINGS_MODAL_ID,
+        SETTINGS_MODAL_SCRIPT,
+    )
+
+    harness = tmp_path / "harness.js"
+    harness.write_text(textwrap.dedent("""
+        const FRAMED = %s;
+        function fresh(framed) {
+          const listeners = {};
+          const doc = {
+            documentElement: { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } },
+            body: { appendChild(el) { doc._overlay = el; } },
+            _overlay: null,
+            addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+            removeEventListener() {},
+            getElementById(id) { return doc._overlay && doc._overlay.id === id ? doc._overlay : null; },
+            createElement(tag) {
+              return { tagName: tag.toUpperCase(), style: {}, children: [],
+                       appendChild(c) { this.children.push(c); }, addEventListener() {},
+                       setAttribute() {}, remove() { doc._overlay = null; } };
+            },
+            dispatchEvent() {},
+          };
+          global.document = doc;
+          global.window = framed ? { top: 1, self: 2 } : { top: 1, self: 1 };
+          global.KeyboardEvent = function (type, opts) { this.type = type; Object.assign(this, opts); };
+          eval(%s);
+          return { listeners, doc };
+        }
+
+        const top = fresh(false);
+        const anchor = { tagName: 'A', getAttribute: (k) => (k === 'href' ? '/app/settings' : null),
+                         parentNode: null };
+        const ev = { target: anchor, prevented: false, stopped: false,
+                     preventDefault() { this.prevented = true; },
+                     stopPropagation() { this.stopped = true; } };
+        top.listeners.click[0](ev);
+        const overlay = top.doc._overlay;
+        const frame = overlay && overlay.children[0] && overlay.children[0].children[0];
+        const framed = fresh(true);
+        console.log(JSON.stringify({
+          prevented: ev.prevented,
+          stopped: ev.stopped,
+          overlayId: overlay && overlay.id,
+          frameSrc: frame && frame.src,
+          topMarked: FRAMED in top.doc.documentElement.attrs,
+          framedMarked: framed.doc.documentElement.attrs[FRAMED] === "1",
+          framedIntercepts: !!(framed.listeners.click && framed.listeners.click.length),
+        }));
+    """) % (json.dumps(FRAMED_ATTRIBUTE), json.dumps(SETTINGS_MODAL_SCRIPT)))
+
+    result = subprocess.run(
+        ["node", str(harness)], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert outcome["prevented"] is True
+    assert outcome["stopped"] is True
+    assert outcome["overlayId"] == SETTINGS_MODAL_ID
+    assert outcome["frameSrc"] == "/app/settings"
+    # The top-level document is never marked; only a framed one strips its own shell.
+    assert outcome["topMarked"] is False
+    assert outcome["framedMarked"] is True
+    assert outcome["framedIntercepts"] is False
