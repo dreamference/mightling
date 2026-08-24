@@ -258,7 +258,13 @@ class ModelMatrixRegistry:
                 # caching is on ('all' when the model supports mamba prefix caching, 'align'
                 # otherwise) and requires chunked prefill for align, which this recipe already
                 # enables.
-                "enable_prefix_caching": True,
+                # OFF since 2026-08-24: on this kvfix2 image the align-mode chunk splitter
+                # still uses cache_config.block_size (2240) against a 4480 mamba block, so the
+                # rare hits that occur restore a STALE GDN state (see the root-cause comment
+                # above and specs/DREAMFERENCE_PREFIX_CACHE.md). The dense4 image the default
+                # entry pins carries the fixes; this entry keeps its untouched image and gives
+                # up the (broken here) feature instead. Flip back only on a patched image.
+                "enable_prefix_caching": False,
                 # load_format left at vLLM's default (mmap). Upstream ships fastsafetensors and
                 # measures 8 min -> 1 min on load, but that finding does not survive this project's:
                 # GB10 has no GDS, so fastsafetensors falls back to staging every shard through
@@ -368,10 +374,16 @@ class ModelMatrixRegistry:
                 # the drafter's block DOWN (2240 -> 1120) instead of the target's up, so the
                 # LCM — the prefix-cache hit floor/grid — halves 4480 -> 2240 at zero capacity
                 # cost, and the mamba page's 2x padding waste returns to the pool. Full story:
-                # specs/DREAMFERENCE_PREFIX_CACHE.md. The int4-dflash fallback deliberately
-                # stays on kvfix2 (untouched-fallback principle) and so retains the stale-hit
-                # hazard that spec documents.
-                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense3",
+                # specs/DREAMFERENCE_PREFIX_CACHE.md.
+                # dense4 = dense3 + patch_mamba_checkpoint_chunks (2026-08-24): aligned prefill
+                # chunks capped at DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS blocks (default 1), so
+                # EVERY 2240 boundary gets a mamba state checkpoint and any shared prefix
+                # >= 2240 tokens can hit -- not just the boundaries where a budget-sized chunk
+                # happened to end. Checkpoints are evictable cache (freed mid-request, hash
+                # kept), so density costs pool pressure, not live capacity. The int4-dflash
+                # fallback stays on kvfix2 (untouched-fallback principle); its prefix caching
+                # is now OFF instead, closing the stale-hit hazard the spec documents.
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense4",
                 # 32k, not the int4-dflash entry's 131k, for two stacked reasons. The hard one:
                 # this stack's non-KV residency is larger (the int8 lm-head holds both copies
                 # until its lazy first-forward build), and the first load refused loudly --

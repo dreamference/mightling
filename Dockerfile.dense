@@ -22,6 +22,10 @@
 #                            instead of everyone else up: LCM drops 4480 -> 2240, halving the
 #                            prefix-cache hit floor/grid and doubling checkpoint density, and
 #                            the mamba page's 2x padding waste disappears (dense3, spec §6.1)
+#   patch_mamba_checkpoint_chunks  cap aligned prefill chunks at N blocks (env
+#                            DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS, default 1) so every N-th
+#                            2240 boundary gets a mamba state checkpoint — hits for any shared
+#                            prefix >= 2240 tokens, not just chunk-end boundaries (dense4)
 #
 # All are sentinel-guarded and fail loudly when their anchor is missing, so a base bump
 # cannot silently produce an image that looks patched and is not.
@@ -34,9 +38,11 @@ COPY runtime/patch_int8_lmhead_v3.py /opt/dreamference/patch_int8_lmhead_v3.py
 COPY runtime/patch_fla_shmem.py /opt/dreamference/patch_fla_shmem.py
 COPY runtime/patch_mamba_chunk_align.py /opt/dreamference/patch_mamba_chunk_align.py
 COPY runtime/patch_unify_downscale.py /opt/dreamference/patch_unify_downscale.py
+COPY runtime/patch_mamba_checkpoint_chunks.py /opt/dreamference/patch_mamba_checkpoint_chunks.py
 
 RUN python3 /opt/dreamference/patch_inc_hybrid.py \
  && python3 /opt/dreamference/patch_int8_lmhead_v3.py \
  && python3 /opt/dreamference/patch_fla_shmem.py \
  && python3 /opt/dreamference/patch_mamba_chunk_align.py \
- && python3 /opt/dreamference/patch_unify_downscale.py
+ && python3 /opt/dreamference/patch_unify_downscale.py \
+ && python3 /opt/dreamference/patch_mamba_checkpoint_chunks.py

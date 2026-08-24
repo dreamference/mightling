@@ -96,15 +96,23 @@ def test_dflash_recipe_disables_thinking():
     payload = cmd[cmd.index("--default-chat-template-kwargs") + 1]
     assert json.loads(payload) == {"enable_thinking": False}
 
-def test_dflash_recipe_states_prefix_caching_explicitly():
+def test_dflash_recipes_state_prefix_caching_explicitly():
     # Stating it matters as much as the value. vLLM's own default for this model is OFF --
     # ModelConfig.is_prefix_caching_supported() returns False for hybrid attention -- and that
-    # default is consulted only when the flag is absent. Omitting it would silently lose the
-    # ~13x warm-prefix TTFT the patched image exists to unlock.
+    # default is consulted only when the flag is absent. Since 2026-08-24 the two recipes state
+    # OPPOSITE values, both deliberately: the hybrid default runs the dense4 image whose
+    # patches make the feature correct (specs/DREAMFERENCE_PREFIX_CACHE.md), while the
+    # int4-dflash fallback keeps its untouched kvfix2 image, where the align-mode splitter
+    # serves STALE mamba states on the rare hits -- so it turns the feature off instead.
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-hybrid-dflash")
     assert "--enable-prefix-caching" in cmd
     assert "--no-enable-prefix-caching" not in cmd
+
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    assert "--no-enable-prefix-caching" in cmd
+    assert "--enable-prefix-caching" not in cmd
 
 def test_a_recipe_can_still_veto_prefix_caching(monkeypatch):
     # The veto path is still load-bearing for any checkpoint whose KV geometry cannot support
