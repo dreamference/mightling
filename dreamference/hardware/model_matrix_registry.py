@@ -201,14 +201,25 @@ class ModelMatrixRegistry:
                 # at 8171; adding the 21 back puts it at exactly 8192. Retuning either
                 # max-num-seqs or num_speculative_tokens changes this number.
                 "max_num_batched_tokens": 8213,
-                # 2026-08-24 isolation result, three controlled trials (hybrid and Intel
-                # checkpoints, dense1 and kvfix2 images, new and old flags): the counter shows
-                # ZERO cross-request hits in every combination -- identical long-prefix request
-                # pairs re-pay their full prefill. The nonzero hit rates once seen in logs were
-                # almost certainly Deep Research abort/retry churn re-querying its own in-flight
-                # prompts. The flag stays on (harmless, and correct if the engine path is ever
-                # fixed), but the 13x figure below is upstream's, not this stack's; treat warm
-                # -prefix TTFT as an open engine-level issue, not a delivered feature.
+                # 2026-08-24 ROOT CAUSE of the zero-hit isolation result (found by driving the
+                # real KVCacheManager offline inside the image, no GPU needed): vLLM's mamba
+                # 'align' mode never materialises intermediate GDN state blocks during prefill.
+                # The mamba group's block table is the null block everywhere except the live
+                # tail state, cache_full_blocks skips null blocks, and the hybrid coordinator's
+                # get_cached_block demands a hit in EVERY KV group — so re-sending an identical
+                # prompt structurally cannot hit, on any checkpoint, image, or flag set. A real
+                # mamba state block is cached only when DECODE crosses a block boundary (2240
+                # tokens here), so the one reachable hit shape is a multi-turn continuation
+                # whose shared prefix extends past a boundary the previous turn generated
+                # through: verified offline, a 7600-token identical re-send hits 0 while a
+                # continuation past 8960 hits exactly 8960. That is also what the historical
+                # 1.4-3.6% logged hit rates were. 'all' mode would cache every block, but vLLM
+                # forces 'align' for models lacking SupportsMambaPrefixCaching — mamba1/mamba2
+                # families only; Qwen3.5's GDN is not among them — so no flag reaches it.
+                # Upstream design limitation, not aeon/DFlash/dense-stack specific. The flag
+                # stays on: boundary-crossing continuations do hit, and the full-attention
+                # groups' caching works; only the 13x warm-prefix figure below is upstream's
+                # (non-hybrid), not this stack's.
                 # Prefix caching ON, which is worth roughly 13x on warm-prefix TTFT upstream
                 # (2.30s -> 0.18s on a 4k prefix) and matters more here than any other single
                 # setting: an agent re-reads the same files every turn, and without this every turn
@@ -321,9 +332,10 @@ class ModelMatrixRegistry:
                 "load peak without GDS, which is what freezes this host). The default since "
                 "2026-08-23. Repointed from the bleysg hybrid checkpoint back to Intel's INT4 "
                 "on 2026-08-24, per upstream's amortization law (dense FP8-experts gains fall "
-                "to ~0% at agent-level speculative acceptance) and because the bleysg "
-                "checkpoint shipped a prefix-caching regression here: zero cache hits even on "
-                "byte-identical requests, measured 2026-08-23. The int8 lm-head and FLA "
+                "to ~0% at agent-level speculative acceptance). The zero-prefix-cache-hit "
+                "behaviour first blamed on the bleysg checkpoint turned out to be "
+                "architectural — every hybrid-GDN checkpoint has it; see the int4-dflash "
+                "entry's enable_prefix_caching comment for the root cause. The int8 lm-head and FLA "
                 "patches still apply; the FP8-experts patch detects no FP8 dense layers and "
                 "stands down. int4-dflash remains the untouched fallback."
             ),
