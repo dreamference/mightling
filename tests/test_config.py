@@ -2,11 +2,11 @@ from pathlib import Path
 from dreamference.config import DreamferenceConfig
 
 def test_config_env_vars():
-    config = DreamferenceConfig(vllm_host="http://localhost:8000", model="qwen2.5-coder-32b")
+    config = DreamferenceConfig(vllm_host="http://localhost:8000", model="qwen3.6-35b-a3b-nvfp4")
     env = config.get_env_vars()
     assert env["GOOSE_PROVIDER"] == "openai"
     assert env["OPENAI_BASE_URL"] == "http://localhost:8000/v1"
-    assert env["GOOSE_MODEL"] == "Qwen/Qwen2.5-Coder-32B-Instruct"
+    assert env["GOOSE_MODEL"] == "nvidia/Qwen3.6-35B-A3B-NVFP4"
 
 def test_ensure_goose_config(tmp_path):
     config = DreamferenceConfig()

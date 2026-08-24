@@ -218,7 +218,16 @@ class ModelMatrixRegistry:
                 # hit exactly 8960 = floor(12519/4480)*4480 — the first nonzero hit ever
                 # observed on this stack, and it skipped 11200 (odd 2240-multiple), pinning the
                 # 4480 grid. The historical 1.4-3.6% logged rates were these long-history
-                # multi-turn hits. 'all' mode would cache every block, but vLLM
+                # multi-turn hits. Follow-up analysis indicates those rare hits are also WRONG:
+                # the scheduler's chunk splitter aligns to cache_config.block_size (2240)
+                # while page unification scaled the mamba block to 4480, so the checkpointed
+                # state can be up to 2240 tokens short of the boundary its hash claims — by the
+                # slot-write arithmetic the live 8960 hit restored state@6720 (kernel write
+                # semantics inferred, not directly observed; the spec's A/B confirms). Fix
+                # designed in
+                # specs/DREAMFERENCE_PREFIX_CACHE.md; patch in
+                # runtime/patch_mamba_chunk_align.py (not yet baked into an image).
+                # 'all' mode would cache every block, but vLLM
                 # forces 'align' for models lacking SupportsMambaPrefixCaching — mamba1/mamba2
                 # families only; Qwen3.5's GDN is not among them — so no flag reaches it.
                 # Upstream design limitation, not aeon/DFlash/dense-stack specific. The flag
