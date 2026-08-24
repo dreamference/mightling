@@ -8,17 +8,31 @@
 
 ---
 
-## 1. The two defects
+## 1. How Prefix Caching Works on this Stack
+
+Before diving into the defects and patches, it is critical to understand how prefix caching operates on the **Hybrid GDN + DFlash** architecture, as it fundamentally differs from standard attention models.
+
+1. **The Three KV Groups:** This stack must maintain KV cache for three distinct components simultaneously: 
+   - The target model's standard Attention layers.
+   - The target model's GDN (Gated Dense Network / Mamba-like) layers.
+   - The DFlash speculative drafter (which has a per-token KV footprint exactly 2x larger than the target).
+2. **Page Unification (The 4480 Grid):** Because the DFlash drafter requires more space per token, the engine forces a "page unification" step (`patch_kv_unify.py`). It scales the target's attention and GDN blocks up to match the drafter's page size. The resulting Least Common Multiple (LCM) across all three groups dictates that blocks are quantized into massive **4480-token grids**.
+3. **Mamba `align` Mode:** Because Qwen's GDN layers do not natively support full state materialization (`SupportsMambaPrefixCaching` is missing), vLLM is forced to run in `align` mode. This means it cannot save the GDN state for every single token. It only saves **one state slot at the very end of a scheduling step**.
+4. **The Boundary Rule:** For a prefix cache hit to occur, a prefill chunk MUST end exactly on a 4480-token boundary. If two agents read the exact same 4,000-token prompt, they will get **zero cache hits** because the sequence didn't reach the 4480 boundary. If they share 10,000 tokens, they will hit exactly at 8960 (2 blocks of 4480).
+
+---
+
+## 2. The two defects
 
 Both were found by driving the real `KVCacheManager`/`HybridKVCacheCoordinator` offline inside the pinned image (pure bookkeeping, no GPU) and then confirming against the live server.
 
-### 1.1 Zero hits by design (upstream `align`-mode sparsity)
+### 2.1 Zero hits by design (upstream `align`-mode sparsity)
 
 In mamba cache mode `align` — forced for Qwen3.5's GDN layers, which lack `SupportsMambaPrefixCaching` — the GDN kernel receives exactly **one running-state slot per scheduling step**: `mamba_get_block_table_tensor` gathers the block table down to `(seq_len - 1) // block_size`. Every earlier position in the mamba group's block table is the null block, `cache_full_blocks` skips null blocks, and the hybrid coordinator's `get_cached_block` demands a hit in **every** KV group. Consequence: a prompt that prefills in one chunk stores *nothing* reusable in the mamba group, and any identical re-send misses in that group, which zeroes the whole intersection. This is the measured behaviour: 7.6k-token identical re-sends hit 0 in every configuration ever tested on this stack.
 
 Hits only exist where a prefill chunk *ended* on a reusable boundary. Store and lookup are both quantized to `scheduler_block_size` — the LCM across groups, **4480** here, because page-size unification (`patch_kv_unify.py`) scales the target's attention and mamba blocks 2240 → 4480 to match the DFlash drafter's ~2x page.
 
-### 1.2 Wrong-state hits (introduced by the unify + prefix-align combination)
+### 2.2 Wrong-state hits (introduced by the unify + prefix-align combination)
 
 `Scheduler._mamba_block_aligned_split` exists to make chunk ends land on mamba block boundaries, but it aligns to `cache_config.block_size` (**2240**) — not the unified mamba block (**4480**). A chunk ending at an odd 2240-multiple ends *mid* mamba block: the kernel writes its end-of-step state into slot `(end-1)//4480`, whose nominal boundary is up to 2240 tokens later, and `cache_blocks` then hashes that block under the *boundary's* token hash.
 
@@ -26,7 +40,7 @@ Live demonstration (2026-08-24, exact production config): a 12,323-token first t
 
 ---
 
-## 2. The patch
+## 3. The patch
 
 **One line, scheduler-side** (`runtime/patch_mamba_chunk_align.py`, sentinel `dreamference-mamba-chunk-align`): `_mamba_block_aligned_split` aligns to `self.block_size` — the scheduler's *resolved* block size, which the engine core computes as the LCM across KV groups and passes in — instead of `cache_config.block_size`.
 
@@ -36,13 +50,13 @@ Why the LCM is the right value in every configuration:
 - It equals the coordinator's store-alignment and hit-gate grid, so every checkpoint the splitter forces is also *cacheable and hittable* — with the 2240 splitter, states at odd 2240-multiples (e.g. 6720, 11200) were unreachable even when correct.
 - Wherever group sizes agree — every configuration upstream lets through today — `self.block_size == cache_config.block_size` and the patch is a no-op.
 
-### 2.1 Chunk-size economics (no registry change required)
+### 3.1 Chunk-size economics (no registry change required)
 
 The current budgets (`max_num_batched_tokens` 8248 for the hybrid, 8213 for int4) floor to one 4480-token chunk per step under the patch. That doubles the step count of a long prefill but maximizes checkpoint density (every 4480 boundary). The alternative — raising the budget so chunks land at exactly 8960 (two blocks) — restores per-step efficiency at half the checkpoint density, moves the torch.compile range endpoint (one cold compile), and grows activation reserve slightly against the 0.68 gpu-mem headroom. **Recommendation: ship the patch with the budget unchanged, measure prefill throughput, and only then decide** — prefill on this box is compute-bound MoE work where a 4480-token batch is still large.
 
 ---
 
-## 3. Deployment Plan
+## 4. Deployment Plan
 
 1. Append to `Dockerfile.dense` (after the existing three patch RUNs):
    `COPY runtime/patch_mamba_chunk_align.py /tmp/` + `RUN python3 /tmp/patch_mamba_chunk_align.py`
@@ -54,14 +68,14 @@ The current budgets (`max_num_batched_tokens` 8248 for the hybrid, 8213 for int4
 
 ---
 
-## 4. What this does not fix (design floor)
+## 5. What this does not fix (design floor)
 
 - No hits below 4480 shared tokens, and hits remain quantized to the 4480 grid — both follow from one-state-slot-per-step `align` mode plus the LCM. Finer grids are not reachable by configuration: shrinking the grid to 2240 would require un-scaling the target's blocks, which either re-triggers the startup assert `patch_kv_unify.py` exists to fix or doubles attention KV bytes via padding.
 - The real fix is upstream: `SupportsMambaPrefixCaching` ('all' mode) for GDN, which materializes every block's state at real memory cost. Out of scope here.
 
 ---
 
-## 5. Further patch options (roadmap)
+## 6. Further patch options (roadmap)
 
 Ranked by value-per-risk on this stack. Geometry fact underpinning #1: the drafter's per-token KV is exactly 2x the target's (8 kv-heads x 128 head-dim = 4096 B vs 2 x 256 = 2048 B, both bf16) — that integer ratio is the whole reason the grid is 4480.
 
@@ -73,7 +87,7 @@ Ranked by value-per-risk on this stack. Geometry fact underpinning #1: the draft
 
 ---
 
-## 6. Upstream reporting
+## 7. Upstream reporting
 
 Two reports worth filing, both with the offline repro:
 
