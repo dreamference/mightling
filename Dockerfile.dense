@@ -18,6 +18,10 @@
 #                            'align'-mode checkpoints land on true block boundaries; without it
 #                            prefix-cache hits restore a stale GDN state and short prompts
 #                            checkpoint nothing (specs/DREAMFERENCE_PREFIX_CACHE.md)
+#   patch_unify_downscale    unify page sizes by scaling the drafter's block DOWN (2240 -> 1120)
+#                            instead of everyone else up: LCM drops 4480 -> 2240, halving the
+#                            prefix-cache hit floor/grid and doubling checkpoint density, and
+#                            the mamba page's 2x padding waste disappears (dense3, spec §6.1)
 #
 # All are sentinel-guarded and fail loudly when their anchor is missing, so a base bump
 # cannot silently produce an image that looks patched and is not.
@@ -29,8 +33,10 @@ COPY runtime/patch_inc_hybrid.py /opt/dreamference/patch_inc_hybrid.py
 COPY runtime/patch_int8_lmhead_v3.py /opt/dreamference/patch_int8_lmhead_v3.py
 COPY runtime/patch_fla_shmem.py /opt/dreamference/patch_fla_shmem.py
 COPY runtime/patch_mamba_chunk_align.py /opt/dreamference/patch_mamba_chunk_align.py
+COPY runtime/patch_unify_downscale.py /opt/dreamference/patch_unify_downscale.py
 
 RUN python3 /opt/dreamference/patch_inc_hybrid.py \
  && python3 /opt/dreamference/patch_int8_lmhead_v3.py \
  && python3 /opt/dreamference/patch_fla_shmem.py \
- && python3 /opt/dreamference/patch_mamba_chunk_align.py
+ && python3 /opt/dreamference/patch_mamba_chunk_align.py \
+ && python3 /opt/dreamference/patch_unify_downscale.py

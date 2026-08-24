@@ -363,11 +363,15 @@ class ModelMatrixRegistry:
                 # Values mirror the int4-dflash entry above verbatim, comments included by
                 # reference -- one recipe, one place to reason about it. Only the image differs.
                 # dense2 = dense1 + patch_mamba_chunk_align (2026-08-24): prefill chunks align
-                # to the 4480 LCM so mamba 'align'-mode checkpoints are correct and reachable —
-                # see specs/DREAMFERENCE_PREFIX_CACHE.md. The int4-dflash fallback deliberately
+                # to the LCM grid so mamba 'align'-mode checkpoints are correct and reachable.
+                # dense3 = dense2 + patch_unify_downscale (2026-08-24): page unification scales
+                # the drafter's block DOWN (2240 -> 1120) instead of the target's up, so the
+                # LCM — the prefix-cache hit floor/grid — halves 4480 -> 2240 at zero capacity
+                # cost, and the mamba page's 2x padding waste returns to the pool. Full story:
+                # specs/DREAMFERENCE_PREFIX_CACHE.md. The int4-dflash fallback deliberately
                 # stays on kvfix2 (untouched-fallback principle) and so retains the stale-hit
                 # hazard that spec documents.
-                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense2",
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense3",
                 # 32k, not the int4-dflash entry's 131k, for two stacked reasons. The hard one:
                 # this stack's non-KV residency is larger (the int8 lm-head holds both copies
                 # until its lazy first-forward build), and the first load refused loudly --

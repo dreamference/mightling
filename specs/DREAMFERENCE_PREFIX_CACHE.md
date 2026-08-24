@@ -157,7 +157,49 @@ by the patch, which only created checkpoints where there were none.
 - The real fix is upstream: `SupportsMambaPrefixCaching` ('all' mode) for GDN, which materializes
   every block's state at real memory cost. Out of scope here.
 
-## 6. Upstream reporting
+## 6. Further patch options (roadmap, 2026-08-24)
+
+Ranked by value-per-risk on this stack. Geometry fact underpinning #1: the drafter's per-token
+KV is exactly 2x the target's (8 kv-heads x 128 head-dim = 4096 B vs 2 x 256 = 2048 B, both
+bf16) — that integer ratio is the whole reason the grid is 4480.
+
+1. **Halve the grid by scaling the drafter's block DOWN (2240 → 1120).**
+   `unify_kv_cache_spec_page_size` only scales smaller-page specs *up* to the max page; with
+   the platform block at 2240 the drafter's page (9.2 MB) becomes the max and the target's
+   attn+mamba scale to 4480. A patch in the same function `patch_kv_unify.py` already rewrites
+   could instead scale the *larger*-page spec's block down when the ratio divides evenly:
+   drafter 2240 → 1120 puts every group at ~4.59 MB pages with blocks {2240, 2240, 1120} →
+   LCM = **2240**. Hit floor and grid halve, checkpoint density doubles, and — unlike padding —
+   there is **no capacity cost**: scaling is byte-exact (the 2.0 ratio makes the pages equal to
+   the byte). FA has no problem with block 1120 (multiple of 16), and stride consistency is
+   preserved (the acceptance collapse `patch_kv_unify.py` warns about came from padding
+   *without* scaling). Verification: the §4 matrix, expecting hits at 2240·k.
+2. **Stop freeing hash-cached checkpoint blocks mid-request.** `MambaManager.
+   remove_skipped_blocks` frees the previous state block as the sequence advances; freed
+   blocks keep their hash only until the free queue recycles them, which is what makes hits
+   opportunistic. Skipping the free when `block.block_hash is not None` keeps checkpoints
+   alive until normal request teardown. Trade: a 32k sequence holds up to ~7 extra mamba
+   blocks until it finishes, and under real pool pressure holding memory can cause the
+   preemption the free was avoiding — a wash there, a win in the mid-pressure band. Pair with:
+3. **Recycle-event logging** (one debug line where the pool evicts a hashed block on reuse) —
+   would have settled the §4 unexplained zero in one glance; near-zero risk.
+4. **Drafter-only fp8 KV** — the other route to a 2240 grid (4096 → 2048 B/token), with a
+   capacity *gain*; the FA backend has the fp8-KV plumbing, but sm121 kernel support needs a
+   live probe and quantized drafter KV risks DFlash acceptance. Superseded by #1 unless the
+   capacity gain is wanted for its own sake.
+5. **`all`-mode mamba caching for GDN** (the complete fix: every block's state materialised,
+   hits guaranteed rather than opportunistic, no dependence on chunk history). Requires the
+   FLA GDN kernel to write per-block states — it has no `all`-mode machinery today (verified)
+   — plus `SupportsMambaPrefixCaching` on the model class, at roughly −30% effective KV
+   capacity (mamba blocks become prompt-proportional). Upstream-grade work.
+
+Rejected on the numbers: padding target pages up to the drafter's at block 2240 (halves the
+token pool — scaling is waste-free, padding is not); partial-group hits with GDN-state replay
+(engine surgery upstream doesn't have either). Housekeeping regardless of the above: the
+`int4-dflash` fallback still ships the §1.2 stale-hit hazard on kvfix2 — either bake a
+`kvfix3` with `patch_mamba_chunk_align` or set its `enable_prefix_caching` to False.
+
+## 7. Upstream reporting
 
 Two reports worth filing, both with the offline repro:
 
