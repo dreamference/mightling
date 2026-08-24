@@ -206,14 +206,19 @@ class ModelMatrixRegistry:
                 # 'align' mode never materialises intermediate GDN state blocks during prefill.
                 # The mamba group's block table is the null block everywhere except the live
                 # tail state, cache_full_blocks skips null blocks, and the hybrid coordinator's
-                # get_cached_block demands a hit in EVERY KV group — so re-sending an identical
-                # prompt structurally cannot hit, on any checkpoint, image, or flag set. A real
-                # mamba state block is cached only when DECODE crosses a block boundary (2240
-                # tokens here), so the one reachable hit shape is a multi-turn continuation
-                # whose shared prefix extends past a boundary the previous turn generated
-                # through: verified offline, a 7600-token identical re-send hits 0 while a
-                # continuation past 8960 hits exactly 8960. That is also what the historical
-                # 1.4-3.6% logged hit rates were. 'all' mode would cache every block, but vLLM
+                # get_cached_block demands a hit in EVERY KV group — so nothing can hit below
+                # the first boundary at which a real mamba state block exists, on any
+                # checkpoint, image, or flag set. Store and lookup are both quantized to the
+                # scheduler_block_size grid — the LCM across groups, 4480 here because the
+                # DFlash drafter's block is 2x the target's 2240 — and align mode only
+                # materialises mamba states when prefill runs long enough to checkpoint one
+                # (multi-chunk, >8280-token prompts). Live-confirmed 2026-08-24 on this exact
+                # config: a 7.6k identical re-send hits 0 (single chunk, no state below 4480's
+                # first reachable boundary), while a second turn over a 12.5k-token first turn
+                # hit exactly 8960 = floor(12519/4480)*4480 — the first nonzero hit ever
+                # observed on this stack, and it skipped 11200 (odd 2240-multiple), pinning the
+                # 4480 grid. The historical 1.4-3.6% logged rates were these long-history
+                # multi-turn hits. 'all' mode would cache every block, but vLLM
                 # forces 'align' for models lacking SupportsMambaPrefixCaching — mamba1/mamba2
                 # families only; Qwen3.5's GDN is not among them — so no flag reaches it.
                 # Upstream design limitation, not aeon/DFlash/dense-stack specific. The flag
