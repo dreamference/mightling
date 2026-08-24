@@ -180,6 +180,20 @@ Wasting 3 GB of VRAM on empty padding is a cheap tax to pay for the massive spee
 
 Until vLLM rewrites its kernels to support decoupled hybrid caching natively, paying the 3 GB memory tax is mandatory to keep the engine lightning fast.
 
+### 1.9 Roadmap: Explicit (Opt-In) Client Caching
+
+Currently, vLLM's prefix caching is **100% automatic and global**. Every sequence is hashed and pushed into the LRU pool. However, modifying the engine to support strict **opt-in caching** (where the client explicitly requests caching via an API flag) is a highly recommended, Python-only engineering task that yields massive stability benefits.
+
+**How it would be implemented:**
+No low-level CUDA kernels need to be altered. The implementation requires three straightforward Python-layer changes:
+1. **API Layer:** Modify the OpenAI-compatible API (`vllm/entrypoints/openai/`) to accept a custom request flag (e.g., `"enable_cache": false`).
+2. **Engine Layer:** Pass this boolean down to the `SequenceGroup` object.
+3. **Allocator Layer (The Switch):** Inside the `BlockAllocator`, modify the block-freeing logic. Currently, if a block has a hash, it is sent to the LRU Prefix queue. The logic would change to: `if block.has_hash and sequence.enable_cache:`. If the flag is false, the block bypasses the LRU pool entirely and its memory is instantly zeroized/reclaimed for new active requests.
+
+**Why this is critical for production:**
+* **Preventing "Cache Thrashing":** In a multi-agent environment, the LRU queue is filled with highly valuable, frequently reused System Prompts. If a user suddenly submits a massive, one-off batch job (e.g., summarizing 50 unique 20,000-token PDFs), the automatic cacher will blindly attempt to cache all of them. This massive influx of useless data will instantly flood the LRU queue, pushing out and destroying the valuable System Prompts. Explicit control allows the PDF job to opt-out, destroying its KV blocks instantly upon completion and protecting the main LRU pool for the agents.
+* **Security and Privacy (PII):** If a specific user prompt contains sensitive PII, passwords, or strict-confidentiality text, the client can explicitly opt out of caching to guarantee that no mathematical trace of that text sits dormant in the shared GPU memory pool.
+
 ---
 
 ## 2. The two defects
