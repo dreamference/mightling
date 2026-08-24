@@ -112,7 +112,29 @@ box is compute-bound MoE work where a 4480-token batch is still large.
 4. Done 2026-08-24: `dense2` built (patch layer only), default entry repointed, server
    relaunched.
 
-## 4. Verification plan
+## 4. Verification — results (2026-08-24, dense2 live)
+
+| Probe | Result |
+| --- | --- |
+| Identical 7.4k re-send | **hit 4480** (was 0 on dense1, every trial). Warm wall 2.5s. |
+| Two-turn over 12.2k first turn | **hit 8960** in 2 of 3 runs; see caveat below. |
+| Warm vs cold answers (greedy, identical input) | **identical** — the §1.2 A/B: post-patch hits restore the correct state. |
+| Cold prefill throughput, 10.5k prompt | 1,929 tok/s vs 1,973 on dense1 = **−2.2%** for 4480-token chunks; the §2.1 budget bump is not worth its recompile. |
+
+**Caveat — hits are opportunistic, not guaranteed.** The first post-boot matrix run's two-turn
+probe hit 0, **unexplained**: two identical follow-up sequences (including one reproducing the
+full matrix shape) both hit 8960. Candidate accounts, neither confirmed: (a) recycling of a
+freed checkpoint block — align mode frees the previous state block mid-request
+(`remove_skipped_blocks`), and a freed block keeps its hash only until the free queue reuses
+it — though the LRU queue consumes never-allocated blocks first and the pool was ~80% untouched
+at the time, which makes this strained; (b) some first-minute-post-boot engine state (the run
+started ~1 minute after health, right behind the 43s lazy-warmup request). Rare,
+boot-adjacent, and the fix direction would not change either way; noted for re-runs rather
+than chased. Structurally, checkpoints *are* freeable mid-request, so under genuine pool
+pressure hits can be lost — inherent to `align` mode's one-live-state design, not introduced
+by the patch, which only created checkpoints where there were none.
+
+### Original plan (retained for re-runs)
 
 - **Re-send probe** (exists: `scratchpad` probes from the investigation): 7.6k identical re-send —
   expect `prefix_cache_hits` delta 4480, was 0.
