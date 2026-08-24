@@ -1,7 +1,8 @@
 # Prefix Caching on the Hybrid GDN + DFlash Stack — Findings and Patch Design
 
-**Status:** v2 — Deployed (patch baked into `dreamference-vllm-dflash:0.23.0-aeon-dense2`,
-default entry repointed 2026-08-24; verification results in §4)
+**Status:** v3 — Deployed (`patch_mamba_chunk_align` in dense2, `patch_unify_downscale` — §6.1,
+implemented — in `dreamference-vllm-dflash:0.23.0-aeon-dense3`; default entry on dense3 since
+2026-08-24; verification results in §4)
 **Date:** 2026-08-24
 **Patch:** `runtime/patch_mamba_chunk_align.py`
 **Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` / `qwen3.5-122b-a10b-int4-dflash`, image
@@ -112,14 +113,39 @@ box is compute-bound MoE work where a 4480-token batch is still large.
 4. Done 2026-08-24: `dense2` built (patch layer only), default entry repointed, server
    relaunched.
 
-## 4. Verification — results (2026-08-24, dense2 live)
+## 4. Verification — results (2026-08-24; dense2 then dense3 live)
 
-| Probe | Result |
-| --- | --- |
-| Identical 7.4k re-send | **hit 4480** (was 0 on dense1, every trial). Warm wall 2.5s. |
-| Two-turn over 12.2k first turn | **hit 8960** in 2 of 3 runs; see caveat below. |
-| Warm vs cold answers (greedy, identical input) | **identical** — the §1.2 A/B: post-patch hits restore the correct state. |
-| Cold prefill throughput, 10.5k prompt | 1,929 tok/s vs 1,973 on dense1 = **−2.2%** for 4480-token chunks; the §2.1 budget bump is not worth its recompile. |
+| Probe | dense1 (pre-patch) | dense2 (chunk-align) | dense3 (+ downscale, grid 2240) |
+| --- | --- | --- | --- |
+| Identical 7.4k re-send | 0, every trial | **4480** | **6720** (warm wall 1.65s) |
+| Two-turn over 12.2k first turn | 8960 with stale state | **8960**, correct state | **11200** (warm 4.2s vs cold 10.0s) |
+| Warm vs cold, greedy, identical input | — | byte-identical | factually identical; see note |
+| Cold prefill, 10.5k prompt | 1,973 tok/s | 1,929 (−2.2%) | 1,812 (−8% vs dense1) |
+| KV pool (boot-dependent memory) | 12.9 GiB / 71.8k tok | 13.3 GiB / 73.5k | **12.6 GiB / 111.7k** (+52% tokens on fewer bytes — the mamba 2x padding reclaimed) |
+
+The downscale engaged as designed — server log: `dreamference-unify-downscale: 6 layer(s)
+block 2240 -> 1120 (unified page 4587520 bytes)`, the six drafter attention layers, page equal
+to the offline prediction to the byte.
+
+**Warm/cold note (dense3):** answers diverge at the token level but are factually identical —
+on a varied 11.6k-token ledger, warm (hit 11200) and cold both recalled Record 0 verbatim and
+the correct decade span, differing only in phrasing ("1950 to 1999" vs "the 1950s through the
+1990s"). Different prefill chunkings produce ulp-level logit differences that flip greedy
+near-ties; dense2's byte-identical result was the lucky case, not the guarantee. The
+structural argument is the strong one: with splitter grid, mamba block, and LCM all equal
+(2240), a chunk can no longer end mid mamba block, so the §1.2 staleness mechanism cannot
+arise by construction.
+
+**Prefill cost:** the 8192-token budget floors to 6720-token chunks on the 2240 grid (was 8192
+whole on dense1). Recoverable by raising `max_num_batched_tokens` so the post-draft-slot
+budget lands on a 2240 multiple (e.g. 8960 + 88 slots = 9048), at the cost of one cold
+compile; not taken — 8% is tolerable and the KV-pool and hit-rate wins dominate.
+
+**Launch note:** the dense3 relaunch was refused twice by the host-safety pre-flight (desktop
+~2 GB fatter than at the morning launches; at 0.72 the arena + 10.9 GB load peak missed
+available memory by 1.3 GB, at 0.71 by 0.13 GB while the desktop drifted between checks).
+`gpu_memory_utilization` is now 0.70 in the registry — ~6.5 GiB KV floor headroom retained,
+worth raising back when the desktop is lighter; the registry comment records the arithmetic.
 
 **Caveat — hits are opportunistic, not guaranteed.** The first post-boot matrix run's two-turn
 probe hit 0, **unexplained**: two identical follow-up sequences (including one reproducing the
@@ -163,7 +189,9 @@ Ranked by value-per-risk on this stack. Geometry fact underpinning #1: the draft
 KV is exactly 2x the target's (8 kv-heads x 128 head-dim = 4096 B vs 2 x 256 = 2048 B, both
 bf16) — that integer ratio is the whole reason the grid is 4480.
 
-1. **Halve the grid by scaling the drafter's block DOWN (2240 → 1120).**
+1. **Halve the grid by scaling the drafter's block DOWN (2240 → 1120).** *Implemented
+   2026-08-24 as `runtime/patch_unify_downscale.py`, baked into dense3 — §4 has the measured
+   results, including the unplanned +52% KV pool from reclaiming the mamba padding.*
    `unify_kv_cache_spec_page_size` only scales smaller-page specs *up* to the max page; with
    the platform block at 2240 the drafter's page (9.2 MB) becomes the max and the target's
    attn+mamba scale to 4480. A patch in the same function `patch_kv_unify.py` already rewrites
