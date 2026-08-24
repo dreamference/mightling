@@ -16,6 +16,11 @@ Before diving into the defects and patches, it is critical to understand how pre
 
 This stack must maintain KV cache for three distinct components simultaneously. Because the DFlash speculative drafter requires 2x the space per token, the engine forces a "page unification" step (`patch_kv_unify.py`). It scales the target's attention and GDN blocks up to match the drafter's page size, resulting in a strict **4480-token grid**.
 
+**Approximate Cache Entry Size Formula:**
+For a prefix of length $L$ tokens (where $L$ is a multiple of 4480), the total memory consumed by a single cache entry is approximately:
+$$Memory(L) \approx (L \times 121 \text{ KB}) + 157 \text{ MB}$$
+*(Where $121 \text{ KB/token}$ is the Attention KV cost and $157 \text{ MB}$ is the fixed GDN recurrent state.)*
+
 ```mermaid
 graph TD
     subgraph Target Model
@@ -98,6 +103,18 @@ The total KV Cache pool on this stack is roughly **~13 GiB**. Here is how the me
 
 * **Target & Drafter Attention:** This consumes the vast majority of the pool. Attention KV scales with tokens (roughly ~121 KB per token across all layers), meaning a 10,000-token prompt consumes about ~1.2 GB of Attention KV.
 * **GDN (Mamba) Cache:** A single complete GDN state across all 36 GDN layers is roughly **157 MB** (about 4.36 MB per layer). 
+
+#### Why is the GDN cache fixed? (In Simple Words)
+Unlike standard Attention memory, which grows token-by-token (like a growing shopping list), the GDN state is a **fixed-size summary** (like a one-page summary of a book). 
+
+1. **Memory Safety:** If we saved a new 157 MB summary for every single token or even every small block of tokens, we would run out of memory (OOM) almost instantly. For a 10,000-token prompt, saving it at every block would take ~94 GB! 
+2. **Architecture:** The model architecture (Gated DeltaNet) is designed to carry forward this summary as it reads. To save it, we have to pause and "photocopy" the entire 157 MB state. To keep things efficient, we only do this "photocopying" at specific, large intervals (every 4480 tokens).
+
+#### Where does 157 MB come from? (In Simple Words)
+The 157 MB is the total size of the "math summary" that the model's 36 GDN layers need to keep track of what it has already read.
+* **The Math:** Each of the 36 layers has its own internal state. For Qwen 122B, each layer's state is about **4.36 MB**. 
+* **The Layer Breakdown:** This 4.36 MB per layer comes from the layer's internal dimensions (specifically 64 heads, each tracking a 128x128 matrix). When you multiply these dimensions together and account for the precision (float32), it adds up to exactly ~4 MB per layer.
+* **The Total:** $36 \text{ layers} \times 4.36 \text{ MB} = 157 \text{ MB}$.
 
 **The Percentage in `align` Mode (Current State):**
 Because `align` mode only stores **one** GDN state slot per active request, if you have 8 concurrent agents running, the total GDN footprint is `8 sequences × 157 MB = ~1.25 GB`. 
