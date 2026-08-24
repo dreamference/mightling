@@ -1,10 +1,10 @@
 # Prefix Caching on the Hybrid GDN + DFlash Stack — Findings and Patch Design
 
-**Status:** Proposed (Code is currently on `dense1` with `enable_prefix_caching: True` for both models)
+**Status:** v5 — Deployed (`dense5` with region-adaptive chunking + 9048 budget for hybrid; `enable_prefix_caching: False` for int4 fallback)
 
 **Date:** 2026-08-24
 **Patch:** `runtime/patch_mamba_chunk_align.py`
-**Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` / `qwen3.5-122b-a10b-int4-dflash`, images `dreamference-vllm-dflash:0.23.0-aeon-dense1` and `dreamference-vllm-dflash:0.23.0-aeon-kvfix2`
+**Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense5`) / `qwen3.5-122b-a10b-int4-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-kvfix2`)
 
 ---
 
@@ -12,13 +12,118 @@
 
 Before diving into the defects and patches, it is critical to understand how prefix caching operates on the **Hybrid GDN + DFlash** architecture, as it fundamentally differs from standard attention models.
 
-1. **The Three KV Groups:** This stack must maintain KV cache for three distinct components simultaneously: 
-   - The target model's standard Attention layers.
-   - The target model's GDN (Gated Dense Network / Mamba-like) layers.
-   - The DFlash speculative drafter (which has a per-token KV footprint exactly 2x larger than the target).
-2. **Page Unification (The 4480 Grid):** Because the DFlash drafter requires more space per token, the engine forces a "page unification" step (`patch_kv_unify.py`). It scales the target's attention and GDN blocks up to match the drafter's page size. The resulting Least Common Multiple (LCM) across all three groups dictates that blocks are quantized into massive **4480-token grids**.
-3. **Mamba `align` Mode:** Because Qwen's GDN layers do not natively support full state materialization (`SupportsMambaPrefixCaching` is missing), vLLM is forced to run in `align` mode. This means it cannot save the GDN state for every single token. It only saves **one state slot at the very end of a scheduling step**.
-4. **The Boundary Rule:** For a prefix cache hit to occur, a prefill chunk MUST end exactly on a 4480-token boundary. If two agents read the exact same 4,000-token prompt, they will get **zero cache hits** because the sequence didn't reach the 4480 boundary. If they share 10,000 tokens, they will hit exactly at 8960 (2 blocks of 4480).
+### 1.1 The Three KV Groups & Page Unification
+
+This stack must maintain KV cache for three distinct components simultaneously. Because the DFlash speculative drafter requires 2x the space per token, the engine forces a "page unification" step (`patch_kv_unify.py`). It scales the target's attention and GDN blocks up to match the drafter's page size, resulting in a strict **4480-token grid**.
+
+```mermaid
+graph TD
+    subgraph Target Model
+        A[Attention Layers<br/>2048 B/token]
+        B[GDN Layers<br/>Mamba State]
+    end
+    subgraph Speculative Drafter
+        C[DFlash Drafter<br/>4096 B/token]
+    end
+    
+    A -->|Scale Up| D{Page Unification<br/>patch_kv_unify.py}
+    B -->|Scale Up| D
+    C -->|Anchor| D
+    
+    D -->|Least Common Multiple| E((4480-Token Grid))
+```
+
+### 1.2 Mamba `align` Mode & Full State Materialization
+
+Because Qwen's GDN layers do not natively support full state materialization (`SupportsMambaPrefixCaching` is missing), vLLM is forced to run in `align` mode. This means it cannot save the GDN state for every single token. It only saves **one state slot at the very end of a scheduling step**.
+
+#### What it would take to fix this (Enabling `all` mode)
+To support full state materialization, two massive upstream engineering tasks are required:
+1. **GPU Kernel Rewrite:** The underlying FLA (Flash Linear Attention) CUDA/Triton kernels must be rewritten. Currently, they compute the GDN state in fast SRAM and only write to Global Memory at the end of the sequence. They must be modified to pause at every KV block boundary and write the intermediate state out to memory.
+2. **vLLM Integration:** The Python model executor must pass the full block table to the new kernel, giving it the exact pointers for every block, and inherit the `SupportsMambaPrefixCaching` trait so vLLM knows it can enable `all` mode.
+
+#### The Fatal Catch: Memory Explosion
+Even if the kernel is rewritten, enabling `all` mode triggers a physics problem. While standard Attention KV cache is small (kilobytes per token), a single fixed GDN state for all 36 layers of Qwen 122B is massive—roughly **~157 MB**. 
+
+```mermaid
+graph TD
+    subgraph "align" Mode (Current)
+        A[10,000 Token Prompt] -->|One state per step| B(Single GDN State<br/>~157 MB)
+    end
+    
+    subgraph "all" Mode (Full Materialization)
+        C[10,000 Token Prompt] -->|State per block| D(Block 1: 157 MB)
+        C -->|State per block| E(Block 2: 157 MB)
+        C -->|State per block| F(Block N: 157 MB...)
+        D -.-> OOM
+        E -.-> OOM
+        F -.-> OOM
+        OOM((Fatal OOM Crash<br/>~94 GB VRAM Cost))
+    end
+    
+    classDef danger fill:#c62828,stroke:#000,stroke-width:2px,color:#fff;
+    class OOM danger;
+```
+
+In `align` mode, vLLM only stores one 157 MB state per request. If `all` mode were enabled, storing a 157 MB state for *every single block* would instantly consume ~94 GB of VRAM for a single 10,000-token prompt, causing an inevitable Out-Of-Memory (OOM) crash on almost any GPU. The strict grid in `align` mode is a necessary compromise to keep the memory footprint survivable.
+
+### 1.3 The Boundary Rule
+
+For a prefix cache hit to occur, a prefill chunk MUST end exactly on a 4480-token boundary. 
+
+```mermaid
+graph LR
+    subgraph Token Sequence
+        T0[0 Tokens] -->|Miss| T4000[4000 Tokens]
+        T4000 -->|HIT: Boundary 1| T4480[4480 Tokens]
+        T4480 -->|Miss| T7000[7000 Tokens]
+        T7000 -->|HIT: Boundary 2| T8960[8960 Tokens]
+        T8960 -->|Miss| T10000[10000 Tokens]
+    end
+    
+    classDef hit fill:#2e7d32,stroke:#000,stroke-width:2px,color:#fff;
+    classDef miss fill:#c62828,stroke:#000,stroke-width:2px,color:#fff;
+    
+    class T4480,T8960 hit;
+    class T0,T4000,T7000,T10000 miss;
+```
+
+*(Example: If two agents read the exact same 4,000-token prompt, they get **zero cache hits** because the sequence didn't reach the 4480 boundary. If they share 10,000 tokens, they hit exactly at 8960).*
+
+### 1.4 Memory Footprint: What Percentage of the Cache is GDN?
+
+Understanding the physical memory footprint explains why the cache operates this way. 
+
+The total KV Cache pool on this stack is roughly **~13 GiB**. Here is how the memory is distributed:
+
+* **Target & Drafter Attention:** This consumes the vast majority of the pool. Attention KV scales with tokens (roughly ~121 KB per token across all layers), meaning a 10,000-token prompt consumes about ~1.2 GB of Attention KV.
+* **GDN (Mamba) Cache:** A single complete GDN state across all 36 GDN layers is roughly **157 MB** (about 4.36 MB per layer). 
+
+**The Percentage in `align` Mode (Current State):**
+Because `align` mode only stores **one** GDN state slot per active request, if you have 8 concurrent agents running, the total GDN footprint is `8 sequences × 157 MB = ~1.25 GB`. 
+Against the ~13 GB total pool, the GDN cache currently consumes **less than 10%** of the total cache memory. The other 90%+ is dedicated entirely to the Attention KV.
+
+**The Percentage in `all` Mode (The Fatal Hypothetical):**
+If `all` mode were enabled and forced to save a 157 MB GDN state for *every single 16-token block* (standard vLLM block size), a 10,000-token prompt would generate 625 blocks. 
+`625 blocks × 157 MB = ~98 GB` of GDN state for just one prompt. In this scenario, the GDN cache would consume **100% of the KV pool and immediately crash the server**, which is why `align` mode restricts it to a single slot (less than 10%).
+
+### 1.5 Decoupling the Caches: Pros and Cons
+
+A common architectural question is why vLLM unifies these caches via `HybridKVCacheCoordinator` instead of splitting the **Target Attention**, **Target GDN**, and **Drafter** caches into three completely independent processing frameworks.
+
+If the engine were rewritten to decouple them, the trade-offs would be:
+
+#### The Pluses (Pros)
+1. **Decoupled Grid Sizes (Granularity):** Target Attention would no longer be forced into the massive 4480-token grid required by the Drafter and GDN. It could return to a standard 16-token grid.
+2. **Hit Rate Maximization:** A 4,000-token sequence would no longer result in a "zero hit" just because it missed the GDN 4480 boundary. The Attention cache could hit at exactly 4,000 tokens, the Drafter cache could hit at 4,000, and only the GDN cache would miss.
+3. **Memory Efficiency (No Padding):** Page unification forces the Target's blocks to scale up to match the Drafter. Independent frameworks would eliminate this padding, returning gigabytes of wasted space to the KV pool.
+
+#### The Minuses (Cons)
+1. **Divergent Engine State (Coordination Hell):** This is the fatal flaw. If Attention hits at 4,000 tokens but GDN misses (0 hits), the engine must run a "partial prefill". It would have to compute the GDN layers from token 0 to 4000, while somehow telling the Attention layers to sleep during that exact same span. This shatters the sequential forward pass.
+2. **Kernel Incompatibility:** vLLM's low-level CUDA kernels (like PagedAttention) are designed to process all layers of a sequence synchronously. The kernels lack the ability to selectively mask out specific layers based on cache hit divergence.
+3. **3x CPU Bookkeeping Overhead:** The Python scheduler would have to maintain three independent BlockTables, three LRU eviction queues, and three hash maps for every single sequence. This tripling of bookkeeping would likely cause CPU bottlenecks during high-concurrency routing.
+
+Because of the "Coordination Hell," vLLM forces unification: a sequence is only considered a cache hit if **all three groups** hit at the exact same token boundary.
 
 ---
 
@@ -52,19 +157,16 @@ Why the LCM is the right value in every configuration:
 
 ### 3.1 Chunk-size economics (no registry change required)
 
-The current budgets (`max_num_batched_tokens` 8248 for the hybrid, 8213 for int4) floor to one 4480-token chunk per step under the patch. That doubles the step count of a long prefill but maximizes checkpoint density (every 4480 boundary). The alternative — raising the budget so chunks land at exactly 8960 (two blocks) — restores per-step efficiency at half the checkpoint density, moves the torch.compile range endpoint (one cold compile), and grows activation reserve slightly against the 0.68 gpu-mem headroom. **Recommendation: ship the patch with the budget unchanged, measure prefill throughput, and only then decide** — prefill on this box is compute-bound MoE work where a 4480-token batch is still large.
+The `max_num_batched_tokens` budget went from 8248 → 9048 for the hybrid entry (exactly two 4480-token blocks). Because the `dense5` image includes a region-adaptive chunking patch, prefill chunks are capped to 1 block (4480) *only* during the first two blocks, ensuring dense checkpoints where shared system prompts live. Deeper prefill runs at the full 9048 budget (two blocks per step) to recover per-step efficiency. The `gpu_memory_utilization` was safely raised to 0.70 to cover the larger activation reserve.
 
 ---
 
-## 4. Deployment Plan
+## 4. Deployment History
 
-1. Append to `Dockerfile.dense` (after the existing three patch RUNs):
-   `COPY runtime/patch_mamba_chunk_align.py /tmp/` + `RUN python3 /tmp/patch_mamba_chunk_align.py`
-   (the script exits 1 and fails the build if the anchor is missing).
-2. Build as `dreamference-vllm-dflash:0.23.0-aeon-dense2` (base layers cached; the build is patch-layers only).
-3. Point the default (hybrid) entry's `docker_image` at `dense2`, restart via `dream server`.
-   The torch.compile cache is keyed off traced sources of the *model*, not the scheduler, and the scheduler is host-process Python — expect a warm compile cache.
-4. **Housekeeping:** The `int4-dflash` fallback currently runs on `kvfix2` with `enable_prefix_caching` set to `True` in the registry. Because it lacks the new alignment patches, it ships the §1.2 stale-hit hazard. We must either bake a `kvfix3` with `patch_mamba_chunk_align` or set its `enable_prefix_caching` to `False` in the registry.
+1. `dense2` deployed the `patch_mamba_chunk_align.py` patch.
+2. `dense3` deployed the `patch_unify_downscale` patch.
+3. `dense5` deployed the region-adaptive `patch_mamba_checkpoint_chunks` patch, enabling the 9048 budget.
+4. **Housekeeping:** The `int4-dflash` fallback currently runs on `kvfix2`. Because it lacks the new alignment patches, it would ship the §2.2 stale-hit hazard if caching were enabled. Its `enable_prefix_caching` is therefore explicitly set to `False` in the registry. It will remain off until a patched `kvfix3` image is baked.
 
 ---
 
