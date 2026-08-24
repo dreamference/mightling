@@ -375,15 +375,19 @@ class ModelMatrixRegistry:
                 # LCM — the prefix-cache hit floor/grid — halves 4480 -> 2240 at zero capacity
                 # cost, and the mamba page's 2x padding waste returns to the pool. Full story:
                 # specs/DREAMFERENCE_PREFIX_CACHE.md.
-                # dense4 = dense3 + patch_mamba_checkpoint_chunks (2026-08-24): aligned prefill
-                # chunks capped at DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS blocks (default 1), so
-                # EVERY 2240 boundary gets a mamba state checkpoint and any shared prefix
-                # >= 2240 tokens can hit -- not just the boundaries where a budget-sized chunk
-                # happened to end. Checkpoints are evictable cache (freed mid-request, hash
-                # kept), so density costs pool pressure, not live capacity. The int4-dflash
+                # dense5 = dense4's patch_mamba_checkpoint_chunks made region-adaptive
+                # (2026-08-24): chunks are capped to 1 block only inside the first
+                # DREAMFERENCE_CHECKPOINT_DENSE_BLOCKS blocks (default 2 = 4480 tokens), so the
+                # 2240 and 4480 boundaries -- where shared system prompts and personas live --
+                # always get checkpoints, while deeper prefill runs full-budget chunks (the
+                # force-to-last_cache branch still checkpoints every prompt's final boundary,
+                # which is what same-conversation continuations hit). Uniform capping measured
+                # -14% prefill same-boot; this form keeps the short-prefix hits at ~full speed.
+                # Checkpoints are evictable cache (freed mid-request, hash kept), so density
+                # costs pool pressure, not live capacity. The int4-dflash
                 # fallback stays on kvfix2 (untouched-fallback principle); its prefix caching
                 # is now OFF instead, closing the stale-hit hazard the spec documents.
-                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense4",
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense5",
                 # 32k, not the int4-dflash entry's 131k, for two stacked reasons. The hard one:
                 # this stack's non-KV residency is larger (the int8 lm-head holds both copies
                 # until its lazy first-forward build), and the first load refused loudly --
@@ -413,10 +417,15 @@ class ModelMatrixRegistry:
                 "attention_backend": "flash_attn",
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
-                # 8280 = 8192 + max_num_seqs * (num_speculative_tokens - 1) = 8192 + 8*11; the
-                # draft-slot arithmetic the int4-dflash entry documents, retuned for 8 seqs
-                # and the n=12 draft window below.
-                "max_num_batched_tokens": 8280,
+                # 9048 = 8960 + max_num_seqs * (num_speculative_tokens - 1) = 8960 + 8*11; the
+                # draft-slot arithmetic the int4-dflash entry documents, retuned for 8 seqs and
+                # the n=12 draft window below. 8960, not the previous 8192: since dense2 the
+                # scheduler floors prefill chunks to the 2240 grid, and 8192 floored to 6720 --
+                # an 18% per-step budget waste. 8960 is exactly 4 blocks, so sparse chunks
+                # beyond the dense checkpoint region (see the dense5 image note above) run at
+                # full budget. Changing this moves the torch.compile range endpoint: one cold
+                # compile on the next launch.
+                "max_num_batched_tokens": 9048,
                 "enable_prefix_caching": True,
                 "speculative_config": {
                     "method": "dflash",

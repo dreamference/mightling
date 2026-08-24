@@ -1,6 +1,9 @@
 # Prefix Caching on the Hybrid GDN + DFlash Stack — Findings and Patch Design
 
-**Status:** v4 — Deployed (`patch_mamba_chunk_align` → dense2, `patch_unify_downscale` →
+**Status:** v5 — Deployed (see §4.2: dense-region adaptive chunking + 9048 budget recovered
+the prefill cost in full)
+
+**v4 was:** Deployed (`patch_mamba_chunk_align` → dense2, `patch_unify_downscale` →
 dense3, `patch_mamba_checkpoint_chunks` → `dreamference-vllm-dflash:0.23.0-aeon-dense4`;
 default entry on dense4 since 2026-08-24; the int4-dflash fallback now runs with prefix
 caching OFF on its untouched kvfix2 image. Verification results in §4/§4.1)
@@ -191,6 +194,32 @@ time correlated with an add→abort request storm every ~2s — Onyx re-establis
 connection after the restart. Steady-state behaviour is verified correct; treat first-minute
 measurements after a restart as unreliable, and take any production zero-hit report with a
 restart timestamp check before reopening this file.
+
+### 4.2 dense5 — region-adaptive density + budget on the grid (prefill recovered)
+
+Same-boot A/B showed uniform cap=1 costs **−14% prefill** (1,837 vs 2,137 tok/s at 10.5k) —
+much more than the cross-boot noise had suggested. dense5 makes the cap region-adaptive:
+chunks are capped to 1 block only inside the first `DREAMFERENCE_CHECKPOINT_DENSE_BLOCKS`
+blocks (default 2 = 4480 tokens, where shared system prompts and personas live); beyond it
+chunks run the full grid-floored budget, and the force-to-last_cache branch still checkpoints
+every prompt's final boundary. `max_num_batched_tokens` went 8280 → **9048** so the
+post-draft-slot budget is exactly 8960 = 4 blocks (no flooring waste; one cold compile).
+
+Measured (2026-08-24, dense5 live): prefill 10.5k **2,051–2,202 tok/s** (uniform cap: 1,837;
+uncapped: 2,137 — recovery complete, at or above uncapped); 21k prompt 2,036 tok/s;
+divergent ~4.9k-shared still hits **4480**; two-turn 12.2k still hits **11200**. The trade:
+checkpoints between the dense region and each prompt's final boundary are now sparse (budget-
+sized spacing), so a mid-depth divergence (say, shared 8k) hits at 4480 instead of 6720 —
+tune `DREAMFERENCE_CHECKPOINT_DENSE_BLOCKS` up (no rebuild, one restart) if mid-depth
+branching traffic ever matters more than the 14%.
+
+**Band fix (same day):** the first cut applied the cap inside the splitter's two branches,
+and the equality case — `num_new == last_cache_position == budget`, i.e. prompts in
+[8960, 11200) — took the else-path uncapped, skipping the dense-region checkpoints entirely.
+The cap now applies *before* the branch arithmetic (in-region chunks are grid multiples, so
+the branches are no-ops on them). Verified live: a 9,780-token donor in the band now serves a
+2240 hit to a request sharing only ~3.2k tokens (pre-fix: 0), with prefill unchanged
+(2,034 tok/s).
 
 ### Original plan (retained for re-runs)
 

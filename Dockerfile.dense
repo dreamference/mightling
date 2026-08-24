@@ -22,10 +22,13 @@
 #                            instead of everyone else up: LCM drops 4480 -> 2240, halving the
 #                            prefix-cache hit floor/grid and doubling checkpoint density, and
 #                            the mamba page's 2x padding waste disappears (dense3, spec §6.1)
-#   patch_mamba_checkpoint_chunks  cap aligned prefill chunks at N blocks (env
-#                            DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS, default 1) so every N-th
-#                            2240 boundary gets a mamba state checkpoint — hits for any shared
-#                            prefix >= 2240 tokens, not just chunk-end boundaries (dense4)
+#   patch_mamba_checkpoint_chunks  inside a dense region (DREAMFERENCE_CHECKPOINT_DENSE_BLOCKS,
+#                            default 2 = first 4480 tokens) cap aligned prefill chunks at
+#                            DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS blocks (default 1), so every
+#                            2240 boundary there gets a mamba state checkpoint; deeper prefill
+#                            runs full-budget chunks and the final boundary is always
+#                            checkpointed. Uniform capping measured -14% prefill (dense4);
+#                            the region form recovers it (dense5, spec §4.2)
 #
 # All are sentinel-guarded and fail loudly when their anchor is missing, so a base bump
 # cannot silently produce an image that looks patched and is not.

@@ -14,12 +14,16 @@ first 5000 tokens finds no state at 2240 or 4480 and misses entirely, even thoug
 full-attention KV for those blocks is cached. Checkpoint density equals chunk size, and chunk
 size was budget-driven.
 
-The fix: cap aligned prefill chunks at N blocks, so every N-th block boundary becomes a chunk
-end and receives an exact boundary state. N comes from `DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS`
-(read once at scheduler init): default **1** — a checkpoint at every 2240-token boundary, the
-densest hit resolution this architecture allows — `0` disables the cap (previous behaviour).
-The cap applies only inside the mamba-aligned prefill region of hybrid models; decode, the
-sub-block tail, and non-mamba models are untouched.
+The fix: cap aligned prefill chunks at N blocks (`DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS`,
+default 1; 0 disables) — but only inside a **dense region** of the first
+`DREAMFERENCE_CHECKPOINT_DENSE_BLOCKS` blocks (default 2, i.e. 4480 tokens; 0 disables the
+region and with it the cap). Inside the region every block boundary becomes a chunk end and
+receives an exact state — that is where shared prefixes (system prompts, personas, repo-map
+heads) live. Beyond it, chunks run at the full grid-floored budget for prefill speed, and the
+splitter's force-to-last_cache branch still checkpoints every prompt's final boundary, which
+is all a same-conversation continuation needs. Measured on GB10 (same boot): capping every
+chunk cost ~14% prefill (1,837 vs 2,137 tok/s on 10.5k); the dense-region form keeps the
+short-prefix hits at ~full speed. Decode, the sub-block tail, and non-mamba models untouched.
 
 Why this is affordable where 'all' mode is not: a mamba checkpoint block on this stack is
 ~157 MB (36 GDN layers x 4.59 MB page). 'all' mode would hold one per block per *running*
@@ -60,43 +64,37 @@ INIT_NEW = """        self.need_mamba_block_aligned_split = (
             _dreamference_ckpt_blocks * self.block_size
             if _dreamference_ckpt_blocks > 0
             else None
+        )
+        # Dense region: the cap applies only below this many tokens; beyond it chunks run at
+        # the full (grid-floored) budget, and the force-to-last_cache branch still guarantees
+        # a checkpoint at every prompt's final boundary. Shared prefixes (system prompts,
+        # personas) live early; deep continuations only need the last boundary. Measured on
+        # GB10: capping everywhere costs ~14% prefill; dense-2-blocks + sparse recovers it.
+        _dreamference_dense_blocks = int(
+            _dreamference_os.environ.get("DREAMFERENCE_CHECKPOINT_DENSE_BLOCKS", "2")
+        )
+        self._dreamference_dense_region_tokens = (
+            _dreamference_dense_blocks * self.block_size
+            if _dreamference_dense_blocks > 0
+            else 0
         )"""
 
-SPLIT_OLD = """            if num_computed_tokens_after_sched < last_cache_position:
-                # align to block_size
-                num_new_tokens = num_new_tokens // block_size * block_size
-            elif (
-                num_computed_tokens
-                < last_cache_position
-                < num_computed_tokens_after_sched
-            ):
-                # force to cache the last chunk
-                num_new_tokens = last_cache_position - num_computed_tokens"""
+SPLIT_OLD = """            num_computed_tokens_after_sched = num_computed_tokens + num_new_tokens"""
 
-SPLIT_NEW = """            if num_computed_tokens_after_sched < last_cache_position:
-                # align to block_size
-                num_new_tokens = num_new_tokens // block_size * block_size
-                # dreamference-checkpoint-chunks: end the chunk at the next checkpoint
-                # boundary; the remainder reschedules next step, checkpointing as it goes.
-                if (
-                    self._dreamference_ckpt_chunk_tokens is not None
-                    and num_new_tokens > self._dreamference_ckpt_chunk_tokens
-                ):
-                    num_new_tokens = self._dreamference_ckpt_chunk_tokens
-            elif (
-                num_computed_tokens
-                < last_cache_position
-                < num_computed_tokens_after_sched
+SPLIT_NEW = """            # dreamference-checkpoint-chunks: inside the dense region, end every chunk at
+            # the next checkpoint boundary regardless of which branch below fires — the
+            # remainder reschedules next step, checkpointing as it goes. Applied BEFORE the
+            # branch arithmetic so the equality case (num_new_tokens == last_cache_position ==
+            # budget; prompts in [8960, 11200) at the 8960 budget) cannot slip through
+            # uncapped. In-region chunks are grid multiples, so the branches below are no-ops
+            # on them; out-of-region scheduling is untouched.
+            if (
+                self._dreamference_ckpt_chunk_tokens is not None
+                and num_computed_tokens < self._dreamference_dense_region_tokens
+                and num_new_tokens > self._dreamference_ckpt_chunk_tokens
             ):
-                # force to cache the last chunk
-                num_new_tokens = last_cache_position - num_computed_tokens
-                # dreamference-checkpoint-chunks: same cap on the forced chunk; later steps
-                # still reach last_cache_position exactly, one checkpoint per boundary.
-                if (
-                    self._dreamference_ckpt_chunk_tokens is not None
-                    and num_new_tokens > self._dreamference_ckpt_chunk_tokens
-                ):
-                    num_new_tokens = self._dreamference_ckpt_chunk_tokens"""
+                num_new_tokens = self._dreamference_ckpt_chunk_tokens
+            num_computed_tokens_after_sched = num_computed_tokens + num_new_tokens"""
 
 
 def main() -> int:
