@@ -1,6 +1,7 @@
 # Prefix Caching on the Hybrid GDN + DFlash Stack — Findings and Patch Design
 
-**Status:** v1 — Designed (patch written, not yet baked into an image)
+**Status:** v2 — Deployed (patch baked into `dreamference-vllm-dflash:0.23.0-aeon-dense2`,
+default entry repointed 2026-08-24; verification results in §4)
 **Date:** 2026-08-24
 **Patch:** `runtime/patch_mamba_chunk_align.py`
 **Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` / `qwen3.5-122b-a10b-int4-dflash`, image
@@ -102,12 +103,14 @@ box is compute-bound MoE work where a 4480-token batch is still large.
    (the script exits 1 and fails the build if the anchor is missing).
 2. Build as `dreamference-vllm-dflash:0.23.0-aeon-dense2` (base layers cached; the build is
    patch-layers only).
-3. Point both DFlash registry entries' `docker_image` at `dense2`, restart via `dream server`.
+3. Point the default (hybrid) entry's `docker_image` at `dense2`, restart via `dream server`.
    The torch.compile cache is keyed off traced sources of the *model*, not the scheduler, and the
-   scheduler is host-process Python — expect a warm compile cache.
-4. Until then, the deployed `dense1` serves rare stale-state hits (§1.2). If that window matters,
-   set `enable_prefix_caching: False` in the registry as an interim; the measured cost is nil
-   (hits were both rare and wrong).
+   scheduler is host-process Python — expect a warm compile cache. **Deviation from v1, which
+   said "both entries":** the `int4-dflash` fallback deliberately stays on `kvfix2` — its whole
+   value is being the untouched known-good configuration — and therefore retains the §1.2
+   stale-hit hazard; its registry comment says so.
+4. Done 2026-08-24: `dense2` built (patch layer only), default entry repointed, server
+   relaunched.
 
 ## 4. Verification plan
 

@@ -226,7 +226,8 @@ class ModelMatrixRegistry:
                 # semantics inferred, not directly observed; the spec's A/B confirms). Fix
                 # designed in
                 # specs/DREAMFERENCE_PREFIX_CACHE.md; patch in
-                # runtime/patch_mamba_chunk_align.py (not yet baked into an image).
+                # runtime/patch_mamba_chunk_align.py, baked into the dense2 image the hybrid
+                # entry pins. THIS entry's kvfix2 image does not carry it (untouched fallback).
                 # 'all' mode would cache every block, but vLLM
                 # forces 'align' for models lacking SupportsMambaPrefixCaching — mamba1/mamba2
                 # families only; Qwen3.5's GDN is not among them — so no flag reaches it.
@@ -361,7 +362,12 @@ class ModelMatrixRegistry:
             launch_overrides={
                 # Values mirror the int4-dflash entry above verbatim, comments included by
                 # reference -- one recipe, one place to reason about it. Only the image differs.
-                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense1",
+                # dense2 = dense1 + patch_mamba_chunk_align (2026-08-24): prefill chunks align
+                # to the 4480 LCM so mamba 'align'-mode checkpoints are correct and reachable —
+                # see specs/DREAMFERENCE_PREFIX_CACHE.md. The int4-dflash fallback deliberately
+                # stays on kvfix2 (untouched-fallback principle) and so retains the stale-hit
+                # hazard that spec documents.
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense2",
                 # 32k, not the int4-dflash entry's 131k, for two stacked reasons. The hard one:
                 # this stack's non-KV residency is larger (the int8 lm-head holds both copies
                 # until its lazy first-forward build), and the first load refused loudly --

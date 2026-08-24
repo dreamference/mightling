@@ -11,7 +11,15 @@
 #   patch_int8_lmhead_v3   int8 w8a16 Triton GEMV lm-head (+33% on their bench)
 #   patch_fla_shmem        FLA sm121 large-tile shared-memory tuning
 #
-# All three are sentinel-guarded and fail loudly when their anchor is missing, so a base bump
+# One patch of our own on top (dense2, 2026-08-24) — not from the Entrpi lineage but fixing a
+# defect their unify+prefix-align combination exposes:
+#
+#   patch_mamba_chunk_align  align prefill chunks to the resolved LCM block size so mamba
+#                            'align'-mode checkpoints land on true block boundaries; without it
+#                            prefix-cache hits restore a stale GDN state and short prompts
+#                            checkpoint nothing (specs/DREAMFERENCE_PREFIX_CACHE.md)
+#
+# All are sentinel-guarded and fail loudly when their anchor is missing, so a base bump
 # cannot silently produce an image that looks patched and is not.
 #
 # Keep this tag in sync with the `docker_image` entry in ModelMatrixRegistry.
@@ -20,7 +28,9 @@ FROM dreamference-vllm-dflash:0.23.0-aeon-kvfix2
 COPY runtime/patch_inc_hybrid.py /opt/dreamference/patch_inc_hybrid.py
 COPY runtime/patch_int8_lmhead_v3.py /opt/dreamference/patch_int8_lmhead_v3.py
 COPY runtime/patch_fla_shmem.py /opt/dreamference/patch_fla_shmem.py
+COPY runtime/patch_mamba_chunk_align.py /opt/dreamference/patch_mamba_chunk_align.py
 
 RUN python3 /opt/dreamference/patch_inc_hybrid.py \
  && python3 /opt/dreamference/patch_int8_lmhead_v3.py \
- && python3 /opt/dreamference/patch_fla_shmem.py
+ && python3 /opt/dreamference/patch_fla_shmem.py \
+ && python3 /opt/dreamference/patch_mamba_chunk_align.py
