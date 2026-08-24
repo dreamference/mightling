@@ -389,7 +389,14 @@ class ModelMatrixRegistry:
                 # (measured 2026-08-24). 0.72 is the NVFP4 entry's own operating point on an
                 # even larger checkpoint; the pre-flight gate still referees against the live
                 # desktop before any load, which is the designed loud failure.
-                "gpu_memory_utilization": 0.72,
+                # Lowered 0.72 -> 0.70 on 2026-08-24 at that gate's own instruction: with the
+                # desktop ~2 GB fatter than at the morning launch, 0.72's arena (87.57) plus the
+                # 10.94 GB load peak needed 98.51 GB against 97.19 available, and a retry at
+                # 0.71 still missed by 0.13 GB while the desktop drifted between checks. 0.70
+                # leaves ~6.5 GiB for KV against the 5.9 floor above -- tight but above it --
+                # and buys the launch a standing margin instead of gating on the day's tabs.
+                # Worth raising back toward 0.72 when the desktop is lighter.
+                "gpu_memory_utilization": 0.70,
                 "kv_cache_dtype": "auto",
                 "attention_backend": "flash_attn",
                 "tool_call_parser": "qwen3_xml",
