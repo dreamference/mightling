@@ -267,6 +267,23 @@ Ranked by value-per-risk on this stack. Geometry fact underpinning #1: the draft
 4. **Drafter-only fp8 KV** — the other route to a 2240 grid (4096 → 2048 B/token), with a capacity *gain*.
 5. **`all`-mode mamba caching for GDN** (the complete fix: every block's state materialised, hits guaranteed rather than opportunistic, no dependence on chunk history). Requires the FLA GDN kernel to write per-block states — it has no `all`-mode machinery today.
 
+### 6.1 Synergy: The "God Mode" Configuration (Opt-In + 1120 Grid)
+
+While the patches in this roadmap are powerful on their own, combining **Explicit Opt-In Caching** (Section 1.9) with the **1120-Token Drafter Grid** (Roadmap Item 1) creates the ultimate, dynamic configuration for this Hybrid stack. It completely eliminates the Time-To-First-Token (TTFT) bandwidth tax associated with smaller grid sizes.
+
+**The Secret: Dynamic Chunking**
+The only downside to shrinking the grid to 1120 tokens is that the Python scheduler forces the prefill engine to pause more frequently to write 157 MB GDN state checkpoints (paying an ~8-14% memory bandwidth tax). By introducing the `"enable_cache"` API flag, we can tie it directly to the scheduler's chunking logic:
+
+* **Scenario A: The One-Off Batch Job (Opt-Out)**
+  If a client passes `"enable_cache": false`, the scheduler dynamically **disables the dense checkpoint chunking cap**. Because the client doesn't care about caching, the engine doesn't need to force the prompt to align to the 2240/4480 grid. The engine gobbles its maximum budget (e.g., 9048 tokens) in a single massive gulp, pausing only once at the very end to write a single 157 MB state. 
+  *Result:* 100% maximum hardware speed, zero bandwidth tax, and zero LRU cache thrashing.
+
+* **Scenario B: The Shared Agent Persona (Opt-In)**
+  If a client passes `"enable_cache": true` (e.g., establishing a system prompt for a swarm of agents), the scheduler activates the strict 1120-token grid constraints. The engine chops the prefill into smaller pieces, dropping dense, highly granular cache boundaries precisely at 2240, 4480, 6720, and 8960 tokens.
+  *Result:* You willingly pay the ~10% TTFT penalty **exactly once** during the cold start. In exchange, the LRU pool is populated with a perfectly tailored, fine-grained cache track that drops subsequent agent response times from 5.0 seconds down to 0.2 seconds.
+
+This dynamic shifting yields the absolute best of both worlds: uninhibited, maximum-bandwidth throughput for raw bulk processing, and extremely fine-grained cache resolution for agentic loops.
+
 ---
 
 ## 7. Upstream reporting
