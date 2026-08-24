@@ -347,7 +347,13 @@ class ModelMatrixRegistry:
                     "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
                     "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
                 },
-                "gpu_memory_utilization": 0.68,
+                # 0.72, not the int4-dflash entry's 0.68: the Intel shards are ~5 GiB larger than
+                # the bleysg hybrid this entry briefly served, and at 0.68 the engine refused to
+                # start -- 5.9 GiB KV needed for one 32k request against 5.4 available
+                # (measured 2026-08-24). 0.72 is the NVFP4 entry's own operating point on an
+                # even larger checkpoint; the pre-flight gate still referees against the live
+                # desktop before any load, which is the designed loud failure.
+                "gpu_memory_utilization": 0.72,
                 "kv_cache_dtype": "auto",
                 "attention_backend": "flash_attn",
                 "tool_call_parser": "qwen3_xml",
