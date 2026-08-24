@@ -125,6 +125,61 @@ If the engine were rewritten to decouple them, the trade-offs would be:
 
 Because of the "Coordination Hell," vLLM forces unification: a sequence is only considered a cache hit if **all three groups** hit at the exact same token boundary.
 
+### 1.6 Prefix Caching Dynamics: Client-Side Usage
+
+A common question is how clients interact with this cache. **Prefix caching is 100% automatic and transparent to the client.**
+
+* **No Explicit Flags Required:** Unlike some commercial APIs (e.g., Anthropic's `ephemeral` cache tags), the client does not need to explicitly ask the server to cache a prompt. 
+* **Automatic Hashing:** Under the hood, vLLM hashes the token IDs of every incoming request starting from token 0. If it finds a matching hash in the KV pool (and it aligns with the 4480-token boundary rule), it automatically skips the computation for those blocks and instantly restores the state.
+* **LRU Eviction (Opportunistic Caching):** When a request finishes generating, its KV blocks are "freed," but vLLM does not delete them. It leaves the hashed blocks in the GPU memory. They are only evicted (overwritten) on a Least Recently Used (LRU) basis when the engine runs completely out of free blocks for new requests.
+
+**The Golden Rule for Clients:**
+Because caching is sequential starting from token 0, the client **must** place all shared, reusable context at the absolute beginning of the prompt.
+If a client inserts a changing string (such as the current time, a unique conversation ID, or the user's new question) *before* the massive 10,000-token system prompt, the hash chain is instantly broken at token 0, and **0% of the prompt will be cached**. 
+
+Always structure prompts as: `[Static System Instructions] -> [Static Documents/Context] -> [Dynamic Conversation History/New User Question]`.
+
+#### The Long-Running Chat: Should Old Entries Be Deleted?
+
+Consider a long-running chat that reaches 15,000 tokens. As it grew, the engine created cache checkpoints at the 4480, 8960, and 13440 boundaries. Does it make sense to delete the older 4480 entry once the 8960 entry is created?
+
+**For the System Prompt (No):**
+Absolutely not. The 4480 boundary usually contains the static system prompt, core tool definitions, or shared RAG documents. If you delete the 4480 entry, the *next* agent or chat session that starts with that identical system prompt—but asks a completely different question—will suffer a total cache miss and have to recompute from token 0. You want to preserve these early blocks indefinitely because they have a massive reuse rate across multiple concurrent users.
+
+**For the Chat Tail (Yes, but LRU handles it):**
+As the chat progresses to 13440 tokens, that specific checkpoint contains the unique back-and-forth history of *one specific conversation*. No other session will ever match its hash. While it might seem efficient to aggressively delete the intermediate 8960 block once 13440 is reached, vLLM relies on its **Least Recently Used (LRU)** eviction policy to handle this naturally.
+When the GPU's memory fills up, the LRU algorithm automatically overwrites the blocks that haven't been requested recently. The unique "chat tail" blocks from abandoned or finished conversations naturally get evicted, while the 4480-token "system prompt" blocks are constantly "touched" by new incoming requests, keeping them immortalized in the cache.
+
+*(Note: vLLM's current MambaManager actually does try to free previous GDN states mid-request, relying entirely on the LRU queue to keep them alive opportunistically. See Roadmap Section 6.2 for why we might want to patch this to keep them strictly alive).*
+
+### 1.7 Architectural Contrast: Hybrid vs. Pure Attention (Nemotron)
+
+A frequent question is whether pure-Attention models (like `Llama-3.1-Nemotron-70B`) handle prefix caching better than this Qwen Hybrid stack. The answer is **yes, vastly better and simpler**, but with a long-context trade-off.
+
+Because Nemotron lacks GDN (Mamba) layers, it bypasses "Coordination Hell" entirely. It uses standard PagedAttention, which natively caches in tiny, highly efficient **16-token blocks**.
+* **No Grid Lock-in:** A cache hit can happen precisely at token 16, 32, 48, etc., instead of waiting for a massive 4480-token boundary.
+* **No 157 MB Checkpoints:** It only stores standard KV tensors, which take up very little space per token, avoiding massive spikes in LRU cache pressure.
+* **Zero Unification Waste:** Without the need to scale blocks up to match a Drafter's LCM, Nemotron wastes almost zero memory on block padding.
+
+**The Trade-Off:** While Nemotron's caching is infinitely cleaner, pure Attention KV cache *grows linearly* with context size. At 100,000 tokens, a pure Attention model requires massive amounts of VRAM just to hold the active KV cache for a single request. Qwen uses GDN because the GDN state size is *fixed* (~157 MB) whether you are at 1,000 or 100,000 tokens, making it theoretically far more memory-efficient during extreme long-context generation.
+
+### 1.8 Quantifying the Padding Waste: Is it still worth it?
+
+Given that Page Unification forces Attention blocks into massive 4480-token buckets, how much memory is actually wasted, and should prefix caching be disabled to reclaim it?
+
+**The Math on Padding Waste (Internal Fragmentation):**
+* As established in Section 1.4, Attention KV requires roughly ~121 KB per token. Therefore, one unified 4480-token bucket consumes **~542 MB** of VRAM.
+* Prompts rarely end exactly on a multiple of 4480. If your prompt is 4,481 tokens long, vLLM must allocate a full second bucket (542 MB) just to hold that 1 extra token.
+* On average, the final "tail" bucket of any sequence is half-empty, wasting roughly **~271 MB per active sequence**.
+* With 8 concurrent agent streams, plus a few older abandoned tails sitting in the LRU queue, the server wastes roughly **2.5 to 3.5 GB of VRAM** globally on empty padding (roughly 20-25% of the ~13 GB KV pool).
+
+**The Verdict: Absolutely DO NOT turn off prefix caching.**
+Wasting 3 GB of VRAM on empty padding is a cheap tax to pay for the massive speedup in agentic workflows. Agents operate in loops, repeatedly sending the exact same 10,000-token history back to the model with just a few new tool results appended. 
+* **Without Caching:** The GPU must run a full, cold mathematical forward pass on all 10,000 tokens every single step. Time-To-First-Token (TTFT) takes **3 to 5 seconds** while the GPU grinds through historical text.
+* **With Caching:** The engine hits the 8960-token boundary, instantly loads the state from memory, and computes only the delta. TTFT drops to **~0.2 seconds**. 
+
+Until vLLM rewrites its kernels to support decoupled hybrid caching natively, paying the 3 GB memory tax is mandatory to keep the engine lightning fast.
+
 ---
 
 ## 2. The two defects
@@ -148,6 +203,12 @@ Live demonstration (2026-08-24, exact production config): a 12,323-token first t
 ## 3. The patch
 
 **One line, scheduler-side** (`runtime/patch_mamba_chunk_align.py`, sentinel `dreamference-mamba-chunk-align`): `_mamba_block_aligned_split` aligns to `self.block_size` — the scheduler's *resolved* block size, which the engine core computes as the LCM across KV groups and passes in — instead of `cache_config.block_size`.
+
+**At what points are new cache entries created, and how large are they?**
+In Mamba `align` mode, a new cache entry (reusable state checkpoint) is created **only at the exact end of a prefill chunk**. 
+By patching the chunk splitter to align strictly to the 4480-token LCM grid, this patch forces prefill chunks to end *exactly* at 4480, 8960, 13440 tokens, etc. Because the prefill pauses exactly on those boundaries, vLLM's `align` mode successfully writes a new, reusable GDN cache entry into the pool at every single one of those boundaries.
+
+Each GDN cache entry created at these boundaries has a fixed size of **~157 MB**. This single 157 MB chunk of memory holds the mathematical summary (the recurrent state) of the entire sequence up to that boundary across all 36 GDN layers. 
 
 Why the LCM is the right value in every configuration:
 
