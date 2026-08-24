@@ -42,10 +42,12 @@ COPY runtime/patch_fla_shmem.py /opt/dreamference/patch_fla_shmem.py
 COPY runtime/patch_mamba_chunk_align.py /opt/dreamference/patch_mamba_chunk_align.py
 COPY runtime/patch_unify_downscale.py /opt/dreamference/patch_unify_downscale.py
 COPY runtime/patch_mamba_checkpoint_chunks.py /opt/dreamference/patch_mamba_checkpoint_chunks.py
+COPY runtime/patch_opt_in_cache.py /opt/dreamference/patch_opt_in_cache.py
 
 RUN python3 /opt/dreamference/patch_inc_hybrid.py \
  && python3 /opt/dreamference/patch_int8_lmhead_v3.py \
  && python3 /opt/dreamference/patch_fla_shmem.py \
  && python3 /opt/dreamference/patch_mamba_chunk_align.py \
  && python3 /opt/dreamference/patch_unify_downscale.py \
- && python3 /opt/dreamference/patch_mamba_checkpoint_chunks.py
+ && python3 /opt/dreamference/patch_mamba_checkpoint_chunks.py&& python3 /opt/dreamference/patch_mamba_checkpoint_chunks.py python3 /opt/dreamference/patch_mamba_checkpoint_chunks.py \
+ && python3 /opt/dreamference/patch_opt_in_cache.py
