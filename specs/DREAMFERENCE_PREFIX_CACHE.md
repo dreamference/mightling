@@ -1,8 +1,9 @@
 # Prefix Caching on the Hybrid GDN + DFlash Stack — Findings and Patch Design
 
-**Status:** v3 — Deployed (`patch_mamba_chunk_align` in dense2, `patch_unify_downscale` — §6.1,
-implemented — in `dreamference-vllm-dflash:0.23.0-aeon-dense3`; default entry on dense3 since
-2026-08-24; verification results in §4)
+**Status:** v4 — Deployed (`patch_mamba_chunk_align` → dense2, `patch_unify_downscale` →
+dense3, `patch_mamba_checkpoint_chunks` → `dreamference-vllm-dflash:0.23.0-aeon-dense4`;
+default entry on dense4 since 2026-08-24; the int4-dflash fallback now runs with prefix
+caching OFF on its untouched kvfix2 image. Verification results in §4/§4.1)
 **Date:** 2026-08-24
 **Patch:** `runtime/patch_mamba_chunk_align.py`
 **Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` / `qwen3.5-122b-a10b-int4-dflash`, image
@@ -159,6 +160,37 @@ boot-adjacent, and the fix direction would not change either way; noted for re-r
 than chased. Structurally, checkpoints *are* freeable mid-request, so under genuine pool
 pressure hits can be lost — inherent to `align` mode's one-live-state design, not introduced
 by the patch, which only created checkpoints where there were none.
+
+### 4.1 dense4 — checkpoint-dense chunking (`patch_mamba_checkpoint_chunks`)
+
+The last structural gap: a checkpoint existed only where a budget-sized chunk ended, so a
+prefix shared up to e.g. 5k tokens missed even though its full-attention KV was cached. dense4
+caps aligned prefill chunks at `DREAMFERENCE_CHECKPOINT_CHUNK_BLOCKS` blocks (default 1), so
+**every 2240 boundary of every prefill gets an exact mamba state** — 'all'-mode hit behaviour
+at align-mode memory cost, because checkpoints remain *evictable* freed-but-hashed blocks
+(a held mamba block is ~157 MB × 36 GDN layers — the reason real 'all' mode is unaffordable).
+
+Measured (2026-08-24, dense4 live, util 0.70):
+
+| Probe | dense3 | dense4 |
+| --- | --- | --- |
+| Identical 7.4k re-send | 6720 | **6720** ✓ |
+| Divergent prompt sharing ~4.9k tokens | **0** (no checkpoint below 6720) | **4480** ✓ |
+| Two-turn over 12.2k | 11200 | **11200** ✓ |
+| Cold prefill, 10.5k (2240-token chunks) | 1,812 tok/s | 1,789 (−1.3% — the density is nearly free) |
+| Prose decode | 23.5 tok/s | 23.8 ✓ |
+
+Pack efficiency held: 8,845 tokens/GiB vs dense2's 5,536 (+60%). This boot's pool is small in
+absolute terms (5.84 GiB / 51.7k tokens) only because util went 0.72 → 0.70 while the desktop
+sat ~2 GB heavier; raising util back when the desktop lightens restores ~9k tokens per 0.01.
+
+**Boot-adjacent anomaly, second occurrence.** The first post-boot matrix run again produced
+one impossible miss (the divergent probe read 0; the identical logic re-run minutes later hit
+4480 twice). Same signature as the dense2-era zero: within ~90s of engine health, and this
+time correlated with an add→abort request storm every ~2s — Onyx re-establishing its provider
+connection after the restart. Steady-state behaviour is verified correct; treat first-minute
+measurements after a restart as unreliable, and take any production zero-hit report with a
+restart timestamp check before reopening this file.
 
 ### Original plan (retained for re-runs)
 
