@@ -284,7 +284,7 @@ Ranked by value-per-risk on this stack. Geometry fact underpinning #1: the draft
 4. **Drafter-only fp8 KV** — the other route to a 2240 grid (4096 → 2048 B/token), with a capacity *gain*.
 5. **`all`-mode mamba caching for GDN** (the complete fix: every block's state materialised, hits guaranteed rather than opportunistic, no dependence on chunk history). Requires the FLA GDN kernel to write per-block states — it has no `all`-mode machinery today.
 
-### 6.1 Synergy: The "God Mode" Configuration (Opt-In + 1120 Grid)
+### 6.1 Synergy: The "God Mode" Configuration (Opt-In + 1120 Grid) - ✅ IMPLEMENTED (`dense9`)
 
 While the patches in this roadmap are powerful on their own, combining **Explicit Opt-In Caching** (Section 1.9) with the **1120-Token Drafter Grid** (Roadmap Item 1) creates the ultimate, dynamic configuration for this Hybrid stack. It completely eliminates the Time-To-First-Token (TTFT) bandwidth tax associated with smaller grid sizes.
 

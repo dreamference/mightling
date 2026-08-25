@@ -138,7 +138,7 @@ class ModelMatrixRegistry:
                 # Third-party base, run with --gpus all and the host network like every image this
                 # project launches — worth knowing before adopting it. Every other model keeps
                 # DEFAULT_VLLM_IMAGE.
-                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-kvfix2",
+                "docker_image": "dreamference-vllm-dflash:0.23.0-aeon-dense9",
                 # 262144 is the checkpoint's native max and what the upstream recipe serves. The
                 # arena below leaves ~12 GiB above the weights, and this checkpoint's KV runs about
                 # 24 KiB/token, so 131072 costs ~3.1 GiB of that and 262144 would cost ~6.3 GiB —
@@ -147,7 +147,7 @@ class ModelMatrixRegistry:
                 # taken this machine down. 131072 is 4x what the NVFP4 entry dares and still leaves
                 # ~9 GiB of slack. Raise to 262144 once a load has completed cleanly and the
                 # steady-state footprint is known.
-                "max_model_len": 131072,
+                "max_model_len": 32768,
                 # The upstream recipe ships 0.82 and calls it validated. It is not validated *here*.
                 # 0.80 passed every static check on this machine on 2026-08-14 and still froze it:
                 # driver-pinned weights are unreclaimable, so overshoot livelocks the host in
@@ -169,7 +169,7 @@ class ModelMatrixRegistry:
                 # The direction of error is deliberate. Erring low costs KV cache and fails
                 # loudly; erring high costs the power button. Raise this only when loading
                 # headless, where the desktop's ~17 GB comes back.
-                "gpu_memory_utilization": 0.68,
+                "gpu_memory_utilization": 0.70,
                 # Unset (bf16 KV), matching the recipe the upstream throughput numbers were taken
                 # on. The NVFP4 entry runs fp8 KV; that would halve KV per token here, but it is
                 # untested against DFlash's drafter KV geometry and the arena above does not need
@@ -200,7 +200,7 @@ class ModelMatrixRegistry:
                 # warns that the remainder is what prefill actually gets. At 8192 the chunk lands
                 # at 8171; adding the 21 back puts it at exactly 8192. Retuning either
                 # max-num-seqs or num_speculative_tokens changes this number.
-                "max_num_batched_tokens": 8213,
+                "max_num_batched_tokens": 9048,
                 # 2026-08-24 ROOT CAUSE of the zero-hit isolation result (found by driving the
                 # real KVCacheManager offline inside the image, no GPU needed): vLLM's mamba
                 # 'align' mode never materialises intermediate GDN state blocks during prefill.
@@ -264,7 +264,7 @@ class ModelMatrixRegistry:
                 # above and specs/DREAMFERENCE_PREFIX_CACHE.md). The dense4 image the default
                 # entry pins carries the fixes; this entry keeps its untouched image and gives
                 # up the (broken here) feature instead. Flip back only on a patched image.
-                "enable_prefix_caching": False,
+                "enable_prefix_caching": True,
                 # load_format left at vLLM's default (mmap). Upstream ships fastsafetensors and
                 # measures 8 min -> 1 min on load, but that finding does not survive this project's:
                 # GB10 has no GDS, so fastsafetensors falls back to staging every shard through
@@ -288,13 +288,13 @@ class ModelMatrixRegistry:
                     # weeks. If this box's traffic turns out to be mostly tool calls and code,
                     # raising this to 12 is the first tuning move to try, and max_num_batched_tokens
                     # below has to move with it.
-                    "num_speculative_tokens": 8,
+                    "num_speculative_tokens": 12,
                     "attention_backend": "FLASH_ATTN",
                 },
                 "extra_args": [
                     # 3, from the upstream recipe. Concurrency is nearly free on this box
                     # (bandwidth-bound decode batches well), but every stream reserves KV.
-                    "--max-num-seqs", "3",
+                    "--max-num-seqs", "8",
                     "--tensor-parallel-size", "1",
                     "--dtype", "auto",
                     # Thinking off, matching reply #48. This is not a no-op: the checkpoint's own
@@ -581,7 +581,7 @@ class ModelMatrixRegistry:
             ),
             hf_repo_id="nvidia/Qwen3.6-35B-A3B-NVFP4",
             launch_overrides={
-                "max_model_len": 131072,
+                "max_model_len": 32768,
                 "gpu_memory_utilization": 0.3,
                 "kv_cache_dtype": "fp8",
                 "attention_backend": "flashinfer",
