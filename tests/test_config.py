@@ -132,3 +132,62 @@ def test_model_from_config_file_is_preserved_on_resave(tmp_path):
     config.sandbox = "podman"
     config.save_config()
     assert "starcoder2-15b" in cfg_file.read_text()
+
+def test_every_config_names_a_diffusion_model():
+    # The diffusion model is a peer of the main one: nothing set anywhere still resolves to a
+    # concrete registry alias, so `server start` always has something to launch beside vLLM.
+    from dreamference.config.dreamference_config import DEFAULT_DIFFUSION_MODEL
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+    config = DreamferenceConfig()
+    assert config.diffusion_model == DEFAULT_DIFFUSION_MODEL
+    assert ModelMatrixRegistry.get_spec(config.diffusion_model) is not None
+
+def test_diffusion_model_resolves_through_the_same_four_tiers(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "tiers.yaml"
+    cfg_file.write_text("diffusion_model: from-file\n")
+
+    assert DreamferenceConfig(config_file=str(cfg_file)).diffusion_model == "from-file"
+    monkeypatch.setenv("DREAMFERENCE_DIFFUSION_MODEL", "from-env")
+    assert DreamferenceConfig(config_file=str(cfg_file)).diffusion_model == "from-env"
+    assert DreamferenceConfig(
+        config_file=str(cfg_file), diffusion_model="from-kwarg"
+    ).diffusion_model == "from-kwarg"
+
+def test_pinning_the_default_diffusion_model_survives_a_default_change(tmp_path):
+    # Same intent-vs-coincidence contract as the main model: `dream diffusion-model set X` where
+    # X equals today's default is still a choice, and must be written down.
+    import dreamference.config.dreamference_config as cfg_mod
+
+    cfg_file = tmp_path / "dpin.yaml"
+    cfg_file.write_text("vllm_host: http://localhost:8000\n")
+
+    config = DreamferenceConfig(config_file=str(cfg_file))
+    config.diffusion_model = cfg_mod.DEFAULT_DIFFUSION_MODEL  # what `diffusion-model set` does
+    config.save_config()
+    assert "diffusion_model" in cfg_file.read_text()
+
+    original_default = cfg_mod.DEFAULT_DIFFUSION_MODEL
+    try:
+        cfg_mod.DEFAULT_DIFFUSION_MODEL = "some-future-diffusion-default"
+        assert DreamferenceConfig(config_file=str(cfg_file)).diffusion_model == original_default
+    finally:
+        cfg_mod.DEFAULT_DIFFUSION_MODEL = original_default
+
+def test_unpinned_diffusion_model_is_not_fossilised_into_the_config(tmp_path):
+    import dreamference.config.dreamference_config as cfg_mod
+
+    cfg_file = tmp_path / "dunpinned.yaml"
+    cfg_file.write_text("vllm_host: http://localhost:8000\n")
+
+    DreamferenceConfig(config_file=str(cfg_file)).save_config()
+    assert "diffusion_model" not in cfg_file.read_text()
+
+    original_default = cfg_mod.DEFAULT_DIFFUSION_MODEL
+    try:
+        cfg_mod.DEFAULT_DIFFUSION_MODEL = "some-future-diffusion-default"
+        assert DreamferenceConfig(
+            config_file=str(cfg_file)
+        ).diffusion_model == "some-future-diffusion-default"
+    finally:
+        cfg_mod.DEFAULT_DIFFUSION_MODEL = original_default

@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, Final
 
 from dreamference.hardware import MODEL_MATRIX, check_model_compatibility
-from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
+from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, DEFAULT_DIFFUSION_MODEL_ALIAS
 from dreamference.config.config_path_resolver import ConfigPathResolver
 from dreamference.config.config_file_storage_manager import ConfigFileStorageManager, yaml
 
 # System defaults
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 DEFAULT_MODEL: Final[str] = DEFAULT_MODEL_ALIAS
+DEFAULT_DIFFUSION_MODEL: Final[str] = DEFAULT_DIFFUSION_MODEL_ALIAS
 DEFAULT_SPECULATIVE_TOKENS: Final[int] = 8
 DEFAULT_SANDBOX: Final[str] = "none"
 DEFAULT_AGENT_RUNNER: Final[str] = "codex"
@@ -67,6 +68,7 @@ class DreamferenceConfig:
         config_file: Optional[str] = None,
         vllm_host: Optional[str] = None,
         model: Optional[str] = None,
+        diffusion_model: Optional[str] = None,
         draft_model: Optional[str] = None,
         num_speculative_tokens: Optional[int] = None,
         sandbox: Optional[str] = None,
@@ -119,6 +121,24 @@ class DreamferenceConfig:
             else os.getenv(
                 "DREAMFERENCE_MODEL",
                 str(self.file_data.get("model", DEFAULT_MODEL))
+            )
+        )
+
+        # 2b. Diffusion model served in parallel with the main model. Every configuration names
+        # one, exactly as it names a main model, and the pinning rules are the same for the same
+        # reason: a diffusion model that happens to equal today's default is still a choice, and
+        # dropping it from the file re-points the workspace when the default moves.
+        self._diffusion_model_pinned: bool = (
+            diffusion_model is not None
+            or os.getenv("DREAMFERENCE_DIFFUSION_MODEL") is not None
+            or "diffusion_model" in self.file_data
+        )
+        self._diffusion_model: str = (
+            diffusion_model
+            if diffusion_model is not None
+            else os.getenv(
+                "DREAMFERENCE_DIFFUSION_MODEL",
+                str(self.file_data.get("diffusion_model", DEFAULT_DIFFUSION_MODEL))
             )
         )
 
@@ -269,6 +289,30 @@ class DreamferenceConfig:
         self._model = value
         self._model_pinned = True
 
+    @property
+    def diffusion_model(self) -> str:
+        """
+        The diffusion model served beside the main one.
+
+        Returns:
+            str: Model alias, HuggingFace repo ID, or display name.
+        """
+        return self._diffusion_model
+
+    @diffusion_model.setter
+    def diffusion_model(self, value: str) -> None:
+        """
+        Sets the diffusion model and records that it was chosen deliberately.
+
+        Assigning through this property is what `dream diffusion-model set` does, and it is a pin
+        by definition -- same contract as the main model's setter above.
+
+        Args:
+            value (str): Model alias, HuggingFace repo ID, or display name.
+        """
+        self._diffusion_model = value
+        self._diffusion_model_pinned = True
+
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
         Saves current active configuration parameters to YAML or JSON config file.
@@ -291,6 +335,9 @@ class DreamferenceConfig:
         # one carries intent.
         if self.model and (self._model_pinned or self.model != DEFAULT_MODEL):
             data["model"] = self.model
+        # Same intent-carrying rule as `model` above, for the same reason.
+        if self.diffusion_model and (self._diffusion_model_pinned or self.diffusion_model != DEFAULT_DIFFUSION_MODEL):
+            data["diffusion_model"] = self.diffusion_model
         if self.draft_model is not None: data["draft_model"] = self.draft_model
         if self.num_speculative_tokens != DEFAULT_SPECULATIVE_TOKENS: data["num_speculative_tokens"] = self.num_speculative_tokens
         if self.sandbox != DEFAULT_SANDBOX: data["sandbox"] = self.sandbox

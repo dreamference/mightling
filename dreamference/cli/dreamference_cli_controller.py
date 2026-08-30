@@ -17,7 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from dreamference.config import DreamferenceConfig
-from dreamference.config.dreamference_config import DEFAULT_MODEL
+from dreamference.config.dreamference_config import DEFAULT_MODEL, DEFAULT_DIFFUSION_MODEL
 from dreamference.runner import (
     GooseRunner, ClineRunner, ClineInstaller,
     AiderRunner, AiderInstaller,
@@ -26,7 +26,7 @@ from dreamference.runner import (
     CodexRunner, CodexInstaller
 )
 from dreamference.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache
-from dreamference.vllm_server import VLLMServerManager, DEFAULT_VLLM_IMAGE
+from dreamference.vllm_server import VLLMServerManager, DiffusionServerManager, DEFAULT_VLLM_IMAGE, DEFAULT_DIFFUSION_PORT
 from dreamference.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dreamference.mcp_server import main as run_mcp_server
 
@@ -720,6 +720,12 @@ class DreamferenceCLIController:
                  "and per-workload speculative acceptance (sends extra requests; slower)",
         )
 
+        # Command: dream diffusion-model
+        diffusion_model_parser = subparsers.add_parser("diffusion-model", help="Diffusion model operations")
+        diffusion_model_subparsers = diffusion_model_parser.add_subparsers(dest="diffusion_model_command", help="Diffusion model commands")
+        diffusion_model_set_parser = diffusion_model_subparsers.add_parser("set", help="Set the diffusion model served beside the main one")
+        diffusion_model_set_parser.add_argument("model_name", type=str, help="Name of the diffusion model to set")
+
         # Command: dream model download
         # Command: dream model list
         model_subparsers.add_parser("list", help="List available model names and HuggingFace repos")
@@ -775,13 +781,18 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: False)")
         start_server_parser.add_argument("--docker-image", default=None, help="Docker image for vLLM. Unset uses the model's own docker_image recipe entry, then the pinned default")
+        start_server_parser.add_argument("--diffusion-model", default=None, help=f"Diffusion model to serve beside the main one (default: the configured diffusion model, {DEFAULT_DIFFUSION_MODEL})")
+        start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port for the diffusion sidecar's OpenAI endpoint")
+        start_server_parser.add_argument("--no-diffusion", action="store_true", help="Skip starting the diffusion sidecar")
         # Command: dream server stop
-        stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM Docker container")
+        stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM and diffusion Docker containers")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
+        stop_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port of the diffusion sidecar to stop")
 
         # Command: dream server remove
-        remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM Docker container")
+        remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM and diffusion Docker containers")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
+        remove_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port of the diffusion sidecar to remove")
 
         # Command: dream server logs
         server_logs_parser = server_subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
@@ -946,6 +957,7 @@ class DreamferenceCLIController:
         config_file = getattr(args, "config", None)
         vllm_host = getattr(args, "vllm_host", None)
         model = getattr(args, "model", None)
+        diffusion_model = getattr(args, "diffusion_model", None)
         draft_model = getattr(args, "draft_model", None)
         num_speculative_tokens = getattr(args, "num_speculative_tokens", None)
         sandbox = getattr(args, "sandbox", None)
@@ -963,6 +975,7 @@ class DreamferenceCLIController:
             config_file=config_file,
             vllm_host=vllm_host,
             model=model,
+            diffusion_model=diffusion_model,
             draft_model=draft_model,
             num_speculative_tokens=num_speculative_tokens,
             sandbox=sandbox,
@@ -1024,11 +1037,44 @@ class DreamferenceCLIController:
                         print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dream init --model <model_name>'")
                 sys.exit(0)
 
+        elif args.command == "diffusion-model":
+            if args.diffusion_model_command == "set":
+                cls.display_header()
+                from rich.console import Console
+                out_console = Console()
+                # The mirror of main-model set's refusal: an autoregressive checkpoint handed to
+                # the diffusion sidecar loads through AutoModelForMaskedLM and produces garbage
+                # (or an opaque load error), so only registry entries that declare themselves
+                # diffusion are accepted. Unknown keys are refused too — the sidecar has no
+                # pre-flight gates to catch a bad guess later.
+                from dreamference.hardware import model_is_diffusion
+                if not model_is_diffusion(args.model_name):
+                    out_console.print(
+                        f"[bold red]❌ '{args.model_name}' is not a diffusion model in the registry.[/bold red]\n"
+                        f"   Diffusion checkpoints generate by block denoising and are served by the "
+                        f"diffusion sidecar, not vLLM. For the main model use: "
+                        f"[cyan]dream main-model set {args.model_name}[/cyan]")
+                    sys.exit(1)
+                config.diffusion_model = args.model_name
+                saved_path = config.save_config()
+                out_console.print(f"[bold green]✅ Diffusion model set to '{args.model_name}'[/bold green]")
+                out_console.print(f"   [cyan]Config saved to:[/cyan] {saved_path}")
+                sys.exit(0)
+
         elif args.command == "main-model":
             if args.main_model_command == "set":
                 cls.display_header()
                 from rich.console import Console
                 out_console = Console()
+                # A diffusion checkpoint pointed at vLLM fails only at launch, with an error that
+                # never mentions the real problem. Refuse it here, where the fix is nameable.
+                from dreamference.hardware import model_is_diffusion
+                if model_is_diffusion(args.model_name):
+                    out_console.print(
+                        f"[bold red]❌ '{args.model_name}' is a diffusion model and cannot be served "
+                        f"by vLLM as the main model.[/bold red]\n"
+                        f"   Use: [cyan]dream diffusion-model set {args.model_name}[/cyan]")
+                    sys.exit(1)
                 config.model = args.model_name
                 saved_path = config.save_config()
                 out_console.print(f"[bold green]✅ Main model set to '{args.model_name}'[/bold green]")
@@ -1771,6 +1817,7 @@ class DreamferenceCLIController:
             cred_table.add_column("Value", style="white")
             cred_table.add_row("Base URL (localhost)", "http://localhost:8000/v1")
             cred_table.add_row("Base URL (LAN IP)", f"http://{local_ip}:8000/v1")
+            cred_table.add_row("Diffusion model URL", f"http://localhost:{DEFAULT_DIFFUSION_PORT}/v1")
             cred_table.add_row("API Key", "Optional (use --api-key on serve; otherwise not required)")
             cred_table.add_row("Auth Header", "Authorization: Bearer <key> (when enabled)")
             console.print(cred_table)
@@ -1785,6 +1832,29 @@ class DreamferenceCLIController:
                 # `main-model set` and `server start` can never disagree again.
                 args.model = args.model or config.model
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+
+                # The diffusion sidecar starts *before* the vLLM launch on purpose: vLLM's
+                # pre-flight reads current free memory, so a sidecar already resident is
+                # accounted for — the reverse order lets a marginal KV check pass and then lose
+                # the sidecar's memory mid-load. Its failure never blocks the main model.
+                diffusion_mgr = None
+                if not args.no_diffusion:
+                    diffusion_model = args.diffusion_model or config.diffusion_model
+                    diffusion_mgr = DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}")
+                    try:
+                        # A False return is a docker failure already reported by the manager;
+                        # nulling the handle here is what keeps the post-launch health poll from
+                        # spending 30 seconds on a container that never existed.
+                        if not diffusion_mgr.start_server(
+                            model=diffusion_model,
+                            main_model=args.model,
+                            port=args.diffusion_port,
+                            hf_token=config.hf_token,
+                        ):
+                            diffusion_mgr = None
+                    except Exception as exc:
+                        print(f"⚠️  Diffusion sidecar failed to start: {exc}")
+                        diffusion_mgr = None
             
                 # Start monitoring thread before server launch
                 from dreamference.hardware import get_model_launch_overrides
@@ -1858,7 +1928,24 @@ class DreamferenceCLIController:
                                     print(f"⚠️  NVFP4 Canary skipped: API returned {resp.status_code}")
                             except Exception as e:
                                 print(f"⚠️  NVFP4 Canary failed to execute: {e}")
-                
+
+                        # By now the sidecar's 0.6B load has usually finished under the main
+                        # model's. A brief poll reports its state either way — its /health is the
+                        # only place a transformers-version mismatch with the checkpoint's remote
+                        # code surfaces — but never fails the start: the model keeps loading in
+                        # the background and the endpoint comes up when it does.
+                        if diffusion_mgr is not None:
+                            import time as _time
+                            deadline = _time.time() + 30
+                            while _time.time() < deadline and not diffusion_mgr.check_health():
+                                _time.sleep(2)
+                            state = diffusion_mgr.get_load_state()
+                            if state == "ok":
+                                print(f"🌫️  Diffusion model ready at {diffusion_mgr.host}/v1")
+                            else:
+                                print(f"🌫️  Diffusion sidecar at {diffusion_mgr.host}/v1 — "
+                                      f"still loading in background (state: {state})")
+
                     # Do not block: exit after health check passes (server keeps running)
                     
                 except KeyboardInterrupt:
@@ -1875,10 +1962,12 @@ class DreamferenceCLIController:
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.stop_server(port=args.port)
+                DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").stop_server(port=args.diffusion_port)
             elif args.server_command == "remove":
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.remove_server(port=args.port)
+                DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").remove_server(port=args.diffusion_port)
             elif args.server_command == "logs":
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")

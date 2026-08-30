@@ -42,6 +42,11 @@ class ModelSpec:
             The signal is the checkpoint's architecture (`...ForConditionalGeneration` with a
             `vision_config`) rather than the name, which is why it is recorded per entry here
             rather than guessed from the alias.
+        is_diffusion (bool): Whether the checkpoint is a diffusion language model rather than an
+            autoregressive one. Diffusion checkpoints cannot be served by vLLM -- they load
+            through transformers with trust_remote_code and their own block-denoising generate --
+            so this flag routes them to the diffusion sidecar and keeps `main-model set` from
+            pointing vLLM at a checkpoint it would fail to launch.
     """
     name: str
     params_b: float
@@ -53,3 +58,4 @@ class ModelSpec:
     hf_repo_id: str
     launch_overrides: Dict[str, Any] = field(default_factory=dict)
     supports_vision: bool = False
+    is_diffusion: bool = False

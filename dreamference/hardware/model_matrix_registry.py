@@ -28,6 +28,11 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
 # tested fallback.
 DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-hybrid-dflash"
 
+# The diffusion model served beside the main one. A separate default rather than a mode of the
+# main model, because the two run in parallel: every configuration names both, and `dream server
+# start` launches both.
+DEFAULT_DIFFUSION_MODEL_ALIAS: Final[str] = "tiny-a2d-coder-0.5b-diffusion"
+
 class ModelMatrixRegistry:
     """
     Registry holding qualified models for NVIDIA GB10 hardware and short alias resolution logic.
@@ -623,6 +628,31 @@ class ModelMatrixRegistry:
             ),
             hf_repo_id="z-lab/Qwen3.5-122B-A10B-DFlash",
         ),
+        "tiny-a2d-coder-0.5b-diffusion": ModelSpec(
+            name="Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion)",
+            params_b=0.6,
+            supported_precisions=["BF16"],
+            # ~1.2 GiB of BF16 shards plus activations. Small enough that the diffusion sidecar
+            # runs it under a fixed container memory cap instead of the PSI watchdog.
+            min_memory_gb=1.5,
+            max_memory_gb=3.0,
+            compatible_gb10=True,
+            notes=(
+                "Default diffusion model. A Qwen2.5-Coder 0.5B converted to a block-diffusion "
+                "(bd3lm) language model by the dLLM project's Tiny-A2D recipe: generation "
+                "denoises 32-token blocks over up to 128 steps instead of decoding "
+                "autoregressively. NOT vLLM-servable -- the checkpoint loads through "
+                "transformers as AutoModelForMaskedLM with trust_remote_code and generates via "
+                "its own remote-code sampler -- which is what is_diffusion records and why "
+                "DiffusionServerManager serves it rather than the vLLM launcher. The model "
+                "card's sampler settings (steps=128, block_size=32, temperature=0.0, "
+                "cfg_scale=0.0, remasking='low_confidence') are applied by the sidecar's "
+                "serving script, which falls back to bare max_new_tokens if the remote code's "
+                "generate signature differs. Apache 2.0."
+            ),
+            hf_repo_id="dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1",
+            is_diffusion=True,
+        ),
     }
 
     @classmethod
@@ -727,6 +757,25 @@ class ModelMatrixRegistry:
         """
         spec = cls.get_spec(model_key) if model_key else None
         return bool(spec and spec.supports_vision)
+
+    @classmethod
+    def is_diffusion(cls, model_key: str) -> bool:
+        """
+        Reports whether the model is a diffusion language model.
+
+        The distinction routes serving: an autoregressive checkpoint goes to the vLLM launcher, a
+        diffusion one to the transformers-based sidecar, and pointing either at the other kind
+        fails only at load time with an unhelpful error. Unknown keys report False, which sends
+        them down the vLLM path -- the path with pre-flight gates that can explain a bad load.
+
+        Args:
+            model_key (str): Short model alias, HF repo ID, or display name.
+
+        Returns:
+            bool: True when the checkpoint generates by diffusion rather than autoregression.
+        """
+        spec = cls.get_spec(model_key) if model_key else None
+        return bool(spec and spec.is_diffusion)
 
     @classmethod
     def declares_own_quantization(cls, model_key: str) -> bool:

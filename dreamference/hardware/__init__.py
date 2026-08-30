@@ -22,6 +22,9 @@ def get_speculative_draft_repo(model_key: str) -> Optional[str]:
 def model_supports_vision(model_key: str) -> bool:
     return ModelMatrixRegistry.supports_vision(model_key)
 
+def model_is_diffusion(model_key: str) -> bool:
+    return ModelMatrixRegistry.is_diffusion(model_key)
+
 def model_declares_own_quantization(model_key: str) -> bool:
     return ModelMatrixRegistry.declares_own_quantization(model_key)
 
@@ -83,6 +86,7 @@ __all__ = [
     "resolve_model_hf_repo",
     "get_model_launch_overrides",
     "model_supports_vision",
+    "model_is_diffusion",
     "get_speculative_draft_repo",
     "model_declares_own_quantization",
     "is_model_downloaded",
