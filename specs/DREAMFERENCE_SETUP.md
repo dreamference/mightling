@@ -2,6 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Installation, Hardware Detection, Quickstart, Helper Scripts
+> **Checked against the code:** 2026-09-28 (`setup.py`, `scripts/`, `dreamference/`)
 
 ---
 
@@ -9,8 +10,10 @@
 
 - [1. System Requirements](#1-system-requirements)
 - [2. Hardware Identification](#2-hardware-identification)
-- [3. Quickstart Installation](#3-quickstart-installation)
+- [3. Installation](#3-installation)
 - [4. Helper Scripts](#4-helper-scripts)
+- [5. Troubleshooting](#5-troubleshooting)
+- [6. Post-Installation Checks](#6-post-installation-checks)
 
 ---
 
@@ -18,335 +21,149 @@
 
 ### 1.1. Hardware
 
-- **System**: 1x NVIDIA GB10 (Blackwell, 128 GB Unified Memory) — or host with ≥100 GB RAM for detection fallback
-- **GPU**: NVIDIA GB10 Tensor Core GPU (Blackwell architecture)
-- **Memory**: 128 GB Unified LPDDR5X (or ≥100 GB fallback)
-- **CPU**: High-performance ARM Cortex CPU cores (`aarch64` architecture)
-- **Storage**: NVMe PCIe SSD (recommended for workspace indexing & model caching)
+- **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU). Any host with ≥ 100 GB RAM also qualifies by the detection heuristic (§2), but the recipes and images target SM121.
+- NVMe storage: the model caches plus the DFlash vLLM images (~41 GB each) take hundreds of GB.
 
-### 1.2. Operating System
+### 1.2. Operating System and Drivers
 
-- **OS**: Linux ARM64 (Ubuntu 22.04 LTS or compatible)
-- **Kernel**: Standard Linux kernel (5.15+ recommended)
-- **Drivers**: NVIDIA Linux Driver 580+ / CUDA 13.x (typical GB10 stack)
+- Linux ARM64 (Ubuntu; this machine runs a 6.17 NVIDIA kernel).
+- The NVIDIA driver and the NVIDIA Container Toolkit, for `docker run --gpus all`.
+- **Memory-safety prerequisites**, which `check_host_safety()` checks before a model load and aborts without: swap, and `earlyoom` or `systemd-oomd` configured. See `DREAMFERENCE_INFERENCE.md` §7.
 
-### 1.3. Software Dependencies
+### 1.3. Software
 
-**Core**:
-- Python 3.10+
-- PyYAML
-- Rich (terminal UI)
-- Requests (HTTP client)
+- **Python:** 3.10 or newer; development and tests run on 3.12. `setup.py` declares no `python_requires`.
+- **Python dependencies** (`setup.py` `install_requires`): `pyyaml`, `toml`, `rich`, `requests`, `sentence-transformers`, `sqlite-vec`, `tensorizer`, `einops`, `fonttools[woff]`, `Pillow`, `beautifulsoup4`.
+- **Docker**, which is required: the model server runs only in Docker.
+- **For `puffin`:**
+  - `git` with submodules (`codex/`), and a Rust toolchain via rustup (`puffin-admin codex build` installs rustup if missing);
+  - `perl` and a C compiler, because OpenSSL is built from source;
+  - no `libssl-dev` or `libcap-dev` is needed.
+- **For the web UI:** `onyx-cli`, installed via pip by `OnyxInstaller` when missing.
+- **For the desktop window:** GTK/WebKit 4.1 development headers, Rust and the Tauri CLI. `puffin-admin desktop install` fetches all three; the headers need `sudo apt-get`.
+- **Optional agents:**
+  - VS Code / VSCodium, for Cline and Continue;
+  - `aider-chat`, for Aider;
+  - Apptainer or Podman, for Goose sandboxing.
 
-**Optional**:
-- **Docker**: For vLLM & OpenHands (strongly recommended)
-- **VS Code / VSCodium**: For Cline & Continue runners
-- **Aider**: `aider-chat` package for Aider runner
-- **Sandbox Runtimes**: Apptainer, Podman, or Docker (for Goose sandbox prefixes)
+### 1.4. Privileges
 
-### 1.4. Runtime Privileges
-
-- **Docker Access**: Should not require `sudo` (standard `docker` group membership)
-- **Filesystem**: Write access to `~/.cache/` and `~/.config/`
+- Docker through `docker` group membership, without `sudo`.
+- Write access to `~/.cache/`, `~/.config/`, `~/.local/`.
+- `sudo` only for the desktop's system packages (prompted, and visible before it runs).
 
 ---
 
 ## 2. Hardware Identification
 
-### 2.1. Automatic Detection
+`HardwareManager` reads `/proc/meminfo` and `nvidia-smi --query-gpu=name,driver_version,memory.total`. The machine qualifies as GB10 when:
+- the GPU name contains `GB10` or `BLACKWELL`; **or**
+- total memory ≥ 100 GB. If no GPU name is available, it is reported as "NVIDIA GB10 (Simulated / Unified Memory Node)".
 
-Dreamference automatically detects GB10 qualification via:
+There is no override variable. The `DREAMFERENCE_GB10_OVERRIDE` this document used to describe does not exist.
 
 ```bash
-nvidia-smi --query-gpu=name --format=csv
+nvidia-smi --query-gpu=name,memory.total --format=csv
 free -h
+puffin-admin status        # "System Target" row
 ```
-
-**Qualification Criteria**:
-- GPU name contains `GB10` or `BLACKWELL`, OR
-- Total memory ≥ ~100 GiB (fallback heuristic)
-
-### 2.2. Manual Verification
-
-```bash
-# Check GPU name
-nvidia-smi --query-gpu=name --format=csv
-
-# Check total memory
-free -h
-```
-
-**Expected Output for GB10**:
-```
-NVIDIA GB10 (Blackwell)
-total: ~128G
-```
-
-### 2.3. Detection Override
-
-For testing on unsupported hardware:
-```bash
-export DREAMFERENCE_GB10_OVERRIDE=1
-puffin-admin status  # Will report GB10 mode
-```
-
-**Warning**: This is for testing only. Many GB10-specific optimizations may fail on incompatible hardware.
 
 ---
 
-## 3. Quickstart Installation
+## 3. Installation
 
-### 3.1. Automated Install
-
-```bash
-# Clone repository
-git clone https://github.com/dreamference/dreamference.git
-cd dreamference
-
-# Run install script (downloads Goose, installs package, initializes)
-./scripts/install_gb10.sh [MODEL]
-
-# Verify installation
-puffin-admin status
-
-# Start interactive session
-puffin-admin chat
-```
-
-**MODEL Argument**: Optional (default `qwen3.6-35b-a3b-nvfp4`)
-
-### 3.2. What the Install Script Does
-
-`scripts/install_gb10.sh` performs:
-
-1. **Install Goose CLI**:
-   ```bash
-   curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash -s -- --yes
-   ```
-
-2. **Install Dreamference Package** (editable):
-   ```bash
-   pip install -e .
-   ```
-
-3. **Initialize Workspace**:
-   ```bash
-   puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
-   ```
-
-This downloads model weights, generates `dreamference.toml`, writes Goose config, and force-indexes the workspace.
-
-### 3.3. Manual Installation Steps
-
-If you prefer to install manually:
+### 3.1. Recommended manual install
 
 ```bash
-# 1. Create & activate virtual environment (optional)
+git clone --recurse-submodules https://github.com/dgxcoder/dgxcoder.git
+cd dgxcoder                      # the codex/ submodule is shallow; add --depth 1 on update if preferred
+
 python3 -m venv .venv
-source .venv/bin/activate
+.venv/bin/pip install -e .       # installs the `puffin-admin` console script into .venv/bin
 
-# 2. Install Dreamference in editable mode
-pip install -e .
-
-# 3. Install Goose (or skip; auto-install on first `puffin-admin chat`)
-curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash -s -- --yes
-
-# 4. Initialize workspace
-puffin-admin init --model qwen3.6-35b-a3b-nvfp4
-
-# 5. Verify installation
-puffin-admin status
+.venv/bin/puffin-admin init                  # default model qwen3.5-122b-a10b-hybrid-dflash: downloads weights,
+                                             # writes dreamference.toml and the Goose config, indexes the workspace
+.venv/bin/puffin-admin codex build           # builds puffin from codex/ + codex-patches/ + puffin-rs/,
+                                             # links ~/.local/bin/puffin (first build: long; later: incremental)
+.venv/bin/puffin-admin server start          # vLLM + diffusion sidecar; exits when healthy
+puffin                                       # the terminal agent
 ```
 
-### 3.4. Verification
+**Extras:**
+- **Web UI:** `puffin-admin puffin start`, then `puffin-admin puffin configure`.
+- **Desktop window:** `puffin-admin desktop install`, then `puffin-admin desktop run`, or `puffin app`.
 
-After installation:
+**Model images.** The default model pins `dreamference-vllm-dflash:0.23.0-aeon-dense5`, a locally built image. It is not pulled and not built automatically: build it from `Dockerfile.dflash` → `Dockerfile.dense` before the first `server start` (`DREAMFERENCE_DOCKER.md` §5.2–5.3).
+
+### 3.2. Prebuilt `puffin`
+
+A published GitHub release carries `puffin` and `codex-code-mode-host` for linux-arm64. Once a release exists, `puffin update` installs or refreshes them, and a source checkout is then only needed for `puffin-admin`. As of 2026-09-28 no release has been published.
+
+### 3.3. `scripts/install_gb10.sh` (outdated)
 
 ```bash
-# 1. Check hardware detection
-puffin-admin status
-
-# 2. Verify model matrix
-puffin-admin model list
-
-# 3. Try interactive chat
-puffin-admin chat --agent goose
-
-# 4. Try a task
-puffin-admin run "Hello, Goose!"
+./scripts/install_gb10.sh [MODEL]
 ```
+
+It does the following:
+1. If `goose` is missing, installs it with `curl -fsSL https://github.com/aaif-goose/goose/releases/latest/download/download_cli.sh | sh`, falling back to `pip install goose-ai`.
+2. `pip install -e .` into whatever environment is active.
+3. `puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"`.
+4. Tells you to run `puffin`.
+
+> ⚠️ **Out of step with the code.** Its default model is `qwen3.6-35b-a3b-nvfp4`, not the current default. It installs Goose, which is no longer the default agent. It does not initialise the `codex` submodule or build `puffin`, so the `puffin` it tells you to run does not exist yet after it finishes. Prefer §3.1.
 
 ---
 
 ## 4. Helper Scripts
 
-Located in `scripts/` directory:
+All in `scripts/` at the repository root.
 
-### 4.1. `scripts/install_gb10.sh`
+### 4.1. `scripts/run_vllm_gb10.sh [MODEL] [PORT] [DRAFT] [TOKENS]`
 
-```bash
-./scripts/install_gb10.sh [MODEL]
-```
+A foreground launch outside Docker: `python3 -m vllm.entrypoints.openai.api_server --model "$MODEL" --max-model-len 16384 --gpu-memory-utilization 0.50 --trust-remote-code --enforce-eager`. With a draft, it adds `--speculative-model … --num-speculative-tokens …`. The defaults are model `qwen3.6-35b-a3b-nvfp4`, port 8000 and 5 tokens.
 
-**Role**: Full installation (Goose + package + initialization)
+> ⚠️ It passes `MODEL` to vLLM **unresolved**: an alias like the default is not an HF repo id, so vLLM cannot load it. Pass an HF repo instead. It also bypasses Docker, the recipes, host safety and the pinned images. Use `puffin-admin server start`.
 
-**Positional Args**:
-- `[MODEL]`: Model alias (default `qwen3.6-35b-a3b-nvfp4`)
+### 4.2. `scripts/run_goose.sh`
 
-**What It Does**:
-1. Installs Goose via `releases/latest/download/download_cli.sh`
-2. Fallback to `pip install goose-ai` if download fails
-3. `pip install -e .`
-4. `puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"`
+Exports `GOOSE_PROVIDER=openai`, `OPENAI_HOST=$DREAMFERENCE_VLLM_HOST` (default `http://localhost:8000`), `OPENAI_BASE_PATH=v1`, `OPENAI_API_KEY=gb10-local-token` and `GOOSE_MODEL=${DREAMFERENCE_MODEL:-qwen3.6-35b-a3b-nvfp4}`, then runs `goose session "$@"`.
 
-**Note**: Runtime Goose auto-install uses `releases/download/stable/…`; this script uses `releases/latest/…`.
-
-### 4.2. `scripts/run_vllm_gb10.sh`
-
-```bash
-./scripts/run_vllm_gb10.sh [MODEL] [PORT] [DRAFT] [TOKENS]
-```
-
-**Role**: Thin foreground Python-module vLLM launch (minimal flags)
-
-**Positional Args**:
-- `[MODEL]`: Model alias (default `qwen3.6-35b-a3b-nvfp4`)
-- `[PORT]`: vLLM port (default `8000`)
-- `[DRAFT]`: Draft model for speculative decoding (optional)
-- `[TOKENS]`: Speculative tokens (optional)
-
-**Caveats**:
-- No prefix-cache / chunked-prefill / kv-cache-dtype flags
-- No Docker containerization
-- No tensorizer support
-- **Prefer `puffin-admin server start` for full GB10-tuned behavior**
-
-### 4.3. `scripts/run_goose.sh`
-
-```bash
-./scripts/run_goose.sh
-```
-
-**Role**: Sets Goose OpenAI environment variables and runs `goose session`
-
-**What It Does**:
-1. Exports `GOOSE_PROVIDER=openai`
-2. Exports `OPENAI_*` vars from config
-3. Launches `goose session`
-
-**Preference**: Use `puffin-admin chat` instead (handles more cases, better UX).
+> ⚠️ `GOOSE_MODEL` is set to the alias, but vLLM serves the model under its HF repo id. Set `DREAMFERENCE_MODEL` to the served id (e.g. `Intel/Qwen3.5-122B-A10B-int4-AutoRound`), or use `puffin-admin run --agent goose`, which resolves it.
 
 ---
 
-## 5. Installation Troubleshooting
+## 5. Troubleshooting
 
-### 5.1. Docker Not Found
-
-**Error**: `docker ps` fails
-
-**Resolution**:
-```bash
-# Install Docker
-sudo apt install docker.io
-
-# Add user to docker group (no sudo required)
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Verify
-docker ps
-```
-
-### 5.2. Goose Not Found
-
-**Error**: `which goose` returns nothing
-
-**Resolution**:
-```bash
-# Manual Goose install
-curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash -s -- --yes
-
-# Verify
-goose --version
-```
-
-### 5.3. NVIDIA Driver Not Found
-
-**Error**: `nvidia-smi` fails
-
-**Resolution**:
-```bash
-# Install NVIDIA drivers (550+ recommended for GB10)
-sudo apt install -y nvidia-driver-550
-
-# Reboot
-sudo reboot
-
-# Verify
-nvidia-smi
-```
-
-### 5.4. Python 3.10+ Not Found
-
-**Error**: `python --version` shows Python 3.9 or earlier
-
-**Resolution**:
-```bash
-# Install Python 3.11 (or 3.10)
-sudo apt install python3.11 python3.11-venv python3.11-dev
-
-# Create venv with specific version
-python3.11 -m venv .venv
-source .venv/bin/activate
-
-# Install Dreamference
-pip install -e .
-```
+| Problem | Fix |
+| --- | --- |
+| `docker ps` fails | `sudo apt install docker.io`; `sudo usermod -aG docker $USER`; log in again |
+| `--gpus all` fails | Install the NVIDIA Container Toolkit and restart Docker |
+| `server start` aborts in the host-safety pre-flight | Read the printed reason. Usually swap is missing, or `earlyoom`/`systemd-oomd` isn't configured, or the model doesn't fit current free memory |
+| `puffin-admin: command not found` | It lives in `.venv/bin/`: use the full path, or add `.venv/bin` to `PATH` |
+| `puffin: command not found` | `puffin-admin codex build`, then make sure `~/.local/bin` is on `PATH` |
+| `puffin-admin codex build` says the submodule is not checked out | `git submodule update --init codex` |
+| `puffin` waits forever "for local vLLM server" | `puffin-admin server start`; check `DREAMFERENCE_VLLM_HOST` / `vllm_host` |
+| First `puffin-admin index` fails offline | The nomic embedding model is downloaded on first use; fetch it while online (`DREAMFERENCE_CONTEXT.md` §5) |
 
 ---
 
-## 6. Post-Installation
-
-### 6.1. Verify vLLM Health
+## 6. Post-Installation Checks
 
 ```bash
-puffin-admin server start --model qwen3.6-35b-a3b-nvfp4
+puffin-admin status                 # GB10 qualified; vLLM health; agent CLIs present; context index
+puffin-admin model list             # the model matrix
+puffin --version                    # "puffin 0.158.0"
+puffin exec "say hello"             # a one-shot answer from the local model (needs the server)
+puffin-admin index --force          # (re)builds .dreamference/ in the current directory
+.venv/bin/python -m pytest tests/ -q   # 317 passed, 63 skipped without a model server (2026-09-28)
 ```
-
-Server should print logs and exit once healthy (vLLM stays running in background).
-
-### 6.2. Verify Agent Runner
-
-```bash
-puffin-admin chat --agent goose
-```
-
-Should launch an interactive Goose session.
-
-### 6.3. Verify Context Engine
-
-```bash
-puffin-admin index --force
-```
-
-Should index workspace and create `.dreamference/` artifacts.
-
-### 6.4. Check Status
-
-```bash
-puffin-admin status
-```
-
-Should display:
-- ✅ GB10 qualified
-- ✅ vLLM endpoint health
-- ✅ Agent readiness
-- ✅ Context index loaded
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md)** — CLI reference
-- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md)** — Model matrix & selection
-- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md)** — Agent setup & usage
+- **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md):** CLI reference
+- **[DREAMFERENCE_PUFFIN_CODEX.md](./DREAMFERENCE_PUFFIN_CODEX.md):** building `puffin`
+- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md):** model matrix
+- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agents
