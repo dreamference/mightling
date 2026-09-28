@@ -1,0 +1,13 @@
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index 4d7984d..a89bd04 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -170,6 +170,8 @@ enum Subcommand {
+     AppServer(AppServerCommand),
+ 
+     /// [experimental] Manage the app-server daemon with remote control enabled.
++    // Puffin: hidden, not removed -- it relays through OpenAI today; kept for a private relay later.
++    #[clap(hide = true)]
+     RemoteControl(RemoteControlCommand),
+ 
+     /// Launch the Desktop app (opens the app installer if missing).
