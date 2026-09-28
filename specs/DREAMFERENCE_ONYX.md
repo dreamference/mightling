@@ -1,344 +1,226 @@
-# Dreamference Onyx Integration & Branding Overrides
+# Dreamference Onyx Integration & Branding (the Puffin web UI)
 
 > **Version:** 1.2.0
-> **Subject:** Onyx Lite Deployment, Puffin Rebrand, Telegram Typography, UI Stylesheet Patches, SSRF / Local Voice STT, SearXNG Web Search
+> **Subject:** Onyx Lite deployment; provider registration; Puffin branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
+> **Checked against the code:** 2026-09-28 (`dreamference/chat/`)
 
 ---
 
 ## Table of Contents
 
-- [1. Architectural Overview & Deployment Lifecycle](#1-architectural-overview--deployment-lifecycle)
-- [2. Config-Driven API Provisioning](#2-config-driven-api-provisioning)
-- [3. Brand Identity & Vector Asset Overrides (Puffin)](#3-brand-identity--vector-asset-overrides-puffin)
-- [4. Next.js Bundle & Sidebar Label Rewriting](#4-nextjs-bundle--sidebar-label-rewriting)
-- [5. Telegram-Style Typography Substitution](#5-telegram-style-typography-substitution)
-- [6. Minimalist UI Layout & CSS Overrides](#6-minimalist-ui-layout--css-overrides)
-- [7. Local Voice Transcription & SSRF Exemption Patch](#7-local-voice-transcription--ssrf-exemption-patch)
-- [8. Secure Web Search Integration](#8-secure-web-search-integration)
-
---- 
-
-## 1. Architectural Overview & Deployment Lifecycle
-
-Dreamference integrates **Onyx Lite**—a self-hosted, browser-based chat UI—to provide a user-friendly conversational interface backed by the same local vLLM model serving terminal agents. 
-
-Onyx Lite is not a separate application; rather, it is the stock Onyx stack configured to run with unnecessary components (the vector database, Redis, Celery workers, model servers, and object storage) switched off. This minimizes resource overhead on the NVIDIA GB10 hardware, running only:
-- **web_server**: Next.js-based frontend
-- **api_server**: FastAPI-based backend APIs
-- **db**: PostgreSQL database
-
-### 1.1. Package Structure
-
-The Onyx integration and override engine is implemented across the following modules:
-- `dreamference/runner/onyx_runner.py`: Orchestrates the stack lifecycle, API configurations, and rebrand pipelines.
-- `dreamference/runner/onyx_installer.py`: Detects and manages installation of `onyx-cli`.
-- `dreamference/runner/onyx_brand_assets.py`: Renders custom vector logos/icons and patches Next.js bundles to inject the brand assets.
-- `dreamference/runner/onyx_ui_fonts.py`: Fetches, cache-converts, installs, and injects Roboto & Roboto Mono typography.
-- `dreamference/runner/onyx_ui_labels.py`: Shortens long sidebar navigation labels within compiled JSX assets.
-- `dreamference/runner/onyx_ui_overrides.py`: Appends CSS overrides for minimalist design, a white layout, and hover actions.
-
-### 1.2. Lifecycle Operations
-
-Dreamference controls the deployment strictly through the official `onyx-cli` tool. The main command flows map as follows:
-
-| CLI Command | Internal Operation | Description |
-|---|---|---|
-| `puffin-admin onyx start` | `onyx-cli deploy install --lite --no-prompt` | Provisions and starts containers. Defaults to waiting until all containers are healthy unless `--no-wait` is passed. |
-| `puffin-admin onyx configure` | (API & container injections) | Orchestrates provider registrations, branding swaps, and local sidecar hooks. |
-| `puffin-admin onyx status` | `onyx-cli deploy status` | Reports deployment version, container state, and active health checks. |
-| `puffin-admin onyx logs [--follow]` | `onyx-cli deploy logs` | Streams combined standard output/error from all container services. |
-| `puffin-admin onyx stop` | `onyx-cli deploy stop` | Shuts down containers while preserving all data (PostgreSQL volumes remain). |
-| `puffin-admin onyx uninstall` | `onyx-cli deploy uninstall` | Destroys containers and permanently deletes PostgreSQL databases/volumes. |
-
-### 1.3. CLI Binary Resolution (`OnyxInstaller`)
-
-To ensure standard setup on host systems, `OnyxInstaller` resolves the path to the `onyx-cli` executable by checking the following locations in order:
-1. The active Python virtual environment path (`sys.prefix/bin/onyx-cli`) to prefer local `pip install onyx-cli`.
-2. Environment `PATH` lookup via `shutil.which`.
-3. User local binaries (`~/.local/bin/onyx-cli`).
-
-If no executable is found, it automatically installs `onyx-cli` via `pip install --silent onyx-cli` before proceeding.
+- [1. Overview & Lifecycle](#1-overview--lifecycle)
+- [2. `configure`: API Provisioning](#2-configure-api-provisioning)
+- [3. Branding (settings, persona, assets)](#3-branding-settings-persona-assets)
+- [4. The Four Kinds of UI Patch](#4-the-four-kinds-of-ui-patch)
+- [5. Voice (local Whisper + SSRF patch)](#5-voice-local-whisper--ssrf-patch)
+- [6. Web Search (SearXNG)](#6-web-search-searxng)
+- [7. Image Search](#7-image-search)
+- [8. Gmail](#8-gmail)
+- [9. Google Sign-In & Telemetry](#9-google-sign-in--telemetry)
 
 ---
 
-## 2. Config-Driven API Provisioning
+## 1. Overview & Lifecycle
 
-Because Onyx does not configure its default model providers through environment variables, Dreamference automates database configuration by directly interacting with the Onyx API endpoints. 
+**Onyx Lite** is the stock Onyx stack with Vespa, Redis, Celery, the model servers and object storage switched off. It is a browser chat UI in front of the same vLLM model the terminal agents use. Its containers are pinned to `puffin-*` names in the lite overlay:
+- `puffin-web_server-1` (Next.js);
+- `puffin-api_server-1` (FastAPI);
+- `puffin-relational_db-1` (PostgreSQL);
+- `puffin-nginx-1`;
+- `puffin-code-interpreter-1`.
 
-Executing `puffin-admin onyx configure` triggers an idempotent, multi-stage administrative setup:
+The UI is served at `http://localhost:3000`, and the desktop window `puffin-app` shows the same server.
 
-```
-[puffin-admin onyx configure]
-       │
-       ▼
-1. Authenticate / Register Admin (`admin@dreamference.dev`)
-       │
-       ▼
-2. Resolve Docker Bridge Gateway (172.17.0.1)
-       │
-       ▼
-3. PUT `/admin/llm/provider` (upsert OpenAI-compatible model link)
-       │
-       ├─► [Vision Supported?] ──► Set default-vision-model & supports_image_input=True
-       ▼
-4. Connect SearXNG (Web Search Container)
-       │
-       ▼
-5. Apply Puffin Branding & Override Static Web Assets
-       │
-       ▼
-6. Deploy Local Whisper Container (`speaches`) & Patch Voice API SSRF Check
-```
+Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 
-### 2.1. Container Network Loopback Resolution
+| Module | Role |
+| --- | --- |
+| `chat/onyx_runner.py` (`OnyxRunner`) | Lifecycle, `configure`, branding, voice, web search, image search, Gmail, Google sign-in, telemetry |
+| `chat/onyx_installer.py` (`OnyxInstaller`) | Finds `onyx-cli`: the venv's `bin/` first, then `PATH`, then `~/.local/bin`. If missing, installs it with pip |
+| `chat/onyx_brand_assets.py` | Logo, wordmark and favicon files, and the in-bundle logo paths |
+| `chat/onyx_ui_fonts.py`, `onyx_ui_overrides.py`, `onyx_ui_labels.py`, `onyx_ui_scripts.py` | The UI patches (§4) |
+| `chat/gmail_*`, `chat/image_search_service.py` | Sidecar services (§7, §8) |
 
-Dreamference launches vLLM with `--network host`, binding it to `localhost:8000` on the host machine. However, Onyx's containers run on Docker's default bridge network, where `localhost` resolves inside the container itself. 
+Dreamference never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
-To bridge this gap, `OnyxRunner` dynamically retrieves the Docker bridge network gateway (typically `172.17.0.1`) and rewrites loopback addresses:
-
-```python
-# dreamference/runner/onyx_runner.py
-# Resolves localhost to the bridge gateway IP
-gateway = subprocess.run(
-    ["docker", "network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}"],
-    capture_output=True, text=True
-).stdout.strip()
-```
-
-This transforms the host API URL `http://localhost:8000` into `http://172.17.0.1:8000/v1` for communication inside the container.
-
-### 2.2. Model Integration & Vision Support
-
-The local vLLM provider is registered under the identifier `dreamference-vllm` using the `openai_compatible` provider format. To ensure stability:
-1. The model provider setup checks `GET /admin/llm/provider` to see if `dreamference-vllm` exists.
-2. If it exists, the runner sends a `PUT` request with the provider's existing database ID to perform an update; otherwise, it triggers a creation request (`is_creation=true`).
-3. Max input tokens are bound to `max_model_len` as declared in the model registry.
-4. **Vision Gating**: If the active model supports vision, the runner overrides `supports_image_input` to `True`. Additionally, it calls `POST /admin/llm/default-vision` to route visual prompt structures. This removes the stock message: *"The current model does not support image input."*
+| Command (`puffin-admin puffin …`, alias `onyx`) | Does |
+|---|---|
+| `start [--no-wait]` | `onyx-cli deploy install --lite --no-prompt`, and waits until healthy unless `--no-wait` |
+| `configure [--email] [--password] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]` | §2 |
+| `google-auth [--client-id] [--client-secret]` | §9 |
+| `gmail` | Connects a Gmail account (§8) |
+| `status` / `logs [-f]` / `stop` | `onyx-cli deploy status` / `logs` / `stop`. `stop` keeps the data |
+| `uninstall` | Removes the deployment **and its data** |
 
 ---
 
-## 3. Brand Identity & Vector Asset Overrides (Puffin)
+## 2. `configure`: API Provisioning
 
-Onyx reserves its full white-label capabilities (custom window titles, hiding copyright headers, replacing the default workspace branding) for its Paid Enterprise Edition (`ee/` module), gated by the environment variable `ENABLE_PAID_ENTERPRISE_EDITION_FEATURES`. 
+Onyx has **no environment variable for the LLM provider**. Providers live in its database, so `configure` drives the admin API that the Admin panel uses. In order:
 
-Because Dreamference strictly complies with open-source licenses, it does not force-enable the Enterprise flag. Instead, it applies rebranding via a two-tier approach:
-- **Tier 1 (Community Settings API)**: Standard database settings and persona configs are updated.
-- **Tier 2 (Static Container Modifications)**: Low-level modifications are made directly on Next.js compiled frontend bundles in the running container.
-
-### 3.1. Rebranding Conversational Configs
-
-Through the FastAPI settings endpoints, the database parameters are updated as follows:
-- **Company Name**: `"Puffin"`
-- **Company Description**: `"Local, air-gapped pair programming on NVIDIA GB10."`
-- **Default Assistant Disabled**: True (the stock default assistant is disabled, forcing users to land on the custom Puffin persona).
-
-### 3.2. Puffin Persona Initialization
-
-An independent assistant persona called **Puffin** is created to avoid tampering with Onyx's non-editable built-in persona:
-- **Name / Description**: `Puffin` / `Local pair programmer on GB10 — web search, Python, and file reading, served entirely from this machine.`
-- **System Instructions**:
-  ```
-  You are Puffin, an AI assistant that runs entirely on this machine — a local, air-gapped 
-  deployment on NVIDIA GB10 hardware. When you are asked your name, who you are, or what you 
-  are, say that you are Puffin. Do not describe yourself as a generic assistant and do not 
-  answer with the name of the model you are served from.
-  ```
-- **System Prompts Configuration**: `replace_base_system_prompt` is set to `False`. The prompt is appended to Onyx's base system instructions so that tool usage descriptions (search, Python execution) remain intact.
-- **Tool Exclusions**: The coding agent tool (`coding_agent`) is excluded to prevent conflicts with Dreamference's specialized terminal-based agents running concurrently.
-
-### 3.3. Vector Asset Injection (`OnyxBrandAssets`)
-
-`OnyxBrandAssets` generates Puffin-themed SVGs and copies them over the web container's default assets:
-- **Vector Favicon**: Renders an `.ico` vector favicon asset and places it at `/app/public/favicon.ico` (resolving as `/favicon.ico`).
-- **Sidebar & Logo PNGs**: Renders brand logos and uploads them to `/app/public/logo.png` and `/app/public/images/logo.png`.
+1. **Telemetry off** (§9). This comes first, because applying it recreates the API server, and a session cookie taken earlier would point at the replaced container.
+2. **Authenticate** as `admin@dreamference.dev` / `dreamference` by default. The account is registered, and becomes admin, when login fails.
+3. **Register the model** as provider `dreamference-vllm`, type `openai_compatible`:
+   - `api_base` is the vLLM URL with loopback rewritten to the Docker **bridge gateway** (`docker network inspect bridge` → e.g. `http://172.17.0.1:8000/v1`), because vLLM uses `--network host` and `localhost` inside Onyx is the container itself;
+   - `max_input_tokens` is the recipe's `max_model_len`;
+   - `supports_image_input` is the model's `supports_vision`.
+4. **Upsert correctly.** `PUT /admin/llm/provider` is **not** an upsert: `?is_creation=true|false` picks the operation, and each value rejects the other case. So the provider is looked up by name first.
+   - **Model change:** Onyx refuses to drop the stored default model. The runner first sends the union of the old and new models, then moves the default (`POST /admin/llm/default`), then trims to the new model.
+5. **Make it the default** (`POST /admin/llm/default`). For a vision model it also calls `POST /admin/llm/default-vision`. Both settings are needed, or uploads stay refused with "The current model does not support image input".
+6. **Web search** (§6), unless `--no-web`.
+7. **Gmail tool** (§8), unless `--no-gmail`.
+8. **Image search** (§7), unless `--no-image-search`.
+9. **Branding** (§3–4), unless `--no-brand`.
+10. **Voice** (§5), unless `--no-voice`. It comes last, because it may restart the API server.
 
 ---
 
-## 4. Next.js Bundle & Sidebar Label Rewriting
+## 3. Branding (settings, persona, assets)
 
-Because the web UI's sidebar logo and wordmark are written directly as inline SVG React components inside Next.js bundle JS chunks rather than references to static images, standard stylesheet manipulation cannot hide or replace them.
+Onyx's real white-labelling (`application_name`, `hide_onyx_branding`, custom logo and greeting) lives in `ee/`, behind `ENABLE_PAID_ENTERPRISE_EDITION_FEATURES`. That is a **paid** feature, and Dreamference does not set it. The rebrand uses community settings plus file patches.
 
-`OnyxBrandAssets` and `OnyxUILabels` solve this by recursively parsing the Next.js bundle files (`.js` and `.mjs` in `/app/.next` and `/app/public`) directly inside the container and replacing matching string definitions.
+**Settings** (`PUT /admin/settings`):
+- `company_name = "Puffin"`;
+- `company_description = "Local, air-gapped pair programming on NVIDIA GB10."`;
+- `disable_default_assistant = true`, but only once the Puffin assistant exists. Reversing that order would leave a user with no assistant, and a test covers the ordering.
 
-### 4.1. SVG Component Overwrite
+**The Puffin assistant** (a public persona):
+- **Description:** empty on purpose. Onyx prints it under the composer, where it would be noise.
+- **Tools:** everything `GET /tool` reports, minus `coding_agent`, which overlaps the terminal agents.
+- **`system_prompt`:** `PUFFIN_ASSISTANT_INSTRUCTIONS`. Onyx's persona *name* is only a UI label and is never sent to the model. The instructions say it is Puffin, running on this machine's GB10, and that it can reach the web through its search tool, so it must never claim to have no internet. They also say that when asked for a picture it calls `image_search` and embeds the returned Markdown images.
+- **`replace_base_system_prompt = false`:** the instructions are appended, so Onyx's base prompt, which teaches the search and Python tools, is kept.
 
-The left-panel SVG mark is drawn by Onyx using coordinate-driven shapes. `OnyxBrandAssets` locates this component by matching its unique viewport definitions and substitutes the vector coordinates with Puffin's brand mark:
+**Asset files** (`OnyxBrandAssets`): rendered with Pillow from a Tiffany Blue gradient (`TIFFANY_BLUE = #0ABAB5`), then copied with `docker cp` into `/app/public`:
+- `logo.png` and `logo-dark.png` (400×400);
+- `logotype.png` (2640×733) and `logotype-dark.png` (720×320);
+- `logo.svg` (56×56 viewBox, like Onyx's own);
+- `onyx.ico`.
 
-| Target Component | Matching Pattern | Substitute Path Data |
-|---|---|---|
-| **Onyx Logo Mark** | ViewBox `0 0 56 56` shapes | Puffin's Teal Shield and Crest coordinates |
-| **Onyx Letter Wordmark** | SVG paths drawing letters "o-n-y-x" | Puffin's customized wordmark coordinates |
+Each matches the original's size. These are container file writes, so an image upgrade or `deploy install --force` reverts them, and re-running `configure` restores them. Nothing binary is checked in.
 
-Additionally, references to `"Onyx"` within whitelabel fallback JS evaluations are surgically replaced:
-- `application_name?.trim()||"Onyx"` ➔ `application_name?.trim()||"Puffin"`
-- `.trim()}return"Onyx"` ➔ `.trim()}return"Puffin"`
-
-### 4.2. Shortening Navigation Labels (`OnyxUILabels`)
-
-To clean up the sidebar and give it a polished, compact look, `OnyxUILabels` searches through compiled chunks to shorten text inside JSX definitions:
-
-```javascript
-// Label substitution map used by the runner's node evaluator script
-LABEL_SUBSTITUTIONS = {
-    'children:"New Session"': 'children:"New"',
-    'children:"Search Chats"': 'children:"Search"',
-    '"How can I help you today?"': '"Message"' // Replaces both label & placeholder
-}
-```
-
-This rewrite logic parses files in parallel inside the running container. It evaluates and replaces string segments, keeping count of modified files.
+**In-bundle logo and name** (§4.2): the sidebar mark is four shapes on a **64×64** grid inside the JS bundle, not a static file. `ONYX_LOGO_PATHS` maps each Onyx path to Puffin's. `ONYX_APP_NAME_STRINGS` replaces `application_name?.trim()||"Onyx"` and `.trim()}return"Onyx"` with `"Puffin"`.
 
 ---
 
-## 5. Telegram-Style Typography Substitution
+## 4. The Four Kinds of UI Patch
 
-Onyx's default fonts are Hanken Grotesk, KH Teka (headings), and DM Mono (code syntax). Replacing forty separate font-family definitions in CSS variables is fragile and breaks whenever Tailwind utilities are compiled.
+They are applied in this order by `apply_branding()`:
+1. `OnyxBrandAssets.install()`;
+2. `OnyxUIFonts.install()`;
+3. `OnyxUIOverrides.install()`;
+4. `OnyxUILabels.install()`;
+5. `OnyxUIScripts.install()`.
 
-`OnyxUIFonts` sidesteps this by intercepting and overwriting typography at the **`@font-face` source level**.
+### 4.1. Fonts: substituted at `@font-face` (`onyx_ui_fonts.py`)
 
-### 5.1. Target Mappings
+Onyx names its interface face in around forty declarations, mostly through `--font-hanken-grotesk`. Rather than rewriting those, the four `@font-face` blocks are rewritten, so **the CSS still says `Hanken Grotesk` and renders Roboto**:
 
-The original fonts map to highly polished, readability-optimized alternatives used by Telegram:
+| Face | Becomes | Weights |
+| --- | --- | --- |
+| `Hanken Grotesk` | `Roboto.woff2` | 100 900 |
+| `KH Teka` | `Roboto.woff2` | 100 900 |
+| `DM Mono` | `RobotoMono.woff2` | 100 700 |
 
-| Original Font Name | Replacement Font | Target Style Range |
-|---|---|---|
-| `Hanken Grotesk` | **Roboto** (`Roboto.woff2`) | Weight range `100 900` |
-| `KH Teka` | **Roboto** (`Roboto.woff2`) | Weight range `100 900` (replaces old header fonts) |
-| `DM Mono` | **Roboto Mono** (`RobotoMono.woff2`) | Weight range `100 700` |
+The variable TTFs come once from `google/fonts`, are converted to WOFF2 with fontTools, and are cached in `~/.cache/dreamference/fonts`. Onyx then serves them from `/app/public/fonts` (`/fonts/…`), with no font CDN at page load. Next.js registers `public/` routes **at boot**, so `install()` restarts the web server, but only when it actually copied a new file.
 
-### 5.2. Compilation and Local Delivery
+### 4.2. Strings: rewritten in the compiled JS (`onyx_ui_labels.py`, plus the brand strings above)
 
-To preserve air-gapped security, fonts are never served from a public CDN at runtime:
-1. On the host, raw variable TTF fonts are pulled once from the official Google Fonts repository.
-2. They are cache-converted to highly optimized WOFF2 structures and stored under `~/.cache/dreamference/fonts`.
-3. The `.woff2` files are copied directly into the web container's public directory (`/app/public/fonts`).
-4. **CSS Patching**: Every compiled Next.js stylesheet under `/app/.next` is parsed. The `@font-face` blocks are surgically rewritten:
+`LABEL_SUBSTITUTIONS` rewrites *quoted* literals, and carries the prop name where the wording is common:
+- `children:"New Session"` → `"New"`;
+- `children:"Search Chats"` → `"Search"`;
+- `"How can I help you today?"` → `"Message"` (both the placeholder and `aria-placeholder`);
+- `"Search chat sessions, projects..."` → `"Search chat sessions"`;
+- the settings tab holding the Google/Gmail connection → "Gmail Accounts".
 
-```css
-/* BEFORE */
-@font-face{font-family:'Hanken Grotesk';src:url(/_next/static/media/hanken-grotesk.woff2) ...}
+A CSS `content` swap would leave the original in the accessibility tree and in find-in-page.
 
-/* AFTER */
-@font-face{font-family:'Hanken Grotesk';src:url(/fonts/Roboto.woff2);font-weight:100 900}
-```
+### 4.3. Styles: appended (`onyx_ui_overrides.py`)
 
-Since Next.js indexes the `public/` folder only once at boot, `OnyxUIFonts` restarts the web container (`docker restart <web_container>`) immediately after copying the fonts to prevent font-loading 404s.
+`UI_OVERRIDES` concatenates 35 named `Final[str]` rules. Examples:
+- `SIDEBAR_CSS`, `MESSAGE_BUBBLE_CSS`, `CHAT_SURFACE_CSS`, `MESSAGE_TEXT_CSS`, `HOVER_TOOLBAR_CSS`;
+- `AGENT_AVATAR_CSS`, `MODEL_CHIP_CSS`, `SHARE_BUTTON_CSS`, `FOOTER_CSS`, `HELP_LINK_CSS`;
+- `AGENTS_SECTION_CSS`, `PROJECTS_SECTION_CSS`, `SETTINGS_SECTIONS_CSS`;
+- `GALLERY_CSS`, `CUSTOM_SCROLLBAR_CSS`, `STREAMING_CURSOR_CSS`.
 
----
+The block is appended to **every** stylesheet under `/app/.next`, because Next.js splits CSS per route. It opens with `/*dreamference-ui-overrides*/`, and a re-run cuts at the marker and rewrites, so later edits apply.
 
-## 6. Minimalist UI Layout & CSS Overrides
+**Rules of the craft** (details in `CLAUDE.md`):
+- **Match Onyx's specificity exactly.** The selected sidebar row is `.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"]` → `#0ABAB5`, and on hover `#09A19C`.
+- **Redefine tokens instead of repainting.** Message text is black because `--text-04`/`--text-05` are redefined.
+- **Anchor to things a build cannot renumber:** `data-testid`, `data-*`, `aria-label`, `opal-…` BEM classes and SVG viewBoxes. Never Tailwind utilities.
+- **Use `:has()`** for unlabelled sections.
+- **Scope every white and black rule `html:not(.dark)`**, because those tokens are translucent white in dark mode.
+- **The per-message avatar column is hidden with `visibility`,** not `display`, because the timeline grid aligns against it. The selector is `[class*="--timeline-rail-width"]`.
+- **Hover-revealed toolbar:** the assistant message controls (`[data-testid^="AgentMessage/"]` except the toolbar) sit at `opacity:0`, and appear on `:hover`/`:focus-within`.
+- **Hidden, not removed:** dropping a constant restores the feature on the next `configure`.
 
-`OnyxUIOverrides` appends Dreamference's custom CSS styles to every Next.js route stylesheet. To remain robust across software updates, selectors are pinned to stable React attributes (`data-testid`, BEM classes like `.opal-sidebar-root__column`, and custom element IDs) rather than compilation-unstable Tailwind utility names.
+### 4.4. Behaviour: injected scripts (`onyx_ui_scripts.py`)
 
-The overrides open with a unique marker `/*dreamference-ui-overrides*/`, allowing subsequent configuration sweeps to safely wipe and overwrite previous blocks without duplicate appends.
+`UI_SCRIPTS`, marked `/*dreamference-ui-scripts*/`, is appended **only to the JS chunks that mention `opal-sidebar-footer`**, the chunk that renders its anchor. It is wrapped in a guard and a `try`, because a throwing top-level statement in a chunk takes the app down. It adds:
+- the "Connect Google" button and Gmail Accounts section;
+- a custom sidebar scrollbar (`#puffin-scrollbar`), because WebKitGTK's native one can't be styled;
+- the settings modal and its synthetic tabs;
+- image-tool step handling;
+- a gallery with a lightbox.
 
-### 6.1. White Sidebar Theme (`SIDEBAR_CSS`)
+Two traps are handled:
+- Turbopack ends each chunk with `//# debugId=…` and **no trailing newline**, so a block appended directly would sit inside the comment and never run. Newlines are trimmed, and exactly one is written.
+- The webview caches chunks, so verify with a fresh cache.
 
-Onyx tints the left sidebar grey by default. To match Telegram's light aesthetic, the panel is turned pure white, and selected chat sessions are highlighted in Tiffany Blue:
-
-```css
-html:not(.dark) .opal-sidebar-root__column {
-  background-color: var(--background-tint-00); /* Adaptive white token */
-}
-
-/* Selected row background highlighting */
-.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"] {
-  background-color: #0EB1AB; /* Tiffany Blue brand color */
-  --interactive-foreground: #fff;
-  --interactive-foreground-icon: #fff;
-}
-
-/* Hover over selected rows */
-.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"]:hover:not([data-disabled]) {
-  background-color: #09A19C; /* Darker Tiffany hover tint */
-}
-```
-
-### 6.2. Chat Surface & Message Bubbles
-
-To create a clean interface, the chat canvas is changed from grey to white, and user messages are given distinct borders:
-
-```css
-/* Whiten canvas body and shell wrappers */
-html:not(.dark) body, 
-html:not(.dark) .bg-background.min-h-screen {
-  background-color: var(--background-tint-00);
-}
-
-/* User message bubbles: plain white with a clean boundary shadow */
-html:not(.dark) #onyx-human-message .bg-background-tint-02 {
-  background-color: var(--background-tint-00);
-  box-shadow: 0 1px 2px rgba(0,0,0,.08);
-}
-```
-
-### 6.3. Action Toolbars and Avatar Hiding
-
-- **Avatar Clutter**: Hides the octagonal user/agent avatar icons on the left of each message, streamlining the chat thread and reclaiming space:
-  ```css
-  [data-testid="onyx-ai-message"] .flex-shrink-0.w-8.h-8 {
-    display: none !important;
-  }
-  ```
-- **Reveal-on-Hover Message Controls**: Assistant controls (like, dislike, retry, copy, TTS) are hidden by default to keep the screen clean. Hovering or focusing a message transitions the opacity smoothly:
-  ```css
-  [data-testid="onyx-ai-message"] [data-testid^="AgentMessage/"]:not([data-testid="AgentMessage/toolbar"]) {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .12s ease-in-out;
-  }
-
-  [data-testid="onyx-ai-message"]:hover [data-testid^="AgentMessage/"]:not([data-testid="AgentMessage/toolbar"]),
-  [data-testid="onyx-ai-message"]:focus-within [data-testid^="AgentMessage/"]:not([data-testid="AgentMessage/toolbar"]) {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  ```
+The tests execute the real script under node against a stub DOM (`tests/test_onyx_ui_scripts.py`).
 
 ---
 
-## 7. Local Voice Transcription & SSRF Exemption Patch
+## 5. Voice (local Whisper + SSRF patch)
 
-Onyx features full voice dictation support. However, it displays no microphone button until a valid Speech-to-Text (STT) provider is registered. Dreamference deploys a local STT service and integrates it into the stack.
+Onyx shows no microphone button until a speech-to-text provider exists, and vLLM has no `/v1/audio/transcriptions`.
 
-### 7.1. Whisper STT Sidecar Deployment (`dream-stt`)
+- **`dreamference-stt` sidecar:**
+  - image `ghcr.io/speaches-ai/speaches:latest-cpu`, running on **CPU** (ctranslate2's CUDA doesn't cover SM121, and dictation-length audio takes about 5 s);
+  - model `Systran/faster-whisper-small`, cached in the volume `dreamference-stt-cache`;
+  - published on `127.0.0.1:8100` and joined to Onyx's network as `http://dreamference-stt:8000/v1`.
+- **SSRF patch:** Onyx exempts only Azure voice endpoints from its private-address block (`allow_private_network = provider_type.lower() == "azure"`), whatever the SSRF setting. `_allow_local_voice_endpoint()` rewrites that line in `/app/onyx/server/manage/voice/api.py` to `in ("azure", "openai")`, then **restarts the API server**: this is imported Python, unlike the frontend patches.
+- **Registration:** the voice provider `dreamference-whisper`, type `openai`, pointing at the sidecar.
 
-A Whisper transcription sidecar is launched as a background container:
-- **Image**: `ghcr.io/speaches-ai/speaches:latest-cpu` (CPU processing is fast enough on Blackwell host cores and avoids SM121 CUDA conflicts).
-- **Cached Model**: `Systran/faster-whisper-small` (cached in a persistent volume `dream-stt-cache`).
-- **Network Routing**: The container is connected to Onyx's private bridge network, exposing its transcription endpoints internally at `http://dream-stt:8000/v1`.
-
-### 7.2. SSRF Check Bypass Patch
-
-Onyx implements Server-Side Request Forgery (SSRF) protections, preventing the API server from contacting loopback or private network endpoints. For voice STT, it hardcodes an exemption **only** for Microsoft Azure:
-
-```python
-# onyx/server/manage/voice/api.py (Original)
-allow_private_network = provider_type.lower() == "azure"
-```
-
-Because of this, registering the local sidecar at `http://dream-stt:8000` is blocked and fails with a connection error. 
-
-To resolve this, `OnyxRunner` executes a Python script inside the running API server container to patch the SSRF check:
-
-```python
-# onyx/server/manage/voice/api.py (Patched)
-allow_private_network = provider_type.lower() in ("azure", "openai")
-```
-
-Once patched, the API server container is restarted and monitored until its status returns to healthy. The speech provider is then registered as an `openai` type pointing to `http://dream-stt:8000/v1` with the local Whisper model, enabling the microphone button in the web UI.
+`--no-voice` skips all of this. A shim that speaks Azure's protocol would need no patch, and would be the better answer if voice becomes load-bearing.
 
 ---
 
-## 8. Secure Web Search Integration
+## 6. Web Search (SearXNG)
 
-Onyx's default assistant is granted web search access using the local **SearXNG** instance. 
+Onyx has first-class SearXNG support (`WebSearchProviderType.SEARXNG`, no API key). `configure` registers the provider `dreamference-searxng` with `searxng_base_url = http://dreamference-searxng:8080`. Onyx's own base prompt already teaches search-then-open.
 
-To enable search without compromising system security:
-1. Rather than writing instructions into the model system prompts, Dreamference registers SearXNG as an admin-configured search provider.
-2. The SearXNG container (which publishes strictly on loopback `127.0.0.1:8080` to prevent external exposure) is joined to Onyx's private bridge network:
-   ```bash
-   docker network connect <onyx_network> searxng
-   ```
-3. A search provider named `dreamference-searxng` is created, pointing to `http://searxng:8080`.
-4. This keeps the default secure SSRF protections active globally while allowing search traffic through the admin-configured network route.
+- **Container:**
+  - `configure` does **not** start SearXNG. The `dreamference-searxng` container is started separately; `web_tools.py`'s error message carries the command: `docker run -d --name dreamference-searxng --restart unless-stopped -p 127.0.0.1:8888:8080 -v ~/.config/searxng:/etc/searxng docker.io/searxng/searxng:latest`.
+  - It publishes only on loopback, **port 8888** on the host.
+  - `_attach_searxng()` joins it to Onyx's network, because the bridge gateway that reaches vLLM doesn't reach it.
+- **Why a provider, not a prompt:**
+  - The only global prompt hook, `user_preferences`, is capped at 500 characters.
+  - Reaching SearXNG through the LLM-driven `open_url` tool would require SSRF protection set to `disabled`. The admin-configured provider's client does no SSRF validation, so the secure `validate_all` default stays untouched.
+- **Other users:** `puffin-admin search` and the MCP `web_search` tool use the same container, via `127.0.0.1:8888`.
+
+---
+
+## 7. Image Search
+
+`enable_image_search()` runs two containers, both on `python:3-slim` and both joined to Onyx's network:
+- the `dreamference-image-search` sidecar (`chat/image_search_service.py`), published on `127.0.0.1:8768` with data in `~/.config/dreamference/image-search`;
+- a SigLIP embedding sidecar, `dreamference-siglip` (`michaelf34/infinity:latest-cpu`, `google/siglip-base-patch16-224`).
+
+It registers an **Image Search** custom tool, and injects an nginx route (`# >>> puffin-image-search`) so that the fetched images are served to the browser under `/puffin-images/`. See `DREAMFERENCE_IMAGE_SEARCH.md`. The memory note records that SigLIP was blocked on arm64 at one point, so check the sidecar's state before relying on image ranking.
+
+---
+
+## 8. Gmail
+
+- **Service:** `dreamference-gmail` (`chat/gmail_search_service.py` on `python:3-slim`) reads the connected accounts' credentials, over **read-only IMAP**. It is published on `127.0.0.1:8767` and authenticated by the `X-Puffin-Gmail-Token` header.
+- **Tool:** `enable_gmail_search()` registers a **Gmail** custom tool, "Search and read the user's Gmail mailbox." It is registered even before an account is connected, because the Connect button lives in this UI.
+- **Connecting accounts:** `puffin-admin puffin gmail`, or the injected "Connect Google" button (§4.4).
+- **The terminal agent:** `puffin` reaches the same service through `puffin-admin gmail` (`DREAMFERENCE_PUFFIN_GMAIL.md`).
+
+---
+
+## 9. Google Sign-In & Telemetry
+
+- **`google-auth`:** writes `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` to `~/.config/onyx/deployment/.env`, and recreates the API server. The login page then offers Google alongside username and password. The redirect URI is `http://localhost:3000/auth/oauth/callback`.
+- **Telemetry:** Onyx's backend posts anonymous records to `telemetry.onyx.app` unless `DISABLE_TELEMETRY=true`. `disable_telemetry()` writes that to the deployment `.env`, and it is a no-op once set (checked by reading the file, to avoid needless recreation). The web container already ships `NEXT_TELEMETRY_DISABLED=1`, and its PostHog/Sentry keys are empty.
