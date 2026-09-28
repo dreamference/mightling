@@ -43,9 +43,14 @@ const MAX_WAIT: Duration = Duration::from_secs(600);
 /// Codex subcommands that never open a session, so `puffin apply` or `puffin completion bash`
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
-    "help", "completion", "apply", "a", "features", "doctor", "login", "logout", "mcp", "plugin",
-    "archive", "unarchive", "delete", "sandbox",
+    "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
+    "unarchive", "delete", "sandbox",
 ];
+
+/// Codex's OpenAI account commands. Puffin talks to the model served on this machine, so there is
+/// no account to sign in to; patch 0005 hides them from `--help` and `/logout` from the TUI, and
+/// `prepare_args` refuses them here, before Codex could start an OpenAI sign-in.
+const REMOVED_COMMANDS: &[&str] = &["login", "logout"];
 
 /// Appended to Codex's own system prompt. Web access has to travel with the session rather than
 /// the directory: an `AGENTS.md` would only apply inside this repository. It is a shell command,
@@ -92,6 +97,12 @@ pub async fn prepare_args(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> 
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
+    if let Some(command) = removed_command(&user_args) {
+        bail!(
+            "`puffin {command}` is not available: puffin uses the model served on this machine, \
+             so there is no OpenAI account to sign in to or out of."
+        );
+    }
     if !needs_model(&user_args) {
         return Ok(args);
     }
@@ -104,6 +115,14 @@ pub async fn prepare_args(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> 
         .to_path_buf();
     configure_codex_home(&codex_home, &host, &model)?;
     Ok(with_local_model_args(args, &model.id))
+}
+
+/// Returns the OpenAI account subcommand a command line asks for, if any.
+pub fn removed_command(user_args: &[String]) -> Option<&str> {
+    user_args
+        .first()
+        .map(String::as_str)
+        .filter(|first| REMOVED_COMMANDS.contains(first))
 }
 
 /// Tells whether a command line talks to the model at all.
@@ -364,6 +383,14 @@ mod tests {
 
     fn strings(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn openai_login_and_logout_are_refused() {
+        assert_eq!(removed_command(&strings(&["login"])), Some("login"));
+        assert_eq!(removed_command(&strings(&["logout"])), Some("logout"));
+        assert_eq!(removed_command(&strings(&["exec", "login"])), None);
+        assert_eq!(removed_command(&strings(&[])), None);
     }
 
     #[test]
