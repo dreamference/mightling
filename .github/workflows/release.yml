@@ -77,6 +77,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          # The pip cache is keyed on a dependency file, and this project declares its
+          # dependencies in setup.py, not requirements.txt or pyproject.toml.
+          cache-dependency-path: setup.py
       - name: Install
         run: pip install -e . pytest
       # No GPU or Docker needed: every hardware and subprocess call in the suite is mocked.
