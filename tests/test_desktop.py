@@ -136,9 +136,31 @@ def test_desktop_entry_matches_the_window_class_gnome_sees():
     # unnamed generic icon in the dock, which is what it was doing.
     from dreamference.chat.desktop_runner import DESKTOP_ENTRY_NAME, WINDOW_CLASS
 
-    assert WINDOW_CLASS == "Puffin-ui"
+    assert WINDOW_CLASS == "Puffin-app"
     # Tao derives the class from the binary name, so the file is named after the instance too.
-    assert DESKTOP_ENTRY_NAME == "puffin-ui.desktop"
+    assert DESKTOP_ENTRY_NAME == "puffin-app.desktop"
+
+
+def test_registration_removes_launchers_left_by_earlier_binary_names(tmp_path):
+    # The binary was puffin-desktop, then puffin-ui; their entries would otherwise sit beside the
+    # new one in the applications grid, launching a binary that no longer builds.
+    from dreamference.chat import desktop_runner
+
+    entries, icons = tmp_path / "applications", tmp_path / "icons"
+    entries.mkdir()
+    icons.mkdir()
+    for legacy in ("puffin-desktop", "puffin-ui"):
+        (entries / f"{legacy}.desktop").write_text("[Desktop Entry]\n")
+        (icons / f"{legacy}.png").write_bytes(b"")
+    with patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(entries)), \
+         patch.object(desktop_runner, "ICON_DIR", str(icons)), \
+         patch.object(DesktopRunner, "binary_path", return_value="/opt/puffin-app"), \
+         patch("dreamference.chat.onyx_brand_assets.OnyxBrandAssets.render_app_icon"), \
+         patch("subprocess.run"):
+        assert DesktopRunner.install_desktop_entry() is True
+
+    assert sorted(p.name for p in entries.iterdir()) == ["puffin-app.desktop"]
+    assert list(icons.iterdir()) == []
 
 
 def test_desktop_entry_is_not_written_before_anything_is_built():

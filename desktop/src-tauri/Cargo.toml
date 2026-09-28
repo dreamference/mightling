@@ -1,5 +1,5 @@
 [package]
-name = "puffin-ui"
+name = "puffin-app"
 version = "0.1.0"
 description = "Desktop window onto the local Puffin deployment"
 edition = "2021"

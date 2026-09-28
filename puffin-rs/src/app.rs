@@ -1,7 +1,7 @@
-//! `puffin app`: opens Puffin's desktop window, `puffin-ui`.
+//! `puffin app`: opens Puffin's desktop window, `puffin-app`.
 //!
 //! Upstream `codex app` opens OpenAI's closed-source desktop app, and is compiled only on macOS and
-//! Windows. Puffin's own window is the Tauri shell in `desktop/` (`puffin-ui`), which renders the
+//! Windows. Puffin's own window is the Tauri shell in `desktop/` (`puffin-app`), which renders the
 //! local Onyx web UI, so the launcher answers `app` itself before Codex parses the command line.
 //! It does what `puffin-admin desktop run` does before opening the window, minus building it:
 //! check Onyx is answering and empty the webview's HTTP cache.
@@ -12,12 +12,12 @@ use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
-/// Where the window's Onyx deployment answers; `puffin-ui` is pointed at the same address.
+/// Where the window's Onyx deployment answers; `puffin-app` is pointed at the same address.
 const ONYX_WEB_URL: &str = "http://localhost:3000";
 
 /// The executable and the desktop entry `puffin-admin desktop install` registers for it.
-const EXECUTABLE: &str = "puffin-ui";
-const DESKTOP_ENTRY: &str = "puffin-ui.desktop";
+const EXECUTABLE: &str = "puffin-app";
+const DESKTOP_ENTRY: &str = "puffin-app.desktop";
 
 /// The webview's data directory is named after the Tauri identifier in `tauri.conf.json`. Its
 /// HTTP cache is emptied on every launch: Onyx serves stylesheets as `immutable` under names that
@@ -29,17 +29,17 @@ const WEBVIEW_CACHE_DIR: &str = "WebKitCache";
 /// Handles `puffin app [args...]` and returns the process exit code.
 pub async fn open(args: &[String]) -> i32 {
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
-        println!("Open Puffin's desktop window (puffin-ui) on the local Onyx web UI.\n");
+        println!("Open Puffin's desktop window (puffin-app) on the local Onyx web UI.\n");
         println!("Usage: puffin app");
         return 0;
     }
     if !args.is_empty() {
         // Codex's `app` takes a workspace folder; the Puffin window is a chat, not an editor.
-        eprintln!("note: puffin-ui opens the chat, not a folder; ignoring {}", args.join(" "));
+        eprintln!("note: puffin-app opens the chat, not a folder; ignoring {}", args.join(" "));
     }
 
     let Some(executable) = find_executable() else {
-        eprintln!("❌ puffin-ui is not installed.");
+        eprintln!("❌ puffin-app is not installed.");
         eprintln!("💡 Build and register it with: puffin-admin desktop build");
         return 1;
     };
@@ -76,7 +76,7 @@ pub async fn open(args: &[String]) -> i32 {
     }
 }
 
-/// `puffin-ui` on PATH, else the binary the registered desktop entry launches.
+/// `puffin-app` on PATH, else the binary the registered desktop entry launches.
 ///
 /// The desktop entry is where `puffin-admin desktop` records the built binary's absolute path, so
 /// it finds a checkout's build without this crate knowing where the checkout is.
@@ -142,9 +142,9 @@ mod tests {
 
     #[test]
     fn the_exec_line_names_the_program() {
-        let entry = "[Desktop Entry]\nName=Puffin\nExec=/opt/puffin/puffin-ui %U\nIcon=puffin-ui\n";
-        assert_eq!(exec_path(entry), Some(PathBuf::from("/opt/puffin/puffin-ui")));
-        assert_eq!(exec_path("Exec=\"/opt/puffin-ui\"\n"), Some(PathBuf::from("/opt/puffin-ui")));
+        let entry = "[Desktop Entry]\nName=Puffin\nExec=/opt/puffin/puffin-app %U\nIcon=puffin-app\n";
+        assert_eq!(exec_path(entry), Some(PathBuf::from("/opt/puffin/puffin-app")));
+        assert_eq!(exec_path("Exec=\"/opt/puffin-app\"\n"), Some(PathBuf::from("/opt/puffin-app")));
         assert_eq!(exec_path("[Desktop Entry]\nName=x\n"), None);
     }
 }

@@ -41,15 +41,19 @@ HEALTH_TIMEOUT_SECONDS: Final[int] = 5
 # running from a source checkout, they belong in the XDG user directories instead.
 DESKTOP_ENTRY_DIR: Final[str] = os.path.expanduser("~/.local/share/applications")
 ICON_DIR: Final[str] = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps")
-DESKTOP_ENTRY_NAME: Final[str] = "puffin-ui.desktop"
-ICON_NAME: Final[str] = "puffin-ui"
+DESKTOP_ENTRY_NAME: Final[str] = "puffin-app.desktop"
+ICON_NAME: Final[str] = "puffin-app"
 
 # GNOME matches a running window to its desktop entry by `WM_CLASS`, and shows a generic icon when
 # nothing matches -- which is why the app appeared in the dock as an unnamed placeholder. Tao sets
-# the class from the binary name, so the window reports instance `puffin-ui` and class
-# `Puffin-ui`; naming the file after the instance covers the automatic match and
+# the class from the binary name, so the window reports instance `puffin-app` and class
+# `Puffin-app`; naming the file after the instance covers the automatic match and
 # `StartupWMClass` covers the explicit one.
-WINDOW_CLASS: Final[str] = "Puffin-ui"
+WINDOW_CLASS: Final[str] = "Puffin-app"
+
+# Names the desktop binary had before, whose launcher entries and icons are removed on registration
+# so the applications grid does not show two Puffins, one pointing at a binary that no longer builds.
+LEGACY_ENTRY_NAMES: Final[tuple] = ("puffin-desktop", "puffin-ui")
 
 # WebKitGTK's HTTP cache, inside the webview's data directory. Onyx serves its stylesheets with
 # `immutable` and never changes their filenames, so a patched stylesheet is invisible to anything
@@ -253,7 +257,7 @@ class DesktopRunner:
         """
         for profile in ("release", "debug"):
             candidate = os.path.join(
-                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "puffin-ui"
+                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "puffin-app"
             )
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
                 return candidate
@@ -307,6 +311,14 @@ class DesktopRunner:
         except OSError as exc:
             print(f"⚠️  Could not write the desktop entry: {exc}")
             return False
+
+        for legacy in LEGACY_ENTRY_NAMES:
+            for stale in (
+                os.path.join(DESKTOP_ENTRY_DIR, f"{legacy}.desktop"),
+                os.path.join(ICON_DIR, f"{legacy}.png"),
+            ):
+                if os.path.exists(stale):
+                    os.remove(stale)
 
         subprocess.run(
             ["update-desktop-database", DESKTOP_ENTRY_DIR],
