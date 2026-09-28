@@ -30,6 +30,8 @@ use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::value;
 
+pub mod app;
+
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
 
@@ -108,6 +110,10 @@ pub async fn prepare_args(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> 
             "`puffin {command}` is not available: puffin uses the model served on this machine, \
              so there is no OpenAI account to sign in to or out of."
         );
+    }
+    // `app` is Puffin's desktop window, not OpenAI's app (see app.rs); it never reaches Codex.
+    if user_args.first().map(String::as_str) == Some("app") {
+        std::process::exit(app::open(&user_args[1..]).await);
     }
     if !needs_model(&user_args) {
         return Ok(args);
