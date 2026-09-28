@@ -1,0 +1,11 @@
+# LaTeX build products and page renders; only sources are tracked.
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+.render/
+arxiv.tar.gz
