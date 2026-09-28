@@ -114,3 +114,11 @@ index 369a674..74897a5 100644
 -            Span::from("OpenAI Codex").bold(),
 +            Span::from("Puffin").bold(),
              Span::from(" ").dim(),
+diff --git a/codex-rs/exec/src/cli.rs b/codex-rs/exec/src/cli.rs
+--- a/codex-rs/exec/src/cli.rs
++++ b/codex-rs/exec/src/cli.rs
+@@ -12,3 +12,3 @@ use std::path::PathBuf;
+     version,
+-    override_usage = "codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]"
++    override_usage = "puffin exec [OPTIONS] [PROMPT]\n       puffin exec [OPTIONS] <COMMAND> [ARGS]"
+ )]

@@ -33,7 +33,7 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     cli_manifest = (tmp_path / "src" / "codex-rs" / "cli" / "Cargo.toml").read_text()
     assert 'puffin-launcher = { path = "../puffin" }' in cli_manifest
     cli_main = (tmp_path / "src" / "codex-rs" / "cli" / "src" / "main.rs").read_text()
-    assert "MultitoolCli::parse_from(puffin_launcher::args().await?)" in cli_main
+    assert "puffin_launcher::help::parse(puffin_launcher::args().await?)" in cli_main
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
     )

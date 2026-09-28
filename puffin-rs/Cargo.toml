@@ -15,6 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+clap = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 flate2 = { workspace = true }
@@ -31,3 +32,6 @@ toml_edit = { workspace = true }
 # openssl-sys every other crate links -- which is what keeps this out of a patch to codex-core.
 [target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
 openssl-sys = { workspace = true, features = ["vendored"] }
+
+[dev-dependencies]
+clap = { workspace = true, features = ["derive"] }

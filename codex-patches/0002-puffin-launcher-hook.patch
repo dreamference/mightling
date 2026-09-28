@@ -13,5 +13,5 @@ index 003136b..6350671 100644
 @@ -1033,3 +1033,3 @@ async fn cli_main(
          subcommand,
 -    } = MultitoolCli::parse();
-+    } = MultitoolCli::parse_from(puffin_launcher::args().await?);
++    } = puffin_launcher::help::parse(puffin_launcher::args().await?);
      // Retain the launch target through TUI exit, even if a launcher changes selection.

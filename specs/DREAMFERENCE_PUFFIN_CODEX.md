@@ -65,13 +65,14 @@ Only changes that cannot be made from outside are patches, and each is a one-lin
 | `exec/src/event_processor_with_human_output.rs` | `exec` banner `OpenAI Codex vX` → `Puffin vX` |
 | `cli/src/main.rs` | clap `name`, `bin_name`, `override_usage` and the shell-completion name → `puffin`, so `--version` prints `puffin 0.158.0` |
 | `cli/src/plugin_cmd.rs`, `marketplace_cmd.rs`, `mcp_cmd.rs` | Subcommand usage lines `codex plugin …`, `codex mcp add …` → `puffin …` |
+| `exec/src/cli.rs` | `exec`'s hard-coded usage `codex exec …` → `puffin exec …` (clap exposes no getter for `override_usage`, so the parse-time rebrand cannot reach it) |
 
 ### `0002-puffin-launcher-hook.patch` (the hook)
 
 | File | Change |
 | --- | --- |
 | `cli/Cargo.toml` | `puffin-launcher = { path = "../puffin" }` |
-| `cli/src/main.rs` | `MultitoolCli::parse()` → `MultitoolCli::parse_from(puffin_launcher::args().await?)` |
+| `cli/src/main.rs` | `MultitoolCli::parse()` → `puffin_launcher::help::parse(puffin_launcher::args().await?)`, which rebrands the clap help tree at parse time (`puffin-rs/src/help.rs`) |
 
 The call sits in `cli_main`. That is after `arg0` dispatch, so the `codex-linux-sandbox`, `apply_patch` and `codex-execve-wrapper` aliases never reach it, and before Codex parses its command line.
 

@@ -31,6 +31,7 @@ use toml_edit::Table;
 use toml_edit::value;
 
 pub mod app;
+pub mod help;
 
 pub mod update;
 
