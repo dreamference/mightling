@@ -1,6 +1,25 @@
 # Puffin — Google Auth via GOA Client
 
-**Status:** draft · **Owner:** Owner · **Scope:** Gmail + Drive connectors, single-user and multi-account
+**Status:** partly implemented (Gmail only) · **Owner:** Owner · **Scope:** Gmail + Drive connectors, single-user and multi-account
+
+## 0. As built (checked against `dreamference/chat/gmail_search_service.py`, 2026-09-28)
+
+The Gmail half of this design is implemented inside the **Gmail service container** (`dreamference-gmail`), not in the Onyx backend. §§1–12 below remain the design, including the unimplemented parts. What actually exists:
+
+- **Client:** GNOME's Google OAuth client. The id and secret are compiled into the module as defaults, and can be overridden with `GOA_GOOGLE_CLIENT_ID` / `GOA_GOOGLE_CLIENT_SECRET`. That departs from §3 ("never committed"): the defaults are in the source.
+- **Scopes:** `https://www.googleapis.com/auth/userinfo.email` and `https://mail.google.com/`, with no `openid` and no Drive (§4 lists more).
+- **Flow (§5):**
+  - `POST /api/google/oauth/start` returns the auth URL: PKCE S256, `access_type=offline`, `prompt=consent`, and a **fixed** `redirect_uri` of the service itself, `http://localhost:8767/`, not a free port `P`.
+  - When the browser is on this machine, Google redirects to `GET /?code=…&state=…` and the service completes the exchange.
+  - Otherwise, the user pastes the URL into `POST /api/google/oauth/complete`.
+  - States live in memory (`OAUTH_STATES`), so a service restart invalidates pending flows.
+- **Storage:** one account per Google address. The refresh token is **sealed** with a key kept in the same directory (obfuscation with a stated threat model, not secret management), alongside the current access token and `expires_at`. Access tokens refresh when less than 60 s remain.
+- **Transport:** IMAP XOAUTH2 against `imap.gmail.com:993`, on `[Gmail]/All Mail`, found by the `\All` attribute, with `X-GM-RAW` search, read-only (`BODY.PEEK`). The Gmail REST API is not used.
+- **Multi-account (§8):** yes. Accounts can be disconnected with `POST /disconnect`, and search reports failures per account.
+- **Not implemented:** Drive, Docs, Sheets and Contacts (§7 rows 2–4); the `invalid_grant` / `invalid_client` / `accessNotConfigured` error mapping (§6); the fleet-wide alert and fallback UI (§10); DWD for Workspace.
+- **Code-side inconsistencies to know about:**
+  - The module docstring still describes an earlier design, in which GNOME on the host holds the refresh token and a systemd user timer pushes access tokens, and says the service "accepts no POST at all". Both are no longer true.
+  - `GNOME_TOKEN_UNIT = "dreamference-goa"` in `onyx_runner.py` is a leftover constant with no users.
 
 ## 1. Summary
 
