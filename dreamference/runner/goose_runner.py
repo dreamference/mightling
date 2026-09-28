@@ -94,7 +94,7 @@ class GooseRunner:
                 
             if max_wait is not None and (time.time() - start_time) > max_wait:
                 print(f"\n❌ Timed out waiting for vLLM server after {max_wait} seconds.")
-                print(f"💡 Start vLLM in another terminal via: `dream server_start`")
+                print(f"💡 Start vLLM in another terminal via: `puffin-admin server start`")
                 return False
                 
             sys.stdout.write(".")

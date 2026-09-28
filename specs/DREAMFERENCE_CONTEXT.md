@@ -20,8 +20,8 @@
 
 ### 1.1. Entry Points
 
-- **`dream init`**: Always forces a full re-index (`ContextEngine.index_workspace(force_reindex=True)`).
-- **`dream index [--dir PATH] [--force]`**: Manual indexing of any directory (defaults to CWD).
+- **`puffin-admin init`**: Always forces a full re-index (`ContextEngine.index_workspace(force_reindex=True)`).
+- **`puffin-admin index [--dir PATH] [--force]`**: Manual indexing of any directory (defaults to CWD).
 
 ### 1.2. Parallel Execution
 

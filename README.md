@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/dreamference/dreamference/main/scri
 ### Launch Interactive Pair Programming:
 ```bash
 # Initializes workspace, auto-launches local vLLM server, and starts Goose agent session
-dream chat
+puffin-admin chat
 ```
 
 ---
@@ -110,25 +110,25 @@ Dreamference automatically applies an optimized **NVIDIA GB10 launch recipe** wh
 
 ```bash
 # 1. Initialize project workspace & Goose agent configuration
-dream init --model qwen3.6-35b-a3b-nvfp4
+puffin-admin init --model qwen3.6-35b-a3b-nvfp4
 
 # 2. Launch interactive pair-programming session (Auto-launches vLLM if offline)
-dream chat --debug
+puffin-admin chat --debug
 
 # 3. Run autonomous coding task non-interactively
-dream run "Refactor database pool to use async pg" --sandbox apptainer
+puffin-admin run "Refactor database pool to use async pg" --sandbox apptainer
 
 # 4. Check GB10 memory telemetry & vLLM health
-dream status
+puffin-admin status
 
 # 5. Launch local vLLM GB10 server with MTP Speculative Decoding
-dream server start --model qwen3.6-35b-a3b-nvfp4 --port 8000
+puffin-admin server start --model qwen3.6-35b-a3b-nvfp4 --port 8000
 
 # 6. Index codebase AST & vector context
-dream index --force
+puffin-admin index --force
 
 # 7. Start Web Canvas UI
-dream web --port 8501
+puffin-admin web --port 8501
 ```
 
 ---

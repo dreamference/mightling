@@ -29,7 +29,7 @@ When starting the local inference server using the default model (`qwen3.6-35b-a
 
 | Parameter | Value | Description |
 | :--- | :--- | :--- |
-| **Model Alias** | `qwen3.6-35b-a3b-nvfp4` | Primary default short alias passed to `dream init / start_server / chat`. |
+| **Model Alias** | `qwen3.6-35b-a3b-nvfp4` | Primary default short alias passed to `puffin-admin init / start_server / chat`. |
 | **HuggingFace Repo ID** | `nvidia/Qwen3.6-35B-A3B-NVFP4` | Official HuggingFace repository containing NVFP4 weights. |
 | **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | Pinned NGC vLLM container image with Blackwell SM121 kernel support. |
 

@@ -23,7 +23,7 @@
 The vLLM launch engine is the heart of Dreamference's inference subsystem. Every model load passes through a carefully orchestrated sequence:
 
 ```
-Request: dream chat --model <alias>
+Request: puffin-admin chat --model <alias>
     ↓
 Resolve model alias → HF repo
     ↓
@@ -179,7 +179,7 @@ The low `0.50` default prevents OOMs on the 128 GB unified memory SoC. Models wi
 
 ### 7.1. Monitoring Components
 
-- `dream server start` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
+- `puffin-admin server start` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
 - The monitor thread constantly pipes raw vLLM container logs to stdout.
 - Prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`).
 - Tracks loading stages from logs and polls `/v1/models` until healthy.

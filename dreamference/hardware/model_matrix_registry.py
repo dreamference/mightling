@@ -29,7 +29,7 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
 DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-hybrid-dflash"
 
 # The diffusion model served beside the main one. A separate default rather than a mode of the
-# main model, because the two run in parallel: every configuration names both, and `dream server
+# main model, because the two run in parallel: every configuration names both, and `puffin-admin server
 # start` launches both.
 DEFAULT_DIFFUSION_MODEL_ALIAS: Final[str] = "tiny-a2d-coder-0.5b-diffusion"
 

@@ -282,10 +282,10 @@ docker run --rm -it \
 
 ## 7. Session Startup Flows
 
-### 7.1. Goose Path (`dream chat|run` with default agent)
+### 7.1. Goose Path (`puffin-admin chat|run` with default agent)
 
 ```
-dream chat | run [--agent goose]
+puffin-admin chat | run [--agent goose]
        |
        v
 [1] Resolve config (CLI > Env > config file > defaults)
@@ -358,7 +358,7 @@ dream chat | run [--agent goose]
 4. `docker rm -f dreamference-openhands`.
 5. Run container on port **3000** with workspace + docker.sock mounts and LLM env pointing at local vLLM.
 
-### 7.6. `dream server start` Variant
+### 7.6. `puffin-admin server start` Variant
 
 Launches `VLLMServerManager.start_server(background=True)`, starts a `ModelLoadingMonitor` thread (live log piping + 10s Docker memory stats + stage detection + health polling), prints progress, and **exits once the model health check passes** (the vLLM server/container continues running).
 
@@ -386,7 +386,7 @@ GOOSE_MODEL=<resolved HF repo>
 
 ### 8.3. MCP Companion
 
-Always registers the `jetbrains_mcp` stdio extension (`dream mcp`).
+Always registers the `jetbrains_mcp` stdio extension (`puffin-admin mcp`).
 
 ### 8.4. Deep-Merge Safety
 
@@ -407,7 +407,7 @@ Always registers the `jetbrains_mcp` stdio extension (`dream mcp`).
 
 `DreamferenceConfig.build_instructions()` injects `HERMES_TOOL_CALL_PROMPT` into the Goose `instructions` block **only** when the resolved parser is `hermes`. Teaching a model to emit Hermes tags while the server runs an XML parser produces tool calls the server cannot parse. Cave Mode instructions are appended independently of parser choice.
 
-**Result**: `dream chat` / `run` produce a fully-functional Goose session that can execute real shell commands and call tools against the GB10 vLLM instance out-of-the-box.
+**Result**: `puffin-admin chat` / `run` produce a fully-functional Goose session that can execute real shell commands and call tools against the GB10 vLLM instance out-of-the-box.
 
 ---
 
@@ -415,7 +415,7 @@ Always registers the `jetbrains_mcp` stdio extension (`dream mcp`).
 
 | Failure | Signal | Recovery |
 | :------ | :----- | :------- |
-| vLLM launch failure | Timeout on `/v1/models` health check | Hint to run `dream server start --model <model>`; `chat`/`run` exit `1` |
+| vLLM launch failure | Timeout on `/v1/models` health check | Hint to run `puffin-admin server start --model <model>`; `chat`/`run` exit `1` |
 | Process crash during wait | Log drain, process detection | Drain remaining logs; return failure |
 | Ctrl+C during wait | Signal handler | Cancel without starting the agent |
 | Goose install failure | `which goose` not found | Print manual curl install command; exit `1` |

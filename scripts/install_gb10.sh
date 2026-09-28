@@ -25,7 +25,7 @@ echo -e "🔧 ${BLUE}Installing Dreamference package...${NC}"
 pip install -e .
 
 echo -e "⚙️ ${BLUE}Initializing Dreamference configuration & indexing workspace...${NC}"
-dream init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
+puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
 
 echo -e "\n${GREEN}${BOLD}🎉 Dreamference Installation & GB10 Setup Complete!${NC}"
-echo -e "👉 Run ${BOLD}'dream chat'${NC} to start your first session."
+echo -e "👉 Run ${BOLD}'puffin-admin chat'${NC} to start your first session."

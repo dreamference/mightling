@@ -81,7 +81,7 @@ def test_hf_token_config(tmp_path):
     assert config_cli.hf_token == "hf_override_67890"
 
 def test_pinning_the_current_default_model_survives_a_default_change(tmp_path):
-    # `dream main-model set X` where X happens to equal today's DEFAULT_MODEL used to write no
+    # `puffin-admin main-model set X` where X happens to equal today's DEFAULT_MODEL used to write no
     # `model` key at all, because save_config only recorded non-defaults. The pin then silently
     # followed the default to a different checkpoint the next time DEFAULT_MODEL moved -- which it
     # did on 2026-08-15. A chosen model and a defaulted one are different intents.
@@ -106,7 +106,7 @@ def test_pinning_the_current_default_model_survives_a_default_change(tmp_path):
 
 def test_unpinned_model_is_not_fossilised_into_the_config(tmp_path):
     # The other half of the contract: a config nobody pinned must keep tracking the default, or
-    # every `dream init` would freeze whatever model happened to be current that day.
+    # every `puffin-admin init` would freeze whatever model happened to be current that day.
     import dreamference.config.dreamference_config as cfg_mod
 
     cfg_file = tmp_path / "unpinned.yaml"
@@ -155,7 +155,7 @@ def test_diffusion_model_resolves_through_the_same_four_tiers(tmp_path, monkeypa
     ).diffusion_model == "from-kwarg"
 
 def test_pinning_the_default_diffusion_model_survives_a_default_change(tmp_path):
-    # Same intent-vs-coincidence contract as the main model: `dream diffusion-model set X` where
+    # Same intent-vs-coincidence contract as the main model: `puffin-admin diffusion-model set X` where
     # X equals today's default is still a choice, and must be written down.
     import dreamference.config.dreamference_config as cfg_mod
 

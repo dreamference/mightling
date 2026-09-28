@@ -10,7 +10,7 @@ Dreamference provides a 100% air-gapped, zero-egress environment for autonomous 
 
 - **🚀 [Installation Guide](installation.md)**: Get up and running on your GB10 in minutes.
 - **🖥️ [Model Matrix](models.md)**: Explore the qualified models for Blackwell's 128GB unified memory.
-- **🛠️ [CLI Reference](cli.md)**: Master the `dream` command-line suite.
+- **🛠️ [CLI Reference](cli.md)**: Master the `puffin-admin` command-line suite.
 - **🏗️ [Architecture](architecture.md)**: Deep dive into how Dreamference orchestrates agents and inference.
 
 ## 📝 Technical Specification

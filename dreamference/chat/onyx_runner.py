@@ -368,17 +368,17 @@ class OnyxRunner:
 
         if not self.vllm_manager.check_health():
             print("⚠️  Local vLLM is not answering yet — Onyx will start, but its model provider")
-            print("   will not respond until `dream server start` has the model serving.")
+            print("   will not respond until `puffin-admin server start` has the model serving.")
 
         print("🚀 Deploying Onyx Lite (API server + web server + PostgreSQL)...")
         returncode = subprocess.call(command)
         if returncode != 0:
-            print("❌ Onyx Lite deployment failed. See the output above, or run: dream puffin logs")
+            print("❌ Onyx Lite deployment failed. See the output above, or run: puffin-admin puffin logs")
             return returncode
 
         print(f"✅ Onyx Lite is up — open {DEFAULT_ONYX_WEB_URL}")
         print("💡 The first account to sign up becomes the admin.")
-        print("💡 Then run `dream puffin configure` to point Onyx at the local vLLM model.")
+        print("💡 Then run `puffin-admin puffin configure` to point Onyx at the local vLLM model.")
         return 0
 
     def stop(self) -> int:
@@ -562,7 +562,7 @@ class OnyxRunner:
         if enable_web:
             self.enable_web_search(api, cookie)
 
-        # Registered here rather than only from `dream puffin gmail`, because the Connect button that
+        # Registered here rather than only from `puffin-admin puffin gmail`, because the Connect button that
         # obtains the Google credentials lives in the UI this tool belongs to. Waiting for consent
         # would mean a fresh install has no Gmail tool until someone had already finished a flow
         # they can only start from a page the tool is listed on.
@@ -1494,7 +1494,7 @@ class OnyxRunner:
         """
         if not self._attach_searxng():
             print("⚠️  SearXNG is not running or could not join Onyx's network — skipping web setup.")
-            print("💡 Start it, then re-run: dream puffin configure")
+            print("💡 Start it, then re-run: puffin-admin puffin configure")
             return False
 
         payload = {
@@ -1666,7 +1666,7 @@ class OnyxRunner:
         if error:
             print(f"❌ Could not register an Onyx account: {error}")
             print("💡 If an account already exists, pass its credentials:")
-            print("   dream puffin configure --email you@example.com --password ...")
+            print("   puffin-admin puffin configure --email you@example.com --password ...")
             return None
 
         cookie = self._login(api, email, password)

@@ -126,7 +126,7 @@ Gmail: an **OpenAPI document** (`openapi_definition()` in the service module, on
 `image_search` POST operation with `queries` and optional `count`) sent to
 `POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate, and
 a `custom_headers` shared secret (`X-Puffin-Image-Token`, generated once into the data
-directory). `dream onyx configure` runs it; `--no-image-search` skips it. Image `GET`s carry no
+directory). `puffin-admin onyx configure` runs it; `--no-image-search` skips it. Image `GET`s carry no
 secret — the browser is the caller and the ids are unguessable.
 
 ---
@@ -201,6 +201,6 @@ OpenAPI document. The funnel's collaborators are constructor-injected for exactl
 header, create-then-update), nginx route idempotence and deferred form, configure opt-out. An
 autouse fixture stubs the provisioning internals so the suite never starts containers.
 
-**Live E2E (performed):** `dream onyx configure` registers the tool; a real `/search` returns
+**Live E2E (performed):** `puffin-admin onyx configure` registers the tool; a real `/search` returns
 ranked cached embeds; the image serves through `localhost:3000/puffin-images/…` (200,
 `image/jpeg`); nginx survives the sidecar being stopped; a `count: 6` request returns six.

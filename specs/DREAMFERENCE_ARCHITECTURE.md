@@ -67,10 +67,10 @@ Primary agent runtime is **Goose** (`aaif-goose/goose`). Additional runners sele
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    CLI & User Interfaces                        │
-│  • dream chat/run (interactive agents)                          │
-│  • dream server start (vLLM lifecycle)                          │
-│  • dream status (hardware/vLLM/context telemetry)               │
-│  • dream index (workspace indexing)                             │
+│  • puffin-admin chat/run (interactive agents)                          │
+│  • puffin-admin server start (vLLM lifecycle)                          │
+│  • puffin-admin status (hardware/vLLM/context telemetry)               │
+│  • puffin-admin index (workspace indexing)                             │
 └────────────┬────────────────────────────────────────────────────┘
              │
 ┌────────────v────────────────────────────────────────────────────┐

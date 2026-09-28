@@ -6,7 +6,7 @@ This module provides the DesktopRunner class, which builds and launches the Taur
 
 The shell is deliberately thin: its window points straight at the Onyx deployment on this machine,
 so there is no bundled frontend to keep in step with the browser. The desktop app and the browser
-render the same server, which means every patch `dream puffin configure` applies -- the typography,
+render the same server, which means every patch `puffin-admin puffin configure` applies -- the typography,
 the white canvas, the hidden chrome -- shows up in both without being ported. What the desktop app
 adds is a window of its own: its own launcher entry and icon, no address bar, and no tab that gets
 lost among thirty others.
@@ -14,7 +14,7 @@ lost among thirty others.
 It follows the same shape as the agent runners: check the service is healthy, provision the tooling
 if it is missing, then hand off to a subprocess. The health check is the one that matters -- a
 window opened against a stopped Onyx shows a connection error with no hint of what to start, so it
-is checked first and the user is told to run `dream puffin start` instead.
+is checked first and the user is told to run `puffin-admin puffin start` instead.
 """
 
 import json
@@ -54,7 +54,7 @@ WINDOW_CLASS: Final[str] = "Puffin-ui"
 # WebKitGTK's HTTP cache, inside the webview's data directory. Onyx serves its stylesheets with
 # `immutable` and never changes their filenames, so a patched stylesheet is invisible to anything
 # holding a cached copy -- the browser needs a hard refresh, and the app kept showing UI from
-# before the last `dream puffin configure`. Emptying this on launch costs a few megabytes re-fetched
+# before the last `puffin-admin puffin configure`. Emptying this on launch costs a few megabytes re-fetched
 # over loopback and removes the whole class of bug. The sibling `cookies` file is left alone, which
 # is what keeps the session: deleting the data directory wholesale signs the user out.
 WEBVIEW_CACHE_DIR_NAME: Final[str] = "WebKitCache"
@@ -157,7 +157,7 @@ class DesktopRunner:
         """
         if not cls.onyx_is_up(web_url):
             print(f"❌ Puffin is not answering at {web_url}.")
-            print("💡 Start it first: dream puffin start")
+            print("💡 Start it first: puffin-admin puffin start")
             return 1
         if not cls._ensure_toolchain():
             return 1
@@ -342,6 +342,6 @@ class DesktopRunner:
         """
         serving = cls.onyx_is_up(web_url)
         print(f"{'✅' if serving else '❌'} Puffin server at {web_url}"
-              f"{'' if serving else ' — start it with: dream puffin start'}")
+              f"{'' if serving else ' — start it with: puffin-admin puffin start'}")
         complete, _ = DesktopInstaller.report()
         return 0 if serving and complete else 1

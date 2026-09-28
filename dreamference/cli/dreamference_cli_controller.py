@@ -33,7 +33,7 @@ from dreamference.mcp_server import main as run_mcp_server
 # Global Rich console instance for styled terminal outputs
 console: Final[Console] = Console()
 
-# Where `dream benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
+# Where `puffin-admin benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
 # sonnet_dataset.py rather than read out of the image or fetched, because images disagree about
 # where they keep it and this project is meant to work without a network.
 SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
@@ -538,7 +538,7 @@ class DreamferenceCLIController:
     @classmethod
     def handle_status(cls) -> None:
         """
-        Executes `dream status` command, displaying hardware metrics, vLLM health, Goose/Cline/Aider/Continue/OpenHands config,
+        Executes `puffin-admin status` command, displaying hardware metrics, vLLM health, Goose/Cline/Aider/Continue/OpenHands config,
         and context engine index telemetry in formatted Rich panels.
         """
         cls.display_header()
@@ -548,7 +548,7 @@ class DreamferenceCLIController:
         vllm_status = vllm_mgr.get_server_status()
         goose_runner = GooseRunner(config=config)
         # Imported here, not at module scope: the context engine pulls in torch, which
-        # costs ~2.1s and 0.7 GB. `dream mcp` never needs it, and Codex starts one of
+        # costs ~2.1s and 0.7 GB. `puffin-admin mcp` never needs it, and Codex starts one of
         # those per session on a box that is already tight on memory.
         from dreamference.context_engine import ContextEngine
         ctx_engine = ContextEngine()
@@ -643,14 +643,14 @@ class DreamferenceCLIController:
 
         Args:
             chat_prog (Optional[str]): Program name shown in the `chat` subcommand's usage line.
-                None keeps argparse's default, `dream chat`; the `puffin` entry point passes its
+                None keeps argparse's default, `puffin-admin chat`; the `puffin` entry point passes its
                 own name so `puffin --help` does not describe a command the user did not type.
 
         Returns:
             argparse.ArgumentParser: Configured argument parser object.
         """
         parser = argparse.ArgumentParser(
-            prog="dream",
+            prog="puffin-admin",
             description="Dreamference: Autonomous local agentic coding engine powered by Goose, Cline, Aider, Continue, OpenHands & NVIDIA GB10"
         )
         agent_choices = ["goose", "cline", "aider", "continue", "openhands", "codex"]
@@ -661,7 +661,7 @@ class DreamferenceCLIController:
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
         subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-        # Command: dream init
+        # Command: puffin-admin init
         init_parser = subparsers.add_parser("init", help="Initialize .dreamference project workspace and agent configs")
         init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
@@ -670,7 +670,7 @@ class DreamferenceCLIController:
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
-        # Command: dream chat
+        # Command: puffin-admin chat
         chat_parser = subparsers.add_parser("chat", prog=chat_prog, help="Launch interactive pair programming session")
         chat_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
@@ -680,7 +680,7 @@ class DreamferenceCLIController:
         chat_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         chat_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
 
-        # Command: dream run
+        # Command: puffin-admin run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
         run_parser.add_argument("prompt", type=str, help="Task prompt for AI agent")
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
@@ -691,24 +691,24 @@ class DreamferenceCLIController:
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
 
-        # Command: dream status
+        # Command: puffin-admin status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
 
-        # Command: dream index
+        # Command: puffin-admin index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
         index_parser.add_argument("--dir", default=None, help="Directory to index")
         index_parser.add_argument("--force", action="store_true", help="Force reindexing")
 
-        # Command: dream mcp
+        # Command: puffin-admin mcp
         subparsers.add_parser("mcp", help="Run stdio MCP server for JetBrains & VS Code extensions")
 
-        # Command: dream model
+        # Command: puffin-admin model
         model_parser = subparsers.add_parser("model", help="Model operations")
         model_subparsers = model_parser.add_subparsers(dest="model_command", help="Model commands")
         
 
 
-        # Command: dream main-model
+        # Command: puffin-admin main-model
         main_model_parser = subparsers.add_parser("main-model", help="Main model operations")
         main_model_subparsers = main_model_parser.add_subparsers(dest="main_model_command", help="Main model commands")
         main_model_set_parser = main_model_subparsers.add_parser("set", help="Set the main model")
@@ -725,47 +725,47 @@ class DreamferenceCLIController:
                  "and per-workload speculative acceptance (sends extra requests; slower)",
         )
 
-        # Command: dream diffusion-model
+        # Command: puffin-admin diffusion-model
         diffusion_model_parser = subparsers.add_parser("diffusion-model", help="Diffusion model operations")
         diffusion_model_subparsers = diffusion_model_parser.add_subparsers(dest="diffusion_model_command", help="Diffusion model commands")
         diffusion_model_set_parser = diffusion_model_subparsers.add_parser("set", help="Set the diffusion model served beside the main one")
         diffusion_model_set_parser.add_argument("model_name", type=str, help="Name of the diffusion model to set")
 
-        # Command: dream model download
-        # Command: dream model list
+        # Command: puffin-admin model download
+        # Command: puffin-admin model list
         model_subparsers.add_parser("list", help="List available model names and HuggingFace repos")
         
-        # Command: dream model download
+        # Command: puffin-admin model download
         download_parser = model_subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
         download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=False, help="Auto-convert model to tensorize format after download (default: False)")
-        # Command: dream clear-tensorize-cache
+        # Command: puffin-admin clear-tensorize-cache
         subparsers.add_parser("clear-tensorize-cache", help="Clear local tensorizer model cache only")
 
-        # Command: dream clear
+        # Command: puffin-admin clear
         clear_parser = subparsers.add_parser("clear", help="Clear operations")
         clear_subparsers = clear_parser.add_subparsers(dest="clear_command", help="Clear commands")
         
-        # Command: dream clear model-cache
+        # Command: puffin-admin clear model-cache
         clear_subparsers.add_parser("model-cache", help="Clear local HuggingFace and tensorizer model caches")
         
-        # Command: dream clear tensorize-cache
+        # Command: puffin-admin clear tensorize-cache
         clear_subparsers.add_parser("tensorize-cache", help="Clear local tensorizer model cache only")
 
-        # Command: dream endpoints
+        # Command: puffin-admin endpoints
         subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
 
-        # Command: dream server
+        # Command: puffin-admin server
         server_parser = subparsers.add_parser("server", help="Manage the vLLM server container (start, stop, remove)")
         server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operations")
 
 
 
-        # Command: dream server start
+        # Command: puffin-admin server start
         start_server_parser = server_subparsers.add_parser("start", help="Launch local vLLM server optimized for GB10 unified memory")
         # default=None, resolved to the *configured* model in the handler. A concrete default
-        # here silently outranked `dream main-model set`: the config said one model and
+        # here silently outranked `puffin-admin main-model set`: the config said one model and
         # `server start` launched another -- found live, when a recipe switch started the old
         # checkpoint on the old image and only the /v1/models listing told the truth.
         start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
@@ -789,28 +789,28 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--diffusion-model", default=None, help=f"Diffusion model to serve beside the main one (default: the configured diffusion model, {DEFAULT_DIFFUSION_MODEL})")
         start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port for the diffusion sidecar's OpenAI endpoint")
         start_server_parser.add_argument("--no-diffusion", action="store_true", help="Skip starting the diffusion sidecar")
-        # Command: dream server stop
+        # Command: puffin-admin server stop
         stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM and diffusion Docker containers")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
         stop_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port of the diffusion sidecar to stop")
 
-        # Command: dream server remove
+        # Command: puffin-admin server remove
         remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM and diffusion Docker containers")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
         remove_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port of the diffusion sidecar to remove")
 
-        # Command: dream server logs
+        # Command: puffin-admin server logs
         server_logs_parser = server_subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         server_logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
-        # Command: dream logs
+        # Command: puffin-admin logs
         logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         logs_parser.add_argument("target", nargs="?", choices=["server", "mcp"],
                                  help="server: vLLM container logs. mcp: Codex MCP server lifecycle, "
                                       "read from ~/.codex/logs_2.sqlite (the TUI logs there, not to a file)")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
-        # Command: dream codex
+        # Command: puffin-admin codex
         codex_parser = subparsers.add_parser("codex", help="Codex server operations")
         codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Codex commands")
         codex_subparsers.add_parser("start", help="Start the Codex comic server in the background")
@@ -824,12 +824,12 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
-        # Command: dream puffin
+        # Command: puffin-admin puffin
         #
         # A subcommand group rather than an `--agent onyx` runner, because Onyx is a service and
         # not a terminal session. Every entry in the --agent switch is a CLI that Dreamference
         # execs and waits on; Onyx is a set of long-lived containers with a lifecycle of its own,
-        # so it mirrors `dream server` instead.
+        # so it mirrors `puffin-admin server` instead.
         # "puffin" is the command's name; "onyx" remains as a compatibility alias, because the
         # muscle memory and the docs' history both predate the rename.
         onyx_parser = subparsers.add_parser(
@@ -892,9 +892,9 @@ class DreamferenceCLIController:
         )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
 
-        # Command: dream desktop {run,build,status}
+        # Command: puffin-admin desktop {run,build,status}
         #
-        # The desktop shell is a window onto the same deployment `dream puffin` manages, so it is a
+        # The desktop shell is a window onto the same deployment `puffin-admin puffin` manages, so it is a
         # sibling command rather than an `--agent` entry: nothing is exec'd and waited on here
         # except the window itself.
         desktop_parser = subparsers.add_parser(
@@ -920,12 +920,12 @@ class DreamferenceCLIController:
             "uninstall", help="Permanently delete the Onyx deployment and all its data"
         )
 
-        # Command: dream search / dream fetch
+        # Command: puffin-admin search / puffin-admin fetch
         #
         # Web access as CLI subcommands rather than repo scripts, because the agent should find
         # them from any workspace. These replaced repo scripts that only existed inside this
         # checkout, paired with an AGENTS.md that is workspace-scoped too — in any other directory
-        # both the instruction and the command vanished. `dream` is on PATH wherever the venv is.
+        # both the instruction and the command vanished. `puffin-admin` is on PATH wherever the venv is.
         #
         # Not an MCP tool: Codex exposes MCP tools only inside its `exec` JS runtime, and this
         # model does not reliably wrap calls that way. The shell it always uses correctly.
@@ -938,7 +938,7 @@ class DreamferenceCLIController:
         fetch_parser.add_argument("url", help="Absolute http(s) URL")
         fetch_parser.add_argument("--max-chars", type=int, default=8000, help="Characters to return")
 
-        # Command: dream web
+        # Command: puffin-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
 
@@ -1045,7 +1045,7 @@ class DreamferenceCLIController:
                         if config.draft_model:
                             download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                     else:
-                        print("⚠️  No model specified. Use --model <model_name> or initialize config with 'dream init --model <model_name>'")
+                        print("⚠️  No model specified. Use --model <model_name> or initialize config with 'puffin-admin init --model <model_name>'")
                 sys.exit(0)
 
         elif args.command == "diffusion-model":
@@ -1064,7 +1064,7 @@ class DreamferenceCLIController:
                         f"[bold red]❌ '{args.model_name}' is not a diffusion model in the registry.[/bold red]\n"
                         f"   Diffusion checkpoints generate by block denoising and are served by the "
                         f"diffusion sidecar, not vLLM. For the main model use: "
-                        f"[cyan]dream main-model set {args.model_name}[/cyan]")
+                        f"[cyan]puffin-admin main-model set {args.model_name}[/cyan]")
                     sys.exit(1)
                 config.diffusion_model = args.model_name
                 saved_path = config.save_config()
@@ -1084,7 +1084,7 @@ class DreamferenceCLIController:
                     out_console.print(
                         f"[bold red]❌ '{args.model_name}' is a diffusion model and cannot be served "
                         f"by vLLM as the main model.[/bold red]\n"
-                        f"   Use: [cyan]dream diffusion-model set {args.model_name}[/cyan]")
+                        f"   Use: [cyan]puffin-admin diffusion-model set {args.model_name}[/cyan]")
                     sys.exit(1)
                 config.model = args.model_name
                 saved_path = config.save_config()
@@ -1094,7 +1094,7 @@ class DreamferenceCLIController:
                 # A model change is not local to vLLM: Onyx's LLM provider is registered by
                 # name, its vision flag follows the checkpoint, and the image search sidecar
                 # carries the served model id in its environment. Left alone, all three keep
-                # pointing at the previous model until someone remembers `dream puffin configure`
+                # pointing at the previous model until someone remembers `puffin-admin puffin configure`
                 # -- so it runs here, when Onyx is up. configure() is idempotent, and skipping
                 # when Onyx is absent keeps `main-model set` usable before any deployment.
                 if not args.no_onyx:
@@ -1128,7 +1128,7 @@ class DreamferenceCLIController:
                 # level requests.get/post helpers. Each of those builds a throwaway Session with
                 # its own connection pool and never closes it, so eleven probes left eleven
                 # sockets in CLOSE-WAIT for the life of the process — visible in `ss` after any
-                # `dream main-model inspect`. A shared session also reuses the one connection
+                # `puffin-admin main-model inspect`. A shared session also reuses the one connection
                 # instead of reconnecting per probe. External hosts stay on the module API.
                 session = requests.Session()
 
@@ -1300,7 +1300,7 @@ class DreamferenceCLIController:
                     # then breaks, deliberately abandoning the rest of the body. A streamed
                     # response whose body is never finished holds its connection open, and the
                     # server's FIN then leaves the socket in CLOSE-WAIT for the life of the
-                    # process — `dream main-model inspect` was leaking one per probe.
+                    # process — `puffin-admin main-model inspect` was leaking one per probe.
                     with session.post(
                         api_base, json=payload_stream, headers=headers, timeout=15, stream=True
                     ) as s_response:
@@ -1622,7 +1622,7 @@ class DreamferenceCLIController:
             cls.display_header()
             db = os.path.expanduser("~/.codex/logs_2.sqlite")
             if not os.path.exists(db):
-                print(f"❌ No Codex log database at {db}. Run a session with `dream chat --debug` first.")
+                print(f"❌ No Codex log database at {db}. Run a session with `puffin-admin chat --debug` first.")
                 sys.exit(1)
             try:
                 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -1649,7 +1649,7 @@ class DreamferenceCLIController:
                     seen.append(entry)
 
             if not seen:
-                print("No MCP lifecycle entries found. Run `dream chat --debug` to record some.")
+                print("No MCP lifecycle entries found. Run `puffin-admin chat --debug` to record some.")
             else:
                 print("[bold]Codex MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:
@@ -2074,7 +2074,7 @@ class DreamferenceCLIController:
         elif args.command == "web":
             cls.display_header()
             # Lazy for the same reason as the context engine: web_canvas imports it, and
-            # `dream web` is the only subcommand that needs either.
+            # `puffin-admin web` is the only subcommand that needs either.
             from dreamference.web_canvas import start_web_canvas_server
 
             start_web_canvas_server(port=args.port, daemon=False)
@@ -2101,9 +2101,9 @@ def main(argv: Optional[List[str]] = None, chat_prog: Optional[str] = None) -> N
 
 def puffin_main() -> None:
     """
-    The `puffin` command: `dream chat` under its own name.
+    The `puffin` command: `puffin-admin chat` under its own name.
 
     It is the same parse and the same dispatch with `chat` put in front of the arguments, so the
-    two commands cannot drift apart -- a flag added to `dream chat` is a flag of `puffin` too.
+    two commands cannot drift apart -- a flag added to `puffin-admin chat` is a flag of `puffin` too.
     """
     main(["chat", *sys.argv[1:]], chat_prog="puffin")

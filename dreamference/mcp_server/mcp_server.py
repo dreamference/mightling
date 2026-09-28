@@ -206,6 +206,6 @@ class MCPServer:
         asyncio.run(self.run_stdio_async())
 
 def main() -> None:
-    """Main CLI entrypoint for `dream mcp` command."""
+    """Main CLI entrypoint for `puffin-admin mcp` command."""
     server = MCPServer()
     server.run_stdio()

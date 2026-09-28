@@ -87,7 +87,7 @@ total: ~128G
 For testing on unsupported hardware:
 ```bash
 export DREAMFERENCE_GB10_OVERRIDE=1
-dream status  # Will report GB10 mode
+puffin-admin status  # Will report GB10 mode
 ```
 
 **Warning**: This is for testing only. Many GB10-specific optimizations may fail on incompatible hardware.
@@ -107,10 +107,10 @@ cd dreamference
 ./scripts/install_gb10.sh [MODEL]
 
 # Verify installation
-dream status
+puffin-admin status
 
 # Start interactive session
-dream chat
+puffin-admin chat
 ```
 
 **MODEL Argument**: Optional (default `qwen3.6-35b-a3b-nvfp4`)
@@ -131,7 +131,7 @@ dream chat
 
 3. **Initialize Workspace**:
    ```bash
-   dream init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
+   puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
    ```
 
 This downloads model weights, generates `dreamference.toml`, writes Goose config, and force-indexes the workspace.
@@ -148,14 +148,14 @@ source .venv/bin/activate
 # 2. Install Dreamference in editable mode
 pip install -e .
 
-# 3. Install Goose (or skip; auto-install on first `dream chat`)
+# 3. Install Goose (or skip; auto-install on first `puffin-admin chat`)
 curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash -s -- --yes
 
 # 4. Initialize workspace
-dream init --model qwen3.6-35b-a3b-nvfp4
+puffin-admin init --model qwen3.6-35b-a3b-nvfp4
 
 # 5. Verify installation
-dream status
+puffin-admin status
 ```
 
 ### 3.4. Verification
@@ -164,16 +164,16 @@ After installation:
 
 ```bash
 # 1. Check hardware detection
-dream status
+puffin-admin status
 
 # 2. Verify model matrix
-dream model list
+puffin-admin model list
 
 # 3. Try interactive chat
-dream chat --agent goose
+puffin-admin chat --agent goose
 
 # 4. Try a task
-dream run "Hello, Goose!"
+puffin-admin run "Hello, Goose!"
 ```
 
 ---
@@ -197,7 +197,7 @@ Located in `scripts/` directory:
 1. Installs Goose via `releases/latest/download/download_cli.sh`
 2. Fallback to `pip install goose-ai` if download fails
 3. `pip install -e .`
-4. `dream init --model "${1:-qwen3.6-35b-a3b-nvfp4}"`
+4. `puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"`
 
 **Note**: Runtime Goose auto-install uses `releases/download/stable/…`; this script uses `releases/latest/…`.
 
@@ -219,7 +219,7 @@ Located in `scripts/` directory:
 - No prefix-cache / chunked-prefill / kv-cache-dtype flags
 - No Docker containerization
 - No tensorizer support
-- **Prefer `dream server start` for full GB10-tuned behavior**
+- **Prefer `puffin-admin server start` for full GB10-tuned behavior**
 
 ### 4.3. `scripts/run_goose.sh`
 
@@ -234,7 +234,7 @@ Located in `scripts/` directory:
 2. Exports `OPENAI_*` vars from config
 3. Launches `goose session`
 
-**Preference**: Use `dream chat` instead (handles more cases, better UX).
+**Preference**: Use `puffin-admin chat` instead (handles more cases, better UX).
 
 ---
 
@@ -310,7 +310,7 @@ pip install -e .
 ### 6.1. Verify vLLM Health
 
 ```bash
-dream server start --model qwen3.6-35b-a3b-nvfp4
+puffin-admin server start --model qwen3.6-35b-a3b-nvfp4
 ```
 
 Server should print logs and exit once healthy (vLLM stays running in background).
@@ -318,7 +318,7 @@ Server should print logs and exit once healthy (vLLM stays running in background
 ### 6.2. Verify Agent Runner
 
 ```bash
-dream chat --agent goose
+puffin-admin chat --agent goose
 ```
 
 Should launch an interactive Goose session.
@@ -326,7 +326,7 @@ Should launch an interactive Goose session.
 ### 6.3. Verify Context Engine
 
 ```bash
-dream index --force
+puffin-admin index --force
 ```
 
 Should index workspace and create `.dreamference/` artifacts.
@@ -334,7 +334,7 @@ Should index workspace and create `.dreamference/` artifacts.
 ### 6.4. Check Status
 
 ```bash
-dream status
+puffin-admin status
 ```
 
 Should display:

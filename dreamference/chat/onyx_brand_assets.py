@@ -12,7 +12,7 @@ replacing a PNG in a container you host yourself is a file change, not a license
 window title still says Onyx, because that one *is* behind the flag.
 
 The trade-off is impermanence: `docker cp` writes into the running container's filesystem, so an
-upgrade or a `deploy install --force` restores the originals. Re-running `dream puffin configure`
+upgrade or a `deploy install --force` restores the originals. Re-running `puffin-admin puffin configure`
 puts them back, and the assets are re-rendered rather than stored in the repo so there is no
 binary to keep in sync.
 """

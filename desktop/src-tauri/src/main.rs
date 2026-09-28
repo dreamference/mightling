@@ -2,7 +2,7 @@
 //
 // The window points straight at the Onyx deployment on this machine, so there is no bundled
 // frontend to keep in step with the browser UI -- the desktop app and the browser render the same
-// server, and every patch `dream onyx configure` applies shows up in both.
+// server, and every patch `puffin-admin onyx configure` applies shows up in both.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 /// Environment the WebKitGTK webview needs, applied before Tauri starts it.

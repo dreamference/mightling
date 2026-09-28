@@ -24,7 +24,7 @@ Dreamference implements a best-effort download strategy for model weights. All o
 
 ### 1.2. Download Flow
 
-1. **Trigger Points**: `dream init`, `dream server start`, explicit `dream model list`, `dream model download` command
+1. **Trigger Points**: `puffin-admin init`, `puffin-admin server start`, explicit `puffin-admin model list`, `puffin-admin model download` command
 2. **Resolution**: Model alias → HuggingFace repo via `ModelMatrixRegistry.resolve_hf_repo()`
 3. **Pre-download**: `ModelDownloader.download_model()` and `download_all_models()`
 4. **Caching**: All weights land in `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if `HF_HOME` set)
@@ -62,7 +62,7 @@ Dreamference implements a best-effort download strategy for model weights. All o
 ### 2.3. Clearing Cache
 
 ```bash
-dream clear model-cache
+puffin-admin clear model-cache
 ```
 
 Removes both HF (`~/.cache/huggingface/`) and tensorizer (`~/.cache/dreamference/`) parent cache directories.
@@ -96,14 +96,14 @@ After HF download (when `auto_tensorize=True`):
 
 ### 3.4. Configuration
 
-- CLI: `dream model download --tensorize` / `--no-tensorize`
+- CLI: `puffin-admin model download --tensorize` / `--no-tensorize`
 - Config: `auto_tensorize: true/false` in `dreamference.toml`
 - Default: Off (no automatic tensorization)
 
 ### 3.5. Clearing Tensorizer Cache
 
 ```bash
-dream clear tensorize-cache
+puffin-admin clear tensorize-cache
 ```
 
 Removes only the tensorizer cache directory (`~/.cache/dreamference/tensorizer`).

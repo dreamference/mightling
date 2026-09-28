@@ -278,7 +278,7 @@ class DreamferenceConfig:
         """
         Sets the model and records that it was chosen deliberately.
 
-        Assigning a model is what `dream main-model set` does, and it is a pin by definition — the
+        Assigning a model is what `puffin-admin main-model set` does, and it is a pin by definition — the
         caller named this model. That has to be remembered separately from the value itself, or
         save_config() cannot tell a deliberate choice from a value that merely matches today's
         default, and would drop the former on the floor.
@@ -304,7 +304,7 @@ class DreamferenceConfig:
         """
         Sets the diffusion model and records that it was chosen deliberately.
 
-        Assigning through this property is what `dream diffusion-model set` does, and it is a pin
+        Assigning through this property is what `puffin-admin diffusion-model set` does, and it is a pin
         by definition -- same contract as the main model's setter above.
 
         Args:

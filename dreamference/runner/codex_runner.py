@@ -19,9 +19,9 @@ from dreamference.hardware import resolve_model_hf_repo, get_model_launch_overri
 
 # Appended to Codex's own system prompt, because web access has to travel with the session rather
 # than with the directory. The equivalent text lives in this repo's AGENTS.md, but AGENTS.md is
-# workspace-scoped: run `dream chat` anywhere else and the instruction is gone. The repo scripts
+# workspace-scoped: run `puffin-admin chat` anywhere else and the instruction is gone. The repo scripts
 # these subcommands replaced had the same problem one level down — a relative path that only
-# resolved here. `dream` is on PATH wherever the venv is, so the commands work from any workspace
+# resolved here. `puffin-admin` is on PATH wherever the venv is, so the commands work from any workspace
 # and the instruction naming them has to travel with the session too.
 #
 # Not an MCP tool: Codex exposes MCP tools only inside its `exec` JS runtime as
@@ -33,12 +33,12 @@ WEB_ACCESS_INSTRUCTIONS: str = """
 
 You have web access through two shell commands, run like any other command:
 
-    dream search "your query here"        # search; -n N for more results (default 5)
-    dream fetch "https://example.com"     # fetch a page as readable text
+    puffin-admin search "your query here"        # search; -n N for more results (default 5)
+    puffin-admin fetch "https://example.com"     # fetch a page as readable text
 
 Use them whenever the answer depends on something you cannot know from training or from the files
 in front of you: today's weather or tides, current events, release versions, live documentation,
-anything dated. Search first, then `dream fetch` a promising URL when the snippets are not enough.
+anything dated. Search first, then `puffin-admin fetch` a promising URL when the snippets are not enough.
 
 Do not say you cannot browse the web. You can, through these commands.
 
@@ -246,10 +246,10 @@ class CodexRunner:
         #
         # The web tools were the other reason to register it, and they hit the same wall as
         # searxng did: Codex exposes MCP tools only inside its `exec` JS runtime, and this
-        # model does not wrap calls that way. Search is reached through the `dream search` and
-        # `dream fetch` subcommands, described in WEB_ACCESS_INSTRUCTIONS above.
+        # model does not wrap calls that way. Search is reached through the `puffin-admin search` and
+        # `puffin-admin fetch` subcommands, described in WEB_ACCESS_INSTRUCTIONS above.
         #
-        # `dream mcp` still runs for IDE clients — it is just not wired into Codex.
+        # `puffin-admin mcp` still runs for IDE clients — it is just not wired into Codex.
 
         # SearXNG is deliberately NOT registered as an MCP server. It was, via the
         # mcp-searxng wrapper, and the wiring worked: the server initialised and its four
@@ -257,7 +257,7 @@ class CodexRunner:
         # exposes MCP tools only inside its `exec` JS runtime as
         # tools.mcp__searxng__searxng_web_search(...), and this model calls the namespace
         # directly, gets `unsupported call`, and gives up. Search is reached through the
-        # `dream search` and `dream fetch` subcommands instead, which WEB_ACCESS_INSTRUCTIONS
+        # `puffin-admin search` and `puffin-admin fetch` subcommands instead, which WEB_ACCESS_INSTRUCTIONS
         # puts in the prompt and the model uses correctly. The SearXNG container is still
         # required — only the MCP wrapper is gone.
 
@@ -359,7 +359,7 @@ base_url = "{api_base}"
             db_path = os.path.join(codex_config_dir, "logs_2.sqlite")
             print(f"🐞 Debug logging on (RUST_LOG={env['RUST_LOG']})")
             print(f"   TUI logs go to: {db_path}")
-            print(f"   Read MCP lifecycle with: dream logs mcp")
+            print(f"   Read MCP lifecycle with: puffin-admin logs mcp")
 
         print(f"🚀 Launching Codex Pair-Programmer on GB10 local endpoint ({self.config.model})...")
         try:

@@ -43,12 +43,12 @@ Dreamference controls the deployment strictly through the official `onyx-cli` to
 
 | CLI Command | Internal Operation | Description |
 |---|---|---|
-| `dream onyx start` | `onyx-cli deploy install --lite --no-prompt` | Provisions and starts containers. Defaults to waiting until all containers are healthy unless `--no-wait` is passed. |
-| `dream onyx configure` | (API & container injections) | Orchestrates provider registrations, branding swaps, and local sidecar hooks. |
-| `dream onyx status` | `onyx-cli deploy status` | Reports deployment version, container state, and active health checks. |
-| `dream onyx logs [--follow]` | `onyx-cli deploy logs` | Streams combined standard output/error from all container services. |
-| `dream onyx stop` | `onyx-cli deploy stop` | Shuts down containers while preserving all data (PostgreSQL volumes remain). |
-| `dream onyx uninstall` | `onyx-cli deploy uninstall` | Destroys containers and permanently deletes PostgreSQL databases/volumes. |
+| `puffin-admin onyx start` | `onyx-cli deploy install --lite --no-prompt` | Provisions and starts containers. Defaults to waiting until all containers are healthy unless `--no-wait` is passed. |
+| `puffin-admin onyx configure` | (API & container injections) | Orchestrates provider registrations, branding swaps, and local sidecar hooks. |
+| `puffin-admin onyx status` | `onyx-cli deploy status` | Reports deployment version, container state, and active health checks. |
+| `puffin-admin onyx logs [--follow]` | `onyx-cli deploy logs` | Streams combined standard output/error from all container services. |
+| `puffin-admin onyx stop` | `onyx-cli deploy stop` | Shuts down containers while preserving all data (PostgreSQL volumes remain). |
+| `puffin-admin onyx uninstall` | `onyx-cli deploy uninstall` | Destroys containers and permanently deletes PostgreSQL databases/volumes. |
 
 ### 1.3. CLI Binary Resolution (`OnyxInstaller`)
 
@@ -65,10 +65,10 @@ If no executable is found, it automatically installs `onyx-cli` via `pip install
 
 Because Onyx does not configure its default model providers through environment variables, Dreamference automates database configuration by directly interacting with the Onyx API endpoints. 
 
-Executing `dream onyx configure` triggers an idempotent, multi-stage administrative setup:
+Executing `puffin-admin onyx configure` triggers an idempotent, multi-stage administrative setup:
 
 ```
-[dream onyx configure]
+[puffin-admin onyx configure]
        │
        ▼
 1. Authenticate / Register Admin (`admin@dreamference.dev`)

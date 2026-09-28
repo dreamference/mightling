@@ -148,7 +148,7 @@ class ModelDownloader:
             return True
 
         # Serialization loads the whole checkpoint, so it carries the same freeze risk as serving
-        # it and has to clear the same gate — reachable directly via `dream model download`, which
+        # it and has to clear the same gate — reachable directly via `puffin-admin model download`, which
         # never passes through start_server.
         from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
         VLLMServerManager.check_host_safety()

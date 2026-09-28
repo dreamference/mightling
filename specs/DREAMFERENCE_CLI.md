@@ -18,7 +18,7 @@
 
 ## 1. CLI Overview
 
-**Entry Point**: `dream` (CLI controller: `DreamferenceCLIController` in `dreamference/cli/`)
+**Entry Point**: `puffin-admin` (CLI controller: `DreamferenceCLIController` in `dreamference/cli/`)
 
 **Framework**: Argparse + Rich terminal UI
 
@@ -75,10 +75,10 @@ These flags apply to all subcommands:
 
 ## 4. Detailed Command Reference
 
-### 4.1. `dream init`
+### 4.1. `puffin-admin init`
 
 ```bash
-dream init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--sandbox …] [--agent …] [--hf-token …]
+puffin-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--sandbox …] [--agent …] [--hf-token …]
 ```
 
 **Behavior**:
@@ -89,23 +89,23 @@ dream init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--san
 
 **Example**:
 ```bash
-dream init --model qwen3.6-35b-a3b-nvfp4 --agent goose
+puffin-admin init --model qwen3.6-35b-a3b-nvfp4 --agent goose
 ```
 
 ---
 
-### 4.2. `dream main-model`
+### 4.2. `puffin-admin main-model`
 
 #### Subcommand: `set`
 ```bash
-dream main-model set <model_name>
+puffin-admin main-model set <model_name>
 ```
 
 **Behavior**: Modifies `dreamference.toml` to lock in a new primary model alias/repo.
 
 #### Subcommand: `inspect`
 ```bash
-dream main-model inspect
+puffin-admin main-model inspect
 ```
 
 **Behavior**: Runs an automated suite of prompt probes against the running model to detect:
@@ -121,15 +121,15 @@ Outputs a detailed markdown table.
 
 **Example**:
 ```bash
-dream main-model inspect
+puffin-admin main-model inspect
 ```
 
 ---
 
-### 4.3. `dream chat`
+### 4.3. `puffin-admin chat`
 
 ```bash
-dream chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aider|continue|openhands] [--sandbox …] [--hf-token …] [--debug] [--cave]
+puffin-admin chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aider|continue|openhands] [--sandbox …] [--hf-token …] [--debug] [--cave]
 ```
 
 **Behavior**: Instantiates agent runner (`GooseRunner` / `ClineRunner` / `AiderRunner` / `ContinueRunner` / `OpenHandsRunner`), then `run_session(debug=…)`.
@@ -137,7 +137,7 @@ dream chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aide
 **Function Calling (Goose)**:
 - Enabled by default via `--enable-auto-tool-choice`
 - Tool-call parser automatically resolved per-model (e.g., `qwen3_xml` for default model, `hermes` for Qwen 2.5 Coder)
-- No extra flags needed for `dream chat`
+- No extra flags needed for `puffin-admin chat`
 
 **Cave Mode (`--cave`)**:
 - Injects strict Cave Mode system prompt into Goose `instructions` or `.clinerules` for Cline
@@ -145,15 +145,15 @@ dream chat [--model MODEL] [--draft-model DRAFT_MODEL] [--agent goose|cline|aide
 
 **Example**:
 ```bash
-dream chat --agent aider --debug
+puffin-admin chat --agent aider --debug
 ```
 
 ---
 
-### 4.4. `dream run`
+### 4.4. `puffin-admin run`
 
 ```bash
-dream run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug] [--cave]
+puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug] [--cave]
 ```
 
 **Behavior**:
@@ -164,15 +164,15 @@ dream run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--
 
 **Example**:
 ```bash
-dream run "Refactor database connection pool to use async pg" --agent goose
+puffin-admin run "Refactor database connection pool to use async pg" --agent goose
 ```
 
 ---
 
-### 4.5. `dream status`
+### 4.5. `puffin-admin status`
 
 ```bash
-dream status
+puffin-admin status
 ```
 
 **Output Panels**:
@@ -200,10 +200,10 @@ dream status
 
 ---
 
-### 4.6. `dream server start`
+### 4.6. `puffin-admin server start`
 
 ```bash
-dream server start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--hf-token …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--tensorize/--no-tensorize]
+puffin-admin server start [--model MODEL] [--port PORT] [--quantization QUANT] [--draft-model DRAFT] [--hf-token …] [--api-key KEY] [--enable-auto-tool-choice] [--tool-call-parser PARSER] [--max-num-batched-tokens N] [--tensorize/--no-tensorize]
 ```
 
 **Behavior**:
@@ -231,15 +231,15 @@ docker run --ipc=host --network host --name dreamference-vllm-<port> --gpus all 
 
 **Example**:
 ```bash
-dream server start --model qwen3.6-35b-a3b-nvfp4 --port 8000
+puffin-admin server start --model qwen3.6-35b-a3b-nvfp4 --port 8000
 ```
 
 ---
 
-### 4.7. `dream server stop`
+### 4.7. `puffin-admin server stop`
 
 ```bash
-dream server stop [--port PORT]
+puffin-admin server stop [--port PORT]
 ```
 
 **Behavior**: Stops Docker container `dreamference-vllm-<port>` (safe no-op if not running).
@@ -248,15 +248,15 @@ dream server stop [--port PORT]
 
 **Example**:
 ```bash
-dream server stop --port 8000
+puffin-admin server stop --port 8000
 ```
 
 ---
 
-### 4.8. `dream server remove`
+### 4.8. `puffin-admin server remove`
 
 ```bash
-dream server remove [--port PORT]
+puffin-admin server remove [--port PORT]
 ```
 
 **Behavior**: Forces removal of Docker container.
@@ -265,15 +265,15 @@ dream server remove [--port PORT]
 
 **Example**:
 ```bash
-dream server remove --port 8000
+puffin-admin server remove --port 8000
 ```
 
 ---
 
-### 4.9. `dream logs request`
+### 4.9. `puffin-admin logs request`
 
 ```bash
-dream logs request [--port PORT]
+puffin-admin logs request [--port PORT]
 ```
 
 **Behavior**: Tails the logs of the running vLLM container.
@@ -282,30 +282,30 @@ dream logs request [--port PORT]
 
 **Example**:
 ```bash
-dream logs request --port 8000
+puffin-admin logs request --port 8000
 ```
 
 ---
 
-### 4.10. `dream benchmark_server`
+### 4.10. `puffin-admin benchmark_server`
 
 ```bash
-dream benchmark_server [--port PORT]
+puffin-admin benchmark_server [--port PORT]
 ```
 
 **Behavior**: Run vLLM serve benchmark using Sonnet dataset on the running server container.
 
 **Example**:
 ```bash
-dream benchmark_server --port 8000
+puffin-admin benchmark_server --port 8000
 ```
 
 ---
 
-### 4.11. `dream index`
+### 4.11. `puffin-admin index`
 
 ```bash
-dream index [--dir PATH] [--force]
+puffin-admin index [--dir PATH] [--force]
 ```
 
 **Behavior**: Indexes workspace (Python AST + FTS5 + TF-IDF + semantic embeddings); persists:
@@ -314,15 +314,15 @@ dream index [--dir PATH] [--force]
 
 **Example**:
 ```bash
-dream index --force
+puffin-admin index --force
 ```
 
 ---
 
-### 4.12. `dream mcp`
+### 4.12. `puffin-admin mcp`
 
 ```bash
-dream mcp
+puffin-admin mcp
 ```
 
 **Behavior**: Stdio JSON-RPC MCP server.
@@ -339,10 +339,10 @@ IDE fields live in in-process `IDEState` (empty unless populated by companion); 
 
 ---
 
-### 4.13. `dream endpoints`
+### 4.13. `puffin-admin endpoints`
 
 ```bash
-dream endpoints
+puffin-admin endpoints
 ```
 
 **Behavior**: Prints two Rich tables:
@@ -362,15 +362,15 @@ dream endpoints
 
 **Example**:
 ```bash
-dream endpoints
+puffin-admin endpoints
 ```
 
 ---
 
-### 4.14. `dream web`
+### 4.14. `puffin-admin web`
 
 ```bash
-dream web [--port PORT]
+puffin-admin web [--port PORT]
 ```
 
 **Behavior**: HTTP server on `0.0.0.0:{port}` (default `8501`).
@@ -386,25 +386,25 @@ dream web [--port PORT]
 
 **Example**:
 ```bash
-dream web --port 8501
+puffin-admin web --port 8501
 ```
 
 ---
 
-### 4.15. `dream model list`
+### 4.15. `puffin-admin model list`
 
 ```bash
-dream model list
+puffin-admin model list
 ```
 
 **Behavior**: Lists all models in `ModelMatrixRegistry.MATRIX` with compatibility info.
 
 ---
 
-### 4.16. `dream model download`
+### 4.16. `puffin-admin model download`
 
 ```bash
-dream model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
+puffin-admin model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 ```
 
 **Behavior**:
@@ -416,15 +416,15 @@ dream model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 
 **Example**:
 ```bash
-dream model download --model qwen3.6-35b-a3b-nvfp4
+puffin-admin model download --model qwen3.6-35b-a3b-nvfp4
 ```
 
 ---
 
-### 4.17. `dream clear model-cache`
+### 4.17. `puffin-admin clear model-cache`
 
 ```bash
-dream clear model-cache
+puffin-admin clear model-cache
 ```
 
 **Behavior**: Clears both HuggingFace (`~/.cache/huggingface`) and tensorizer (`~/.cache/dreamference`) parent cache directories.
@@ -435,15 +435,15 @@ Invokes `ModelDownloader.clear_cache()` → `shutil.rmtree()`.
 
 **Example**:
 ```bash
-dream clear model-cache
+puffin-admin clear model-cache
 ```
 
 ---
 
-### 4.18. `dream clear tensorize-cache`
+### 4.18. `puffin-admin clear tensorize-cache`
 
 ```bash
-dream clear tensorize-cache
+puffin-admin clear tensorize-cache
 ```
 
 **Behavior**: Clears only tensorizer cache directory (`~/.cache/dreamference/tensorizer`).
@@ -454,7 +454,7 @@ Invokes `ModelDownloader.clear_tensorizer_cache()` → `shutil.rmtree()`.
 
 **Example**:
 ```bash
-dream clear tensorize-cache
+puffin-admin clear tensorize-cache
 ```
 
 ---

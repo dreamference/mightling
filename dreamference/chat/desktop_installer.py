@@ -256,5 +256,5 @@ class DesktopInstaller:
             print("   • No Rust toolchain — installed with rustup on first build.")
         if "tauri-cli" in missing:
             print("   • No Tauri CLI — installed from npm on first build.")
-        print("💡 `dream desktop install` fetches all of it.")
+        print("💡 `puffin-admin desktop install` fetches all of it.")
         return False, missing

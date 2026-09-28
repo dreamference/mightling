@@ -119,7 +119,7 @@ Because the tool fetches arbitrary PDFs from the internet and parses them locall
 - Hardened downloader SSRF assertions.
 
 **Integration:**
-- `dream onyx configure` successfully registers the tool.
+- `puffin-admin onyx configure` successfully registers the tool.
 - End-to-end local test against a mock SearXNG instance returning a test PDF. 
 - Verify the tool extracts text, embeds it, and returns the top chunk.
 - Verify memory is freed (no PDF files left on disk).

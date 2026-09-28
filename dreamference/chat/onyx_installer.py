@@ -24,7 +24,7 @@ class OnyxInstaller:
         Locates the `onyx-cli` binary in the project venv, PATH, or standard install locations.
 
         The venv is checked first, and deliberately so: `pip install onyx-cli` inside this
-        project's venv puts it next to `dream`, which is where it lands when Dreamference
+        project's venv puts it next to `puffin-admin`, which is where it lands when Dreamference
         installs it, and a system-wide copy of a different version should not silently win.
 
         Returns:

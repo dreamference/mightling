@@ -148,7 +148,7 @@ The sidecar implements the identical hardened downloader logic for fetching imag
 - SQLite GC cleanup routines.
 
 **Integration:**
-- `dream onyx configure` successfully registers the tool and injects the Nginx route.
+- `puffin-admin onyx configure` successfully registers the tool and injects the Nginx route.
 - Assistant seamlessly uses the tool and renders `![alt](/puffin-images/...)` inline.
 - Grid/Timeline natively supported via Onyx's built-in `CustomToolStart/Delta` packet rendering. 
 
