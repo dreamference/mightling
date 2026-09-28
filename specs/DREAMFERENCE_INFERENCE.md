@@ -80,7 +80,9 @@ It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingfa
 ### 3.2. Speculative token count
 
 - **With a recipe:** its `speculative_config` carries the count. The DFlash entries use 12.
-- **With an explicit draft:** `num_speculative_tokens` applies. `build_launch_command` / `start_server` default it to 5 when called directly, and the CLI passes the config value (`DEFAULT_SPECULATIVE_TOKENS = 8`).
+- **With an explicit draft:** `puffin-admin server start` passes `--num-speculative-tokens` exactly as given, and its parser default is `None`. The config's `num_speculative_tokens` (`DEFAULT_SPECULATIVE_TOKENS = 8`) is **not** used on this path. `start_server()` / `build_launch_command()` default to 5 only when called directly from Python.
+
+> ⚠️ **Known defect:** `server start --draft-model X` without `--num-speculative-tokens` passes `None` through, and the command line gets `--num-speculative-tokens None`, which vLLM rejects. Give `--num-speculative-tokens` explicitly with `--draft-model`.
 
 ### 3.3. torch.compile cache
 
@@ -185,7 +187,7 @@ Every current matrix entry sets its own context length and utilisation.
 On GB10, host RAM and GPU memory are the same memory. A load that exhausts it can freeze the whole machine rather than OOM the container. There are two layers, both of which must be kept when touching `start_server()`:
 
 - **Before the load:** `check_host_safety()` inspects swap, `sysctl` values and whether `earlyoom` or `systemd-oomd` is present and configured. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. Either one aborts with an explanation rather than risking a lockup.
-- **During the load, `MemoryPressureWatchdog` (`psi_watchdog.py`):** it samples `/proc/pressure/memory` on a thread and resolves the container's cgroup. It kills the container if `avg10` spikes or `avg60` stays high for the trip duration. The kill paths, in order:
+- **During the load, `MemoryPressureWatchdog` (`psi_watchdog.py`):** it samples `/proc/pressure/memory` once a second and resolves the container's cgroup. It trips when `full avg10` ≥ 60% holds for 5 s (`PSI_FULL_LIMIT_PCT`, `PSI_TRIP_DURATION_S`), or at once when `full avg60` ≥ 25% (`PSI_SUSTAINED_AVG60_PCT`). The kill paths, in order:
   1. direct `SIGKILL` to the cgroup's PIDs, if permitted;
   2. a kill request over dockerd's unix socket;
   3. the `docker` CLI.

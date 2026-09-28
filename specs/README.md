@@ -84,3 +84,5 @@ The reconciliation on 2026-09-28 found these places where the **code** is wrong 
 | `scripts/*.sh` | Old default model; `run_vllm_gb10.sh` passes an unresolved alias to vLLM; `install_gb10.sh` never builds `puffin` | SETUP §3.3, §4 |
 | `--draft-model` | Silently replaces the recipe's speculative config; legacy `--speculative-model` flag | INFERENCE §3.1 |
 | Gmail service | Module docstring describes a retired design; `GNOME_TOKEN_UNIT` unused | GOA §0 |
+| `server start --draft-model` | Without `--num-speculative-tokens`, emits `--num-speculative-tokens None`; the config's value (8) is never used here | INFERENCE §3.2 |
+| Aider runner | With a draft model, `--architect` puts the *draft* (small) model in the architect seat and the main model as editor; this looks inverted | AGENTS §5.3 |
