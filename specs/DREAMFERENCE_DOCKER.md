@@ -2,6 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Docker vLLM Architecture, Model Downloads, Tensorization, Cache Management
+> **Checked against the code:** 2026-09-28 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`)
 
 ---
 
@@ -12,29 +13,28 @@
 - [3. Tensorization](#3-tensorization)
 - [4. Docker vLLM Architecture](#4-docker-vllm-architecture)
 - [5. vLLM Runtime Images](#5-vllm-runtime-images)
-- [6. Docker Agent Architecture](#6-docker-agent-architecture)
+- [6. Other Containers](#6-other-containers)
 
 ---
 
 ## 1. Model Download & Caching
 
-### 1.1. Overview
+### 1.1. Download Flow
 
-Dreamference implements a best-effort download strategy for model weights. All operations degrade gracefully to on-demand fetch by vLLM if pre-download fails.
+1. **Triggers:**
+   - `puffin-admin init`;
+   - `puffin-admin server start`, for the main model, `--draft-model`, and the recipe's drafter;
+   - `puffin-admin model download [--model M | --all]`.
 
-### 1.2. Download Flow
+   `model list` only lists; it downloads nothing.
+2. **Resolution:** alias → HF repo via `ModelMatrixRegistry.resolve_hf_repo()` (also exposed as `dreamference.hardware.resolve_model_hf_repo`).
+3. **Download:** `ModelDownloader.download_model()`, or `download_all_models()` for every `compatible_gb10` entry.
+4. **Cache:** `~/.cache/huggingface/hub/`, or `$HF_HOME/hub`.
 
-1. **Trigger Points**: `puffin-admin init`, `puffin-admin server start`, explicit `puffin-admin model list`, `puffin-admin model download` command
-2. **Resolution**: Model alias → HuggingFace repo via `ModelMatrixRegistry.resolve_hf_repo()`
-3. **Pre-download**: `ModelDownloader.download_model()` and `download_all_models()`
-4. **Caching**: All weights land in `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if `HF_HOME` set)
+### 1.2. Best-Effort Policy
 
-### 1.3. Best-Effort Policy
-
-- Pre-download uses `huggingface_hub.snapshot_download` (preferred) or `huggingface-cli download` fallback
-- Network failures or permission errors do **not** halt startup
-- vLLM continues and fetches weights on-demand if they're missing from cache
-- Useful for air-gapped or bandwidth-limited deployments
+- It tries `huggingface_hub.snapshot_download` first, then the `huggingface-cli` binary.
+- Network or permission failures print a note and do **not** stop `server start`. vLLM then fetches the missing weights itself, from inside the container during the load, which this host handles badly. Pre-download before an offline session.
 
 ---
 
@@ -44,30 +44,24 @@ Dreamference implements a best-effort download strategy for model weights. All o
 
 ```
 ~/.cache/huggingface/hub/
-├── models--<org>--<model>/           (one per model)
-│   ├── refs/
-│   │   └── main                      (current HEAD ref)
-│   ├── snapshots/
-│   │   └── <commit>/                 (commit snapshot)
-│   │       ├── config.json
-│   │       ├── model-*.safetensors   (weight shards)
-│   │       └── ...
-│   └── blobs/                        (content-addressed storage)
+└── models--<org>--<model>/
+    ├── refs/main
+    ├── snapshots/<commit>/     (config.json, *.safetensors → symlinks into blobs/)
+    └── blobs/
 ```
 
 ### 2.2. Detection
 
-`is_model_downloaded(model_alias)` checks for non-empty snapshot directory.
+- `is_model_downloaded(alias)`: the snapshot directory exists and is non-empty.
+- `get_model_snapshot_dir(alias)`: its path.
 
-### 2.3. Clearing Cache
+### 2.3. Clearing
 
-```bash
-puffin-admin clear model-cache
-```
+`puffin-admin clear model-cache` runs `ModelDownloader.clear_cache()`, which `rmtree`s the **parents** of both caches:
+- `~/.cache/huggingface`, which is more than `hub/`: it includes the stored HF token;
+- `~/.cache/dreamference`, which is more than the tensorizer cache: it also holds vLLM's compile cache, the `puffin` build cache, fonts and logs.
 
-Removes both HF (`~/.cache/huggingface/`) and tensorizer (`~/.cache/dreamference/`) parent cache directories.
-
-**Implementation**: `ModelDownloader.clear_cache()` → `shutil.rmtree()` with status messages (`🗑️ ℹ️ ✅`).
+Deleting individual `models--…` directories is the targeted alternative.
 
 ---
 
@@ -75,203 +69,142 @@ Removes both HF (`~/.cache/huggingface/`) and tensorizer (`~/.cache/dreamference
 
 ### 3.1. Overview
 
-Tensorizer serializes PyTorch model weights to a compact binary format for faster loading on GB10.
+Tensorizer serializes weights into one `model.tensors` file for faster loading. It is **off by default**.
 
-- **Format**: `.tensors` file per model
-- **Cache**: `~/.cache/dreamference/tensorizer/` (secondary cache)
-- **Optional**: Disabled by default (`auto_tensorize=False`)
+- **Cache:** `~/.cache/dreamference/tensorizer/<model dir>/model.tensors`. The paths come from `get_tensorized_dir()` / `get_tensorized_path()`.
+- **Detection:** `is_model_tensorized(alias)` checks for a non-empty `model.tensors`.
+- **Creation:** `tensorize_model(alias)`, run after download when tensorizing is on.
+- **Loading:** when tensorized weights exist and tensorizing is on, `build_launch_command` sets `--load-format tensorizer`. That requires an image with vLLM's tensorizer extra, which the project `Dockerfile` adds.
 
-### 3.2. Tensorization Flow
+### 3.2. Configuration
 
-After HF download (when `auto_tensorize=True`):
+- **CLI:** `puffin-admin model download --tensorize|--no-tensorize`, `server start --tensorize|--no-tensorize`.
+- **Config key:** `use_tensorizer = true|false`; environment variable `DREAMFERENCE_USE_TENSORIZER`.
+- **Recipe:** `launch_overrides["use_tensorizer"]`.
 
-1. `tensorize_model(model_alias)` serializes weights to `<repo>--/model.tensors`
-2. Stored in `~/.cache/dreamference/tensorizer/`
-3. vLLM checks for `.tensors` file on startup
-4. If present and valid, loads from `.tensors` instead of `.safetensors` (faster)
+### 3.3. Clearing
 
-### 3.3. Detection
+`puffin-admin clear tensorize-cache` runs `ModelDownloader.clear_tensorizer_cache()`.
 
-`is_model_tensorized(model_alias)` checks for non-empty `model.tensors` file.
-
-### 3.4. Configuration
-
-- CLI: `puffin-admin model download --tensorize` / `--no-tensorize`
-- Config: `auto_tensorize: true/false` in `dreamference.toml`
-- Default: Off (no automatic tensorization)
-
-### 3.5. Clearing Tensorizer Cache
-
-```bash
-puffin-admin clear tensorize-cache
-```
-
-Removes only the tensorizer cache directory (`~/.cache/dreamference/tensorizer`).
-
-**Implementation**: `ModelDownloader.clear_tensorizer_cache()` → `shutil.rmtree()` with status messages.
+> ⚠️ **Known defect:** it removes the **parent** of the tensorizer directory, which is all of `~/.cache/dreamference` (compile cache, `puffin` build cache, …), not just `tensorizer/`. Until that is fixed, delete `~/.cache/dreamference/tensorizer` by hand. See `DREAMFERENCE_CLI.md` §4.18.
 
 ---
 
 ## 4. Docker vLLM Architecture
 
-### 4.1. Overview
+### 4.1. Requirements
 
-Dreamference uses Docker to run the primary vLLM inference engine. All Docker operations require a working Docker daemon (`docker ps` must succeed).
+- A working Docker daemon (`docker ps` must succeed), used as a member of the `docker` group.
+- The NVIDIA container runtime, for `--gpus all`.
 
-### 4.2. Daemon Requirements
+### 4.2. Container Lifecycle
 
-- Docker service running and accessible
-- No elevated privileges required by default (standard `docker` group membership)
-- `docker ps` must succeed to proceed with any Docker operations
+**Before launch:**
+1. `ensure_docker_image(image)` (§5.3).
+2. Force-remove any stale `dreamference-vllm-<port>` (`docker rm -f`).
 
-### 4.3. Container Lifecycle
-
-**Pre-Launch**:
-1. Pull vLLM image if missing (or use custom `dreamference-vllm-tensorizer:26.07-py3` if built locally)
-2. Force-remove any stale container (`docker rm -f dreamference-vllm-<port>`)
-
-**Launch**:
+**Launch** (full flag list in `DREAMFERENCE_CODEBASE.md` §5):
 ```bash
-docker run --ipc=host --network host \
-  --name dreamference-vllm-<port> \
-  --gpus all \
+docker run --ipc=host --network host --restart unless-stopped \
+  --name dreamference-vllm-<port> --gpus all \
+  --cpus=<n> --memory=<N>g --memory-swap=<N>g --oom-score-adj=800 \
   -v ~/.cache/huggingface:/root/.cache/huggingface \
   -v ~/.cache/dreamference:/root/.cache/dreamference \
-  -e HF_TOKEN=<token> \
-  -e CUTE_DSL_ARCH=sm_121a \
-  -e VLLM_LOGGING_LEVEL=DEBUG \
-  [recipe-specific environment variables] \
-  --entrypoint vllm <image> serve <model_id> [vllm-flags]
+  [-e HF_TOKEN=<token>] [recipe env] \
+  -e VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm -e CUTE_DSL_ARCH=sm_121a -e VLLM_LOGGING_LEVEL=DEBUG \
+  -e VLLM_DEBUG_LOG_API_SERVER_RESPONSE=1 -e VLLM_DEBUG_LOG_API_SERVER_REQUEST=1 \
+  --entrypoint vllm <image> serve <hf_repo> [vllm flags]
 ```
 
-**Post-Launch**:
-1. Stream logs to stdout (ModelLoadingMonitor)
-2. Poll `/v1/models` every 0.1 seconds until healthy
-3. Print progress: memory usage, stage detection, ETA
+- `--restart unless-stopped` means the server comes back after a reboot, or a daemon restart, until it is stopped explicitly.
+- `--memory-swap` equals `--memory`, so the container cannot swap.
 
-**Shutdown**:
-- `docker stop dreamference-vllm-<port>` (graceful)
-- `docker rm -f dreamference-vllm-<port>` (force removal)
+**After launch:**
+- `ModelLoadingMonitor` streams the logs;
+- it prints Docker memory every 10 s;
+- it tracks load stages;
+- it polls `/v1/models` until healthy.
 
-### 4.4. Volume Mounts
+**Shutdown:** `server stop` runs `docker stop`, and `server remove` runs `docker rm -f`. Both also cover the diffusion sidecar.
+
+### 4.3. Volume Mounts
 
 | Mount | Purpose |
 | :---- | :------ |
-| `~/.cache/huggingface:/root/.cache/huggingface` | Model weight caching (inside container) |
-| `~/.cache/dreamference:/root/.cache/dreamference` | Tensorizer cache (if enabled) |
-
-### 4.5. Environment Exports
-
-| Variable | Typical Value | Purpose |
-| :-------- | :------------ | :------ |
-| `HF_TOKEN` | (user's token) | Access gated models |
-| `CUTE_DSL_ARCH` | `sm_121a` | Pin SM121 ISA for Blackwell |
-| `VLLM_LOGGING_LEVEL` | `DEBUG` | Verbose logging for startup |
-| Recipe-specific | (model-dependent) | NVFP4 backend selection, attention backend, MoE backend |
+| `~/.cache/huggingface:/root/.cache/huggingface` | Model weights |
+| `~/.cache/dreamference:/root/.cache/dreamference` | Tensorized weights, plus the persistent torch.compile cache (`VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`) |
 
 ---
 
 ## 5. vLLM Runtime Images
 
-### 5.1. Base Image
+### 5.1. Project default: `dreamference-vllm-tensorizer:26.07-py3`
 
-**Default Image**: `nvcr.io/nvidia/vllm:26.07-py3`
-
-- **Source**: NVIDIA NGC repository (official vLLM container)
-- **Pin Rationale**: Includes upstreamed `flashinfer-b12x` SM12x backends (merged May 2026)
-- **Blackwell Support**: Full support for SM121 ISA, FP4 kernels, MoE backends
-
-### 5.2. Custom Build (Optional)
-
-Dockerfile dynamically builds if needed:
+`DEFAULT_VLLM_IMAGE` is a **bare tag**, built locally from the repository's `Dockerfile`:
 
 ```dockerfile
 FROM nvcr.io/nvidia/vllm:26.07-py3
-RUN python -m pip install --no-cache-dir --no-deps "xgrammar==0.2.4"
 RUN pip install "vllm[tensorizer]"
+RUN pip install ray
+RUN python -m pip install --no-cache-dir --no-deps --force-reinstall "xgrammar==0.2.4"
+ENTRYPOINT ["vllm", "serve"]
 ```
 
-**Built As**: `dreamference-vllm-tensorizer:26.07-py3`
+It is NVIDIA's NGC vLLM image, which includes the May 2026 SM12x FlashInfer backends, plus the tensorizer extra, Ray and a pinned `xgrammar`.
 
-**Purpose**: Adds:
-- `xgrammar` (grammar-constrained generation)
-- `vllm[tensorizer]` (optional tensorizer support for fast model loading)
+### 5.2. Per-model images
 
-### 5.3. Version Compatibility
+A recipe can pin its own engine in `launch_overrides["docker_image"]`. The current DFlash entries do:
 
-**Critical**: Using older vLLM containers (pre-May 2026) will fall back to slower or broken paths for NVFP4 inference on GB10.
+| Model | Image | Built from |
+| --- | --- | --- |
+| `qwen3.5-122b-a10b-hybrid-dflash` (default) | `dreamference-vllm-dflash:0.23.0-aeon-dense5` | `Dockerfile.dense`, on top of `dreamference-vllm-dflash:0.23.0-aeon-kvfix2` |
+| `qwen3.5-122b-a10b-int4-dflash` | `dreamference-vllm-dflash:0.23.0-aeon-dense9` | same lineage |
 
-If you use an older image:
-- NVFP4 models may produce corrupted output (`!` only)
-- Fallback to FP8 is triggered
-- Performance is degraded
+The chain begins at `Dockerfile.dflash`, `FROM ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`, which is the AEON sm121 vLLM the DGX Spark DFlash recipe is built on. The kvfix layers bake in KV page-size unification, mamba prefix alignment and block-table fixes. The dense layer adds the Entrpi dense-bandwidth patches. These images are ~41 GB each and are built by hand with `docker build -f Dockerfile.dense …`; nothing in the CLI builds them.
 
-**Recommendation**: Always use `nvcr.io/nvidia/vllm:26.07-py3` or later.
+The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAULT_VLLM_IMAGE`.
 
-### 5.4. Container Naming
+### 5.3. How images are acquired (`ensure_docker_image`)
 
-- **Pattern**: `dreamference-vllm-<port>` (e.g., `dreamference-vllm-8000`)
-- **Cleanup**: Old containers are force-removed before new launch
+- **Present locally:** used as is.
+- **Registry-qualified** (the name contains `/`): `docker pull`.
+- **Bare tag:** `docker build -t <tag> -f Dockerfile .`, using the **main** `Dockerfile`.
+
+> ⚠️ **Known defect:** the bare-tag rule assumes the bare tag is `DEFAULT_VLLM_IMAGE`. If a pinned DFlash image (`dreamference-vllm-dflash:…`) is missing, it is "built" from the main `Dockerfile` under the DFlash tag. The result is the NGC engine mislabelled as the DFlash one, and the DFlash recipe then fails on it. Build pinned images from their own Dockerfile before `server start`.
+
+`probe_image()` never acquires an image. It reports on one already present, because it is called from `build_launch_command`, where a missing image must not start a multi-gigabyte download.
+
+### 5.4. Container naming
+
+- vLLM: `dreamference-vllm-<port>`;
+- diffusion: `dreamference-diffusion-<port>`, default 8001.
 
 ---
 
-## 6. Docker Agent Architecture
+## 6. Other Containers
 
-### 6.1. OpenHands Container
+| Container | Started by | Notes |
+| --- | --- | --- |
+| `dreamference-diffusion-8001` | `server start`, before vLLM | `--memory=8g`, swap equal; `diffusion_openai_service.py` |
+| `puffin-api_server-1`, `puffin-web_server-1`, `puffin-relational_db-1`, `puffin-nginx-1`, `puffin-code-interpreter-1` | `puffin-admin puffin start` (Onyx Lite via `onyx-cli`) | Container names pinned to `puffin-*` in the lite overlay |
+| `dreamference-searxng`, `dreamference-gmail`, `dreamference-image-search`, `dreamference-stt` | `puffin-admin puffin configure` | Sidecars joined to Onyx's network |
+| `dreamference-openhands` | `puffin-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, port **3000**, which collides with Onyx (`DREAMFERENCE_AGENTS.md` §7) |
 
-Dreamference uses Docker for the optional OpenHands agent UI. All Docker operations require a working Docker daemon (`docker ps` must succeed).
+**OpenHands launch:**
 
-### 6.2. Image
-
-**Image**: `ghcr.io/all-hands-ai/openhands:main`
-
-- **Source**: GitHub Container Registry (all-hands-ai organization)
-- **Pulling**: On-demand via `OpenHandsInstaller.pull_image_if_missing()` when `--agent openhands` is selected
-- **Local Build**: No local build; always pulled from GHCR
-
-### 6.3. Container Lifecycle
-
-**Pre-Launch**:
-1. Pull image if missing (first run or after clearing)
-2. Force-remove any stale container (`docker rm -f dreamference-openhands`)
-
-**Launch**:
 ```bash
-docker run --rm -it \
-  --name dreamference-openhands \
-  -e LLM_MODEL=openai/{hf_repo} \
-  -e LLM_BASE_URL={vllm_host}/v1 \
-  -e LLM_API_KEY=gb10-local-token \
+docker run --rm -it --name dreamference-openhands \
+  -e LLM_MODEL=openai/{hf_repo} -e LLM_BASE_URL={vllm_host}/v1 -e LLM_API_KEY=gb10-local-token \
   -e WORKSPACE_BASE={cwd} \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v {cwd}:/opt/workspace_base \
-  -p 3000:3000 \
-  ghcr.io/all-hands-ai/openhands:main
+  -v /var/run/docker.sock:/var/run/docker.sock -v {cwd}:/opt/workspace_base \
+  -p 3000:3000 ghcr.io/all-hands-ai/openhands:main
 ```
-
-**Post-Launch**:
-- Web UI accessible at `http://localhost:3000`
-- Full access to workspace directory and Docker daemon (for autonomous agent tasks)
-
-### 6.4. Container Naming & Cleanup
-
-- **Name**: `dreamference-openhands` (single instance per system)
-- **Cleanup**: Old instances removed before new launch
-- **Isolation**: Each launch is stateless (no persistent container data)
-
-### 6.5. Environment Variables
-
-| Variable | Value | Purpose |
-| :------- | :---- | :------ |
-| `LLM_MODEL` | `openai/{hf_repo}` | Model identifier |
-| `LLM_BASE_URL` | `{vllm_host}/v1` | vLLM API endpoint |
-| `LLM_API_KEY` | `gb10-local-token` | Fixed authentication token |
-| `WORKSPACE_BASE` | `{cwd}` | Workspace directory for agent tasks |
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md)** — Model matrix & defaults
-- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md)** — Launch configuration & recipes
-- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md)** — Agent runners & OpenHands integration
+- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md):** model matrix
+- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** launch configuration and recipes
+- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent runners
