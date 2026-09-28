@@ -21,8 +21,8 @@ unified memory) and puts three things in front of it:
 ### Terminal agent
 
 `puffin` reads your code, runs commands and makes changes in your repository. It is built on
-OpenAI's open-source Codex CLI, so its commands and flags will be familiar, but it talks only to
-the model on your machine.
+OpenAI's open-source Codex CLI, so its commands and flags will be familiar, but its model is the
+one on your machine.
 
 [Terminal agent →](puffin.md)
 </div>
@@ -45,9 +45,10 @@ to your Gmail, all answered by the same local model.
 
 ## Why Puffin
 
-- **Local by design.** Inference runs on your GB10. The coding agent talks only to the model you
-  serve; there is no cloud model and no OpenAI account. The web chat's telemetry is switched off.
-  See [Privacy & security](privacy.md) for exactly what does and does not leave the machine.
+- **Local by design.** Inference runs on your GB10. The coding agent sends its prompts to the model
+  you serve, not to a cloud model, and needs no OpenAI account. The web chat's telemetry is switched
+  off. See [Privacy & security](privacy.md) for exactly what does leave the machine, including one
+  known gap.
 - **A large model on one desk.** The default model is Qwen 3.5 122B-A10B with speculative decoding.
   On a GB10 it measures 23.8 tokens/s on prose, 49.9 on code and 53.1 on JSON, single-stream at a
   32k context with eight slots. See [Models](models.md).

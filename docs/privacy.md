@@ -18,8 +18,22 @@ off.
 | Image search, if you use it | The image query, then downloads of the matching images | Public search engines through SearXNG, then the sites hosting the images |
 | `puffin update` | A check for, and download of, the latest Puffin release | GitHub |
 
-Your repositories, prompts, chats and usage are not sent anywhere by Puffin. The only content that
-leaves the machine is what these features need: a search query, a URL, a mailbox read.
+Apart from these, and the known gap below, Puffin does not send your repositories, prompts or chats
+anywhere. The only content that leaves the machine is what these features need: a search query,
+a URL, a mailbox read.
+
+!!! warning "Known gap: Codex usage analytics"
+    `puffin` keeps its settings in `~/.codex`, the same directory as upstream Codex. If you have
+    ever signed in to Codex on this machine, that sign-in is still stored there. With it present,
+    Codex's built-in usage analytics can be sent to OpenAI. A fix is planned. Until then, turn
+    analytics off by adding this to `~/.codex/config.toml`:
+
+    ```toml
+    [analytics]
+    enabled = false
+    ```
+
+    Or, if you no longer use upstream Codex, delete `~/.codex/auth.json`.
 
 ## What Puffin switches off
 

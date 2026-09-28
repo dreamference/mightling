@@ -48,11 +48,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "repos/${GITHUB_REPOSITORY}/pages" >/dev/null 2>&1; then
+          # Pages enabled with the default "Deploy from a branch" source answers here too, but then
+          # the Actions deploy fails -- only the GitHub Actions source ("workflow") counts.
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq .build_type 2>/dev/null)" = "workflow" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::GitHub Pages is not enabled for this repository; the site was built and checked but not deployed."
+            echo "::notice::Site built and checked but not deployed: enable GitHub Pages with Source: GitHub Actions to publish it."
           fi
 
       - if: steps.pages.outputs.enabled == 'true'

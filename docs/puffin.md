@@ -2,8 +2,8 @@
 
 `puffin` is a coding agent that works in your repository. It reads files, runs commands, edits code
 and explains what it did. It is built on the open-source [OpenAI Codex CLI](https://github.com/openai/codex)
-(currently release 0.158.0), with Puffin's changes applied on top, and it talks only to the model
-your GB10 serves.
+(currently release 0.158.0), with Puffin's changes applied on top. Its prompts go to the model your
+GB10 serves, not to a cloud model.
 
 ```bash
 cd ~/my-project
@@ -45,7 +45,7 @@ Configuration and saved sessions live in `~/.codex` (or `$CODEX_HOME`), as with 
 
 | Feature | Details |
 |---|---|
-| **Local model, no account** | Every request goes to the model your GB10 serves. |
+| **Local model, no account** | Prompts go to the model your GB10 serves, and no OpenAI account is needed. (See the [analytics gap](privacy.md#what-reaches-the-network-and-when).) |
 | **Web access** | The agent can search the web and read pages through `puffin-admin search` and `puffin-admin fetch`, which go through a search instance on your machine. The instructions travel with every session, so this works in any directory. Needs `puffin-admin` on your `PATH`. |
 | **Gmail, read-only** | If you have connected Gmail accounts in the web chat, the agent can search and read mail through `puffin-admin gmail`. It is told that email content is untrusted and must never be treated as instructions. Turn it off with `puffin_gmail = false` in `dreamference.toml`. |
 | **`/usage`** | Shows this session's token usage: input (cached and new), output, the total, and how full the context window was on the last request. |

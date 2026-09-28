@@ -42,8 +42,14 @@ export PATH="$HOME/puffin/.venv/bin:$PATH"
 puffin-admin server start
 ```
 
-The first start downloads the model weights and the server image, then loads the model. Expect
-several minutes. Later starts only load the model. A small second model (a code-diffusion model)
+The first start downloads the model weights, then loads the model. Expect several minutes. Later
+starts only load the model.
+
+!!! warning "The default model needs its own server image"
+    The default model runs on a custom vLLM image, `dreamference-vllm-dflash:0.23.0-aeon-dense5`,
+    built in stages from `Dockerfile.dflash` and `Dockerfile.dense` in the repository. The headers
+    of those files describe how. `server start` cannot build this image by itself yet, so build it
+    before the first start. Check with `docker image ls dreamference-vllm-dflash`. A small second model (a code-diffusion model)
 starts beside the main one; see [Models](models.md).
 
 Check that it is answering:
@@ -102,6 +108,9 @@ After that, `puffin app` also opens it. See [Desktop app](desktop.md).
 - **First run with an empty `~/.codex`.** When `puffin` starts with no existing configuration
   directory, it can open on a "Sign in with ChatGPT" screen instead of the message box. Puffin does
   not use an OpenAI account; this screen is inherited from Codex and is being fixed.
+- **Codex usage analytics.** If you have signed in to upstream Codex on this machine, Codex's
+  usage analytics can reach OpenAI. See [Privacy & security](privacy.md#what-reaches-the-network-and-when)
+  for how to switch them off.
 - **`puffin update` finds nothing yet.** It installs the latest published Puffin release, and none
   has been published. Until then, update by pulling the repository and running
   `puffin-admin codex build`.
