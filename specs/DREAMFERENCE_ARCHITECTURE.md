@@ -1,238 +1,156 @@
 # Dreamference Architecture Overview
 
-> - **Version:** 1.2.0 (`dreamference.__version__`)
-> - **Status:** Implemented / Production-Ready
-> - **Target Hardware:** Exclusive to **NVIDIA GB10** (Blackwell architecture with 128 GB Unified Memory)
-> - **Deployment Model:** Single-Node Standalone NVIDIA GB10 System
-> - **License:** Open Source (AGPL-3.0-or-later)
+> - **Version:** 1.2.0 (`dreamference.__version__`, `setup.py`)
+> - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified LPDDR5X)
+> - **Deployment Model:** single-node, air-gapped
+> - **License:** AGPL-3.0-or-later
+> - **Checked against the code:** 2026-09-28
 
 ---
 
-## 1. Executive Summary & Vision
+## 1. Executive Summary
 
-**Dreamference** is an open-source, enterprise-grade, agentic AI software development platform engineered exclusively to run on an **NVIDIA GB10 system** (Blackwell architecture with 128 GB of Unified Memory). Inspired by platforms like Google Antigravity, Dreamference delivers end-to-end autonomous pair-programming, codebase AST & vector indexing, multi-agent orchestration, and localized code synthesis with 100% data sovereignty, zero cloud egress, and zero external cluster dependencies.
+**Dreamference** is a local, air-gapped agentic coding platform for a single NVIDIA GB10. It serves open models with vLLM in Docker, and puts three front ends on the same local OpenAI-compatible endpoint:
 
-By leveraging the integrated SoC architecture of the NVIDIA GB10 (Blackwell GPU paired with high-performance ARM Cortex CPU host sharing **128 GB of high-speed Unified LPDDR5X Memory**), Dreamference hosts state-of-the-art open coding LLMs with high generation speeds and low latency.
+- **`puffin`:** the terminal coding agent, and the default. It is a Puffin-branded build of OpenAI's Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`puffin-rs/`).
+- **Puffin web UI:** Onyx Lite, deployed and patched by `puffin-admin puffin …`. It is a browser chat with web search, image search, voice and Gmail, and it is also shown as a desktop window by the Tauri shell `puffin-app`.
+- **Other agents:** Goose, Cline, Aider, Continue and OpenHands, through `puffin-admin run --agent …`.
 
-Primary agent runtime is **Goose** (`aaif-goose/goose`). Additional runners selected via `--agent` / `DREAMFERENCE_AGENT`: **Cline**, **Aider**, **Continue**, and **OpenHands** — all targeting the same local vLLM OpenAI-compatible endpoint.
+Everything is administered through **`puffin-admin`**, the Python CLI.
 
 ```text
-+-----------------------------------------------------------------------------------+
-|                                  Dreamference Clients                                 |
-|   +----------------------+   +-----------------------+   +--------------------+   |
-|   | `dreamference` CLI       |   | Stdio MCP Companion   |   | Web Canvas UI      |   |
-|   | Terminal Interface   |   | (Goose IDE bridge)    |   | Telemetry Pane     |   |
-|   +-----------+----------+   +-----------+-----------+   +----------+---------+   |
-+---------------+--------------------------+--------------------------+-------------+
-|                                          | Model Context Protocol (MCP)           |
-+------------------------------------------v----------------------------------------+
-|   Agents: Goose (default) | Cline | Aider | Continue | OpenHands                  |
-|  +---------------------+  +---------------------+  +----------------------------+ |
-|  | Context Engine      |  | Session Controllers |  | Sandbox / Docker / IDE     | |
-|  | AST + FTS5 + TF-IDF |  | (5 runners)         |  | Prefix / Extension / Image | |
-|  +---------------------+  +---------------------+  +----------------------------+ |
-+------------------------------------------+----------------------------------------+
-|                                          | Local OpenAI-compatible HTTP (vLLM)    |
-+------------------------------------------v----------------------------------------+
-|                      NVIDIA GB10 Hardware & Inference Engine                      |
-|  +-----------------------------------------------------------------------------+  |
-|  | vLLM Engine (BF16 / INT8 / FP8 / INT4) + Prefix Cache / Chunked Prefill     |  |
-|  +-----------------------------------------------------------------------------+  |
-|  | GB10 Open Models: Qwen 2.5 Coder 32B/72B | DeepSeek-R1-Distill 32B/70B      |  |
-|  |                   Llama 3.3 70B | StarCoder2 15B | Draft 1.5B/3B            |  |
-|  +-----------------------------------------------------------------------------+  |
-|  | Hardware: 1x NVIDIA GB10 (Blackwell | 128 GB Unified Memory)                |  |
-|  +-----------------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------------+
++------------------------------------------------------------------------------------+
+|  Front ends                                                                        |
+|   puffin (Rust, Codex fork)   Puffin web UI (Onyx Lite) / puffin-app   IDEs (MCP)  |
+|   puffin-admin run --agent goose|cline|aider|continue|openhands                    |
++-----------------------+--------------------------------+---------------------------+
+                        | OpenAI-compatible HTTP          | stdio MCP (puffin-admin mcp)
++-----------------------v--------------------------------v---------------------------+
+|  dreamference/ (Python)                                                            |
+|   config  hardware  vllm_server  runner  chat  context_engine  mcp_server  cli     |
+|   agent tools: puffin-admin search / fetch (SearXNG), gmail (read-only service)    |
++-----------------------+------------------------------------------------------------+
+                        | docker run
++-----------------------v------------------------------------------------------------+
+|  Containers on the GB10                                                            |
+|   dreamference-vllm-8000 (main model)   dreamference-diffusion-8001 (sidecar)      |
+|   puffin-* (Onyx: api, web, db, nginx, code-interpreter)                           |
+|   dreamference-gmail, dreamference-image-search, dreamference-stt, dreamference-searxng |
++------------------------------------------------------------------------------------+
+|  NVIDIA GB10 — Blackwell GPU + Arm CPU sharing 128 GB unified memory               |
++------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 2. Parity & Key Differentiators
+## 2. Models
 
-| Feature                | Google Antigravity                | Dreamference                                                                                         |
-| :--------------------- | :-------------------------------- | :----------------------------------------------------------------------------------------------- |
-| **Model Hosting**      | Cloud (Google Vertex AI / Gemini) | **100% On-Premise NVIDIA GB10 System**                                                           |
-| **Source Code**        | Proprietary                       | **Open Source (AGPL-3.0-or-later)**                                                                     |
-| **Supported Models**   | Gemini 1.5 Pro / Flash, Claude    | **Single-Node Open LLMs (Qwen 2.5 Coder, DeepSeek-R1 Distills, Llama 3.3)**                      |
-| **Inference Hardware** | Cloud TPUs / GPUs                 | **NVIDIA GB10 (Blackwell Architecture)**                                                         |
-| **Data Privacy**       | Cloud Privacy Policy              | **Strict Zero-Egress Air-Gapped Local Execution**                                                |
-| **System Memory**      | Cloud Allocation                  | **128 GB Unified LPDDR5X Memory**                                                                |
-| **Interfaces**         | Antigravity IDE, CLI, Desktop     | **CLI (`dreamference`); agents Goose / Cline / Aider / Continue / OpenHands; stdio MCP; Web Canvas** |
+The model matrix (`hardware/model_matrix_registry.py`, `MATRIX`) is the source of truth for launch flags. Per-model vLLM tuning lives in each entry's `launch_overrides`, and a model may pin its own Docker image.
 
----
+| Alias | Weights | Role |
+| --- | --- | --- |
+| `qwen3.5-122b-a10b-hybrid-dflash` | `Intel/Qwen3.5-122B-A10B-int4-AutoRound` | **Default** main model (`DEFAULT_MODEL_ALIAS`); DFlash speculative decoding, vision |
+| `qwen3.5-122b-a10b-int4-dflash` | same weights | Tested fallback recipe |
+| `qwen3.5-122b-a10b-nvfp4` | `nvidia/Qwen3.5-122B-A10B-NVFP4` | NVFP4 alternative, vision |
+| `qwen3.6-35b-a3b-nvfp4` | `nvidia/Qwen3.6-35B-A3B-NVFP4` | Smaller MoE |
+| `qwen3.5-122b-a10b-dflash-draft` | `z-lab/Qwen3.5-122B-A10B-DFlash` | DFlash drafter, not served on its own |
+| `tiny-a2d-coder-0.5b-diffusion` | `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1` | **Default** diffusion model, served by the sidecar (vLLM cannot serve diffusion checkpoints) |
 
-## 3. System Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    CLI & User Interfaces                        │
-│  • puffin-admin chat/run (interactive agents)                          │
-│  • puffin-admin server start (vLLM lifecycle)                          │
-│  • puffin-admin status (hardware/vLLM/context telemetry)               │
-│  • puffin-admin index (workspace indexing)                             │
-└────────────┬────────────────────────────────────────────────────┘
-             │
-┌────────────v────────────────────────────────────────────────────┐
-│                    Config & State Management                    │
-│  • 4-tier config resolution (CLI → Env → TOML → defaults)      │
-│  • Goose config synthesis & environment setup                  │
-│  • HF token management & caching                               │
-└────────────┬────────────────────────────────────────────────────┘
-             │
-┌────────────v────────────────────────────────────────────────────┐
-│              Agent Runners (5 strategies)                       │
-│  • Goose (default): Native shell + MCP tools                   │
-│  • Cline: VS Code extension bridge                             │
-│  • Aider: CLI-driven pair programming                          │
-│  • Continue: IDE autocomplete & chat                           │
-│  • OpenHands: Docker UI for autonomous agents                  │
-└────────────┬────────────────────────────────────────────────────┘
-             │
-┌────────────v────────────────────────────────────────────────────┐
-│         Subsystems (parallel to agent runners)                  │
-│  • vLLM Server: Docker-based inference management              │
-│  • Context Engine: AST + FTS5 + TF-IDF + embeddings            │
-│  • MCP Server: IDE state & workspace tools                     │
-│  • Hardware Manager: GB10 detection & telemetry                │
-└────────────┬────────────────────────────────────────────────────┘
-             │
-┌────────────v────────────────────────────────────────────────────┐
-│       Hardware Layer (NVIDIA GB10 / 128 GB Unified Memory)      │
-│  • Local vLLM endpoint (OpenAI-compatible REST API)            │
-│  • Blackwell GPU inference + ARM Cortex CPU                    │
-│  • Unified LPDDR5X memory model (no discrete copies)           │
-└─────────────────────────────────────────────────────────────────┘
-```
+The current recipes run at a 32k context. See `DREAMFERENCE_MODELS.md` and `DREAMFERENCE_INFERENCE.md`.
 
 ---
 
-## 4. Core Subsystems
+## 3. Packages
 
-### 4.1. Configuration & Initialization
+Each package's `__init__.py` is a re-export facade with an explicit `__all__`. The same-named top-level modules (`dreamference/config.py`, `cli.py`, …) are dead shims, shadowed by the packages.
 
-**Package**: `dreamference/config/`
+### 3.1. `config/`: 4-tier configuration
 
-The 4-tier config resolution ensures all components (Goose, vLLM, agents) inherit the same unified configuration:
+Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
+1. constructor argument (the CLI);
+2. `DREAMFERENCE_*` environment variable;
+3. config file (`--config`, `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`/`.json`, `~/.config/dreamference/config.toml`);
+4. module-level `DEFAULT_*` constant.
 
-```
-Explicit CLI arguments
-    ↓
-Environment Variables (DREAMFERENCE_*, HF_TOKEN, …)
-    ↓
-Config File (dreamference.toml / .json)
-    ↓
-Built-in Defaults
-```
+`save_config()` writes only values that differ from the defaults. The package also writes the Goose config and the Goose environment.
 
-Every field resolves through the same chain. `save_config()` deliberately writes only values that differ from the defaults, so a round-trip does not fossilize defaults into the TOML.
+### 3.2. `hardware/`: models, downloads, telemetry
 
-### 4.2. Hardware Layer
+- `model_matrix_registry.py` / `model_spec.py`: the matrix, and `ModelSpec` (`supports_vision`, `is_diffusion`, `launch_overrides`).
+- `model_downloader.py`: HF downloads and tensorizer caching.
+- `hardware_manager.py`, `hardware_telemetry.py`, `memory_metrics.py`: GB10 detection and memory figures.
 
-**Package**: `dreamference/hardware/`
+### 3.3. `vllm_server/`: model serving and host safety
 
-**Responsibilities**:
-- GB10 detection and qualification (GPU name, total memory, architecture)
-- Model matrix registry with per-model vLLM launch recipes
-- Weight pre-download & tensorization caching
-- Memory budget validation before model loading
+- `vllm_server_manager.py`: builds the `docker run … vllm serve` command from recipe plus config, starts, stops, removes, tails logs, and resets a stale torch.compile cache.
+- `vllm_launch_options.py`: flag merging.
+- `model_loading_monitor.py`, `vllm_startup_monitor.py`, `vllm_log_streamer.py`, `vllm_server_status.py`, `diagnostics.py`: load progress and status.
+- **Host safety:** unified memory means a bad load can freeze the whole host. Two layers guard against it:
+  - `check_host_safety()` runs *before* the load (swap, sysctl, earlyoom/systemd-oomd);
+  - `psi_watchdog.MemoryPressureWatchdog` runs *during* it, sampling `/proc/pressure/memory` and killing the container on sustained pressure.
+- `diffusion_server_manager.py` / `diffusion_openai_service.py`: the diffusion sidecar. It runs in the main model's image, starts *before* vLLM, and is capped at `--memory=8g`.
 
-**Key Components**:
-- `hardware_manager.py`: Detection, telemetry, memory metrics
-- `model_matrix_registry.py`: Source-of-truth model specs with launch overrides
-- `model_downloader.py`: HuggingFace + tensorizer cache management
+### 3.4. `runner/`: agents
 
-### 4.3. vLLM Server Management
+Six runner/installer pairs plus `sandbox_manager.py`. For Codex, the default, `codex_branded_builder.py` builds `puffin` from the submodule, patches and launcher. See `DREAMFERENCE_AGENTS.md` and `DREAMFERENCE_PUFFIN_CODEX.md`.
 
-**Package**: `dreamference/vllm_server/`
+### 3.5. `chat/`: the Puffin web UI and desktop
 
-**Responsibilities**:
-- Docker container lifecycle (pull, run, stop, remove)
-- Launch-arg construction from model recipes & config
-- Health checks and readiness polling
-- Live log streaming & memory monitoring
+- `onyx_runner.py` / `onyx_installer.py`: the Onyx Lite lifecycle and `configure`: LLM provider, branding, web search, voice, Gmail, image search.
+- `onyx_ui_overrides.py`, `onyx_ui_fonts.py`, `onyx_ui_labels.py`, `onyx_ui_scripts.py`, `onyx_brand_assets.py`: patches applied to Onyx's served CSS, JS and assets.
+- `gmail_search_service.py`, `gmail_credentials.py`, `gmail_client.py`: the read-only Gmail service and its client.
+- `image_search_service.py`: the image search sidecar.
+- `desktop_runner.py` / `desktop_installer.py`: the Tauri window `puffin-app` (project in `desktop/`).
 
-**Key Components**:
-- `vllm_server_manager.py`: Main orchestrator
-- `model_loading_monitor.py`: Progress tracking & memory telemetry
-- `vllm_launch_options.py`: Flag merging from recipes
+See `DREAMFERENCE_ONYX.md`, `DREAMFERENCE_PUFFIN_GMAIL.md` and `DREAMFERENCE_IMAGE_SEARCH.md`.
 
-### 4.4. Agent Runners
+### 3.6. `context_engine/`: workspace index
 
-**Package**: `dreamference/runner/`
+Python `ast` symbols (`ast_symbol_extractor.py`), TF-IDF, SQLite FTS5 and `nomic-embed-text-v1.5` embeddings in sqlite-vec (`sqlite_context_storage.py`, `embedding_calculator.py`), all written to `.dreamference/`. It serves `workspace_search_code` over MCP and the web canvas; `puffin` does not use it. See `DREAMFERENCE_CONTEXT.md`.
 
-**Responsibilities**:
-- Per-agent provisioning (Goose, Cline, Aider, Continue, OpenHands)
-- Session startup orchestration
-- Sandbox prefixes (Apptainer, Podman, Docker) for Goose
-- Environment variable synthesis & config passing
+### 3.7. `mcp_server/`: IDE companion
 
-**Key Components**:
-- `goose_runner.py`: Shared vLLM waitloop + Goose session launch
-- `{agent}_installer.py`: Binary/extension provisioning (5 installers)
-- `sandbox_manager.py`: Rootless container wrapping for Goose
+A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `IDEState`, plus `web_search` / `web_fetch` (`web_tools.py`) and `workspace_search_code`.
 
-### 4.5. Context Engine
+### 3.8. `cli/`: `puffin-admin`
 
-**Package**: `dreamference/context_engine/`
+`dreamference_cli_controller.py` (`build_parser`, `run_cli`), `model_deep_inspector.py` (`main-model inspect --deep`) and `sonnet_dataset.py` (for `benchmark_server`). See `DREAMFERENCE_CLI.md`.
 
-**Responsibilities**:
-- Parallel AST symbol extraction from codebase
-- SQLite FTS5 indexing + sqlite-vec embeddings
-- TF-IDF ranking + semantic search
-- Hybrid ranking (FTS5 + TF-IDF + cosine similarity)
+### 3.9. Outside the Python package
 
-**Key Components**:
-- `context_engine.py`: Orchestration & search
-- `ast_symbol_extractor.py`: Python symbol extraction
-- `sqlite_context_storage.py`: Persistent storage + queries
-- `embedding_calculator.py`: Dense semantic embeddings (nomic-embed-text-v1.5)
-
-### 4.6. MCP & IDE Integration
-
-**Package**: `dreamference/mcp_server/`
-
-**Responsibilities**:
-- Stdio MCP server for IDE companions (JetBrains, VS Code)
-- In-memory IDE state tracking
-- Workspace search via context engine
-
-**Tools Exposed**:
-- `ide_get_active_editor`, `ide_open_file`, `ide_apply_diff`
-- `workspace_search_code` (hybrid search)
-- IDE diagnostics & file management
-
-### 4.7. CLI & User Experience
-
-**Package**: `dreamference/cli/`
-
-**19 Subcommands**:
-- Initialization: `init`, `main-model {set,inspect}`
-- Agent Sessions: `chat`, `run`
-- Server Management: `server {start,stop,remove}`, `logs request`, `benchmark_server`
-- Indexing: `index`
-- Utilities: `status`, `endpoints`, `web`, `model {list,download}`, `clear {model-cache,tensorize-cache}`, `mcp`
+| Path | What |
+| --- | --- |
+| `codex/` | Submodule: the `dgxcoder/codex` fork, pinned to `rust-v0.158.0`, never edited |
+| `codex-patches/` | Patch series applied to an exported copy at build time |
+| `puffin-rs/` | The launcher crate compiled into `puffin` |
+| `desktop/` | Tauri project for `puffin-app` |
+| `dreamference/web_canvas.py` | `puffin-admin web` status page |
+| `.github/workflows/release.yml` | Manually triggered release: Python dist, desktop bundles, `puffin` binaries |
 
 ---
 
-## 5. Roadmap & Implementation Verification
+## 4. Roadmap & Implementation Verification
 
-- [x] **Phase 1: NVIDIA GB10 Exclusive Specification** — model matrix & unified-memory targeting
-- [x] **Phase 2: GB10 Inference Pipeline & Auto-Launch Engine** — multi-tier vLLM, live logs, weight pre-download, CLI suite including `model list`, `model download`
-- [x] **Phase 3: Agentic Engine, Provisioning & MCP** — Goose auto-install, stdio MCP tools, multi-agent runners (Cline, Aider, Continue, OpenHands)
-- [x] **Phase 4: Context Engine & Web Canvas** — parallel AST, SQLite/FTS5, TF-IDF (in-process), Web Canvas telemetry UI
-- [x] **Phase 5: Modular Package Layout** — split packages under `dreamference/{hardware,config,runner,vllm_server,context_engine,mcp_server,cli}/` with shim modules for stable imports
-- [x] **Phase 6: Expanded Agent Matrix** — Aider CLI, Continue IDE, OpenHands Docker UI wired through `--agent`
+- [x] GB10 model matrix, unified-memory targeting and host-safety guards
+- [x] Docker vLLM lifecycle, weight pre-download, tensorizer, benchmark, deep inspection
+- [x] Diffusion sidecar beside the main model
+- [x] Agent runners (Goose, Cline, Aider, Continue, OpenHands) and the stdio MCP server
+- [x] Context engine (AST, FTS5, TF-IDF, embeddings) and web canvas
+- [x] `puffin`: branded Codex from a pinned fork, Rust launcher, `update`, `app`, `/usage`
+- [x] Puffin web UI (Onyx Lite) with branding, web and image search, voice, Gmail; desktop window
+- [ ] Code index for `puffin` (codebase-memory-mcp + SCIP): proposed, `DREAMFERENCE_PUFFIN_CODE_INDEX.md`
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md)** — Supported GB10 model matrix and default model rationale
-- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md)** — GB10 inference stack, vLLM launch recipes, performance flags
-- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md)** — Agent runtimes, session startup, integration details
-- **[DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md)** — Code indexing pipeline, AST extraction, hybrid search
-- **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md)** — Docker vLLM architecture, model caching, tensorization
-- **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md)** — CLI suite, configuration, environment variables
-- **[DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md)** — System requirements, installation, helper scripts
-- **[DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md)** — Codebase structure, module layout, architecture reference
+- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md):** model matrix and default rationale
+- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM launch recipes and flags
+- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent runtimes
+- **[DREAMFERENCE_PUFFIN_CODEX.md](./DREAMFERENCE_PUFFIN_CODEX.md):** the `puffin` binary
+- **[DREAMFERENCE_ONYX.md](./DREAMFERENCE_ONYX.md):** the Puffin web UI
+- **[DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md):** context engine
+- **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md):** Docker and caches
+- **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md):** CLI reference
+- **[DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md):** installation
+- **[DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md):** codebase layout
