@@ -1,0 +1,18 @@
+diff --git a/codex-rs/tui/src/chatwidget/turn_runtime.rs b/codex-rs/tui/src/chatwidget/turn_runtime.rs
+index bad721b..73eec47 100644
+--- a/codex-rs/tui/src/chatwidget/turn_runtime.rs
++++ b/codex-rs/tui/src/chatwidget/turn_runtime.rs
+@@ -564,3 +564,3 @@ impl ChatWidget {
+ 
+-        "Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.".to_string()
++        "Conversation interrupted - tell the model what to do differently.".to_string()
+     }
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+index bf335d8..25a7842 100644
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -310,2 +310,4 @@ impl SlashCommand {
+             SlashCommand::Logout => false,
++            // Puffin: /feedback uploads session logs to OpenAI, which an air-gapped tool must not do.
++            SlashCommand::Feedback => false,
+             SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),
