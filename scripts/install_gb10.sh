@@ -28,4 +28,4 @@ echo -e "⚙️ ${BLUE}Initializing Dreamference configuration & indexing worksp
 puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
 
 echo -e "\n${GREEN}${BOLD}🎉 Dreamference Installation & GB10 Setup Complete!${NC}"
-echo -e "👉 Run ${BOLD}'puffin-admin chat'${NC} to start your first session."
+echo -e "👉 Run ${BOLD}'puffin'${NC} to start your first session."

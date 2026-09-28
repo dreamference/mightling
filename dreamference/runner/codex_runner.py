@@ -1,8 +1,8 @@
 """
 Codex Session Runner for Dreamference.
 
-This module provides the CodexRunner class, which `puffin-admin chat` and `puffin-admin run` use when
-the configured agent is Codex. It builds `puffin` if needed and hands over to it.
+This module provides the CodexRunner class, which `puffin-admin run` uses when the configured
+agent is Codex. It builds `puffin` if needed and hands over to it.
 
 It no longer sets up the session. Waiting for the model server, writing the model catalog and
 `~/.codex/config.toml`, the system prompt with its web-access section, and the local-model options

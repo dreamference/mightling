@@ -1610,7 +1610,7 @@ class DreamferenceCLIController:
             cls.display_header()
             db = os.path.expanduser("~/.codex/logs_2.sqlite")
             if not os.path.exists(db):
-                print(f"❌ No Codex log database at {db}. Run a session with `puffin-admin chat --debug` first.")
+                print(f"❌ No Codex log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace puffin` first.")
                 sys.exit(1)
             try:
                 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -1637,7 +1637,7 @@ class DreamferenceCLIController:
                     seen.append(entry)
 
             if not seen:
-                print("No MCP lifecycle entries found. Run `puffin-admin chat --debug` to record some.")
+                print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace puffin` to record some.")
             else:
                 print("[bold]Codex MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:

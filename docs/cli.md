@@ -4,7 +4,7 @@ See the full list of commands in the [Technical Specification](../DREAMFERENCE_S
 
 Key commands:
 - `puffin-admin init`
-- `puffin-admin chat`
+- `puffin` (the terminal agent)
 - `puffin-admin server start`
 - `puffin-admin server stop`
 - `puffin-admin endpoints`

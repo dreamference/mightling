@@ -7,5 +7,5 @@ curl -fsSL https://raw.githubusercontent.com/dreamference/dreamference/main/scri
 
 ## Quickstart
 ```bash
-puffin-admin chat
+puffin
 ```
