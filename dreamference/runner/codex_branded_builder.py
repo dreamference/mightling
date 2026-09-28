@@ -2,17 +2,19 @@
 Puffin-Branded Codex Builder for Dreamference.
 
 This module provides the CodexBrandedBuilder class, which turns the pinned `codex/` submodule (a
-fork of openai/codex at a stable release tag) into the `puffin-codex` executable the Codex runner
-launches.
+fork of openai/codex at a stable release tag) into `puffin`, the terminal agent. It is Codex with
+Puffin's branding and with the launcher in `puffin-rs/` compiled in, so it finds the local model
+server and configures itself with no Python involved.
 
 The submodule is never modified. Each build exports the pinned commit with `git archive` into a
 scratch tree, applies the patch series in `codex-patches/` there with `git apply`, and compiles that
-tree -- so the fork stays byte-identical to upstream and moving to a newer release is a submodule
+tree, after copying `puffin-rs/` in beside the workspace crates as `codex-rs/puffin` -- so the fork
+stays byte-identical to upstream and moving to a newer release is a submodule
 bump plus whatever patch hunks stop applying. Only `codex-rs/` is exported: it is the whole Rust
 workspace, and the rest of the repository (the npm wrapper, Bazel files, SDKs) plays no part in a
 Cargo build.
 
-The compiled output is keyed by the source commit and the patch contents, so an unchanged tree is
+The compiled output is keyed by the source commit, the patch contents and the launcher's source, so an unchanged tree is
 not rebuilt, and Cargo's target directory is kept across builds so a patch edit recompiles only the
 crates it touches rather than the several hundred dependencies beneath them.
 """
@@ -32,16 +34,26 @@ REPO_ROOT: Final[str] = os.path.dirname(
 CODEX_SUBMODULE_DIR: Final[str] = os.path.join(REPO_ROOT, "codex")
 CODEX_PATCH_DIR: Final[str] = os.path.join(REPO_ROOT, "codex-patches")
 
+# The launcher crate. It is Dreamference's own Rust, so it lives here as source rather than inside a
+# patch, and is copied into the exported tree where patch 0004 expects it.
+PUFFIN_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "puffin-rs")
+PUFFIN_CRATE_DEST: Final[str] = os.path.join("codex-rs", "puffin")
+
 # The release the patches are written against. The submodule is pinned to this tag's commit; the
 # constant exists so a mismatch can be reported by name rather than as a hunk that fails to apply.
 CODEX_RELEASE_TAG: Final[str] = "rust-v0.158.0"
 
+# The cache keeps its original name: Cargo's target directory inside it holds several hundred
+# compiled dependencies, and renaming it would throw them away.
 BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-codex")
-INSTALL_DIR: Final[str] = os.path.expanduser("~/.local/share/dreamference/puffin-codex")
+INSTALL_DIR: Final[str] = os.path.expanduser("~/.local/share/dreamference/puffin")
 
-# Not `codex`, which would shadow the upstream install on PATH, and not `puffin`, which is the
-# Dreamference entry point that launches this.
-BRANDED_EXECUTABLE_NAME: Final[str] = "puffin-codex"
+# Patch 0002 renames Cargo's [[bin]] from `codex` to this, so it is what cargo builds as well.
+BRANDED_EXECUTABLE_NAME: Final[str] = "puffin"
+
+# Where the user types `puffin`. A symlink rather than a copy, because Codex finds
+# codex-code-mode-host next to its own executable, and it resolves that through the link.
+PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin")
 
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
@@ -121,8 +133,9 @@ class CodexBrandedBuilder:
     @classmethod
     def build_key(cls) -> Optional[str]:
         """
-        Identifies a build by its inputs: the source commit, the exact bytes of every patch, and the
-        profile overrides, since changing those changes the binary as surely as a patch does.
+        Identifies a build by its inputs: the source commit, the exact bytes of every patch and of
+        every launcher source file, and the profile overrides, since changing any of those changes
+        the binary as surely as a patch does.
 
         Returns:
             Optional[str]: A short key, or None if the submodule is not checked out.
@@ -136,7 +149,25 @@ class CodexBrandedBuilder:
             digest.update(os.path.basename(patch).encode())
             with open(patch, "rb") as handle:
                 digest.update(handle.read())
+        for path in cls.launcher_files():
+            digest.update(os.path.relpath(path, PUFFIN_CRATE_DIR).encode())
+            with open(path, "rb") as handle:
+                digest.update(handle.read())
         return f"{commit[:12]}-{digest.hexdigest()[:12]}"
+
+    @classmethod
+    def launcher_files(cls) -> List[str]:
+        """
+        Lists the launcher crate's source files, in a stable order.
+
+        Returns:
+            List[str]: Absolute paths under `puffin-rs/`, excluding any local build output.
+        """
+        found: List[str] = []
+        for root, dirs, files in os.walk(PUFFIN_CRATE_DIR):
+            dirs[:] = sorted(d for d in dirs if d != "target")
+            found.extend(os.path.join(root, name) for name in sorted(files))
+        return found
 
     @classmethod
     def is_current(cls) -> bool:
@@ -162,7 +193,8 @@ class CodexBrandedBuilder:
     @classmethod
     def prepare_source(cls, source_dir: str) -> bool:
         """
-        Exports the pinned commit into `source_dir` and applies the patch series to that copy.
+        Exports the pinned commit into `source_dir`, adds the launcher crate, and applies the patch
+        series to that copy.
 
         Args:
             source_dir (str): Scratch directory to create; any previous contents are removed.
@@ -187,6 +219,12 @@ class CodexBrandedBuilder:
         if archive.wait() != 0 or extracted.returncode != 0:
             print(f"❌ Could not export codex {commit[:12]} from the submodule.")
             return False
+        # Before the patches, because 0004 makes the workspace depend on it.
+        shutil.copytree(
+            PUFFIN_CRATE_DIR,
+            os.path.join(source_dir, PUFFIN_CRATE_DEST),
+            ignore=shutil.ignore_patterns("target"),
+        )
 
         for patch in cls.patches():
             # Checked first so a patch that does not fit leaves nothing half-applied behind it.
@@ -335,7 +373,7 @@ class CodexBrandedBuilder:
         # third-party version stays exactly as the lockfile pins it.
         command = [
             "cargo", "build", "--release",
-            "-p", "codex-cli", "--bin", "codex",
+            "-p", "codex-cli", "--bin", BRANDED_EXECUTABLE_NAME,
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
         print(f"🔨 Building Puffin-branded Codex ({CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
@@ -346,7 +384,7 @@ class CodexBrandedBuilder:
         release_dir = os.path.join(BUILD_CACHE_DIR, "target", "release")
         bin_dir = os.path.join(INSTALL_DIR, "bin")
         os.makedirs(bin_dir, exist_ok=True)
-        for built, installed in (("codex", BRANDED_EXECUTABLE_NAME), (CODE_MODE_HOST_NAME, CODE_MODE_HOST_NAME)):
+        for built, installed in ((BRANDED_EXECUTABLE_NAME, BRANDED_EXECUTABLE_NAME), (CODE_MODE_HOST_NAME, CODE_MODE_HOST_NAME)):
             # Copied to a temporary name and renamed over the old one, so a running session keeps
             # its binary and a new one never sees a half-written file.
             staging = os.path.join(bin_dir, f".{installed}.new")
@@ -355,5 +393,24 @@ class CodexBrandedBuilder:
         with open(os.path.join(INSTALL_DIR, BUILD_STAMP_NAME), "w") as handle:
             handle.write(f"{key}\n")
 
+        cls.link_onto_path()
         print(f"✅ Installed {cls.executable_path()}")
         return True
+
+    @classmethod
+    def link_onto_path(cls) -> None:
+        """
+        Points `~/.local/bin/puffin` at the installed executable, so `puffin` works from any shell.
+
+        Only a missing file or an existing symlink is replaced; a real file of that name belongs to
+        something else and is reported instead of overwritten.
+        """
+        os.makedirs(os.path.dirname(PATH_LINK), exist_ok=True)
+        if os.path.lexists(PATH_LINK) and not os.path.islink(PATH_LINK):
+            print(f"⚠️ {PATH_LINK} exists and is not a link; leaving it. Run {cls.executable_path()} directly.")
+            return
+        staging = f"{PATH_LINK}.new"
+        if os.path.lexists(staging):
+            os.remove(staging)
+        os.symlink(cls.executable_path(), staging)
+        os.replace(staging, PATH_LINK)

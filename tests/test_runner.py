@@ -46,111 +46,24 @@ def test_agent_runner_choices():
         cfg = DreamferenceConfig(agent_runner=agent)
         assert cfg.agent_runner == agent
 
-def test_codex_config_keeps_top_level_keys_out_of_tables(tmp_path, monkeypatch):
-    # TOML scopes a bare key to the most recent [section] above it, so appending a top-level key
-    # to a file that already has tables silently reparents it. Codex writes its own
-    # [tui.model_availability_nux] table -- whose values must be integers -- and appending
-    # model_catalog_json after it produced "invalid type: string ... expected u32" and a CLI that
-    # would not start.
-    import tomllib
-    from dreamference.config import DreamferenceConfig
-    from dreamference.runner import CodexRunner
-
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    # A config shaped like the one Codex leaves behind: tables only, no top-level keys.
-    (codex_home / "config.toml").write_text(
-        '[model_providers.openai-custom]\n'
-        'name = "openai-custom"\n'
-        'base_url = "http://localhost:8000/v1"\n'
-        '\n'
-        '[tui.model_availability_nux]\n'
-        '"gpt-5.6-sol" = 3\n'
-    )
-
-    from dreamference.runner import CodexInstaller
-    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
-    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
-    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
-    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/bin/true"))
-    monkeypatch.setattr("subprocess.call", lambda *a, **k: 0)
-    runner.run_session()
-
-    parsed = tomllib.loads((codex_home / "config.toml").read_text())
-    assert parsed["model_catalog_json"].endswith("model_catalog.json")
-    # The pre-existing table must be untouched, and must not have adopted the key.
-    assert parsed["tui"]["model_availability_nux"] == {"gpt-5.6-sol": 3}
-
-def test_codex_config_stays_valid_toml_after_repeated_writes(tmp_path, monkeypatch):
-    # Every top-level key the runner writes must land above the first [table]. TOML scopes a bare
-    # key to the table above it, so a key appended anywhere else is silently reparented -- which
-    # has now broken this config twice: once into [tui.model_availability_nux] (values must be
-    # u32) and once into [mcp_servers.searxng.env] (values must be strings). Both surfaced only
-    # when Codex refused to start.
-    import tomllib
+def test_codex_runner_hands_arguments_and_host_to_puffin(tmp_path, monkeypatch):
+    # Session setup lives in the Rust launcher now (puffin-rs/, with its own tests for the TOML
+    # scoping rule and the local-model options); the Python side only builds and hands over.
+    # Arguments go through verbatim, the prompt is Codex's positional PROMPT, and the vLLM host
+    # travels in the environment variable the launcher reads first.
     from dreamference.config import DreamferenceConfig
     from dreamference.runner import CodexRunner, CodexInstaller
 
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
-    monkeypatch.setenv("HOME", str(tmp_path))
-    # Seed with tables whose value types differ, so a reparented key fails to parse as that type.
-    (codex_home / "config.toml").write_text(
-        '[tui.model_availability_nux]\n"gpt-5.6-sol" = 3\n\n'
-        '[mcp_servers.other.env]\nSOME_URL = "http://example"\n'
-    )
-
-    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
-    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
-    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
-    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/bin/true"))
-    monkeypatch.setattr("subprocess.call", lambda *a, **k: 0)
-
-    # Twice: the second run must not duplicate or reparent anything.
-    runner.run_session()
-    runner.run_session()
-
-    parsed = tomllib.loads((codex_home / "config.toml").read_text())
-    assert isinstance(parsed.get("model_catalog_json"), str)
-    assert parsed.get("suppress_unstable_features_warning") is True
-    # The seeded tables keep their original value types -- nothing was reparented into them.
-    assert parsed["tui"]["model_availability_nux"] == {"gpt-5.6-sol": 3}
-    assert parsed["mcp_servers"]["other"]["env"] == {"SOME_URL": "http://example"}
-    assert parsed["features"]["code_mode"] is True
-
-
-def test_codex_arguments_follow_the_local_model_flags(tmp_path, monkeypatch):
-    # Codex's exec, resume and fork inherit root-level --oss/--model, so forwarded arguments --
-    # subcommands included -- go after them and still run against the local model. The prompt is
-    # Codex's positional PROMPT; Codex has no --message option.
-    from dreamference.config import DreamferenceConfig
-    from dreamference.runner import CodexRunner, CodexInstaller
-
-    (tmp_path / ".codex").mkdir()
-    monkeypatch.setenv("HOME", str(tmp_path))
-    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
-    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
-    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
-    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/bin/true"))
+    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml"), vllm_host="http://gb10:9000"))
+    monkeypatch.setattr(CodexInstaller, "install_if_missing", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/opt/puffin"))
     calls = []
-    monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)
+    monkeypatch.setattr("subprocess.call", lambda cmd, env=None, **k: calls.append((cmd, env)) or 0)
 
     runner.run_session(agent_args=["exec", "--json", "do it"])
     runner.run_session(prompt="fix the tests")
 
-    forwarded, prompted = calls
-    assert forwarded[1:6] == ["--oss", "--local-provider", "openai-custom", "--model", forwarded[5]]
-    assert forwarded[6:] == ["exec", "--json", "do it"]
-    assert prompted[-1] == "fix the tests" and "--message" not in prompted
-
-
-def test_version_and_help_do_not_wait_for_the_model():
-    from dreamference.runner import CodexRunner
-
-    assert not CodexRunner.needs_model(["--version"])
-    assert not CodexRunner.needs_model(["exec", "--help"])
-    assert not CodexRunner.needs_model(["apply"])
-    assert CodexRunner.needs_model(["exec", "do it"])
-    assert CodexRunner.needs_model([])
+    (forwarded, env), (prompted, _) = calls
+    assert forwarded == ["/opt/puffin", "exec", "--json", "do it"]
+    assert prompted == ["/opt/puffin", "fix the tests"]
+    assert env["DREAMFERENCE_VLLM_HOST"] == "http://gb10:9000"

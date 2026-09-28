@@ -2,7 +2,7 @@
 Dreamference Command Line Interface (CLI) Controller.
 
 This module provides the DreamferenceCLIController class which parses command line arguments
-for subcommands (`init`, `chat`, `run`, `status`, `server start`, `index`, `mcp`, `model download`, `web`),
+for subcommands (`init`, `run`, `status`, `server start`, `index`, `mcp`, `model download`, `web`),
 renders Rich terminal user interfaces, and coordinates backend component execution.
 """
 
@@ -38,20 +38,6 @@ console: Final[Console] = Console()
 # where they keep it and this project is meant to work without a network.
 SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
 SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
-
-# `chat` (and so `puffin`) takes Codex's command line: anything it does not recognise itself is
-# handed to puffin-codex unchanged, so `puffin -a on-request "fix the tests"`, `puffin exec ...` and
-# `puffin resume --last` behave as they do under `codex`. `--sandbox` is the one real collision:
-# Dreamference uses it for a container *engine* and Codex for a *policy*. The two value sets do not
-# overlap, so one flag takes both and a policy is routed to Codex.
-SANDBOX_ENGINES: Final[tuple] = ("none", "apptainer", "podman", "docker")
-CODEX_SANDBOX_POLICIES: Final[tuple] = ("read-only", "workspace-write", "danger-full-access")
-CHAT_PASSTHROUGH_EPILOG: Final[str] = (
-    "Every other option and argument is passed to puffin-codex, which takes the Codex CLI's "
-    "command line: a quoted prompt, -a/--ask-for-approval, -c key=value, -C/--cd, --add-dir, "
-    "-i/--image, -p/--profile, --search, --full-auto, and subcommands such as exec, resume, fork "
-    "and apply. See `puffin-codex --help`. Pass-through arguments need the codex agent."
-)
 
 class DreamferenceCLIController:
     """
@@ -651,14 +637,9 @@ class DreamferenceCLIController:
             console.print(Panel(ctx_table, title="[bold]📚 Context Engine Index Status[/bold]", border_style="green"))
 
     @classmethod
-    def build_parser(cls, chat_prog: Optional[str] = None) -> argparse.ArgumentParser:
+    def build_parser(cls) -> argparse.ArgumentParser:
         """
         Constructs ArgumentParser with subcommands for Dreamference CLI operations.
-
-        Args:
-            chat_prog (Optional[str]): Program name shown in the `chat` subcommand's usage line.
-                None keeps argparse's default, `puffin-admin chat`; the `puffin` entry point passes its
-                own name so `puffin --help` does not describe a command the user did not type.
 
         Returns:
             argparse.ArgumentParser: Configured argument parser object.
@@ -683,31 +664,6 @@ class DreamferenceCLIController:
         init_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
-
-        # Command: puffin-admin chat
-        # No abbreviations: `--a` or `--ag` must reach Codex as typed, not be read as `--agent`.
-        # Help is a plain flag rather than argparse's exiting action, so `puffin exec --help` can
-        # reach Codex's help for `exec` while `puffin --help` still shows this one.
-        chat_parser = subparsers.add_parser(
-            "chat", prog=chat_prog, help="Launch interactive pair programming session",
-            epilog=CHAT_PASSTHROUGH_EPILOG, allow_abbrev=False, add_help=False,
-        )
-        chat_parser.add_argument(
-            "-h", "--help", action="store_true",
-            help="Show this help; after a Codex subcommand, show that subcommand's help",
-        )
-        parser.chat_parser = chat_parser
-        chat_parser.add_argument("-m", "--model", default=None, help="Model name served on vLLM GB10 endpoint")
-        chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
-        chat_parser.add_argument(
-            "-s", "--sandbox", choices=[*SANDBOX_ENGINES, *CODEX_SANDBOX_POLICIES], default=None,
-            help="Rootless container engine (none, apptainer, podman, docker), or a Codex sandbox "
-                 "policy (read-only, workspace-write, danger-full-access)",
-        )
-        chat_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
-        chat_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
-        chat_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
-        chat_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
 
         # Command: puffin-admin run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
@@ -978,29 +934,15 @@ class DreamferenceCLIController:
         return parser
 
     @classmethod
-    def run_cli(cls, argv: Optional[List[str]] = None, chat_prog: Optional[str] = None) -> None:
+    def run_cli(cls, argv: Optional[List[str]] = None) -> None:
         """
         Main execution entrypoint for CLI command parsing and subcommand dispatching.
 
         Args:
             argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.
-            chat_prog (Optional[str]): Usage-line name for the `chat` subcommand (see `build_parser`).
         """
-        parser = cls.build_parser(chat_prog=chat_prog)
-        args, agent_args = parser.parse_known_args(argv)
-        # Only `chat` forwards what it does not recognise; every other command stays as strict as
-        # parse_args() made it.
-        if agent_args and args.command != "chat":
-            parser.error(f"unrecognized arguments: {' '.join(agent_args)}")
-        if args.command == "chat" and args.help:
-            if agent_args and not agent_args[0].startswith("-"):
-                agent_args.append("--help")
-            else:
-                parser.chat_parser.print_help()
-                sys.exit(0)
-        if args.command == "chat" and args.sandbox in CODEX_SANDBOX_POLICIES:
-            agent_args = ["--sandbox", args.sandbox, *agent_args]
-            args.sandbox = None
+        parser = cls.build_parser()
+        args = parser.parse_args(argv)
 
         if not args.command:
             parser.print_help()
@@ -1823,16 +1765,6 @@ class DreamferenceCLIController:
             console.print(f"   [cyan]Target Host:[/cyan]     {config.vllm_host}")
             console.print(f"   [cyan]Indexed Files:[/cyan]   {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")
 
-        elif args.command == "chat":
-            if not agent_args:
-                sys.exit(runner.run_session(debug=args.debug))
-            if config.agent_runner != "codex":
-                parser.error(
-                    f"unrecognized arguments: {' '.join(agent_args)} "
-                    f"(only the codex agent takes pass-through arguments; this is {config.agent_runner})"
-                )
-            sys.exit(runner.run_session(debug=args.debug, agent_args=agent_args))
-
         elif args.command == "run":
             sys.exit(runner.run_session(prompt=args.prompt, debug=args.debug))
 
@@ -2143,26 +2075,18 @@ class DreamferenceCLIController:
             except KeyboardInterrupt:
                 console.print("\n[yellow]Stopping Web Canvas UI...[/yellow]")
 
-def main(argv: Optional[List[str]] = None, chat_prog: Optional[str] = None) -> None:
+def main(argv: Optional[List[str]] = None) -> None:
     """
     Standalone CLI main function.
 
+    `puffin` is not defined here: it is the Rust binary built from the codex submodule, with the
+    session setup this package used to do compiled into it (see `puffin-rs/`).
+
     Args:
         argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.
-        chat_prog (Optional[str]): Usage-line name for the `chat` subcommand.
     """
     try:
-        DreamferenceCLIController.run_cli(argv, chat_prog=chat_prog)
+        DreamferenceCLIController.run_cli(argv)
     except KeyboardInterrupt:
         print("\nGoodbye!")
         sys.exit(0)
-
-
-def puffin_main() -> None:
-    """
-    The `puffin` command: `puffin-admin chat` under its own name.
-
-    It is the same parse and the same dispatch with `chat` put in front of the arguments, so the
-    two commands cannot drift apart -- a flag added to `puffin-admin chat` is a flag of `puffin` too.
-    """
-    main(["chat", *sys.argv[1:]], chat_prog="puffin")

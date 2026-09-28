@@ -1,7 +1,7 @@
 # Puffin Terminal Agent — Gmail Access
 
 **Status:** draft — not implemented
-**Target:** the `puffin` terminal agent (`puffin-admin chat`, the Puffin-branded Codex launched by `CodexRunner`)
+**Target:** the `puffin` terminal agent (`puffin`, the Puffin-branded Codex with the launcher in `puffin-rs/` compiled in)
 **Builds on:** the Gmail search service already running for the Onyx web UI (`dreamference/chat/gmail_search_service.py`, container `dreamference-gmail`), and the `puffin-admin search` / `puffin-admin fetch` pattern that gives the same agent web access.
 
 ---
@@ -14,7 +14,7 @@ Let the terminal agent answer mailbox questions — "what did Alice send about t
 
 ## 2. Why a shell command, not a tool
 
-The agent reaches web search through two shell commands described in its system prompt (`WEB_ACCESS_INSTRUCTIONS` in `codex_runner.py`). Gmail uses the same mechanism, for the reasons already recorded there:
+The agent reaches web search through two shell commands described in its system prompt (`WEB_ACCESS_INSTRUCTIONS` in `puffin-rs/src/lib.rs`). Gmail uses the same mechanism, for the reasons already recorded there:
 
 - **MCP is effectively unreachable for this model.** With `code_mode` on, Codex exposes MCP tools only inside its `exec` JavaScript runtime as `tools.mcp__<server>__<tool>(…)`. The served Qwen model calls the namespace directly, gets `unsupported call`, and gives up. This is the same failure that retired the SearXNG MCP wrapper.
 - **Shell commands are used reliably.** The model already runs `puffin-admin search` / `fetch` correctly from any workspace, because the instruction travels in the session's prompt rather than a workspace `AGENTS.md`.
@@ -60,7 +60,7 @@ Following the one-class-per-file convention:
 
 ## 4. Prompt
 
-`CodexRunner` appends a `GMAIL_ACCESS_INSTRUCTIONS` block after `WEB_ACCESS_INSTRUCTIONS`, **only when `GmailClient.status()` reports `connected`** at launch. An instruction naming a tool that answers "not connected" teaches the model to try, fail, and conclude it has no mail access; omitting it lets the model say plainly that Gmail isn't set up. Draft text:
+The launcher (`puffin-rs`, which assembles the prompt since the Python runner was retired) appends a `GMAIL_ACCESS_INSTRUCTIONS` block after `WEB_ACCESS_INSTRUCTIONS`, **only when the Gmail service's status endpoint reports `connected`** at launch; it asks the service over HTTP, as the `puffin-admin gmail` commands do, rather than importing `GmailClient`. An instruction naming a tool that answers "not connected" teaches the model to try, fail, and conclude it has no mail access; omitting it lets the model say plainly that Gmail isn't set up. Draft text:
 
 ```
 # Email access
@@ -115,7 +115,7 @@ The service and the IMAP layer are already covered in `tests/test_onyx_runner.py
 
 - `GmailClient` sends the secret header, URL-encodes the query, clamps `limit`, and maps connection-refused and a missing secret to the two messages in §7.
 - CLI text output: numbered results with the `id:` line, the untrusted-content frame around `read`, an explicit "no messages matched", and a non-zero exit only on error.
-- `CodexRunner` includes `GMAIL_ACCESS_INSTRUCTIONS` with the account list when `status()` is connected, omits it when not connected or when `puffin_gmail = false`, and still includes `WEB_ACCESS_INSTRUCTIONS` in every case.
+- The launcher includes `GMAIL_ACCESS_INSTRUCTIONS` with the account list when `status()` is connected, omits it when not connected or when `puffin_gmail = false`, and still includes `WEB_ACCESS_INSTRUCTIONS` in every case.
 - Service: `search()` reports a per-account failure in `errors` and still returns the other accounts' messages.
 
 ## 9. Acceptance

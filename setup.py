@@ -22,7 +22,6 @@ setup(
     entry_points={
         "console_scripts": [
             "puffin-admin=dreamference.cli:main",
-            "puffin=dreamference.cli:puffin_main",
         ],
     },
 )

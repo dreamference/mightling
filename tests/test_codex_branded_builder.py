@@ -28,6 +28,10 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     session = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs").read_text()
     assert '"OpenAI Codex"' not in session and '"Puffin"' in session
+    # The launcher crate is copied in from puffin-rs/, and the binary Cargo builds is `puffin`.
+    assert (tmp_path / "src" / "codex-rs" / "puffin" / "src" / "lib.rs").is_file()
+    cli_manifest = (tmp_path / "src" / "codex-rs" / "cli" / "Cargo.toml").read_text()
+    assert 'name = "puffin"' in cli_manifest and 'default-run = "puffin"' in cli_manifest
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
     )
@@ -52,6 +56,17 @@ def test_the_build_key_changes_with_the_patches(tmp_path):
             patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
         first = CodexBrandedBuilder.build_key()
         (patch_dir / "0001-a.patch").write_text("two")
+        assert CodexBrandedBuilder.build_key() != first
+
+
+def test_the_build_key_changes_with_the_launcher_source(tmp_path):
+    crate = tmp_path / "puffin-rs"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "lib.rs").write_text("// one")
+    with patch.object(builder_module, "PUFFIN_CRATE_DIR", str(crate)), \
+            patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
+        first = CodexBrandedBuilder.build_key()
+        (crate / "src" / "lib.rs").write_text("// two")
         assert CodexBrandedBuilder.build_key() != first
 
 
@@ -80,6 +95,7 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     assert env["CARGO_PROFILE_RELEASE_DEBUG"] == "none"
     assert env["CARGO_PROFILE_RELEASE_STRIP"] == "debuginfo"
     assert command[:3] == ["cargo", "build", "--release"]
+    assert command[command.index("--bin") + 1] == "puffin"
 
 
 def test_the_runner_never_falls_back_to_an_upstream_codex(tmp_path):
@@ -92,7 +108,7 @@ def test_the_runner_never_falls_back_to_an_upstream_codex(tmp_path):
 
 
 def test_the_runner_resolves_the_branded_executable(tmp_path):
-    binary = tmp_path / "bin" / "puffin-codex"
+    binary = tmp_path / "bin" / "puffin"
     binary.parent.mkdir()
     binary.write_text("#!/bin/sh\n")
     binary.chmod(0o755)

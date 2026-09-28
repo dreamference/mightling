@@ -11,8 +11,8 @@ Do not use `curl` or `wget` for this — the sandbox usually blocks them, which 
 being down rather than the command being unavailable. There is no web search *tool*; search is a
 shell command.
 
-The full instructions are appended to the system prompt by `codex_runner.py`
-(`WEB_ACCESS_INSTRUCTIONS`), so they apply in every workspace, not only this one — that is the
+The full instructions are appended to the system prompt by the `puffin` launcher
+(`WEB_ACCESS_INSTRUCTIONS` in `puffin-rs/src/lib.rs`), so they apply in every workspace, not only this one — that is the
 reason this section is a pointer rather than a copy.
 
 ## Project

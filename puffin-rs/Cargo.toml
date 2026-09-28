@@ -1,0 +1,23 @@
+# The Puffin launcher: what used to be Dreamference's Python `puffin` entry point, compiled into the
+# branded Codex binary. It is not part of the codex submodule. CodexBrandedBuilder copies this crate
+# into the exported tree as `codex-rs/puffin`, and patch 0004 adds it to the workspace and calls it
+# from the CLI's `cli_main`, so it builds against the workspace's own dependency versions.
+[package]
+name = "puffin-launcher"
+version.workspace = true
+edition.workspace = true
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "puffin_launcher"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+codex-models-manager = { workspace = true }
+codex-utils-home-dir = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+toml = { workspace = true }
+toml_edit = { workspace = true }
