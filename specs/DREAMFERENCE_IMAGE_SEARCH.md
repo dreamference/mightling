@@ -1,6 +1,6 @@
 # Puffin Image Search Tool — Technical Specification
 
-**Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft)
+**Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft). Constants re-checked against `image_search_service.py` on 2026-09-28.
 **Target:** Puffin (Dreamference Sidecar ecosystem)
 **Source:** `dreamference/chat/image_search_service.py` (the sidecar), `OnyxRunner.enable_image_search` and siblings in `dreamference/chat/onyx_runner.py` (provisioning, registration, nginx), `GALLERY_SCRIPT`/`GALLERY_CSS` and `IMAGE_TOOL_STEP_SCRIPT` in the UI patch modules (presentation). Tests: `tests/test_image_search_service.py`, plus registration and nginx tests in `tests/test_onyx_runner.py`.
 
@@ -126,7 +126,7 @@ Gmail: an **OpenAPI document** (`openapi_definition()` in the service module, on
 `image_search` POST operation with `queries` and optional `count`) sent to
 `POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate, and
 a `custom_headers` shared secret (`X-Puffin-Image-Token`, generated once into the data
-directory). `puffin-admin onyx configure` runs it; `--no-image-search` skips it. Image `GET`s carry no
+directory). `puffin-admin puffin configure` (alias `onyx`) runs it; `--no-image-search` skips it. Image `GET`s carry no
 secret — the browser is the caller and the ids are unguessable.
 
 ---
@@ -201,6 +201,6 @@ OpenAPI document. The funnel's collaborators are constructor-injected for exactl
 header, create-then-update), nginx route idempotence and deferred form, configure opt-out. An
 autouse fixture stubs the provisioning internals so the suite never starts containers.
 
-**Live E2E (performed):** `puffin-admin onyx configure` registers the tool; a real `/search` returns
+**Live E2E (performed):** `puffin-admin puffin configure` (alias `onyx`) registers the tool; a real `/search` returns
 ranked cached embeds; the image serves through `localhost:3000/puffin-images/…` (200,
 `image/jpeg`); nginx survives the sidecar being stopped; a `count: 6` request returns six.
