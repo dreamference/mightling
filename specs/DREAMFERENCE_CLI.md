@@ -343,7 +343,7 @@ The second is more than the tensorizer cache. It also holds vLLM's torch.compile
 puffin-admin puffin start [--no-wait]
 puffin-admin puffin configure [--email E] [--password P] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]
 puffin-admin puffin google-auth [--client-id ID] [--client-secret S]
-puffin-admin puffin gmail
+puffin-admin puffin gmail                 # (re-)register the Gmail tool; accounts are connected in the UI
 puffin-admin puffin status | logs [-f] | stop | uninstall
 ```
 

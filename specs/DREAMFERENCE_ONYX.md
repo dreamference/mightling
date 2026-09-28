@@ -48,7 +48,7 @@ Dreamference never writes Onyx's compose files. Everything goes through `onyx-cl
 | `start [--no-wait]` | `onyx-cli deploy install --lite --no-prompt`, and waits until healthy unless `--no-wait` |
 | `configure [--email] [--password] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]` | §2 |
 | `google-auth [--client-id] [--client-secret]` | §9 |
-| `gmail` | Connects a Gmail account (§8) |
+| `gmail` | (Re-)registers the Gmail tool and refreshes the Puffin assistant's tool list (`connect_gmail()`). It does **not** sign an account in; that happens in the UI (§8) |
 | `status` / `logs [-f]` / `stop` | `onyx-cli deploy status` / `logs` / `stop`. `stop` keeps the data |
 | `uninstall` | Removes the deployment **and its data** |
 
@@ -215,7 +215,7 @@ It registers an **Image Search** custom tool, and injects an nginx route (`# >>>
 
 - **Service:** `dreamference-gmail` (`chat/gmail_search_service.py` on `python:3-slim`) reads the connected accounts' credentials, over **read-only IMAP**. It is published on `127.0.0.1:8767` and authenticated by the `X-Puffin-Gmail-Token` header.
 - **Tool:** `enable_gmail_search()` registers a **Gmail** custom tool, "Search and read the user's Gmail mailbox." It is registered even before an account is connected, because the Connect button lives in this UI.
-- **Connecting accounts:** `puffin-admin puffin gmail`, or the injected "Connect Google" button (§4.4).
+- **Connecting accounts:** in the web UI, through the injected "Connect Google" button and Settings → Gmail Accounts (§4.4). The OAuth flow runs in the Gmail service (`DREAMFERENCE_GOA.md` §0). `puffin-admin puffin gmail` only (re-)registers the tool.
 - **The terminal agent:** `puffin` reaches the same service through `puffin-admin gmail` (`DREAMFERENCE_PUFFIN_GMAIL.md`).
 
 ---
