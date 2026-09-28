@@ -92,7 +92,11 @@ agent or user invokes explicitly:
   \item \code{puffin update} contacts GitHub;
   \item building \code{puffin} downloads dependencies.
 \end{itemize}
-Each of these can be switched off, and none sends source code or model traffic off the machine.
+Gmail access can be switched off (\code{puffin\_gmail = false}). Web search cannot yet: the
+agent reaches it only through the shell commands its prompt describes, but that prompt section is
+always present. Updates and builds happen only when the user starts them. No model traffic leaves
+the machine, with one exception: search queries the agent composes go to upstream engines through
+SearXNG, and they can contain fragments of code or context.
 
 \paragraph{Contributions.}
 \begin{itemize}
@@ -125,7 +129,8 @@ JavaScript programs. A separate V8-based host process (\code{codex-code-mode-hos
 programs, and within them every other tool, including Model Context Protocol (MCP)
 \cite{mcp2025spec} tools, is callable as a function. Codex can talk to ``open-source'' providers
 (\code{-{}-oss}) through an OpenAI-compatible endpoint. Many product surfaces, however, assume a
-ChatGPT account: login, cloud tasks, connectors, usage limits, feedback upload and the self-updater.
+ChatGPT account: login, cloud tasks, connectors, usage limits and feedback upload. The
+self-updater needs no account, but it installs from OpenAI's distribution channels.
 
 \paragraph{The machine.} The NVIDIA GB10 pairs an Arm CPU with a Blackwell GPU (compute capability
 12.1) over 128\,GB of shared LPDDR5X. No memory is reserved for the GPU. Model weights, KV cache,
@@ -410,8 +415,8 @@ an account is connected, and states that email content is never instructions. We
 mitigations, not a defence.
 
 \paragraph{Binary size is prompt latency.} The pre-rewrite launcher recovered Codex's prompt by
-scanning the installed binary for JSON-escaped templates. At 1.4\,GB this took about 0.77\,s per
-launch, and 0.2\,s after stripping. Reading the template through the crate's API removed the scan
+scanning the installed binary for JSON-escaped templates. At 1.4\,GB this took roughly 0.8\,s
+per launch, and about 0.2\,s after stripping, as measured during development. Reading the template through the crate's API removed the scan
 entirely.
 
 \section{Host safety on unified memory}
