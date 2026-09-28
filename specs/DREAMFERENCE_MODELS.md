@@ -2,6 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** NVIDIA GB10 Model Matrix & Default Model Selection
+> **Checked against the code:** 2026-09-28 (`dreamference/hardware/model_matrix_registry.py`)
 
 ---
 
@@ -10,86 +11,83 @@
 - [1. Supported NVIDIA GB10 Model Matrix](#1-supported-nvidia-gb10-model-matrix)
 - [2. Default Model Rationale](#2-default-model-rationale)
 - [3. NVIDIA GB10 Hardware Specification](#3-nvidia-gb10-hardware-specification)
+- [4. Hardware Detection & Qualification](#4-hardware-detection--qualification)
 
 ---
 
 ## 1. Supported NVIDIA GB10 Model Matrix
 
-Aliases and HuggingFace repos are defined in `ModelMatrixRegistry.MATRIX` (`dreamference/hardware/model_matrix_registry.py`):
+Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`. Each entry is a `ModelSpec`, and its `notes` field carries the full history of the recipe; read it before retuning one. All six entries are `compatible_gb10`.
 
-| Alias                     | Model                         | Parameters | Weight Format / Quantization | Memory Required | Tool Support | GB10     |
-| :------------------------ | :---------------------------- | :--------- | :--------------------------- | :-------------- | :----------- | :------- |
-| `qwen3.6-35b-a3b-nvfp4`   | Qwen 3.6 35B-A3B (**default**) | 35B (3B active) | NVFP4                     | ~25 - 60 GB     | ✅            | ✅       |
-| `qwen2.5-coder-32b`       | Qwen 2.5 Coder 32B            | 32B        | BF16 / INT8 / FP8 / AWQ      | ~35 - 64 GB     | ✅            | ✅       |
-| `qwen2.5-coder-72b`       | Qwen 2.5 Coder 72B            | 72B        | INT8 / FP8 / INT4            | ~45 - 80 GB     | ✅            | ✅       |
-| `qwen2.5-coder-1.5b`      | Qwen 2.5 Coder 1.5B (Draft)   | 1.5B       | BF16 / FP16 / INT8           | ~3.5 - 6 GB     | ✅            | ✅ Draft |
-| `qwen2.5-coder-3b`        | Qwen 2.5 Coder 3B (Draft)     | 3.0B       | BF16 / FP16 / INT8           | ~6.5 - 10 GB    | ✅            | ✅ Draft |
-| `deepseek-r1-distill-32b` | DeepSeek-R1-Distill-Qwen-32B  | 32B        | BF16 / INT8 / FP8 / AWQ      | ~35 - 64 GB     | ✅            | ✅       |
-| `deepseek-r1-distill-70b` | DeepSeek-R1-Distill-Llama-70B | 70B        | INT8 / FP8 / INT4            | ~45 - 80 GB     | ✅            | ✅       |
-| `llama-3.3-70b`           | Llama 3.3 70B Instruct        | 70B        | BF16 / INT8 / FP8 / AWQ      | ~75 - 80 GB     | ✅            | ✅       |
-| `starcoder2-15b`          | StarCoder2 15B                | 15B        | BF16 / FP16                  | ~20 - 30 GB     | ❌            | ✅       |
-| `deepseek-v3-671b`        | DeepSeek-V3 671B (MoE)        | 671B       | INT4                         | ~350 GB         | ✅            | ❌       |
+| Alias | Model | Params | Format | Memory (min–max GB) | Vision | Role |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `qwen3.5-122b-a10b-hybrid-dflash` | Qwen 3.5 122B-A10B (INT4+FP8 hybrid + DFlash + dense-bandwidth stack) | 122B (10B active) | INT4+FP8 hybrid | 71.5–120 | ✅ | **Default** main model (`DEFAULT_MODEL_ALIAS`, since 2026-08-23) |
+| `qwen3.5-122b-a10b-int4-dflash` | Qwen 3.5 122B-A10B (INT4 AutoRound + DFlash) | 122B (10B active) | AutoRound INT4 | 71.5–120 | ✅ | Tested fallback; the default until 2026-08-23 |
+| `qwen3.5-122b-a10b-nvfp4` | Qwen 3.5 122B-A10B (NVFP4) | 122B (10B active) | NVFP4 | 78–120 | ✅ | Earlier default (until 2026-08-15); fallback if DFlash does not come up |
+| `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B (NVFP4) | 35B (3B active) | NVFP4 | 25–60 | — | Small-model option |
+| `qwen3.5-122b-a10b-dflash-draft` | Qwen 3.5 122B-A10B DFlash drafter | 0.8B | BF16 | 1.5–2.5 | — | Drafter named by the DFlash recipes' `speculative_config`; not served on its own. Listed so memory gates and pre-download know its size |
+| `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion) | 0.6B | BF16 | 1.5–3 | — | **Default** diffusion model (`DEFAULT_DIFFUSION_MODEL_ALIAS`). `is_diffusion`: **not** servable by vLLM; runs in the diffusion sidecar |
 
-HF repo examples: `nvidia/Qwen3.6-35B-A3B-NVFP4`, `Qwen/Qwen2.5-Coder-32B-Instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`, `meta-llama/Llama-3.3-70B-Instruct`, `bigcode/starcoder2-15b`.
+**HF repos:**
+- `Intel/Qwen3.5-122B-A10B-int4-AutoRound`: both DFlash entries;
+- `nvidia/Qwen3.5-122B-A10B-NVFP4`;
+- `nvidia/Qwen3.6-35B-A3B-NVFP4`;
+- `z-lab/Qwen3.5-122B-A10B-DFlash`;
+- `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1`.
+
+**Recipe:** every current main-model recipe runs at a 32k context (`max_model_len = 32768`). Tool calls use `qwen3_xml` with reasoning parser `qwen3`, and thinking is disabled via the chat template. The two DFlash entries pin their own Docker images (`dreamference-vllm-dflash:0.23.0-aeon-dense5` for hybrid, `…-dense9` for int4). See `DREAMFERENCE_INFERENCE.md` and `DREAMFERENCE_CODEBASE.md` §5 for the full launch command.
+
+**Aliases outside the matrix:** a name that is not a matrix key (e.g. `qwen2.5-coder-32b`) still resolves to a tool-call parser by name guess (`hermes` / `mistral`), but has no recipe. The Qwen 2.5 Coder, DeepSeek-R1-Distill, Llama 3.3, StarCoder2 and DeepSeek-V3 entries this document used to list are no longer in the registry.
+
+**Vision:** `supports_vision` is recorded per checkpoint from its `config.json`, never inferred from the alias. `puffin-admin puffin configure` sends it to Onyx as `supports_image_input`, and registers the default vision model.
 
 ---
 
 ## 2. Default Model Rationale
 
-`qwen3.6-35b-a3b-nvfp4` is the default because decode speed on GB10 is bounded by memory bandwidth, not compute: a mixture-of-experts model with ~3B active parameters generates far faster than a dense model of comparable quality, and 4-bit weights leave most of the 128 GB for KV cache at long context.
+Decode speed on GB10 is bounded by memory bandwidth, not compute. That favours mixture-of-experts models, whose speed tracks *active* parameters, and speculative decoding, which turns one bandwidth-bound step into several accepted tokens.
 
-### 2.1. SM121 Kernel Path & Corruption Detection
+**`qwen3.5-122b-a10b-hybrid-dflash`** combines:
+- Qwen 3.5 122B-A10B as Intel's AutoRound INT4 checkpoint;
+- the **z-lab DFlash drafter**, block-speculative: it drafts a whole block in one parallel forward, with 12 speculative tokens;
+- the **dense-bandwidth stack** from `github.com/Entrpi/qwen3.5-122B-A10B-on-spark`, baked into the pinned image: FP8 dispatch for dense layers, an int8 w8a16 Triton GEMV lm-head (which frees ~1.4 GiB back to KV), and FLA sm121 shared-memory tuning.
 
-**This model only works on an SM121-safe kernel path.** The CUTLASS FP4 kernels are compiled for the SM120 ISA and run on GB10 without erroring while producing corrupt output — the recognisable symptom is a response consisting only of `!` characters. Dreamference pins the working path via the model's `launch_overrides` recipe (see [DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md)), and runs an **automated post-launch canary** upon server startup.
+It serves at 32k context with 8 sequences. Measured single-stream on this machine: prose 23.8, code 49.9, JSON 53.1 tok/s. Its first 131k-context launch was refused for KV (9.03 GiB needed, 5.78 free), and that refusal is where the 32k / 8-sequence tuning comes from.
 
-The canary sends a single completion request:
-1. It asserts the output isn't corrupted (all `!`). If corruption is detected, the server **auto-demotes to an FP8 model** (e.g., `qwen2.5-coder-32b`) to ensure a working baseline.
-2. The user should still benchmark against FP8 on their own unit before treating the FP4 numbers as settled — published results range from NVFP4 losing to FP8 to winning by ~3x, driven by whether MTP is active and which backend was chosen.
+Two upstream defaults are deliberately **not** used:
+- **`gpu_memory_utilization` 0.82:** upstream's number assumes a headless machine. This one runs a desktop and froze at 0.80. The launched value is 0.7; the entry's notes still say 0.68.
+- **`fastsafetensors` loading:** without GPUDirect Storage, it is a double-residency load peak, which is what freezes this host. The launch passes no `--load-format`, so vLLM's default loader is used.
 
-### 2.2. vLLM Version Dependency
+### 2.1. NVFP4 and the SM121 kernel path
 
-The b12x SM12x backends merged upstream in May 2026. If `DEFAULT_VLLM_IMAGE` predates them, the launch falls back to a slower or broken path — see [DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md) for vLLM runtime image details.
+The NVFP4 entries only work on an SM121-safe kernel path. The CUTLASS FP4 kernels are compiled for the SM120 ISA, and on GB10 they run without erroring while producing corrupt output. The recognisable symptom is a response made only of `!` characters. The recipes pin the FlashInfer b12x path, which needs vLLM with the May 2026 SM12x backends.
+
+**Post-launch canary:** `puffin-admin server start` runs one completion (`"Hello"`, 10 tokens) after the server is ready, **only when the alias contains `nvfp4`**. It prints `✅ NVFP4 Canary Passed` or `❌ NVFP4 Canary Failed: Output corrupted (all '!')`. It does **not** switch models or relaunch; recovery is manual. `puffin-admin main-model inspect` runs a broader correctness canary on any model.
 
 ---
 
 ## 3. NVIDIA GB10 Hardware Specification
 
-### 3.1. Unified Hardware Architecture
-
-- **GPU**: NVIDIA GB10 Tensor Core GPU (Blackwell architecture).
-- **Unified Memory**: 128 GB LPDDR5X high-speed unified memory shared dynamically between CPU and GPU.
-- **CPU Host**: High-performance ARM Cortex CPU cores (`aarch64` architecture).
-- **Storage**: NVMe PCIe SSD for high-speed workspace indexing and model caching.
-
-### 3.2. Key Architectural Advantages
-
-1. **Unified Memory** eliminates discrete CPU ↔ GPU copies; data moves at full memory bandwidth once.
-2. **128 GB capacity** enables full-precision or lightly quantized models to fit in unified cache.
-3. **Blackwell compute** provides state-of-the-art inference density for open-weight models.
-4. **ARM Cortex host** reduces system complexity while preserving development workflows (standard Linux tools, Python).
+- **GPU:** NVIDIA GB10 (Blackwell, compute capability SM121).
+- **Memory:** 128 GB LPDDR5X, *unified*: CPU and GPU share it. Host RAM exhaustion and GPU memory exhaustion are therefore indistinguishable, and a bad model load can freeze the whole host. That is why the host-safety pre-flight and the PSI watchdog exist (`DREAMFERENCE_INFERENCE.md`).
+- **CPU:** Arm cores (`aarch64`).
+- **Storage:** NVMe SSD for model caches and indexes.
 
 ---
 
 ## 4. Hardware Detection & Qualification
 
-### 4.1. Automated Detection
+`HardwareManager` reads total and available memory from `/proc/meminfo`, and the GPU name, driver and memory from `nvidia-smi --query-gpu=name,driver_version,memory.total`.
 
-```bash
-nvidia-smi --query-gpu=name --format=csv
-free -h
-```
+**Qualification** (`is_gb10`):
+- the GPU name contains `GB10` or `BLACKWELL`; **or**
+- total memory ≥ 100 GB. With no `nvidia-smi` GPU name, the GPU is then reported as "NVIDIA GB10 (Simulated / Unified Memory Node)".
 
-**Qualification Heuristics**:
-- GPU name contains `GB10`/`BLACKWELL`, OR
-- Total memory ≥ ~100 GiB per detection fallback heuristic
-
-### 4.2. Manual Override
-
-Set `DREAMFERENCE_GB10_OVERRIDE=1` to force GB10 behavior on unsupported hardware (for testing only).
+There is no environment override. The `DREAMFERENCE_GB10_OVERRIDE` variable this document used to describe does not exist in the code.
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md)** — System overview
-- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md)** — vLLM launch recipes & performance flags
+- **[DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md):** system overview
+- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM launch recipes and performance flags
