@@ -2,6 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** vLLM Launch Engine, Auto-Configuration, & Performance Optimization
+> **Checked against the code:** 2026-09-28 (`dreamference/vllm_server/vllm_server_manager.py`)
 
 ---
 
@@ -10,196 +11,200 @@
 - [1. GB10 Inference Stack Overview](#1-gb10-inference-stack-overview)
 - [2. Weight Pre-Download & Management](#2-weight-pre-download--management)
 - [3. Speculative Decoding](#3-speculative-decoding)
-- [4. Blackwell Performance Flags](#4-blackwell-performance-flags)
+- [4. Launch Flags](#4-launch-flags)
 - [5. Per-Model Launch Recipes](#5-per-model-launch-recipes)
-- [6. Base Configuration & Flags](#6-base-configuration--flags)
-- [7. Readiness Polling & Live Streaming](#7-readiness-polling--live-streaming)
-- [8. Instant Signal Handling](#8-instant-signal-handling)
+- [6. Base Configuration & Module Defaults](#6-base-configuration--module-defaults)
+- [7. Host Safety](#7-host-safety)
+- [8. Readiness Polling & Live Streaming](#8-readiness-polling--live-streaming)
 
 ---
 
 ## 1. GB10 Inference Stack Overview
 
-The vLLM launch engine is the heart of Dreamference's inference subsystem. Every model load passes through a carefully orchestrated sequence:
+The server is started only by `puffin-admin server start`. Agents never start it: they wait for it (`DREAMFERENCE_AGENTS.md` §8, or `puffin`'s launcher).
 
 ```
-Request: puffin-admin chat --model <alias>
+puffin-admin server start [--model <alias>]
     ↓
-Resolve model alias → HF repo
+Resolve alias → HF repo, recipe (launch_overrides), Docker image
     ↓
-Resolve vLLM image & recipe
+Host-safety pre-flight (check_host_safety): swap, sysctl, earlyoom / systemd-oomd, memory arena
     ↓
-Check host safety (swap, PSI, oomd)
+Pre-download weights: main model, --draft-model, and the recipe's own drafter (DFlash)
     ↓
-Pre-download model weights (HF cache)
+Reset a stale torch.compile cache if the speculative signature changed
     ↓
-Build launch command (flags + recipes + overrides)
+Start the diffusion sidecar (dreamference-diffusion-8001) first, unless --no-diffusion
     ↓
-Docker: pull image (if missing) + run container
+Build the docker run … vllm serve command (explicit args > recipe > module defaults)
     ↓
-Stream logs + poll /v1/models until healthy
+Run the container under the PSI MemoryPressureWatchdog
     ↓
-Serve (model remains loaded in background)
+Stream logs and Docker memory; poll /v1/models until healthy
+    ↓
+NVFP4 canary (nvfp4 aliases only); report diffusion sidecar state
+    ↓
+Exit; the containers keep running (--restart unless-stopped)
 ```
 
 ---
 
 ## 2. Weight Pre-Download & Management
 
-- `start_server()` always calls `download_model()` for primary (and draft if set) before spawning the process.
-- Download uses `huggingface_hub.snapshot_download` (preferred), then `huggingface-cli download`, else defers fetch to vLLM init.
-- Weights are cached in `~/.cache/huggingface/hub/` (or `$HF_HOME/hub` if set).
+- `start_server()` calls `download_model()` for the main model, for `--draft-model` if given, and for the recipe's drafter (`get_speculative_draft_repo`) before the container starts. vLLM therefore never has to fetch weights during the load, which is the one phase this host cannot afford surprises in.
+- `ModelDownloader` tries `huggingface_hub.snapshot_download` first, then the `huggingface-cli` binary. If both fail, the fetch is left to vLLM.
+- The cache is `~/.cache/huggingface/hub/` (`$HF_HOME/hub` if set), mounted into the container at `/root/.cache/huggingface`.
 
 ### 2.1. HF Token Handling
 
-Set via:
-1. CLI `--hf-token TOKEN`
-2. Environment `HF_TOKEN` or `DREAMFERENCE_HF_TOKEN`
-3. HuggingFace CLI credentials (`~/.cache/huggingface/token`)
+The token is the first of:
+1. CLI `--hf-token`;
+2. `HF_TOKEN`, then `DREAMFERENCE_HF_TOKEN`;
+3. the `hf_token` config key.
 
-Exported to the vLLM container as `-e HF_TOKEN=...` for gated model access.
+It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingface_hub` falls back to its own stored login (`~/.cache/huggingface/token`) on the host side.
 
 ---
 
 ## 3. Speculative Decoding
 
-### 3.1. Draft Model Compatibility
+### 3.1. Two ways to get a drafter
 
-- Speculative decoding requires the draft and target models to share a vocabulary (tokenizer compatibility).
-  - ✅ Valid: `qwen2.5-coder-1.5b` as draft for `qwen2.5-coder-32b`
-  - ❌ Invalid: `qwen2.5-coder-1.5b` as draft for `qwen3.6-35b-a3b-nvfp4` (different tokenizers)
-  - ❌ Invalid: `qwen2.5-coder-1.5b` as draft for `llama-3.3-70b` (different architectures)
+- **Recipe (normal case):** the model's `launch_overrides["speculative_config"]` is serialised to `--speculative-config`. The two DFlash entries use `{"method": "dflash", "model": "z-lab/Qwen3.5-122B-A10B-DFlash", "num_speculative_tokens": 12, "attention_backend": "FLASH_ATTN"}`. The drafter is a separate checkpoint, pre-downloaded and counted in the memory budget. MTP recipes (heads inside the checkpoint) use the same key with `"method": "mtp"`.
+- **Explicit `--draft-model`:** emitted as `--speculative-model <repo> --num-speculative-tokens <n>`.
 
-### 3.2. In-Checkpoint vs. External Drafts
+**Precedence:** if both are present, the explicit draft **replaces** the recipe's `speculative_config`. There is no fail-fast validation of the combination. The explicit path also still uses the legacy `--speculative-model` spelling, which current vLLM releases may reject. Prefer the recipe.
 
-- Providing an external `--draft-model` when the primary model's recipe already declares in-checkpoint speculation (MTP/Eagle) is a **configuration error** and will fail fast.
-- Example: `qwen3.6-35b-a3b-nvfp4` has MTP speculation built-in; do not also pass `--draft-model`.
+**Compatibility:** a drafter must share the target's tokenizer. The DFlash drafter is built for Qwen 3.5 122B-A10B.
 
-### 3.3. Configuration
+### 3.2. Speculative token count
 
-- Configured via `--speculative-config` (consolidated from the older `--speculative-model` flag).
-- For in-checkpoint speculation, the `launch_overrides` dict carries `speculative_config: {...}` (e.g., `{"method": "mtp", "num_speculative_tokens": 3, "moe_backend": "triton"}`).
+- **With a recipe:** its `speculative_config` carries the count. The DFlash entries use 12.
+- **With an explicit draft:** `num_speculative_tokens` applies. `build_launch_command` / `start_server` default it to 5 when called directly, and the CLI passes the config value (`DEFAULT_SPECULATIVE_TOKENS = 8`).
+
+### 3.3. torch.compile cache
+
+vLLM keys its compile cache on the engine config, but `SpeculativeConfig.compute_hash()` does not include `num_speculative_tokens`. `_reset_stale_compile_cache()` keeps its own `model|method|n` signature and clears the cache when it changes. It clears it *inside* the image, because the cache is root-owned. The cache lives at `VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`, which is persistent: a cold compile takes 8–12 minutes.
 
 ---
 
-## 4. Blackwell Performance Flags
+## 4. Launch Flags
 
-Flags that are actually applied to the vLLM launch command (conditionally or always):
-
-| Flag                        | Default | Applied When | Effect |
-| :-------------------------- | :------ | :----------- | :----- |
-| `--enable-prefix-caching`   | ✅ On   | Always       | Automatic KV cache prefix reuse across multi-turn sessions |
-| `--enable-chunked-prefill`  | ✅ On   | Always       | Prefill chunking for responsive TTFT during long prompts |
-| `--kv-cache-dtype`          | `auto`  | Model recipe | Quantized KV cache (default auto unless specified) |
-| `--attention-backend`       | `auto`  | Model recipe (if ≠ `auto`) | Blackwell-optimized attention (e.g., `flashinfer`) |
-| `--moe-backend`             | unset   | Model recipe (if set) | Mixture-of-Experts backend (e.g., `triton`, `flashinfer-b12x`) |
-| `--reasoning-parser`        | unset   | Model recipe (if set) | Parser for reasoning tags (e.g., `qwen3`, `deepseek_r1`) |
-| `--speculative-config`      | unset   | Model recipe or CLI | JSON for external drafts or in-checkpoint MTP |
-| `--quantization`            | unset   | Model recipe or auto-detected | Model weight quantization (fp8, int8, int4, awq, gptq) |
-| `--tool-call-parser`        | `hermes` (fallback) | Model recipe or explicit | Tool call format parser (e.g., `qwen3_xml`, `mistral`) |
-
-### 4.1. Quantization Auto-Detection
-
-- For model names containing `70b` or `72b` when quantization is unset **and** the checkpoint does not declare its own format, vLLM auto-selects `--quantization fp8`.
-- Self-declaring formats (NVFP4, MXFP4, AWQ, GPTQ) are detected by vLLM from `config.json`; Dreamference suppresses the flag rather than overriding that detection with a guess derived from the model name.
+| Flag | Default | Source | Effect |
+| :--- | :--- | :--- | :--- |
+| `--enable-prefix-caching` | on | Config; forced **off** when the recipe says `enable_prefix_caching: false` | KV prefix reuse |
+| `--enable-chunked-prefill` | on | Config | Chunked prefill |
+| `--max-num-batched-tokens` | `8192` | Recipe (default model: `9048`) | Prefill chunk size |
+| `--kv-cache-dtype` | `auto` | Recipe; config override | KV precision |
+| `--attention-backend` | omitted when `auto` | Recipe (default model: `flash_attn`) | Attention kernels |
+| `--moe-backend` | unset | Recipe | MoE kernels (must be SM121-safe) |
+| `--tool-call-parser` | resolved | Explicit > recipe > name guess (`mistral` / `hermes`) | Tool-call format (`qwen3_xml` for all Qwen 3.x entries) |
+| `--reasoning-parser` | unset | Recipe (`qwen3`) | Reasoning channel |
+| `--structured-outputs-config.backend` | `xgrammar` | `guided_decoding_backend` | Structured outputs. On images older than vLLM v0.12 it is spelled `--guided-decoding-backend`, chosen by probing the image |
+| `--override-generation-config` | `{"temperature": 0.0, "top_p": 1.0, "top_k": 0}` | `DEFAULT_GENERATION_OVERRIDES`; a recipe may override or disable it (`generation_overrides`) | Deterministic sampling unless the client asks otherwise |
+| `--speculative-config` | unset | Recipe | See §3 |
+| `--quantization` | unset | Explicit; **fp8** for `70b`/`72b` names whose checkpoint does not declare its own quantization | Self-declaring formats (NVFP4, AutoRound, AWQ, GPTQ, …) are left to vLLM's detection |
+| `--load-format` | omitted | Recipe `load_format`; `tensorizer` when tensorized weights are used | `DEFAULT_LOAD_FORMAT = "auto"`, deliberately **not** `fastsafetensors` (see §6) |
 
 ---
 
 ## 5. Per-Model Launch Recipes
 
-Not every model runs correctly on one global flag set. `ModelSpec.launch_overrides` (`dreamference/hardware/model_spec.py`) carries a per-model vLLM recipe as registry data, and `build_launch_command` merges it with this precedence:
+`ModelSpec.launch_overrides` carries each model's vLLM recipe as registry data. `build_launch_command` resolves every setting in this order:
 
 ```
 explicit caller argument  >  model launch_overrides  >  module default
 ```
 
-An argument left as `None` is treated as unset; `attention_backend='auto'` also counts as unset, since `auto` delegates the choice by definition. Models with no recipe resolve to exactly the previous defaults, so the mechanism is inert unless a model opts in.
+`None` counts as unset, and so does `attention_backend='auto'`. Per-model tuning belongs in the registry entry, not in the launch builder, and the tests assert this layering.
 
-**Example**: `deepseek-r1-distill-32b` and `deepseek-r1-distill-70b` opt-in to specify `reasoning_parser: "deepseek_r1"`.
+### 5.1. Recipe Keys
 
-### 5.1. Recipe Structure
-
-Recognised keys mirror `build_launch_command` parameters, plus:
+The keys mirror `build_launch_command`'s parameters: `max_model_len`, `gpu_memory_utilization`, `kv_cache_dtype`, `attention_backend`, `moe_backend`, `tool_call_parser`, `reasoning_parser`, `max_num_batched_tokens`, `guided_decoding_backend`, `use_tensorizer`, `load_format`. On top of those:
 
 | Key | Effect |
 | :-- | :----- |
-| `env` | `Dict[str, str]` exported into the vLLM container as `docker run -e K=V`. Required because some kernel-backend selection (notably NVFP4 MoE) is read from the process environment, not CLI flags. |
-| `speculative_config` | Dict serialised to `--speculative-config`. For in-checkpoint speculation, which has no separate draft model. |
-| `extra_args` | Verbatim flags appended to the launch command, for recipe settings without a first-class parameter. |
+| `docker_image` | Pins this model's vLLM image, overriding `DEFAULT_VLLM_IMAGE` (the engine is part of the recipe) |
+| `env` | `Dict[str, str]` exported with `docker run -e K=V`. Some kernel selection is read from the environment, not flags |
+| `speculative_config` | Serialised to `--speculative-config` |
+| `enable_prefix_caching` | `false` forces prefix caching off, whatever the config says (hybrid-GDN checkpoints cannot honour it) |
+| `generation_overrides` | Replaces, or with `None` disables, the default `--override-generation-config` |
+| `extra_args` | Verbatim flags appended to the command |
 
-### 5.2. Default Model Recipe
+### 5.2. Default Model Recipe (`qwen3.5-122b-a10b-hybrid-dflash`)
 
-The default model's recipe is `ModelMatrixRegistry.MATRIX['qwen3.6-35b-a3b-nvfp4'].launch_overrides` and follows NVIDIA's published DGX Spark recipe:
+| Setting | Value |
+| :------ | :---- |
+| `docker_image` | `dreamference-vllm-dflash:0.23.0-aeon-dense5` |
+| `max_model_len` | `32768` |
+| `gpu_memory_utilization` | `0.7` |
+| `kv_cache_dtype` | `auto` |
+| `attention_backend` | `flash_attn` |
+| `max_num_batched_tokens` | `9048` |
+| `tool_call_parser` / `reasoning_parser` | `qwen3_xml` / `qwen3` |
+| `speculative_config` | DFlash, 12 tokens (§3.1) |
+| `enable_prefix_caching` | `true` (explicit in the recipe) |
+| `env` | `VLLM_MARLIN_USE_ATOMIC_ADD=1`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` |
+| `extra_args` | `--max-num-seqs 8 --tensor-parallel-size 1 --dtype auto --default-chat-template-kwargs {"enable_thinking": false}` |
 
-| Setting | Value | Purpose |
-| :------ | :---- | :------ |
-| `max_model_len` | `131072` (131k tokens) | Extended context window |
-| `gpu_memory_utilization` | `0.3` | 30% reservation for GB10 unified memory |
-| `kv_cache_dtype` | `fp8` | 8-bit KV cache for efficiency |
-| `attention_backend` | `flashinfer` | Blackwell-optimized attention |
-| `tool_call_parser` | `qwen3_xml` | Qwen 3.6 XML tool syntax |
-| `reasoning_parser` | `qwen3` | Qwen 3.6 reasoning tag parser |
-| `max_num_batched_tokens` | `8192` | Chunked prefill iteration size |
-| `speculative_config` | `{"method": "mtp", "num_speculative_tokens": 3, "moe_backend": "triton"}` | In-checkpoint 3-token speculation |
-| `max_num_seqs` | `4` | Caps concurrent sequences |
-| `use_tensorizer` | `False` | Disabled by default |
-
-**Required Environment Variables**:
-- `VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x`
-- `VLLM_MARLIN_USE_ATOMIC_ADD=1`
-- `VLLM_DISABLED_KERNELS=MarlinNvFp4LinearKernel`
+The resulting command is listed flag by flag in `DREAMFERENCE_CODEBASE.md` §5. The NVFP4 entries use the FlashInfer b12x kernels, selected through `env` and `moe_backend`, because the CUTLASS FP4 path corrupts output on SM121 (`DREAMFERENCE_MODELS.md` §2.1).
 
 ---
 
-## 6. Base Configuration & Flags
+## 6. Base Configuration & Module Defaults
 
-### 6.1. Global Base Flags
-
-Applied to every vLLM launch:
+These are always emitted:
 
 ```
---host 0.0.0.0
---port <port>
---max-model-len 16384         (baseline; override per recipe)
---gpu-memory-utilization 0.50 (conservative default; override per recipe)
---trust-remote-code
---async-scheduling
---load-format fastsafetensors
+--host 0.0.0.0 --port <port> --max-model-len <n> --gpu-memory-utilization <f>
+--trust-remote-code --async-scheduling
+--enable-log-requests --enable-log-outputs --max-log-len 2048
+--enable-auto-tool-choice            (unless disabled)
 ```
 
-The low `0.50` default prevents OOMs on the 128 GB unified memory SoC. Models with stricter memory budgets override via `launch_overrides["gpu_memory_utilization"]`.
+**Module defaults**, used only when neither the caller nor the recipe sets a value:
+- `DEFAULT_MAX_MODEL_LEN = 16384`;
+- `DEFAULT_GPU_MEMORY_UTILIZATION = 0.50`;
+- `DEFAULT_KV_CACHE_DTYPE = "auto"`;
+- `DEFAULT_LOAD_FORMAT = "auto"`.
 
-### 6.2. Default Speculative Tokens
+Every current matrix entry sets its own context length and utilisation.
 
-- Default `num_speculative_tokens`: `8` (used only if speculative decoding is enabled for the model)
+**No `fastsafetensors`.** It used to be hardcoded. Without GPUDirect Storage, which GB10 lacks, it double-resides the checkpoint during load, and that peak is what froze this host. vLLM's own loader is used unless a recipe asks otherwise.
 
----
-
-## 7. Readiness Polling & Live Streaming
-
-### 7.1. Monitoring Components
-
-- `puffin-admin server start` (and agent runners) use `ModelLoadingMonitor` + `VLLMServerManager`.
-- The monitor thread constantly pipes raw vLLM container logs to stdout.
-- Prints Docker reserved memory usage every 10 seconds (`[HH:MM:SS] 📊 Reserved memory (Docker): …`).
-- Tracks loading stages from logs and polls `/v1/models` until healthy.
-- `VLLMStartupMonitor` provides additional memory-growth tracking and stall detection with explicit progress percentages (`~X% (Y/Z GB since start)`).
-
-### 7.2. Server Startup Exit Behavior
-
-- `server start` exits once the health check passes (server keeps running in background).
+**Container:**
+- `--ipc=host --network host --restart unless-stopped --gpus all`;
+- `--cpus` and a memory limit derived from `gpu_memory_utilization` plus headroom, below total memory minus a 12 GB host reserve (`HOST_MEMORY_RESERVE_GB`);
+- `--memory-swap` equal to the memory limit, and `--oom-score-adj=800`;
+- env `VLLM_CACHE_ROOT`, `CUTE_DSL_ARCH=sm_121a`, `VLLM_LOGGING_LEVEL=DEBUG`, and API request/response debug logging.
 
 ---
 
-## 8. Instant Signal Handling
+## 7. Host Safety
 
-- Poll loop sleeps in short intervals so `Ctrl+C` is handled promptly.
-- Graceful shutdown: cancel pending health checks, drain remaining logs, return failure status.
+On GB10, host RAM and GPU memory are the same memory. A load that exhausts it can freeze the whole machine rather than OOM the container. There are two layers, both of which must be kept when touching `start_server()`:
+
+- **Before the load:** `check_host_safety()` inspects swap, `sysctl` values and whether `earlyoom` or `systemd-oomd` is present and configured. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. Either one aborts with an explanation rather than risking a lockup.
+- **During the load, `MemoryPressureWatchdog` (`psi_watchdog.py`):** it samples `/proc/pressure/memory` on a thread and resolves the container's cgroup. It kills the container if `avg10` spikes or `avg60` stays high for the trip duration. The kill paths, in order:
+  1. direct `SIGKILL` to the cgroup's PIDs, if permitted;
+  2. a kill request over dockerd's unix socket;
+  3. the `docker` CLI.
+
+The diffusion sidecar has no watchdog: its fixed `--memory=8g` limit (swap equal) contains the worst case. It starts before vLLM, so that vLLM's free-memory pre-flight sees it.
+
+---
+
+## 8. Readiness Polling & Live Streaming
+
+- `ModelLoadingMonitor` pipes the container's logs to stdout and prints `[HH:MM:SS] 📊 Reserved memory (Docker): …` every 10 seconds. It tracks loading stages and polls `/v1/models` until healthy.
+- `VLLMStartupMonitor` adds memory-growth tracking and stall detection with progress percentages.
+- `server start` exits once healthy, and the server keeps running.
+- Ctrl+C during the wait prints `⏹️  Shutting down server...` and terminates the monitored `docker run` process: `terminate`, then `kill` after 5 s. Follow it with `puffin-admin server stop` to be certain the container is gone.
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md)** — Supported models & default model details
-- **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md)** — vLLM image management & tensorization
-- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md)** — Session startup & agent integration
+- **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md):** models and the default model
+- **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md):** images and tensorization
+- **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agents and how they wait for the server
