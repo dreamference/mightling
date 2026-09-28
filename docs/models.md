@@ -1,69 +1,76 @@
-# Supported Models & vLLM Parameters
+# Models
 
-All models listed below are qualified for single-node **NVIDIA GB10** workstations with 128 GB Unified LPDDR5X Memory.
+Every model Puffin can serve is listed in its model registry, together with the exact server
+settings it runs with on a GB10. Choosing a model chooses all of its settings, so there is nothing
+to tune by hand.
 
----
+## The registry
 
-## NVIDIA GB10 Model Qualification Matrix
+| Alias | Model | Parameters | Precision | Memory needed | Images |
+|---|---|---|---|---|---|
+| **`qwen3.5-122b-a10b-hybrid-dflash`** (default) | Qwen 3.5 122B-A10B, INT4+FP8 hybrid, with DFlash speculative decoding | 122B (10B active) | INT4 + FP8 | 71.5 – 120 GB | yes |
+| `qwen3.5-122b-a10b-int4-dflash` | Qwen 3.5 122B-A10B, INT4 AutoRound, with DFlash | 122B (10B active) | INT4 | 71.5 – 120 GB | yes |
+| `qwen3.5-122b-a10b-nvfp4` | Qwen 3.5 122B-A10B | 122B (10B active) | NVFP4 | 78 – 120 GB | yes |
+| `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B | 35B (3B active) | NVFP4 | 25 – 60 GB | no |
+| `qwen3.5-122b-a10b-dflash-draft` | DFlash drafter for the 122B models (not served on its own) | 0.8B | BF16 | 1.5 – 2.5 GB | no |
+| `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D, a diffusion conversion of Qwen 2.5 Coder 0.5B | 0.6B | BF16 | 1.5 – 3 GB | no |
 
-| Alias | Model Name | Parameters | Precision | Memory Required | GB10 Status | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`qwen3.6-35b-a3b-nvfp4`** | Qwen 3.6 35B-A3B | 35B (3B active) | NVFP4 | ~25 – 60 GB | ✅ **Default** | MoE with ~3B active parameters. FlashInfer b12x NVFP4 path. |
-| **`qwen2.5-coder-32b`** | Qwen 2.5 Coder 32B | 32B | BF16 / INT8 / FP8 | ~35 – 64 GB | ✅ Qualified | Fits comfortably in 128 GB Unified Memory. |
-| **`qwen2.5-coder-72b`** | Qwen 2.5 Coder 72B | 72B | INT8 / FP8 / INT4 | ~45 – 80 GB | ✅ Qualified | Supported via INT8/FP8 quantization. |
-| **`deepseek-r1-distill-32b`** | DeepSeek-R1-Distill-Qwen-32B | 32B | BF16 / INT8 / FP8 | ~35 – 64 GB | ✅ Qualified | High-reasoning 32B distilled model. |
-| **`deepseek-r1-distill-70b`** | DeepSeek-R1-Distill-Llama-70B | 70B | INT8 / FP8 / INT4 | ~45 – 80 GB | ✅ Qualified | High-reasoning 70B distilled model. |
-| **`llama-3.3-70b`** | Llama 3.3 70B Instruct | 70B | INT8 / FP8 | ~75 GB | ✅ Qualified | Quantized FP8 fit. |
-| **`qwen2.5-coder-1.5b`** | Qwen 2.5 Coder 1.5B | 1.5B | BF16 / FP16 / INT8 | ~3.5 – 6 GB | ✅ Draft | Speculative decoding draft model. |
-| **`qwen2.5-coder-3b`** | Qwen 2.5 Coder 3B | 3.0B | BF16 / FP16 / INT8 | ~6.5 – 10 GB | ✅ Draft | Speculative decoding draft model. |
-| **`starcoder2-15b`** | StarCoder2 15B | 15B | BF16 / FP16 | ~20 – 30 GB | ✅ Qualified | Fits easily in Unified Memory. |
-| `deepseek-v3-671b` | DeepSeek-V3 671B | 671B | INT4 | ~350 GB | ❌ Unqualified | Exceeds 128 GB Unified Memory capacity. |
+List them, with their Hugging Face repositories, on your machine:
 
----
+```bash
+puffin-admin model list
+```
 
-## vLLM Parameters for Default Model (`qwen3.6-35b-a3b-nvfp4`)
+## The default model
 
-When starting the local inference server using the default model (`qwen3.6-35b-a3b-nvfp4`), `Dreamference` applies a specialized per-model launch recipe (`ModelMatrixRegistry.MATRIX['qwen3.6-35b-a3b-nvfp4'].launch_overrides`) tuned specifically for NVIDIA GB10 (Blackwell SM121) hardware.
+`qwen3.5-122b-a10b-hybrid-dflash` is Intel's INT4 AutoRound quantisation of Qwen 3.5 122B-A10B,
+with its dense layers in FP8. A small drafter model (DFlash) proposes 12 tokens at a time and the
+large model checks them in one pass. That is why structured output such as code and JSON comes out
+faster than prose.
 
-### 1. Model & Container Identity
+Measured on a GB10, single-stream, at a 32k context with eight slots:
 
-| Parameter | Value | Description |
-| :--- | :--- | :--- |
-| **Model Alias** | `qwen3.6-35b-a3b-nvfp4` | Primary default short alias passed to `puffin-admin init / start_server / chat`. |
-| **HuggingFace Repo ID** | `nvidia/Qwen3.6-35B-A3B-NVFP4` | Official HuggingFace repository containing NVFP4 weights. |
-| **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | Pinned NGC vLLM container image with Blackwell SM121 kernel support. |
+| Output | Tokens per second |
+|---|---|
+| Prose | 23.8 |
+| Code | 49.9 |
+| JSON | 53.1 |
 
-### 2. Core vLLM CLI Parameters
+Server settings it runs with (from the registry):
 
-The table below lists all CLI flags passed to the vLLM engine when launching `qwen3.6-35b-a3b-nvfp4`:
+| Setting | Value |
+|---|---|
+| Context length | 32,768 tokens |
+| Concurrent sequences | 8 |
+| GPU memory fraction | 0.7 |
+| Speculative decoding | DFlash, `z-lab/Qwen3.5-122B-A10B-DFlash`, 12 tokens |
+| Prefix caching | on |
+| Attention backend | FlashAttention |
+| Tool calls / reasoning parsers | `qwen3_xml` / `qwen3` |
+| Thinking | off by default |
+| Server image | a pinned vLLM build with the dense-layer optimisations |
 
-| CLI Flag | Value | Description |
-| :--- | :--- | :--- |
-| `--max-model-len` | `131072` | Configures a 128K token context window for large codebase analysis. |
-| `--gpu-memory-utilization` | `0.5` | Allocates 50% of GB10 memory to vLLM, leaving space for host OS and processes. |
-| `--kv-cache-dtype` | `fp8` | Uses FP8 precision for KV cache tensors to maximize context capacity. |
-| `--attention-backend` | `flashinfer` | Uses FlashInfer attention implementation optimized for Blackwell SM121. |
-| `--moe-backend` | `marlin` | Selects Marlin MoE kernel path to avoid SM120 CUTLASS kernel corruption on SM121. |
-| `--tool-call-parser` | `qwen3_xml` | Specifies the Qwen 3.6 XML parser for agent tool calls (`<tool_call>`). |
-| `--reasoning-parser` | `qwen3` | Specifies the Qwen 3.6 parser for the separate reasoning channel. |
-| `--max-num-batched-tokens` | `32768` | Sets maximum batched tokens per iteration for chunked prefill efficiency. |
-| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Enables internal Multi-Token Prediction (MTP) with 3 speculative tokens per step. |
-| `--enable-prefix-caching` | *(flag present)* | Enables automatic KV cache prefix reuse across multi-turn agent conversations. |
-| `--enable-chunked-prefill` | *(flag present)* | Breaks long prompt prefills into chunks to ensure low time-to-first-token latency. |
-| `--max-num-seqs` | `4` | Caps maximum concurrent request sequences at 4. |
-| `--tensor-parallel-size` | `1` | Runs single-GPU tensor parallelism for single-chip GB10 hardware. |
-| `--dtype` | `auto` | Auto-detects model tensor data types from checkpoint configuration. |
-| `--trust-remote-code` | *(flag present)* | Allows remote code execution required by Qwen architecture modules. |
+`qwen3.5-122b-a10b-int4-dflash` stays in the registry as the tested fallback.
 
-### 3. Container Environment Variables
+## The diffusion model
 
-Blackwell SM121 MoE kernel routing is set via environment variables passed into the Docker container (`docker run -e ...`):
+Beside the main model, `puffin-admin server start` also runs a small code-diffusion model,
+`tiny-a2d-coder-0.5b-diffusion`, on port 8001 with its own OpenAI-compatible endpoint. The main
+model server cannot serve diffusion models, so it runs in a separate container with a fixed 8 GB
+memory cap. If it ever runs away, only that container is stopped. It starts before the main model,
+so the main model's memory check already accounts for it.
 
-| Environment Variable | Value | Description |
-| :--- | :--- | :--- |
-| `VLLM_NVFP4_GEMM_BACKEND` | `flashinfer-b12x` | Forces the SM121-compatible FlashInfer b12x NVFP4 GEMM backend path. |
-| `VLLM_MARLIN_USE_ATOMIC_ADD` | `1` | Enables atomic addition optimizations in Marlin MoE kernels. |
+## Changing models
 
----
+```bash
+puffin-admin main-model set qwen3.6-35b-a3b-nvfp4       # pick the main model
+puffin-admin diffusion-model set <alias>                # pick the diffusion model
+puffin-admin model download --model <alias>             # fetch weights ahead of time
+puffin-admin server stop && puffin-admin server start   # restart with the new choice
+```
 
-See [DREAMFERENCE_SPEC.md](../DREAMFERENCE_SPEC.md#427-per-model-launch-recipes) for full implementation details.
+`main-model set` also points a running web chat at the new model (`--no-onyx` skips that). The
+terminal agent needs no change: it asks the server which model it serves each time it starts.
+
+`puffin-admin main-model inspect` runs sample prompts against the running model and reports how it
+was launched.

@@ -1,37 +1,75 @@
-name: Deploy docs to GitHub Pages
+name: Product site
+
+# Builds the MkDocs site on every change to it, strictly (a broken link or a missing page fails the
+# build), and deploys it to GitHub Pages only when Pages is enabled for the repository. Enabling
+# Pages is a deliberate step taken in the repository settings (Pages → Source: GitHub Actions):
+# this workflow never enables it by itself, because on a private repository that would publish the
+# site.
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.pages.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
+
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.12"
+
+      # Pinned: MkDocs 2.0 drops the plugin and theme system Material depends on.
       - name: Install MkDocs
-        run: pip install mkdocs mkdocs-material
-      - name: Build docs site
-        run: mkdocs build
-      - uses: actions/upload-pages-artifact@v3
+        run: pip install "mkdocs==1.6.1" "mkdocs-material==9.7.7"
+
+      - name: Build (strict)
+        run: mkdocs build --strict
+
+      - name: Is Pages enabled?
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages is not enabled for this repository; the site was built and checked but not deployed."
+          fi
+
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
+
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
   deploy:
+    needs: build
+    if: needs.build.outputs.pages == 'true'
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
     steps:
       - name: Deploy to GitHub Pages
         id: deployment

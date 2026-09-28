@@ -738,9 +738,9 @@ class DreamferenceCLIController:
         )
         agent_choices = ["goose", "cline", "aider", "continue", "openhands", "codex"]
 
-        parser.add_argument("--config", default=None, help="Path to custom Dreamference config file (.yaml or .json)")
+        parser.add_argument("--config", default=None, help="Path to custom Dreamference config file (.toml, .yaml or .json)")
         parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
-        parser.add_argument("--agent", choices=agent_choices, default=None, help="Select primary AI agent runner (default: goose)")
+        parser.add_argument("--agent", choices=agent_choices, default=None, help="Select primary AI agent runner (default: codex)")
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
         subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
@@ -884,14 +884,14 @@ class DreamferenceCLIController:
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
         # Command: puffin-admin codex
-        codex_parser = subparsers.add_parser("codex", help="Codex server operations")
+        codex_parser = subparsers.add_parser("codex", help="Build puffin and manage its app-server daemon")
         codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Codex commands")
         codex_build_parser = codex_subparsers.add_parser(
             "build", help="Build the Puffin-branded Codex from the codex submodule and codex-patches/"
         )
         codex_build_parser.add_argument("--force", action="store_true", help="Rebuild even if the installed build is current")
-        codex_subparsers.add_parser("start", help="Start the Codex comic server in the background")
-        codex_subparsers.add_parser("stop", help="Stop the Codex comic server")
+        codex_subparsers.add_parser("start", help="Start puffin's app-server daemon in the background")
+        codex_subparsers.add_parser("stop", help="Stop puffin's app-server daemon")
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
