@@ -115,7 +115,7 @@ def test_flexible_model_alias_resolution():
         assert spec is not None, f"Failed to get spec for {name}"
         assert spec.hf_repo_id == "nvidia/Qwen3.6-35B-A3B-NVFP4"
         assert resolve_model_hf_repo(name) == "nvidia/Qwen3.6-35B-A3B-NVFP4"
-        assert get_model_launch_overrides(name).get("max_model_len") == 131072
+        assert get_model_launch_overrides(name).get("max_model_len") == 32768
         assert model_declares_own_quantization(name) is True
 
 def test_download_model_functions():

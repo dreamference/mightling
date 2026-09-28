@@ -1138,10 +1138,11 @@ def test_a_tampered_credentials_file_is_refused_rather_than_half_read(tmp_path):
 
     GmailSearchService.save_token("me@gmail.com", "ya29.tok", 3600, str(tmp_path))
     stored = json.loads((tmp_path / "credentials.json").read_text())
-    stored["access_token"] = "A" + stored["access_token"][1:]
+    account = stored["accounts"]["me@gmail.com"]
+    account["access_token"] = "A" + account["access_token"][1:]
     (tmp_path / "credentials.json").write_text(json.dumps(stored))
 
-    assert GmailSearchService.credentials(str(tmp_path)) is None
+    assert GmailSearchService.credentials(str(tmp_path)) == []
 
 
 def test_all_mail_is_found_by_its_attribute_not_its_english_name():
@@ -1168,11 +1169,11 @@ def test_a_mailbox_search_never_marks_anything_read():
 
     from dreamference.chat.gmail_search_service import GmailSearchService
 
-    for method in (GmailSearchService._summaries, GmailSearchService.message):
+    for method in (GmailSearchService._fetch_headers, GmailSearchService._fetch_body):
         source = inspect.getsource(method)
         assert "BODY.PEEK" in source
         assert "BODY[" not in source
-    assert "readonly=True" in inspect.getsource(GmailSearchService._open_mailbox)
+    assert "readonly=True" in inspect.getsource(GmailSearchService._open_mailboxes)
 
 
 def test_a_non_ascii_query_is_sent_as_a_utf8_literal():
@@ -1338,20 +1339,21 @@ def test_xoauth2_answers_the_second_challenge_with_nothing():
 
 
 def test_the_service_holds_no_long_lived_credential(tmp_path):
-    # The property the whole design rests on: GNOME keeps the refresh token and hands out an
-    # hour's worth of access at a time, so a stolen credentials file is worth an hour of read
-    # access rather than a mailbox.
+    # An account connected through GNOME hands over an hour's access at a time and keeps the
+    # refresh token itself, so its credentials file is worth an hour of read access rather than a
+    # mailbox. Nothing long-lived is written unless a refresh token is passed in explicitly.
     from dreamference.chat.gmail_search_service import GmailSearchService
 
     assert GmailSearchService.save_token("me@gmail.com", "ya29.tok", 3600, str(tmp_path))
     stored = json.loads((tmp_path / "credentials.json").read_text())
+    account = stored["accounts"]["me@gmail.com"]
 
-    assert "refresh_token" not in stored and "app_password" not in stored
+    assert "refresh_token" not in account and "app_password" not in account
     assert "ya29.tok" not in json.dumps(stored)
-    assert stored["expires_at"] > 0
-    assert GmailSearchService.credentials(str(tmp_path)) == {
-        "email": "me@gmail.com", "access_token": "ya29.tok",
-    }
+    assert account["expires_at"] > 0
+    assert GmailSearchService.credentials(str(tmp_path)) == [
+        {"email": "me@gmail.com", "access_token": "ya29.tok"},
+    ]
 
 
 def test_an_expired_token_reads_as_not_connected(tmp_path):
@@ -1361,7 +1363,7 @@ def test_an_expired_token_reads_as_not_connected(tmp_path):
 
     GmailSearchService.save_token("me@gmail.com", "ya29.tok", 30, str(tmp_path))
 
-    assert GmailSearchService.credentials(str(tmp_path)) is None
+    assert GmailSearchService.credentials(str(tmp_path)) == []
 
 
 
@@ -1410,3 +1412,29 @@ def test_the_nginx_image_route_is_deferred_resolution_and_idempotent():
     assert OnyxRunner.apply_image_route(once) == once
     # A template without the anchor is left alone rather than guessed at.
     assert OnyxRunner.apply_image_route("server {}\n") == "server {}\n"
+def test_a_search_returns_the_messages_it_finds():
+    # search() swallows per-account failures so one broken mailbox does not hide the others, which
+    # also hid a call to a helper that no longer existed: every search came back empty, silently.
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    class FakeConnection:
+        literal = None
+
+        def uid(self, command, *args):
+            if command == "SEARCH":
+                return "OK", [b"7 9"]
+            return "OK", [(
+                b"9 (X-GM-MSGID 1234 BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {40}",
+                b"From: a@b.c\r\nSubject: Hi\r\nDate: Mon, 1 Jan 2026\r\n\r\n",
+            ), b")"]
+
+        def logout(self):
+            pass
+
+    with patch.object(GmailSearchService, "_open_mailboxes",
+                      return_value=({"me@gmail.com": FakeConnection()}, None)):
+        answer = GmailSearchService.search("hi", 1)
+
+    assert answer == {"messages": [{
+        "id": "me@gmail.com|1234", "from": "a@b.c", "subject": "Hi", "date": "Mon, 1 Jan 2026",
+    }]}

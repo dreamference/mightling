@@ -30,7 +30,7 @@ def test_vllm_build_launch_command_default():
 def test_nvfp4_model_applies_registry_launch_recipe():
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
-    assert cmd[cmd.index("--max-model-len") + 1] == "131072"
+    assert cmd[cmd.index("--max-model-len") + 1] == "32768"
     assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.3"
     assert cmd[cmd.index("--kv-cache-dtype") + 1] == "fp8"
     assert cmd[cmd.index("--attention-backend") + 1] == "flashinfer"
@@ -65,24 +65,24 @@ def test_dflash_recipe_emits_drafter_speculative_config():
     import json
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
-    assert cmd[cmd.index("--max-model-len") + 1] == "131072"
-    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.68"
+    assert cmd[cmd.index("--max-model-len") + 1] == "32768"
+    assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.7"
     assert cmd[cmd.index("--attention-backend") + 1] == "flash_attn"
     assert cmd[cmd.index("--tool-call-parser") + 1] == "qwen3_xml"
     assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
-    assert cmd[cmd.index("--max-num-seqs") + 1] == "3"
+    assert cmd[cmd.index("--max-num-seqs") + 1] == "8"
     # The prefill chunk carries the draft-token reservation vLLM takes out of it:
-    # max_num_seqs * (num_speculative_tokens - 1) on top of the 8192 the recipe wants prefill to
+    # max_num_seqs * (num_speculative_tokens - 1) on top of the 8960 the recipe wants prefill to
     # actually get. If either of those is retuned, this number moves with them.
-    spec_slots = 3 * (8 - 1)
-    assert cmd[cmd.index("--max-num-batched-tokens") + 1] == str(8192 + spec_slots)
+    spec_slots = 8 * (12 - 1)
+    assert cmd[cmd.index("--max-num-batched-tokens") + 1] == str(8960 + spec_slots)
 
     # A drafter that lives in the recipe still goes out as --speculative-config, not as the
     # --speculative-model pair, which is reserved for a drafter the caller named.
     spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
     assert spec["method"] == "dflash"
     assert spec["model"] == "z-lab/Qwen3.5-122B-A10B-DFlash"
-    assert spec["num_speculative_tokens"] == 8
+    assert spec["num_speculative_tokens"] == 12
     assert spec["attention_backend"] == "FLASH_ATTN"
     assert "--speculative-model" not in cmd
 
@@ -99,20 +99,18 @@ def test_dflash_recipe_disables_thinking():
 def test_dflash_recipes_state_prefix_caching_explicitly():
     # Stating it matters as much as the value. vLLM's own default for this model is OFF --
     # ModelConfig.is_prefix_caching_supported() returns False for hybrid attention -- and that
-    # default is consulted only when the flag is absent. Since 2026-08-24 the two recipes state
-    # OPPOSITE values, both deliberately: the hybrid default runs the dense4 image whose
-    # patches make the feature correct (specs/DREAMFERENCE_PREFIX_CACHE.md), while the
-    # int4-dflash fallback keeps its untouched kvfix2 image, where the align-mode splitter
-    # serves STALE mamba states on the rare hits -- so it turns the feature off instead.
+    # default is consulted only when the flag is absent. Both recipes turn it ON, and both can:
+    # the int4-dflash fallback was OFF from 2026-08-24 while it ran the untouched kvfix2 image,
+    # whose align-mode splitter served STALE mamba states on the rare hits, and was flipped back
+    # on 2026-08-25 when it moved to the dense9 image that carries the fix
+    # (specs/DREAMFERENCE_PREFIX_CACHE.md). Pointing it back at an unpatched image must turn it
+    # off again.
     mgr = VLLMServerManager()
 
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-hybrid-dflash")
-    assert "--enable-prefix-caching" in cmd
-    assert "--no-enable-prefix-caching" not in cmd
-
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
-    assert "--no-enable-prefix-caching" in cmd
-    assert "--enable-prefix-caching" not in cmd
+    for model in ("qwen3.5-122b-a10b-hybrid-dflash", "qwen3.5-122b-a10b-int4-dflash"):
+        cmd = mgr.build_launch_command(model=model)
+        assert "--enable-prefix-caching" in cmd, model
+        assert "--no-enable-prefix-caching" not in cmd, model
 
 def test_a_recipe_can_still_veto_prefix_caching(monkeypatch):
     # The veto path is still load-bearing for any checkpoint whose KV geometry cannot support
@@ -197,11 +195,11 @@ def test_compile_cache_signature_tracks_speculative_depth():
 
     sig = VLLMServerManager._compile_cache_signature
     baseline = sig("qwen3.5-122b-a10b-int4-dflash")
-    assert "dflash" in baseline and "8" in baseline
+    assert "dflash" in baseline and baseline.endswith("|12")
 
     spec = ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"]
     retuned = copy.deepcopy(spec.launch_overrides)
-    retuned["speculative_config"]["num_speculative_tokens"] = 12
+    retuned["speculative_config"]["num_speculative_tokens"] = 8
     patched = ModelSpec(
         name=spec.name,
         params_b=spec.params_b,
