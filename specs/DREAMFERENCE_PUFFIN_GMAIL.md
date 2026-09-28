@@ -1,6 +1,6 @@
 # Puffin Terminal Agent — Gmail Access
 
-**Status:** implemented — `dreamference/chat/gmail_client.py`, `puffin-admin gmail`, the launcher's prompt block in `puffin-rs/src/lib.rs`, per-account `errors` in the service. Default-on when connected (§5's open decision), opt out with `puffin_gmail = false`.
+**Status:** implemented (re-checked against the code 2026-09-28) — `dreamference/chat/gmail_client.py`, `puffin-admin gmail`, the launcher's prompt block in `puffin-rs/src/lib.rs`, per-account `errors` in the service. Default-on when connected (§5's open decision), opt out with `puffin_gmail = false`.
 **Target:** the `puffin` terminal agent (`puffin`, the Puffin-branded Codex with the launcher in `puffin-rs/` compiled in)
 **Builds on:** the Gmail search service already running for the Onyx web UI (`dreamference/chat/gmail_search_service.py`, container `dreamference-gmail`), and the `puffin-admin search` / `puffin-admin fetch` pattern that gives the same agent web access.
 
@@ -46,7 +46,7 @@ The command is a thin HTTP client for the running service. It does **not** open 
 
 - **Endpoint:** `http://127.0.0.1:8767`, which is `GMAIL_HOST_PORT`, already published on loopback for the browser status check and the OAuth redirect.
 - **Auth:** the `X-Puffin-Gmail-Token` header, carrying the shared secret read from `~/.config/dreamference/gmail/service-secret`. That is the file `OnyxRunner._gmail_secret()` creates and the container receives as `PUFFIN_GMAIL_SECRET`. The CLI only reads it; it never creates one. A missing file means Gmail was never set up, and the error names `puffin-admin puffin start`.
-- **Why not in-process IMAP:** the service is the one component that owns credential unsealing, the multi-account fan-out and the refresh timer's output. A second host-side IMAP path would give two chances to disagree about the same sealed file, the exact problem `gmail_credentials.py` exists to avoid. It would also put the mailbox token inside the agent's own process.
+- **Why not in-process IMAP:** the service is the one component that owns credential unsealing, the multi-account fan-out and access-token refresh (it refreshes from the sealed refresh token when less than 60 s remain; see `DREAMFERENCE_GOA.md` §0). A second host-side IMAP path would give two chances to disagree about the same sealed file, the exact problem `gmail_credentials.py` exists to avoid. It would also put the mailbox token inside the agent's own process.
 - **Sandbox:** the runner already sets `[sandbox_workspace_write] network_access = true`, so loopback is reachable from the agent's shell, and reading a file under `~` is permitted by the workspace-write sandbox. Nothing new is needed in `config.toml`.
 
 Constants (`GMAIL_HOST_PORT`, `GMAIL_AUTH_HEADER`, the secret path) are imported from `onyx_runner.py` / `gmail_credentials.py`, never re-declared.
@@ -106,7 +106,7 @@ This is the part that differs from the web UI. There the model can only call the
 | `dreamference-gmail` not running | `❌ Gmail service is not running.` / `💡 Start it with: puffin-admin puffin start` |
 | No `service-secret` file | `❌ Gmail has not been set up.` / `💡 Run: puffin-admin puffin start, then connect in Settings → Gmail Accounts` |
 | Connected to no account | The service's `NOT_CONNECTED_MESSAGE` |
-| Token expired, refresh timer stopped | The service's IMAP auth error, per account (§6) |
+| Refresh token revoked or rejected by Google (e.g. `AUTHENTICATIONFAILED`) | The service's IMAP or refresh error, per account (§6); reconnect that account in Settings → Gmail Accounts |
 | Id from a disconnected account | `❌ Message not found` |
 
 ## 8. Tests
