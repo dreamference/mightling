@@ -223,10 +223,14 @@ class CodexBrandedBuilder:
             print(f"❌ Could not export codex {commit[:12]} from the submodule.")
             return False
         # Before the patches, because 0002 makes the CLI depend on it.
+        # Plain copy, not copy2: Cargo decides freshness by comparing source mtimes with its last
+        # build, so a file carrying its original, older mtime can be taken as already compiled even
+        # though its content changed -- and the stale launcher gets linked in.
         shutil.copytree(
             PUFFIN_CRATE_DIR,
             os.path.join(source_dir, PUFFIN_CRATE_DEST),
             ignore=shutil.ignore_patterns("target"),
+            copy_function=shutil.copy,
         )
 
         for patch in cls.patches():
@@ -349,10 +353,35 @@ class CodexBrandedBuilder:
             force (bool): Rebuild even if the installed binaries match the current inputs.
 
         Returns:
-            bool: True if an up-to-date `puffin-codex` is installed afterwards.
+            bool: True if an up-to-date `puffin` is installed afterwards.
         """
         if not force and cls.is_current():
             return True
+        # Every build starts by wiping the shared source tree, so two at once destroy each other
+        # mid-compile ("Could not locate working directory"). An exclusive lock makes a second
+        # build wait, and the re-check after it lets that one finish at once if the first build
+        # already produced what it needed.
+        import fcntl
+
+        os.makedirs(BUILD_CACHE_DIR, exist_ok=True)
+        with open(os.path.join(BUILD_CACHE_DIR, ".build.lock"), "w") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print("⏳ Another puffin build is running; waiting for it to finish...")
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            if not force and cls.is_current():
+                return True
+            return cls._build_locked()
+
+    @classmethod
+    def _build_locked(cls) -> bool:
+        """
+        The build itself; `build()` holds the lock around it.
+
+        Returns:
+            bool: True if an up-to-date `puffin` is installed afterwards.
+        """
         # The toolchain version itself is pinned by codex-rs/rust-toolchain.toml; rustup fetches it
         # on the first cargo invocation, so only rustup has to exist beforehand.
         if not DesktopInstaller.install_rust():
