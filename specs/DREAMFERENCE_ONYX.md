@@ -203,11 +203,11 @@ Onyx has first-class SearXNG support (`WebSearchProviderType.SEARXNG`, no API ke
 
 ## 7. Image Search
 
-`enable_image_search()` runs two containers, both on `python:3-slim` and both joined to Onyx's network:
-- the `dreamference-image-search` sidecar (`chat/image_search_service.py`), published on `127.0.0.1:8768` with data in `~/.config/dreamference/image-search`;
-- a SigLIP embedding sidecar, `dreamference-siglip` (`michaelf34/infinity:latest-cpu`, `google/siglip-base-patch16-224`).
+`enable_image_search()` provisions two containers, both joined to Onyx's network:
+- the `dreamference-image-search` sidecar (`chat/image_search_service.py` on `python:3-slim`), published on `127.0.0.1:8768` with data in `~/.config/dreamference/image-search`;
+- a SigLIP embedding sidecar, `dreamference-siglip` (image `michaelf34/infinity:latest-cpu`, model `google/siglip-base-patch16-224`). It is started best-effort.
 
-It registers an **Image Search** custom tool, and injects an nginx route (`# >>> puffin-image-search`) so that the fetched images are served to the browser under `/puffin-images/`. See `DREAMFERENCE_IMAGE_SEARCH.md`. The memory note records that SigLIP was blocked on arm64 at one point, so check the sidecar's state before relying on image ranking.
+It registers an **Image Search** custom tool, and injects an nginx route (`# >>> puffin-image-search`) so that the fetched images are served to the browser under `/puffin-images/`. See `DREAMFERENCE_IMAGE_SEARCH.md`. Infinity publishes amd64 images only, so on GB10 (aarch64) the SigLIP sidecar does not start. The search then skips the SigLIP pre-filter and relies on the vision model's rank-and-filter pass (`DREAMFERENCE_IMAGE_SEARCH.md` §7).
 
 ---
 
