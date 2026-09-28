@@ -59,7 +59,8 @@ Rejected, with the reason:
   codebase-memory-mcp            SCIP reader (`scip` crate)
   (one-shot CLI, JSON)           .dreamference/scip/*.scip + manifest
   graph, BM25, semantic,         exact defs/refs for files unchanged
-  live via its watcher           since the indexed commit
+  incremental re-index at        since the snapshot
+  launch / on demand (§3.1)
 ```
 
 - **Both layers stay unmodified.** codebase-memory-mcp is invoked as a pinned binary. SCIP files are produced by the upstream indexers. The only new code is the router and the SCIP scheduler.
@@ -234,7 +235,7 @@ Three rules follow.
 - **Trust gate.**
   - Exact indexing runs only for repositories the user has marked trusted: `trusted = true` in `<repo>/.dreamference/code_index.toml`, or Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, the `ProjectConfig.trust_level` the TUI already asks about).
   - Untrusted repositories get the universal layer only, and `puffin code status` says so in one line.
-  - Indexers marked "no" in the table may run untrusted, but still inside the sandbox.
+  - Indexers marked "no" in the table may run on an untrusted repository on demand (`puffin code index --exact`), still inside the sandbox, but never automatically.
 - **Sandbox, in addition to the memory limit.** Every SCIP indexer runs as `systemd-run … -- bwrap …`, with the network removed and the filesystem read-only except for its outputs. For rust-analyzer:
   ```
   systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 -- \
@@ -248,6 +249,7 @@ Three rules follow.
           -- rust-analyzer scip "$SRC" --output "$REPO/.dreamference/scip/rust-analyzer.scip"
   ```
   - `/usr/bin/bwrap` is already installed; it is Codex's own sandbox.
+  - The router creates `$REPO/.dreamference/scip` and `$SCRATCH_TARGET` beforehand, because bwrap cannot bind a path that does not exist.
   - `$CARGO_HOME` is writable only because Cargo takes a lock file there even when offline; with no network, nothing can be fetched into it.
   - `$SRC` is read-only. If Cargo needs to rewrite the lockfile, the run fails and is recorded. The remedy is an exported scratch copy, as for `codex/` (§5.2), where `$SRC` is additionally bound writable.
 - **Offline is enforced, not assumed.**
