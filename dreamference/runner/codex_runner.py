@@ -136,14 +136,14 @@ class CodexRunner:
             if not goose_runner.wait_for_vllm():
                 return 1
 
-        # Step 2: Ensure Codex CLI is installed
+        # Step 2: Ensure the branded Codex is built from the current submodule and patches
         if not CodexInstaller.is_installed():
             CodexInstaller.install_if_missing()
 
         codex_bin = CodexInstaller.get_codex_executable()
         if not codex_bin:
-            print("❌ Codex CLI (`codex`) is not installed or available in PATH.")
-            print("💡 Install Codex via: `npm install -g @openai/codex`")
+            print("❌ Puffin Codex (`puffin-codex`) is not built.")
+            print("💡 Build it with: `puffin-admin codex build`")
             return 1
 
         hf_model = resolve_model_hf_repo(self.config.model)
@@ -229,9 +229,14 @@ class CodexRunner:
         # it a member of that table, whose values must be integers, and Codex then refused to start
         # with `invalid type: string ... expected u32`. A key that belongs at the top has to be
         # written at the top.
+        # The update check compares this build against openai/codex releases and offers to install
+        # theirs; for the branded build compiled from the submodule that offer would replace Puffin
+        # with upstream Codex. Another top-level key, so it goes in with the catalog key.
+        update_check_key = "check_for_update_on_startup = false\n"
         catalog_key = (
             f'model_catalog_json = "{catalog_path}"\n'
             "suppress_unstable_features_warning = true\n"
+            + update_check_key
         )
 
         # No MCP servers are registered for Codex, deliberately.
@@ -297,15 +302,19 @@ base_url = "{api_base}"
 
             lines = existing_config.splitlines(keepends=True)
             changed = False
+            # Before the first table header, which is the only region where a bare key is
+            # unambiguously top-level.
+            first_table = next(
+                (i for i, line in enumerate(lines) if line.lstrip().startswith("[")),
+                len(lines),
+            )
 
             if "model_catalog_json" not in existing_config:
-                # Before the first table header, which is the only region where a bare key is
-                # unambiguously top-level.
-                first_table = next(
-                    (i for i, line in enumerate(lines) if line.lstrip().startswith("[")),
-                    len(lines),
-                )
                 lines.insert(first_table, catalog_key)
+                changed = True
+            elif "check_for_update_on_startup" not in existing_config:
+                # A config written before the branded build already has the catalog key.
+                lines.insert(first_table, update_check_key)
                 changed = True
 
             if "openai-custom" not in existing_config:
@@ -361,7 +370,7 @@ base_url = "{api_base}"
             print(f"   TUI logs go to: {db_path}")
             print(f"   Read MCP lifecycle with: puffin-admin logs mcp")
 
-        print(f"🚀 Launching Codex Pair-Programmer on GB10 local endpoint ({self.config.model})...")
+        print(f"🚀 Launching Puffin on GB10 local endpoint ({self.config.model})...")
         try:
             return subprocess.call(cmd, env=env)
         except Exception as e:

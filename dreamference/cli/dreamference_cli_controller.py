@@ -813,6 +813,10 @@ class DreamferenceCLIController:
         # Command: puffin-admin codex
         codex_parser = subparsers.add_parser("codex", help="Codex server operations")
         codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Codex commands")
+        codex_build_parser = codex_subparsers.add_parser(
+            "build", help="Build the Puffin-branded Codex from the codex submodule and codex-patches/"
+        )
+        codex_build_parser.add_argument("--force", action="store_true", help="Rebuild even if the installed build is current")
         codex_subparsers.add_parser("start", help="Start the Codex comic server in the background")
         codex_subparsers.add_parser("stop", help="Stop the Codex comic server")
 
@@ -1989,10 +1993,16 @@ class DreamferenceCLIController:
 
         elif args.command == "codex":
             import subprocess
+            from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
             from dreamference.runner.codex_installer import CodexInstaller
-            codex_bin = CodexInstaller.get_codex_executable() or "codex"
+            if args.codex_command == "build":
+                sys.exit(0 if CodexBrandedBuilder.build(force=args.force) else 1)
+            # The branded build only -- never an upstream `codex` from PATH.
+            if not CodexInstaller.install_if_missing():
+                sys.exit(1)
+            codex_bin = CodexInstaller.get_codex_executable()
             if args.codex_command == "start":
-                print("🚀 Starting OpenAI Codex app-server daemon...")
+                print("🚀 Starting Puffin Codex app-server daemon...")
                 subprocess.Popen(
                     [codex_bin, "app-server", "daemon", "start"],
                     stdout=subprocess.DEVNULL,
@@ -2001,7 +2011,7 @@ class DreamferenceCLIController:
                 )
                 print("✅ Codex app-server daemon started.")
             elif args.codex_command == "stop":
-                print("🛑 Stopping OpenAI Codex app-server daemon...")
+                print("🛑 Stopping Puffin Codex app-server daemon...")
                 subprocess.call([codex_bin, "app-server", "daemon", "stop"])
                 print("✅ Codex app-server daemon stopped.")
 

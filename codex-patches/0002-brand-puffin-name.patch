@@ -1,0 +1,86 @@
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index 4d7984d..6580088 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -119,8 +119,9 @@ use codex_terminal_detection::TerminalName;
+     // The executable is sometimes invoked via a platform‑specific name like
+     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
+     // the generic `codex` command name that users run.
+-    bin_name = "codex",
+-    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
++    name = "puffin",
++    bin_name = "puffin-codex",
++    override_usage = "puffin-codex [OPTIONS] [PROMPT]\n       puffin-codex [OPTIONS] <COMMAND> [ARGS]"
+ )]
+ struct MultitoolCli {
+     #[clap(flatten)]
+@@ -2691,7 +2692,7 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
+ 
+ fn print_completion(cmd: CompletionCommand) {
+     let mut app = MultitoolCli::command();
+-    let name = "codex";
++    let name = "puffin-codex";
+     generate(cmd.shell, &mut app, name, &mut std::io::stdout());
+ }
+ 
+diff --git a/codex-rs/exec/src/event_processor_with_human_output.rs b/codex-rs/exec/src/event_processor_with_human_output.rs
+index 222bc48..17fa132 100644
+--- a/codex-rs/exec/src/event_processor_with_human_output.rs
++++ b/codex-rs/exec/src/event_processor_with_human_output.rs
+@@ -216,7 +216,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
+         session_configured_event: &SessionConfiguredEvent,
+     ) {
+         const VERSION: &str = env!("CARGO_PKG_VERSION");
+-        eprintln!("OpenAI Codex v{VERSION}\n--------");
++        eprintln!("Puffin v{VERSION}\n--------");
+         for (key, value) in config_summary_entries(config, session_configured_event) {
+             eprintln!("{} {}", format!("{key}:").style(self.bold), value);
+         }
+diff --git a/codex-rs/tui/src/history_cell/session.rs b/codex-rs/tui/src/history_cell/session.rs
+index e749c02..efef9c1 100644
+--- a/codex-rs/tui/src/history_cell/session.rs
++++ b/codex-rs/tui/src/history_cell/session.rs
+@@ -404,7 +404,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
+             Line::from(vec![
+                 "  ".into(),
+                 ">_ ".fg(accent_color()),
+-                "OpenAI Codex".bold(),
++                "Puffin".bold(),
+                 format!(" (v{})", self.version).dim(),
+             ]),
+             Line::from(vec![
+@@ -444,10 +444,10 @@ impl HistoryCell for SessionHeaderHistoryCell {
+ 
+         let make_row = |spans: Vec<Span<'static>>| Line::from(spans);
+ 
+-        // Title line rendered inside the box: ">_ OpenAI Codex (vX)"
++        // Title line rendered inside the box: ">_ Puffin (vX)"
+         let title_spans: Vec<Span<'static>> = vec![
+             Span::from(">_ ").dim(),
+-            Span::from("OpenAI Codex").bold(),
++            Span::from("Puffin").bold(),
+             Span::from(" ").dim(),
+             Span::from(format!("(v{})", self.version)).dim(),
+         ];
+@@ -524,7 +524,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
+                 .collect();
+         }
+         let mut lines = vec![
+-            Line::from(format!("OpenAI Codex (v{})", self.version)),
++            Line::from(format!("Puffin (v{})", self.version)),
+             Line::from(format!(
+                 "model: {}{}",
+                 self.model,
+diff --git a/codex-rs/tui/src/status/card.rs b/codex-rs/tui/src/status/card.rs
+index 369a674..74897a5 100644
+--- a/codex-rs/tui/src/status/card.rs
++++ b/codex-rs/tui/src/status/card.rs
+@@ -736,7 +736,7 @@ impl StatusHistoryCell {
+         let mut lines: Vec<Line<'static>> = Vec::new();
+         lines.push(Line::from(vec![
+             Span::from(format!("{}>_ ", FieldFormatter::INDENT)).dim(),
+-            Span::from("OpenAI Codex").bold(),
++            Span::from("Puffin").bold(),
+             Span::from(" ").dim(),
+             Span::from(format!("(v{CODEX_CLI_VERSION})")).dim(),
+         ]));

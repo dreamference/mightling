@@ -1,3 +1,7 @@
 [submodule "fano"]
 	path = fano
 	url = https://github.com/dgxcoder/fano.git
+[submodule "codex"]
+	path = codex
+	url = https://github.com/dgxcoder/codex.git
+	shallow = true

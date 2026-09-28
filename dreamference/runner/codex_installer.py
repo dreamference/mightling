@@ -1,67 +1,55 @@
 """
 Codex CLI Provisioning & Detection for Dreamference.
 
-This module provides the CodexInstaller class which verifies Codex installation (`codex`)
-and manages auto-installing `codex` via pip or pipx if missing.
+This module provides the CodexInstaller class, which resolves the Codex executable the runner
+launches: the Puffin-branded build compiled from the `codex/` submodule by CodexBrandedBuilder.
+An upstream `codex` on PATH is deliberately never used, not even as a fallback -- a silent fallback
+would put the unbranded agent back on screen with nothing to say it had happened.
 """
 
-import shutil
-import subprocess
-import sys
+import os
 from typing import Optional
+
+from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
 
 class CodexInstaller:
     """
-    Installer and verifier class for Codex CLI (`codex`).
+    Installer and verifier class for the Puffin-branded Codex (`puffin-codex`).
     """
 
     @classmethod
     def get_codex_executable(cls) -> Optional[str]:
         """
-        Locates executable `codex` binary in system PATH or standard install locations.
+        Locates the branded `puffin-codex` executable.
 
         Returns:
-            Optional[str]: Absolute path to executable codex binary or None if not found.
+            Optional[str]: Absolute path to the executable, or None if it has not been built.
         """
-        import os
-        for path in [
-            shutil.which("codex"),
-            os.path.expanduser("~/.local/bin/codex"),
-            os.path.expanduser("~/.codex/bin/codex")
-        ]:
-            if path and os.path.exists(path) and os.access(path, os.X_OK):
-                return path
+        path = CodexBrandedBuilder.executable_path()
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
         return None
 
     @classmethod
     def is_installed(cls) -> bool:
         """
-        Checks if Codex CLI binary exists.
+        Checks that the branded build is installed and matches the current submodule and patches.
 
         Returns:
-            bool: True if codex executable is present.
+            bool: True if no build is needed.
         """
-        return cls.get_codex_executable() is not None
+        return CodexBrandedBuilder.is_current()
 
     @classmethod
     def install_if_missing(cls) -> bool:
         """
-        Auto-installs `codex` CLI via the official standalone install script.
+        Builds the branded Codex from the submodule if it is missing or out of date.
 
         Returns:
-            bool: True if installation succeeds.
+            bool: True if an up-to-date `puffin-codex` is installed afterwards.
         """
         if cls.is_installed():
-            print("✅ Codex CLI (`codex`) is already installed.")
+            print("✅ Puffin Codex (`puffin-codex`) is already built.")
             return True
-
-        print("📦 Installing Codex CLI standalone (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`)...")
-        try:
-            res = subprocess.run(["sh", "-c", "curl -fsSL https://chatgpt.com/codex/install.sh | sh"], check=False)
-            if res.returncode == 0 and cls.is_installed():
-                print("✅ Codex CLI installed successfully!")
-                return True
-        except Exception as e:
-            print(f"⚠️ Failed to install Codex via install script: {e}")
-
-        return False
+        return CodexBrandedBuilder.build()
