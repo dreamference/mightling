@@ -136,9 +136,9 @@ def test_desktop_entry_matches_the_window_class_gnome_sees():
     # unnamed generic icon in the dock, which is what it was doing.
     from dreamference.chat.desktop_runner import DESKTOP_ENTRY_NAME, WINDOW_CLASS
 
-    assert WINDOW_CLASS == "Puffin-desktop"
+    assert WINDOW_CLASS == "Puffin-ui"
     # Tao derives the class from the binary name, so the file is named after the instance too.
-    assert DESKTOP_ENTRY_NAME == "puffin-desktop.desktop"
+    assert DESKTOP_ENTRY_NAME == "puffin-ui.desktop"
 
 
 def test_desktop_entry_is_not_written_before_anything_is_built():

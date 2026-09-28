@@ -41,15 +41,15 @@ HEALTH_TIMEOUT_SECONDS: Final[int] = 5
 # running from a source checkout, they belong in the XDG user directories instead.
 DESKTOP_ENTRY_DIR: Final[str] = os.path.expanduser("~/.local/share/applications")
 ICON_DIR: Final[str] = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps")
-DESKTOP_ENTRY_NAME: Final[str] = "puffin-desktop.desktop"
-ICON_NAME: Final[str] = "puffin-desktop"
+DESKTOP_ENTRY_NAME: Final[str] = "puffin-ui.desktop"
+ICON_NAME: Final[str] = "puffin-ui"
 
 # GNOME matches a running window to its desktop entry by `WM_CLASS`, and shows a generic icon when
 # nothing matches -- which is why the app appeared in the dock as an unnamed placeholder. Tao sets
-# the class from the binary name, so the window reports instance `puffin-desktop` and class
-# `Puffin-desktop`; naming the file after the instance covers the automatic match and
+# the class from the binary name, so the window reports instance `puffin-ui` and class
+# `Puffin-ui`; naming the file after the instance covers the automatic match and
 # `StartupWMClass` covers the explicit one.
-WINDOW_CLASS: Final[str] = "Puffin-desktop"
+WINDOW_CLASS: Final[str] = "Puffin-ui"
 
 # WebKitGTK's HTTP cache, inside the webview's data directory. Onyx serves its stylesheets with
 # `immutable` and never changes their filenames, so a patched stylesheet is invisible to anything
@@ -253,7 +253,7 @@ class DesktopRunner:
         """
         for profile in ("release", "debug"):
             candidate = os.path.join(
-                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "puffin-desktop"
+                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "puffin-ui"
             )
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
                 return candidate
