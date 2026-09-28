@@ -1,0 +1,445 @@
+"""Every `puffin` TUI slash command, driven through a real terminal against the running model server,
+and the command-line subcommands Puffin changes.
+
+The slash-command tests are live. They skip unless the model server answers at the configured vLLM
+URL and `puffin` has been built (`puffin-admin codex build`), so the ordinary suite stays offline.
+The subcommand tests need only the built binary, since the launcher answers them before it looks
+for a server. With the server up, run the file on its own; the tests that make the model work take
+minutes:
+
+    .venv/bin/python -m pytest tests/test_puffin_slash_commands.py -v
+
+Each command runs in a fresh session: `puffin` on a pseudo-terminal, rendered by pyte, in a
+throwaway git repository with a throwaway CODEX_HOME, so nothing touches the user's own sessions
+or config. The list of commands is read from the pinned Codex source, and every one of them must
+appear in CASES below. A command added by a submodule bump therefore fails here until someone
+decides how to drive it.
+
+Nothing here confirms an action with outside effects: pop-ups are closed with Esc, and neither
+`puffin update` (which would replace the installed binaries) nor `puffin app` (which opens a
+desktop window) is run.
+"""
+
+import os
+import re
+import subprocess
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
+
+import pytest
+
+import requests
+
+try:
+    import pexpect
+    import pyte
+except ImportError:  # the subcommand tests do not need a terminal
+    pexpect = pyte = None
+
+from dreamference.config import DreamferenceConfig  # noqa: E402
+from dreamference.runner.codex_branded_builder import (  # noqa: E402
+    CODEX_SUBMODULE_DIR,
+    CodexBrandedBuilder,
+)
+
+ROWS, COLS = 60, 200
+SLASH_SOURCE = Path(CODEX_SUBMODULE_DIR) / "codex-rs" / "tui" / "src" / "slash_command.rs"
+# PUFFIN_BIN points the tests at another build, e.g. one not yet installed.
+PUFFIN = os.environ.get("PUFFIN_BIN") or CodexBrandedBuilder.executable_path()
+VLLM_HOST = (os.environ.get("DREAMFERENCE_VLLM_HOST") or DreamferenceConfig().vllm_host).rstrip("/")
+
+# Text that means something broke, whatever the command was.
+FAILURE_MARKERS = (
+    "panicked",
+    "Unrecognized command",
+    "stream disconnected",
+    "Connection failed",
+    "unexpected status",
+    "Error loading configuration",
+)
+# Shown only while a turn is running.
+BUSY_MARKER = "esc to interrupt"
+# The prompt used wherever a command needs a conversation to act on.
+PING = "Reply with exactly one word: pong"
+
+
+def _served_model() -> Optional[str]:
+    try:
+        response = requests.get(f"{VLLM_HOST}/v1/models", timeout=3)
+        return response.json()["data"][0]["id"] if response.ok else None
+    except (requests.RequestException, ValueError, KeyError, IndexError):
+        return None
+
+
+SERVED_MODEL = _served_model()
+
+needs_source = pytest.mark.skipif(not SLASH_SOURCE.is_file(), reason="codex submodule not checked out")
+needs_puffin = pytest.mark.skipif(not os.access(PUFFIN, os.X_OK), reason=f"{PUFFIN} is not built; run `puffin-admin codex build`")
+needs_server = pytest.mark.skipif(SERVED_MODEL is None, reason=f"no model server answering at {VLLM_HOST}/v1/models")
+needs_terminal = pytest.mark.skipif(pexpect is None, reason="pexpect and pyte are not installed")
+
+
+def live(test: Callable) -> Callable:
+    """Marks a test that drives `puffin` on a terminal against the running model server."""
+    for mark in (needs_source, needs_puffin, needs_server, needs_terminal):
+        test = mark(test)
+    return test
+
+
+def slash_commands() -> Dict[str, str]:
+    """
+    Reads the slash commands from the pinned source, as the TUI names them.
+
+    Returns:
+        Dict[str, str]: Command name -> enum variant, in the order the popup lists them.
+    """
+    if not SLASH_SOURCE.is_file():
+        return {}
+    body = SLASH_SOURCE.read_text().split("pub enum SlashCommand {", 1)[1].split("\n}", 1)[0]
+    commands: Dict[str, str] = {}
+    pending: Optional[str] = None
+    for line in body.splitlines():
+        line = line.strip()
+        attr = re.match(r'#\[strum\((?:to_string = "([^"]+)")?(?:, )?(?:serialize = "([^"]+)")?\)\]', line)
+        if attr:
+            pending = attr.group(1) or attr.group(2)
+            continue
+        variant = re.match(r"([A-Z]\w*),$", line)
+        if variant:
+            name = pending or re.sub(r"(?<!^)(?=[A-Z])", "-", variant.group(1)).lower()
+            commands[name] = variant.group(1)
+            pending = None
+    return commands
+
+
+@dataclass(frozen=True)
+class Case:
+    """
+    How to drive one command and what it must produce.
+
+    Attributes:
+        mode: "popup" (opens a view, dismissed with Esc), "inline" (prints into the transcript),
+            "turn" (makes the model work), "exit" (ends the session), "absent" (hidden by a Puffin
+            patch or not offered on this platform/build, so the TUI must say it is unrecognised)
+            or "skip".
+        args: Inline arguments typed after the command.
+        expect: Text the screen must show afterwards; SERVED_MODEL and WORKSPACE are substituted.
+        history: Hold one exchange with the model first, for commands that act on a conversation.
+        keys: Keystrokes sent after the command, e.g. to choose an entry in the popup it opens.
+        check: A further assertion on (session, workspace) once the command has finished.
+        reason: Why a command is skipped or absent.
+    """
+
+    mode: str
+    args: str = ""
+    expect: Tuple[str, ...] = ()
+    history: bool = False
+    keys: str = ""
+    check: Optional[Callable[["Session", Path], None]] = None
+    reason: str = ""
+
+
+def _agents_md_written(session: "Session", workspace: Path) -> None:
+    assert (workspace / "AGENTS.md").is_file(), "/init finished without writing AGENTS.md"
+
+
+def _cd_moved(session: "Session", workspace: Path) -> None:
+    session.command("/pwd")
+    assert str(workspace / "sub") in session.text()
+
+
+CASES: Dict[str, Case] = {
+    "model": Case("popup", expect=("SERVED_MODEL",)),
+    "ide": Case("inline"),
+    "permissions": Case("popup"),
+    "keymap": Case("popup"),
+    "vim": Case("inline"),
+    "setup-default-sandbox": Case("absent", reason="sets up the elevated sandbox, a Windows feature"),
+    "experimental": Case("popup"),
+    # SlashCommand::AutoReview: retries an approval review, which defaults to OpenAI's
+    # codex-auto-review model.
+    "approve": Case("absent", reason="hidden by patch 0012: auto-review defaults to an OpenAI model"),
+    "memories": Case("popup"),
+    "skills": Case("popup"),
+    "import": Case("popup"),
+    "hooks": Case("popup"),
+    # Opens a picker of what to review; the first entry is the uncommitted changes in a.txt.
+    "review": Case("turn", keys="\r"),
+    "rename": Case("inline", args="slash-command test", history=True),
+    "new": Case("inline", history=True),
+    "archive": Case("popup", history=True),
+    "delete": Case("popup", history=True),
+    "resume": Case("popup", history=True),
+    "fork": Case("inline", history=True),
+    "worktree": Case("popup"),
+    "app": Case("absent", reason="opens the desktop app, compiled only for macOS and Windows"),
+    "init": Case("turn", check=_agents_md_written),
+    "compact": Case("turn", history=True),
+    "recap": Case("turn", history=True),
+    "plan": Case("inline", expect=("Plan",)),
+    "voice": Case("absent", reason="hidden by patch 0010: voice uses OpenAI's realtime API"),
+    "goal": Case("inline", args="Keep every answer to one word"),
+    "agents": Case("popup"),
+    "side": Case("turn", args="What is two plus two? Answer with digits only.", expect=("4",)),
+    "btw": Case("turn", args="What is three plus three? Answer with digits only.", expect=("6",)),
+    "copy": Case("inline", history=True),
+    "export": Case("inline", history=True),
+    "raw": Case("inline"),
+    "tui": Case("popup"),
+    "diff": Case("inline", expect=("a.txt",)),
+    "mention": Case("popup"),
+    "status": Case("inline", expect=("Puffin", "SERVED_MODEL", "openai-custom")),
+    "daemon": Case("popup"),
+    "warnings": Case("popup"),
+    "cd": Case("inline", args="sub", check=_cd_moved),
+    "pwd": Case("inline", expect=("WORKSPACE",)),
+    # Patch 0011: token statistics for the session instead of ChatGPT plan limits.
+    "usage": Case("inline", history=True, expect=("Token usage this session", "Total")),
+    "debug-config": Case("inline"),
+    "title": Case("popup"),
+    "statusline": Case("popup"),
+    "theme": Case("popup"),
+    "pets": Case("popup"),
+    "mcp": Case("inline", expect=("MCP",)),
+    "apps": Case("absent", reason="apps are OpenAI-hosted connectors that need a ChatGPT login"),
+    "plugins": Case("popup"),
+    "logout": Case("absent", reason="hidden by patch 0005: there is no OpenAI account to sign out of"),
+    "quit": Case("exit"),
+    "exit": Case("exit"),
+    "feedback": Case("absent", reason="removed by patch 0009: it uploads session logs to OpenAI"),
+    "rollout": Case("absent", reason="debug builds only"),
+    "ps": Case("inline"),
+    "stop": Case("inline"),
+    "clear": Case("inline", history=True),
+    "test-approval": Case("absent", reason="debug builds only"),
+    "subagents": Case("popup"),
+    "debug-m-drop": Case("skip", reason='described upstream as "DO NOT USE": drops the memory store'),
+    "debug-m-update": Case("skip", reason='described upstream as "DO NOT USE"'),
+}
+
+
+class Session:
+    """
+    One `puffin` process on a pseudo-terminal, with its screen rendered by pyte.
+    """
+
+    def __init__(self, workspace: Path, codex_home: Path, args: List[str]):
+        self.screen = pyte.Screen(COLS, ROWS)
+        self.stream = pyte.ByteStream(self.screen)
+        env = dict(os.environ, CODEX_HOME=str(codex_home), TERM="xterm-256color", DREAMFERENCE_VLLM_HOST=VLLM_HOST)
+        self.child = pexpect.spawn(PUFFIN, args, cwd=str(workspace), env=env, dimensions=(ROWS, COLS))
+
+    def pump(self, seconds: float) -> bool:
+        """Renders output for `seconds`; False once the process has exited."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            try:
+                self.stream.feed(self.child.read_nonblocking(65536, timeout=0.2))
+            except pexpect.TIMEOUT:
+                continue
+            except pexpect.EOF:
+                return False
+        return True
+
+    def text(self) -> str:
+        return "\n".join(line.rstrip() for line in self.screen.display)
+
+    def wait_for(self, predicate: Callable[[str], bool], timeout: float) -> bool:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            alive = self.pump(0.5)
+            if predicate(self.text()):
+                return True
+            if not alive:
+                return False
+        return False
+
+    def wait_ready(self) -> None:
+        # The launcher may first wait for the server, and a cold compile of the prompt takes time.
+        ready = self.wait_for(lambda text: ">_ Puffin" in text and "›" in text, timeout=120)
+        assert ready, f"puffin never reached its composer:\n{self.text()}"
+        assert "Sign in with ChatGPT" not in self.text()
+        # Which commands are offered depends on feature flags that load just after the composer
+        # appears; typing sooner races them.
+        self.pump(3.0)
+
+    def command(self, line: str) -> None:
+        """Types a line, lets the command popup settle, and submits it."""
+        self.child.send(line)
+        self.pump(1.0)
+        self.child.send("\r")
+        self.pump(2.0)
+
+    def wait_idle(self, timeout: float) -> None:
+        """Waits until a model turn has started and finished."""
+        self.wait_for(lambda text: BUSY_MARKER in text, timeout=30)
+        finished = self.wait_for(lambda text: BUSY_MARKER not in text, timeout=timeout)
+        assert finished, f"the turn did not finish within {timeout}s:\n{self.text()}"
+        self.pump(1.0)
+
+    def converse(self) -> None:
+        """Holds one exchange with the model, so conversation-level commands have something to act on."""
+        self.command(PING)
+        self.wait_idle(timeout=300)
+        assert "pong" in self.text().lower(), f"the model did not answer:\n{self.text()}"
+
+    def close(self) -> None:
+        if self.child.isalive():
+            self.child.sendcontrol("c")
+            self.pump(0.5)
+            self.child.sendcontrol("c")
+            self.pump(1.0)
+        self.child.terminate(force=True)
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    """A git repository with one uncommitted change, so /diff and /review have something to show."""
+    repo = tmp_path / "ws"
+    (repo / "sub").mkdir(parents=True)
+    (repo / "a.txt").write_text("a\n")
+    (repo / "sub" / "b.txt").write_text("b\n")
+    git = ["git", "-c", "user.name=puffin-test", "-c", "user.email=puffin@test"]
+    subprocess.run([*git, "init", "-q"], cwd=repo, check=True)
+    subprocess.run([*git, "add", "."], cwd=repo, check=True)
+    subprocess.run([*git, "commit", "-qm", "init"], cwd=repo, check=True)
+    (repo / "a.txt").write_text("a\nchanged\n")
+    return repo
+
+
+@pytest.fixture
+def codex_home(tmp_path: Path, workspace: Path) -> Path:
+    """
+    A CODEX_HOME that already trusts the workspace and names the local provider.
+
+    Both are pre-seeded so every test reaches the composer. `model_provider` is also what keeps the
+    ChatGPT sign-in screen away; test_a_fresh_home_opens_on_the_composer checks that the launcher
+    handles that on its own.
+    """
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        'model_provider = "openai-custom"\n\n'
+        f'[projects."{workspace}"]\ntrust_level = "trusted"\n'
+    )
+    return home
+
+
+def _run(name: str, case: Case, workspace: Path, codex_home: Path) -> None:
+    # `-a never`: an approval prompt in the middle of a model turn would stall the test.
+    session = Session(workspace, codex_home, ["-a", "never", "-s", "workspace-write"])
+    try:
+        session.wait_ready()
+        if case.history:
+            session.converse()
+        if case.mode == "absent":
+            # With a trailing space the completion popup closes and the name is sent as typed;
+            # otherwise Enter picks the closest command offered (`/app` would run `/approve`).
+            session.command(f"/{name} ")
+        else:
+            session.command(f"/{name} {case.args}".rstrip())
+        if case.keys:
+            session.child.send(case.keys)
+            session.pump(2.0)
+
+        if case.mode == "exit":
+            ended = session.wait_for(lambda text: False, timeout=10) or not session.child.isalive()
+            assert ended, f"/{name} did not end the session:\n{session.text()}"
+            return
+        if case.mode == "absent":
+            assert "Unrecognized command" in session.text(), f"/{name} is offered, but should not be here ({case.reason})"
+            return
+        if case.mode == "turn":
+            session.wait_idle(timeout=600)
+
+        screen = session.text()
+        assert session.child.isalive(), f"puffin exited after /{name}:\n{screen}"
+        for marker in FAILURE_MARKERS:
+            assert marker not in screen, f"/{name} produced {marker!r}:\n{screen}"
+        for wanted in case.expect:
+            wanted = wanted.replace("SERVED_MODEL", SERVED_MODEL or "").replace("WORKSPACE", str(workspace))
+            assert wanted in screen, f"/{name} did not show {wanted!r}:\n{screen}"
+        if case.mode == "popup":
+            session.child.send("\x1b")
+            assert session.pump(1.0), f"puffin exited when /{name} was dismissed"
+        if case.check:
+            case.check(session, workspace)
+    finally:
+        session.close()
+
+
+@needs_source
+def test_every_slash_command_has_a_case():
+    commands = slash_commands()
+    assert commands, "could not read any slash commands from the Codex source"
+    missing = sorted(set(commands) - set(CASES))
+    stale = sorted(set(CASES) - set(commands))
+    assert not missing, f"new slash commands with no test case: {missing}"
+    assert not stale, f"test cases for commands that no longer exist: {stale}"
+
+
+@live
+@pytest.mark.parametrize("name", list(CASES))
+def test_slash_command(name: str, workspace: Path, codex_home: Path):
+    case = CASES[name]
+    if case.mode == "skip":
+        pytest.skip(case.reason)
+    _run(name, case, workspace, codex_home)
+
+
+@live
+def test_a_fresh_home_opens_on_the_composer(tmp_path: Path, workspace: Path):
+    # No pre-seeded provider: whatever the launcher writes must be enough to skip the ChatGPT
+    # sign-in screen, which is what a new user of `puffin` would otherwise land on.
+    home = tmp_path / "fresh-home"
+    home.mkdir()
+    (home / "config.toml").write_text(f'[projects."{workspace}"]\ntrust_level = "trusted"\n')
+    session = Session(workspace, home, [])
+    try:
+        reached = session.wait_for(lambda text: "›" in text and ">_ Puffin" in text or "Sign in with ChatGPT" in text, 120)
+        assert reached, f"puffin showed neither its composer nor a sign-in screen:\n{session.text()}"
+        assert "Sign in with ChatGPT" not in session.text(), "a fresh CODEX_HOME lands on the ChatGPT sign-in screen"
+    finally:
+        session.close()
+
+
+# Command-line subcommands. The launcher answers these before it looks for a model server, so they
+# need only the built binary.
+
+HIDDEN_SUBCOMMANDS = ("cloud", "login", "logout", "remote-control")
+REFUSED_SUBCOMMANDS = ("cloud", "cloud-tasks", "login", "logout")
+
+
+def _puffin(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
+    home = tmp_path / "codex-home"
+    home.mkdir(exist_ok=True)
+    env = dict(os.environ, CODEX_HOME=str(home), DREAMFERENCE_VLLM_HOST="http://127.0.0.1:9")
+    return subprocess.run(
+        [PUFFIN, *args], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+    )
+
+
+@needs_puffin
+def test_version_names_puffin(tmp_path: Path):
+    result = _puffin(tmp_path, "--version")
+    assert result.returncode == 0 and result.stdout.startswith("puffin "), result.stdout + result.stderr
+
+
+@needs_puffin
+def test_help_lists_only_what_puffin_offers(tmp_path: Path):
+    result = _puffin(tmp_path, "--help")
+    assert result.returncode == 0, result.stderr
+    listed = {line.split()[0] for line in result.stdout.splitlines() if line.startswith("  ") and line.split()}
+    assert {"exec", "resume", "update"} <= listed
+    assert not listed & set(HIDDEN_SUBCOMMANDS), f"hidden subcommands are listed: {sorted(listed & set(HIDDEN_SUBCOMMANDS))}"
+
+
+@needs_puffin
+@pytest.mark.parametrize("name", REFUSED_SUBCOMMANDS)
+def test_openai_hosted_subcommands_are_refused(tmp_path: Path, name: str):
+    # Refused by the launcher before Codex parses anything, so no sign-in or cloud request starts.
+    result = _puffin(tmp_path, name)
+    assert result.returncode != 0
+    assert f"`puffin {name}` is not available" in result.stderr, result.stdout + result.stderr
