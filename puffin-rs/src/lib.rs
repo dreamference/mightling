@@ -88,6 +88,12 @@ pub struct ServedModel {
     pub max_model_len: u64,
 }
 
+/// The process's own command line, prepared by [`prepare_args`]. This is what the one-line hook in
+/// Codex's `cli_main` calls in place of reading argv itself.
+pub async fn args() -> anyhow::Result<Vec<OsString>> {
+    prepare_args(std::env::args_os().collect()).await
+}
+
 /// Rewrites the command line so Codex talks to the local model, doing the setup that requires.
 ///
 /// Returns the arguments unchanged when the command never reaches a model, e.g. `--version`.
@@ -225,12 +231,13 @@ async fn wait_for_model(host: &str) -> anyhow::Result<ServedModel> {
     }
 }
 
-/// Codex's own system prompt, with the web section appended.
+/// Codex's own system prompt, renamed to Puffin, with the web section appended.
 ///
 /// The catalog must supply `base_instructions` or Codex rejects the model, and what goes there is
 /// the entire system prompt, not a label. The longest bundled template is used: the shorter ones
 /// are trimmed variants for narrower modes, and a missing section costs more than an irrelevant
-/// one. Patch 0003 has already renamed its identity to Puffin.
+/// one. The rename happens here rather than in a patch to `models.json`, whose templates are each
+/// one JSON line of ~20 KB, so a patch touching them was ~390 KB of diff.
 pub fn base_instructions() -> String {
     let prompt = codex_models_manager::bundled_models_response()
         .ok()
@@ -242,7 +249,24 @@ pub fn base_instructions() -> String {
                 .max_by_key(String::len)
         })
         .unwrap_or_else(|| "You are Puffin, a coding agent.".to_string());
-    prompt + WEB_ACCESS_INSTRUCTIONS
+    rebrand(&prompt) + WEB_ACCESS_INSTRUCTIONS
+}
+
+/// Renames the agent in a Codex prompt.
+///
+/// The opening sentence also claims a model ("…based on GPT-5."), which is untrue of the local
+/// model, so the whole sentence is replaced; every later "Codex" is the agent's name and becomes
+/// "Puffin".
+pub fn rebrand(prompt: &str) -> String {
+    const IDENTITY: &str = "You are Codex, ";
+    let body = match prompt.strip_prefix(IDENTITY) {
+        Some(rest) => match rest.find(". ") {
+            Some(end) => format!("You are Puffin, a coding agent.{}", &rest[end + 1..]),
+            None => prompt.to_string(),
+        },
+        None => prompt.to_string(),
+    };
+    body.replace("Codex", "Puffin")
 }
 
 /// The catalog entry Codex needs before it will talk to a model it does not know.
@@ -480,8 +504,52 @@ mod tests {
     #[test]
     fn the_prompt_is_puffins_and_carries_web_access() {
         let prompt = base_instructions();
-        assert!(prompt.starts_with("You are Puffin"), "{}", &prompt[..80.min(prompt.len())]);
+        assert!(
+            prompt.starts_with("You are Puffin, a coding agent. "),
+            "{}",
+            &prompt[..80.min(prompt.len())]
+        );
+        assert!(!prompt.contains("Codex") && !prompt.contains("based on GPT"));
         assert!(prompt.contains("puffin-admin search"));
+    }
+
+    #[test]
+    fn rebrand_replaces_the_identity_sentence_and_later_mentions() {
+        assert_eq!(
+            rebrand("You are Codex, an agent based on GPT-6. As Codex, you help."),
+            "You are Puffin, a coding agent. As Puffin, you help."
+        );
+        assert_eq!(rebrand("No identity here."), "No identity here.");
+    }
+
+    #[test]
+    fn gmail_is_advertised_only_for_connected_accounts() {
+        assert_eq!(
+            parse_gmail_status(&json!({"connected": true, "email": "a@x.com, b@y.com"})),
+            Some("a@x.com, b@y.com".into())
+        );
+        assert_eq!(parse_gmail_status(&json!({"connected": false, "email": null})), None);
+        assert_eq!(parse_gmail_status(&json!({"error": "unauthorised"})), None);
+        let block = gmail_access_instructions("a@x.com");
+        assert!(block.contains("puffin-admin gmail search") && block.contains("a@x.com"));
+        assert!(block.contains("untrusted data"));
+    }
+
+    #[test]
+    fn the_catalog_prompt_keeps_web_access_and_appends_gmail() {
+        let model = ServedModel { id: "m".into(), max_model_len: 1024 };
+        let with_gmail = model_catalog(&model, &gmail_access_instructions("a@x.com"));
+        let prompt = with_gmail["models"][0]["base_instructions"].as_str().unwrap_or_default();
+        assert!(prompt.contains("puffin-admin search") && prompt.contains("puffin-admin gmail read"));
+        let without = model_catalog(&model, "");
+        let prompt = without["models"][0]["base_instructions"].as_str().unwrap_or_default();
+        assert!(prompt.contains("puffin-admin search") && !prompt.contains("puffin-admin gmail"));
+    }
+
+    #[test]
+    fn gmail_can_be_switched_off_in_the_config_file() {
+        assert_eq!(puffin_gmail_from_toml("puffin_gmail = false\n"), Some(false));
+        assert_eq!(puffin_gmail_from_toml("vllm_host = \"x\"\n"), None);
     }
 
     #[test]

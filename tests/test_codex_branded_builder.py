@@ -28,24 +28,23 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     session = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs").read_text()
     assert '"OpenAI Codex"' not in session and '"Puffin"' in session
-    # The launcher crate is copied in from puffin-rs/, and the binary Cargo builds is `puffin`.
+    # The launcher crate is copied in from puffin-rs/ and reached through one dependency line.
     assert (tmp_path / "src" / "codex-rs" / "puffin" / "src" / "lib.rs").is_file()
     cli_manifest = (tmp_path / "src" / "codex-rs" / "cli" / "Cargo.toml").read_text()
-    assert 'name = "puffin"' in cli_manifest and 'default-run = "puffin"' in cli_manifest
+    assert 'puffin-launcher = { path = "../puffin" }' in cli_manifest
+    cli_main = (tmp_path / "src" / "codex-rs" / "cli" / "src" / "main.rs").read_text()
+    assert "MultitoolCli::parse_from(puffin_launcher::args().await?)" in cli_main
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
     )
     assert status.stdout == ""
 
 
-@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
-def test_the_embedded_prompt_names_puffin_not_codex(tmp_path):
-    # The runner reads its system prompt out of the built binary's models.json, so the identity
-    # line the model sees comes from this file.
-    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
-    models = (tmp_path / "src" / "codex-rs" / "models-manager" / "models.json").read_text()
-    assert "You are Puffin, a coding agent." in models
-    assert "You are Codex" not in models
+def test_the_patches_stay_small():
+    # Anything bigger than a hook or a one-line string belongs in puffin-rs/, which Cargo compiles
+    # into the same binary; the patches are only the places Codex has to call it or say "Puffin".
+    # (The prompt rename used to be a ~390 KB patch to models.json; it is now rebrand() in Rust.)
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 16_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
@@ -95,7 +94,8 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     assert env["CARGO_PROFILE_RELEASE_DEBUG"] == "none"
     assert env["CARGO_PROFILE_RELEASE_STRIP"] == "debuginfo"
     assert command[:3] == ["cargo", "build", "--release"]
-    assert command[command.index("--bin") + 1] == "puffin"
+    # Cargo builds `codex`; the builder installs it as `puffin`.
+    assert command[command.index("--bin") + 1] == "codex"
 
 
 def test_the_runner_never_falls_back_to_an_upstream_codex(tmp_path):

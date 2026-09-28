@@ -35,7 +35,7 @@ CODEX_SUBMODULE_DIR: Final[str] = os.path.join(REPO_ROOT, "codex")
 CODEX_PATCH_DIR: Final[str] = os.path.join(REPO_ROOT, "codex-patches")
 
 # The launcher crate. It is Dreamference's own Rust, so it lives here as source rather than inside a
-# patch, and is copied into the exported tree where patch 0004 expects it.
+# patch, and is copied into the exported tree where patch 0002's dependency line expects it.
 PUFFIN_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "puffin-rs")
 PUFFIN_CRATE_DEST: Final[str] = os.path.join("codex-rs", "puffin")
 
@@ -48,7 +48,10 @@ CODEX_RELEASE_TAG: Final[str] = "rust-v0.158.0"
 BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-codex")
 INSTALL_DIR: Final[str] = os.path.expanduser("~/.local/share/dreamference/puffin")
 
-# Patch 0002 renames Cargo's [[bin]] from `codex` to this, so it is what cargo builds as well.
+# Cargo still builds the binary as `codex` -- renaming the [[bin]] and `default-run` would be two
+# more patch hunks for a name the builder can simply give the file when it installs it. Codex's
+# own help and --version already say `puffin` (patch 0001 sets clap's name and bin_name).
+CARGO_BIN_NAME: Final[str] = "codex"
 BRANDED_EXECUTABLE_NAME: Final[str] = "puffin"
 
 # Where the user types `puffin`. A symlink rather than a copy, because Codex finds
@@ -219,7 +222,7 @@ class CodexBrandedBuilder:
         if archive.wait() != 0 or extracted.returncode != 0:
             print(f"❌ Could not export codex {commit[:12]} from the submodule.")
             return False
-        # Before the patches, because 0004 makes the workspace depend on it.
+        # Before the patches, because 0002 makes the CLI depend on it.
         shutil.copytree(
             PUFFIN_CRATE_DIR,
             os.path.join(source_dir, PUFFIN_CRATE_DEST),
@@ -373,7 +376,7 @@ class CodexBrandedBuilder:
         # third-party version stays exactly as the lockfile pins it.
         command = [
             "cargo", "build", "--release",
-            "-p", "codex-cli", "--bin", BRANDED_EXECUTABLE_NAME,
+            "-p", "codex-cli", "--bin", CARGO_BIN_NAME,
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
         print(f"🔨 Building Puffin-branded Codex ({CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
@@ -384,7 +387,7 @@ class CodexBrandedBuilder:
         release_dir = os.path.join(BUILD_CACHE_DIR, "target", "release")
         bin_dir = os.path.join(INSTALL_DIR, "bin")
         os.makedirs(bin_dir, exist_ok=True)
-        for built, installed in ((BRANDED_EXECUTABLE_NAME, BRANDED_EXECUTABLE_NAME), (CODE_MODE_HOST_NAME, CODE_MODE_HOST_NAME)):
+        for built, installed in ((CARGO_BIN_NAME, BRANDED_EXECUTABLE_NAME), (CODE_MODE_HOST_NAME, CODE_MODE_HOST_NAME)):
             # Copied to a temporary name and renamed over the old one, so a running session keeps
             # its binary and a new one never sees a half-written file.
             staging = os.path.join(bin_dir, f".{installed}.new")

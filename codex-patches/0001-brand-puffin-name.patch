@@ -1,27 +1,8 @@
-diff --git a/codex-rs/cli/Cargo.toml b/codex-rs/cli/Cargo.toml
-index 4fed766..a6f6a97 100644
---- a/codex-rs/cli/Cargo.toml
-+++ b/codex-rs/cli/Cargo.toml
-@@ -4,10 +4,10 @@ version.workspace = true
- edition.workspace = true
- license.workspace = true
- build = "build.rs"
--default-run = "codex"
-+default-run = "puffin"
- 
- [[bin]]
--name = "codex"
-+name = "puffin"
- path = "src/main.rs"
- 
- [[bin]]
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
 index 4d7984d..003136b 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
-@@ -119,8 +119,9 @@ use codex_terminal_detection::TerminalName;
-     // The executable is sometimes invoked via a platform‑specific name like
-     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
+@@ -121,4 +121,5 @@ use codex_terminal_detection::TerminalName;
      // the generic `codex` command name that users run.
 -    bin_name = "codex",
 -    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
@@ -29,177 +10,107 @@ index 4d7984d..003136b 100644
 +    bin_name = "puffin",
 +    override_usage = "puffin [OPTIONS] [PROMPT]\n       puffin [OPTIONS] <COMMAND> [ARGS]"
  )]
- struct MultitoolCli {
-     #[clap(flatten)]
-@@ -2691,7 +2692,7 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
- 
- fn print_completion(cmd: CompletionCommand) {
+@@ -2693,3 +2694,3 @@ fn print_completion(cmd: CompletionCommand) {
      let mut app = MultitoolCli::command();
 -    let name = "codex";
 +    let name = "puffin";
      generate(cmd.shell, &mut app, name, &mut std::io::stdout());
- }
- 
 diff --git a/codex-rs/cli/src/marketplace_cmd.rs b/codex-rs/cli/src/marketplace_cmd.rs
 index d942de6..2103ed0 100644
 --- a/codex-rs/cli/src/marketplace_cmd.rs
 +++ b/codex-rs/cli/src/marketplace_cmd.rs
-@@ -31,7 +31,7 @@ use crate::plugin_cmd::configured_marketplace_sources;
- use crate::plugin_cmd::load_cli_auth_manager;
- 
+@@ -33,3 +33,3 @@ use crate::plugin_cmd::load_cli_auth_manager;
  #[derive(Debug, Parser)]
 -#[command(bin_name = "codex plugin marketplace")]
 +#[command(bin_name = "puffin plugin marketplace")]
  pub struct MarketplaceCli {
-     #[clap(flatten)]
-     pub config_overrides: CliConfigOverrides,
-@@ -59,7 +59,7 @@ enum MarketplaceSubcommand {
- 
- #[derive(Debug, Parser)]
+@@ -61,3 +61,3 @@ enum MarketplaceSubcommand {
  #[command(
 -    bin_name = "codex plugin marketplace add",
 +    bin_name = "puffin plugin marketplace add",
      after_help = "Examples:\n  codex plugin marketplace add ./path/to/marketplace\n  codex plugin marketplace add owner/repo --ref main\n  codex plugin marketplace add https://github.com/owner/repo --sparse plugins/foo"
- )]
- struct AddMarketplaceArgs {
-@@ -85,7 +85,7 @@ struct AddMarketplaceArgs {
- }
- 
+@@ -87,3 +87,3 @@ struct AddMarketplaceArgs {
  #[derive(Debug, Parser)]
 -#[command(bin_name = "codex plugin marketplace list")]
 +#[command(bin_name = "puffin plugin marketplace list")]
  struct ListMarketplaceArgs {
-     /// Output marketplace list as JSON.
-     #[arg(long = "json")]
-@@ -94,7 +94,7 @@ struct ListMarketplaceArgs {
- 
- #[derive(Debug, Parser)]
+@@ -96,3 +96,3 @@ struct ListMarketplaceArgs {
  #[command(
 -    bin_name = "codex plugin marketplace upgrade",
 +    bin_name = "puffin plugin marketplace upgrade",
      after_help = "Examples:\n  codex plugin marketplace upgrade\n  codex plugin marketplace upgrade debug"
- )]
- struct UpgradeMarketplaceArgs {
-@@ -109,7 +109,7 @@ struct UpgradeMarketplaceArgs {
- 
- #[derive(Debug, Parser)]
+@@ -111,3 +111,3 @@ struct UpgradeMarketplaceArgs {
  #[command(
 -    bin_name = "codex plugin marketplace remove",
 +    bin_name = "puffin plugin marketplace remove",
      after_help = "Example:\n  codex plugin marketplace remove debug"
- )]
- struct RemoveMarketplaceArgs {
 diff --git a/codex-rs/cli/src/mcp_cmd.rs b/codex-rs/cli/src/mcp_cmd.rs
 index 8fda684..1ae8765 100644
 --- a/codex-rs/cli/src/mcp_cmd.rs
 +++ b/codex-rs/cli/src/mcp_cmd.rs
-@@ -95,7 +95,7 @@ pub struct GetArgs {
- }
- 
+@@ -97,3 +97,3 @@ pub struct GetArgs {
  #[derive(Debug, clap::Parser)]
 -#[command(override_usage = "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
 +#[command(override_usage = "puffin mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
  pub struct AddArgs {
-     /// Name for the MCP server configuration.
-     pub name: String,
 diff --git a/codex-rs/cli/src/plugin_cmd.rs b/codex-rs/cli/src/plugin_cmd.rs
 index d282452..e167423 100644
 --- a/codex-rs/cli/src/plugin_cmd.rs
 +++ b/codex-rs/cli/src/plugin_cmd.rs
-@@ -47,7 +47,7 @@ const OPENAI_BUNDLED_ALPHA_MARKETPLACE_NAME: &str = "openai-bundled-alpha";
- const OPENAI_PRIMARY_RUNTIME_MARKETPLACE_NAME: &str = "openai-primary-runtime";
- 
+@@ -49,3 +49,3 @@ const OPENAI_PRIMARY_RUNTIME_MARKETPLACE_NAME: &str = "openai-primary-runtime";
  #[derive(Debug, Parser)]
 -#[command(bin_name = "codex plugin")]
 +#[command(bin_name = "puffin plugin")]
  pub struct PluginCli {
-     #[clap(flatten)]
-     pub config_overrides: CliConfigOverrides,
-@@ -79,7 +79,7 @@ pub enum PluginSubcommand {
- 
- #[derive(Debug, Parser)]
+@@ -81,3 +81,3 @@ pub enum PluginSubcommand {
  #[command(
 -    bin_name = "codex plugin add",
 +    bin_name = "puffin plugin add",
      after_help = "Examples:\n  codex plugin add sample@debug\n  codex plugin add sample --marketplace debug"
- )]
- pub struct AddPluginArgs {
-@@ -98,7 +98,7 @@ pub struct AddPluginArgs {
- 
- #[derive(Debug, Parser)]
+@@ -100,3 +100,3 @@ pub struct AddPluginArgs {
  #[command(
 -    bin_name = "codex plugin list",
 +    bin_name = "puffin plugin list",
      after_help = "Examples:\n  codex plugin list\n  codex plugin list --marketplace debug\n  codex plugin list --json\n  codex plugin list --available --json"
- )]
- pub struct ListPluginsArgs {
-@@ -117,7 +117,7 @@ pub struct ListPluginsArgs {
- 
- #[derive(Debug, Parser)]
+@@ -119,3 +119,3 @@ pub struct ListPluginsArgs {
  #[command(
 -    bin_name = "codex plugin remove",
 +    bin_name = "puffin plugin remove",
      after_help = "Examples:\n  codex plugin remove sample@debug\n  codex plugin remove sample --marketplace debug"
- )]
- pub struct RemovePluginArgs {
 diff --git a/codex-rs/exec/src/event_processor_with_human_output.rs b/codex-rs/exec/src/event_processor_with_human_output.rs
 index 222bc48..17fa132 100644
 --- a/codex-rs/exec/src/event_processor_with_human_output.rs
 +++ b/codex-rs/exec/src/event_processor_with_human_output.rs
-@@ -216,7 +216,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
-         session_configured_event: &SessionConfiguredEvent,
-     ) {
+@@ -218,3 +218,3 @@ impl EventProcessor for EventProcessorWithHumanOutput {
          const VERSION: &str = env!("CARGO_PKG_VERSION");
 -        eprintln!("OpenAI Codex v{VERSION}\n--------");
 +        eprintln!("Puffin v{VERSION}\n--------");
          for (key, value) in config_summary_entries(config, session_configured_event) {
-             eprintln!("{} {}", format!("{key}:").style(self.bold), value);
-         }
 diff --git a/codex-rs/tui/src/history_cell/session.rs b/codex-rs/tui/src/history_cell/session.rs
-index e749c02..efef9c1 100644
+index e749c02..e4d305e 100644
 --- a/codex-rs/tui/src/history_cell/session.rs
 +++ b/codex-rs/tui/src/history_cell/session.rs
-@@ -404,7 +404,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
-             Line::from(vec![
-                 "  ".into(),
+@@ -406,3 +406,3 @@ impl HistoryCell for SessionHeaderHistoryCell {
                  ">_ ".fg(accent_color()),
 -                "OpenAI Codex".bold(),
 +                "Puffin".bold(),
                  format!(" (v{})", self.version).dim(),
-             ]),
-             Line::from(vec![
-@@ -444,10 +444,10 @@ impl HistoryCell for SessionHeaderHistoryCell {
- 
-         let make_row = |spans: Vec<Span<'static>>| Line::from(spans);
- 
--        // Title line rendered inside the box: ">_ OpenAI Codex (vX)"
-+        // Title line rendered inside the box: ">_ Puffin (vX)"
-         let title_spans: Vec<Span<'static>> = vec![
+@@ -449,3 +449,3 @@ impl HistoryCell for SessionHeaderHistoryCell {
              Span::from(">_ ").dim(),
 -            Span::from("OpenAI Codex").bold(),
 +            Span::from("Puffin").bold(),
              Span::from(" ").dim(),
-             Span::from(format!("(v{})", self.version)).dim(),
-         ];
-@@ -524,7 +524,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
-                 .collect();
-         }
+@@ -526,3 +526,3 @@ impl HistoryCell for SessionHeaderHistoryCell {
          let mut lines = vec![
 -            Line::from(format!("OpenAI Codex (v{})", self.version)),
 +            Line::from(format!("Puffin (v{})", self.version)),
              Line::from(format!(
-                 "model: {}{}",
-                 self.model,
 diff --git a/codex-rs/tui/src/status/card.rs b/codex-rs/tui/src/status/card.rs
 index 369a674..74897a5 100644
 --- a/codex-rs/tui/src/status/card.rs
 +++ b/codex-rs/tui/src/status/card.rs
-@@ -736,7 +736,7 @@ impl StatusHistoryCell {
-         let mut lines: Vec<Line<'static>> = Vec::new();
-         lines.push(Line::from(vec![
+@@ -738,3 +738,3 @@ impl StatusHistoryCell {
              Span::from(format!("{}>_ ", FieldFormatter::INDENT)).dim(),
 -            Span::from("OpenAI Codex").bold(),
 +            Span::from("Puffin").bold(),
              Span::from(" ").dim(),
-             Span::from(format!("(v{CODEX_CLI_VERSION})")).dim(),
-         ]));
