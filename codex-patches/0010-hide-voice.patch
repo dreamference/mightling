@@ -1,0 +1,10 @@
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+index 25a7842..93c12fc 100644
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -307,3 +307,4 @@ impl SlashCommand {
+             SlashCommand::App => cfg!(any(target_os = "macos", target_os = "windows")),
+-            SlashCommand::Voice => true,
++            // Puffin: hidden, not removed -- voice uses OpenAI's realtime API; kept for a local voice later.
++            SlashCommand::Voice => false,
+             // Puffin: no OpenAI account to sign out of.
