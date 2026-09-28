@@ -119,3 +119,38 @@ def test_codex_config_stays_valid_toml_after_repeated_writes(tmp_path, monkeypat
     assert parsed["tui"]["model_availability_nux"] == {"gpt-5.6-sol": 3}
     assert parsed["mcp_servers"]["other"]["env"] == {"SOME_URL": "http://example"}
     assert parsed["features"]["code_mode"] is True
+
+
+def test_codex_arguments_follow_the_local_model_flags(tmp_path, monkeypatch):
+    # Codex's exec, resume and fork inherit root-level --oss/--model, so forwarded arguments --
+    # subcommands included -- go after them and still run against the local model. The prompt is
+    # Codex's positional PROMPT; Codex has no --message option.
+    from dreamference.config import DreamferenceConfig
+    from dreamference.runner import CodexRunner, CodexInstaller
+
+    (tmp_path / ".codex").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(CodexInstaller, "is_installed", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/bin/true"))
+    calls = []
+    monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)
+
+    runner.run_session(agent_args=["exec", "--json", "do it"])
+    runner.run_session(prompt="fix the tests")
+
+    forwarded, prompted = calls
+    assert forwarded[1:6] == ["--oss", "--local-provider", "openai-custom", "--model", forwarded[5]]
+    assert forwarded[6:] == ["exec", "--json", "do it"]
+    assert prompted[-1] == "fix the tests" and "--message" not in prompted
+
+
+def test_version_and_help_do_not_wait_for_the_model():
+    from dreamference.runner import CodexRunner
+
+    assert not CodexRunner.needs_model(["--version"])
+    assert not CodexRunner.needs_model(["exec", "--help"])
+    assert not CodexRunner.needs_model(["apply"])
+    assert CodexRunner.needs_model(["exec", "do it"])
+    assert CodexRunner.needs_model([])

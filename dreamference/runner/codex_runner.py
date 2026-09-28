@@ -10,12 +10,19 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Optional, List
+from typing import Final, List, Optional, Sequence
 
 from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.codex_installer import CodexInstaller
 from dreamference.hardware import resolve_model_hf_repo, get_model_launch_overrides
+
+# Codex subcommands that never open a session, so a forwarded `puffin apply` or
+# `puffin completion bash` runs without first waiting for the model server.
+CODEX_COMMANDS_WITHOUT_MODEL: Final[tuple] = (
+    "help", "completion", "apply", "a", "features", "doctor", "login", "logout",
+    "mcp", "plugin", "archive", "unarchive", "delete", "sandbox",
+)
 
 # Appended to Codex's own system prompt, because web access has to travel with the session rather
 # than with the directory. The equivalent text lives in this repo's AGENTS.md, but AGENTS.md is
@@ -118,19 +125,46 @@ class CodexRunner:
         # section costs more here than an irrelevant one.
         return max(decoded, key=len)
 
-    def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:
+    @staticmethod
+    def needs_model(agent_args: Sequence[str]) -> bool:
+        """
+        Tells whether a pass-through command line talks to the model at all.
+
+        `puffin --version` or `puffin apply` should answer at once, not wait for a model server
+        that may take minutes to load or may not be running.
+
+        Args:
+            agent_args (Sequence[str]): Arguments forwarded to puffin-codex.
+
+        Returns:
+            bool: False for version, help and the subcommands that never start a session.
+        """
+        if {"--help", "-h", "--version", "-V"} & set(agent_args):
+            return False
+        return not (agent_args and agent_args[0] in CODEX_COMMANDS_WITHOUT_MODEL)
+
+    def run_session(
+        self,
+        prompt: Optional[str] = None,
+        debug: bool = False,
+        agent_args: Optional[Sequence[str]] = None,
+    ) -> int:
         """
         Ensures vLLM server is online, provisions Codex CLI if missing, and launches Codex task/session.
 
         Args:
-            prompt (Optional[str]): Optional task prompt for non-interactive execution.
+            prompt (Optional[str]): Optional initial prompt, passed as Codex's positional PROMPT.
             debug (bool): Enable verbose debug output.
+            agent_args (Optional[Sequence[str]]): Codex command-line arguments forwarded verbatim
+                after the ones this runner sets, so a Codex user's flags and subcommands work.
 
         Returns:
             int: Subprocess exit code (0 for success).
         """
+        agent_args = list(agent_args or [])
+
         # Step 1: Ensure local vLLM endpoint is online
-        if not self.vllm_manager.check_health():
+        if self.needs_model(agent_args) and not self.vllm_manager.check_health():
             from dreamference.runner.goose_runner import GooseRunner
             goose_runner = GooseRunner(config=self.config)
             if not goose_runner.wait_for_vllm():
@@ -342,15 +376,19 @@ base_url = "{api_base}"
         # Codex CLI doesn't use OPENAI_API_KEY natively for custom providers, but we set it just in case
         env["OPENAI_API_KEY"] = "sk-gb10-local-token"
         
+        # These are root-level options, which Codex's exec, resume and fork subcommands inherit, so
+        # forwarded arguments go after them -- a subcommand among them still sees the local model.
         cmd: List[str] = [
             codex_bin,
             "--oss",
             "--local-provider", "openai-custom",
-            "--model", hf_model
+            "--model", hf_model,
+            *agent_args,
         ]
 
+        # Codex takes the initial prompt as a positional argument; it has no --message option.
         if prompt:
-            cmd.extend(["--message", prompt])
+            cmd.append(prompt)
 
         if debug:
             # Codex has no --debug flag; `debug` is a subcommand (`codex debug models`), so
