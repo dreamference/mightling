@@ -31,8 +31,15 @@ def test_check_model_compatibility():
     assert valid_unknown is True
     assert "unknown" in msg_unknown.lower()
 
-def test_check_speculative_compatibility():
-    from dreamference.hardware import check_speculative_compatibility
+def test_check_speculative_compatibility(monkeypatch):
+    # The memory budget is checked against the host, so pin it to a GB10's 128 GB: on a 16 GB CI
+    # runner the real check correctly refuses the pair, and the test is about the registry entries.
+    from types import SimpleNamespace
+    from dreamference.hardware import HardwareManager, check_speculative_compatibility
+    monkeypatch.setattr(
+        HardwareManager, "detect_gb10_hardware",
+        classmethod(lambda cls: SimpleNamespace(total_unified_memory_gb=128.0)),
+    )
     valid, msg = check_speculative_compatibility(
         "qwen3.5-122b-a10b-int4-dflash", "qwen3.5-122b-a10b-dflash-draft")
     assert valid is True
