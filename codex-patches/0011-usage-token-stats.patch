@@ -1,0 +1,55 @@
+diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
+index 9d61157..4033938 100644
+--- a/codex-rs/tui/Cargo.toml
++++ b/codex-rs/tui/Cargo.toml
+@@ -24,2 +24,3 @@ workspace = true
+ [dependencies]
++puffin-launcher = { path = "../puffin" }
+ codex-build-info = { workspace = true }
+diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
+index 383376a..c60916f 100644
+--- a/codex-rs/tui/src/bottom_pane/slash_commands.rs
++++ b/codex-rs/tui/src/bottom_pane/slash_commands.rs
+@@ -77,3 +77,2 @@ pub(crate) fn builtins_for_input(flags: BuiltinCommandFlags) -> Vec<(&'static st
+         .filter(|(_, cmd)| flags.plugins_command_enabled || *cmd != SlashCommand::Plugins)
+-        .filter(|(_, cmd)| flags.token_activity_command_enabled || *cmd != SlashCommand::Usage)
+         .filter(|(_, cmd)| flags.goal_command_enabled || *cmd != SlashCommand::Goal)
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+index 4fe2ed0..878517b 100644
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -533,5 +533,6 @@ impl ChatWidget {
+             SlashCommand::Usage => {
+-                if self.ensure_usage_command_available() {
+-                    self.open_usage_menu();
+-                }
++                let u = |t: &crate::token_usage::TokenUsage| [t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.total_tokens];
++                let info = self.token_info.as_ref();
++                let report = puffin_launcher::usage::report(info.map(|i| u(&i.total_token_usage)), info.map(|i| u(&i.last_token_usage)), info.and_then(|i| i.model_context_window));
++                self.add_plain_history_lines(report.into_iter().map(ratatui::text::Line::from).collect());
+             }
+@@ -778,14 +779,3 @@ impl ChatWidget {
+             }
+-            SlashCommand::Usage => {
+-                if self.ensure_usage_command_available() {
+-                    match crate::analytics::TokenActivityView::parse(trimmed) {
+-                        Some(view) => self
+-                            .app_event_tx
+-                            .send(AppEvent::OpenAnalytics { view: Some(view) }),
+-                        None => self.add_error_message(
+-                            "Usage: /usage [daily|weekly|cumulative]".to_string(),
+-                        ),
+-                    }
+-                }
+-            }
++            SlashCommand::Usage => self.dispatch_command(SlashCommand::Usage),
+             SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+index 25a7842..7b0b05e 100644
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -120,3 +120,3 @@ impl SlashCommand {
+             SlashCommand::Pwd => "show the current working directory",
+-            SlashCommand::Usage => "view account usage or use a usage limit reset",
++            SlashCommand::Usage => "show token usage for this session",
+             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",

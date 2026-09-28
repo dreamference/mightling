@@ -34,6 +34,7 @@ pub mod app;
 pub mod help;
 
 pub mod update;
+pub mod usage;
 
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
