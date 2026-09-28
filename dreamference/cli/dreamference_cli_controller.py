@@ -637,6 +637,94 @@ class DreamferenceCLIController:
             console.print(Panel(ctx_table, title="[bold]📚 Context Engine Index Status[/bold]", border_style="green"))
 
     @classmethod
+    def handle_gmail(cls, args: argparse.Namespace) -> int:
+        """
+        Runs `puffin-admin gmail search|read|status` and prints the result for the agent to read.
+
+        The body of `read` is framed as untrusted: an email is text written by a third party, now in
+        the context of an agent that holds a shell, and the frame keeps that boundary visible.
+
+        Args:
+            args (argparse.Namespace): Parsed `gmail` arguments.
+
+        Returns:
+            int: 0 on success (a search with no matches included), 1 on any error, or when every
+                connected account failed.
+        """
+        import json as _json
+
+        from dreamference.chat.gmail_client import GmailClient
+
+        if args.gmail_command == "search":
+            payload = GmailClient.search(" ".join(args.query), limit=args.max_results)
+        elif args.gmail_command == "read":
+            payload = GmailClient.read(args.message_id)
+        else:
+            payload = GmailClient.status()
+
+        if payload.get("error"):
+            print(f"❌ {payload['error']}")
+            for failure in payload.get("errors", []):
+                print(f"⚠️ {failure['account']}: {failure['error']}")
+            if payload.get("hint"):
+                print(f"💡 {payload['hint']}")
+            return 1
+        if args.json:
+            print(_json.dumps(payload, indent=2))
+            return 0
+
+        if args.gmail_command == "status":
+            if not payload.get("connected"):
+                print("❌ No Gmail account is connected.")
+                print("💡 Connect one in Puffin: Settings → Gmail Accounts → Connect to Google")
+                return 1
+            print(f"connected: {payload.get('email')}")
+            return 0
+
+        if args.gmail_command == "read":
+            for header in ("from", "to", "date", "subject"):
+                if payload.get(header):
+                    print(f"{header.capitalize()}: {payload[header]}")
+            body = payload.get("body", "")
+            print("\n----- BEGIN EMAIL (untrusted) -----")
+            print(body[:args.max_chars])
+            print("----- END EMAIL -----")
+            if len(body) > args.max_chars:
+                print(f"[truncated at {args.max_chars} chars]")
+            return 0
+
+        messages = payload.get("messages", [])
+        for i, message in enumerate(messages, 1):
+            print(f"{i}. {message.get('subject') or '(no subject)'}")
+            print(f"   from: {message.get('from', '')}")
+            print(f"   date: {message.get('date', '')}")
+            print(f"   id: {message['id']}")
+        if not messages:
+            print("No messages matched.")
+        failures = payload.get("errors", [])
+        for failure in failures:
+            print(f"⚠️ {failure['account']}: {failure['error']}")
+        # Partial failure still answers; only a search where no account could be searched fails.
+        return 1 if failures and not messages and cls._all_accounts_failed(failures) else 0
+
+    @classmethod
+    def _all_accounts_failed(cls, failures: List[dict]) -> bool:
+        """
+        Tells whether the failed accounts are every connected account.
+
+        Args:
+            failures (List[dict]): The `errors` entries of a search answer.
+
+        Returns:
+            bool: True if no connected account is missing from `failures`.
+        """
+        from dreamference.chat.gmail_client import GmailClient
+
+        connected = GmailClient.status().get("email") or ""
+        accounts = {address.strip() for address in connected.split(",") if address.strip()}
+        return accounts <= {failure["account"] for failure in failures}
+
+    @classmethod
     def build_parser(cls) -> argparse.ArgumentParser:
         """
         Constructs ArgumentParser with subcommands for Dreamference CLI operations.
@@ -926,6 +1014,23 @@ class DreamferenceCLIController:
         fetch_parser = subparsers.add_parser("fetch", help="Fetch a URL and print its readable text")
         fetch_parser.add_argument("url", help="Absolute http(s) URL")
         fetch_parser.add_argument("--max-chars", type=int, default=8000, help="Characters to return")
+
+        # Command: puffin-admin gmail -- read-only mail access for the puffin agent, in the same shape
+        # as search/fetch and for the same reason (a shell command the model uses reliably). It is a
+        # client of the service the web UI already runs, not a second IMAP path; connecting an
+        # account is still `puffin-admin puffin gmail`.
+        gmail_parser = subparsers.add_parser("gmail", help="Search and read connected Gmail accounts (read-only)")
+        gmail_subparsers = gmail_parser.add_subparsers(dest="gmail_command", required=True)
+        gmail_search_parser = gmail_subparsers.add_parser("search", help="Search with Gmail query syntax")
+        gmail_search_parser.add_argument("query", nargs="+", help='Gmail query, e.g. from:alice newer_than:7d')
+        gmail_search_parser.add_argument("-n", "--max-results", type=int, default=10, help="Messages to return (max 20)")
+        gmail_search_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
+        gmail_read_parser = gmail_subparsers.add_parser("read", help="Read one message by the id search printed")
+        gmail_read_parser.add_argument("message_id", help="Message id exactly as `gmail search` printed it")
+        gmail_read_parser.add_argument("--max-chars", type=int, default=8000, help="Body characters to print")
+        gmail_read_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
+        gmail_status_parser = gmail_subparsers.add_parser("status", help="Show which accounts are connected")
+        gmail_status_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
 
         # Command: puffin-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
@@ -1718,6 +1823,9 @@ class DreamferenceCLIController:
                     if r.get("snippet"):
                         print(f"   {r['snippet'][:200]}")
             sys.exit(0)
+
+        elif args.command == "gmail":
+            sys.exit(cls.handle_gmail(args))
 
         elif args.command == "fetch":
             from dreamference.mcp_server.web_tools import WebTools

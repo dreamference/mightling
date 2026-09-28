@@ -473,22 +473,53 @@ class GmailSearchService:
         return respond
 
     @classmethod
-    def _open_mailboxes(cls) -> Tuple[Dict[str, imaplib.IMAP4_SSL], Optional[str]]:
+    def _open_mailboxes(
+        cls,
+    ) -> Tuple[Dict[str, imaplib.IMAP4_SSL], Optional[str], List[Dict[str, str]]]:
+        """
+        Opens every connected account's All Mail folder read-only.
+
+        An account that fails to open is reported rather than skipped: with several accounts, a
+        silent skip makes "that account is broken" look exactly like "nothing matched there".
+
+        Returns:
+            The open connections by address, an error when none could be opened, and one
+            `{"account", "error"}` entry per account that failed.
+        """
         stored = cls.credentials()
         if not stored:
-            return {}, NOT_CONNECTED_MESSAGE
+            return {}, NOT_CONNECTED_MESSAGE, []
         connections = {}
+        failures: List[Dict[str, str]] = []
         for cred in stored:
             try:
                 conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=IMAP_TIMEOUT_SECONDS)
                 conn.authenticate("XOAUTH2", cls._xoauth2(cred["email"], cred["access_token"]))
                 conn.select(f'"{cls._all_mail_folder(conn)}"', readonly=True)
                 connections[cred["email"]] = conn
-            except Exception:
-                continue
+            except Exception as error:
+                failures.append({"account": cred["email"], "error": cls._describe(error)})
         if not connections:
-            return {}, "Could not connect to any Gmail accounts."
-        return connections, None
+            return {}, "Could not connect to any Gmail accounts.", failures
+        return connections, None, failures
+
+    @classmethod
+    def _describe(cls, error: Exception) -> str:
+        """
+        Turns an IMAP failure into one readable line.
+
+        imaplib raises with the server's response as bytes, which prints as `b'...'`.
+
+        Args:
+            error (Exception): The failure.
+
+        Returns:
+            str: A short description.
+        """
+        detail = error.args[0] if error.args else error
+        if isinstance(detail, bytes):
+            detail = detail.decode("utf-8", "replace")
+        return str(detail) or type(error).__name__
 
     @classmethod
     def _all_mail_folder(cls, connection: imaplib.IMAP4_SSL) -> str:
@@ -562,10 +593,15 @@ class GmailSearchService:
     def search(cls, query: str, limit: int) -> Dict[str, Any]:
         """
         Finds messages matching a Gmail search query.
+
+        Returns:
+            Dict[str, Any]: `messages`, newest first, plus `errors` naming each account that could
+                not be searched -- present only when one failed, so a clean answer keeps the shape
+                the web UI's tool has always read. `error` alone when no account could be opened.
         """
-        connections, error = cls._open_mailboxes()
+        connections, error, failures = cls._open_mailboxes()
         if not connections:
-            return {"error": error}
+            return {"error": error, "errors": failures} if failures else {"error": error}
         
         limit = max(1, min(limit, MAX_RESULT_LIMIT))
         all_messages = []
@@ -579,15 +615,18 @@ class GmailSearchService:
                     for m in messages:
                         m["id"] = f"{email}|{m['id']}"
                     all_messages.extend(messages)
-            except Exception:
-                pass
+            except Exception as failure:
+                failures.append({"account": email, "error": cls._describe(failure)})
             finally:
                 try:
                     connection.logout()
                 except Exception:
                     pass
         
-        return {"messages": all_messages[:limit]}
+        answer: Dict[str, Any] = {"messages": all_messages[:limit]}
+        if failures:
+            answer["errors"] = failures
+        return answer
 
     @classmethod
     def _fetch_headers(cls, connection: imaplib.IMAP4_SSL, uids: List[bytes]) -> List[Dict[str, str]]:
@@ -687,7 +726,7 @@ class GmailSearchService:
         else:
             email, real_id = None, message_id
             
-        connections, error = cls._open_mailboxes()
+        connections, error, _failures = cls._open_mailboxes()
         if not connections:
             return {"error": error}
             
@@ -1026,7 +1065,9 @@ class GmailSearchService:
                     self._reply(200, cls.search(terms, limit))
                     return
                 if parsed.path.startswith("/message/"):
-                    self._reply(200, cls.message(parsed.path.rsplit("/", 1)[-1]))
+                    # Decoded: a client may percent-encode the `@` and `|` in "<account>|<id>".
+                    message_id = urllib.parse.unquote(parsed.path.rsplit("/", 1)[-1])
+                    self._reply(200, cls.message(message_id))
                     return
                 self._reply(404, {"error": "not found"})
 

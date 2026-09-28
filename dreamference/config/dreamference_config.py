@@ -47,6 +47,9 @@ HERMES_TOOL_CALL_PROMPT: Final[str] = (
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
 DEFAULT_CAVE_MODE: Final[bool] = False
 DEFAULT_USE_TENSORIZER: Final[bool] = False
+# Whether the puffin agent's prompt advertises `puffin-admin gmail` when an account is connected.
+# Read by the Rust launcher too (DREAMFERENCE_PUFFIN_GMAIL, then `puffin_gmail` in the TOML file).
+DEFAULT_PUFFIN_GMAIL: Final[bool] = True
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -82,6 +85,7 @@ class DreamferenceConfig:
         cave_mode: Optional[bool] = None,
         use_tensorizer: Optional[bool] = None,
         guided_decoding_backend: Optional[str] = None,
+        puffin_gmail: Optional[bool] = None,
     ):
         """
         Initializes DreamferenceConfig by loading file defaults and overriding with environment variables and parameters.
@@ -260,6 +264,14 @@ class DreamferenceConfig:
         else:
             self.use_tensorizer = bool(self.file_data.get("use_tensorizer", DEFAULT_USE_TENSORIZER))
 
+        env_puffin_gmail = os.getenv("DREAMFERENCE_PUFFIN_GMAIL")
+        if puffin_gmail is not None:
+            self.puffin_gmail: bool = puffin_gmail
+        elif env_puffin_gmail is not None:
+            self.puffin_gmail = env_puffin_gmail.lower() in ("1", "true", "yes")
+        else:
+            self.puffin_gmail = bool(self.file_data.get("puffin_gmail", DEFAULT_PUFFIN_GMAIL))
+
         # Path to official Goose config file
         self.config_path: Path = GOOSE_CONFIG_PATH
 
@@ -350,6 +362,7 @@ class DreamferenceConfig:
         if self.cave_mode != DEFAULT_CAVE_MODE: data["cave_mode"] = self.cave_mode
         if self.guided_decoding_backend != DEFAULT_GUIDED_DECODING_BACKEND: data["guided_decoding_backend"] = self.guided_decoding_backend
         if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
+        if self.puffin_gmail != DEFAULT_PUFFIN_GMAIL: data["puffin_gmail"] = self.puffin_gmail
 
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

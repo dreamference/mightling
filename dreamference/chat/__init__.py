@@ -15,6 +15,7 @@ in a window of its own (`desktop_installer`, `desktop_runner`).
 
 from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.chat.desktop_runner import DesktopRunner
+from dreamference.chat.gmail_client import GmailClient
 from dreamference.chat.gmail_credentials import GmailCredentials
 from dreamference.chat.gmail_search_service import GmailSearchService
 from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
@@ -28,6 +29,7 @@ from dreamference.chat.onyx_ui_scripts import OnyxUIScripts
 __all__ = [
     "DesktopInstaller",
     "DesktopRunner",
+    "GmailClient",
     "GmailCredentials",
     "GmailSearchService",
     "OnyxBrandAssets",

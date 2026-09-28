@@ -1432,7 +1432,7 @@ def test_a_search_returns_the_messages_it_finds():
             pass
 
     with patch.object(GmailSearchService, "_open_mailboxes",
-                      return_value=({"me@gmail.com": FakeConnection()}, None)):
+                      return_value=({"me@gmail.com": FakeConnection()}, None, [])):
         answer = GmailSearchService.search("hi", 1)
 
     assert answer == {"messages": [{

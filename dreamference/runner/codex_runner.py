@@ -66,6 +66,8 @@ class CodexRunner:
         # The launcher reads the vLLM URL from the environment first, so a host given to
         # puffin-admin on the command line or in a non-default config file reaches it.
         env["DREAMFERENCE_VLLM_HOST"] = self.config.vllm_host
+        # Same for the Gmail prompt opt-out, which the launcher reads the same way.
+        env["DREAMFERENCE_PUFFIN_GMAIL"] = "true" if self.config.puffin_gmail else "false"
         if debug:
             # Codex has no --debug flag; verbosity is RUST_LOG. The TUI owns the terminal, so its
             # log goes to ~/.codex/logs_2.sqlite rather than to a file.

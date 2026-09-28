@@ -1,6 +1,6 @@
 # Puffin Terminal Agent — Gmail Access
 
-**Status:** draft — not implemented
+**Status:** implemented — `dreamference/chat/gmail_client.py`, `puffin-admin gmail`, the launcher's prompt block in `puffin-rs/src/lib.rs`, per-account `errors` in the service. Default-on when connected (§5's open decision), opt out with `puffin_gmail = false`.
 **Target:** the `puffin` terminal agent (`puffin`, the Puffin-branded Codex with the launcher in `puffin-rs/` compiled in)
 **Builds on:** the Gmail search service already running for the Onyx web UI (`dreamference/chat/gmail_search_service.py`, container `dreamference-gmail`), and the `puffin-admin search` / `puffin-admin fetch` pattern that gives the same agent web access.
 
