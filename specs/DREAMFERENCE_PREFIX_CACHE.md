@@ -1,10 +1,10 @@
 # Prefix Caching on the Hybrid GDN + DFlash Stack — Findings and Patch Design
 
-**Status:** v5 — Deployed (`dense5` with region-adaptive chunking + 9048 budget for hybrid; `enable_prefix_caching: False` for int4 fallback)
+**Status:** v5 — Deployed. As of the registry on 2026-09-28: `hybrid-dflash` on `dense5` (region-adaptive chunking, 9048 budget), and the `int4-dflash` fallback moved to `dense9` (1120 grid + opt-in caching, §6.1), with `enable_prefix_caching: True` on both.
 
 **Date:** 2026-08-24
 **Patch:** `runtime/patch_mamba_chunk_align.py`
-**Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense5`) / `qwen3.5-122b-a10b-int4-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-kvfix2`)
+**Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense5`) / `qwen3.5-122b-a10b-int4-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense9`; it was `kvfix2` when this document was first written). The patches live in `runtime/` and are baked in by `Dockerfile.dense`, which also bakes `patch_opt_in_cache.py`.
 
 ---
 
@@ -258,7 +258,8 @@ The `max_num_batched_tokens` budget went from 8248 → 9048 for the hybrid entry
 1. `dense2` deployed the `patch_mamba_chunk_align.py` patch.
 2. `dense3` deployed the `patch_unify_downscale` patch.
 3. `dense5` deployed the region-adaptive `patch_mamba_checkpoint_chunks` patch, enabling the 9048 budget.
-4. **Housekeeping:** The `int4-dflash` fallback currently runs on `kvfix2`. Because it lacks the new alignment patches, it would ship the §2.2 stale-hit hazard if caching were enabled. Its `enable_prefix_caching` is therefore explicitly set to `False` in the registry. It will remain off until a patched `kvfix3` image is baked.
+4. **Housekeeping (superseded):** the `int4-dflash` fallback used to run on `kvfix2`. That image lacked the alignment patches, and would have shipped the §2.2 stale-hit hazard, so caching was forced off for it.
+5. `dense9` deployed the 1120-grid drafter downscale plus opt-in caching (§6.1). The `int4-dflash` entry now pins `dense9` and has `enable_prefix_caching: True`. The hybrid default stays on `dense5`.
 
 ---
 
