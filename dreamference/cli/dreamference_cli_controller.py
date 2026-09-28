@@ -10,7 +10,7 @@ import argparse
 import os
 import sys
 import time
-from typing import Final, Optional
+from typing import Final, List, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -637,9 +637,14 @@ class DreamferenceCLIController:
             console.print(Panel(ctx_table, title="[bold]📚 Context Engine Index Status[/bold]", border_style="green"))
 
     @classmethod
-    def build_parser(cls) -> argparse.ArgumentParser:
+    def build_parser(cls, chat_prog: Optional[str] = None) -> argparse.ArgumentParser:
         """
         Constructs ArgumentParser with subcommands for Dreamference CLI operations.
+
+        Args:
+            chat_prog (Optional[str]): Program name shown in the `chat` subcommand's usage line.
+                None keeps argparse's default, `dream chat`; the `puffin` entry point passes its
+                own name so `puffin --help` does not describe a command the user did not type.
 
         Returns:
             argparse.ArgumentParser: Configured argument parser object.
@@ -666,7 +671,7 @@ class DreamferenceCLIController:
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
         # Command: dream chat
-        chat_parser = subparsers.add_parser("chat", help="Launch interactive pair programming session")
+        chat_parser = subparsers.add_parser("chat", prog=chat_prog, help="Launch interactive pair programming session")
         chat_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         chat_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
         chat_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
@@ -940,10 +945,16 @@ class DreamferenceCLIController:
         return parser
 
     @classmethod
-    def run_cli(cls) -> None:
-        """Main execution entrypoint for CLI command parsing and subcommand dispatching."""
-        parser = cls.build_parser()
-        args = parser.parse_args()
+    def run_cli(cls, argv: Optional[List[str]] = None, chat_prog: Optional[str] = None) -> None:
+        """
+        Main execution entrypoint for CLI command parsing and subcommand dispatching.
+
+        Args:
+            argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.
+            chat_prog (Optional[str]): Usage-line name for the `chat` subcommand (see `build_parser`).
+        """
+        parser = cls.build_parser(chat_prog=chat_prog)
+        args = parser.parse_args(argv)
 
         if not args.command:
             parser.print_help()
@@ -2073,10 +2084,26 @@ class DreamferenceCLIController:
             except KeyboardInterrupt:
                 console.print("\n[yellow]Stopping Web Canvas UI...[/yellow]")
 
-def main() -> None:
-    """Standalone CLI main function."""
+def main(argv: Optional[List[str]] = None, chat_prog: Optional[str] = None) -> None:
+    """
+    Standalone CLI main function.
+
+    Args:
+        argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.
+        chat_prog (Optional[str]): Usage-line name for the `chat` subcommand.
+    """
     try:
-        DreamferenceCLIController.run_cli()
+        DreamferenceCLIController.run_cli(argv, chat_prog=chat_prog)
     except KeyboardInterrupt:
         print("\nGoodbye!")
         sys.exit(0)
+
+
+def puffin_main() -> None:
+    """
+    The `puffin` command: `dream chat` under its own name.
+
+    It is the same parse and the same dispatch with `chat` put in front of the arguments, so the
+    two commands cannot drift apart -- a flag added to `dream chat` is a flag of `puffin` too.
+    """
+    main(["chat", *sys.argv[1:]], chat_prog="puffin")
