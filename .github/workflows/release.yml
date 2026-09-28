@@ -232,4 +232,8 @@ jobs:
           flags=(--generate-notes --target "$GITHUB_SHA" --title "Puffin $TAG")
           [[ "${{ inputs.prerelease }}" == "true" ]] && flags+=(--prerelease)
           [[ "${{ inputs.draft }}" == "true" ]] && flags+=(--draft)
-          gh release create "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" "${flags[@]}"
+          # merge-multiple keeps each artifact's own subdirectories (deb/, appimage/), so collect the
+          # files themselves; handing gh a directory fails the upload after the release is created.
+          mapfile -t files < <(find artifacts -type f | sort)
+          printf 'Uploading %s\n' "${files[@]}"
+          gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" "${flags[@]}"
