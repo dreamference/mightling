@@ -1,6 +1,6 @@
 # Puffin PDF Search Tool — Technical Specification
 
-**Status:** Draft v1 (Dreamference Sidecar architecture)
+**Status:** Draft v1: **not implemented.** Nothing in `dreamference/` implements PDF search, as of 2026-09-28. The facts below about existing infrastructure (container names, tool registration, SearXNG, Infinity) were corrected against the code on that date; the design itself is unchanged.
 **Target:** Puffin (Dreamference Sidecar ecosystem)
 **Estimated effort:** ~4-5 days (sidecar app, SearXNG integration, PDF parsing, text embedding, semantic chunking, SSRF hardened downloader)
 
@@ -10,7 +10,7 @@
 
 Add a built-in `PDF Search` tool that lets the LLM search the internet for PDF documents, download them on the fly, extract their text, and return the most relevant excerpts. 
 
-Built on the Dreamference sidecar architecture (like the Image Search and Gmail tools), this tool runs as an independent container (`dream-pdf-search`). It registers dynamically via Onyx's Custom Tool REST API. 
+Built on the Dreamference sidecar architecture (like the Image Search and Gmail tools), this tool would run as an independent container (`dreamference-pdf-search`; the deployment names its sidecars `dreamference-*`). It registers dynamically via Onyx's Custom Tool REST API. 
 
 The tool queries the deployment's SearXNG instance with `filetype:pdf` filters, downloads the candidate PDFs with strict SSRF guards, extracts text using PyMuPDF, chunks the text, and runs it through the local Infinity embedding sidecar. The top-K most semantically relevant chunks are returned to the LLM as text along with source URLs and page numbers, enabling accurate, on-the-fly research without bloating the LLM's context window.
 
@@ -22,10 +22,10 @@ The tool queries the deployment's SearXNG instance with `filetype:pdf` filters, 
 LLM custom tool call {"queries": ["Sony Alpha a7 III user manual"]}
         │
         ▼
-Onyx API Server calls POST http://dream-pdf-search:8769/search
+Onyx API Server calls POST http://dreamference-pdf-search:8769/search
         │
         ▼
-[Inside dream-pdf-search container]
+[Inside dreamference-pdf-search container]
 SearXNGClient.search_web (with query modifications e.g. "ext:pdf")
         │
         ▼
@@ -40,7 +40,7 @@ PARSE STEP: PyMuPDF extracts text + page numbers
   → Chunk text into overlapping segments (e.g. 500 words)
         │
         ▼
-EMBED STEP: Infinity sidecar (puffin-siglip / text embedding model)
+EMBED STEP: a text-embedding server (see §4.2: the Infinity sidecar cannot run on GB10)
   → Embed all chunks and the search query
         │
         ▼
@@ -62,18 +62,14 @@ Onyx receives response, streams to chat.
 
 ## 3. Sidecar Service Design
 
-The sidecar is a FastAPI Python application (`dream-pdf-search`) running on port `8769`.
+The sidecar would run on port `8769`. The existing sidecars (Gmail, image search) are a **single stdlib-HTTP file** in a stock `python:3-slim` container, not FastAPI. Following that convention means a PDF library installed at start, the way image search installs Pillow into `/tmp`.
 
 ### 3.1 Tool Registration
-In `onyx_runner.py`'s `configure` phase, Dreamference dynamically registers the tool:
-```python
-payload = {
-    "name": "PDF Search",
-    "description": "Search the web specifically for PDF documents (manuals, research papers, reports) and read their contents.",
-    "custom_tool_url": "http://dream-pdf-search:8769/search",
-}
-# PUT to /api/admin/tool/custom
-```
+Onyx's custom-tool API takes an **OpenAPI document**, not a `custom_tool_url`. Registration should mirror `enable_image_search()` / `enable_gmail_search()`:
+- `openapi_definition()` in the service module, with one `pdf_search` POST operation;
+- sent to `POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate;
+- a `custom_headers` shared secret (e.g. `X-Puffin-PDF-Token`) generated once into the data directory;
+- a `--no-pdf-search` opt-out on `puffin-admin puffin configure`, like the other tools.
 
 ### 3.2 PDF Parsing and Chunking
 The sidecar uses `pymupdf` (fitz) to extract text. 
@@ -89,11 +85,12 @@ Unlike Image Search, the PDFs downloaded by this tool are strictly ephemeral. Th
 ## 4. Provider & Inference Interactions
 
 ### 4.1 SearXNG Client
-Queries `http://searxng:8080/search`. The sidecar modifies the LLM's query by appending `" filetype:pdf"` (or passing the appropriate SearXNG category flags) to ensure the search engine returns PDF files.
+Queries `http://dreamference-searxng:8080/search` (`SEARXNG_CONTAINER_URL`), which is reachable because SearXNG is joined to Onyx's network. The sidecar modifies the LLM's query by appending `" filetype:pdf"` (or passing the appropriate SearXNG category flags) to ensure the search engine returns PDF files.
 
 ### 4.2 Infinity Embeddings (Text)
-Queries the existing Infinity sidecar (`http://puffin-siglip:9100/embeddings`). 
-*Note: Infinity supports serving multiple models. The sidecar should be configured to load a fast text embedding model (e.g., `BAAI/bge-small-en-v1.5`) alongside SigLIP.*
+The draft planned to reuse the image-search Infinity sidecar (`dreamference-siglip`, `http://dreamference-siglip:9100`) with a text model loaded alongside SigLIP. **That sidecar cannot start on GB10.** Infinity publishes amd64 images only, and GB10 is aarch64 (`DREAMFERENCE_IMAGE_SEARCH.md` §7). Options that do work here:
+- a small torch/transformers or ONNX text-embedding sidecar;
+- reusing `nomic-embed-text-v1.5`, which the context engine already runs on this machine.
 The sidecar embeds the search query and the PDF chunks, calculating cosine similarity locally (NumPy) to surface the most relevant excerpts.
 
 ---
@@ -119,7 +116,7 @@ Because the tool fetches arbitrary PDFs from the internet and parses them locall
 - Hardened downloader SSRF assertions.
 
 **Integration:**
-- `puffin-admin onyx configure` successfully registers the tool.
+- `puffin-admin puffin configure` successfully registers the tool.
 - End-to-end local test against a mock SearXNG instance returning a test PDF. 
 - Verify the tool extracts text, embeds it, and returns the top chunk.
 - Verify memory is freed (no PDF files left on disk).
