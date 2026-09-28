@@ -1,9 +1,10 @@
 # Cuts a product release on demand: Actions tab → "Release" → Run workflow.
 #
-# Builds the Python distribution (the `puffin` and `puffin-admin` commands) and, optionally, the
-# Puffin desktop bundle, then publishes them as a GitHub release tagged v<version> on the commit
-# the workflow was dispatched from. The version is stamped into setup.py and tauri.conf.json inside
-# the runner's checkout only -- nothing is committed back, so the tag is the record of the release.
+# Builds the Python distribution (the `puffin-admin` command), the prebuilt `puffin` agent that
+# `puffin update` downloads, and, optionally, the Puffin desktop bundle, then publishes them as a
+# GitHub release tagged v<version> on the commit the workflow was dispatched from. The version is
+# stamped into setup.py, tauri.conf.json and the puffin binary inside the runner's checkout only --
+# nothing is committed back, so the tag is the record of the release.
 name: Release
 
 on:
@@ -31,6 +32,17 @@ on:
         default: true
       desktop_runner:
         description: "Runner for the desktop build; GB10 is arm64"
+        type: choice
+        default: ubuntu-24.04-arm
+        options:
+          - ubuntu-24.04-arm
+          - ubuntu-24.04
+      build_puffin:
+        description: "Build the puffin agent binaries that `puffin update` installs"
+        type: boolean
+        default: true
+      puffin_runner:
+        description: "Runner for the puffin build; its architecture names the assets (GB10 is arm64)"
         type: choice
         default: ubuntu-24.04-arm
         options:
@@ -154,9 +166,58 @@ jobs:
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
+  puffin:
+    needs: [validate, test]
+    if: ${{ inputs.build_puffin && !failure() && !cancelled() }}
+    runs-on: ${{ inputs.puffin_runner }}
+    env:
+      # Compiled into the launcher, so `puffin update` can tell whether a newer release exists.
+      PUFFIN_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # Only the pinned Codex fork; the fano submodule plays no part in the build.
+      - name: Codex submodule
+        run: git submodule update --init --depth 1 codex
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: setup.py
+      - name: Install puffin-admin
+        run: pip install -e .
+      # Only the registry is cached: Codex's target directory runs to many gigabytes, past what the
+      # Actions cache holds. rustup fetches the toolchain codex-rs/rust-toolchain.toml pins.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'puffin-rs/**') }}
+          restore-keys: cargo-registry-${{ runner.arch }}-
+      # The same build `puffin-admin codex build` runs locally: export the submodule, add
+      # puffin-rs/, apply codex-patches/, cargo build with prebuilt V8 fetched and verified.
+      - name: Build puffin
+        run: puffin-admin codex build --force
+      - name: Package
+        run: |
+          bin="$(dirname "$(python -c 'from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; print(B.executable_path())')")"
+          target="$(uname -m)-unknown-linux-gnu"
+          mkdir -p dist
+          gzip -9 -c "$bin/puffin" > "dist/puffin-$target.gz"
+          gzip -9 -c "$bin/codex-code-mode-host" > "dist/codex-code-mode-host-$target.gz"
+          # `puffin update` checks both archives against this file before installing either.
+          (cd dist && sha256sum "puffin-$target.gz" "codex-code-mode-host-$target.gz" > "puffin-$target.sha256sums")
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: puffin-binaries
+          path: dist/*
+          if-no-files-found: error
+
   release:
-    needs: [python-dist, desktop]
-    # `desktop` is skipped when build_desktop is off; the release still goes out without it.
+    needs: [python-dist, desktop, puffin]
+    # `desktop` and `puffin` are skipped when their inputs are off; the release still goes out
+    # without them.
     if: ${{ !failure() && !cancelled() && needs.python-dist.result == 'success' }}
     runs-on: ubuntu-latest
     steps:

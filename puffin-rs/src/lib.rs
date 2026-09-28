@@ -32,6 +32,7 @@ use toml_edit::value;
 
 pub mod app;
 
+pub mod update;
 
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
@@ -47,7 +48,7 @@ const MAX_WAIT: Duration = Duration::from_secs(600);
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox",
+    "unarchive", "delete", "sandbox", "update",
 ];
 
 /// Codex subcommands Puffin does not offer, each with the reason it gives. They are refused here,

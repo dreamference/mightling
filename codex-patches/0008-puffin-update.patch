@@ -1,0 +1,21 @@
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -184,7 +184,7 @@
+     /// Generate shell completion scripts.
+     Completion(CompletionCommand),
+ 
+-    /// Update Codex to the latest version.
++    /// Update Puffin to the latest release.
+     Update,
+ 
+     /// Diagnose local Codex installation, config, auth, and runtime health.
+@@ -1626,7 +1626,7 @@
+                 root_remote_auth_token_env.as_deref(),
+                 "update",
+             )?;
+-            run_update_command()?;
++            puffin_launcher::update::run().await?;
+         }
+         Some(Subcommand::Doctor(doctor_cli)) => {
+             reject_remote_mode_for_subcommand(
