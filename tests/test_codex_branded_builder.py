@@ -76,6 +76,9 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     assert not cwd.startswith(CODEX_SUBMODULE_DIR)
     assert env["RUSTY_V8_ARCHIVE"] == "a"
     assert env["CARGO_TARGET_DIR"] == os.path.join(str(tmp_path), "target")
+    # Debug info is dropped at compile time, not stripped after: upstream's profile keeps it.
+    assert env["CARGO_PROFILE_RELEASE_DEBUG"] == "none"
+    assert env["CARGO_PROFILE_RELEASE_STRIP"] == "debuginfo"
     assert command[:3] == ["cargo", "build", "--release"]
 
 

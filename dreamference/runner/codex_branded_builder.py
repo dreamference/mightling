@@ -47,6 +47,16 @@ BRANDED_EXECUTABLE_NAME: Final[str] = "puffin-codex"
 # executable, so the two binaries are built and installed together.
 CODE_MODE_HOST_NAME: Final[str] = "codex-code-mode-host"
 
+# Upstream's release profile keeps line tables (`debug = "line-tables-only"`, `strip = false`) so
+# its CI can archive symbols, and strips only when it packages. Built as-is, puffin-codex is 1.4 GB
+# rather than ~315 MB -- and the runner reads the whole file on every launch to recover its system
+# prompt. Overridden through Cargo's environment rather than a patch, so it touches no Codex source,
+# and applied at compile time, which also spares generating debug info that would be thrown away.
+RELEASE_PROFILE_OVERRIDES: Final[dict] = {
+    "CARGO_PROFILE_RELEASE_DEBUG": "none",
+    "CARGO_PROFILE_RELEASE_STRIP": "debuginfo",
+}
+
 # Records which source commit and patch set the installed binaries were built from.
 BUILD_STAMP_NAME: Final[str] = "build-key"
 
@@ -111,7 +121,8 @@ class CodexBrandedBuilder:
     @classmethod
     def build_key(cls) -> Optional[str]:
         """
-        Identifies a build by its inputs: the source commit and the exact bytes of every patch.
+        Identifies a build by its inputs: the source commit, the exact bytes of every patch, and the
+        profile overrides, since changing those changes the binary as surely as a patch does.
 
         Returns:
             Optional[str]: A short key, or None if the submodule is not checked out.
@@ -120,6 +131,7 @@ class CodexBrandedBuilder:
         if commit is None:
             return None
         digest = hashlib.sha256()
+        digest.update(repr(sorted(RELEASE_PROFILE_OVERRIDES.items())).encode())
         for patch in cls.patches():
             digest.update(os.path.basename(patch).encode())
             with open(patch, "rb") as handle:
@@ -317,6 +329,7 @@ class CodexBrandedBuilder:
         environment = DesktopRunner._environment()
         environment.update(rusty_v8)
         environment["CARGO_TARGET_DIR"] = os.path.join(BUILD_CACHE_DIR, "target")
+        environment.update(RELEASE_PROFILE_OVERRIDES)
         # No --locked: upstream's Cargo.lock records the workspace crates at version 0.0.0, which
         # its release job bumps just before building, so Cargo rewrites those 158 entries. Every
         # third-party version stays exactly as the lockfile pins it.
@@ -338,11 +351,6 @@ class CodexBrandedBuilder:
             # its binary and a new one never sees a half-written file.
             staging = os.path.join(bin_dir, f".{installed}.new")
             shutil.copy2(os.path.join(release_dir, built), staging)
-            # Upstream's release profile keeps line tables for symbolication and strips when it
-            # packages; unstripped, puffin-codex is 1.4 GB rather than ~315 MB, and the runner reads
-            # the whole file on every launch to recover its system prompt.
-            if shutil.which("strip"):
-                subprocess.run(["strip", "--strip-debug", staging], check=False)
             os.replace(staging, os.path.join(bin_dir, installed))
         with open(os.path.join(INSTALL_DIR, BUILD_STAMP_NAME), "w") as handle:
             handle.write(f"{key}\n")
