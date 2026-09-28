@@ -1,0 +1,14 @@
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index 4d7984d..5567ad0 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -221,7 +221,8 @@ enum Subcommand {
+     Fork(ForkCommand),
+ 
+     /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
+-    #[clap(name = "cloud", alias = "cloud-tasks")]
++    // Puffin: hidden, not removed -- kept runnable for a future private cloud.
++    #[clap(name = "cloud", alias = "cloud-tasks", hide = true)]
+     Cloud(CloudTasksCli),
+ 
+     /// Internal: run the responses API proxy.
