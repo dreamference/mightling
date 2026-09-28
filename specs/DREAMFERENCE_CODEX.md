@@ -1,5 +1,7 @@
 # Dreamference Codex Integration
 
+> **Superseded:** this describes the old setup, which launched an upstream `codex` from PATH. The agent is now `puffin`, a Puffin-branded build of Codex; see [`DREAMFERENCE_PUFFIN_CODEX.md`](DREAMFERENCE_PUFFIN_CODEX.md).
+
 > **Version:** 1.2.0
 > **Subject:** Codex CLI runner, provisioning, and vLLM integration.
 
