@@ -50,8 +50,8 @@ vLLM as the fallback. Source code, prompts and
 inference never leave the machine, and no vendor account is involved. Puffin is a fork of
 the Codex CLI (release \code{rust-v0.158.0}, 4{,}894 Rust source files, 1.93 million lines). Its
 central engineering choice is to keep the fork almost identical to upstream. The upstream tree is
-never edited. Each build exports it, applies a series of thirteen patches totalling 17.3\,KB (20 files,
-$+57/-41$ lines), and links in a separate crate that does the actual work of localisation: model
+never edited. Each build exports it, applies a series of fourteen patches totalling 19.3\,KB (22 files,
+$+79/-41$ lines), and links in a separate crate that does the actual work of localisation: model
 discovery, configuration, prompt rebranding, help-text rewriting, a release-based updater and
 refusal of cloud-bound commands. We report how the series shrank from an initial 406\,KB and which
 techniques did it. We also report an inventory of the cloud dependencies we had to switch off,
@@ -105,7 +105,7 @@ SearXNG, and they can contain fragments of code or context.
 \begin{itemize}
   \item A \textbf{patch-minimal fork method} for a large Rust agent (\cref{sec:fork}). The method has
     four parts: an unmodified pinned submodule, a build-time export, a small series of one- and
-    two-line hooks, and an external crate linked into the binary. We quantify the result: 17.3\,KB
+    two-line hooks, and an external crate linked into the binary. We quantify the result: 19.3\,KB
     of patches against a 1.93M-line upstream. We also report the techniques that reduced the
     series from 406\,KB.
   \item An \textbf{inventory of the cloud surface} of a modern coding-agent client, and how each part
@@ -168,7 +168,7 @@ concurrent sequences, a configuration forced by memory headroom (\cref{sec:safet
   % row 1: the request path
   \node[box=1.3cm]  (user)     at (-0.2,0)  {terminal\\user};
   \node[box=3.1cm]  (launcher) at (2.8,0)   {\code{puffin-rs} launcher\\\scriptsize model discovery, config,\\help rebrand, update, \code{app}};
-  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 14 patches, 19.2\,KB};
+  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 14 patches, 19.3\,KB};
   \node[box=3.2cm]  (vllm)     at (12.6,0)  {SGLang container\\\scriptsize Qwen3.8-27B NVFP4 + DFlash2};
   % row 2
   \node[box=3.3cm]  (host)     at (6.9,-1.7)  {{\footnotesize\code{codex-code-mode-host}}\\\scriptsize V8, runs Code Mode JS};
@@ -292,7 +292,7 @@ Patch & Files & $+/-$ & Purpose \\
 0015 no-openai-network & 4 & 12/3 & Close the channels found by tracing (\S\ref{sec:egress}) \\
 0016 doctor-offline & 2 & 20/0 & Switch off \code{doctor}'s sign-in, update and reachability checks \\
 \midrule
-Total (14 patches, 19{,}173 bytes) & 22 & 77/41 & against 4{,}894 Rust files, 1.93M lines \\
+Total (14 patches, 19{,}318 bytes) & 22 & 79/41 & against 4{,}894 Rust files, 1.93M lines \\
 \bottomrule
 \end{tabularx}
 \caption{The patch series at the time of writing. Numbers 0003 and 0004 were retired when their
@@ -531,13 +531,13 @@ for example on SWE-bench \cite{jimenez2024swebench}. \Cref{sec:limits} discusses
 Metric & Value \\
 \midrule
 Upstream (Codex \code{rust-v0.158.0}) & 4{,}894 Rust files, 1.93M lines \\
-Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 19{,}173 B (14 patches) \\
-Upstream files touched / lines changed & 20 files / $+57,\ -41$ \\
+Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 19{,}318 B (14 patches) \\
+Upstream files touched / lines changed & 22 files / $+79,\ -41$ \\
 Launcher crate (\code{puffin-rs}) & 1{,}843 lines, 31 unit tests \\
 Agent binary, unstripped $\rightarrow$ stripped & 1.4\,GB $\rightarrow$ 315\,MB (+ 93\,MB Code Mode host) \\
 Incremental rebuild after a launcher edit & $\approx$7 min (thin LTO relink) \\
-Management and services (Python) & 79 modules, 20.2k lines; 416 tests \\
-\quad without a model server & 353 pass, 63 skip (need live server) \\
+Management and services (Python) & 81 modules, 20.9k lines; 427 tests \\
+\quad without a model server & 364 pass, 63 skip (need live server) \\
 Live slash-command suite, Qwen3.8-27B (default) & 77 tests: 75 pass, 2 skip; 651.3\,s \\
 Live slash-command suite, Qwen3.5-122B (fallback) & 77 tests: 75 pass, 2 skip; 806.7\,s \\
 Decode throughput, single stream, 32k context & prose 23.8 / code 49.9 / JSON 53.1 tok/s \\
@@ -681,7 +681,7 @@ rather than any serving algorithm.
 
 Puffin shows that a production coding-agent client can be made vendor-free, with its model on a single
 unified-memory workstation without giving up the ability to take upstream releases. The fork adds
-a 17.3\,KB patch series and a 1.8k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
+a 19.3\,KB patch series and a 1.8k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
 surface is audited and neutralised explicitly, and the host is protected by admission checks and a
 pressure watchdog. The next steps are a task-level accuracy evaluation, the fix for first-run
 onboarding, and the two-layer code index.

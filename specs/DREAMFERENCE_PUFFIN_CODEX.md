@@ -1,6 +1,6 @@
 # Puffin — Changes Made to Codex
 
-**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0016` bring it to 14 patches and 19,173 bytes (2026-09-29), touching 22 upstream files, under the 20,000-byte limit `test_the_patches_stay_small` enforces. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`.
+**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0016` bring it to 14 patches and 19,318 bytes (2026-09-30; `0010` also hides `/pets`), touching 22 upstream files, under the 20,000-byte limit `test_the_patches_stay_small` enforces. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`.
 **Supersedes:** `DREAMFERENCE_CODEX.md`, which describes the older setup where an upstream `codex` on PATH was launched from Python.
 **Upstream:** [openai/codex](https://github.com/openai/codex), release `rust-v0.158.0`.
 

@@ -120,7 +120,7 @@ These are recorded here because the spec used to promise otherwise.
 
 ## 6. Tests Architecture
 
-- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-09-29: 353 passed and 63 skipped in about 30 s. The skips are the live slash-command tests, which need a running vLLM.
+- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-09-30: 364 passed and 63 skipped in about 30 s. The skips are the live slash-command tests, which need a running vLLM.
 - **Style:** `tmp_path` isolation, and no external services except in tests that detect them and skip.
 
 | Test File | Scope |

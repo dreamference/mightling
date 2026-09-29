@@ -159,7 +159,7 @@ puffin-admin model list             # the model matrix
 puffin --version                    # "puffin 0.158.0"
 puffin exec "say hello"             # a one-shot answer from the local model (needs the server)
 puffin-admin index --force          # (re)builds .dreamference/ in the current directory
-.venv/bin/python -m pytest tests/ -q   # 353 passed, 63 skipped without a model server (2026-09-29)
+.venv/bin/python -m pytest tests/ -q   # 364 passed, 63 skipped without a model server (2026-09-30)
 ```
 
 ---
