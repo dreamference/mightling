@@ -66,6 +66,9 @@ class AiderRunner:
             "--openai-api-key", "gb10-local-token",
             "--model", f"openai/{hf_model}",
             "--no-auto-commits" if self.config.sandbox != "none" else "--auto-commits",
+            # Aider otherwise asks PyPI for a newer version, shows release notes, and offers to
+            # send PostHog analytics; none of which a local-only tool should do.
+            "--no-check-update", "--no-show-release-notes", "--analytics-disable",
         ]
 
         # No architect/editor split from the draft model: a draft model is the speculative head
@@ -80,7 +83,9 @@ class AiderRunner:
 
         print(f"🚀 Launching Aider Git Pair-Programmer on GB10 local endpoint ({self.config.model})...")
         try:
-            return subprocess.call(cmd)
+            # litellm, inside Aider, downloads its model-price table from GitHub on import unless
+            # told to use the copy it ships.
+            return subprocess.call(cmd, env={**os.environ, "LITELLM_LOCAL_MODEL_COST_MAP": "True"})
         except Exception as e:
             print(f"❌ Failed to run Aider: {e}")
             return 1

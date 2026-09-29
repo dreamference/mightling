@@ -212,7 +212,7 @@ CASES: Dict[str, Case] = {
     "title": Case("popup"),
     "statusline": Case("popup"),
     "theme": Case("popup"),
-    "pets": Case("popup"),
+    "pets": Case("absent", reason="hidden by patch 0010: pet art is downloaded from OpenAI's CDN"),
     "mcp": Case("inline", expect=("MCP",)),
     "apps": Case("absent", reason="apps are OpenAI-hosted connectors that need a ChatGPT login"),
     "plugins": Case("popup"),

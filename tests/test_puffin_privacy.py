@@ -82,3 +82,16 @@ def test_doctor_checks_that_reach_openai_or_github_are_switched_off(tmp_path):
     updates = (cli / "doctor" / "updates.rs").read_text()
     body = updates[updates.index("async fn updates_check("):]
     assert body.index("if super::PUFFIN_DOCTOR_OFFLINE {") < body.index("\n}\n")
+
+
+@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
+def test_pets_are_hidden_because_their_art_comes_from_openai(tmp_path):
+    # /pets and a configured pet download art from persistent.oaistatic.com (OpenAI's CDN). Patch
+    # 0010 hides the command; the launcher drops a `tui.pet` left in the config.
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
+    slash = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "slash_command.rs").read_text()
+    visible = slash[slash.index("fn is_visible(self)"):]
+    assert "SlashCommand::Pets => false," in visible[:visible.index("_ => true")]
+    launcher = open(os.path.join(os.path.dirname(__file__), os.pardir, "puffin-rs", "src", "lib.rs")).read()
+    assert 'tui.remove("pet");' in launcher
+    assert 'doc["check_for_update_on_startup"] = value(false);' in launcher

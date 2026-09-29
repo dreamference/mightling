@@ -117,3 +117,23 @@ def test_agents_only_name_the_model_the_server_serves(monkeypatch, tmp_path):
     runner.run_session()
     models = [cmd[i + 1] for cmd in calls for i, arg in enumerate(cmd) if arg in ("--model", "--editor-model")]
     assert models and all(m == f"openai/{served}" for m in models)
+
+
+def test_aider_runs_without_update_checks_or_analytics(monkeypatch, tmp_path):
+    # Aider asked PyPI for updates, offered PostHog analytics, and its litellm fetched a price
+    # table from GitHub on import; the audit of 2026-09-29 found all three.
+    from dreamference.config import DreamferenceConfig
+    from dreamference.runner import AiderRunner, AiderInstaller
+
+    runner = AiderRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(AiderInstaller, "install_if_missing", classmethod(lambda cls: True), raising=False)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/aider")
+    calls = []
+    monkeypatch.setattr("subprocess.call", lambda cmd, env=None, **k: calls.append((cmd, env)) or 0)
+
+    runner.run_session("hi")
+    cmd, env = calls[0]
+    for flag in ("--no-check-update", "--no-show-release-notes", "--analytics-disable"):
+        assert flag in cmd
+    assert env["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"

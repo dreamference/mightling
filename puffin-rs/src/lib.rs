@@ -543,11 +543,18 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
 
     doc["model_catalog_json"] = value(catalog_path.to_string_lossy().into_owned());
     set_if_absent(doc.as_table_mut(), "suppress_unstable_features_warning", true);
-    // The update check compares this build with openai/codex releases and offers to install
-    // theirs, which would replace Puffin with upstream Codex.
-    set_if_absent(doc.as_table_mut(), "check_for_update_on_startup", false);
+    // The update check asks api.github.com about openai/codex releases and offers to install
+    // theirs, which would replace Puffin with upstream Codex. Forced, not set only when absent:
+    // a `true` left in the file turned the request back on.
+    doc["check_for_update_on_startup"] = value(false);
     // Always, not only when absent: this is a privacy boundary, not a preference.
     doc["chatgpt_base_url"] = value(OFFLINE_CHATGPT_BASE_URL);
+    // A chosen terminal pet downloads its art from OpenAI's CDN (persistent.oaistatic.com) at
+    // startup; /pets is hidden (patch 0010), and a pet left in the file is dropped for the same
+    // reason.
+    if let Some(tui) = doc.get_mut("tui").and_then(|item| item.as_table_like_mut()) {
+        tui.remove("pet");
+    }
 
     let providers = table(doc.as_table_mut(), "model_providers");
     providers.set_implicit(true);
@@ -834,6 +841,20 @@ mod tests {
     }
 
     #[test]
+    fn settings_that_reach_openai_are_overridden_not_just_defaulted() {
+        let existing = "check_for_update_on_startup = true\n[tui]\npet = \"otter\"\ntheme = \"x\"\n";
+        let text = updated_config(existing, Path::new("/h/c.json"), "http://x:8000")
+            .unwrap_or_default();
+        let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+        assert_eq!(
+            parsed.get("check_for_update_on_startup").and_then(toml::Value::as_bool),
+            Some(false)
+        );
+        let tui = parsed.get("tui").and_then(toml::Value::as_table);
+        assert!(tui.is_some_and(|tui| !tui.contains_key("pet") && tui.contains_key("theme")));
+    }
+
+    #[test]
     fn config_files_are_replaced_whole_and_leave_no_staging_file() {
         let dir = std::env::temp_dir().join(format!("puffin-atomic-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap_or_default();
@@ -850,13 +871,15 @@ mod tests {
 
     #[test]
     fn user_choices_in_config_are_kept() {
-        let existing = "check_for_update_on_startup = true\n[features]\ncode_mode = false\n";
+        // Preferences only: the update check reaches api.github.com and is forced off instead
+        // (settings_that_reach_openai_are_overridden_not_just_defaulted).
+        let existing = "suppress_unstable_features_warning = false\n[features]\ncode_mode = false\n";
         let text =
             updated_config(existing, Path::new("/c.json"), DEFAULT_VLLM_HOST).unwrap_or_default();
         let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
         assert_eq!(
-            parsed.get("check_for_update_on_startup").and_then(toml::Value::as_bool),
-            Some(true)
+            parsed.get("suppress_unstable_features_warning").and_then(toml::Value::as_bool),
+            Some(false)
         );
         let code_mode = parsed
             .get("features")
