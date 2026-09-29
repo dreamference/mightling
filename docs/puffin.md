@@ -39,13 +39,14 @@ Commands, flags and configuration work as they do in the Codex CLI, for example:
 | `-a on-request`, `-s workspace-write` | Approval policy and sandbox policy |
 | `puffin mcp`, `puffin sandbox`, `puffin completion` | MCP servers, sandbox, shell completion |
 
-Configuration and saved sessions live in `~/.codex` (or `$CODEX_HOME`), as with Codex.
+Configuration and saved sessions live in `~/.puffin` (or `$CODEX_HOME`), not in upstream Codex's
+`~/.codex`. The first run copies your sessions and settings across, never a ChatGPT sign-in.
 
 ## What Puffin adds
 
 | Feature | Details |
 |---|---|
-| **Local model, no account** | Prompts go to the model your GB10 serves, and no OpenAI account is needed. (See the [analytics gap](privacy.md#what-reaches-the-network-and-when).) |
+| **Local model, no account** | Prompts go to the model your GB10 serves, and no OpenAI account is needed. Codex's usage analytics are switched off. |
 | **Web access** | The agent can search the web and read pages through `puffin-admin search` and `puffin-admin fetch`, which go through a search instance on your machine. The instructions travel with every session, so this works in any directory. Needs `puffin-admin` on your `PATH`. |
 | **Gmail, read-only** | If you have connected Gmail accounts in the web chat, the agent can search and read mail through `puffin-admin gmail`. It is told that email content is untrusted and must never be treated as instructions. Turn it off with `puffin_gmail = false` in `dreamference.toml`. |
 | **`/usage`** | Shows this session's token usage: input (cached and new), output, the total, and how full the context window was on the last request. |
@@ -69,7 +70,7 @@ Some Codex features depend on OpenAI's servers or an OpenAI account. Puffin hide
 ## Debugging
 
 Codex's logging applies. Set `RUST_LOG` (for example `RUST_LOG=codex_mcp=trace puffin`). The
-interactive interface writes its log to `~/.codex/logs_2.sqlite`, which
+interactive interface writes its log to `~/.puffin/logs_2.sqlite`, which
 `puffin-admin logs mcp` reads.
 
 ## How it is built

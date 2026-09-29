@@ -18,22 +18,14 @@ off.
 | Image search, if you use it | The image query, then downloads of the matching images | Public search engines through SearXNG, then the sites hosting the images |
 | `puffin update` | A check for, and download of, the latest Puffin release | GitHub |
 
-Apart from these, and the known gap below, Puffin does not send your repositories, prompts or chats
-anywhere. The only content that leaves the machine is what these features need: a search query,
+Apart from these, Puffin does not send your repositories, prompts or chats anywhere. The only content that leaves the machine is what these features need: a search query,
 a URL, a mailbox read.
 
-!!! warning "Known gap: Codex usage analytics"
-    `puffin` keeps its settings in `~/.codex`, the same directory as upstream Codex. If you have
-    ever signed in to Codex on this machine, that sign-in is still stored there. With it present,
-    Codex's built-in usage analytics can be sent to OpenAI. A fix is planned. Until then, turn
-    analytics off by adding this to `~/.codex/config.toml`:
-
-    ```toml
-    [analytics]
-    enabled = false
-    ```
-
-    Or, if you no longer use upstream Codex, delete `~/.codex/auth.json`.
+!!! note "Separate from upstream Codex"
+    `puffin` keeps its settings and sessions in `~/.puffin`, not in upstream Codex's `~/.codex`, so
+    a ChatGPT sign-in you made with OpenAI's `codex` is never visible to it. On first run it copies
+    your sessions, history and settings across, and never the sign-in. Codex's usage analytics are
+    switched off in the code itself, so no setting or sign-in can turn them back on.
 
 ## What Puffin switches off
 
@@ -44,6 +36,18 @@ a URL, a mailbox read.
   - `/feedback`, which uploads logs to OpenAI, is removed.
   - `/voice` and `/approve` are hidden.
   - Codex's own update check is off.
+  - Codex's usage analytics are disabled in the code (patch `0013`), and `puffin` never reads
+    upstream Codex's `~/.codex`, where a ChatGPT sign-in may be stored.
+- **Network exposure.** The web chat is published on `127.0.0.1` only (ports 80 and 3000), so its
+  admin account is not reachable from other machines on your network; `configure` applies this.
+  OpenHands, if you use it, is published on `127.0.0.1:3001`, and the diffusion model's endpoint
+  listens on `127.0.0.1:8001`.
+  **The main model server is the exception:** vLLM listens on every interface at port 8000, with no
+  API key, because the web chat and OpenHands run in Docker containers and reach it through the
+  Docker bridge, which a loopback-only server would not answer. Another machine on your network can
+  therefore send it prompts (it reads nothing of yours, but it can use the model). On a network
+  you do not trust, block the port for everything but the bridge, for example
+  `sudo ufw deny in on <your-LAN-interface> to any port 8000`.
 
   See [Terminal agent](puffin.md#what-puffin-removes).
 

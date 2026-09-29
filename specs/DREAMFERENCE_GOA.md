@@ -2,7 +2,7 @@
 
 **Status:** partly implemented (Gmail only) · **Owner:** Owner · **Scope:** Gmail + Drive connectors, single-user and multi-account
 
-## 0. As built (checked against `dreamference/chat/gmail_search_service.py`, 2026-09-28)
+## 0. As built (checked against `dreamference/chat/gmail_search_service.py`, 2026-09-29)
 
 The Gmail half of this design is implemented inside the **Gmail service container** (`dreamference-gmail`), not in the Onyx backend. §§1–12 below remain the design, including the unimplemented parts. What actually exists:
 
@@ -17,9 +17,7 @@ The Gmail half of this design is implemented inside the **Gmail service containe
 - **Transport:** IMAP XOAUTH2 against `imap.gmail.com:993`, on `[Gmail]/All Mail`, found by the `\All` attribute, with `X-GM-RAW` search, read-only (`BODY.PEEK`). The Gmail REST API is not used.
 - **Multi-account (§8):** yes. Accounts can be disconnected with `POST /disconnect`, and search reports failures per account.
 - **Not implemented:** Drive, Docs, Sheets and Contacts (§7 rows 2–4); the `invalid_grant` / `invalid_client` / `accessNotConfigured` error mapping (§6); the fleet-wide alert and fallback UI (§10); DWD for Workspace.
-- **Code-side inconsistencies to know about:**
-  - The module docstring still describes an earlier design, in which GNOME on the host holds the refresh token and a systemd user timer pushes access tokens, and says the service "accepts no POST at all". Both are no longer true.
-  - `GNOME_TOKEN_UNIT = "dreamference-goa"` in `onyx_runner.py` is a leftover constant with no users.
+- **Earlier design, now gone from the code:** GNOME Online Accounts on the host holding the refresh token, with a systemd user timer pushing access tokens into a service that accepted no POST. The module docstring now describes the flow above and records that design as removed, and the leftover `GNOME_TOKEN_UNIT` constant is gone from `onyx_runner.py` (both until 2026-09-29).
 
 ## 1. Summary
 

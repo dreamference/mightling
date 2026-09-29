@@ -30,7 +30,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 
 \title{Puffin: A Vendor-Free Coding Agent on a Single Unified-Memory Workstation, Built from a
-15\,KB Patch Series over OpenAI Codex}
+17\,KB Patch Series over OpenAI Codex}
 
 \author{Dreamference\\
 \texttt{dgxcoder@dreamference.ai}}
@@ -48,8 +48,8 @@ a 122B-parameter mixture-of-experts model served locally through vLLM. Source co
 inference never leave the machine, and no vendor account is involved. Puffin is a fork of
 the Codex CLI (release \code{rust-v0.158.0}, 4{,}894 Rust source files, 1.93 million lines). Its
 central engineering choice is to keep the fork almost identical to upstream. The upstream tree is
-never edited. Each build exports it, applies a series of ten patches totalling 15.4\,KB (14 files,
-$+46/-42$ lines), and links in a separate crate that does the actual work of localisation: model
+never edited. Each build exports it, applies a series of thirteen patches totalling 17.3\,KB (20 files,
+$+57/-41$ lines), and links in a separate crate that does the actual work of localisation: model
 discovery, configuration, prompt rebranding, help-text rewriting, a release-based updater and
 refusal of cloud-bound commands. We report how the series shrank from an initial 406\,KB and which
 techniques did it. We also report an inventory of the cloud dependencies we had to switch off,
@@ -82,8 +82,9 @@ This paper reports how we navigated that tension in Puffin. Puffin is the termin
 \emph{Dreamference}, a local AI stack for the NVIDIA GB10.
 
 \paragraph{What ``local'' means here.} The model, the agent and all session state run on one
-workstation. Source code, prompts, tool output and model traffic never leave it, and no vendor
-account exists. Puffin is not air-gapped, however. Network access happens only through tools the
+workstation. Source code, prompts, tool output and model traffic never leave it, no vendor
+account exists, and a traced session shows no connection to any vendor
+(\cref{sec:egress}). Puffin is not air-gapped, however. Network access happens only through tools the
 agent or user invokes explicitly:
 \begin{itemize}
   \item web search goes through a SearXNG \cite{searxng} instance on the machine, which queries
@@ -102,7 +103,7 @@ SearXNG, and they can contain fragments of code or context.
 \begin{itemize}
   \item A \textbf{patch-minimal fork method} for a large Rust agent (\cref{sec:fork}). The method has
     four parts: an unmodified pinned submodule, a build-time export, a small series of one- and
-    two-line hooks, and an external crate linked into the binary. We quantify the result: 15.4\,KB
+    two-line hooks, and an external crate linked into the binary. We quantify the result: 17.3\,KB
     of patches against a 1.93M-line upstream. We also report the techniques that reduced the
     series from 406\,KB.
   \item An \textbf{inventory of the cloud surface} of a modern coding-agent client, and how each part
@@ -162,7 +163,7 @@ memory headroom (\cref{sec:safety}).
   % row 1: the request path
   \node[box=1.3cm]  (user)     at (-0.2,0)  {terminal\\user};
   \node[box=3.1cm]  (launcher) at (2.8,0)   {\code{puffin-rs} launcher\\\scriptsize model discovery, config,\\help rebrand, update, \code{app}};
-  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 10 patches, 15.4\,KB};
+  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 13 patches, 17.3\,KB};
   \node[box=3.2cm]  (vllm)     at (12.6,0)  {vLLM container\\\scriptsize Qwen3.5-122B int4 + DFlash};
   % row 2
   \node[box=3.3cm]  (host)     at (6.9,-1.7)  {{\footnotesize\code{codex-code-mode-host}}\\\scriptsize V8, runs Code Mode JS};
@@ -228,7 +229,7 @@ Codex is vendored as a git submodule of our own GitHub fork, pinned to the stabl
 Moving to a new upstream release means bumping the submodule and resolving whichever hunks stop
 applying. Because the hunks are few and small, conflicts are local and obvious.
 
-\subsection{From 406\,KB to 15\,KB}
+\subsection{From 406\,KB to 17\,KB}
 
 The first working series had four patches totalling 406{,}116 bytes. \Cref{tab:patches} shows the
 current one. Four techniques made the difference.
@@ -271,7 +272,7 @@ repurposes a ChatGPT-plan screen as local token statistics.
 \toprule
 Patch & Files & $+/-$ & Purpose \\
 \midrule
-0001 brand-puffin-name & 8 & 20/19 & Product name in TUI header, status card, \code{exec} banner, fixed usage strings \\
+0001 brand-puffin-name & 9 & 15/14 & Product name in TUI header, status card, \code{exec} banner, fixed usage strings \\
 0002 puffin-launcher-hook & 2 & 2/1 & One dependency line; route argv through the launcher \\
 0005 hide-openai-login & 2 & 4/0 & Hide \code{login}/\code{logout} and \code{/logout} \\
 0006 hide-cloud & 1 & 2/1 & Hide \code{cloud} (kept for a private cloud) \\
@@ -281,8 +282,11 @@ Patch & Files & $+/-$ & Purpose \\
 0010 hide-voice & 1 & 2/1 & Hide \code{/voice} (hosted realtime API) \\
 0011 usage-token-stats & 4 & 7/17 & \code{/usage} shows local token statistics \\
 0012 hide-auto-review & 1 & 2/0 & Hide \code{/approve} (defaults to a hosted review model) \\
+0013 disable-usage-analytics & 1 & 2/1 & Construct the analytics client disabled \\
+0014 puffin-home & 1 & 2/0 & Use \code{\textasciitilde/.puffin}, never upstream's login \\
+0015 no-openai-network & 4 & 12/3 & Close the channels found by tracing (\S\ref{sec:egress}) \\
 \midrule
-Total (10 patches, 15{,}389 bytes) & 14 & 46/42 & against 4{,}894 Rust files, 1.93M lines \\
+Total (13 patches, 17{,}288 bytes) & 20 & 57/41 & against 4{,}894 Rust files, 1.93M lines \\
 \bottomrule
 \end{tabularx}
 \caption{The patch series at the time of writing. Numbers 0003 and 0004 were retired when their
@@ -329,8 +333,37 @@ therefore also refused in the launcher: \code{login} and \code{logout}, which st
 OpenAI sign-in, and \code{cloud} and \code{cloud-tasks}, which browse tasks on OpenAI's servers.
 \code{remote-control}, \code{/voice} and \code{/approve} are only hidden. Each needs an OpenAI
 account that Puffin does not have, so none of them can succeed.
-The launcher currently checks only the first argument, so \code{puffin -c k=v cloud} would evade
-the refusal. This is a known gap, and fixing it means scanning for the first non-option argument.
+The refusal finds the subcommand the way Codex will: it reads Codex's own clap definitions to learn
+which options consume the next token, so \code{puffin -c k=v cloud} is refused too. An earlier
+version checked only the first argument and let that form through.
+
+\subsection{Traffic an audit of commands does not find}
+\label{sec:egress}
+
+Auditing commands found every channel a user starts deliberately. It found none of the channels
+Codex opens by itself. We found those by tracing: a real \code{puffin exec} session, and a real
+interactive session driven through a pseudo-terminal with a fresh configuration directory, each
+under \code{strace -f -e trace=connect,execve}, with the HTTP client's debug logging on to name the
+URLs. With the model served on the loopback interface, anything else in the trace is traffic we
+did not intend.
+
+The first traces were not clean, although no ChatGPT login was present. Codex exported OpenTelemetry
+metrics to Statsig at \code{ab.chatgpt.com}, the default in release builds, with an API key compiled
+in; it ran \code{git ls-remote https://github.com/openai/plugins.git} to sync OpenAI's curated
+plugins; it requested \code{chatgpt.com/backend-api/plugins/featured}; and the interactive
+interface fetched an announcement from \code{raw.githubusercontent.com} on every start. Two further
+channels needed the login that an earlier upstream installation had left in the shared
+\code{\textasciitilde/.codex}: usage analytics and token refresh.
+
+Each is closed where it originates rather than by configuration, so no setting or later login can
+reopen it. The analytics client and the metrics exporter resolve to ``disabled'', the plugin sync
+and the two fetches return before any request, and Puffin keeps its state in
+\code{\textasciitilde/.puffin}, copying sessions and settings across but never the login. As a
+second line, the launcher points Codex's \code{chatgpt\_base\_url} at a closed local port, so any
+ChatGPT-backend call we did not find fails on the machine. Re-traced, both sessions contacted only
+two loopback services: the model server and the local mail service. The lesson is general: for a
+vendor client, the list of what it sends is an empirical question, and has to be re-measured after
+every upstream update.
 
 \begin{table}[t]
 \centering
@@ -349,6 +382,14 @@ Surface & Why it does not fit a vendor-free agent & Treatment \\
 \code{/approve} (auto-review) & Defaults to a hosted review model & hide \\
 \code{app} & Opens OpenAI's closed-source desktop app & replace (opens Puffin's own window) \\
 update check at start-up & Compares against \code{openai/codex} releases & disabled in config \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Found only by tracing a session (\S\ref{sec:egress})}} \\
+usage analytics & Posted to \code{chatgpt.com} whenever a ChatGPT login is present & disabled \\
+shared \code{\textasciitilde/.codex} & Inherited an upstream ChatGPT login and its token refresh & own \code{\textasciitilde/.puffin} \\
+OTEL metrics & Exported to Statsig (\code{ab.chatgpt.com}) by default in release builds & disabled \\
+curated plugin sync & \code{git ls-remote} of OpenAI's plugin repository on GitHub at start-up & removed \\
+featured plugins & Request for featured plugins to \code{chatgpt.com} & removed \\
+announcement tip & TUI fetch from GitHub's content host on every start & removed \\
 \bottomrule
 \end{tabularx}
 \caption{Cloud-coupled surfaces and their treatment. On Linux, Codex's \code{app} subcommand is
@@ -484,14 +525,14 @@ for example on SWE-bench \cite{jimenez2024swebench}. \Cref{sec:limits} discusses
 Metric & Value \\
 \midrule
 Upstream (Codex \code{rust-v0.158.0}) & 4{,}894 Rust files, 1.93M lines \\
-Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 15{,}389 B (10 patches) \\
-Upstream files touched / lines changed & 14 files / $+46,\ -42$ \\
-Launcher crate (\code{puffin-rs}) & 1{,}403 lines, 24 unit tests \\
+Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 17{,}288 B (13 patches) \\
+Upstream files touched / lines changed & 20 files / $+57,\ -41$ \\
+Launcher crate (\code{puffin-rs}) & 1{,}843 lines, 31 unit tests \\
 Agent binary, unstripped $\rightarrow$ stripped & 1.4\,GB $\rightarrow$ 315\,MB (+ 93\,MB Code Mode host) \\
 Incremental rebuild after a launcher edit & $\approx$7 min (thin LTO relink) \\
-Management and services (Python) & 79 modules, 19.7k lines; 380 tests \\
-\quad without a model server & 317 pass, 63 skip (need live server) \\
-Live slash-command suite (local 122B model) & 70 tests: 65 pass, 3 fail, 2 skip; 731.6\,s \\
+Management and services (Python) & 79 modules, 20.2k lines; 416 tests \\
+\quad without a model server & 353 pass, 63 skip (need live server) \\
+Live slash-command suite (local 122B model) & 77 tests: 75 pass, 2 skip; 806.7\,s \\
 Decode throughput, single stream, 32k context & prose 23.8 / code 49.9 / JSON 53.1 tok/s \\
 \bottomrule
 \end{tabular}
@@ -504,18 +545,22 @@ record for the default configuration, not re-measured for this paper.}
 on a pseudo-terminal, in a throwaway git repository and \code{CODEX\_HOME}, against the running
 local model. It asserts per command that the expected screen or reply appears, and that removed
 commands are rejected. \Cref{tab:eval} gives the totals. Two commands that upstream labels ``DO NOT
-USE'' are skipped. The three failures were diagnosed from session transcripts.
+USE'' are skipped. An earlier run, before the fixes in this paper, had three failures, each
+diagnosed from the session transcript.
 \begin{enumerate}
-  \item \code{/init}: the harness treated the brief disappearance of the ``esc to interrupt'' marker
-    between tool calls as the end of a turn. It checked for \code{AGENTS.md} too early, and its
-    clean-up interrupted a model that was working normally. This is a harness bug.
-  \item \code{/btw}: this is an alias of \code{/side}, which is unavailable until a conversation
-    exists. The test must converse first. This is also a harness bug.
-  \item \emph{Fresh-home start}: with an empty configuration directory, \code{puffin} opens on
-    Codex's ``Sign in with ChatGPT'' screen instead of the composer, even though the launcher has
-    written a complete local-provider configuration. This is a real defect, and it would be the
-    first thing a new user sees. Fixing it requires suppressing Codex's first-run onboarding for the
-    local provider.
+  \item \emph{Fresh-home start}: with an empty configuration directory, \code{puffin} opened on
+    Codex's ``Sign in with ChatGPT'' screen. The start-up account check reads the configured
+    \code{model\_provider}, not \code{--oss}; the launcher now also passes
+    \code{-c model\_provider=\ldots}, and the test passes.
+  \item \code{/btw}: an alias of \code{/side}, unavailable until a conversation exists. The test
+    must converse first; this was a harness bug.
+  \item \code{/init}: first a harness bug (a single missed ``esc to interrupt'' marker between tool
+    calls ended the wait early), fixed by requiring the marker to stay away for three seconds. The
+    remaining failures were the model: it explored the repository, announced ``I'll create a
+    concise AGENTS.md'', and ended its turn without the tool call. The same prompt through
+    \code{puffin exec} wrote the file in 6 of 6 runs, with or without an extra
+    ``act, don't announce'' instruction, so we did not change the prompt. The test now does what a
+    user would: it says ``go ahead'' once, and fails only if the file still does not appear.
 \end{enumerate}
 
 \paragraph{Throughput.} Decode speed for JSON (53.1 tokens/s) and code (49.9) is roughly twice
@@ -560,7 +605,7 @@ beside a resident 122B model at all.
 
 \paragraph{Keep the fork boring.} Every behaviour that could live in a linked crate went there.
 Every remaining hook is a single call or predicate. The measure of success is how long an upstream
-bump takes, not how little code we wrote. A 15\,KB series that touches 14 files turns an upstream
+bump takes, not how little code we wrote. A 17\,KB series that touches 20 files turns an upstream
 release into an afternoon's review rather than a merge project.
 
 \paragraph{Presentation diffs are the expensive ones.} Almost all of the original series' size, 97\%,
@@ -629,7 +674,7 @@ rather than any serving algorithm.
 
 Puffin shows that a production coding-agent client can be made vendor-free, with its model on a single
 unified-memory workstation without giving up the ability to take upstream releases. The fork adds
-a 15.4\,KB patch series and a 1.4k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
+a 17.3\,KB patch series and a 1.8k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
 surface is audited and neutralised explicitly, and the host is protected by admission checks and a
 pressure watchdog. The next steps are a task-level accuracy evaluation, the fix for first-run
 onboarding, and the two-layer code index.

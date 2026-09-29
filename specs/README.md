@@ -68,21 +68,41 @@ This directory holds the specification, split into focused documents. This page 
 
 ## ⚠️ Known defects recorded in these specs
 
-The reconciliation on 2026-09-28 found these places where the **code** is wrong or unsafe. Each spec documents the behaviour as it is; none of these is fixed yet.
+The reconciliation on 2026-09-28 found these places where the **code** was wrong or unsafe. Most were fixed on 2026-09-29, and the individual specs now describe the fixed behaviour, each with a one-line note of what it replaced.
+
+### Still open
 
 | Where | Defect | Spec |
 |---|---|---|
-| `ModelDownloader.clear_tensorizer_cache()` | Deletes all of `~/.cache/dreamference` (compile cache, `puffin` build cache), not just `tensorizer/` | CLI §4.18, DOCKER §3.3 |
-| `puffin-admin clear-tensorize-cache` | Registered subcommand with no handler: it does nothing | CLI §3 |
-| `ensure_docker_image()` | A missing pinned bare-tag image (DFlash) is built from the main `Dockerfile` under the wrong name | DOCKER §5.3 |
-| `ensure_goose_config()` | Goose MCP extension runs `dreamference mcp`; that command no longer exists | AGENTS §3.4 |
-| OpenHands runner | Binds port 3000, which Onyx uses | AGENTS §7 |
-| Continue runner | Tab autocomplete names a model the vLLM endpoint does not serve | AGENTS §6.2 |
-| Context engine | After a cached load, search is FTS5-only; `vec_context` is never queried; nomic model not pre-fetched | CONTEXT §5 |
-| `puffin` launcher | Refused-command check looks at the first argument only | PUFFIN_CODEX §4 |
-| `puffin` | Fresh `CODEX_HOME` opens on the ChatGPT sign-in screen | PUFFIN_CODEX §5 |
-| `scripts/*.sh` | Old default model; `run_vllm_gb10.sh` passes an unresolved alias to vLLM; `install_gb10.sh` never builds `puffin` | SETUP §3.3, §4 |
-| `--draft-model` | Silently replaces the recipe's speculative config; legacy `--speculative-model` flag | INFERENCE §3.1 |
-| Gmail service | Module docstring describes a retired design; `GNOME_TOKEN_UNIT` unused | GOA §0 |
-| `server start --draft-model` | Without `--num-speculative-tokens`, emits `--num-speculative-tokens None`; the config's value (8) is never used here | INFERENCE §3.2 |
-| Aider runner | With a draft model, `--architect` puts the *draft* (small) model in the architect seat and the main model as editor; this looks inverted | AGENTS §5.3 |
+| vLLM engine (default recipe) | Died once with `CUBLAS_STATUS_INTERNAL_ERROR` in a bf16 GEMM with two requests running, KV cache at 92% and ~21 GB of host memory free (2026-09-29 11:49); Docker restarted it. Likely cuBLAS failing to get workspace under memory pressure; not reproduced | INFERENCE |
+| vLLM on `0.0.0.0:8000` | The model server listens on every interface with no API key, so anything on the LAN can use the model. It must answer on the Docker bridge (Onyx and OpenHands reach it at the bridge gateway), so loopback-only is not an option; binding the bridge address alone would break every `localhost:8000` client. Needs a decision: an API key shared with the containers, or a firewall rule. Documented in `docs/privacy.md` | INFERENCE |
+| `dreamference-searxng` | After 18 h up, the container's Docker-embedded DNS (`127.0.0.11`, as it is joined to `onyx_default`) answered SERVFAIL for every name, so every engine failed and both the agents' `web_search` and Onyx's web search came back empty. Fresh containers on the same two networks resolved fine and `docker restart` cleared it; the cause is not known. The empty result is now reported as an error naming each failed engine, with the restart as the hint | ONYX |
+
+### Fixed on 2026-09-29
+
+| Where | Was | Now |
+|---|---|---|
+| `clear tensorize-cache` / `clear model-cache` | Deleted the *parents*: all of `~/.cache/dreamference` (build and compile caches) and all of `~/.cache/huggingface` (including the login token) | Remove only `tensorizer/` and `hub/`, and report files a container left behind as root |
+| `puffin-admin clear-tensorize-cache` | Parsed and did nothing | Same as `clear tensorize-cache` |
+| `ensure_docker_image()` | Built the plain `Dockerfile` under a pinned DFlash tag | Builds only `DEFAULT_VLLM_IMAGE`; for other missing local tags, says how they are built |
+| Goose config | MCP extension ran `dreamference mcp` | Runs `puffin-admin mcp` by its full venv path |
+| OpenHands runner | Port 3000 (Onyx's), on every interface, with the Docker socket mounted; `LLM_BASE_URL` pointed at the container's own localhost | `127.0.0.1:3001`; vLLM reached through the bridge gateway |
+| Onyx web UI | nginx published on every interface, so the default admin account was reachable from the LAN | `configure()` binds ports 80 and 3000 to 127.0.0.1 through Onyx's `.env` |
+| Continue runner, Aider runner | Named the draft model (a speculative head, not a served model) for autocomplete / as the architect | Name the served model only |
+| Context engine | Embeddings were never computed (a one-shot iterator was read twice), never stored (sqlite-vec not loaded, `hash()` row ids), never reloaded; no nomic prefixes | Stored in a plain table, reloaded by `load_index`, `search_document:`/`search_query:` prefixes, keyword-only when the model is unavailable |
+| `puffin` launcher | Refused-command check read the first argument only | Finds the subcommand from Codex's own option definitions |
+| `puffin` | Fresh `CODEX_HOME` opened on the ChatGPT sign-in screen; shared upstream's `~/.codex` and its ChatGPT login; Codex usage analytics on | `-c model_provider` on launch; own `~/.puffin`; analytics client disabled (patch 0013) |
+| `scripts/*.sh` | Old default model; `run_vllm_gb10.sh` launched vLLM directly, bypassing host safety | Thin wrappers over `puffin-admin` |
+| `server start --draft-model` | Emitted the removed `--speculative-model` / `--num-speculative-tokens` flags (vLLM 0.2x rejects them), `None` as the depth, and dropped the recipe's speculative settings | `resolve_speculative_config()` builds `--speculative-config` JSON, layered on an external-drafter recipe or replacing a self-speculation one; the compile-cache signature follows the launched depth |
+| Gmail service | Module docstring described the retired GNOME-holds-the-token design; `GNOME_TOKEN_UNIT` unused | Docstring describes the OAuth flow as built; constant removed |
+| `puffin` network traffic | A traced session with no ChatGPT login still reached `ab.chatgpt.com` (OTEL metrics to Statsig, default-on in release builds), `chatgpt.com/backend-api/plugins/featured`, `github.com` (`git ls-remote openai/plugins` at startup), and, in the TUI, OpenAI's announcement tip from `raw.githubusercontent.com` | Patch 0015 closes all four at the call sites; the launcher points `chatgpt_base_url` at a closed local port so any call not yet found fails locally |
+| Tests | Wrote the real `~/.continue/config.json` and could reach the real Onyx `.env` and containers | `tests/conftest.py` gives every test its own home and a scratch Onyx `.env`, and fails any real container recreate |
+| Context indexing | Walked everything outside a short ignore list with no size cap: 11,565 files and 2.3 GB here (a Tauri `target/` and the codex submodule), with 32 workers, full 8,192-token embeddings and a quadratic TF-IDF. Beside a resident vLLM it pushed the host under earlyoom's line and **earlyoom killed vLLM**. `puffin-admin mcp` indexes on first query, so any workspace with a Rust build tree was exposed | Asks `git ls-files` (honouring `.gitignore`, not entering submodules), skips `target/`, files over 1 MiB and binaries, sizes the pool to the work, runs the embedding model on the CPU at 1,024 tokens, and computes TF-IDF with one `Counter` per file: 223 files, ~2 GB peak, earlyoom untouched with vLLM serving |
+| Context search after a restart | TF-IDF tables were not saved, so a new process scored by FTS5 and embeddings only; with vLLM resident the embedding model failed on CUDA (out of memory) and search went keyword-only | Tables saved with the index (an older index is rebuilt once); embedding model on the CPU |
+| `puffin-admin mcp` | Answered the `notifications/initialized` notification with a `-32601` error; reported a failing tool as a parse error with no id (the client waited forever); no `ping`; `ide_apply_diff` claimed success while writing nothing | Notifications unanswered, `-32603` with the request's id, `ping` supported, `ide_apply_diff` says `not_applied` |
+| `web_search` (MCP and `puffin-admin search`) | When every SearXNG engine failed, returned zero results, indistinguishable from a query with no coverage | Returns an error listing each engine and its failure, with a restart hint |
+| Gmail connect | A Google grant with Gmail access unticked on the consent screen was saved and listed as connected, then failed every search with an opaque `[AUTHENTICATIONFAILED] Invalid credentials` (found live on one of three connected accounts; tokeninfo showed no `mail.google.com` scope) | The OAuth callback refuses such a grant and says which box to tick; an IMAP authentication failure now says to reconnect the account |
+| Diffusion sidecar (`dreamference-diffusion-8001`) | **Had never produced a token.** transformers refused the Tiny-A2D remote code because it imports `dllm` (only under `if __name__ == "__main__"`); past that, its forward read `decoder_layer.attention_type`, which this transformers no longer sets; and the service called `model.generate`, a left-to-right decoder, which is the wrong algorithm for a block-diffusion model. `/health` reported the ImportError, but `server start` launched it anyway and `endpoints` advertised it | Main-guard imports are not load requirements; `attention_type` restored from `config.layer_types`; a block-diffusion sampler (32-token blocks, block-causal attention, most-confident-first commitment, the card's 128 steps) replaces `generate`. Chat completions return correct code in ~2 s on CUDA. Raw `/v1/completions` on this chat-tuned 0.5B model stays weak under every attention variant tried |
+| Diffusion sidecar port | Bound `0.0.0.0:8001` under `--network host`, offering the model to the LAN | Binds `127.0.0.1`; nothing outside the host, or in a container, uses it |
+| `puffin-admin model list` | `UnboundLocalError` on `Table`: a local import elsewhere in `run_cli` made the name local to the whole function | Local re-imports of module-level names removed |
+| `puffin-admin server` / `clear` / `model` / `main-model` / `diffusion-model` without a subcommand | Printed nothing and exited 0 | Print the group's help and exit 1, like `desktop` and `puffin` |

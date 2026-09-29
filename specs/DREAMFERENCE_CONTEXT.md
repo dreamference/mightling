@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** AST Extraction, Hybrid Search, SQLite/FTS5 Indexing, Testing
-> **Checked against the code:** 2026-09-28 (`dreamference/context_engine/`)
+> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`)
 
 ---
 
@@ -33,20 +33,35 @@ The `puffin` agent does **not** use it: it searches with `rg`/`ast-grep` through
 
 ### 1.2. Steps (`index_workspace`)
 
-1. **Discover files:** `os.walk` from the workspace root.
-   - It skips `IGNORE_DIRS`: `.git`, `.svn`, `.hg`, `__pycache__`, `.venv`, `venv`, `node_modules`, `.idea`, `.vscode`, `build`, `dist`, `.dreamference`.
-   - It skips `IGNORE_EXTENSIONS`: `.pyc .pyo .so .o .a .exe .dll .dylib .png .jpg .jpeg .gif .ico .pdf .zip .tar .gz`.
-   - Every other file is read as UTF-8, with errors ignored. That includes other binaries and very large files, because there is no size cap.
+1. **Discover files** (`collect_files`):
+   - **In a git repository:** `git ls-files -z --cached --others --exclude-standard`, i.e. tracked files plus untracked files git does not ignore. Every `.gitignore` applies, nested ones included.
+   - **Submodules are not entered.** They are someone else's code (`codex/` alone is ~8,700 files), and git lists each one as a single directory entry, which the file check drops.
+   - **Outside a repository, or without git:** `os.walk` from the workspace root.
+   - **Both paths skip `IGNORE_DIRS`:** `.git`, `.svn`, `.hg`, `__pycache__`, `.venv`, `venv`, `node_modules`, `.idea`, `.vscode`, `build`, `dist`, `.dreamference`, `target`, `.cargo`.
+   - **Both paths skip `IGNORE_EXTENSIONS`:** `.pyc .pyo .so .o .a .exe .dll .dylib .png .jpg .jpeg .gif .ico .pdf .zip .tar .gz`.
+   - **Symlinks are skipped.**
+   - **A file is skipped if it is larger than `MAX_FILE_BYTES` (1 MiB), or has a NUL byte in its first 8 KiB (binary).** Everything else is decoded as UTF-8, with errors ignored.
+   - **Why:** until 2026-09-29 discovery was the walk alone, with no size cap. On this repository it collected 11,565 files and 2.3 GB, 2.2 GB of it a Tauri `target/`, against 223 files and 2.4 MB now. Holding that beside a resident vLLM pushed the host under earlyoom's 5% line, and earlyoom killed vLLM's EngineCore. `puffin-admin mcp` indexes on its first query, so any workspace with a Rust build tree was exposed.
 2. **Reset the database:** it clears `files`, `symbols` and `fts_context`.
-3. **Parse in parallel:** `ProcessPoolExecutor(max_workers=min(32, cpu_count*2))`. Each worker reads the file, tokenizes it (`TFIDFCalculator.tokenize`), and extracts symbols from **`.py` files only** (`ASTSymbolExtractor`).
+3. **Parse in parallel:** `ProcessPoolExecutor(max_workers=max(1, min(8, cpu_count, files // 32 + 1)))`. The pool is sized to the work, because each worker is a fork of a parent that has imported torch. Results are consumed as they arrive, inside the pool's `with`. Each worker reads the file, tokenizes it (`TFIDFCalculator.tokenize`), and extracts symbols from **`.py` files only** (`ASTSymbolExtractor`).
 4. **Persist to `.dreamference/context.db`:**
    - `files(rel_path PRIMARY KEY, abs_path, size_bytes)`;
    - `symbols(name, symbol_type, file_path, line_start, line_end, signature, docstring)`;
    - `fts_context`, an FTS5 table with `rel_path UNINDEXED, content` (the full file text);
    - every connection sets `PRAGMA mmap_size = 2147483648` (2 GB).
-5. **TF-IDF:** `TFIDFCalculator.compute_matrix` builds an in-memory IDF table and per-token TF-IDF map.
-6. **Embeddings:** `EmbeddingCalculator.compute_embeddings` encodes **each whole file** with sentence-transformers `nomic-ai/nomic-embed-text-v1.5` (`trust_remote_code=True`, normalized, 768-dim), one vector per file. The vectors are kept in memory and also written to `vec_context`, a sqlite-vec `vec0(embedding float[768])` table, with `rowid = abs(hash(rel_path)) % 2**63`. Python's `hash()` of a string is randomised per process, so these ids are not stable, and each re-index adds new rows rather than replacing the old ones. The table is not queried (§5), so this only costs disk.
-7. **Save** `.dreamference/context_index.json`, holding the symbols and file metadata only.
+5. **TF-IDF:** `TFIDFCalculator.compute_matrix` builds an IDF table and a per-token TF-IDF map. It uses one `Counter` per document; until 2026-09-29 it scanned every document's token list once per token, which is quadratic.
+6. **Embeddings:** `EmbeddingCalculator.compute_embeddings` encodes each file with sentence-transformers `nomic-ai/nomic-embed-text-v1.5`, one vector per file.
+   - The model is loaded with `trust_remote_code=True`; vectors are normalised and 768-dim.
+   - **Input:** each text is prefixed `search_document: ` and truncated to its first `MAX_SEQUENCE_TOKENS` (1,024) tokens. Texts are encoded in batches of 8.
+   - **Device:** the model runs on the **CPU** (`EMBEDDING_DEVICE`). With vLLM resident, CUDA refuses even this model (out of memory, although the host has gigabytes free), and a failed attempt leaves a CUDA context in unified memory.
+   - **Memory:** at nomic's full 8,192 tokens and a batch of 32, attention memory alone runs to gigabytes. The vectors are kept in memory and written to `embeddings(rel_path PRIMARY KEY, vector BLOB)` as float32 bytes, replacing the previous run's rows. A plain table, not sqlite-vec: search scores the vectors in Python, so nothing needs the extension. If the model cannot be loaded, this step stores nothing and indexing continues (§5).
+7. **Save** `.dreamference/context_index.json`, holding the symbols, the file metadata and the TF-IDF tables (`idf_table`, `tf_idf_index`).
+
+**Memory budget.** Beside a resident vLLM the host has about 10–13 GB available, and earlyoom sends SIGTERM at 5% (about 6 GB). An index run therefore has roughly 4 GB to work with. Measured on this repository with vLLM serving:
+- 223 files in 1 min 47 s;
+- available memory never below 10.8 GB;
+- peak RSS 2.1 GB;
+- no earlyoom action.
 
 ---
 
@@ -71,18 +86,19 @@ Each symbol records `name` (unqualified), `file_path`, `line_start`, `line_end` 
 
 1. **FTS5:** the query tokens are joined with `OR` and matched against `fts_context`, taking up to `2 × top_k` rows. Each row adds `2 / (|rank| + 1)` to its file's score.
 2. **TF-IDF:** for each query token, each file's TF-IDF weight is added.
-3. **Dense:** the query is embedded, and every in-memory file vector adds `3.0 × max(0, cosine)`.
+3. **Dense:** the query is embedded with the `search_query: ` prefix, and every file vector adds `3.0 × max(0, cosine)`. Skipped when there are no file vectors or no model.
 4. The top `top_k` files are returned, sorted by the combined score.
 
 **Result:** a list of `{"rel_path", "score", "symbols": [all symbols in the file], "size_bytes"}`. There are no snippets or matched line ranges: the caller reads the file.
 
-Nomic's `search_document:` / `search_query:` task prefixes are **not** applied at either stage, and nomic's retrieval quality is lower without them.
+Nomic was trained with those task prefixes and retrieves noticeably worse without them. Until 2026-09-29 neither was applied, and no embedding was computed at all: step 6 iterated a one-shot `executor.map` result a second time and got nothing, and the sqlite-vec extension was never loaded, so every `vec_context` write failed silently.
 
 ---
 
 ## 4. Cache Behavior
 
-- **Without `--force`:** if `context_index.json` exists, `load_index()` restores the symbols and file metadata and returns the summary immediately. No files are re-read.
+- **Without `--force`:** if `context_index.json` exists, `load_index()` restores the symbols, the file metadata and the TF-IDF tables, reads the file vectors back from `embeddings`, and returns the summary immediately. No files are re-read.
+- **A JSON without `tf_idf_index`** was written before the tables were saved, and is treated as absent: it is rebuilt once.
 - **With `--force`**, or when there is no JSON: a full re-index.
 - **Locations:**
   - `.dreamference/context_index.json`;
@@ -96,15 +112,15 @@ Nomic's `search_document:` / `search_query:` task prefixes are **not** applied a
 
 These are recorded here because the spec used to promise otherwise.
 
-- **Search after a cached load is FTS5-only.** `load_index()` restores neither the TF-IDF tables nor the file embeddings, so in a fresh process (every `puffin-admin mcp` session) steps 2 and 3 of §3 contribute nothing. The `vec_context` table is written but never queried: dense search reads only the in-memory vectors from the current indexing run.
-- **Not air-gapped by default.** Nothing pre-downloads the nomic model. `init` downloads only the LLM weights, so the first embedding triggers a Hugging Face download. On an offline machine without the model cached, `SentenceTransformer(…)` raises, and indexing (and the first search) fails. Only when `sentence-transformers` is not installed at all does `embed_texts` fall back to zero vectors, which silently disables the dense signal. Pre-fetch the model while online.
+- **Dense search sees only a file's head.** Embeddings cover a file's first 1,024 tokens, so a definition deep in a long file is found by FTS5 and TF-IDF but not by meaning. Chunking files into several vectors would close this.
+- **Not air-gapped by default.** Nothing pre-downloads the nomic model. `init` downloads only the LLM weights, so the first embedding triggers a Hugging Face download. On an offline machine without the model cached, loading fails once, `⚠️ Embedding model … is unavailable` is printed, and indexing and search carry on by keyword only (FTS5 and TF-IDF) for the rest of the process. The same happens silently when `sentence-transformers` is not installed. Pre-fetch the model while online to get the dense signal. (Until 2026-09-29 a failed load aborted indexing, and a missing library produced zero vectors that scored every file equally.)
 - **Symbols are Python only.** Rust, TypeScript and the rest get full-text and embedding coverage, but no symbols.
 
 ---
 
 ## 6. Tests Architecture
 
-- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-09-28: 317 passed and 63 skipped in about 30 s. The skips are the live slash-command tests, which need a running vLLM.
+- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-09-29: 353 passed and 63 skipped in about 30 s. The skips are the live slash-command tests, which need a running vLLM.
 - **Style:** `tmp_path` isolation, and no external services except in tests that detect them and skip.
 
 | Test File | Scope |

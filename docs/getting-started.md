@@ -105,12 +105,6 @@ After that, `puffin app` also opens it. See [Desktop app](desktop.md).
 
 ## Known issues
 
-- **First run with an empty `~/.codex`.** When `puffin` starts with no existing configuration
-  directory, it can open on a "Sign in with ChatGPT" screen instead of the message box. Puffin does
-  not use an OpenAI account; this screen is inherited from Codex and is being fixed.
-- **Codex usage analytics.** If you have signed in to upstream Codex on this machine, Codex's
-  usage analytics can reach OpenAI. See [Privacy & security](privacy.md#what-reaches-the-network-and-when)
-  for how to switch them off.
 - **`puffin update` finds nothing yet.** It installs the latest published Puffin release, and none
   has been published. Until then, update by pulling the repository and running
   `puffin-admin codex build`.

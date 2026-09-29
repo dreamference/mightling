@@ -1,6 +1,6 @@
 # Puffin — Changes Made to Codex
 
-**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0012` bring it to about 15 KB (15,389 bytes on 2026-09-28), just under the 16,000-byte limit `test_the_patches_stay_small` enforces. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`.
+**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0015` bring it to 13 patches and 17,288 bytes (2026-09-29), touching 20 upstream files, under the 20,000-byte limit `test_the_patches_stay_small` enforces. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`.
 **Supersedes:** `DREAMFERENCE_CODEX.md`, which describes the older setup where an upstream `codex` on PATH was launched from Python.
 **Upstream:** [openai/codex](https://github.com/openai/codex), release `rust-v0.158.0`.
 
@@ -79,7 +79,7 @@ Only changes that cannot be made from outside are patches, and each is a one-lin
 
 The call sits in `cli_main`. That is after `arg0` dispatch, so the `codex-linux-sandbox`, `apply_patch` and `codex-execve-wrapper` aliases never reach it, and before Codex parses its command line.
 
-### `0005`–`0012` (switches: hide, reroute, replace)
+### `0005`–`0015` (switches: hide, reroute, replace, and closing network channels)
 
 Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand that must not run is *also* refused by the launcher (§4, step 1). A hidden slash command (`is_visible() == false`) is gone from the popup, and typing it is not recognised either, because the command lookup only matches visible commands. In every case the code behind the command stays compiled.
 
@@ -93,6 +93,9 @@ Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand
 | `0010-hide-voice` | `tui/src/slash_command.rs` | `/voice`, OpenAI's realtime voice API, is not visible. It is kept for a future local voice. |
 | `0011-usage-token-stats` | `tui/Cargo.toml`, `tui/src/bottom_pane/slash_commands.rs`, `tui/src/chatwidget/slash_dispatch.rs`, `tui/src/slash_command.rs` | `/usage` is always listed, and shows this session's token statistics from `puffin_launcher::usage::report()`, fed by the counters `/status` already uses, instead of ChatGPT plan limits. It drops upstream's `/usage daily\|weekly\|cumulative` form. The TUI crate gains a path dependency on the launcher. |
 | `0012-hide-auto-review` | `tui/src/slash_command.rs` | `/approve` (`SlashCommand::AutoReview`) is not visible. It defaults to OpenAI's `codex-auto-review` model, which the local catalog lacks. |
+| `0013-disable-usage-analytics` | `analytics/src/client.rs` | The analytics client is constructed disabled, whatever `[analytics]` or the login say. It posted usage events to `chatgpt.com/backend-api/codex/analytics-events/events` whenever a ChatGPT login was present. |
+| `0014-puffin-home` | `cli/src/main.rs` | First statement of `main()`: `puffin_launcher::home::use_puffin_home()` sets `CODEX_HOME` to `~/.puffin` (unless already set), before `arg0` reads `.env` from the home folder. First run copies an allow-list from `~/.codex`, never `auth.json`. |
+| `0015-no-openai-network` | `otel/src/config.rs`, `core-plugins/src/manager.rs`, `core-plugins/src/remote_legacy.rs`, `tui/src/tooltips.rs` | Found by tracing sessions with no login: the Statsig OTEL metrics exporter (`ab.chatgpt.com`, default-on in release builds) resolves to none; the curated-plugin startup sync (`git ls-remote https://github.com/openai/plugins.git`) never starts; the featured-plugins request returns an empty list; the TUI's announcement fetch from `raw.githubusercontent.com` records "none" without fetching. With these and the launcher's `chatgpt_base_url` pointed at `127.0.0.1:9`, traced `exec` and TUI sessions contact only loopback services. |
 
 ### What used to be patches
 
@@ -111,7 +114,7 @@ This is the Rust port of what Dreamference's Python `puffin` entry point used to
 
 `args()`, the function the hook calls, runs `prepare_args` on the process's argv:
 
-1. **Refuses switched-off commands** (`REMOVED_COMMANDS`): `login`, `logout`, `cloud` and `cloud-tasks` exit with `` `puffin <name>` is not available: <reason>. `` before Codex parses anything. The check looks at the *first* argument only, so `puffin -c key=value cloud` still reaches Codex; that is a known gap.
+1. **Refuses switched-off commands** (`REMOVED_COMMANDS`): `login`, `logout`, `cloud` and `cloud-tasks` exit with `` `puffin <name>` is not available: <reason>. `` before Codex parses anything. The subcommand is the first positional argument, found by `first_positional()` from Codex's own clap definitions of which options take a value, so `puffin -c key=value cloud` is refused too, and the scan cannot drift from Codex. The same index decides whether the command needs a model at all. Until 2026-09-29 only the first argument was checked, which let that form through.
 2. **Handles `app` itself** (`app.rs`): `puffin app` opens Puffin's desktop window, `puffin-app`, instead of OpenAI's closed-source app.
    - It finds the window on PATH, or through the `Exec=` line of the `puffin-app` desktop entry.
    - It checks that the Onyx web UI answers on `localhost:3000` and empties the webview's HTTP cache (keeping the sign-in).
@@ -137,7 +140,7 @@ This is the Rust port of what Dreamference's Python `puffin` entry point used to
    - `[model_providers.openai-custom]`: `name`, and a `base_url` that is always rewritten to follow the server;
    - `[features] code_mode = true`, `enable_mcp_apps = false`, only if absent;
    - `[sandbox_workspace_write] network_access = true`, only if absent. Without it, DNS fails inside the sandbox and the web commands break.
-10. **Prepends `--oss --local-provider openai-custom --model <id>`**, skipping any of these the user already gave. They are root options, so `exec`, `resume` and `fork` inherit them.
+10. **Prepends `--oss --local-provider openai-custom -c model_provider="openai-custom" --model <id>`**, skipping any of these the user already gave (the `-c` follows a user's `--local-provider`). They are root options, so `exec`, `resume` and `fork` inherit them. The `-c` is what keeps a fresh `CODEX_HOME` off the "Sign in with ChatGPT" screen: the TUI's startup account check reads the configured `model_provider`, not `--local-provider`, and it is passed rather than written to `config.toml`. Until 2026-09-29 a first run opened on that screen (`test_a_fresh_home_opens_on_the_composer`).
 
 The hook then parses the result with `help::parse` (`help.rs`), not `MultitoolCli::parse_from`. It walks the whole clap command tree once and replaces the product name in every about, help and usage string: "OpenAI Codex" and "Codex CLI" become "Puffin", `codex` as the typed command becomes `puffin`. Paths and identifiers that merely contain the name (`~/.codex`, `$CODEX_HOME`, `codex-code-mode-host`, `openai/codex`) are left alone. This is how dozens of help strings across several crates are rebranded without a patch per string.
 
@@ -150,7 +153,7 @@ The hook then parses the result with `help::parse` (`help.rs`), not `MultitoolCl
 | `app.rs` | `puffin app` (step 2) | Opens `puffin-app`. |
 | `help.rs` | every parse | Rebrands the help tree (above). |
 
-`CODEX_HOME` is still `~/.codex`. Existing sessions and history, and `puffin-admin logs mcp` (which reads `~/.codex/logs_2.sqlite`), keep working.
+`CODEX_HOME` is `~/.puffin` (`home.rs`, patch `0014`), unless already set. On first run the launcher copies an allow-list from `~/.codex` — sessions, history, `config.toml`, rules, skills, prompts, plugins and the session-state databases — so existing sessions carry over, while `auth.json` and debug logs stay behind. `puffin-admin logs mcp` reads `~/.puffin/logs_2.sqlite` (`CodexInstaller.home_dir()`).
 
 The crate's unit tests cover:
 - argument injection and the no-model commands;
@@ -168,8 +171,7 @@ Run them in the **export** directory, never in `codex/`: `cargo test --release -
 ## 5. What is deliberately not changed
 
 - **Most "Codex" strings in the TUI** (about 365 in `tui/src`): tips, onboarding, approval wording. Only the identity the user sees on every screen (the header, status card, banner, `--version` and usage lines) and the CLI's help text (via `help.rs`) are renamed. More TUI strings can be added to `0001`, one line each.
-- **First-run sign-in screen.** With an empty `CODEX_HOME`, `puffin` still opens on Codex's "Sign in with ChatGPT" onboarding screen instead of the composer. The launcher writes the provider config, but the onboarding check runs anyway. This is a known defect found by `test_a_fresh_home_opens_on_the_composer` (2026-09-28), not yet fixed.
-- **`codex-code-mode-host`**, crate names, `CODEX_HOME` and the `~/.codex` directory: renaming them would break lookups inside Codex, or separate users from their existing sessions.
+- **`codex-code-mode-host`**, crate names and the `CODEX_HOME` variable name: renaming them would break lookups inside Codex. The *folder* it points at is Puffin's own (§4).
 - **OpenAI-hosted features.** Gmail and the other connectors (`codex_apps`) need a ChatGPT login and run on OpenAI's servers, so they never activate in an `--oss` session. Local mail access is `puffin-admin gmail` (`DREAMFERENCE_PUFFIN_GMAIL.md`). Upstream's `app` is replaced by the launcher (§4, step 2).
 - **Still visible and unchanged:** `/model` (vLLM serves one model, so the picker lists one entry), `/memories`, `/import`, `/ide`, `/daemon`, and the `plugin` / `doctor` subcommands. The last two still refer to OpenAI's marketplace and to `chatgpt.com` connectivity checks. These were reviewed on 2026-09-28 and left for later decisions.
 - **The tools the agent calls.** The launcher is Rust, but `puffin-admin search`, `puffin-admin fetch` and `puffin-admin gmail` are Python.

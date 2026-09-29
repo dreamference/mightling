@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0 (`setup.py`)
 > **Subject:** Command Suite, Subcommands, Configuration, Environment Variables
-> **Checked against the code:** 2026-09-28 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`)
+> **Checked against the code:** 2026-09-29 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`)
 
 ---
 
@@ -75,7 +75,7 @@ These options come before the subcommand (`puffin-admin --agent aider run "…"`
 | **`server start`** | Launch vLLM, plus the diffusion sidecar | many; see §4.6 |
 | **`server stop` / `remove`** | Stop / remove the vLLM and diffusion containers | `[--port 8000] [--diffusion-port 8001]` |
 | **`server logs`** / **`logs [server]`** | Tail the vLLM container | `[--port 8000]` |
-| **`logs mcp`** | Codex MCP lifecycle lines from `~/.codex/logs_2.sqlite` | — |
+| **`logs mcp`** | Codex MCP lifecycle lines from `~/.puffin/logs_2.sqlite` (or `$CODEX_HOME`) | — |
 | **`benchmark_server`** | `vllm bench serve` on the Sonnet dataset | `[--port] [--model] [--dataset-path] [--num-prompts 8] [--max-concurrency 1]` |
 | **`codex build`** | Build `puffin` from the `codex/` submodule and `codex-patches/` | `[--force]` |
 | **`codex start` / `stop`** | Start / stop the Codex app-server daemon using `puffin` | — |
@@ -85,7 +85,7 @@ These options come before the subcommand (`puffin-admin --agent aider run "…"`
 | **`fetch`** | Fetch a URL as readable text | `URL [--max-chars 8000]` |
 | **`gmail …`** | Read-only Gmail search and read | `search QUERY [-n 10] [--json]`, `read ID [--max-chars 8000] [--json]`, `status [--json]` |
 
-A top-level `clear-tensorize-cache` subcommand is still registered by the parser, but it has no handler: it parses and does nothing. Use `clear tensorize-cache`.
+A top-level `clear-tensorize-cache` subcommand is the older spelling of `clear tensorize-cache` and does the same (until 2026-09-29 it parsed and did nothing).
 
 ---
 
@@ -182,6 +182,8 @@ puffin-admin server start [--model MODEL] [--port 8000] [--quantization Q] [--dr
 
 Per-model flags come from the model matrix's `launch_overrides`. Options given here override them, and anything unset falls back to the recipe. `--docker-image` overrides the model's pinned image.
 
+**Speculation.** `--draft-model` and `--num-speculative-tokens` are turned into `--speculative-config` JSON by `VLLMServerManager.resolve_speculative_config()`, never into separate flags: vLLM 0.2x has no `--speculative-model` or `--num-speculative-tokens`. The depth passed is the config's resolved value (flag > `DREAMFERENCE_SPECULATIVE_TOKENS` > file > default), and it applies only together with `--draft-model`; without one, the recipe's speculative config is used exactly. See `DREAMFERENCE_INFERENCE.md` §3.
+
 **Docker command** (`VLLMServerManager.start_server`):
 ```bash
 docker run --ipc=host --network host --restart unless-stopped --name dreamference-vllm-<port> --gpus all \
@@ -220,7 +222,7 @@ puffin-admin server logs [--port 8000]
 ```
 
 - **`logs`, `logs server` and `server logs`:** tail `dreamference-vllm-<port>` (`show_request_logs`).
-- **`logs mcp`:** reads the Codex TUI's tracing database `~/.codex/logs_2.sqlite` read-only, and prints MCP server lifecycle lines. The TUI logs there, not to a file. Record them with `RUST_LOG=codex_mcp=trace puffin`.
+- **`logs mcp`:** reads the Codex TUI's tracing database `~/.puffin/logs_2.sqlite` (`$CODEX_HOME` if set; not upstream Codex's `~/.codex`) read-only, and prints MCP server lifecycle lines. The TUI logs there, not to a file. Record them with `RUST_LOG=codex_mcp=trace puffin`.
 
 ---
 
@@ -238,9 +240,18 @@ Runs vLLM's serving benchmark inside the running container, on the Sonnet datase
 
 stdio JSON-RPC MCP server (`serverInfo.name` `dreamference-mcp-server`) for JetBrains and VS Code. Its tools (`mcp_tool_registry.py`):
 
-- `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`: these read and write the in-process `IDEState`, which is empty unless an IDE companion populates it.
+- `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`: these read and write the in-process `IDEState`, which is empty unless an IDE companion populates it.
+- `ide_apply_diff`: always answers `status: not_applied` and tells the agent to edit the file directly. Nothing in the server writes files. Until 2026-09-29 it answered `success`, so an agent carried on as though its edit had landed.
 - `web_search`, `web_fetch`: `WebTools`, through the local SearXNG instance and direct HTTP.
 - `workspace_search_code`: `ContextEngine.search_code`.
+
+Protocol handling:
+- methods: `initialize`, `ping`, `tools/list`, `tools/call`;
+- notifications (no `id`) are never answered;
+- malformed JSON gets `-32700` with a null id;
+- an exception inside a method gets `-32603` carrying the request's id.
+
+Until 2026-09-29 `notifications/initialized` drew a `-32601` reply, and a failing tool was reported as a parse error with no id, so the client never got its answer.
 
 It is **not** registered with `puffin`; see `DREAMFERENCE_PUFFIN_CODEX.md` for why.
 
@@ -272,7 +283,7 @@ Clients address the model by its full HF repo id (e.g. `Intel/Qwen3.5-122B-A10B-
 puffin-admin web [--port 8501]
 ```
 
-Serves the Web Canvas page (`web_canvas.py`) on `0.0.0.0:<port>` with `socketserver.TCPServer`: a status page with a live unified-memory gauge fed by `GET /api/status` (`{hardware, vllm, context}`).
+Serves the Web Canvas page (`web_canvas.py`) on `127.0.0.1:<port>` (until 2026-09-29, `0.0.0.0`) with `socketserver.TCPServer`: a status page with a live unified-memory gauge fed by `GET /api/status` (`{hardware, vllm, context}`).
 
 ---
 
@@ -323,17 +334,13 @@ puffin-admin gmail status [--json]
 
 ### 4.17. `puffin-admin clear model-cache`
 
-`ModelDownloader.clear_cache()` runs `shutil.rmtree` on the **parents** of both cache directories:
-- `~/.cache/huggingface`, the parent of the hub cache;
-- `~/.cache/dreamference`, the parent of the tensorizer cache.
+`ModelDownloader.clear_cache()` removes exactly two directories: the HuggingFace hub (`~/.cache/huggingface/hub`, or `$HF_HOME/hub`) and the tensorizer cache (`~/.cache/dreamference/tensorizer`). Their parents are left alone: `~/.cache/huggingface` holds the HuggingFace login token, and `~/.cache/dreamference` holds vLLM's torch.compile cache, the `puffin` build cache (`puffin-codex/`), fonts and test logs. Until 2026-09-29 it deleted both parents.
 
-The second is more than the tensorizer cache. It also holds vLLM's torch.compile cache, the `puffin` build cache (`puffin-codex/`), fonts and test logs.
+Containers write parts of these caches as root, which `rmtree` cannot remove as the user. When a directory survives, the command says so, prints the `sudo rm -rf` that would finish the job, and exits 1 rather than reporting success.
 
 ### 4.18. `puffin-admin clear tensorize-cache`
 
-`ModelDownloader.clear_tensorizer_cache()` runs `shutil.rmtree` on the **parent** of the tensorizer directory (`~/.cache/dreamference/tensorizer`), which is all of `~/.cache/dreamference`.
-
-> ⚠️ **Known defect.** Despite its name and help text ("tensorizer model cache only"), this deletes the whole Dreamference cache: vLLM's compile cache (a cold recompile costs 8–12 minutes), the `puffin` build cache (the next build recompiles every dependency), fonts and logs. The intended behaviour is to remove `~/.cache/dreamference/tensorizer` only. Until the code is fixed, delete that directory by hand instead.
+`ModelDownloader.clear_tensorizer_cache()` removes `~/.cache/dreamference/tensorizer` only, with the same report-and-exit-1 behaviour for root-owned leftovers. Until 2026-09-29 it removed the parent, all of `~/.cache/dreamference`, including vLLM's compile cache (a cold recompile costs 8–12 minutes) and the `puffin` build cache.
 
 ---
 

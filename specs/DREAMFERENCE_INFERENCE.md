@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** vLLM Launch Engine, Auto-Configuration, & Performance Optimization
-> **Checked against the code:** 2026-09-28 (`dreamference/vllm_server/vllm_server_manager.py`)
+> **Checked against the code:** 2026-09-29 (`dreamference/vllm_server/vllm_server_manager.py`)
 
 ---
 
@@ -71,18 +71,19 @@ It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingfa
 ### 3.1. Two ways to get a drafter
 
 - **Recipe (normal case):** the model's `launch_overrides["speculative_config"]` is serialised to `--speculative-config`. The two DFlash entries use `{"method": "dflash", "model": "z-lab/Qwen3.5-122B-A10B-DFlash", "num_speculative_tokens": 12, "attention_backend": "FLASH_ATTN"}`. The drafter is a separate checkpoint, pre-downloaded and counted in the memory budget. MTP recipes (heads inside the checkpoint) use the same key with `"method": "mtp"`.
-- **Explicit `--draft-model`:** emitted as `--speculative-model <repo> --num-speculative-tokens <n>`.
+- **Explicit `--draft-model`:** also emitted as `--speculative-config` JSON, built by `resolve_speculative_config()`; vLLM 0.2x has no `--speculative-model` or `--num-speculative-tokens` flag. `"model"` is the draft's resolved HF repo.
 
-**Precedence:** if both are present, the explicit draft **replaces** the recipe's `speculative_config`. There is no fail-fast validation of the combination. The explicit path also still uses the legacy `--speculative-model` spelling, which current vLLM releases may reject. Prefer the recipe.
+**Precedence:** with both present, the explicit draft is **layered onto** the recipe when the recipe also uses an external drafter (it has a `"model"`): `"model"` is replaced, and the recipe's method and drafter attention backend are kept. A self-speculation recipe (MTP, no `"model"`) is replaced outright, since its method means nothing for a separate checkpoint. There is no fail-fast validation of the combination. Until 2026-09-29 the explicit path emitted the removed `--speculative-model` flags and failed at argument parsing.
 
 **Compatibility:** a drafter must share the target's tokenizer. The DFlash drafter is built for Qwen 3.5 122B-A10B.
 
 ### 3.2. Speculative token count
 
 - **With a recipe:** its `speculative_config` carries the count. The DFlash entries use 12.
-- **With an explicit draft:** `puffin-admin server start` passes `--num-speculative-tokens` exactly as given, and its parser default is `None`. The config's `num_speculative_tokens` (`DEFAULT_SPECULATIVE_TOKENS = 8`) is **not** used on this path. `start_server()` / `build_launch_command()` default to 5 only when called directly from Python.
+- **With an explicit draft:** `puffin-admin server start` passes the config's resolved `num_speculative_tokens` — `--num-speculative-tokens` > `DREAMFERENCE_SPECULATIVE_TOKENS` > file > `DEFAULT_SPECULATIVE_TOKENS = 8` — so a draft without the flag gets 8, not the recipe's 12. `start_server()` / `build_launch_command()` default to 5 only when called directly from Python.
+- **Without a draft**, the depth argument is ignored and the recipe's config is passed exactly.
 
-> ⚠️ **Known defect:** `server start --draft-model X` without `--num-speculative-tokens` passes `None` through, and the command line gets `--num-speculative-tokens None`, which vLLM rejects. Give `--num-speculative-tokens` explicitly with `--draft-model`.
+Until 2026-09-29 the raw flag was passed, and an omitted `--num-speculative-tokens` reached the command line as `None`.
 
 ### 3.3. torch.compile cache
 

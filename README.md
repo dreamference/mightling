@@ -1,173 +1,186 @@
 <div align="center">
-<img src="images/dfe-logo-light.svg" alt="Dreamference Logo" width="600">
 
-# 🚀 Dreamference
+<img src="docs/assets/puffin.svg" alt="Puffin" width="96">
 
-### **The Ultimate Autonomous AI Pair Programmer for NVIDIA GB10 Blackwell**
+# Puffin
 
-[![Hardware Qualified](https://img.shields.io/badge/NVIDIA%20GB10-128GB%20Unified%20Memory-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](https://nvidia.com)
-[![Agent Runtime](https://img.shields.io/badge/Agent-AAIF%20Goose%201.45%2B-0052CC?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/aaif-goose/goose)
-[![Inference Engine](https://img.shields.io/badge/vLLM-Speculative%20Decoding-FF6F00?style=for-the-badge&logo=python&logoColor=white)](https://github.com/vllm-project/vllm)
-[![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg?style=for-the-badge)](LICENSE)
-[![Docs](https://img.shields.io/badge/Docs-GitHub%20Pages-4CAF50?style=for-the-badge)](https://dreamference.github.io/dreamference)
-[![Build Status](https://img.shields.io/badge/Tests-15%20Passed-brightgreen?style=for-the-badge)](tests/)
+**OpenAI's Codex CLI, running a 122-billion-parameter model on the desk in front of you.**
 
-<p align="center">
-  <b>100% Air-Gapped. Zero Data Egress. Blazing Fast Speculative Decoding. Enterprise Container Sandboxing.</b>
-</p>
+No cloud model. No OpenAI account. No phone-home.
 
----
+[![NVIDIA GB10 · arm64](https://img.shields.io/badge/NVIDIA%20GB10-arm64%20%C2%B7%20128%20GB%20unified-76B900?logo=nvidia&logoColor=white)](docs/getting-started.md)
+[![Built on Codex rust-v0.158.0](https://img.shields.io/badge/built%20on-Codex%20rust--v0.158.0-111111)](docs/puffin.md)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue)](LICENSE)
 
 </div>
 
-## 🌟 What is Dreamference?
+```console
+$ puffin-admin server start        # load Qwen 3.5 122B-A10B on your GB10
+$ cd ~/my-project && puffin        # and code with it
 
-**Dreamference** is a state-of-the-art, open-source local AI pair programmer designed specifically to harness the massive **128 GB Unified LPDDR5X Memory** architecture of single-node **NVIDIA GB10 (Blackwell)** systems. 
-
-Powered by the **AAIF Goose Agentic Engine** and **vLLM Dual-Model Speculative Decoding**, Dreamference turns your local GB10 workstation into an autonomous software engineering powerhouse capable of writing code, running unit tests, refactoring multi-file repositories, and resolving bugs with zero network egress.
-
----
-
-## 🏆 Why Dreamference?
-
-*   **🛡️ Absolute Sovereignty**: 100% local execution. Your code never leaves your NVIDIA GB10 workstation. Perfect for high-security enterprise and proprietary environments.
-*   **⚡ Blackwell Optimized**: Custom vLLM launch recipes tuned specifically for the GB10 (SM121) architecture, leveraging **FlashInfer** and **NVFP4** quantization.
-*   **🤖 Multi-Agent Freedom**: Use the default **Goose** agent or switch seamlessly to **Aider**, **Cline**, **Continue**, or **OpenHands** with a single flag.
-*   **📚 Deep Context Intelligence**: Air-gapped AST symbol indexing combined with hybrid TF-IDF and dense vector search for lightning-fast codebase navigation.
-*   **🚀 Insane Speed**: Achieve 2x-3x higher throughput with dual-model speculative decoding and Blackwell-optimized kernels.
-
----
-
-## 🔥 Features at a Glance
-
-* ⚡ **Dual-Model Speculative Decoding**: Run primary 32B/70B models (`Qwen 2.5 Coder 32B`, `DeepSeek-R1-Distill`) alongside lightweight draft models (`Qwen 2.5 Coder 1.5B/3B`) to achieve **2x–3x faster inference throughput**.
-* 🤖 **Goose Agentic Loop**: Built-in supervisor that auto-provisions and orchestrates the official **AAIF Goose v1.45+** AI agent runtime out of the box.
-* 🛡️ **Rootless Container Sandboxing**: Isolate subagent tool executions (shell commands, package installs, test runs) using **Apptainer**, **Podman**, or **Docker** rootless containers.
-* 📚 **Zero-Egress AST Context Engine**: Air-gapped code intelligence combining AST symbol parsing (classes, functions, signatures) with TF-IDF semantic vector search (`.dreamference/context_index.json`).
-* 🔌 **IDE Companion MCP Server**: Native stdio **Model Context Protocol (MCP)** server providing real-time linter diagnostics, active editor sync, and diff proposals for **JetBrains** & **VS Code**.
-* 🎨 **Glassmorphism Web Canvas UI**: Interactive browser pane (`http://localhost:8501`) featuring live Mermaid.js architecture diagrams, streaming code diffs, and real-time GB10 memory telemetry.
-
----
-
-## ⚡ Quickstart (Instant Setup)
-
-### 1-Line Automatic Installer:
-```bash
-curl -fsSL https://raw.githubusercontent.com/dreamference/dreamference/main/scripts/install_gb10.sh | bash
+>_ Puffin (v0.158.0)
+model: Intel/Qwen3.5-122B-A10B-int4-AutoRound
 ```
 
-### Launch Interactive Pair Programming:
+Puffin is the product of **Dreamference**, a local AI stack for the NVIDIA GB10. It gives you a
+terminal coding agent, a browser chat assistant and a desktop app, all answered by one model
+served on your own machine. Your code, your prompts and your conversations stay there.
+
+---
+
+## What you get
+
+| Surface | What it does |
+|---|---|
+| **`puffin`, the terminal agent** | Reads your code, runs commands, edits your repository. It *is* the Codex CLI, so `puffin exec`, `puffin resume --last`, `-c key=value` and the slash commands work as you know them. [More →](docs/puffin.md) |
+| **Web chat** | A browser assistant with web search, voice input, image understanding and read-only Gmail, on the same local model. [More →](docs/web-chat.md) |
+| **`puffin-app`** | The web chat in a window of its own, with a launcher entry and icon. [More →](docs/desktop.md) |
+
+## Why it is interesting
+
+**A fork that edits almost nothing.** Codex lives in [`codex/`](codex) as a submodule pinned to the
+`rust-v0.158.0` release, and it is never modified. At build time Puffin exports that source, adds
+its launcher crate ([`puffin-rs/`](puffin-rs)) and applies **13 patches totalling 17 KB** from
+[`codex-patches/`](codex-patches), touching 20 of Codex's files. Most patches are a line or two: a
+hook that calls Puffin's own code, or a switch that turns a cloud feature off. Moving to a new Codex
+release is a submodule bump plus whichever hunks stop applying.
+
+**Every phone-home channel found by tracing, closed at the source.** Codex is built for OpenAI's cloud, and several of
+its calls happen with no login and no command from you. Puffin removes them at the source, in the
+patches, so no config file or sign-in can turn them back on:
+
+| Channel | Where it went | How Puffin closes it |
+|---|---|---|
+| Usage analytics | `chatgpt.com/backend-api/codex/analytics-events` | Analytics client built disabled (`0013`) |
+| OpenTelemetry metrics, on by default in release builds | `ab.chatgpt.com` (Statsig) | Exporter resolves to none (`0015`) |
+| Curated-plugin sync at startup | `github.com/openai/plugins.git` | Startup sync removed (`0015`) |
+| "Featured plugins" list | `chatgpt.com/backend-api/plugins/featured` | Returns an empty list (`0015`) |
+| Announcement tips in the TUI | `raw.githubusercontent.com/openai/codex` | Never fetched (`0015`) |
+| A ChatGPT sign-in left by upstream Codex | `~/.codex/auth.json` | Puffin uses its own `~/.puffin` (`0014`) |
+| Anything missed | `chatgpt_base_url` | Pointed at a closed local port by the launcher |
+
+These were found by tracing real sessions (`strace` on every `connect()` and `execve()`), not by
+reading code, and re-running that trace is part of the checklist for every Codex upgrade. `login`, `cloud`,
+`remote-control`, `/feedback` and `/voice` are refused or hidden; `update` installs Puffin releases
+instead of OpenAI's. The full list is in [`specs/DREAMFERENCE_PUFFIN_CODEX.md`](specs/DREAMFERENCE_PUFFIN_CODEX.md).
+
+**A big model that does not take the machine down with it.** On the GB10 the GPU and the operating
+system share one pool of memory, so an oversized model load does not just fail: it freezes the
+whole machine. That happened six times in one hour on 14 August. Since then, `puffin-admin server
+start` checks swap, kernel settings and the out-of-memory guard before it loads anything, and a
+watchdog reads kernel memory-pressure stall data during the load and kills the container before
+the host locks up. [How →](docs/architecture.md)
+
+## What does leave your machine
+
+Local is not the same as air-gapped, and Puffin does not pretend otherwise. These are the only
+things that reach the network, and each happens because you or the agent asked for it:
+
+| When | What is sent | To |
+|---|---|---|
+| Installing, building, first model start | Container images, packages, model weights, the Rust toolchain | Docker registries, PyPI, crates.io, Hugging Face, GitHub |
+| The agent or chat searches the web | The search query | Search engines, through a SearXNG instance on your machine |
+| The agent fetches a page | A request for that URL | That website |
+| You connect Gmail | Read-only IMAP requests | Google |
+| You run `puffin update` | A release check and download | GitHub |
+
+Search queries are written by the model and can contain fragments of your context. Gmail can be
+switched off (`puffin_gmail = false`); web search cannot yet. Details:
+[Privacy & security](docs/privacy.md).
+
+## Quick start
+
+**You need** an NVIDIA GB10 with 128 GB of unified memory running arm64 Ubuntu, Docker with the
+NVIDIA Container Toolkit, Python 3 and Git. Expect about 70 GB of model weights on first start, an
+8–12 minute kernel compile the first time the server loads, and a Rust build of `puffin` that takes
+a few minutes once its dependencies are cached, much longer the first time.
+
 ```bash
-# Starts the Puffin terminal agent against the local vLLM server (start it with `puffin-admin server start`)
-puffin
+git clone --recurse-submodules https://github.com/dgxcoder/dgxcoder.git puffin
+cd puffin
+python3 -m venv .venv && .venv/bin/pip install -e .
+export PATH="$PWD/.venv/bin:$PATH"   # add to ~/.bashrc: the agent runs puffin-admin for web search
+
+puffin-admin server start            # checks the host, downloads and loads the model
+puffin-admin codex build             # compiles puffin and links it into ~/.local/bin
+cd ~/my-project && puffin            # start coding
 ```
 
----
+`puffin-admin` has to be on the `PATH` the agent inherits: it reaches the web and Gmail by running
+`puffin-admin search`, `fetch` and `gmail` as shell commands. The default model also runs on a
+custom vLLM image, built in two stages from [`Dockerfile.dflash`](Dockerfile.dflash) and
+[`Dockerfile.dense`](Dockerfile.dense), which `server start` cannot build for you yet; the full
+walkthrough, including the web chat and desktop app, is in [Get started](docs/getting-started.md).
 
-## 🖥️ NVIDIA GB10 Model Qualification Matrix
+## Models
 
-All supported models are qualified to run on a single **NVIDIA GB10 System (128 GB Unified Memory)**:
+Choosing a model chooses its whole server recipe: context length, memory share, kernels,
+speculative decoding. There is nothing to tune by hand.
 
-| Model Alias | Parameters | Precision | Memory Required | Hardware Qualification |
-| :--- | :--- | :--- | :--- | :--- |
-| **`qwen3.6-35b-a3b-nvfp4`** | 35B (3B active) | NVFP4 | ~25 - 60 GB | ✅ **Default**. GB10 optimized MoE |
-| **`qwen2.5-coder-32b`** | 32B | BF16 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
-| **`qwen2.5-coder-72b`** | 72B | INT8 / FP8 | ~45 - 80 GB | ✅ Supported (Quantized fit) |
-| **`deepseek-r1-distill-32b`** | 32B | BF16 / FP8 | ~35 - 64 GB | ✅ Fits comfortably in 128GB Unified Memory |
-| **`deepseek-r1-distill-70b`** | 70B | INT8 / FP8 | ~45 - 80 GB | ✅ Supported (Quantized fit) |
-| **`llama-3.3-70b`** | 70B | FP8 | ~75 GB | ✅ Supported (Quantized fit) |
-| **`qwen2.5-coder-1.5b`** | 1.5B | BF16 | ~3.5 - 6 GB | ✅ Ideal Speculative Decoding Draft Model |
-| **`qwen2.5-coder-3b`** | 3.0B | BF16 | ~6.5 - 10 GB | ✅ Ideal Speculative Decoding Draft Model |
-| **`starcoder2-15b`** | 15B | BF16 / FP16 | ~20 - 30 GB | ✅ Fits easily |
-| `deepseek-v3-671b` | 671B | INT4 | ~350 GB | ❌ Exceeds 128GB (Requires multi-node) |
+| Alias | Model | Precision | Memory |
+|---|---|---|---|
+| **`qwen3.5-122b-a10b-hybrid-dflash`** (default) | Qwen 3.5 122B-A10B with DFlash speculative decoding | INT4 + FP8 | 71.5 – 120 GB |
+| `qwen3.5-122b-a10b-int4-dflash` | Qwen 3.5 122B-A10B with DFlash | INT4 | 71.5 – 120 GB |
+| `qwen3.5-122b-a10b-nvfp4` | Qwen 3.5 122B-A10B | NVFP4 | 78 – 120 GB |
+| `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B | NVFP4 | 25 – 60 GB |
 
+The default model measures **23.8 tokens/s on prose, 49.9 on code and 53.1 on JSON** on a GB10,
+single-stream, at a 32k context with eight slots. A small drafter proposes 12 tokens at a time and
+the large model checks them in one pass, which is why structured output is faster than prose.
+[All models →](docs/models.md)
 
----
+## Configuration
 
-## ⚙️ vLLM Parameters for Default Model (`qwen3.6-35b-a3b-nvfp4`)
+Every setting resolves the same way: command-line flag, then `DREAMFERENCE_*` environment variable,
+then `dreamference.toml` (in the project, then `~/.config/dreamference/config.toml`), then the
+built-in default.
 
-Dreamference automatically applies an optimized **NVIDIA GB10 launch recipe** when starting the default model (`qwen3.6-35b-a3b-nvfp4` / `nvidia/Qwen3.6-35B-A3B-NVFP4`):
-
-| Parameter / Flag | Value | Function |
-| :--- | :--- | :--- |
-| **Docker Image** | `nvcr.io/nvidia/vllm:26.07-py3` | Pinned NGC vLLM container with Blackwell SM121 support |
-| **Context Length (`--max-model-len`)** | `131072` | 128K context window for large codebase context |
-| **Memory Ratio (`--gpu-memory-utilization`)** | `0.3` | 30% memory utilization tuned for GB10 unified memory |
-| **KV Cache Dtype (`--kv-cache-dtype`)** | `fp8` | FP8 quantized KV cache for high token capacity |
-| **Attention Backend (`--attention-backend`)** | `flashinfer` | Blackwell-optimized FlashInfer attention kernels |
-| **MoE Backend (`--moe-backend`)** | `flashinfer_b12x` | Blackwell-optimized FlashInfer b12x MoE backend |
-| **Tool Parser (`--tool-call-parser`)** | `qwen3_xml` | Qwen 3.6 XML tool call parser |
-| **Reasoning Parser (`--reasoning-parser`)** | `qwen3` | Qwen 3.6 reasoning channel parser |
-| **Max Batched Tokens (`--max-num-batched-tokens`)** | `32768` | Batched tokens limit for chunked prefill |
-| **Speculation (`--speculative-config`)** | `{"method": "mtp", "num_speculative_tokens": 3, "moe_backend": "triton"}` | MTP (Multi-Token Prediction) with 3 draft tokens and Triton backend |
-| **Cache & Prefill** | `--enable-prefix-caching --enable-chunked-prefill` | Multi-turn prefix reuse & fast TTFT prefill chunking |
-| **Container Environment (`-e`)** | `VLLM_NVFP4_GEMM_BACKEND=flashinfer-b12x`<br>`VLLM_MARLIN_USE_ATOMIC_ADD=1`<br>`VLLM_DISABLED_KERNELS=MarlinNvFp4LinearKernel` | Directs process to SM121 FlashInfer b12x NVFP4 GEMM kernels |
-
----
-
-
-## 🛠️ CLI Suite & Commands
-
-```bash
-# 1. Initialize project workspace & Goose agent configuration
-puffin-admin init --model qwen3.6-35b-a3b-nvfp4
-
-# 2. Launch the interactive Puffin agent (waits for the vLLM server if it is still loading)
-puffin
-
-# 3. Run autonomous coding task non-interactively
-puffin-admin run "Refactor database pool to use async pg" --sandbox apptainer
-
-# 4. Check GB10 memory telemetry & vLLM health
-puffin-admin status
-
-# 5. Launch local vLLM GB10 server with MTP Speculative Decoding
-puffin-admin server start --model qwen3.6-35b-a3b-nvfp4 --port 8000
-
-# 6. Index codebase AST & vector context
-puffin-admin index --force
-
-# 7. Start Web Canvas UI
-puffin-admin web --port 8501
-```
-
----
-
-## ⚙️ Configuration & Precedence
-
-Dreamference uses a **4-Tier Configuration Hierarchy**:
-1. **CLI Flags**: `--config`, `--model`, `--draft-model`, `--sandbox` *(Highest Priority)*
-2. **Environment Variables**: `DREAMFERENCE_MODEL`, `DREAMFERENCE_DRAFT_MODEL`, `DREAMFERENCE_SANDBOX`
-3. **Config File**: `dreamference.toml` or `~/.config/dreamference/config.toml`
-4. **Built-in System Defaults** *(Lowest Priority)*
-
-### Example `dreamference.toml`:
 ```toml
-vllm_host = "http://localhost:8000
-model = "qwen3.6-35b-a3b-nvfp4
-draft_model: null
-num_speculative_tokens: 8
-sandbox: apptainer
+# dreamference.toml
+vllm_host = "http://localhost:8000"
+model = "qwen3.5-122b-a10b-hybrid-dflash"
+agent_runner = "codex"      # codex is `puffin`; also goose, aider, cline, continue, openhands
+puffin_gmail = true         # let the agent read connected Gmail accounts
 ```
 
----
+## Other agents
 
-## 🏗️ Architecture Overview
+`puffin` is the default, but the same server can drive Goose, Aider, Cline, Continue or OpenHands:
+
+```bash
+puffin-admin run --agent aider "add type hints to utils.py"
+```
+
+## Architecture
 
 ```mermaid
-flowchart TD
-    User([Developer / IDE]) <--> CLI[dreamference CLI / MCP Server]
-    CLI <--> Goose[Goose AI Agent Runtime]
-    Goose <--> ContextEngine[AST + Vector Context Index]
-    Goose <--> Sandbox[Rootless Container Sandbox: Apptainer/Podman]
-    Goose <--> vLLM[vLLM GB10 Inference Server]
-    vLLM <--> GB10[NVIDIA GB10 128GB Unified Memory]
-    CLI <--> WebUI[Glassmorphism Web Canvas UI :8501]
+flowchart LR
+    puffin["puffin (Rust, Codex + launcher)"] --> vllm["vLLM on the GB10"]
+    app["puffin-app"] --> chat["Web chat (Onyx)"]
+    chat --> vllm
+    chat --> side["SearXNG, Gmail, speech-to-text, image search"]
+    admin["puffin-admin (Python)"] -. manages .-> vllm
+    admin -. manages .-> chat
+    admin -. builds .-> puffin
 ```
 
----
+`puffin-admin` is the Python CLI from the `dreamference` package: it starts the model server,
+deploys the web chat, builds `puffin` and runs the other agents. Full command reference:
+[`docs/admin.md`](docs/admin.md). Design specs: [`specs/`](specs/README.md).
 
-## 📜 License
+## Development
+
+```bash
+.venv/bin/pip install -e .
+.venv/bin/python -m pytest tests/        # no GPU or Docker needed; live tests skip without a server
+puffin-admin codex build                 # rebuild puffin after changing puffin-rs/ or codex-patches/
+```
+
+Tests never touch your real configuration: each one gets its own home directory. The live
+slash-command suite (`tests/test_puffin_slash_commands.py`) drives every Codex slash command
+against a running model when one is up.
+
+## License
 
 Copyright (C) 2026 Dreamference contributors.
 
@@ -180,23 +193,13 @@ modified version and let users interact with it **over a network**, those users 
 corresponding source. Dreamference ships a browser chat UI, so that clause is the operative one for
 anyone hosting a fork.
 
-This covers Dreamference's own code. The components it deploys keep their own licences — vLLM
-(Apache 2.0), Onyx (its own terms, including an `ee/` directory that is *not* free software and
-which Dreamference deliberately leaves switched off), and the models, each under the terms of its
-own weights licence.
+This covers Dreamference's own code. The components it deploys keep their own licences: Codex
+(Apache 2.0), vLLM (Apache 2.0), Onyx (its own terms, including an `ee/` directory that is *not*
+free software and which Dreamference deliberately leaves switched off), and the models, each under
+the terms of its own weights licence.
 
----
+## Contributing
 
-## 🤝 Community & Contribution
-
-Dreamference is built by and for the **NVIDIA Blackwell** developer community. We believe in the power of open-source local AI.
-
-*   **🐛 Found a Bug?**: Open an issue! We prioritize Blackwell-specific hardware issues and model compatibility.
-*   **💡 Feature Request?**: We'd love to hear it. Multi-agent support and optimization recipes are our top focus.
-*   **🌟 Star the Repo**: Help us make Dreamference viral!
-
----
-
-<div align="center">
-  <b>Built with ❤️ for NVIDIA GB10 & Blackwell AI Workstations</b>
-</div>
+Issues and pull requests are welcome, especially GB10 recipes for new models, and anything the
+network trace turns up after a Codex upgrade. If Puffin is useful to you, a star helps other GB10
+owners find it.

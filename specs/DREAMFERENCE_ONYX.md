@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Onyx Lite deployment; provider registration; Puffin branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
-> **Checked against the code:** 2026-09-28 (`dreamference/chat/`)
+> **Checked against the code:** 2026-09-29 (`dreamference/chat/`)
 
 ---
 
@@ -29,7 +29,7 @@
 - `puffin-nginx-1`;
 - `puffin-code-interpreter-1`.
 
-The UI is served at `http://localhost:3000`, and the desktop window `puffin-app` shows the same server.
+The UI is served at `http://localhost:3000`, and the desktop window `puffin-app` shows the same server. Both of nginx's ports (80 and 3000) are published on **127.0.0.1 only** once `configure` has run (§2 step 1): Docker's default is every interface, which put the UI — and the admin account `configure` creates with a published default password, which can search the user's mail — on the local network. Until 2026-09-29 they were.
 
 Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 
@@ -58,7 +58,7 @@ Dreamference never writes Onyx's compose files. Everything goes through `onyx-cl
 
 Onyx has **no environment variable for the LLM provider**. Providers live in its database, so `configure` drives the admin API that the Admin panel uses. In order:
 
-1. **Telemetry off** (§9). This comes first, because applying it recreates the API server, and a session cookie taken earlier would point at the replaced container.
+1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
 2. **Authenticate** as `admin@dreamference.dev` / `dreamference` by default. The account is registered, and becomes admin, when login fails.
 3. **Register the model** as provider `dreamference-vllm`, type `openai_compatible`:
    - `api_base` is the vLLM URL with loopback rewritten to the Docker **bridge gateway** (`docker network inspect bridge` → e.g. `http://172.17.0.1:8000/v1`), because vLLM uses `--network host` and `localhost` inside Onyx is the container itself;

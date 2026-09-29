@@ -47,8 +47,8 @@ to your Gmail, all answered by the same local model.
 
 - **Local by design.** Inference runs on your GB10. The coding agent sends its prompts to the model
   you serve, not to a cloud model, and needs no OpenAI account. The web chat's telemetry is switched
-  off. See [Privacy & security](privacy.md) for exactly what does leave the machine, including one
-  known gap.
+  off, and so are Codex's usage analytics. See [Privacy & security](privacy.md) for exactly what
+  does leave the machine.
 - **A large model on one desk.** The default model is Qwen 3.5 122B-A10B with speculative decoding.
   On a GB10 it measures 23.8 tokens/s on prose, 49.9 on code and 53.1 on JSON, single-stream at a
   32k context with eight slots. See [Models](models.md).

@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Installation, Hardware Detection, Quickstart, Helper Scripts
-> **Checked against the code:** 2026-09-28 (`setup.py`, `scripts/`, `dreamference/`)
+> **Checked against the code:** 2026-09-29 (`setup.py`, `scripts/`, `dreamference/`)
 
 ---
 
@@ -99,19 +99,20 @@ puffin                                       # the terminal agent
 
 A published GitHub release carries `puffin` and `codex-code-mode-host` for linux-arm64. Once a release exists, `puffin update` installs or refreshes them, and a source checkout is then only needed for `puffin-admin`. As of 2026-09-28 no release has been published.
 
-### 3.3. `scripts/install_gb10.sh` (outdated)
+### 3.3. `scripts/install_gb10.sh`
 
 ```bash
 ./scripts/install_gb10.sh [MODEL]
 ```
 
-It does the following:
-1. If `goose` is missing, installs it with `curl -fsSL https://github.com/aaif-goose/goose/releases/latest/download/download_cli.sh | sh`, falling back to `pip install goose-ai`.
-2. `pip install -e .` into whatever environment is active.
-3. `puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"`.
-4. Tells you to run `puffin`.
+§3.1 in one script, every step done by `puffin-admin`:
+1. `git submodule update --init codex`.
+2. `python3 -m pip install -e .` into whatever environment is active.
+3. `puffin-admin init`, with `--model MODEL` if one is given; otherwise the registry's default model.
+4. `puffin-admin codex build`, so `puffin` exists when it finishes.
+5. Tells you to run `puffin-admin server start`, then `puffin`.
 
-> ⚠️ **Out of step with the code.** Its default model is `qwen3.6-35b-a3b-nvfp4`, not the current default. It installs Goose, which is no longer the default agent. It does not initialise the `codex` submodule or build `puffin`, so the `puffin` it tells you to run does not exist yet after it finishes. Prefer §3.1.
+Until 2026-09-29 it defaulted to `qwen3.6-35b-a3b-nvfp4`, installed Goose, and never built `puffin`.
 
 ---
 
@@ -121,15 +122,17 @@ All in `scripts/` at the repository root.
 
 ### 4.1. `scripts/run_vllm_gb10.sh [MODEL] [PORT] [DRAFT] [TOKENS]`
 
-A foreground launch outside Docker: `python3 -m vllm.entrypoints.openai.api_server --model "$MODEL" --max-model-len 16384 --gpu-memory-utilization 0.50 --trust-remote-code --enforce-eager`. With a draft, it adds `--speculative-model … --num-speculative-tokens …`. The defaults are model `qwen3.6-35b-a3b-nvfp4`, port 8000 and 5 tokens.
+A thin wrapper over `puffin-admin server start`: each argument given becomes `--model`, `--port`, `--draft-model` or `--num-speculative-tokens`, and anything omitted takes the configured value. The launch therefore gets what the CLI gives it — the alias resolved to its HF repo, the registry recipe and pinned image, the host-safety checks and the PSI watchdog.
 
-> ⚠️ It passes `MODEL` to vLLM **unresolved**: an alias like the default is not an HF repo id, so vLLM cannot load it. Pass an HF repo instead. It also bypasses Docker, the recipes, host safety and the pinned images. Use `puffin-admin server start`.
+Until 2026-09-29 it ran `python3 -m vllm.entrypoints.openai.api_server` directly, outside Docker, with the alias unresolved and the removed `--speculative-model` flags.
 
 ### 4.2. `scripts/run_goose.sh`
 
-Exports `GOOSE_PROVIDER=openai`, `OPENAI_HOST=$DREAMFERENCE_VLLM_HOST` (default `http://localhost:8000`), `OPENAI_BASE_PATH=v1`, `OPENAI_API_KEY=gb10-local-token` and `GOOSE_MODEL=${DREAMFERENCE_MODEL:-qwen3.6-35b-a3b-nvfp4}`, then runs `goose session "$@"`.
+```bash
+./scripts/run_goose.sh "task prompt"
+```
 
-> ⚠️ `GOOSE_MODEL` is set to the alias, but vLLM serves the model under its HF repo id. Set `DREAMFERENCE_MODEL` to the served id (e.g. `Intel/Qwen3.5-122B-A10B-int4-AutoRound`), or use `puffin-admin run --agent goose`, which resolves it.
+Runs `puffin-admin run --agent goose "$@"`, which checks the server, writes Goose's config for the served model id and provisions Goose if it is missing (`DREAMFERENCE_AGENTS.md`). Until 2026-09-29 it exported `GOOSE_MODEL` as the alias, which vLLM does not serve, and called `goose` directly.
 
 ---
 
@@ -156,7 +159,7 @@ puffin-admin model list             # the model matrix
 puffin --version                    # "puffin 0.158.0"
 puffin exec "say hello"             # a one-shot answer from the local model (needs the server)
 puffin-admin index --force          # (re)builds .dreamference/ in the current directory
-.venv/bin/python -m pytest tests/ -q   # 317 passed, 63 skipped without a model server (2026-09-28)
+.venv/bin/python -m pytest tests/ -q   # 353 passed, 63 skipped without a model server (2026-09-29)
 ```
 
 ---

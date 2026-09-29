@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** the agent runners: Codex (`puffin`, default), Goose, Cline, Aider, Continue, OpenHands.
-> **Checked against the code:** 2026-09-28 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
+> **Checked against the code:** 2026-09-29 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
 
 ---
 
@@ -44,7 +44,7 @@ The runner is chosen by `--agent`, then `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUN
 - **Session:** `CodexRunner.run_session()` builds `puffin` if needed and runs `puffin [args…] ["PROMPT"]`, passing `DREAMFERENCE_VLLM_HOST` along. With `--debug` it sets `RUST_LOG`.
 - **Everything else happens in the launcher `puffin-rs/`:**
   - waiting for vLLM;
-  - the model catalog and `~/.codex/config.toml`;
+  - the model catalog and `config.toml` in `$CODEX_HOME`, which `puffin` sets to `~/.puffin` (never upstream's `~/.codex`);
   - the system prompt, with web access and optionally Gmail;
   - the `--oss --local-provider openai-custom --model <id>` options.
 
@@ -95,7 +95,7 @@ extensions:
   jetbrains_mcp:
     enabled: true
     type: stdio
-    cmd: dreamference
+    cmd: {DreamferenceConfig.mcp_server_command(): the puffin-admin beside the running interpreter, else bare puffin-admin}
     args: [mcp]
 instructions: {build_instructions(): Hermes tool-call prompt if the parser is hermes, plus Cave Mode text}
 ```
@@ -108,7 +108,7 @@ If the file exists:
 
 `instructions` is always rewritten, so a stale block for a previous model's tool-call format cannot survive.
 
-> ⚠️ **Known defect:** `jetbrains_mcp.cmd` is `dreamference`, a command that no longer exists. The console script has been `puffin-admin` since the rename, so Goose cannot start this MCP extension. It should be `cmd: puffin-admin`, `args: [mcp]`.
+`jetbrains_mcp.cmd` is the full path of `puffin-admin` in the same virtualenv as the running interpreter (falling back to the bare name), because Goose started from an IDE or a desktop entry may not have the venv on PATH. Until 2026-09-29 it was `dreamference`, a command that no longer exists, so the extension never started.
 
 ### 3.5. Session Commands
 
@@ -173,12 +173,11 @@ aider \
   --openai-api-key gb10-local-token \
   --model openai/{hf_repo} \
   --auto-commits | --no-auto-commits \
-  [--editor-model openai/{hf_repo} --architect --model openai/{draft_hf_repo}]   # when draft_model is set
   [--message "<prompt>"] \
   [--verbose]
 ```
 
-**Architect mode.** When a `draft_model` is configured, the runner appends `--architect`, the main model as `--editor-model`, and a second `--model` naming the *draft* model. The later `--model` wins, so the small draft model plans and the main model edits.
+**No architect mode.** Aider only ever names the served model. Until 2026-09-29 a configured `draft_model` added `--architect --editor-model openai/{hf_repo} --model openai/{draft_hf_repo}`; the draft model is the speculative head vLLM runs inside the one served model, not a model it serves, so every request named a model that did not exist.
 
 ### 5.4. Sandbox Mapping
 
@@ -214,14 +213,14 @@ It writes `~/.continue/config.json`. If the file exists, it replaces only `model
   "tabAutocompleteModel": {
     "title": "Dreamference Tab Autocomplete",
     "provider": "openai",
-    "model": "{draft hf_repo, or Qwen/Qwen2.5-Coder-1.5B-Instruct}",
+    "model": "{hf_repo}",
     "apiBase": "{vllm_host}/v1/",
     "apiKey": "gb10-local-token"
   }
 }
 ```
 
-**Tab autocomplete** points at the *same* vLLM endpoint, but names a model that endpoint does not serve. That is the draft model if one is configured, otherwise `Qwen/Qwen2.5-Coder-1.5B-Instruct`, and vLLM serves exactly one model. Autocomplete requests therefore fail unless a second vLLM serving that model is started, and the URL edited to point at it.
+**Tab autocomplete** uses the served model, the only one the endpoint has. Until 2026-09-29 it named the draft model, or `Qwen/Qwen2.5-Coder-1.5B-Instruct`, neither of which vLLM serves, so every autocomplete request failed.
 
 ### 6.3. Session Behaviour
 
@@ -240,9 +239,9 @@ The prompt is unused.
 ### 7.1. Overview
 
 - **Package:** `dreamference/runner/openhands_runner.py`, `openhands_installer.py`
-- **Runtime:** Docker image `ghcr.io/all-hands-ai/openhands:main`, web UI at `http://localhost:3000`
+- **Runtime:** Docker image `ghcr.io/all-hands-ai/openhands:main`, web UI at `http://localhost:3001` (`OPENHANDS_HOST_PORT`)
 
-> ⚠️ **Port conflict:** port 3000 is also where the Puffin web UI (Onyx) listens (`puffin-admin puffin start`). OpenHands cannot start while Onyx is running.
+Port 3001, not 3000, because the Puffin web UI (Onyx) owns 3000; published on `127.0.0.1` only, because the container mounts the Docker socket and a UI on the network would hand root on the host to anyone who can reach it.
 
 ### 7.2. Container Launch
 
@@ -250,14 +249,16 @@ The prompt is unused.
 docker rm -f dreamference-openhands
 docker run --rm -it --name dreamference-openhands \
   -e LLM_MODEL=openai/{hf_repo} \
-  -e LLM_BASE_URL={vllm_host}/v1 \
+  -e LLM_BASE_URL={OnyxRunner.resolve_container_vllm_url(vllm_host)} \
   -e LLM_API_KEY=gb10-local-token \
   -e WORKSPACE_BASE={cwd} \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v {cwd}:/opt/workspace_base \
-  -p 3000:3000 \
+  -p 127.0.0.1:3001:3000 \
   ghcr.io/all-hands-ai/openhands:main
 ```
+
+`LLM_BASE_URL` goes through the same rewrite as Onyx's provider: a loopback vLLM host becomes the Docker bridge gateway, because inside the container `localhost` is the container itself.
 
 ### 7.3. Session Behaviour
 
@@ -332,7 +333,6 @@ The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call
 | Aider install failure | `aider` still not found after pip/pipx | Exit 1 with a `pip install aider-chat` hint |
 | OpenHands without Docker | `docker ps` fails | Exit 1 with a Docker daemon hint |
 | OpenHands image pull failure | `docker pull` error | Exit 1 with the pull command |
-| OpenHands with Onyx running | Port 3000 already bound | Stop Onyx (`puffin-admin puffin stop`) first |
 | `puffin` not built (Codex) | Build fails or is missing | `puffin-admin codex build` |
 
 ---

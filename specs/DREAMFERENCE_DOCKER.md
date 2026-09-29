@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Docker vLLM Architecture, Model Downloads, Tensorization, Cache Management
-> **Checked against the code:** 2026-09-28 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`)
+> **Checked against the code:** 2026-09-29 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`)
 
 ---
 
@@ -57,11 +57,11 @@
 
 ### 2.3. Clearing
 
-`puffin-admin clear model-cache` runs `ModelDownloader.clear_cache()`, which `rmtree`s the **parents** of both caches:
-- `~/.cache/huggingface`, which is more than `hub/`: it includes the stored HF token;
-- `~/.cache/dreamference`, which is more than the tensorizer cache: it also holds vLLM's compile cache, the `puffin` build cache, fonts and logs.
+`puffin-admin clear model-cache` runs `ModelDownloader.clear_cache()`, which removes exactly two directories:
+- the hub, `~/.cache/huggingface/hub` (or `$HF_HOME/hub`), leaving the stored HF token beside it;
+- the tensorizer cache, `~/.cache/dreamference/tensorizer`, leaving vLLM's compile cache, the `puffin` build cache, fonts and logs.
 
-Deleting individual `models--…` directories is the targeted alternative.
+Anything a container wrote there as root survives the user's `rmtree`; the command then names the directory, prints the `sudo rm -rf` for it and exits 1. Until 2026-09-29 it removed both parents. Deleting individual `models--…` directories is the targeted alternative.
 
 ---
 
@@ -84,9 +84,7 @@ Tensorizer serializes weights into one `model.tensors` file for faster loading. 
 
 ### 3.3. Clearing
 
-`puffin-admin clear tensorize-cache` runs `ModelDownloader.clear_tensorizer_cache()`.
-
-> ⚠️ **Known defect:** it removes the **parent** of the tensorizer directory, which is all of `~/.cache/dreamference` (compile cache, `puffin` build cache, …), not just `tensorizer/`. Until that is fixed, delete `~/.cache/dreamference/tensorizer` by hand. See `DREAMFERENCE_CLI.md` §4.18.
+`puffin-admin clear tensorize-cache` runs `ModelDownloader.clear_tensorizer_cache()`, which removes `~/.cache/dreamference/tensorizer` and nothing else, reporting root-owned leftovers as in §2.3. Until 2026-09-29 it removed all of `~/.cache/dreamference`. See `DREAMFERENCE_CLI.md` §4.18.
 
 ---
 
@@ -169,9 +167,8 @@ The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAU
 
 - **Present locally:** used as is.
 - **Registry-qualified** (the name contains `/`): `docker pull`.
-- **Bare tag:** `docker build -t <tag> -f Dockerfile .`, using the **main** `Dockerfile`.
-
-> ⚠️ **Known defect:** the bare-tag rule assumes the bare tag is `DEFAULT_VLLM_IMAGE`. If a pinned DFlash image (`dreamference-vllm-dflash:…`) is missing, it is "built" from the main `Dockerfile` under the DFlash tag. The result is the NGC engine mislabelled as the DFlash one, and the DFlash recipe then fails on it. Build pinned images from their own Dockerfile before `server start`.
+- **`DEFAULT_VLLM_IMAGE`:** `docker build -t <tag> -f Dockerfile .`, using the **main** `Dockerfile`, the only image it produces.
+- **Any other bare tag** (the pinned `dreamference-vllm-dflash:…` images): refused with an explanation. These are built by hand from `Dockerfile.dflash` and then `Dockerfile.dense` (§5.2), before `server start`. Until 2026-09-29 they too were "built" from the main `Dockerfile`, which put the NGC engine under the DFlash tag and failed the DFlash recipe on it.
 
 `probe_image()` never acquires an image. It reports on one already present, because it is called from `build_launch_command`, where a missing image must not start a multi-gigabyte download.
 
@@ -190,17 +187,19 @@ The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAU
 | `puffin-api_server-1`, `puffin-web_server-1`, `puffin-relational_db-1`, `puffin-nginx-1`, `puffin-code-interpreter-1` | `puffin-admin puffin start` (Onyx Lite via `onyx-cli`) | Container names pinned to `puffin-*` in the lite overlay |
 | `dreamference-gmail`, `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `puffin-admin puffin configure` | Sidecars joined to Onyx's network; published on loopback only (gmail 8767, image search 8768, stt 8100) |
 | `dreamference-searxng` | **Started by hand** (the command is in `web_tools.py`'s error message) | `127.0.0.1:8888`; `configure` only joins it to Onyx's network |
-| `dreamference-openhands` | `puffin-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, port **3000**, which collides with Onyx (`DREAMFERENCE_AGENTS.md` §7) |
+| `dreamference-openhands` | `puffin-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, UI on **`127.0.0.1:3001`** (`OPENHANDS_HOST_PORT`): not 3000, which is Onyx's, and loopback only because the container mounts the Docker socket (`DREAMFERENCE_AGENTS.md` §7) |
 
 **OpenHands launch:**
 
 ```bash
 docker run --rm -it --name dreamference-openhands \
-  -e LLM_MODEL=openai/{hf_repo} -e LLM_BASE_URL={vllm_host}/v1 -e LLM_API_KEY=gb10-local-token \
+  -e LLM_MODEL=openai/{hf_repo} -e LLM_BASE_URL={OnyxRunner.resolve_container_vllm_url(vllm_host)} -e LLM_API_KEY=gb10-local-token \
   -e WORKSPACE_BASE={cwd} \
   -v /var/run/docker.sock:/var/run/docker.sock -v {cwd}:/opt/workspace_base \
-  -p 3000:3000 ghcr.io/all-hands-ai/openhands:main
+  -p 127.0.0.1:3001:3000 ghcr.io/all-hands-ai/openhands:main
 ```
+
+`LLM_BASE_URL` has loopback rewritten to the Docker bridge gateway, as for Onyx: vLLM runs with `--network host`, and `localhost` inside the container is the container. Until 2026-09-29 the launch passed the host's `localhost` URL and published `3000:3000` on every interface.
 
 ---
 
