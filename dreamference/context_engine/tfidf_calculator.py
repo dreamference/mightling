@@ -7,6 +7,7 @@ and computing term frequency-inverse document frequency weights across workspace
 
 import math
 import re
+from collections import Counter
 from typing import Dict, List, Set, Tuple
 
 class TFIDFCalculator:
@@ -53,20 +54,23 @@ class TFIDFCalculator:
         """
         doc_count = len(doc_tokens)
         idf_table: Dict[str, float] = {}
-        tf_idf_index: Dict[str, Dict[str, float]] = {}
+        tf_idf_index: Dict[str, Dict[str, float]] = {token: {} for token in all_tokens_set}
+
+        # One pass per document. Scanning every document's token list once per token (`in` and
+        # `.count` on lists) was quadratic, and took minutes on a workspace of a few thousand files.
+        counts = {rel_path: Counter(tokens) for rel_path, tokens in doc_tokens.items()}
+        document_frequency: Counter = Counter()
+        for counter in counts.values():
+            document_frequency.update(counter.keys())
 
         if doc_count > 0:
             for token in all_tokens_set:
-                # Document frequency: number of documents containing token
-                df = sum(1 for tokens in doc_tokens.values() if token in tokens)
                 # Smoothed inverse document frequency
-                idf = math.log((doc_count + 1) / (df + 1)) + 1
-                idf_table[token] = idf
-                
-                tf_idf_index[token] = {}
-                for rel_path, tokens in doc_tokens.items():
-                    tf = tokens.count(token) / (len(tokens) or 1)
-                    if tf > 0:
-                        tf_idf_index[token][rel_path] = tf * idf
+                idf_table[token] = math.log((doc_count + 1) / (document_frequency[token] + 1)) + 1
+            for rel_path, counter in counts.items():
+                length = len(doc_tokens[rel_path]) or 1
+                for token, count in counter.items():
+                    if token in tf_idf_index:
+                        tf_idf_index[token][rel_path] = (count / length) * idf_table[token]
 
         return idf_table, tf_idf_index

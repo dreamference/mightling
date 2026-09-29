@@ -10,7 +10,6 @@ and search.
 """
 
 import sqlite3
-import json
 from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
@@ -69,10 +68,15 @@ class SQLiteContextStorage:
                 """)
             except Exception:
                 pass
-            try:
-                conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS vec_context USING vec0(embedding float[768]);")
-            except Exception:
-                pass
+            # Plain rows, not a sqlite-vec `vec0` table: that extension was never loaded into these
+            # connections, so the table creation and every insert failed silently and no vector
+            # was ever stored. Search scores the vectors in Python, so nothing needs the extension.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS embeddings (
+                    rel_path TEXT PRIMARY KEY,
+                    vector BLOB NOT NULL
+                );
+            """)
         return conn
 
     def search_fts(self, query_tokens: List[str], top_k: int) -> Dict[str, float]:
@@ -104,18 +108,39 @@ class SQLiteContextStorage:
                 pass
         return file_scores
 
-    def insert_vectors(self, rel_paths: List[str], embeddings: np.ndarray) -> None:
-        """Insert or replace vector embeddings into vec_context table (rowid = hash of rel_path for join)."""
-        if self.db_path.exists() and embeddings.size > 0:
-            try:
-                conn = sqlite3.connect(self.db_path)
-                conn.execute("PRAGMA mmap_size = 2147483648;")
-                with conn:
-                    for i, path in enumerate(rel_paths):
-                        vec_json = json.dumps(embeddings[i].tolist())
-                        # Use a stable integer id derived from path hash for vec0 rowid
-                        row_id = abs(hash(path)) % (2**63)
-                        conn.execute("INSERT OR REPLACE INTO vec_context(rowid, embedding) VALUES (?, vec_f32(?));", (row_id, vec_json))
-                conn.close()
-            except Exception:
-                pass
+    def store_embeddings(self, file_to_embedding: Dict[str, np.ndarray]) -> None:
+        """
+        Replaces the stored document embeddings with `file_to_embedding`.
+
+        Keyed by path. (The old vec0 rows were keyed by `hash(path)`, which Python randomises per
+        process, so even a working table could not have been read back after a restart.)
+
+        Args:
+            file_to_embedding (Dict[str, np.ndarray]): File path to float32 embedding.
+        """
+        conn = self.init_db()
+        with conn:
+            conn.execute("DELETE FROM embeddings;")
+            conn.executemany(
+                "INSERT INTO embeddings (rel_path, vector) VALUES (?, ?);",
+                [(path, np.asarray(vector, dtype=np.float32).tobytes()) for path, vector in file_to_embedding.items()],
+            )
+        conn.close()
+
+    def load_embeddings(self) -> Dict[str, np.ndarray]:
+        """
+        Reads back the stored document embeddings.
+
+        Returns:
+            Dict[str, np.ndarray]: File path to float32 embedding; empty if none are stored.
+        """
+        if not self.db_path.exists():
+            return {}
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute("SELECT rel_path, vector FROM embeddings;").fetchall()
+        except sqlite3.OperationalError:
+            rows = []  # an index built before this table existed
+        finally:
+            conn.close()
+        return {path: np.frombuffer(blob, dtype=np.float32) for path, blob in rows}

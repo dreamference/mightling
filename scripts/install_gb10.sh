@@ -1,31 +1,25 @@
 #!/usr/bin/env bash
-set -e
+# Installs Puffin on a GB10 from a checkout of this repository: the Python package (which provides
+# `puffin-admin`), the workspace config, and the `puffin` terminal agent built from the pinned
+# Codex fork. Everything is done by `puffin-admin`; this script only runs it in order.
+#
+#   ./scripts/install_gb10.sh [MODEL]     MODEL defaults to the registry's default model
+set -euo pipefail
 
-# ANSI color codes
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+cd "$(dirname "$0")/.."
+git submodule update --init codex
 
-echo -e "${BLUE}${BOLD}=== 🚀 Installing Dreamference & Goose Agent Runtime on NVIDIA GB10 ===${NC}"
+echo "🔧 Installing the Dreamference package (puffin-admin)..."
+python3 -m pip install -e .
 
-# Check for goose CLI
-if ! command -v goose &> /dev/null; then
-    echo -e "📦 ${BLUE}Installing Goose CLI (aaif-goose/goose)...${NC}"
-    curl -fsSL https://github.com/aaif-goose/goose/releases/latest/download/download_cli.sh | sh || {
-        echo -e "⚠️ ${BLUE}Direct script download failed. Installing goose via pip...${NC}"
-        pip install goose-ai || true
-    }
+echo "⚙️  Writing the workspace configuration..."
+if [ -n "${1:-}" ]; then
+    puffin-admin init --model "$1"
 else
-    echo -e "✅ ${GREEN}Goose CLI is already installed.${NC}"
+    puffin-admin init
 fi
 
-# Install python package in editable mode with dependencies
-echo -e "🔧 ${BLUE}Installing Dreamference package...${NC}"
-pip install -e .
+echo "🔨 Building puffin (the terminal agent) from the codex submodule..."
+puffin-admin codex build
 
-echo -e "⚙️ ${BLUE}Initializing Dreamference configuration & indexing workspace...${NC}"
-puffin-admin init --model "${1:-qwen3.6-35b-a3b-nvfp4}"
-
-echo -e "\n${GREEN}${BOLD}🎉 Dreamference Installation & GB10 Setup Complete!${NC}"
-echo -e "👉 Run ${BOLD}'puffin'${NC} to start your first session."
+echo "🎉 Done. Start the model server with 'puffin-admin server start', then run 'puffin'."

@@ -46,10 +46,10 @@ def download_model(model_key: str, hf_token: Optional[str] = None, auto_tensoriz
 def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = False) -> Dict[str, bool]:
     return ModelDownloader.download_all_models(hf_token=hf_token, auto_tensorize=auto_tensorize)
 
-def clear_model_cache() -> None:
+def clear_model_cache() -> bool:
     return ModelDownloader.clear_cache()
 
-def clear_tensorizer_cache() -> None:
+def clear_tensorizer_cache() -> bool:
     return ModelDownloader.clear_tensorizer_cache()
 
 def get_system_memory() -> Dict[str, float]:

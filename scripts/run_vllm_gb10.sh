@@ -1,29 +1,15 @@
 #!/usr/bin/env bash
-set -e
+# Starts the model server. A thin wrapper over `puffin-admin server start`, which applies the
+# model's registry recipe and the host-safety checks and memory-pressure watchdog that keep a
+# model load on GB10's unified memory from freezing the whole machine. This script used to launch
+# vLLM directly, skipping all of that.
+#
+#   ./scripts/run_vllm_gb10.sh [MODEL] [PORT] [DRAFT_MODEL] [NUM_SPECULATIVE_TOKENS]
+set -euo pipefail
 
-MODEL="${1:-qwen3.6-35b-a3b-nvfp4}"
-PORT="${2:-8000}"
-DRAFT_MODEL="${3:-}"
-NUM_TOKENS="${4:-5}"
-
-echo "=== Launching vLLM Server Optimized for NVIDIA GB10 (128GB Unified Memory) ==="
-echo "Target Model: $MODEL"
-echo "API Port:     $PORT"
-
-CMD=(
-    python3 -m vllm.entrypoints.openai.api_server
-    --host 0.0.0.0
-    --port "$PORT"
-    --model "$MODEL"
-    --max-model-len 16384
-    --gpu-memory-utilization 0.50
-    --trust-remote-code
-    --enforce-eager
-)
-
-if [ -n "$DRAFT_MODEL" ]; then
-    echo "Speculative Draft Model: $DRAFT_MODEL ($NUM_TOKENS tokens)"
-    CMD+=(--speculative-model "$DRAFT_MODEL" --num-speculative-tokens "$NUM_TOKENS")
-fi
-
-"${CMD[@]}"
+args=(server start)
+[ -n "${1:-}" ] && args+=(--model "$1")
+[ -n "${2:-}" ] && args+=(--port "$2")
+[ -n "${3:-}" ] && args+=(--draft-model "$3")
+[ -n "${4:-}" ] && args+=(--num-speculative-tokens "$4")
+exec puffin-admin "${args[@]}"

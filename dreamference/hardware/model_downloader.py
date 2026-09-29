@@ -454,28 +454,62 @@ class ModelDownloader:
         return results
 
     @classmethod
-    def clear_cache(cls) -> None:
+    def clear_cache(cls) -> bool:
         """
-        Clears the HuggingFace and tensorizer model caches.
+        Clears the HuggingFace hub (downloaded weights) and the tensorizer cache.
+
+        Only those two directories. Their parents hold other things: `~/.cache/huggingface` keeps
+        the HuggingFace login token, and `~/.cache/dreamference` keeps the puffin build cache and
+        vLLM's compile cache, which take many minutes to rebuild. This used to delete both parents.
+
+        Returns:
+            bool: True if both directories are gone afterwards.
         """
-        for cache_dir in [cls.get_hf_cache_dir().parent, cls.get_tensorizer_cache_dir().parent]:
-            if cache_dir.exists():
-                print(f"🗑️  Clearing cache: {cache_dir}")
-                shutil.rmtree(cache_dir, ignore_errors=True)
-            else:
-                print(f"ℹ️  Cache directory not found: {cache_dir}")
-        print("✅ Model cache cleared.")
+        cleared = all(
+            [cls._remove_cache_dir(cls.get_hf_cache_dir()), cls._remove_cache_dir(cls.get_tensorizer_cache_dir())]
+        )
+        if cleared:
+            print("✅ Model cache cleared.")
+        return cleared
 
     @classmethod
-    def clear_tensorizer_cache(cls) -> None:
+    def clear_tensorizer_cache(cls) -> bool:
         """
-        Clears only the tensorizer model cache.
+        Clears only the tensorizer cache (`~/.cache/dreamference/tensorizer`).
+
+        Not its parent, which also holds the puffin build cache and vLLM's compile cache; this
+        used to delete the whole of `~/.cache/dreamference`.
+
+        Returns:
+            bool: True if the directory is gone afterwards.
         """
-        cache_dir = cls.get_tensorizer_cache_dir().parent
+        cleared = cls._remove_cache_dir(cls.get_tensorizer_cache_dir())
+        if cleared:
+            print("✅ Tensorizer cache cleared.")
+        return cleared
+
+    @classmethod
+    def _remove_cache_dir(cls, cache_dir: Path) -> bool:
+        """
+        Removes one cache directory and says whether that worked.
+
+        Containers write parts of these caches as root, and `rmtree` cannot remove those as the
+        user; reporting success anyway would leave gigabytes behind with a green tick.
+
+        Args:
+            cache_dir (Path): The directory to remove.
+
+        Returns:
+            bool: True if the directory no longer exists.
+        """
+        if not cache_dir.exists():
+            print(f"ℹ️  Cache directory not found: {cache_dir}")
+            return True
+        print(f"🗑️  Clearing cache: {cache_dir}")
+        shutil.rmtree(cache_dir, ignore_errors=True)
         if cache_dir.exists():
-            print(f"🗑️  Clearing tensorizer cache: {cache_dir}")
-            shutil.rmtree(cache_dir, ignore_errors=True)
-        else:
-            print(f"ℹ️  Tensorizer cache directory not found: {cache_dir}")
-        print("✅ Tensorizer cache cleared.")
+            print(f"⚠️  Some files in {cache_dir} could not be removed (written as root by a container).")
+            print(f"💡 Remove them with: sudo rm -rf {cache_dir}")
+            return False
+        return True
 

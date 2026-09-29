@@ -7,6 +7,7 @@ SQLite/FTS5 persistence, and TF-IDF vector search for zero-egress local code ret
 
 import json
 import os
+import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
@@ -21,13 +22,22 @@ from dreamference.context_engine.indexed_file import IndexedFile
 from dreamference.context_engine.ast_symbol_extractor import ASTSymbolExtractor
 from dreamference.context_engine.tfidf_calculator import TFIDFCalculator
 from dreamference.context_engine.sqlite_context_storage import SQLiteContextStorage
-from dreamference.context_engine.embedding_calculator import EmbeddingCalculator
+from dreamference.context_engine.embedding_calculator import QUERY_PREFIX, EmbeddingCalculator
 
 # Directories ignored during indexing
 IGNORE_DIRS: Final[Set[str]] = {
     ".git", ".svn", ".hg", "__pycache__", ".venv", "venv",
-    "node_modules", ".idea", ".vscode", "build", "dist", ".dreamference"
+    "node_modules", ".idea", ".vscode", "build", "dist", ".dreamference",
+    # Rust build output: a single Tauri `target/` held 2.2 GB, and reading it pushed the host
+    # under earlyoom's limit, which killed vLLM.
+    "target", ".cargo",
 }
+
+# Files larger than this are skipped: they are generated or data, not code worth retrieving.
+MAX_FILE_BYTES: Final[int] = 1024 * 1024
+
+# A NUL byte in this many leading bytes marks a file as binary.
+BINARY_SNIFF_BYTES: Final[int] = 8192
 
 # Binary and non-source extensions ignored during indexing
 IGNORE_EXTENSIONS: Final[Set[str]] = {
@@ -77,6 +87,32 @@ class ContextEngine:
             return True
         return False
 
+    def collect_files(self) -> List[Path]:
+        """
+        Lists the workspace files to index.
+
+        In a git repository this is what git tracks plus untracked files it does not ignore, so
+        every `.gitignore` applies, nested ones included. Submodules are not entered: they are
+        someone else's code (the `codex/` submodule alone is ~8,700 files), and git lists each as
+        one directory entry, which the `is_file` check drops. Outside a repository, or when git
+        is unavailable, it walks the tree and skips `IGNORE_DIRS`.
+
+        Returns:
+            List[Path]: Absolute paths of the files to index.
+        """
+        try:
+            listed = subprocess.run(
+                ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                cwd=self.workspace_root, capture_output=True, check=True, timeout=60,
+            ).stdout.decode("utf-8", errors="surrogateescape")
+            candidates = [self.workspace_root / name for name in listed.split("\0") if name]
+        except (OSError, subprocess.SubprocessError):
+            candidates = []
+            for root, dirs, files in os.walk(self.workspace_root):
+                dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+                candidates.extend(Path(root) / file for file in files)
+        return [p for p in candidates if p.is_file() and not p.is_symlink() and not self.is_ignored(p)]
+
     def tokenize(self, text: str) -> List[str]:
         """Delegates tokenization to TFIDFCalculator."""
         return TFIDFCalculator.tokenize(text)
@@ -99,8 +135,13 @@ class ContextEngine:
             return None
         rel_path = str(abs_path.relative_to(self.workspace_root))
         try:
-            with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
+            if abs_path.stat().st_size > MAX_FILE_BYTES:
+                return None
+            with open(abs_path, "rb") as f:
+                raw = f.read()
+            if b"\0" in raw[:BINARY_SNIFF_BYTES]:
+                return None
+            content = raw.decode("utf-8", errors="ignore")
 
             tokens = self.tokenize(content)
             file_symbols: List[CodeSymbol] = []
@@ -138,13 +179,7 @@ class ContextEngine:
         self.idf_table.clear()
 
         # Step 1: Collect workspace files
-        files_to_index: List[Path] = []
-        for root, dirs, files in os.walk(self.workspace_root):
-            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
-            for file in files:
-                p = Path(root) / file
-                if not self.is_ignored(p):
-                    files_to_index.append(p)
+        files_to_index = self.collect_files()
 
         doc_tokens: Dict[str, List[str]] = {}
         all_tokens_set: Set[str] = set()
@@ -160,17 +195,22 @@ class ContextEngine:
                 pass
 
         # Step 3: Parallel multi-process file parsing across CPU cores (bypasses GIL)
-        max_workers = min(32, (os.cpu_count() or 4) * 2)
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = executor.map(self._process_single_file, files_to_index)
-
-        # Step 4: Populate database records and in-memory indexes
-        with conn:
+        # Sized to the work: each worker is a fork of a parent that has imported torch, so 32 of
+        # them for a couple of hundred files cost memory a resident vLLM cannot spare.
+        max_workers = max(1, min(8, os.cpu_count() or 4, len(files_to_index) // 32 + 1))
+        file_to_content: Dict[str, str] = {}
+        with ProcessPoolExecutor(max_workers=max_workers) as executor, conn:
+            # Step 4: Populate database records and in-memory indexes. Consumed inside the `with`,
+            # so results stream rather than all being buffered by the pool's shutdown first.
+            # `results` is a one-shot iterator, so contents are kept here for the embedding step:
+            # iterating it a second time yielded nothing, and no embedding was ever computed.
+            results = executor.map(self._process_single_file, files_to_index, chunksize=16)
             for item in results:
                 if item is None:
                     continue
                 idx_file, content = item
                 rel_path = idx_file.rel_path
+                file_to_content[rel_path] = content
                 self.indexed_files[rel_path] = idx_file
                 self.symbols.extend(idx_file.symbols)
                 doc_tokens[rel_path] = idx_file.tokens
@@ -189,18 +229,9 @@ class ContextEngine:
         # Step 5: Calculate TF-IDF matrix (kept for backward compat) + semantic embeddings
         self.idf_table, self.tf_idf_index = TFIDFCalculator.compute_matrix(doc_tokens, all_tokens_set)
 
-        # Compute and store dense embeddings + vec table
-        doc_contents = {p: c for p, (f, c) in zip([item[0].rel_path for item in results if item], [(item[0], item[1]) for item in results if item]) if p}
-        # Re-collect contents for embedding
-        file_to_content = {}
-        for item in results:
-            if item:
-                idx_file, content = item
-                file_to_content[idx_file.rel_path] = content
-        file_to_emb, emb_matrix = EmbeddingCalculator.compute_embeddings(file_to_content)
-        self.file_embeddings = file_to_emb
-        if emb_matrix.size > 0:
-            self.sqlite_storage.insert_vectors(list(file_to_emb.keys()), emb_matrix)
+        # Dense embeddings, stored so a later process (and `load_index`) can search by meaning.
+        self.file_embeddings = EmbeddingCalculator.compute_embeddings(file_to_content)
+        self.sqlite_storage.store_embeddings(self.file_embeddings)
 
         self.save_index()
         return self.get_summary()
@@ -226,8 +257,8 @@ class ContextEngine:
                     file_scores[rel_path] = file_scores.get(rel_path, 0.0) + tfidf
 
         # Semantic vector component (query embedding vs stored doc embeddings)
-        q_emb = EmbeddingCalculator.embed_texts([query])
-        if q_emb.size > 0 and self.file_embeddings:
+        q_emb = EmbeddingCalculator.embed_texts([query], QUERY_PREFIX) if self.file_embeddings else None
+        if q_emb is not None:
             vec_scores = {}
             for rel_path, emb in self.file_embeddings.items():
                 sim = float(np.dot(q_emb[0], emb) / (np.linalg.norm(q_emb[0]) * np.linalg.norm(emb) + 1e-8))
@@ -263,7 +294,11 @@ class ContextEngine:
                     "symbols": [asdict(s) for s in f.symbols]
                 }
                 for r, f in self.indexed_files.items()
-            }
+            },
+            # Token lists are not kept, so TF-IDF cannot be recomputed from this file; without the
+            # tables themselves, search after a restart lost its TF-IDF component.
+            "idf_table": self.idf_table,
+            "tf_idf_index": self.tf_idf_index,
         }
         with open(self.index_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -275,6 +310,8 @@ class ContextEngine:
         try:
             with open(self.index_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if "tf_idf_index" not in data:
+                return False  # written before the TF-IDF tables were saved: rebuild once
             self.symbols = [CodeSymbol(**s) for s in data.get("symbols", [])]
             self.indexed_files = {}
             for rel_path, file_data in data.get("files", {}).items():
@@ -287,6 +324,11 @@ class ContextEngine:
                     symbols=syms,
                     tokens=[]
                 )
+            # Without this, search after a restart was keyword-only: embeddings lived only in the
+            # process that computed them.
+            self.file_embeddings = self.sqlite_storage.load_embeddings()
+            self.idf_table = data.get("idf_table", {})
+            self.tf_idf_index = data.get("tf_idf_index", {})
             return True
         except Exception:
             return False

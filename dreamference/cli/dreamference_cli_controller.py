@@ -619,7 +619,12 @@ class DreamferenceCLIController:
         agent_table.add_row("Continue IDE Runtime", continue_str)
         agent_table.add_row("OpenHands Docker Runtime", openhands_str)
         agent_table.add_row("Codex CLI Runtime", codex_str)
-        agent_table.add_row("Dreamference Config Path", str(config.config_file_path))
+        # With no config file anywhere, the resolver names where one *would* be written (the
+        # current directory), which read as though settings were being loaded from there.
+        config_path = str(config.config_file_path)
+        if not config.config_file_path.exists():
+            config_path += " (not present; built-in defaults)"
+        agent_table.add_row("Dreamference Config Path", config_path)
         agent_table.add_row("Goose Config Path", str(config.config_path))
 
         console.print(Panel(agent_table, title="[bold]🤖 vLLM & Agent Status[/bold]", border_style="magenta"))
@@ -1036,6 +1041,19 @@ class DreamferenceCLIController:
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
 
+        # Kept on the parser so run_cli can print a group's help when no subcommand is given.
+        # Without it `puffin-admin server` (or clear, model, …) matched no branch and exited 0
+        # having printed nothing; desktop and puffin named locals of build_parser and hit NameError.
+        parser.command_groups = {
+            "model": (model_parser, "model_command"),
+            "main-model": (main_model_parser, "main_model_command"),
+            "diffusion-model": (diffusion_model_parser, "diffusion_model_command"),
+            "clear": (clear_parser, "clear_command"),
+            "server": (server_parser, "server_command"),
+            "puffin": (onyx_parser, "onyx_command"),
+            "onyx": (onyx_parser, "onyx_command"),
+            "desktop": (desktop_parser, "desktop_command"),
+        }
         return parser
 
     @classmethod
@@ -1052,6 +1070,11 @@ class DreamferenceCLIController:
         if not args.command:
             parser.print_help()
             sys.exit(0)
+
+        group = parser.command_groups.get(args.command)
+        if group is not None and not getattr(args, group[1], None):
+            group[0].print_help()
+            sys.exit(1)
 
         # Handle stdio MCP server command immediately
         if args.command == "mcp":
@@ -1112,10 +1135,7 @@ class DreamferenceCLIController:
             if args.model_command == "list":
                 cls.display_header()
                 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
-                from rich.console import Console
-                from rich.table import Table
-                
-                console = Console()
+
                 table = Table(title="Available Dreamference Models")
                 table.add_column("Model Name", style="cyan", no_wrap=True)
                 table.add_column("HuggingFace Repo ID", style="magenta")
@@ -1144,7 +1164,6 @@ class DreamferenceCLIController:
         elif args.command == "diffusion-model":
             if args.diffusion_model_command == "set":
                 cls.display_header()
-                from rich.console import Console
                 out_console = Console()
                 # The mirror of main-model set's refusal: an autoregressive checkpoint handed to
                 # the diffusion sidecar loads through AutoModelForMaskedLM and produces garbage
@@ -1168,7 +1187,6 @@ class DreamferenceCLIController:
         elif args.command == "main-model":
             if args.main_model_command == "set":
                 cls.display_header()
-                from rich.console import Console
                 out_console = Console()
                 # A diffusion checkpoint pointed at vLLM fails only at launch, with an error that
                 # never mentions the real problem. Refuse it here, where the fix is nameable.
@@ -1209,10 +1227,7 @@ class DreamferenceCLIController:
                 sys.exit(0)
             elif args.main_model_command == "inspect":
                 cls.display_header()
-                from rich.console import Console
-                from rich.table import Table
                 import requests
-                import time
 
                 out_console = Console()
                 out_console.print("[bold cyan]🔍 Inspecting Main Model[/bold cyan]")
@@ -1713,7 +1728,6 @@ class DreamferenceCLIController:
             import sqlite3
 
             cls.display_header()
-            from dreamference.runner.codex_installer import CodexInstaller
             db = os.path.join(CodexInstaller.home_dir(), "logs_2.sqlite")
             if not os.path.exists(db):
                 print(f"❌ No Codex log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace puffin` first.")
@@ -1764,9 +1778,6 @@ class DreamferenceCLIController:
                 sys.exit(DesktopRunner.build())
             elif args.desktop_command == "status":
                 sys.exit(DesktopRunner.status())
-            else:
-                desktop_parser.print_help()
-                sys.exit(1)
 
         elif args.command in ("puffin", "onyx"):
             from dreamference.chat import OnyxRunner
@@ -1799,9 +1810,6 @@ class DreamferenceCLIController:
                 sys.exit(onyx_runner.stop())
             elif args.onyx_command == "uninstall":
                 sys.exit(onyx_runner.uninstall())
-            else:
-                onyx_parser.print_help()
-                sys.exit(1)
 
         elif args.command == "search":
             from dreamference.mcp_server.web_tools import WebTools
@@ -1860,8 +1868,9 @@ class DreamferenceCLIController:
             ctx_engine = ContextEngine()
             summary = ctx_engine.index_workspace(force_reindex=True)
 
-            from rich.console import Console
-            console = Console()
+            # The module-level console. Rebinding `console` anywhere in run_cli made it a local for
+            # the whole function, so every other branch that printed with it (e.g. `endpoints`)
+            # failed with UnboundLocalError.
             console.print("[bold green]✅ Dreamference workspace initialized successfully![/bold green]")
             console.print(f"   [cyan]Dreamference Config:[/cyan] {saved_config_path}")
             console.print(f"   [cyan]Active Agent:[/cyan]    {config.agent_runner.upper()} (Default: GOOSE)")
@@ -1881,20 +1890,20 @@ class DreamferenceCLIController:
             cls.handle_status()
 
         elif args.command == "clear":
-
-
             if args.clear_command == "model-cache":
                 cls.display_header()
-                clear_model_cache()
-                sys.exit(0)
+                sys.exit(0 if clear_model_cache() else 1)
 
             elif args.clear_command == "tensorize-cache":
                 cls.display_header()
-                clear_tensorizer_cache()
-                sys.exit(0)
+                sys.exit(0 if clear_tensorizer_cache() else 1)
+
+        elif args.command == "clear-tensorize-cache":
+            # The older spelling of `clear tensorize-cache`; it used to parse and then do nothing.
+            cls.display_header()
+            sys.exit(0 if clear_tensorizer_cache() else 1)
         elif args.command == "endpoints":
             cls.display_header()
-            from rich.table import Table
             table = Table(title="Available Endpoints (OpenAI-compatible)", show_header=True, header_style="bold magenta")
             table.add_column("Endpoint", style="cyan")
             table.add_column("Method", style="green")
@@ -1976,7 +1985,9 @@ class DreamferenceCLIController:
                         port=args.port,
                         quantization=args.quantization,
                         draft_model=args.draft_model,
-                        num_speculative_tokens=args.num_speculative_tokens,
+                        # The config has resolved flag > env > file > default; the raw flag is None
+                        # when omitted, which used to reach the command line as "None".
+                        num_speculative_tokens=config.num_speculative_tokens,
                         hf_token=config.hf_token,
                         enable_prefix_caching=config.enable_prefix_caching,
                         enable_chunked_prefill=config.enable_chunked_prefill,
@@ -1996,7 +2007,6 @@ class DreamferenceCLIController:
                     )
                 
                     # Print progress while server is initializing
-                    import time
                     last_status = None
                     while not monitor.server_ready and vllm_mgr.process and vllm_mgr.process.poll() is None:
                         current_status = monitor.get_status()
@@ -2047,6 +2057,11 @@ class DreamferenceCLIController:
                             state = diffusion_mgr.get_load_state()
                             if state == "ok":
                                 print(f"🌫️  Diffusion model ready at {diffusion_mgr.host}/v1")
+                            elif state not in ("loading", None):
+                                # The load failed and will not recover by waiting; this used to
+                                # be reported as "still loading" beside the error text.
+                                print(f"⚠️  Diffusion sidecar at {diffusion_mgr.host}/v1 failed to load: {state}\n"
+                                      f"   The main model is unaffected. Details: docker logs dreamference-diffusion-{args.diffusion_port}")
                             else:
                                 print(f"🌫️  Diffusion sidecar at {diffusion_mgr.host}/v1 — "
                                       f"still loading in background (state: {state})")
@@ -2084,7 +2099,6 @@ class DreamferenceCLIController:
         elif args.command == "codex":
             import subprocess
             from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
-            from dreamference.runner.codex_installer import CodexInstaller
             if args.codex_command == "build":
                 sys.exit(0 if CodexBrandedBuilder.build(force=args.force) else 1)
             # The branded build only -- never an upstream `codex` from PATH.

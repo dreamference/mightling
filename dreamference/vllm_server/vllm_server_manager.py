@@ -313,6 +313,18 @@ class VLLMServerManager:
         project_root = Path(__file__).resolve().parent.parent.parent
         dockerfile_path = project_root / "Dockerfile"
 
+        # The plain Dockerfile produces DEFAULT_VLLM_IMAGE and nothing else. A recipe that pins
+        # another local tag (the DFlash `dreamference-vllm-dflash:…-dense*` images) is built by
+        # hand from Dockerfile.dflash and Dockerfile.dense; building the plain Dockerfile under
+        # that name used to hand vLLM the wrong engine with the right label.
+        if docker_image != DEFAULT_VLLM_IMAGE:
+            print(f"❌ Docker image '{docker_image}' is not present, and it is not the image "
+                  f"the project Dockerfile builds ({DEFAULT_VLLM_IMAGE}).")
+            print("💡 The DFlash recipes' images are built by hand from Dockerfile.dflash (the "
+                  "kvfix base) and then Dockerfile.dense, tagged as the recipe pins them. See the "
+                  "comments at the top of each file and specs/DREAMFERENCE_DOCKER.md.")
+            return False
+
         if dockerfile_path.is_file():
             print(f"📦 Docker image '{docker_image}' not found locally. Building from {dockerfile_path}...")
             try:
@@ -561,7 +573,6 @@ class VLLMServerManager:
         from dreamference.hardware.model_downloader import ModelDownloader
 
         hf_model = resolve_model_hf_repo(model)
-        hf_draft_model = resolve_model_hf_repo(draft_model) if draft_model else None
 
         token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DREAMFERENCE_HF_TOKEN")
 
@@ -768,12 +779,9 @@ class VLLMServerManager:
         if quantization:
             cmd.extend(["--quantization", quantization])
 
-        if hf_draft_model:
-            cmd.extend(["--speculative-model", hf_draft_model, "--num-speculative-tokens", str(num_speculative_tokens)])
-        elif recipe.get("speculative_config"):
-            # Self-speculation (MTP/Eagle heads shipped inside the checkpoint) has no separate draft
-            # model, so it is configured as a blob rather than via --speculative-model.
-            cmd.extend(["--speculative-config", json.dumps(recipe["speculative_config"])])
+        speculative = self.resolve_speculative_config(model, draft_model, num_speculative_tokens)
+        if speculative:
+            cmd.extend(["--speculative-config", json.dumps(speculative)])
 
         extra_args = recipe.get("extra_args")
         if extra_args:
@@ -1177,7 +1185,45 @@ class VLLMServerManager:
         return float(spec.min_memory_gb) if spec else 0.0
 
     @classmethod
-    def _compile_cache_signature(cls, model: str) -> str:
+    def resolve_speculative_config(
+        cls, model: str, draft_model: Optional[str] = None, num_speculative_tokens: Optional[int] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        The speculative-decoding config a launch uses: the recipe's, with a `--draft-model` layered on.
+
+        vLLM 0.2x takes speculation only as `--speculative-config` JSON; the `--speculative-model`
+        and `--num-speculative-tokens` flags this used to emit no longer exist, so a `--draft-model`
+        launch failed at argument parsing. Layering onto the recipe's config, instead of replacing
+        it, keeps what the recipe chose that a draft model does not change -- the method, and the
+        drafter's attention backend.
+
+        Args:
+            model (str): Model alias whose recipe may carry a speculative config.
+            draft_model (Optional[str]): Draft model alias or repo from `--draft-model`, if any.
+            num_speculative_tokens (Optional[int]): Depth override; None keeps the recipe's.
+
+        Returns:
+            Optional[Dict[str, Any]]: The config to pass, or None when the launch has no speculation.
+        """
+        from dreamference.hardware import get_model_launch_overrides, resolve_model_hf_repo
+
+        recipe = dict(get_model_launch_overrides(model).get("speculative_config") or {})
+        if not draft_model:
+            # No override: the recipe's config exactly, whatever the depth argument's default.
+            return recipe or None
+        # Carry the recipe's settings over only when it too uses an external drafter. A
+        # self-speculation recipe (MTP heads inside the checkpoint, no "model") has a method that
+        # means nothing for a separate draft model, so that one is replaced, not layered onto.
+        speculative = recipe if recipe.get("model") else {}
+        speculative["model"] = resolve_model_hf_repo(draft_model)
+        if num_speculative_tokens is not None:
+            speculative["num_speculative_tokens"] = num_speculative_tokens
+        return speculative
+
+    @classmethod
+    def _compile_cache_signature(
+        cls, model: str, draft_model: Optional[str] = None, num_speculative_tokens: Optional[int] = None
+    ) -> str:
         """
         Builds the identity of the compiled graph for a model, for the factors vLLM does not hash.
 
@@ -1195,9 +1241,10 @@ class VLLMServerManager:
         Returns:
             str: Opaque signature string; a change means the cached graph must not be reused.
         """
-        from dreamference.hardware import get_model_launch_overrides, resolve_model_hf_repo
+        from dreamference.hardware import resolve_model_hf_repo
 
-        spec = get_model_launch_overrides(model).get("speculative_config") or {}
+        # The launched config, not the recipe's: a --draft-model or depth override changes the graph.
+        spec = cls.resolve_speculative_config(model, draft_model, num_speculative_tokens) or {}
         return "|".join(
             str(part)
             for part in (
@@ -1208,7 +1255,13 @@ class VLLMServerManager:
         )
 
     @classmethod
-    def _reset_stale_compile_cache(cls, model: str, docker_image: str = DEFAULT_VLLM_IMAGE) -> bool:
+    def _reset_stale_compile_cache(
+        cls,
+        model: str,
+        docker_image: str = DEFAULT_VLLM_IMAGE,
+        draft_model: Optional[str] = None,
+        num_speculative_tokens: Optional[int] = None,
+    ) -> bool:
         """
         Drops the persisted torch.compile cache when the graph it holds no longer matches the recipe.
 
@@ -1225,7 +1278,7 @@ class VLLMServerManager:
         Returns:
             bool: True if a stale cache was found and cleared.
         """
-        signature = cls._compile_cache_signature(model)
+        signature = cls._compile_cache_signature(model, draft_model, num_speculative_tokens)
         sig_file = VLLM_CACHE_HOME / ".compile_signature"
 
         try:
@@ -1506,7 +1559,10 @@ class VLLMServerManager:
         # The compile cache persists across container lifetimes now, which means it also outlives
         # the recipe that produced it. Reconcile the two before the graph is loaded rather than
         # after.
-        self._reset_stale_compile_cache(model, docker_image=docker_image)
+        self._reset_stale_compile_cache(
+            model, docker_image=docker_image, draft_model=draft_model,
+            num_speculative_tokens=num_speculative_tokens,
+        )
 
         # Step 2: Build launch command
         cmd = self.build_launch_command(

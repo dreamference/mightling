@@ -427,12 +427,41 @@ def test_vllm_build_launch_command_speculative():
         draft_model="qwen3.5-122b-a10b-dflash-draft",
         num_speculative_tokens=5
     )
-    assert "--speculative-model" in cmd
-    idx = cmd.index("--speculative-model")
-    assert cmd[idx + 1] == "z-lab/Qwen3.5-122B-A10B-DFlash"
-    assert "--num-speculative-tokens" in cmd
-    tokens_idx = cmd.index("--num-speculative-tokens")
-    assert cmd[tokens_idx + 1] == "5"
+    # vLLM 0.2x has no --speculative-model / --num-speculative-tokens flags; only the JSON config.
+    import json
+    assert "--speculative-model" not in cmd and "--num-speculative-tokens" not in cmd
+    spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
+    assert spec["model"] == "z-lab/Qwen3.5-122B-A10B-DFlash"
+    assert spec["num_speculative_tokens"] == 5
+
+def test_an_unknown_speculative_depth_is_omitted_not_stringified():
+    # `server start --draft-model X` without `--num-speculative-tokens` used to launch vLLM with
+    # "--num-speculative-tokens None".
+    import json
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(
+        model="qwen3.6-35b-a3b-nvfp4",
+        draft_model="qwen3.5-122b-a10b-dflash-draft",
+        num_speculative_tokens=None,
+    )
+    assert "None" not in cmd
+    spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
+    assert spec["model"] == "z-lab/Qwen3.5-122B-A10B-DFlash" and "num_speculative_tokens" not in spec
+
+
+def test_a_draft_model_keeps_the_recipes_speculative_settings():
+    # --draft-model used to replace the recipe's config wholesale, dropping its method and the
+    # drafter's attention backend.
+    import json
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash",
+                                   draft_model="qwen3.5-122b-a10b-dflash-draft", num_speculative_tokens=8)
+    spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
+    assert spec["method"] == "dflash" and spec["attention_backend"] == "FLASH_ATTN"
+    assert spec["num_speculative_tokens"] == 8
+    # and the compile-cache signature follows the launched depth, not the recipe's 12
+    assert VLLMServerManager._compile_cache_signature(
+        "qwen3.5-122b-a10b-int4-dflash", "qwen3.5-122b-a10b-dflash-draft", 8).endswith("|8")
 
 def test_vllm_build_launch_command_auto_fp8_for_70b():
     mgr = VLLMServerManager()
@@ -738,6 +767,16 @@ def test_ensure_docker_image_builds_if_missing(monkeypatch):
     assert "docker" in build_calls[0]
     assert "build" in build_calls[0]
     assert "dreamference-vllm-tensorizer:26.07-py3" in build_calls[0]
+
+def test_a_missing_recipe_image_is_not_built_from_the_wrong_dockerfile(monkeypatch):
+    # The plain Dockerfile builds DEFAULT_VLLM_IMAGE only. A recipe pinning a local DFlash tag
+    # used to get the plain image built under its name -- the wrong engine, correctly labelled.
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_image_present", lambda img: False)
+    calls = []
+    monkeypatch.setattr("subprocess.run", lambda cmd, **k: calls.append(cmd))
+    assert mgr.ensure_docker_image("dreamference-vllm-dflash:0.23.0-aeon-dense5") is False
+    assert calls == []
 
 # --- memory pressure watchdog ---
 

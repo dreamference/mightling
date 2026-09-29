@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-set -e
+# Runs one Goose task against the local model server, through `puffin-admin`, which writes Goose's
+# config for the served model and waits for the server. (This script used to export a fixed,
+# no-longer-served model name and call `goose` directly.)
+#
+#   ./scripts/run_goose.sh "task prompt"
+set -euo pipefail
 
-export GOOSE_PROVIDER="openai"
-export OPENAI_HOST="${DREAMFERENCE_VLLM_HOST:-http://localhost:8000}"
-export OPENAI_BASE_PATH="v1"
-export OPENAI_API_KEY="gb10-local-token"
-export GOOSE_MODEL="${DREAMFERENCE_MODEL:-qwen3.6-35b-a3b-nvfp4}"
-
-echo "🚀 Starting Goose session connected to GB10 local endpoint ($GOOSE_MODEL)..."
-goose session "$@"
+exec puffin-admin run --agent goose "$@"
