@@ -1,0 +1,43 @@
+diff --git a/codex-rs/core-plugins/src/manager.rs b/codex-rs/core-plugins/src/manager.rs
+index 3312b40..8c20601 100644
+--- a/codex-rs/core-plugins/src/manager.rs
++++ b/codex-rs/core-plugins/src/manager.rs
+@@ -732,3 +732,5 @@ impl PluginsManager {
+     ) {
+-        if config.plugins_enabled
++        // Puffin: no startup sync of OpenAI's curated plugins from github.com / chatgpt.com.
++        if false
++            && config.plugins_enabled
+             && !self.remote_global_catalog_active(config)
+diff --git a/codex-rs/core-plugins/src/remote_legacy.rs b/codex-rs/core-plugins/src/remote_legacy.rs
+index 65f1c04..4426d9f 100644
+--- a/codex-rs/core-plugins/src/remote_legacy.rs
++++ b/codex-rs/core-plugins/src/remote_legacy.rs
+@@ -127,2 +127,6 @@ pub async fn fetch_remote_featured_plugin_ids(
+ ) -> Result<Vec<String>, RemotePluginFetchError> {
++    // Puffin: no "featured plugins" request to chatgpt.com.
++    if true {
++        return Ok(Vec::new());
++    }
+     let base_url = config.chatgpt_base_url.trim_end_matches('/');
+diff --git a/codex-rs/otel/src/config.rs b/codex-rs/otel/src/config.rs
+index 69ad3b6..42b1fa4 100644
+--- a/codex-rs/otel/src/config.rs
++++ b/codex-rs/otel/src/config.rs
+@@ -19,3 +19,4 @@ pub(crate) fn resolve_exporter(exporter: &OtelExporter) -> OtelExporter {
+             // explicit exporter configuration.
+-            if cfg!(debug_assertions) {
++            // Puffin: never export metrics to OpenAI's Statsig (ab.chatgpt.com), in any build.
++            if true {
+                 return OtelExporter::None;
+diff --git a/codex-rs/tui/src/tooltips.rs b/codex-rs/tui/src/tooltips.rs
+index a8cceac..cf06f60 100644
+--- a/codex-rs/tui/src/tooltips.rs
++++ b/codex-rs/tui/src/tooltips.rs
+@@ -248,3 +248,5 @@ pub(crate) mod announcement {
+     pub(crate) fn prewarm(http_client_factory: HttpClientFactory) {
+-        if ANNOUNCEMENT_TIP.get().is_some() {
++        // Puffin: no announcement fetch from raw.githubusercontent.com (OpenAI's own promotions).
++        if true || ANNOUNCEMENT_TIP.get().is_some() {
++            let _ = ANNOUNCEMENT_TIP.set(None);
+             return;

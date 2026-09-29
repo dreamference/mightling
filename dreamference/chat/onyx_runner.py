@@ -96,6 +96,14 @@ GOOGLE_REDIRECT_URI: Final[str] = f"{DEFAULT_ONYX_WEB_URL}/auth/oauth/callback"
 # those SDKs inert -- so there is nothing to switch off there and no point pretending otherwise.
 ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
 
+# Onyx's nginx publishes `${HOST_PORT_80:-80}:80` and `${HOST_PORT:-3000}:80`, which Docker binds
+# on every interface -- so the web UI, and the admin account `configure()` creates with a published
+# default password (DEFAULT_ONYX_PASSWORD), were reachable from anything on the local network, and
+# that account can search the user's mail through the Gmail tool. Prefixing the host side with
+# 127.0.0.1 keeps both ports on this machine; the browser and the desktop app use localhost:3000
+# either way. Done through the `.env` Onyx already reads, so its compose files stay untouched.
+ONYX_LOOPBACK_ENV: Final[dict] = {"HOST_PORT_80": "127.0.0.1:80", "HOST_PORT": "127.0.0.1:3000"}
+
 # Gmail search, registered the same way web search is: a capability Onyx already knows how to call,
 # rather than instructions bolted onto a prompt.
 #
@@ -104,7 +112,6 @@ ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
 # Onyx's custom-tool client calls whatever URL the tool names and performs no SSRF validation, so
 # anything else on that network could reach a service holding a live mailbox credential. The shared
 # secret header is what actually protects it.
-GNOME_TOKEN_UNIT: Final[str] = "dreamference-goa"
 GMAIL_CONTAINER_NAME: Final[str] = "dreamference-gmail"
 GMAIL_CONTAINER_URL: Final[str] = f"http://{GMAIL_CONTAINER_NAME}:8000"
 GMAIL_HOST_PORT: Final[int] = 8767
@@ -462,6 +469,7 @@ class OnyxRunner:
         # Before anything else, because it recreates the API server: authenticating first would
         # leave the session cookie pointing at a container that is about to be replaced.
         self.disable_telemetry()
+        self.bind_to_loopback()
 
         cookie = self._authenticate(api, email, password)
         if not cookie:
@@ -905,6 +913,23 @@ class OnyxRunner:
             self._allow_local_voice_endpoint()
         return True
 
+    def bind_to_loopback(self) -> bool:
+        """
+        Publishes the web UI on 127.0.0.1 only, instead of on every network interface.
+
+        Does nothing when already in place, since applying it recreates the nginx container and
+        `configure()` calls this on every run.
+
+        Returns:
+            bool: True if the web UI is bound to loopback afterwards.
+        """
+        if self._env_already_set(ONYX_LOOPBACK_ENV):
+            return True
+        if not self._write_env_values(ONYX_LOOPBACK_ENV):
+            return False
+        print("🔒 Restricting the web UI to this machine (127.0.0.1)...")
+        return self._recreate_service("nginx", wait_healthy=False)
+
     @classmethod
     def _env_already_set(cls, values: dict) -> bool:
         """
@@ -975,6 +1000,20 @@ class OnyxRunner:
         Returns:
             bool: True if the container came back healthy.
         """
+        return cls._recreate_service("api_server", wait_healthy=True)
+
+    @classmethod
+    def _recreate_service(cls, service: str, wait_healthy: bool) -> bool:
+        """
+        Recreates one Onyx container from the deployment's compose files, leaving the rest running.
+
+        Args:
+            service (str): The compose service name, e.g. `api_server` or `nginx`.
+            wait_healthy (bool): Wait for the container's healthcheck; otherwise only for it to run.
+
+        Returns:
+            bool: True if the container came back (healthy, when asked to wait for that).
+        """
         directory = os.path.dirname(ONYX_ENV_FILE)
         files: List[str] = []
         for name in ("docker-compose.yml", "docker-compose.onyx-lite.yml"):
@@ -987,21 +1026,23 @@ class OnyxRunner:
 
         result = subprocess.run(
             ["docker", "compose", *files, "-p", "onyx", "--project-directory", directory,
-             "up", "-d", "--force-recreate", "--no-deps", "api_server"],
+             "up", "-d", "--force-recreate", "--no-deps", service],
             capture_output=True, text=True, timeout=300, check=False,
         )
         if result.returncode != 0:
-            print(f"❌ Could not recreate the API server: {result.stderr.strip()[:200]}")
+            print(f"❌ Could not recreate {service}: {result.stderr.strip()[:200]}")
             return False
 
         containers = subprocess.run(
-            ["docker", "ps", "--filter", "label=com.docker.compose.service=api_server",
+            ["docker", "ps", "--filter", f"label=com.docker.compose.service={service}",
              "--format", "{{.Names}}"],
             capture_output=True, text=True, timeout=30, check=False,
         ).stdout.split()
         target = containers[0] if containers else None
         if not target:
             return False
+        if not wait_healthy:
+            return True
         for _ in range(40):
             health = subprocess.run(
                 ["docker", "inspect", target, "--format", "{{.State.Health.Status}}"],
@@ -1010,7 +1051,7 @@ class OnyxRunner:
             if health == "healthy":
                 return True
             time.sleep(5)
-        print("⚠️  The API server did not report healthy in time.")
+        print(f"⚠️  {service} did not report healthy in time.")
         return False
 
     def connect_gmail(

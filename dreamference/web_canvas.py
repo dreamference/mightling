@@ -302,7 +302,9 @@ class CanvasHandler(http.server.BaseHTTPRequestHandler):
 
 def start_web_canvas_server(port: int = 8501, daemon: bool = True) -> threading.Thread:
     """Launches local Dreamference Web Canvas UI on specified port."""
-    server = socketserver.TCPServer(("0.0.0.0", port), CanvasHandler)
+    # Loopback only: the page reports the workspace path and hardware state, and it was offered to
+    # every machine on the LAN on 0.0.0.0 while printing a localhost URL.
+    server = socketserver.TCPServer(("127.0.0.1", port), CanvasHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=daemon)
     thread.start()
     print(f"🌐 Dreamference Web Canvas UI running at: http://localhost:{port}")

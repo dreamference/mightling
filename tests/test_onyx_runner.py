@@ -990,11 +990,35 @@ def test_telemetry_is_disabled_before_the_session_is_opened():
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "disable_telemetry",
                       side_effect=lambda: order.append("telemetry")), \
+         patch.object(OnyxRunner, "bind_to_loopback",
+                      side_effect=lambda: order.append("loopback")), \
          patch.object(OnyxRunner, "_authenticate",
                       side_effect=lambda *a, **k: order.append("auth") or None):
         assert runner.configure() == 1
 
-    assert order == ["telemetry", "auth"]
+    # Both recreate a container, so both come before the session cookie is taken.
+    assert order == ["telemetry", "loopback", "auth"]
+
+
+def test_the_web_ui_is_bound_to_this_machine_only(tmp_path):
+    # Onyx's nginx publishes ${HOST_PORT_80:-80} and ${HOST_PORT:-3000} on every interface by
+    # default, which put the admin account (with its published default password) on the network.
+    from dreamference.chat import onyx_runner as onyx
+    from dreamference.chat.onyx_runner import OnyxRunner
+
+    env = tmp_path / ".env"
+    env.write_text("# HOST_PORT_80=80\nHOST_PORT=3000\nOTHER=1\n")
+    recreated = []
+    with patch.object(onyx, "ONYX_ENV_FILE", str(env)), \
+         patch.object(OnyxRunner, "_recreate_service",
+                      side_effect=lambda service, wait_healthy: recreated.append(service) or True):
+        assert OnyxRunner().bind_to_loopback() is True
+        assert OnyxRunner().bind_to_loopback() is True  # already set: no second recreate
+
+    lines = env.read_text().splitlines()
+    assert 'HOST_PORT="127.0.0.1:3000"' in lines and 'HOST_PORT_80="127.0.0.1:80"' in lines
+    assert "OTHER=1" in lines
+    assert recreated == ["nginx"]
 
 
 def test_telemetry_switch_is_a_no_op_once_it_is_set():

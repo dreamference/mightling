@@ -138,3 +138,22 @@ def test_the_prompt_opt_out_follows_the_four_tier_config(tmp_path, monkeypatch, 
     assert DreamferenceConfig(config_file=str(tmp_path / "d.toml")).puffin_gmail is expected
     monkeypatch.delenv("DREAMFERENCE_PUFFIN_GMAIL")
     assert DreamferenceConfig(config_file=str(tmp_path / "d.toml")).puffin_gmail is True
+
+
+def test_a_grant_without_gmail_access_is_recognised():
+    # Google's consent screen lets Gmail access be unticked; such a grant was saved, listed as
+    # connected, and failed every IMAP login with "Invalid credentials".
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    assert GmailSearchService.grants_gmail({"scope": "https://www.googleapis.com/auth/userinfo.email https://mail.google.com/ openid"})
+    assert not GmailSearchService.grants_gmail({"scope": "https://www.googleapis.com/auth/userinfo.email openid"})
+    assert GmailSearchService.grants_gmail({})  # no scope listed: Google granted what was asked
+
+
+def test_an_imap_authentication_failure_says_to_reconnect():
+    import imaplib
+    from dreamference.chat.gmail_search_service import GmailSearchService
+
+    described = GmailSearchService._describe(imaplib.IMAP4.error(b"[AUTHENTICATIONFAILED] Invalid credentials (Failure)"))
+    assert described.startswith("[AUTHENTICATIONFAILED] Invalid credentials")
+    assert "reconnect this account" in described

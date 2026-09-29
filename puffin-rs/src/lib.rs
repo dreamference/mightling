@@ -44,6 +44,12 @@ pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
 /// The provider name the catalog and `config.toml` agree on.
 pub const PROVIDER: &str = "openai-custom";
 
+/// Where Codex's ChatGPT-backend requests go: a closed local port. Codex builds every such request
+/// (plugins, connectors, account and usage lookups, ...) from `chatgpt_base_url`, which defaults to
+/// `https://chatgpt.com/backend-api/`. Patches 0013 and 0015 remove the calls found on a traced
+/// session; this makes any call not found fail on this machine instead of reaching OpenAI.
+pub const OFFLINE_CHATGPT_BASE_URL: &str = "http://127.0.0.1:9/backend-api/";
+
 /// How long to wait for a model server that is still loading. A cold load of the default model
 /// runs to several minutes.
 const MAX_WAIT: Duration = Duration::from_secs(600);
@@ -540,6 +546,8 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     // The update check compares this build with openai/codex releases and offers to install
     // theirs, which would replace Puffin with upstream Codex.
     set_if_absent(doc.as_table_mut(), "check_for_update_on_startup", false);
+    // Always, not only when absent: this is a privacy boundary, not a preference.
+    doc["chatgpt_base_url"] = value(OFFLINE_CHATGPT_BASE_URL);
 
     let providers = table(doc.as_table_mut(), "model_providers");
     providers.set_implicit(true);
@@ -810,6 +818,10 @@ mod tests {
         assert_eq!(
             parsed.get("check_for_update_on_startup").and_then(toml::Value::as_bool),
             Some(false)
+        );
+        assert_eq!(
+            parsed.get("chatgpt_base_url").and_then(toml::Value::as_str),
+            Some(OFFLINE_CHATGPT_BASE_URL)
         );
         let tui = parsed.get("tui").and_then(toml::Value::as_table);
         assert!(tui.is_some_and(|tui| !tui.contains_key("model_catalog_json")));

@@ -96,7 +96,7 @@ POLL_INTERVAL_MS: Final[int] = 5000
 CONNECT_GOOGLE_SCRIPT: Final[str] = (
     ";(function(){try{"
     "if(window.__puffinConnect)return;window.__puffinConnect=1;"
-    'var ENG=/Chrome\//.test(navigator.userAgent)?"blink":"webkit";'
+    'var ENG=/Chrome\\//.test(navigator.userAgent)?"blink":"webkit";'
     f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",ENG);'
     f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}{SERVICE_CONNECT_PATH}",ID="{BUTTON_ID}";'
     f'var PATH="{CONNECT_PATH}",HEADS={json.dumps(list(SECTION_HEADING_ALIASES))};'

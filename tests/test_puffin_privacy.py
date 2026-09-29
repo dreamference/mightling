@@ -45,3 +45,22 @@ def test_the_python_side_reads_the_same_home(monkeypatch):
     assert CodexInstaller.home_dir() == os.path.expanduser("~/.puffin")
     monkeypatch.setenv("CODEX_HOME", "/elsewhere")
     assert CodexInstaller.home_dir() == "/elsewhere"
+
+
+@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
+def test_no_statsig_metrics_or_openai_plugin_sync(tmp_path):
+    # A traced `puffin exec` on 2026-09-29, with no ChatGPT login anywhere, still contacted
+    # ab.chatgpt.com (OTEL metrics to Statsig, on by default in release builds),
+    # chatgpt.com/backend-api/plugins/featured, and github.com (`git ls-remote openai/plugins`).
+    # Patch 0015 closes all three at the call sites.
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
+    rs = tmp_path / "src" / "codex-rs"
+    otel = (rs / "otel" / "src" / "config.rs").read_text()
+    assert "never export metrics to OpenAI's Statsig" in otel and "if cfg!(debug_assertions) {" not in otel
+    manager = (rs / "core-plugins" / "src" / "manager.rs").read_text()
+    assert "no startup sync of OpenAI's curated plugins" in manager
+    featured = (rs / "core-plugins" / "src" / "remote_legacy.rs").read_text()
+    assert 'no "featured plugins" request to chatgpt.com' in featured
+    # The TUI fetched OpenAI's announcement tip from raw.githubusercontent.com on every start.
+    tips = (rs / "tui" / "src" / "tooltips.rs").read_text()
+    assert "no announcement fetch from raw.githubusercontent.com" in tips

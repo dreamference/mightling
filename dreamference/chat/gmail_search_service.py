@@ -10,23 +10,28 @@ messages and `gmail_message` to read one. The split matters for the same reason 
 mailbox search that returned full bodies would fill the context with ten threads to answer a
 question about one.
 
-**The transport is IMAP and the credential comes from GNOME Online Accounts.** Two other routes
-were built and removed, and the reasons are worth keeping: a Google **app password** is two minutes
-of work but is unavailable to anyone in Google's Advanced Protection Program or under a Workspace
-admin who has switched them off, and a **Google client of one's own** works for everybody but costs
-a Cloud project, a consent screen, a publishing decision and an unverified-app warning. Both put
-setup work on the user. GOA puts none: the user signs into Google once in GNOME Settings, and every
-desktop application on the machine — Evolution for mail, Nautilus for files, and this — asks GOA
-for a short-lived access token when it needs one.
+**The transport is IMAP with XOAUTH2, authorised through GNOME's Google OAuth client.** That client
+is verified by Google for `https://mail.google.com/`, so the consent screen is the normal one, with no
+unverified-app warning and no Cloud project of the user's own. GNOME itself is not involved at run
+time: the service performs the OAuth flow (PKCE, offline access) itself, with the client id and
+secret compiled in as defaults and overridable through `GOA_GOOGLE_CLIENT_ID` /
+`GOA_GOOGLE_CLIENT_SECRET`. Two earlier routes were built and removed -- an app password (unavailable
+under Advanced Protection or to many Workspace users) and a Google client of the user's own (a Cloud
+project, a consent screen, a publishing decision) -- as was an intermediate design in which GNOME
+Online Accounts on the host held the refresh token.
 
-Three consequences shape what is left:
+What shapes the rest:
 
-* **This service holds no long-lived credential.** GNOME keeps the refresh token. What is stored
-  here is about an hour's worth of access, replaced by a systemd user timer on the host.
-* **There is nothing to submit.** With no password to type and no client to paste, the service
-  serves no forms and accepts no POST at all; `/connect` is a page explaining where to sign in.
-* **Gmail's search syntax is preserved exactly**, because `X-GM-RAW` hands the query to the same
-  engine the web UI uses — `from:alice invoice`, `newer_than:7d`, `has:attachment`.
+* **One sealed credential per Google address.** The refresh token is stored sealed with a key kept
+  beside it (obfuscation with a stated threat model, not secret management), with the current access
+  token, refreshed when under a minute remains. Several accounts can be connected; a search reports
+  failures per account instead of dropping them.
+* **Connecting is a small POST surface.** `POST /api/google/oauth/start` returns the consent URL,
+  Google redirects back to this service, or the user pastes the final URL into
+  `POST /api/google/oauth/complete`; `POST /disconnect` removes an account.
+* **Read-only, and Gmail's search syntax is preserved exactly.** Messages are read with `BODY.PEEK`
+  so nothing is marked read, and `X-GM-RAW` hands the query to the same engine the web UI uses --
+  `from:alice invoice`, `newer_than:7d`, `has:attachment`.
 
 The module is deliberately **standard library only and self-contained**. It runs inside a stock
 `python:3-slim` container with nothing installed into it, and it is copied next to the credentials
@@ -51,7 +56,8 @@ import os
 import re
 import secrets
 import time
-import urllib.parse, urllib.request, secrets, base64, hashlib
+import urllib.parse
+import urllib.request
 from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Final, List, Optional, Tuple
@@ -66,7 +72,16 @@ KEY_NAME: Final[str] = "credentials.key"
 
 GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_ID", "44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com")
 GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF")
-GOOGLE_OAUTH_SCOPES: Final[str] = "https://www.googleapis.com/auth/userinfo.email https://mail.google.com/"
+GMAIL_SCOPE: Final[str] = "https://mail.google.com/"
+GOOGLE_OAUTH_SCOPES: Final[str] = "https://www.googleapis.com/auth/userinfo.email " + GMAIL_SCOPE
+
+# Google's consent screen lets each permission be unticked. A grant without Gmail access still
+# signs in and still names the address, but IMAP refuses it as "Invalid credentials" -- so such a
+# grant used to be saved, listed as connected, and fail on every search.
+MISSING_GMAIL_SCOPE: Final[str] = (
+    "Google did not grant Gmail access for {email}. Connect it again and leave the box "
+    "\"Read, compose, send and permanently delete all your email from Gmail\" ticked."
+)
 OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
 
 
@@ -504,6 +519,20 @@ class GmailSearchService:
         return connections, None, failures
 
     @classmethod
+    def grants_gmail(cls, token_response: Dict[str, Any]) -> bool:
+        """
+        Tells whether a token response carries Gmail access.
+
+        Args:
+            token_response (Dict[str, Any]): Google's token endpoint reply.
+
+        Returns:
+            bool: True unless the reply lists its scopes and Gmail's is not among them.
+        """
+        scope = token_response.get("scope")
+        return scope is None or GMAIL_SCOPE in str(scope).split()
+
+    @classmethod
     def _describe(cls, error: Exception) -> str:
         """
         Turns an IMAP failure into one readable line.
@@ -519,7 +548,11 @@ class GmailSearchService:
         detail = error.args[0] if error.args else error
         if isinstance(detail, bytes):
             detail = detail.decode("utf-8", "replace")
-        return str(detail) or type(error).__name__
+        detail = str(detail) or type(error).__name__
+        if "AUTHENTICATIONFAILED" in detail:
+            # Most often a grant made with Gmail access unticked, or one revoked since.
+            detail += " -- reconnect this account and allow Gmail access"
+        return detail
 
     @classmethod
     def _all_mail_folder(cls, connection: imaplib.IMAP4_SSL) -> str:
@@ -605,7 +638,7 @@ class GmailSearchService:
         
         limit = max(1, min(limit, MAX_RESULT_LIMIT))
         all_messages = []
-        for email, connection in connections.items():
+        for address, connection in connections.items():
             try:
                 uids = cls._search_uids(connection, query)
                 if uids:
@@ -613,10 +646,10 @@ class GmailSearchService:
                     # question almost always means.
                     messages = cls._fetch_headers(connection, uids[-limit:][::-1])
                     for m in messages:
-                        m["id"] = f"{email}|{m['id']}"
+                        m["id"] = f"{address}|{m['id']}"
                     all_messages.extend(messages)
             except Exception as failure:
-                failures.append({"account": email, "error": cls._describe(failure)})
+                failures.append({"account": address, "error": cls._describe(failure)})
             finally:
                 try:
                     connection.logout()
@@ -987,6 +1020,9 @@ class GmailSearchService:
                                     user_data = json.load(res2)
                                     email_addr = user_data.get("email", "")
                                 
+                                if email_addr and not GmailSearchService.grants_gmail(tdata):
+                                    self._reply(400, {"error": MISSING_GMAIL_SCOPE.format(email=email_addr)})
+                                    return
                                 if email_addr and "access_token" in tdata:
                                     GmailSearchService.save_token(email_addr, tdata["access_token"], tdata.get("expires_in", 3599), refresh_token=tdata.get("refresh_token"))
                                     self._reply(200, {"status": "ok", "email": email_addr})
@@ -1027,6 +1063,9 @@ class GmailSearchService:
                                 user_data = json.load(res2)
                                 email_addr = user_data.get("email", "")
                             
+                            if email_addr and not GmailSearchService.grants_gmail(data):
+                                self._html(f"<h2>Gmail access was not granted</h2><p>{html.escape(MISSING_GMAIL_SCOPE.format(email=email_addr))}</p>")
+                                return
                             if email_addr and "access_token" in data:
                                 GmailSearchService.save_token(email_addr, data["access_token"], data.get("expires_in", 3599), refresh_token=data.get("refresh_token"))
                                 self._html("<h2>Connected Successfully</h2><p>You can close this tab.</p>")
