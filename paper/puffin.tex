@@ -45,7 +45,8 @@ Dreamference\\
 Terminal coding agents such as OpenAI's Codex CLI are open source, but they are built around a
 hosted model, a vendor account and a cloud of companion services. We describe \emph{Puffin}, a
 coding agent whose model runs on one NVIDIA GB10 workstation (128\,GB of CPU--GPU unified memory):
-a 122B-parameter mixture-of-experts model served locally through vLLM. Source code, prompts and
+a 27B-parameter model served locally through SGLang, with a 122B mixture-of-experts model on
+vLLM as the fallback. Source code, prompts and
 inference never leave the machine, and no vendor account is involved. Puffin is a fork of
 the Codex CLI (release \code{rust-v0.158.0}, 4{,}894 Rust source files, 1.93 million lines). Its
 central engineering choice is to keep the fork almost identical to upstream. The upstream tree is
@@ -139,15 +140,18 @@ self-updater needs no account, but it installs from OpenAI's distribution channe
 the desktop and every other process draw from the same pool. This one fact shapes much of
 \cref{sec:safety}.
 
-\paragraph{The model.} Puffin's default model is Qwen3.5-122B-A10B, a mixture-of-experts model with
-about 10B parameters active per token. We use Intel's AutoRound int4 checkpoint
-\cite{qwen35int4,cheng2023autoround} with FP8 dense layers, served by vLLM
-\cite{kwon2023vllm} and accelerated by DFlash \cite{chen2026dflash}, a block-diffusion drafter
-\cite{dflashdrafter} that proposes twelve tokens per step. The server is not stock vLLM. It is a
-locally built image (\code{dreamference-vllm-dflash:0.23.0-aeon-dense5}), derived from a community
-vLLM~0.23.0 build that adds DFlash support for compute capability 12.1, plus local patches. The
-model runs with a 32k-token context and eight concurrent sequences, a configuration forced by
-memory headroom (\cref{sec:safety}).
+\paragraph{The model.} Puffin's default model is Qwen3.8-27B in an NVFP4 checkpoint, served by
+SGLang and accelerated by a calibrated NVFP4 DFlash2 block-diffusion drafter
+\cite{chen2026dflash,dflashdrafter} that proposes sixteen tokens per step. SGLang serves it
+because the drafter runs nowhere else yet. The model runs with a 262k-token context; on the GB10 it
+decodes 25.5, 50.3 and 87.0 tokens/s on prose, code and JSON, single-stream, and leaves about
+38\,GB of memory free while serving. The default until 2026-09-29, and now the fallback, is
+Qwen3.5-122B-A10B, a mixture-of-experts model with about 10B parameters active per token, in
+Intel's AutoRound int4 checkpoint \cite{qwen35int4,cheng2023autoround} with FP8 dense layers,
+served by vLLM \cite{kwon2023vllm} with a twelve-token DFlash drafter from a locally built image
+(\code{dreamference-vllm-dflash:0.23.0-aeon-dense5}). It runs with a 32k-token context and eight
+concurrent sequences, a configuration forced by memory headroom (\cref{sec:safety}), and decodes
+23.8, 49.9 and 53.1 tokens/s on the same three kinds of output.
 
 \section{System overview}
 \label{sec:overview}
@@ -165,7 +169,7 @@ memory headroom (\cref{sec:safety}).
   \node[box=1.3cm]  (user)     at (-0.2,0)  {terminal\\user};
   \node[box=3.1cm]  (launcher) at (2.8,0)   {\code{puffin-rs} launcher\\\scriptsize model discovery, config,\\help rebrand, update, \code{app}};
   \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 14 patches, 19.2\,KB};
-  \node[box=3.2cm]  (vllm)     at (12.6,0)  {vLLM container\\\scriptsize Qwen3.5-122B int4 + DFlash};
+  \node[box=3.2cm]  (vllm)     at (12.6,0)  {SGLang container\\\scriptsize Qwen3.8-27B NVFP4 + DFlash2};
   % row 2
   \node[box=3.3cm]  (host)     at (6.9,-1.7)  {{\footnotesize\code{codex-code-mode-host}}\\\scriptsize V8, runs Code Mode JS};
   \node[box=3.2cm]  (watch)    at (12.6,-1.7) {PSI watchdog\\\scriptsize + admission checks};
@@ -534,7 +538,8 @@ Agent binary, unstripped $\rightarrow$ stripped & 1.4\,GB $\rightarrow$ 315\,MB 
 Incremental rebuild after a launcher edit & $\approx$7 min (thin LTO relink) \\
 Management and services (Python) & 79 modules, 20.2k lines; 416 tests \\
 \quad without a model server & 353 pass, 63 skip (need live server) \\
-Live slash-command suite (local 122B model) & 77 tests: 75 pass, 2 skip; 806.7\,s \\
+Live slash-command suite, Qwen3.8-27B (default) & 77 tests: 75 pass, 2 skip; 651.3\,s \\
+Live slash-command suite, Qwen3.5-122B (fallback) & 77 tests: 75 pass, 2 skip; 806.7\,s \\
 Decode throughput, single stream, 32k context & prose 23.8 / code 49.9 / JSON 53.1 tok/s \\
 \bottomrule
 \end{tabular}
@@ -600,7 +605,7 @@ workspace's build scripts and procedural macros, of which several hundred were l
 kill. The same fact is why the design indexes only trusted repositories and runs indexers in a
 network-less sandbox. The memory cost of exact indexing
 on a workspace of this size is an open measurement. It will decide whether exact indexing can run
-beside a resident 122B model at all.
+beside a resident model at all.
 
 \section{Lessons}
 \label{sec:lessons}

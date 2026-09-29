@@ -283,7 +283,8 @@ class Session:
         self.child.send("\r")
         self.pump(2.0)
 
-    def wait_idle(self, timeout: float, settle: float = 3.0) -> None:
+    def wait_idle(self, timeout: float, settle: float = 3.0,
+                  started: Optional[Callable[[str], bool]] = None) -> None:
         """
         Waits until a model turn has started and finished.
 
@@ -291,8 +292,14 @@ class Session:
         single check that it is gone ended /init's turn early; the test then found no AGENTS.md
         and its Ctrl-C cleanup interrupted the model. The turn counts as finished only once the
         marker has stayed away for `settle` seconds.
+
+        `started` also accepts a turn whose result is already on screen: a fast model can finish
+        a short turn between two screen reads, the marker is never seen, and waiting 30 s for it
+        added about six minutes to the suite on Qwen3.8.
         """
-        self.wait_for(lambda text: BUSY_MARKER in text, timeout=30)
+        # The marker is drawn by the client when the turn begins, not when the model answers, so
+        # not seeing it within a few seconds means the turn already ended, not that it is late.
+        self.wait_for(lambda text: BUSY_MARKER in text or (started is not None and started(text)), timeout=8)
         end = time.monotonic() + timeout
         quiet_since: Optional[float] = None
         while time.monotonic() < end:
@@ -310,8 +317,10 @@ class Session:
     def converse(self) -> None:
         """Holds one exchange with the model, so conversation-level commands have something to act on."""
         self.command(PING)
-        self.wait_idle(timeout=300)
-        assert "pong" in self.text().lower(), f"the model did not answer:\n{self.text()}"
+        # The prompt itself, echoed on screen, contains "pong" once; the answer is a second one.
+        answered = lambda text: text.lower().count("pong") >= 2  # noqa: E731
+        self.wait_idle(timeout=300, started=answered)
+        assert answered(self.text()), f"the model did not answer:\n{self.text()}"
 
     def close(self) -> None:
         if self.child.isalive():

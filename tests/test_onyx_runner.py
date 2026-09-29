@@ -398,7 +398,10 @@ def test_brand_assets_match_the_dimensions_onyx_ships():
     }
 
 
-def test_brand_asset_install_is_skipped_when_onyx_is_not_running():
+def test_brand_asset_install_is_skipped_when_onyx_is_not_running(monkeypatch):
+    from conftest import REAL_BRAND_INSTALL
+    from dreamference.chat.onyx_brand_assets import OnyxBrandAssets as _Assets
+    monkeypatch.setattr(_Assets, "install", REAL_BRAND_INSTALL)
     from dreamference.chat import OnyxBrandAssets
 
     with patch.object(OnyxBrandAssets, "find_web_container", return_value=None), \
@@ -540,7 +543,10 @@ def test_face_rewrite_keeps_onyxs_own_family_names():
     assert "/fonts/RobotoMono.woff2" in script
 
 
-def test_a_newly_copied_face_restarts_the_web_server():
+def test_a_newly_copied_face_restarts_the_web_server(monkeypatch):
+    from conftest import REAL_FONTS_INSTALL
+    from dreamference.chat.onyx_ui_fonts import OnyxUIFonts as _Fonts
+    monkeypatch.setattr(_Fonts, "install", REAL_FONTS_INSTALL)
     # Next.js builds its static routes from `public/` at boot, so a face copied into a running
     # container has no URL until the server starts again.
     from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
@@ -555,7 +561,10 @@ def test_a_newly_copied_face_restarts_the_web_server():
         restart.assert_called_once()
 
 
-def test_faces_already_in_the_container_are_not_recopied_or_restarted():
+def test_faces_already_in_the_container_are_not_recopied_or_restarted(monkeypatch):
+    from conftest import REAL_FONTS_INSTALL
+    from dreamference.chat.onyx_ui_fonts import OnyxUIFonts as _Fonts
+    monkeypatch.setattr(_Fonts, "install", REAL_FONTS_INSTALL)
     from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
 
     with patch.object(OnyxUIFonts, "ensure_fonts", return_value={"Roboto.woff2": "/tmp/r"}), \
@@ -1325,7 +1334,9 @@ def _serve_gmail(tmp_path):
 
 
 
-def test_the_gmail_container_runs_as_the_invoking_user():
+def test_the_gmail_container_runs_as_the_invoking_user(monkeypatch):
+    from conftest import REAL_START_GMAIL_SERVICE
+    monkeypatch.setattr(OnyxRunner, "_start_gmail_service", REAL_START_GMAIL_SERVICE)
     # The service writes to the mounted directory now -- a connection made from the UI stores the
     # credentials from inside the container -- and a root container writing into a user-owned
     # directory leaves files their owner cannot read or replace. Same trap as the torch.compile

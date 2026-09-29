@@ -22,8 +22,22 @@ import dreamference.cli.dreamference_cli_controller  # noqa: E402,F401 - imports
 import dreamference.mcp_server  # noqa: E402,F401
 from dreamference.chat.onyx_runner import OnyxRunner  # noqa: E402
 
-# Kept for the one test that exercises the real lookup (the fixture below replaces it).
+from dreamference.chat.onyx_brand_assets import OnyxBrandAssets  # noqa: E402
+from dreamference.chat.onyx_ui_fonts import OnyxUIFonts  # noqa: E402
+from dreamference.chat.onyx_ui_labels import OnyxUILabels  # noqa: E402
+from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides  # noqa: E402
+from dreamference.chat.onyx_ui_scripts import OnyxUIScripts  # noqa: E402
+
+# Kept for the tests that exercise the real methods (the fixture below replaces them).
 REAL_SERVED_MODEL_KEY = OnyxRunner.served_model_key
+REAL_START_GMAIL_SERVICE = OnyxRunner._start_gmail_service
+REAL_ATTACH_SEARXNG = OnyxRunner._attach_searxng
+REAL_BRAND_INSTALL = OnyxBrandAssets.install
+REAL_FONTS_INSTALL = OnyxUIFonts.install
+REAL_START_STT_SERVER = OnyxRunner._start_stt_server
+REAL_ALLOW_LOCAL_VOICE_ENDPOINT = OnyxRunner._allow_local_voice_endpoint
+# The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
+UI_PATCHERS = (OnyxBrandAssets, OnyxUIFonts, OnyxUILabels, OnyxUIOverrides, OnyxUIScripts)
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +58,57 @@ def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
     # configure() asks the live server which model it serves; tests use the configured one, so
     # their result does not depend on what happens to be running on this machine.
     monkeypatch.setattr(onyx_runner.OnyxRunner, "served_model_key", lambda self: self.config.model)
+    # configure() also starts sidecars and writes into live containers. Until 2026-09-29 every
+    # offline test run did so for real: it recreated the Gmail sidecar (with a pytest temp folder
+    # and secret once HOME was isolated, which broke Gmail search until the next configure),
+    # joined SearXNG and the speech-to-text sidecar to Onyx's network, copied test logos into the
+    # web server and rewrote its bundle through `docker exec`. A test of one of these methods
+    # restores it from the REAL_* names above.
+    monkeypatch.setattr(onyx_runner.OnyxRunner, "_start_gmail_service", lambda self, secret: True)
+    monkeypatch.setattr(onyx_runner.OnyxRunner, "_attach_searxng", lambda self: True)
+    monkeypatch.setattr(onyx_runner.OnyxRunner, "_start_stt_server", lambda self: True)
+    monkeypatch.setattr(onyx_runner.OnyxRunner, "_allow_local_voice_endpoint", lambda self, *a, **k: True)
+    for patcher in UI_PATCHERS:
+        monkeypatch.setattr(patcher, "install", classmethod(lambda cls, container=None: True))
+
+
+@pytest.fixture(autouse=True)
+def _refuse_real_docker(monkeypatch):
+    # A test that reached OnyxRunner._start_gmail_service ran `docker rm -f dreamference-gmail` and
+    # `docker run` for real, replacing the live Gmail sidecar with one mounting a pytest temp
+    # folder and a test secret: Gmail search in the web chat answered "unauthorised" until the
+    # next `configure` (2026-09-29). Every real docker command from a test now fails that test;
+    # tests that exercise docker paths mock subprocess themselves, which replaces this guard.
+    import subprocess
+
+    def guarded(original):
+        def run(*args, **kwargs):
+            argv = args[0] if args else kwargs.get("args")
+            program = argv[0] if isinstance(argv, (list, tuple)) and argv else str(argv).split(" ")[0]
+            if os.path.basename(str(program)) == "docker" and _changes_something(argv):
+                raise AssertionError(f"a test tried to run a real docker command: {argv!r}; mock it")
+            return original(*args, **kwargs)
+        return run
+
+    for name in ("run", "call", "check_call", "check_output", "Popen"):
+        monkeypatch.setattr(subprocess, name, guarded(getattr(subprocess, name)))
+
+
+# Docker subcommands that only read. Launch-command tests ask `docker info` and `docker image
+# inspect`, which change nothing; anything else touches the machine's containers.
+READ_ONLY_DOCKER: tuple = ("info", "version", "inspect", "ps", "images", "port", "logs", "stats")
+
+
+def _changes_something(argv) -> bool:
+    words = [str(w) for w in argv[1:]] if isinstance(argv, (list, tuple)) else str(argv).split()[1:]
+    words = [w for w in words if not w.startswith("-")]
+    if not words:
+        return False
+    if words[0] in READ_ONLY_DOCKER:
+        return False
+    if words[0] in ("image", "container", "network", "volume") and len(words) > 1:
+        return words[1] not in ("inspect", "ls")
+    return True
 
 
 @pytest.fixture(autouse=True)

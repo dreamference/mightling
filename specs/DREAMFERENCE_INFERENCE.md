@@ -189,7 +189,7 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 | Image input | correct ("Red; 42") | — |
 | 4 puffin tasks at once | all pass, 23 s wall, ≥39.8 GB available | not measured |
 | Host memory available while serving | ~38.7 GB | ~10 GB |
-| Live slash-command suite | 75 pass, 2 skip (1,101 s) | 75 pass, 2 skip (807 s) |
+| Live slash-command suite | 75 pass, 2 skip (651 s with the fixed harness; 1,101 s before) | 75 pass, 2 skip (807 s, old harness) |
 
 Qwen3.8 figures are after the sampler change (the first measurement, before it, was 24.1 / 47.5 / 82.5). The 122B figures came from different prompts (`main-model inspect`), so decode is a tie within noise on prose and code. The suite's longer wall clock on the first runs was the harness, not the model: it waited up to 30 s to see a busy marker that a fast turn never showed (see `specs/README.md`).
 
