@@ -44,7 +44,9 @@ def test_the_patches_stay_small():
     # Anything bigger than a hook or a one-line string belongs in puffin-rs/, which Cargo compiles
     # into the same binary; the patches are only the places Codex has to call it or say "Puffin".
     # (The prompt rename used to be a ~390 KB patch to models.json; it is now rebrand() in Rust.)
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 16_000
+    # Each hide/disable hook costs ~550 bytes, mostly diff headers, so the cap allows a few more of
+    # those; it exists to catch a return to whole-file patches, not to count one-line hooks.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 20_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

@@ -200,7 +200,7 @@ Tail the vLLM Docker container logs.
 
 | Option | Description |
 |---|---|
-| `target` | server: vLLM container logs. mcp: Codex MCP server lifecycle, read from ~/.codex/logs_2.sqlite (the TUI logs there, not to a file) One of: `server`, `mcp`. |
+| `target` | server: vLLM container logs. mcp: Codex MCP server lifecycle, read from ~/.puffin/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file) One of: `server`, `mcp`. |
 | `--port` | Port of the server to tail logs for. |
 
 ### `puffin-admin codex`
