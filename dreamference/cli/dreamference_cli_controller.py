@@ -880,7 +880,7 @@ class DreamferenceCLIController:
         logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         logs_parser.add_argument("target", nargs="?", choices=["server", "mcp"],
                                  help="server: vLLM container logs. mcp: Codex MCP server lifecycle, "
-                                      "read from ~/.codex/logs_2.sqlite (the TUI logs there, not to a file)")
+                                      "read from ~/.puffin/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file)")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
         # Command: puffin-admin codex
@@ -1713,7 +1713,8 @@ class DreamferenceCLIController:
             import sqlite3
 
             cls.display_header()
-            db = os.path.expanduser("~/.codex/logs_2.sqlite")
+            from dreamference.runner.codex_installer import CodexInstaller
+            db = os.path.join(CodexInstaller.home_dir(), "logs_2.sqlite")
             if not os.path.exists(db):
                 print(f"❌ No Codex log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace puffin` first.")
                 sys.exit(1)

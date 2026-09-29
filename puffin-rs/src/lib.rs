@@ -32,6 +32,7 @@ use toml_edit::value;
 
 pub mod app;
 pub mod help;
+pub mod home;
 
 pub mod update;
 pub mod usage;

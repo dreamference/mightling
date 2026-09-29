@@ -32,6 +32,20 @@ class CodexInstaller:
         return None
 
     @classmethod
+    def home_dir(cls) -> str:
+        """
+        Returns the configuration folder `puffin` uses: `$CODEX_HOME` if set, else `~/.puffin`.
+
+        Not `~/.codex`: that is upstream Codex's folder, where a ChatGPT login may live, and the
+        launcher (`puffin-rs/src/home.rs`) keeps Puffin out of it. This mirrors its resolution so
+        the Python side reads the same session logs.
+
+        Returns:
+            str: Absolute path of the folder, whether or not it exists yet.
+        """
+        return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.puffin")
+
+    @classmethod
     def is_installed(cls) -> bool:
         """
         Checks that the branded build is installed and matches the current submodule and patches.

@@ -5,7 +5,7 @@ This module provides the CodexRunner class, which `puffin-admin run` uses when t
 agent is Codex. It builds `puffin` if needed and hands over to it.
 
 It no longer sets up the session. Waiting for the model server, writing the model catalog and
-`~/.codex/config.toml`, the system prompt with its web-access section, and the local-model options
+`~/.puffin/config.toml`, the system prompt with its web-access section, and the local-model options
 all happen inside `puffin` itself, in the launcher crate `puffin-rs/`. Keeping a Python copy of that
 logic here would give the two entry points two setups to keep in step.
 """
@@ -70,12 +70,12 @@ class CodexRunner:
         env["DREAMFERENCE_PUFFIN_GMAIL"] = "true" if self.config.puffin_gmail else "false"
         if debug:
             # Codex has no --debug flag; verbosity is RUST_LOG. The TUI owns the terminal, so its
-            # log goes to ~/.codex/logs_2.sqlite rather than to a file.
+            # log goes to logs_2.sqlite in puffin's home folder rather than to a file.
             env["RUST_LOG"] = os.getenv(
                 "RUST_LOG", "codex_mcp=trace,codex_core=debug,codex_app_server=debug,info"
             )
             print(f"🐞 Debug logging on (RUST_LOG={env['RUST_LOG']})")
-            print(f"   TUI logs go to: {os.path.expanduser('~/.codex/logs_2.sqlite')}")
+            print(f"   TUI logs go to: {os.path.join(CodexInstaller.home_dir(), 'logs_2.sqlite')}")
             print("   Read MCP lifecycle with: puffin-admin logs mcp")
 
         try:

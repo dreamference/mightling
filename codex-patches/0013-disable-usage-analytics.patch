@@ -1,0 +1,10 @@
+diff --git a/codex-rs/analytics/src/client.rs b/codex-rs/analytics/src/client.rs
+index a00c76d..d920989 100644
+--- a/codex-rs/analytics/src/client.rs
++++ b/codex-rs/analytics/src/client.rs
+@@ -247,3 +247,4 @@ impl AnalyticsEventsClient {
+         Self {
+-            queue: (analytics_enabled != Some(false))
++            // Puffin: usage analytics never leave the machine, whatever config.toml or the login says.
++            queue: (false && analytics_enabled != Some(false))
+                 .then(|| AnalyticsEventsQueue::new(Arc::clone(&auth_manager), destination)),
