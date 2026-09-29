@@ -42,6 +42,9 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_CODEX.md](./DREAMFERENCE_CODEX.md) | Superseded Codex page; what `CodexRunner`/`CodexInstaller` still do |
 | [DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md) | The context engine (`puffin-admin index`, MCP `workspace_search_code`), with known gaps |
 | [DREAMFERENCE_PUFFIN_CODE_INDEX.md](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) | *Proposed:* code index for `puffin` (codebase-memory-mcp + SCIP) |
+| [DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) | *Proposed:* `/night`, an overnight task queue worked in git worktrees on the GB10 |
+| [DREAMFERENCE_SELF_SPEEDING.md](./DREAMFERENCE_SELF_SPEEDING.md) | *Proposed:* retraining the speculative drafter on your own sessions (`puffin-admin drafter`) |
+| [DREAMFERENCE_PUFFIN_EGRESS.md](./DREAMFERENCE_PUFFIN_EGRESS.md) | *Proposed:* `puffin-admin audit egress` and `puffin --airlock` |
 
 ### Puffin web UI
 
