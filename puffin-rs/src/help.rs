@@ -13,7 +13,6 @@
 use std::ffi::OsString;
 
 use clap::Command;
-use clap::FromArgMatches;
 use clap::Parser;
 
 /// Parses `args` into `T` exactly as `T::parse_from` would, but with rebranded help text.

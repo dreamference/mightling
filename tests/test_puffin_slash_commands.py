@@ -58,6 +58,9 @@ FAILURE_MARKERS = (
     "Connection failed",
     "unexpected status",
     "Error loading configuration",
+    # A command that refuses to run ("'/side' is unavailable until the current conversation has
+    # started") did nothing, whatever else is on screen.
+    "is unavailable until",
 )
 # Shown only while a turn is running.
 BUSY_MARKER = "esc to interrupt"
@@ -182,8 +185,9 @@ CASES: Dict[str, Case] = {
     "voice": Case("absent", reason="hidden by patch 0010: voice uses OpenAI's realtime API"),
     "goal": Case("inline", args="Keep every answer to one word"),
     "agents": Case("popup"),
-    "side": Case("turn", args="What is two plus two? Answer with digits only.", expect=("4",)),
-    "btw": Case("turn", args="What is three plus three? Answer with digits only.", expect=("6",)),
+    "side": Case("turn", args="What is two plus two? Answer with digits only.", expect=("4",), history=True),
+    # An alias of /side, which is unavailable until the conversation has started.
+    "btw": Case("turn", args="What is three plus three? Answer with digits only.", expect=("6",), history=True),
     "copy": Case("inline", history=True),
     "export": Case("inline", history=True),
     "raw": Case("inline"),
@@ -272,12 +276,29 @@ class Session:
         self.child.send("\r")
         self.pump(2.0)
 
-    def wait_idle(self, timeout: float) -> None:
-        """Waits until a model turn has started and finished."""
+    def wait_idle(self, timeout: float, settle: float = 3.0) -> None:
+        """
+        Waits until a model turn has started and finished.
+
+        The busy marker also disappears for a moment between one tool call and the next, so a
+        single check that it is gone ended /init's turn early; the test then found no AGENTS.md
+        and its Ctrl-C cleanup interrupted the model. The turn counts as finished only once the
+        marker has stayed away for `settle` seconds.
+        """
         self.wait_for(lambda text: BUSY_MARKER in text, timeout=30)
-        finished = self.wait_for(lambda text: BUSY_MARKER not in text, timeout=timeout)
-        assert finished, f"the turn did not finish within {timeout}s:\n{self.text()}"
-        self.pump(1.0)
+        end = time.monotonic() + timeout
+        quiet_since: Optional[float] = None
+        while time.monotonic() < end:
+            alive = self.pump(0.5)
+            if BUSY_MARKER in self.text():
+                quiet_since = None
+            elif quiet_since is None:
+                quiet_since = time.monotonic()
+            elif time.monotonic() - quiet_since >= settle:
+                return
+            if not alive:
+                return
+        raise AssertionError(f"the turn did not finish within {timeout}s:\n{self.text()}")
 
     def converse(self) -> None:
         """Holds one exchange with the model, so conversation-level commands have something to act on."""
@@ -398,9 +419,16 @@ def test_a_fresh_home_opens_on_the_composer(tmp_path: Path, workspace: Path):
     (home / "config.toml").write_text(f'[projects."{workspace}"]\ntrust_level = "trusted"\n')
     session = Session(workspace, home, [])
     try:
-        reached = session.wait_for(lambda text: "›" in text and ">_ Puffin" in text or "Sign in with ChatGPT" in text, 120)
+        reached = session.wait_for(
+            lambda text: ("›" in text and ">_ Puffin" in text) or "Sign in with ChatGPT" in text, 120
+        )
         assert reached, f"puffin showed neither its composer nor a sign-in screen:\n{session.text()}"
-        assert "Sign in with ChatGPT" not in session.text(), "a fresh CODEX_HOME lands on the ChatGPT sign-in screen"
+        # The first screen to match is not the answer: onboarding can replace the composer a moment
+        # later, and a check at that instant passed while a new user still landed on the sign-in.
+        session.pump(5.0)
+        screen = session.text()
+        assert "Sign in with ChatGPT" not in screen, f"a fresh CODEX_HOME lands on the ChatGPT sign-in screen:\n{screen}"
+        assert ">_ Puffin" in screen and "›" in screen, f"puffin is not on its composer:\n{screen}"
     finally:
         session.close()
 
@@ -443,3 +471,30 @@ def test_openai_hosted_subcommands_are_refused(tmp_path: Path, name: str):
     result = _puffin(tmp_path, name)
     assert result.returncode != 0
     assert f"`puffin {name}` is not available" in result.stderr, result.stdout + result.stderr
+
+
+@needs_puffin
+@pytest.mark.parametrize("args", [("-c", "x=1", "login"), ("--oss", "cloud"), ("-cx=1", "logout")])
+def test_refusal_is_not_bypassed_by_options_before_the_subcommand(tmp_path: Path, args: Tuple[str, ...]):
+    # The launcher once checked only the first argument, so any option in front of `login` let
+    # the OpenAI sign-in start.
+    result = _puffin(tmp_path, *args)
+    assert result.returncode != 0
+    assert f"`puffin {args[-1]}` is not available" in result.stderr, result.stdout + result.stderr
+
+
+@needs_puffin
+def test_offline_subcommands_do_not_wait_for_the_model_after_options(tmp_path: Path):
+    # With the server unreachable, a command that needs no model must answer at once rather than
+    # wait (up to ten minutes) for one; _puffin's 30 s timeout turns a wait into a failure.
+    result = _puffin(tmp_path, "-m", "any-model", "completion", "bash")
+    assert result.returncode == 0, result.stderr
+    assert "puffin" in result.stdout and "Waiting for local vLLM" not in result.stderr
+
+
+@needs_puffin
+@pytest.mark.parametrize("subcommand", ["exec", "plugin", "mcp"])
+def test_subcommand_usage_names_puffin(tmp_path: Path, subcommand: str):
+    result = _puffin(tmp_path, subcommand, "--help")
+    usage = next((line for line in result.stdout.splitlines() if line.startswith("Usage:")), "")
+    assert usage.startswith(f"Usage: puffin {subcommand}"), result.stdout + result.stderr

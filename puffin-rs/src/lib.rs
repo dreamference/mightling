@@ -24,6 +24,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::bail;
+use clap::Command;
 use serde_json::json;
 use toml_edit::DocumentMut;
 use toml_edit::Item;
@@ -140,29 +141,38 @@ pub struct ServedModel {
     pub max_model_len: u64,
 }
 
-/// The process's own command line, prepared by [`prepare_args`]. This is what the one-line hook in
-/// Codex's `cli_main` calls in place of reading argv itself.
-pub async fn args() -> anyhow::Result<Vec<OsString>> {
-    prepare_args(std::env::args_os().collect()).await
+/// Parses the process's command line into Codex's CLI type `T`, after [`prepare_args`] has pointed
+/// it at the local model. This is what the one-line hook in Codex's `cli_main` calls in place of
+/// `T::parse()`; taking `T` lets the launcher read Codex's own option definitions (see
+/// [`first_positional`]) instead of keeping a copy of them.
+pub async fn parse<T: clap::Parser>() -> anyhow::Result<T> {
+    let mut command = T::command();
+    command.build();
+    let args = prepare_args(&command, std::env::args_os().collect()).await?;
+    Ok(help::parse::<T>(args))
 }
 
 /// Rewrites the command line so Codex talks to the local model, doing the setup that requires.
 ///
-/// Returns the arguments unchanged when the command never reaches a model, e.g. `--version`.
-pub async fn prepare_args(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
+/// `command` is Codex's root CLI definition, used to find the subcommand. Returns the arguments
+/// unchanged when the command never reaches a model, e.g. `--version`.
+pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
     let user_args: Vec<String> = args
         .iter()
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    if let Some((command, reason)) = removed_command(&user_args) {
-        bail!("`puffin {command}` is not available: {reason}.");
+    let subcommand = first_positional(command, &user_args);
+    if let Some((name, reason)) = removed_command(&user_args, subcommand) {
+        bail!("`puffin {name}` is not available: {reason}.");
     }
     // `app` is Puffin's desktop window, not OpenAI's app (see app.rs); it never reaches Codex.
-    if user_args.first().map(String::as_str) == Some("app") {
-        std::process::exit(app::open(&user_args[1..]).await);
+    if let Some(index) = subcommand
+        && user_args[index] == "app"
+    {
+        std::process::exit(app::open(&user_args[index + 1..]).await);
     }
-    if !needs_model(&user_args) {
+    if !needs_model(&user_args, subcommand) {
         return Ok(args);
     }
 
@@ -184,26 +194,89 @@ pub async fn prepare_args(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> 
     Ok(with_local_model_args(args, &model.id))
 }
 
+/// Finds the first positional argument in `user_args`: the subcommand, or an interactive prompt.
+///
+/// Options come first on Codex's command line and some take a value (`-c key=value`,
+/// `-m model`, `-C dir`), so the first token not starting with `-` is not necessarily the
+/// subcommand: in `puffin -c x=1 login` it is `x=1`. Checking only the first token let
+/// `puffin -c x=1 login` past the refusal of `login`, and made `puffin -m m completion bash` wait
+/// for a model server. Which options consume the next token is read from Codex's own definitions
+/// in `command` (which must have been built), so the scan cannot drift from Codex. An option whose
+/// value is optional does not consume the next token, as clap does not either.
+pub fn first_positional(command: &Command, user_args: &[String]) -> Option<usize> {
+    let takes_value = |arg: &clap::Arg| {
+        !arg.is_positional() && arg.get_num_args().is_some_and(|range| range.min_values() > 0)
+    };
+    let long = |name: &str| {
+        command.get_arguments().find(|arg| {
+            arg.get_long() == Some(name)
+                || arg.get_all_aliases().is_some_and(|aliases| aliases.contains(&name))
+        })
+    };
+    let short = |c: char| {
+        command.get_arguments().find(|arg| {
+            arg.get_short() == Some(c)
+                || arg.get_all_short_aliases().is_some_and(|aliases| aliases.contains(&c))
+        })
+    };
+    let mut index = 0;
+    while index < user_args.len() {
+        let token = user_args[index].as_str();
+        if token == "--" {
+            return (index + 1 < user_args.len()).then_some(index + 1);
+        }
+        if let Some(name) = token.strip_prefix("--") {
+            // `--name=value` carries its own value.
+            if !name.contains('=') && long(name).is_some_and(takes_value) {
+                index += 1;
+            }
+        } else if let Some(cluster) = token.strip_prefix('-').filter(|rest| !rest.is_empty()) {
+            // `-abc` is a cluster of flags; the first one that takes a value takes the rest of
+            // the token (`-cfoo=1`), or the next token when it ends the cluster (`-c foo=1`).
+            for (position, c) in cluster.char_indices() {
+                if short(c).is_some_and(takes_value) {
+                    if position + c.len_utf8() == cluster.len() {
+                        index += 1;
+                    }
+                    break;
+                }
+            }
+        } else {
+            // Includes a lone `-`, which is a positional by convention.
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
 /// Returns the switched-off subcommand a command line asks for, with the reason to give, if any.
-pub fn removed_command(user_args: &[String]) -> Option<(&'static str, &'static str)> {
-    let first = user_args.first()?;
+///
+/// `subcommand` is the index [`first_positional`] found.
+pub fn removed_command(
+    user_args: &[String],
+    subcommand: Option<usize>,
+) -> Option<(&'static str, &'static str)> {
+    let name = user_args.get(subcommand?)?;
     REMOVED_COMMANDS
         .iter()
-        .find(|entry| entry.0 == first.as_str())
+        .find(|entry| entry.0 == name.as_str())
         .copied()
 }
 
 /// Tells whether a command line talks to the model at all.
-pub fn needs_model(user_args: &[String]) -> bool {
+///
+/// `subcommand` is the index [`first_positional`] found.
+pub fn needs_model(user_args: &[String], subcommand: Option<usize>) -> bool {
     if user_args
         .iter()
         .any(|arg| matches!(arg.as_str(), "--help" | "-h" | "--version" | "-V"))
     {
         return false;
     }
-    !user_args
-        .first()
-        .is_some_and(|first| COMMANDS_WITHOUT_MODEL.contains(&first.as_str()))
+    !subcommand
+        .and_then(|index| user_args.get(index))
+        .is_some_and(|name| COMMANDS_WITHOUT_MODEL.contains(&name.as_str()))
 }
 
 /// Resolves the vLLM URL through the same tiers Dreamference's config uses: environment, then the
@@ -420,17 +493,37 @@ pub fn configure_codex_home(
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(codex_home)?;
     let catalog_path = codex_home.join("model_catalog.json");
-    std::fs::write(
+    write_atomically(
         &catalog_path,
-        serde_json::to_string_pretty(&model_catalog(model, extra_instructions))?,
+        serde_json::to_string_pretty(&model_catalog(model, extra_instructions))?.as_bytes(),
     )?;
 
     let config_path = codex_home.join("config.toml");
     let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     let updated = updated_config(&existing, &catalog_path, host)?;
     if updated != existing {
-        std::fs::write(&config_path, updated)?;
+        write_atomically(&config_path, updated.as_bytes())?;
     }
+    Ok(())
+}
+
+/// Replaces a file by writing a sibling and renaming it over the original.
+///
+/// Every launch rewrites the catalog and may rewrite `config.toml`, and a second `puffin` starting
+/// at the same moment reads them. `std::fs::write` truncates first, so that reader could see an
+/// empty or half-written file and refuse to start; a rename is atomic, so it sees one version or
+/// the other.
+fn write_atomically(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+    let name = path
+        .file_name()
+        .context("a config path has no file name")?
+        .to_string_lossy();
+    let staging = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&staging, contents)
+        .with_context(|| format!("could not write {}", staging.display()))?;
+    std::fs::rename(&staging, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&staging);
+    })?;
     Ok(())
 }
 
@@ -481,22 +574,58 @@ fn set_if_absent(table: &mut Table, key: &str, setting: bool) {
     }
 }
 
+/// The values given to any of `flags` on a command line: `--flag value`, `--flag=value`, and for a
+/// short flag `-f value` or `-fvalue`.
+fn option_values<'a>(user_args: &'a [String], flags: &'a [&'a str]) -> impl Iterator<Item = &'a str> {
+    user_args.iter().enumerate().filter_map(move |(index, arg)| {
+        flags.iter().find_map(|flag| {
+            if arg == flag {
+                user_args.get(index + 1).map(String::as_str)
+            } else if flag.starts_with("--") {
+                arg.strip_prefix(flag).and_then(|rest| rest.strip_prefix('='))
+            } else {
+                arg.strip_prefix(flag).filter(|rest| !rest.is_empty())
+            }
+        })
+    })
+}
+
 /// Puts the local-model options in front of the user's arguments, unless the user chose their own.
+///
+/// `--oss --local-provider` choose the provider for the session, but not for the account check
+/// the TUI makes at startup: that reads the configured `model_provider`, which on a fresh
+/// `CODEX_HOME` is OpenAI's, so a new user landed on the "Sign in with ChatGPT" screen. The
+/// `-c model_provider=…` override fixes that without writing the choice into `config.toml`, which
+/// may be shared with an upstream Codex install.
 pub fn with_local_model_args(args: Vec<OsString>, model_id: &str) -> Vec<OsString> {
+    let user_args: Vec<String> = args
+        .iter()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
     let has = |flags: &[&str]| {
-        args.iter().skip(1).any(|arg| {
-            let arg = arg.to_string_lossy();
+        user_args.iter().any(|arg| {
             flags
                 .iter()
-                .any(|flag| arg == *flag || arg.starts_with(&format!("{flag}=")))
+                .any(|flag| arg == flag || arg.starts_with(&format!("{flag}=")))
         })
     };
+    let overrides_provider = option_values(&user_args, &["-c", "--config"]).any(|value| {
+        value
+            .split_once('=')
+            .is_some_and(|(key, _)| key.trim() == "model_provider")
+    });
+    let local_provider = option_values(&user_args, &["--local-provider"]).last();
     let mut injected: Vec<OsString> = Vec::new();
     if !has(&["--oss"]) {
         injected.push("--oss".into());
     }
-    if !has(&["--local-provider"]) {
+    if local_provider.is_none() {
         injected.extend(["--local-provider".into(), PROVIDER.into()]);
+    }
+    if !overrides_provider {
+        let provider = local_provider.unwrap_or(PROVIDER);
+        injected.extend(["-c".into(), format!("model_provider=\"{provider}\"").into()]);
     }
     if !has(&["--model", "-m"]) {
         injected.extend(["--model".into(), model_id.into()]);
@@ -518,31 +647,89 @@ mod tests {
 
     #[test]
     fn openai_login_and_logout_are_refused() {
-        assert_eq!(removed_command(&strings(&["login"])).map(|(name, _)| name), Some("login"));
-        assert_eq!(removed_command(&strings(&["logout"])).map(|(name, _)| name), Some("logout"));
-        assert_eq!(removed_command(&strings(&["exec", "login"])), None);
-        assert_eq!(removed_command(&strings(&[])), None);
+        assert_eq!(removed(&["login"]), Some("login"));
+        assert_eq!(removed(&["logout"]), Some("logout"));
+        assert_eq!(removed(&["exec", "login"]), None);
+        assert_eq!(removed(&[]), None);
+    }
+
+    /// A root command shaped like Codex's: options that take a value, flags that do not, one whose
+    /// value is optional, a positional prompt and subcommands.
+    fn codex_like() -> Command {
+        use clap::Arg;
+        use clap::ArgAction;
+        let mut command = Command::new("puffin")
+            .arg(Arg::new("config").short('c').long("config").action(ArgAction::Append))
+            .arg(Arg::new("model").short('m').long("model"))
+            .arg(Arg::new("cd").short('C').long("cd"))
+            .arg(Arg::new("oss").long("oss").action(ArgAction::SetTrue))
+            .arg(Arg::new("search").long("search").action(ArgAction::SetTrue))
+            .arg(Arg::new("local-provider").long("local-provider"))
+            .arg(Arg::new("color").long("color").num_args(0..=1))
+            .arg(Arg::new("prompt"))
+            .subcommand(Command::new("exec"))
+            .subcommand(Command::new("login"))
+            .subcommand(Command::new("completion"));
+        command.build();
+        command
+    }
+
+    fn first(args: &[&str]) -> Option<usize> {
+        first_positional(&codex_like(), &strings(args))
+    }
+
+    fn removed(args: &[&str]) -> Option<&'static str> {
+        let args = strings(args);
+        removed_command(&args, first_positional(&codex_like(), &args)).map(|(name, _)| name)
+    }
+
+    fn model_needed(args: &[&str]) -> bool {
+        let args = strings(args);
+        needs_model(&args, first_positional(&codex_like(), &args))
+    }
+
+    #[test]
+    fn the_subcommand_is_found_after_options_that_take_a_value() {
+        assert_eq!(first(&["login"]), Some(0));
+        assert_eq!(first(&["-c", "x=1", "login"]), Some(2));
+        assert_eq!(first(&["--config", "x=1", "login"]), Some(2));
+        assert_eq!(first(&["--config=x=1", "login"]), Some(1));
+        assert_eq!(first(&["-cx=1", "login"]), Some(1));
+        assert_eq!(first(&["--oss", "--search", "login"]), Some(2));
+        assert_eq!(first(&["-m", "m", "-C", "/tmp", "exec", "hi"]), Some(4));
+        // An optional value never swallows the next token.
+        assert_eq!(first(&["--color", "login"]), Some(1));
+        assert_eq!(first(&["--", "login"]), Some(1));
+        assert_eq!(first(&["-"]), Some(0));
+        assert_eq!(first(&["-c", "x=1"]), None);
+        assert_eq!(first(&[]), None);
+    }
+
+    #[test]
+    fn a_refused_command_is_refused_after_options_too() {
+        assert_eq!(removed(&["-c", "x=1", "login"]), Some("login"));
+        assert_eq!(removed(&["--oss", "cloud"]), Some("cloud"));
+        assert_eq!(removed(&["-m", "login"]), None, "`login` is the model name here");
     }
 
     #[test]
     fn cloud_and_its_alias_are_switched_off() {
-        let (_, reason) = removed_command(&strings(&["cloud"])).unwrap_or_default();
+        let args = strings(&["cloud"]);
+        let (_, reason) = removed_command(&args, Some(0)).unwrap_or_default();
         assert!(reason.contains("private cloud"));
-        assert_eq!(
-            removed_command(&strings(&["cloud-tasks", "list"])).map(|(name, _)| name),
-            Some("cloud-tasks")
-        );
-        assert_eq!(removed_command(&strings(&["exec", "cloud"])), None);
+        assert_eq!(removed(&["cloud-tasks", "list"]), Some("cloud-tasks"));
+        assert_eq!(removed(&["exec", "cloud"]), None);
     }
 
     #[test]
     fn version_help_and_offline_subcommands_skip_the_server() {
-        assert!(!needs_model(&strings(&["--version"])));
-        assert!(!needs_model(&strings(&["exec", "--help"])));
-        assert!(!needs_model(&strings(&["completion", "bash"])));
-        assert!(needs_model(&strings(&[])));
-        assert!(needs_model(&strings(&["exec", "fix the tests"])));
-        assert!(needs_model(&strings(&["resume", "--last"])));
+        assert!(!model_needed(&["--version"]));
+        assert!(!model_needed(&["exec", "--help"]));
+        assert!(!model_needed(&["completion", "bash"]));
+        assert!(!model_needed(&["-m", "m", "completion", "bash"]));
+        assert!(model_needed(&[]));
+        assert!(model_needed(&["exec", "fix the tests"]));
+        assert!(model_needed(&["resume", "--last"]));
     }
 
     #[test]
@@ -555,10 +742,42 @@ mod tests {
         assert_eq!(
             out,
             strings(&[
-                "puffin", "--oss", "--local-provider", PROVIDER, "--model", "Intel/Qwen", "exec",
+                "puffin",
+                "--oss",
+                "--local-provider",
+                PROVIDER,
+                "-c",
+                "model_provider=\"openai-custom\"",
+                "--model",
+                "Intel/Qwen",
+                "exec",
                 "hi"
             ])
         );
+    }
+
+    fn prepared(args: &[&str]) -> Vec<String> {
+        let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+        with_local_model_args(args, "Intel/Qwen")
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn the_provider_is_selected_for_the_startup_account_check() {
+        // Without `model_provider` the TUI's account check sees OpenAI's provider and a fresh
+        // CODEX_HOME opens on the ChatGPT sign-in screen.
+        let out = prepared(&["puffin"]);
+        assert!(out.windows(2).any(|w| w[0] == "-c" && w[1] == "model_provider=\"openai-custom\""));
+        // A provider the user chose is the one selected, and their own override is left alone.
+        let out = prepared(&["puffin", "--local-provider", "ollama"]);
+        assert!(out.contains(&"model_provider=\"ollama\"".to_string()));
+        assert_eq!(out.iter().filter(|arg| *arg == "--local-provider").count(), 1);
+        let out = prepared(&["puffin", "-c", "model_provider=mine"]);
+        assert!(!out.iter().any(|arg| arg.contains("openai-custom\"")));
+        let out = prepared(&["puffin", "--config=model_provider = \"mine\""]);
+        assert_eq!(out.iter().filter(|arg| arg.starts_with("model_provider")).count(), 0);
     }
 
     #[test]
@@ -600,6 +819,21 @@ mod tests {
             .and_then(|provider| provider.get("base_url"))
             .and_then(toml::Value::as_str);
         assert_eq!(base_url, Some("http://x:8000/v1"));
+    }
+
+    #[test]
+    fn config_files_are_replaced_whole_and_leave_no_staging_file() {
+        let dir = std::env::temp_dir().join(format!("puffin-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap_or_default();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "old = 1\n").unwrap_or_default();
+        write_atomically(&path, b"new = 2\n").unwrap_or_default();
+        assert_eq!(std::fs::read_to_string(&path).unwrap_or_default(), "new = 2\n");
+        let leftovers = std::fs::read_dir(&dir)
+            .map(|entries| entries.filter_map(Result::ok).filter(|e| e.file_name() != "config.toml").count())
+            .unwrap_or(usize::MAX);
+        assert_eq!(leftovers, 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -15,35 +15,6 @@ index 4d7984d..003136b 100644
 -    let name = "codex";
 +    let name = "puffin";
      generate(cmd.shell, &mut app, name, &mut std::io::stdout());
-diff --git a/codex-rs/cli/src/marketplace_cmd.rs b/codex-rs/cli/src/marketplace_cmd.rs
-index d942de6..2103ed0 100644
---- a/codex-rs/cli/src/marketplace_cmd.rs
-+++ b/codex-rs/cli/src/marketplace_cmd.rs
-@@ -33,3 +33,3 @@ use crate::plugin_cmd::load_cli_auth_manager;
- #[derive(Debug, Parser)]
--#[command(bin_name = "codex plugin marketplace")]
-+#[command(bin_name = "puffin plugin marketplace")]
- pub struct MarketplaceCli {
-@@ -61,3 +61,3 @@ enum MarketplaceSubcommand {
- #[command(
--    bin_name = "codex plugin marketplace add",
-+    bin_name = "puffin plugin marketplace add",
-     after_help = "Examples:\n  codex plugin marketplace add ./path/to/marketplace\n  codex plugin marketplace add owner/repo --ref main\n  codex plugin marketplace add https://github.com/owner/repo --sparse plugins/foo"
-@@ -87,3 +87,3 @@ struct AddMarketplaceArgs {
- #[derive(Debug, Parser)]
--#[command(bin_name = "codex plugin marketplace list")]
-+#[command(bin_name = "puffin plugin marketplace list")]
- struct ListMarketplaceArgs {
-@@ -96,3 +96,3 @@ struct ListMarketplaceArgs {
- #[command(
--    bin_name = "codex plugin marketplace upgrade",
-+    bin_name = "puffin plugin marketplace upgrade",
-     after_help = "Examples:\n  codex plugin marketplace upgrade\n  codex plugin marketplace upgrade debug"
-@@ -111,3 +111,3 @@ struct UpgradeMarketplaceArgs {
- #[command(
--    bin_name = "codex plugin marketplace remove",
-+    bin_name = "puffin plugin marketplace remove",
-     after_help = "Example:\n  codex plugin marketplace remove debug"
 diff --git a/codex-rs/cli/src/mcp_cmd.rs b/codex-rs/cli/src/mcp_cmd.rs
 index 8fda684..1ae8765 100644
 --- a/codex-rs/cli/src/mcp_cmd.rs
@@ -53,30 +24,15 @@ index 8fda684..1ae8765 100644
 -#[command(override_usage = "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
 +#[command(override_usage = "puffin mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
  pub struct AddArgs {
-diff --git a/codex-rs/cli/src/plugin_cmd.rs b/codex-rs/cli/src/plugin_cmd.rs
-index d282452..e167423 100644
---- a/codex-rs/cli/src/plugin_cmd.rs
-+++ b/codex-rs/cli/src/plugin_cmd.rs
-@@ -49,3 +49,3 @@ const OPENAI_PRIMARY_RUNTIME_MARKETPLACE_NAME: &str = "openai-primary-runtime";
- #[derive(Debug, Parser)]
--#[command(bin_name = "codex plugin")]
-+#[command(bin_name = "puffin plugin")]
- pub struct PluginCli {
-@@ -81,3 +81,3 @@ pub enum PluginSubcommand {
- #[command(
--    bin_name = "codex plugin add",
-+    bin_name = "puffin plugin add",
-     after_help = "Examples:\n  codex plugin add sample@debug\n  codex plugin add sample --marketplace debug"
-@@ -100,3 +100,3 @@ pub struct AddPluginArgs {
- #[command(
--    bin_name = "codex plugin list",
-+    bin_name = "puffin plugin list",
-     after_help = "Examples:\n  codex plugin list\n  codex plugin list --marketplace debug\n  codex plugin list --json\n  codex plugin list --available --json"
-@@ -119,3 +119,3 @@ pub struct ListPluginsArgs {
- #[command(
--    bin_name = "codex plugin remove",
-+    bin_name = "puffin plugin remove",
-     after_help = "Examples:\n  codex plugin remove sample@debug\n  codex plugin remove sample --marketplace debug"
+diff --git a/codex-rs/exec/src/cli.rs b/codex-rs/exec/src/cli.rs
+index 0ef0be6..a6bd293 100644
+--- a/codex-rs/exec/src/cli.rs
++++ b/codex-rs/exec/src/cli.rs
+@@ -12,3 +12,3 @@ use std::path::PathBuf;
+     version,
+-    override_usage = "codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]"
++    override_usage = "puffin exec [OPTIONS] [PROMPT]\n       puffin exec [OPTIONS] <COMMAND> [ARGS]"
+ )]
 diff --git a/codex-rs/exec/src/event_processor_with_human_output.rs b/codex-rs/exec/src/event_processor_with_human_output.rs
 index 222bc48..17fa132 100644
 --- a/codex-rs/exec/src/event_processor_with_human_output.rs
@@ -86,6 +42,15 @@ index 222bc48..17fa132 100644
 -        eprintln!("OpenAI Codex v{VERSION}\n--------");
 +        eprintln!("Puffin v{VERSION}\n--------");
          for (key, value) in config_summary_entries(config, session_configured_event) {
+diff --git a/codex-rs/tui/src/chatwidget.rs b/codex-rs/tui/src/chatwidget.rs
+index 5ca4182..c1a7ea0 100644
+--- a/codex-rs/tui/src/chatwidget.rs
++++ b/codex-rs/tui/src/chatwidget.rs
+@@ -2044,3 +2044,3 @@ impl Drop for ChatWidget {
+ 
+-const PLACEHOLDER: &str = "Ask Codex to do anything";
++const PLACEHOLDER: &str = "Ask Puffin to do anything";
+ const SIDE_PLACEHOLDER: &str = "Ask a follow-up question";
 diff --git a/codex-rs/tui/src/history_cell/session.rs b/codex-rs/tui/src/history_cell/session.rs
 index e749c02..e4d305e 100644
 --- a/codex-rs/tui/src/history_cell/session.rs
@@ -105,6 +70,26 @@ index e749c02..e4d305e 100644
 -            Line::from(format!("OpenAI Codex (v{})", self.version)),
 +            Line::from(format!("Puffin (v{})", self.version)),
              Line::from(format!(
+diff --git a/codex-rs/tui/src/onboarding/trust_directory.rs b/codex-rs/tui/src/onboarding/trust_directory.rs
+index baab586..e7fae14 100644
+--- a/codex-rs/tui/src/onboarding/trust_directory.rs
++++ b/codex-rs/tui/src/onboarding/trust_directory.rs
+@@ -68,3 +68,3 @@ impl WidgetRef for &TrustDirectoryWidget {
+             } else {
+-                "Trust this folder? Codex can read, edit, and run files here, subject to \
++                "Trust this folder? Puffin can read, edit, and run files here, subject to \
+                  your permission settings. Folder settings can run code automatically, \
+diff --git a/codex-rs/tui/src/onboarding/welcome.rs b/codex-rs/tui/src/onboarding/welcome.rs
+index 9c9e7b8..85c8fa9 100644
+--- a/codex-rs/tui/src/onboarding/welcome.rs
++++ b/codex-rs/tui/src/onboarding/welcome.rs
+@@ -128,4 +128,4 @@ impl WidgetRef for &WelcomeWidget {
+             "Welcome to ".into(),
+-            "Codex".bold(),
+-            ", OpenAI's command-line coding agent".into(),
++            "Puffin".bold(),
++            ", your local coding agent".into(),
+         ]));
 diff --git a/codex-rs/tui/src/status/card.rs b/codex-rs/tui/src/status/card.rs
 index 369a674..74897a5 100644
 --- a/codex-rs/tui/src/status/card.rs
@@ -114,11 +99,3 @@ index 369a674..74897a5 100644
 -            Span::from("OpenAI Codex").bold(),
 +            Span::from("Puffin").bold(),
              Span::from(" ").dim(),
-diff --git a/codex-rs/exec/src/cli.rs b/codex-rs/exec/src/cli.rs
---- a/codex-rs/exec/src/cli.rs
-+++ b/codex-rs/exec/src/cli.rs
-@@ -12,3 +12,3 @@ use std::path::PathBuf;
-     version,
--    override_usage = "codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]"
-+    override_usage = "puffin exec [OPTIONS] [PROMPT]\n       puffin exec [OPTIONS] <COMMAND> [ARGS]"
- )]
