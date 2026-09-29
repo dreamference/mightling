@@ -13,7 +13,7 @@ models, and the helper commands the agent calls (`search`, `fetch`, `gmail`). Th
 
 | Option | Description |
 |---|---|
-| `--config` | Path to custom Dreamference config file (.toml, .yaml or .json) |
+| `--config` | Path to custom Puffin config file (.toml, .yaml or .json) |
 | `--sandbox` | Rootless container sandbox isolation engine. One of: `none`, `apptainer`, `podman`, `docker`. |
 | `--agent` | Select primary AI agent runner (default: codex) One of: `goose`, `cline`, `aider`, `continue`, `openhands`, `codex`. |
 | `--hf-token` | HuggingFace API access token (or set via HF_TOKEN env var) |
@@ -146,7 +146,7 @@ Launch local vLLM server optimized for GB10 unified memory.
 
 | Option | Description |
 |---|---|
-| `--model` | Model name to serve (default: the configured main model; examples: qwen3.5-122b-a10b-hybrid-dflash, llama-3.3-70b) |
+| `--model` | Model name to serve (default: the configured main model; examples: qwen3.8-27b-nvfp4-dflash2, llama-3.3-70b) |
 | `--port` | Port to expose OpenAI API endpoint. |
 | `--quantization` | Quantization method (int8, fp8, awq) |
 | `--draft-model` | Speculative decoding draft model (e.g. qwen2.5-coder-1.5b) |

@@ -22,11 +22,12 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
 # Single source of truth for the model Dreamference serves when nothing else is specified. Imported by
 # the config layer and the vLLM launcher so the two cannot drift apart.
 #
-# hybrid-dflash since 2026-08-23: the Intel int4-dflash recipe plus the dense-bandwidth stack,
-# promoted after serving and benchmarking on this machine (prose 23.8 / code 49.9 / JSON 53.1
-# tok/s single-stream at 32k context and eight slots). int4-dflash stays in the matrix as the
-# tested fallback.
-DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.5-122b-a10b-hybrid-dflash"
+# qwen3.8-27b-nvfp4-dflash2 since 2026-09-29, on SGLang: decode ties the 122B on prose and code
+# (24.1 / 47.5 against 23.8 / 49.9 tok/s) and beats it on JSON (82.5 against 53.1), the live
+# slash-command suite passes as it did, a real puffin task finished in 10 s against 34, context is
+# 262K against 32K, and ~29 GB more host memory stays free while serving. hybrid-dflash (the 122B
+# on vLLM, default from 2026-08-23) stays as the tested fallback, int4-dflash behind it.
+DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.8-27b-nvfp4-dflash2"
 
 # The diffusion model served beside the main one. A separate default rather than a mode of the
 # main model, because the two run in parallel: every configuration names both, and `puffin-admin server
@@ -667,8 +668,46 @@ class ModelMatrixRegistry:
                     "num_speculative_tokens": 16,
                     "quantization": "modelopt_fp4",
                 },
+                # The checkpoint's own chat template refused two things our clients send, and
+                # reasoned at its most expensive level by default. Applied to a copy at launch
+                # (ChatTemplatePatcher); each anchor must match exactly once or the start stops.
+                "chat_template_patches": [
+                    # Codex offers `minimal`/`high` (and `max` exists elsewhere); the template knew
+                    # only xhigh/medium/low and answered HTTP 400. The default drops from xhigh to
+                    # medium: hasso5703 measured xhigh at 3.19x medium's thinking tokens and a
+                    # lower HumanEval (93.9% against 98.2%), five failures being budget
+                    # truncations. puffin itself sends `none` and is unaffected.
+                    [
+                        "    {%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}\n"
+                        "    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}",
+                        "    {%- set resolved_reasoning_effort = reasoning_effort|default('medium') %}\n"
+                        "    {%- if resolved_reasoning_effort in ('max', 'high') %}\n"
+                        "        {%- set resolved_reasoning_effort = 'xhigh' %}\n"
+                        "    {%- elif resolved_reasoning_effort == 'minimal' %}\n"
+                        "        {%- set resolved_reasoning_effort = 'low' %}\n"
+                        "    {%- endif %}\n"
+                        "    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}",
+                    ],
+                    # A system message after the first one raised "System message must be at the
+                    # beginning" on the chat-completions path; it becomes a reminder in the turn.
+                    [
+                        "        {%- if not loop.first %}\n"
+                        "            {{- raise_exception('System message must be at the beginning.') }}\n"
+                        "        {%- endif %}",
+                        "        {%- if not loop.first %}\n"
+                        "            {{- '<|im_start|>user\\n<system-reminder>\\n' + content + "
+                        "'\\n</system-reminder><|im_end|>\\n' }}\n"
+                        "        {%- endif %}",
+                    ],
+                ],
                 "extra_args": [
                     "--attention-backend", "flashinfer",
+                    # FlashInfer's plain sampling kernel, used only when a request asks for no
+                    # truncation at all (top_p 1 and no top_k: what the completions endpoint does
+                    # by default), returned token 0 ('!') for 16 of 16 sampled requests on this
+                    # GB10; any top_p < 1 or any top_k was clean. PyTorch's sampler: 0 of 16, and
+                    # no measurable speed cost (greedy 25.5 / 50.3 / 87.0 tok/s prose/code/JSON).
+                    "--sampling-backend", "pytorch",
                     "--chunked-prefill-size", "8192",
                     "--disable-prefill-cuda-graph",
                     "--cuda-graph-max-bs", "8",

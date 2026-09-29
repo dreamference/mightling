@@ -1303,3 +1303,54 @@ def test_server_start_warms_up_before_reporting_ready():
 
     source = inspect.getsource(DreamferenceCLIController.run_cli)
     assert source.index("vllm_mgr.warm_up()") < source.index("✅ Server Ready!")
+
+
+def test_the_chat_template_is_patched_for_efforts_and_late_system_messages(tmp_path, monkeypatch):
+    # Qwen3.8's template answered HTTP 400 to Codex's `high`/`minimal` efforts and refused a
+    # system message after the first; the recipe patches a copy, and a patch that no longer
+    # matches must stop the launch rather than serve the refusals.
+    import jinja2
+    from dreamference.hardware import get_model_launch_overrides
+    from dreamference.hardware.model_downloader import ModelDownloader
+    from dreamference.vllm_server.chat_template_patcher import ChatTemplatePatcher
+
+    patches = get_model_launch_overrides("qwen3.8-27b-nvfp4-dflash2")["chat_template_patches"]
+    stock = (
+        "{%- if enable_thinking is undefined or enable_thinking is true %}\n"
+        + patches[0][0] + "\n"
+        "        {{- raise_exception('Unexpected reasoning effort ' ~ reasoning_effort) }}\n"
+        "    {%- endif %}\n{{- resolved_reasoning_effort }}\n{%- endif %}\n"
+        "{%- for message in messages %}{%- set content = message.content %}\n"
+        "    {%- if message.role == \"system\" %}\n" + patches[1][0] + "\n    {%- endif %}\n{%- endfor %}"
+    )
+    monkeypatch.setattr(ModelDownloader, "get_hf_cache_dir", classmethod(lambda cls: tmp_path))
+    snapshot = tmp_path / "models--RadixArk--Qwen3.8-27B-NVFP4" / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    (snapshot / "chat_template.jinja").write_text(stock)
+
+    written = ChatTemplatePatcher.prepare("RadixArk/Qwen3.8-27B-NVFP4", "abc", patches)
+    env = jinja2.Environment()
+    env.globals["raise_exception"] = lambda message: (_ for _ in ()).throw(ValueError(message))
+    template = env.from_string(written.read_text())
+    late_system = [{"role": "system", "content": "a"}, {"role": "system", "content": "late"}]
+    assert template.render(messages=late_system, reasoning_effort="high").startswith("xhigh")
+    assert template.render(messages=late_system, reasoning_effort="minimal").startswith("low")
+    assert template.render(messages=late_system).startswith("medium")
+    assert "<system-reminder>\nlate" in template.render(messages=late_system)
+
+    (snapshot / "chat_template.jinja").write_text("an unrelated template")
+    assert ChatTemplatePatcher.prepare("RadixArk/Qwen3.8-27B-NVFP4", "abc", patches) is None
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    assert cmd[cmd.index("--chat-template") + 1].endswith(
+        ChatTemplatePatcher.file_name("RadixArk/Qwen3.8-27B-NVFP4", "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854", patches))
+
+
+def test_the_sglang_recipe_samples_with_pytorch_not_flashinfer(monkeypatch):
+    # FlashInfer's untruncated sampling kernel returned token 0 ('!') for every sampled
+    # completions request on the GB10 (2026-09-29); the recipe must keep PyTorch's sampler.
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    assert cmd[cmd.index("--sampling-backend") + 1] == "pytorch"

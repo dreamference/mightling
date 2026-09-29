@@ -139,5 +139,12 @@ class SGLangLaunchBuilder:
             if speculative.get("quantization"):
                 args.extend(["--speculative-draft-model-quantization", str(speculative["quantization"])])
 
+        patches = recipe.get("chat_template_patches")
+        if patches and recipe.get("revision"):
+            from dreamference.vllm_server.chat_template_patcher import ChatTemplatePatcher
+
+            args.extend(["--chat-template",
+                         ChatTemplatePatcher.container_path(hf_model, recipe["revision"], patches)])
+
         args.extend(str(a) for a in recipe.get("extra_args") or [])
         return args

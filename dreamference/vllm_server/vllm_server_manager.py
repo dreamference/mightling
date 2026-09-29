@@ -1636,7 +1636,7 @@ class VLLMServerManager:
         # Step 1: Pre-download model weights into local cache and convert to tensorize format.
         # Resolve the tensorizer decision up front: some checkpoints opt out in their registry recipe,
         # and converting one anyway would burn time and disk on an artifact the launcher will not use.
-        from dreamference.hardware import download_model, get_model_launch_overrides
+        from dreamference.hardware import download_model, get_model_launch_overrides, resolve_model_hf_repo
         tensorize = use_tensorizer
         if tensorize is None:
             tensorize = get_model_launch_overrides(model).get("use_tensorizer", False)
@@ -1660,6 +1660,20 @@ class VLLMServerManager:
         # vLLM's cache only: SGLang keeps its own under a separate directory, and running the
         # reset for an SGLang model would re-stamp the signature and cost vLLM its graph when
         # the default model comes back.
+        # The recipe's chat-template patches, written before the launch names the file. A missing
+        # anchor means the checkpoint's template is not the one the recipe was written for, and
+        # serving it unpatched would bring back the refusals the patches exist to remove.
+        patches = overrides.get("chat_template_patches")
+        if patches and overrides.get("revision"):
+            from dreamference.vllm_server.chat_template_patcher import ChatTemplatePatcher
+
+            if ChatTemplatePatcher.prepare(resolve_model_hf_repo(model), overrides["revision"], patches) is None:
+                print("❌ The recipe's chat template could not be prepared. Either it could not be written\n"
+                      "   (reported above), or a patch no longer matches this checkpoint's template, which\n"
+                      "   then differs from the one the registry entry was written for: update the patches in\n"
+                      "   model_matrix_registry.py before serving it.")
+                raise SystemExit(1)
+
         if not SGLangLaunchBuilder.is_sglang(overrides):
             self._reset_stale_compile_cache(
                 model, docker_image=docker_image, draft_model=draft_model,

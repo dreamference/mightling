@@ -2060,11 +2060,15 @@ class DreamferenceCLIController:
                                 import requests
                                 from dreamference.hardware import resolve_model_hf_repo
                                 served_model = resolve_model_hf_repo(args.model)
+                                # Default sampling on purpose: on 2026-09-29 this canary caught
+                                # SGLang's untruncated-sampling kernel emitting token 0 ('!') on
+                                # the completions path, which greedy decoding never reaches. The
+                                # first completions request after a boot can take well over 10 s.
                                 resp = requests.post(f"{vllm_mgr.host}/v1/completions", json={
                                     "model": served_model,
                                     "prompt": "Hello",
                                     "max_tokens": 10
-                                }, timeout=10)
+                                }, timeout=60)
                                 if resp.status_code == 200:
                                     text = resp.json()["choices"][0]["text"].strip()
                                     if text and all(c == "!" for c in text if c.strip()):

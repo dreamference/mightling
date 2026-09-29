@@ -49,7 +49,7 @@ def test_default_model_is_registered_and_gb10_compatible():
     from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
     assert spec.compatible_gb10 is True
-    assert spec.hf_repo_id == "Intel/Qwen3.5-122B-A10B-int4-AutoRound"
+    assert spec.hf_repo_id == "RadixArk/Qwen3.8-27B-NVFP4"
 
 def test_default_model_speculates_against_a_downloadable_drafter():
     # The DFlash drafter is named inside the recipe rather than passed as an argument, which is
@@ -62,13 +62,13 @@ def test_default_model_speculates_against_a_downloadable_drafter():
         ModelMatrixRegistry,
     )
     draft_repo = get_speculative_draft_repo(DEFAULT_MODEL_ALIAS)
-    assert draft_repo == "z-lab/Qwen3.5-122B-A10B-DFlash"
+    assert draft_repo == "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal"
     draft_spec = ModelMatrixRegistry.get_spec(draft_repo)
     assert draft_spec is not None
     assert draft_spec.min_memory_gb > 0
 
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
-    assert spec.launch_overrides["speculative_config"]["method"] == "dflash"
+    assert spec.launch_overrides["speculative_config"]["method"].lower() == "dflash"  # SGLang spells it DFLASH
     # Self-speculating and non-speculating models must not report a separate drafter.
     assert get_speculative_draft_repo("qwen3.6-35b-a3b-nvfp4") is None
     assert get_speculative_draft_repo("qwen2.5-coder-32b") is None
