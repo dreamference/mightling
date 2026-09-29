@@ -1,5 +1,5 @@
 """
-Dreamference Command Line Interface (CLI) Controller.
+Puffin admin command line interface (`puffin-admin`) controller.
 
 This module provides the DreamferenceCLIController class which parses command line arguments
 for subcommands (`init`, `run`, `status`, `server start`, `index`, `mcp`, `model download`, `web`),
@@ -25,7 +25,7 @@ from dreamference.runner import (
     OpenHandsRunner, OpenHandsInstaller,
     CodexRunner, CodexInstaller
 )
-from dreamference.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache
+from dreamference.hardware import detect_gb10_hardware, download_model, download_all_models, clear_model_cache, clear_tensorizer_cache, model_key_for_served_id
 from dreamference.vllm_server import VLLMServerManager, DiffusionServerManager, DEFAULT_VLLM_IMAGE, DEFAULT_DIFFUSION_PORT
 from dreamference.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dreamference.mcp_server import main as run_mcp_server
@@ -41,14 +41,14 @@ SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
 
 class DreamferenceCLIController:
     """
-    Controller class for Dreamference CLI operations, Rich status panels, and subcommand routing.
+    Controller class for puffin-admin operations, Rich status panels, and subcommand routing.
     """
 
     @classmethod
     def display_header(cls) -> None:
-        """Renders styled Rich header panel displaying Dreamference branding and GB10 target architecture."""
+        """Renders the Rich header panel: Puffin by Dreamference, and the GB10 target architecture."""
         console.print(Panel.fit(
-            "[bold green]⚡ Dreamference[/bold green] - Autonomous Local Agentic Coding Engine\n"
+            "[bold green]⚡ Puffin[/bold green] [dim]by Dreamference[/dim] - Autonomous Local Agentic Coding Engine\n"
             "[dim]Exclusive Target Hardware: NVIDIA GB10 (Blackwell Architecture | 128 GB Unified Memory)[/dim]",
             border_style="green"
         ))
@@ -243,6 +243,9 @@ class DreamferenceCLIController:
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": 0,
+                # These probe correctness, not reasoning: a model that thinks by default spent the
+                # arithmetic probe's 16 tokens thinking and the canary read that as a wrong answer.
+                "chat_template_kwargs": {"enable_thinking": False},
             }
             if tools:
                 payload["tools"] = tools
@@ -400,12 +403,22 @@ class DreamferenceCLIController:
         except Exception:
             return {}
 
-        # Keep only the server's own arguments: everything after `serve <model>`.
-        try:
-            expected_argv = expected_full[expected_full.index("serve") + 2:]
-        except ValueError:
+        # Keep only the server's own arguments: from the first flag after the engine's entry
+        # point, `serve <model>` for vLLM and `python3 -m sglang.launch_server` for SGLang.
+        def server_args(argv: "list[str]") -> "list[str]":
+            for entry in ("serve", "sglang.launch_server"):
+                if entry in argv:
+                    argv = argv[argv.index(entry) + 1:]
+                    break
+            flags_at = next((i for i, token in enumerate(argv) if token.startswith("--")), len(argv))
+            return argv[flags_at:]
+
+        # The expected command also carries docker's own flags before the image; an entry point
+        # must be present to know where the server's begin.
+        if not any(entry in expected_full for entry in ("serve", "sglang.launch_server")):
             return {}
-        running_argv = running_cmd[2:] if running_cmd[:1] == ["serve"] else running_cmd
+        expected_argv = server_args(expected_full)
+        running_argv = server_args(running_cmd)
 
         expected = parse(expected_argv)
         actual = parse(running_argv)
@@ -531,7 +544,18 @@ class DreamferenceCLIController:
             facts["Compile Cache"] = "Unknown"
 
         if cmd:
-            facts.update(cls._detect_recipe_drift(model_alias, port, cmd))
+            # Against the recipe of the model actually running, not the configured one: `server
+            # start --model` may serve another, and comparing an SGLang server with a vLLM recipe
+            # reported every flag as drift.
+            served_key = model_alias
+            try:
+                import requests
+
+                served = requests.get(f"{vllm_host}/v1/models", timeout=5).json()["data"][0]["id"]
+                served_key = model_key_for_served_id(served, preferred=model_alias) or model_alias
+            except Exception:
+                pass
+            facts.update(cls._detect_recipe_drift(served_key, port, cmd))
 
         return facts
 
@@ -624,7 +648,7 @@ class DreamferenceCLIController:
         config_path = str(config.config_file_path)
         if not config.config_file_path.exists():
             config_path += " (not present; built-in defaults)"
-        agent_table.add_row("Dreamference Config Path", config_path)
+        agent_table.add_row("Puffin Config Path", config_path)
         agent_table.add_row("Goose Config Path", str(config.config_path))
 
         console.print(Panel(agent_table, title="[bold]🤖 vLLM & Agent Status[/bold]", border_style="magenta"))
@@ -732,18 +756,18 @@ class DreamferenceCLIController:
     @classmethod
     def build_parser(cls) -> argparse.ArgumentParser:
         """
-        Constructs ArgumentParser with subcommands for Dreamference CLI operations.
+        Constructs ArgumentParser with subcommands for puffin-admin operations.
 
         Returns:
             argparse.ArgumentParser: Configured argument parser object.
         """
         parser = argparse.ArgumentParser(
             prog="puffin-admin",
-            description="Dreamference: Autonomous local agentic coding engine powered by Goose, Cline, Aider, Continue, OpenHands & NVIDIA GB10"
+            description="Puffin by Dreamference: autonomous local agentic coding engine powered by Goose, Cline, Aider, Continue, OpenHands & NVIDIA GB10"
         )
         agent_choices = ["goose", "cline", "aider", "continue", "openhands", "codex"]
 
-        parser.add_argument("--config", default=None, help="Path to custom Dreamference config file (.toml, .yaml or .json)")
+        parser.add_argument("--config", default=None, help="Path to custom Puffin config file (.toml, .yaml or .json)")
         parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
         parser.add_argument("--agent", choices=agent_choices, default=None, help="Select primary AI agent runner (default: codex)")
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
@@ -909,7 +933,7 @@ class DreamferenceCLIController:
         # Command: puffin-admin puffin
         #
         # A subcommand group rather than an `--agent onyx` runner, because Onyx is a service and
-        # not a terminal session. Every entry in the --agent switch is a CLI that Dreamference
+        # not a terminal session. Every entry in the --agent switch is a CLI that puffin-admin
         # execs and waits on; Onyx is a set of long-lived containers with a lifecycle of its own,
         # so it mirrors `puffin-admin server` instead.
         # "puffin" is the command's name; "onyx" remains as a compatibility alias, because the
@@ -1136,7 +1160,7 @@ class DreamferenceCLIController:
                 cls.display_header()
                 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
-                table = Table(title="Available Dreamference Models")
+                table = Table(title="Available Puffin Models")
                 table.add_column("Model Name", style="cyan", no_wrap=True)
                 table.add_column("HuggingFace Repo ID", style="magenta")
                 
@@ -1871,8 +1895,8 @@ class DreamferenceCLIController:
             # The module-level console. Rebinding `console` anywhere in run_cli made it a local for
             # the whole function, so every other branch that printed with it (e.g. `endpoints`)
             # failed with UnboundLocalError.
-            console.print("[bold green]✅ Dreamference workspace initialized successfully![/bold green]")
-            console.print(f"   [cyan]Dreamference Config:[/cyan] {saved_config_path}")
+            console.print("[bold green]✅ Puffin workspace initialized successfully![/bold green]")
+            console.print(f"   [cyan]Puffin Config:[/cyan]       {saved_config_path}")
             console.print(f"   [cyan]Active Agent:[/cyan]    {config.agent_runner.upper()} (Default: GOOSE)")
             console.print(f"   [cyan]Goose Config:[/cyan]    {config.config_path}")
             console.print(f"   [cyan]Target Model:[/cyan]    {config.model}")
@@ -2018,6 +2042,14 @@ class DreamferenceCLIController:
                 
                     # Server is ready
                     if monitor.server_ready:
+                        # One discarded request first: a fresh engine serves its first batch at
+                        # about two-thirds speed, and that should not be the user's request.
+                        print("🔥 Warming up with one throwaway request...")
+                        warm_up_seconds = vllm_mgr.warm_up()
+                        if warm_up_seconds is None:
+                            print("⚠️  Warm-up request failed; the first real request may be slower.")
+                        else:
+                            print(f"   Warm-up done in {warm_up_seconds:.1f}s")
                         print(f"\n✅ Server Ready! API running at {vllm_mgr.host}")
                         print(f"   Model: {args.model}")
                         print(f"   Loaded in: {monitor.get_status()['elapsed_seconds']:.1f} seconds\n")

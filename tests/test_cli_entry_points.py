@@ -61,4 +61,4 @@ def test_model_list_runs(capsys):
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["model", "list"])
     assert exit_info.value.code == 0
-    assert "Available Dreamference Models" in capsys.readouterr().out
+    assert "Available Puffin Models" in capsys.readouterr().out

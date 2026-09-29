@@ -21,6 +21,7 @@ from typing import Final, List, Optional, Tuple
 
 from dreamference.config import DreamferenceConfig
 from dreamference.hardware import (
+    model_key_for_served_id,
     resolve_model_hf_repo,
     get_model_launch_overrides,
     model_supports_vision,
@@ -432,6 +433,26 @@ class OnyxRunner:
             command.append("--follow")
         return subprocess.call(command)
 
+    def served_model_key(self) -> str:
+        """
+        Names the registry entry of the model the server is actually serving.
+
+        Onyx is registered with the model's served id and asks for it by that id, so registering
+        the *configured* model broke the web chat the first time the server ran another one:
+        `server start --model` with a different model left Onyx asking for a name the server did
+        not know, and every answer came back empty (2026-09-29, the SGLang switch).
+
+        Returns:
+            str: The registry key whose checkpoint the server reports in /v1/models; the
+                configured model when the server does not answer or serves something unlisted.
+        """
+        try:
+            with urllib.request.urlopen(f"{self.config.vllm_host.rstrip('/')}/v1/models", timeout=5) as response:
+                served = json.load(response)["data"][0]["id"]
+        except (OSError, ValueError, KeyError, IndexError):
+            return self.config.model
+        return model_key_for_served_id(served, preferred=self.config.model) or self.config.model
+
     def configure(
         self,
         email: str = DEFAULT_ONYX_EMAIL,
@@ -475,9 +496,10 @@ class OnyxRunner:
         if not cookie:
             return 1
 
-        model_name = resolve_model_hf_repo(self.config.model)
-        overrides = get_model_launch_overrides(self.config.model) or {}
-        vision = model_supports_vision(self.config.model)
+        model_key = self.served_model_key()
+        model_name = resolve_model_hf_repo(model_key)
+        overrides = get_model_launch_overrides(model_key) or {}
+        vision = model_supports_vision(model_key)
         api_base = self.resolve_container_vllm_url(self.config.vllm_host)
 
         payload = {
@@ -1404,7 +1426,7 @@ class OnyxRunner:
              "-e", f"PUFFIN_SIGLIP_URL={SIGLIP_CONTAINER_URL}",
              "-e", "PUFFIN_VISION_URL="
                    f"{self.resolve_container_vllm_url(self.config.vllm_host)}",
-             "-e", f"PUFFIN_VISION_MODEL={resolve_model_hf_repo(self.config.model)}",
+             "-e", f"PUFFIN_VISION_MODEL={resolve_model_hf_repo(self.served_model_key())}",
              "-e", "PUFFIN_DATA_DIR=/config/data",
              IMAGE_SEARCH_SERVICE_IMAGE, "sh", "-c", boot],
             capture_output=True, text=True, timeout=300, check=False,

@@ -315,12 +315,15 @@ class ModelDownloader:
         return True
 
     @classmethod
-    def is_model_downloaded(cls, model_key: str) -> bool:
+    def is_model_downloaded(cls, model_key: str, revision: Optional[str] = None) -> bool:
         """
         Checks if model snapshot files already exist in local HuggingFace cache.
 
         Args:
             model_key (str): Short alias or HuggingFace repo ID.
+            revision (Optional[str]): A pinned commit. When given, only that snapshot counts:
+                a cache holding some other revision is not the checkpoint the recipe was
+                measured on.
 
         Returns:
             bool: True if snapshot directory exists and is non-empty.
@@ -332,6 +335,9 @@ class ModelDownloader:
             return False
         folder_name = "models--" + repo_id.replace("/", "--")
         cache_dir = cls.get_hf_cache_dir() / folder_name / "snapshots"
+        if revision:
+            pinned = cache_dir / revision
+            return pinned.is_dir() and any(pinned.iterdir())
         if cache_dir.exists() and any(cache_dir.iterdir()):
             return True
         return False
@@ -341,7 +347,8 @@ class ModelDownloader:
         cls,
         model_key: str,
         hf_token: Optional[str] = None,
-        auto_tensorize: bool = False
+        auto_tensorize: bool = False,
+        revision: Optional[str] = None,
     ) -> bool:
         """
         Pre-downloads HuggingFace model weights into local cache and optionally converts to tensorize format.
@@ -350,6 +357,7 @@ class ModelDownloader:
             model_key (str): Short alias or HuggingFace repo ID.
             hf_token (Optional[str]): Optional HuggingFace access token.
             auto_tensorize (bool): If True, convert to tensorize format after download.
+            revision (Optional[str]): Commit to fetch; None fetches the default branch.
 
         Returns:
             bool: True if weights are present or successfully downloaded.
@@ -363,7 +371,7 @@ class ModelDownloader:
         success = False
 
         # Check cache FIRST before any downloads
-        if cls.is_model_downloaded(model_key):
+        if cls.is_model_downloaded(model_key, revision):
             cache_size = cls._get_cache_size(model_key)
             print(f"✅ Model '{model_key}' ({repo_id}) found in local cache ({cache_size}).")
             success = True
@@ -374,7 +382,7 @@ class ModelDownloader:
             # 1. Attempt python huggingface_hub snapshot_download
             try:
                 from huggingface_hub import snapshot_download
-                snapshot_download(repo_id=repo_id, token=token_val)
+                snapshot_download(repo_id=repo_id, token=token_val, revision=revision)
                 cache_size = cls._get_cache_size(model_key)
                 print(f"✅ Successfully pre-downloaded {repo_id} ({cache_size})")
                 success = True
@@ -386,6 +394,8 @@ class ModelDownloader:
             # 2. Attempt CLI fallback
             if not success and shutil.which("huggingface-cli"):
                 cmd = ["huggingface-cli", "download", repo_id]
+                if revision:
+                    cmd.extend(["--revision", revision])
                 if token_val:
                     cmd.extend(["--token", token_val])
                 res = subprocess.run(cmd)

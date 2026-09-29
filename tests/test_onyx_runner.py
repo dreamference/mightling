@@ -1462,3 +1462,33 @@ def test_a_search_returns_the_messages_it_finds():
     assert answer == {"messages": [{
         "id": "me@gmail.com|1234", "from": "a@b.c", "subject": "Hi", "date": "Mon, 1 Jan 2026",
     }]}
+
+
+def test_onyx_is_registered_with_the_model_actually_served(monkeypatch, tmp_path):
+    # `server start --model X` with X not the configured model left Onyx asking for the old id,
+    # and every web-chat answer came back empty (the SGLang switch, 2026-09-29).
+    import io
+    import json
+    import urllib.request
+    from dreamference.chat import onyx_runner
+    from dreamference.chat.onyx_runner import OnyxRunner
+    from dreamference.config import DreamferenceConfig
+
+    from conftest import REAL_SERVED_MODEL_KEY
+    monkeypatch.setattr(OnyxRunner, "served_model_key", REAL_SERVED_MODEL_KEY)
+    runner = OnyxRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml"),
+                                                  model="qwen3.5-122b-a10b-hybrid-dflash"))
+
+    def serving(model_id):
+        body = json.dumps({"data": [{"id": model_id}]}).encode()
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: io.BytesIO(body))
+
+    serving("RadixArk/Qwen3.8-27B-NVFP4")
+    assert runner.served_model_key() == "qwen3.8-27b-nvfp4-dflash2"
+    serving("Intel/Qwen3.5-122B-A10B-int4-AutoRound")  # shared by two recipes: the configured wins
+    assert runner.served_model_key() == "qwen3.5-122b-a10b-hybrid-dflash"
+
+    def down(*a, **k):
+        raise OSError("connection refused")
+    monkeypatch.setattr(urllib.request, "urlopen", down)
+    assert runner.served_model_key() == "qwen3.5-122b-a10b-hybrid-dflash"

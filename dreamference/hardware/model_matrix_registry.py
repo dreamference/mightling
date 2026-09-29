@@ -613,6 +613,94 @@ class ModelMatrixRegistry:
                 },
             },
         ),
+        "qwen3.8-27b-nvfp4-dflash2": ModelSpec(
+            name="Qwen 3.8 27B (NVFP4 + DFlash2, SGLang)",
+            params_b=27.0,
+            supported_precisions=["NVFP4"],
+            min_memory_gb=20.0,
+            max_memory_gb=70.0,
+            compatible_gb10=True,
+            notes=(
+                "The one entry served by SGLang instead of vLLM (`engine: sglang`), because the speed "
+                "is in the drafter and only SGLang runs it: DFlash2 is a block-diffusion drafter "
+                "vLLM supports only through an unmerged pull request.\n\n"
+                "Measured here (2026-09-29, single stream, temperature 0, thinking off, median of "
+                "three after a warm-up, decode net of time to first token): prose 24.1, code 47.5, "
+                "JSON 82.5 tok/s; TTFT 0.23 s; prefill 1,724 tok/s on a 13,333-token prompt the "
+                "prefix cache could not help. First boot 7.5 min (torch.compile), with ~38.7 GB of "
+                "host memory still available while serving, against ~10 GB beside the 122B. The "
+                "same `puffin exec` coding task took 10 s here and 34 s on the 122B.\n\n"
+                "Published single-Spark numbers: vLLM with the checkpoint's own MTP managed 24.0 "
+                "tok/s on a code prompt (26.0 with no speculation), SGLang with DFlash2 50.9 on "
+                "code, 25.4 on long prose and 66.6 on short chat (MiaAI-Lab), 71.4 greedy median "
+                "(hasso5703). Our 122B does 49.9 / 23.8 on code / prose, so decode is a tie there "
+                "and structured output is faster; the larger gains are quality (Terminal-Bench 2.1 "
+                "73.0), context (262K against 32K) and memory (~20 GB of weights against ~71).\n\n"
+                "Recipe: github.com/hasso5703/dgx-spark-qwen38 (v1.18, measured 2026-09-17): the "
+                "pinned lmsysorg/sglang v0.5.19 image, RadixArk's NVFP4 conversion and the "
+                "RTN-calibrated NVFP4 DFlash2 drafter at the revisions pinned below, 16 draft "
+                "tokens, memory fraction 0.50, flashinfer attention, mamba radix cache in "
+                "extra_buffer mode, torch.compile up to batch 4. Not copied: its API key and "
+                "keepalive proxy (Puffin reaches the server the way it reaches vLLM) and its "
+                "reasoning-effort default."
+            ),
+            hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
+            launch_overrides={
+                "engine": "sglang",
+                "docker_image": (
+                    "lmsysorg/sglang@sha256:"
+                    "d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9"
+                ),
+                "revision": "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854",
+                "max_model_len": 262144,
+                # SGLang's --mem-fraction-static: weights plus KV pool. What lies outside it (CUDA
+                # graphs, torch.compile, activations) is why the container needs more headroom
+                # than a vLLM arena of the same fraction.
+                "gpu_memory_utilization": 0.50,
+                "container_headroom_gb": 24.0,
+                "tool_call_parser": "qwen3_coder",
+                "reasoning_parser": "qwen3",
+                "speculative_config": {
+                    "method": "DFLASH",
+                    "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
+                    "revision": "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1",
+                    "num_speculative_tokens": 16,
+                    "quantization": "modelopt_fp4",
+                },
+                "extra_args": [
+                    "--attention-backend", "flashinfer",
+                    "--chunked-prefill-size", "8192",
+                    "--disable-prefill-cuda-graph",
+                    "--cuda-graph-max-bs", "8",
+                    "--disable-flashinfer-autotune",
+                    "--mamba-radix-cache-strategy", "extra_buffer",
+                    "--mamba-ssm-dtype", "bfloat16",
+                    "--max-mamba-cache-size", "96",
+                    "--max-running-requests", "8",
+                    "--enable-torch-compile",
+                    "--torch-compile-max-bs", "4",
+                    "--num-continuous-decode-steps", "2",
+                    # Stops the scheduler busy-polling a CPU core while no request is running,
+                    # which on a box that is always on is most of the time.
+                    "--sleep-on-idle",
+                    "--enable-metrics",
+                ],
+            },
+            supports_vision=True,
+        ),
+        "qwen3.8-27b-dflash2-draft": ModelSpec(
+            name="Qwen 3.8 27B DFlash2 Drafter (NVFP4, Draft Model)",
+            params_b=1.0,
+            supported_precisions=["NVFP4"],
+            min_memory_gb=1.0,
+            max_memory_gb=2.0,
+            compatible_gb10=True,
+            notes=(
+                "Drafter for qwen3.8-27b-nvfp4-dflash2, named by its speculative_config and listed "
+                "so the memory gates have a size before the snapshot is on disk."
+            ),
+            hf_repo_id="maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
+        ),
         "qwen3.5-122b-a10b-dflash-draft": ModelSpec(
             name="Qwen 3.5 122B-A10B DFlash Drafter (Draft Model)",
             params_b=0.8,
@@ -661,6 +749,28 @@ class ModelMatrixRegistry:
             is_diffusion=True,
         ),
     }
+
+    @classmethod
+    def key_for_served_id(cls, served_id: str, preferred: Optional[str] = None) -> Optional[str]:
+        """
+        Finds the registry entry for a model id a running server reports in /v1/models.
+
+        The server names its model by checkpoint, and several entries can share one (recipes
+        differing only in launch flags), so a preferred key wins when it matches.
+
+        Args:
+            served_id (str): The id from the server's /v1/models.
+            preferred (Optional[str]): Key to return if it serves that checkpoint.
+
+        Returns:
+            Optional[str]: The matching key, or None when no entry serves that checkpoint.
+        """
+        if preferred and cls.resolve_hf_repo(preferred) == served_id:
+            return preferred
+        for key in cls.MATRIX:
+            if cls.resolve_hf_repo(key) == served_id:
+                return key
+        return None
 
     @classmethod
     def resolve_hf_repo(cls, model_key: str) -> str:

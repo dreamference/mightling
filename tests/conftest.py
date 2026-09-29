@@ -20,6 +20,10 @@ REAL_HOME = os.path.realpath(os.path.expanduser("~"))
 CHECKOUT = os.path.realpath(os.path.join(os.path.dirname(__file__), os.pardir))
 import dreamference.cli.dreamference_cli_controller  # noqa: E402,F401 - imports every subsystem
 import dreamference.mcp_server  # noqa: E402,F401
+from dreamference.chat.onyx_runner import OnyxRunner  # noqa: E402
+
+# Kept for the one test that exercises the real lookup (the fixture below replaces it).
+REAL_SERVED_MODEL_KEY = OnyxRunner.served_model_key
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +41,9 @@ def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
         raise AssertionError("a test tried to recreate a real Onyx container; mock _recreate_service")
 
     monkeypatch.setattr(onyx_runner.OnyxRunner, "_recreate_service", classmethod(refuse))
+    # configure() asks the live server which model it serves; tests use the configured one, so
+    # their result does not depend on what happens to be running on this machine.
+    monkeypatch.setattr(onyx_runner.OnyxRunner, "served_model_key", lambda self: self.config.model)
 
 
 @pytest.fixture(autouse=True)

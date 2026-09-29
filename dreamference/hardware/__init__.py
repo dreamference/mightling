@@ -13,6 +13,9 @@ MODEL_MATRIX = ModelMatrixRegistry.MATRIX
 def resolve_model_hf_repo(model_key: str) -> str:
     return ModelMatrixRegistry.resolve_hf_repo(model_key)
 
+def model_key_for_served_id(served_id: str, preferred: Optional[str] = None) -> Optional[str]:
+    return ModelMatrixRegistry.key_for_served_id(served_id, preferred)
+
 def get_model_launch_overrides(model_key: str) -> Dict[str, Any]:
     return ModelMatrixRegistry.get_launch_overrides(model_key)
 
@@ -40,8 +43,10 @@ def tensorize_model(model_key: str, force: bool = False, hf_token: Optional[str]
 def get_tensorized_path(model_key: str) -> Optional[Path]:
     return ModelDownloader.get_tensorized_path(model_key)
 
-def download_model(model_key: str, hf_token: Optional[str] = None, auto_tensorize: bool = False) -> bool:
-    return ModelDownloader.download_model(model_key, hf_token=hf_token, auto_tensorize=auto_tensorize)
+def download_model(
+    model_key: str, hf_token: Optional[str] = None, auto_tensorize: bool = False, revision: Optional[str] = None
+) -> bool:
+    return ModelDownloader.download_model(model_key, hf_token=hf_token, auto_tensorize=auto_tensorize, revision=revision)
 
 def download_all_models(hf_token: Optional[str] = None, auto_tensorize: bool = False) -> Dict[str, bool]:
     return ModelDownloader.download_all_models(hf_token=hf_token, auto_tensorize=auto_tensorize)
@@ -84,6 +89,7 @@ __all__ = [
     "HardwareManager",
     "MODEL_MATRIX",
     "resolve_model_hf_repo",
+    "model_key_for_served_id",
     "get_model_launch_overrides",
     "model_supports_vision",
     "model_is_diffusion",

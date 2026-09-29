@@ -11,6 +11,7 @@ import re
 import sys
 import shutil
 import subprocess
+import time
 import requests
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Final
@@ -19,6 +20,7 @@ from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS as D
 from dreamference.vllm_server.vllm_server_status import VLLMServerStatus
 from dreamference.vllm_server.vllm_log_streamer import VLLMLogStreamer
 from dreamference.vllm_server.psi_watchdog import MemoryPressureWatchdog
+from dreamference.vllm_server.sglang_launch_builder import SGLangLaunchBuilder
 from dreamference.config.dreamference_config import (
     DreamferenceConfig,
     DEFAULT_GUIDED_DECODING_BACKEND,
@@ -124,6 +126,16 @@ DEFAULT_LOAD_FORMAT: Final[str] = "auto"
 # makes it survive restarts without needing a second volume.
 CONTAINER_VLLM_CACHE_ROOT: Final[str] = "/root/.cache/dreamference/vllm"
 # Host-side view of the same directory, used to invalidate the compile cache before a launch.
+CONTAINER_TELEMETRY_OPT_OUT: Final[Dict[str, str]] = {"VLLM_NO_USAGE_STATS": "1", "DO_NOT_TRACK": "1"}
+
+# One throwaway request after every boot, before `server start` reports ready: the first batch a
+# freshly started engine serves runs at about two-thirds speed (the hasso5703 measurements on this
+# hardware: 23.8 against 40-48 tok/s), so without it the user's first real request is the slow one.
+# Code, because it runs the speculative drafter at full depth, and long enough to leave prefill.
+WARM_UP_PROMPT: Final[str] = "Write a Python function that returns the n-th Fibonacci number iteratively."
+WARM_UP_MAX_TOKENS: Final[int] = 128
+WARM_UP_TIMEOUT_S: Final[float] = 180.0
+
 VLLM_CACHE_HOME: Final[Path] = Path.home() / ".cache" / "dreamference" / "vllm"
 
 # Launch defaults applied when neither the caller nor the model's registry recipe specifies a value.
@@ -218,6 +230,40 @@ class VLLMServerManager:
         except Exception:
             pass
         return []
+
+    def warm_up(self, timeout: float = WARM_UP_TIMEOUT_S) -> Optional[float]:
+        """
+        Sends one discarded chat request so the first real one runs at full speed.
+
+        Engine-neutral: it goes through the OpenAI-compatible API both vLLM and SGLang serve.
+        A failure never fails the start; the server is up either way.
+
+        Args:
+            timeout (float): Request timeout in seconds.
+
+        Returns:
+            Optional[float]: Seconds the request took, or None if it could not be made.
+        """
+        models = self.get_models()
+        if not models:
+            return None
+        start = time.monotonic()
+        try:
+            response = requests.post(
+                f"{self.host}/v1/chat/completions",
+                json={
+                    "model": models[0],
+                    "messages": [{"role": "user", "content": WARM_UP_PROMPT}],
+                    "max_tokens": WARM_UP_MAX_TOKENS,
+                    "temperature": 0.0,
+                },
+                timeout=timeout,
+            )
+        except requests.RequestException:
+            return None
+        if response.status_code != 200:
+            return None
+        return time.monotonic() - start
 
     def get_container_reserved_memory(self) -> Optional[str]:
         """
@@ -619,6 +665,23 @@ class VLLMServerManager:
 
         tool_call_parser = self.resolve_tool_call_parser(model, tool_call_parser)
 
+        if SGLangLaunchBuilder.is_sglang(recipe):
+            if not self.is_docker_available():
+                raise RuntimeError(
+                    "Docker is required to run the model server but is not available. "
+                    "Please ensure Docker is installed and the daemon is running (`docker ps` must succeed)."
+                )
+            cmd = self._docker_run_prefix(port, gpu_memory_utilization, recipe, token_env)
+            for env_key, env_val in sorted(SGLangLaunchBuilder.container_env().items()):
+                cmd.extend(["-e", f"{env_key}={env_val}"])
+            # The image's own entrypoint, as the recipe this entry follows runs it.
+            cmd.append(docker_image)
+            cmd.extend(SGLangLaunchBuilder.server_args(
+                hf_model, recipe, port, max_model_len, gpu_memory_utilization,
+                tool_call_parser, reasoning_parser, api_key,
+            ))
+            return cmd
+
         base_args: List[str] = [
             "--host", "0.0.0.0",
             "--port", str(port),
@@ -706,63 +769,9 @@ class VLLMServerManager:
             base_args.extend(["--load-format", load_format])
 
         if docker_available:
-            hf_cache = os.path.expanduser("~/.cache/huggingface")
-            dgx_cache = os.path.expanduser("~/.cache/dreamference")
-            os.makedirs(hf_cache, exist_ok=True)
-            os.makedirs(dgx_cache, exist_ok=True)
-            os.makedirs(VLLM_CACHE_HOME, exist_ok=True)
-            
-            # Leave the host some CPU so the desktop keeps scheduling during model load.
-            total_cpus = os.cpu_count() or 1
-            cpus_limit = max(1.0, total_cpus * 0.7)
-
-            # The memory cap is what actually stops a hard freeze. On unified memory the weights
-            # vLLM pins come out of the same pool as the compositor's, and the kernel cannot
-            # reclaim driver-pinned pages — so it livelocks in reclaim instead of OOM-killing
-            # anything (journals from the freezes show NVRM NV_ERR_NO_MEMORY and page-cache
-            # flushing, but no oom-kill). Capping the container's cgroup gives the kernel a
-            # bounded scope it *can* kill, turning a power-button reset into a dead container.
-            # --memory-swap equal to --memory disables container swap: swapping 70+ GB of weights
-            # to a 16 GB swapfile is what drags the desktop under before the cap is ever reached.
-            #
-            # Size it against the arena, not against total memory. `total - reserve` produced a
-            # 110 GB cap for a 97.3 GB arena on 2026-08-14 — a ceiling the container could never
-            # reach, so it bounded nothing and the host froze underneath it. Anchored to the arena
-            # the cap is reachable by construction, and hitting it kills the container instead.
-            # Still clamped by the host reserve, so a reckless recipe cannot raise it back out of
-            # range.
-            from dreamference.hardware.hardware_manager import HardwareManager
-            total_mem_gb = HardwareManager.detect_gb10_hardware().total_unified_memory_gb
-            container_mem_gb = max(
-                1.0,
-                min(
-                    total_mem_gb * float(gpu_memory_utilization) + CONTAINER_MEM_HEADROOM_GB,
-                    total_mem_gb - HOST_MEMORY_RESERVE_GB,
-                ),
-            )
-
-            cmd = [
-                "docker", "run",
-                "--ipc=host",
-                "--network", "host",
-                "--restart", "unless-stopped",
-                "--name", f"dreamference-vllm-{port}",
-                "--gpus", "all",
-                f"--cpus={cpus_limit:.1f}",
-                f"--memory={container_mem_gb:.0f}g",
-                f"--memory-swap={container_mem_gb:.0f}g",
-                f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
-                "-v", f"{hf_cache}:/root/.cache/huggingface",
-                "-v", f"{dgx_cache}:/root/.cache/dreamference",
-            ]
-            if token_env:
-                cmd.extend(["-e", f"HF_TOKEN={token_env}"])
-            # Kernel-backend selection for some layers (notably NVFP4 MoE) is read from the process
-            # environment rather than CLI flags, so the recipe's env has to cross the container boundary.
-            for env_key, env_val in sorted(recipe.get("env", {}).items()):
-                cmd.extend(["-e", f"{env_key}={env_val}"])
+            cmd = self._docker_run_prefix(port, gpu_memory_utilization, recipe, token_env)
             # Persist torch.compile output across container lifetimes. This lands inside the
-            # dreamference cache volume mounted just above, so no extra -v is needed; the recipe
+            # dreamference cache volume _docker_run_prefix mounts, so no extra -v is needed; the recipe
             # env above cannot override it, since a per-model cache root would defeat the point.
             cmd.extend(["-e", f"VLLM_CACHE_ROOT={CONTAINER_VLLM_CACHE_ROOT}"])
             cmd.extend(["-e", "CUTE_DSL_ARCH=sm_121a"])
@@ -787,6 +796,90 @@ class VLLMServerManager:
         if extra_args:
             cmd.extend(str(a) for a in extra_args)
 
+        return cmd
+
+    def _docker_run_prefix(
+        self, port: int, gpu_memory_utilization: float, recipe: Dict[str, Any], token_env: Optional[str]
+    ) -> List[str]:
+        """
+        Builds the engine-independent part of the `docker run` command.
+
+        Shared by the vLLM and SGLang launches, so both get the same container name, cgroup
+        memory cap, CPU limit, OOM score, mounts and recipe environment -- the host-safety layer
+        does not depend on which engine runs inside.
+
+        Args:
+            port (int): Serving port; names the container.
+            gpu_memory_utilization (float): The engine's memory fraction; sizes the cgroup cap.
+            recipe (Dict[str, Any]): The model's launch_overrides ('env' and
+                'container_headroom_gb' are read here).
+            token_env (Optional[str]): HuggingFace token to pass through, if any.
+
+        Returns:
+            List[str]: `docker run` and its options, up to but excluding the image.
+        """
+        hf_cache = os.path.expanduser("~/.cache/huggingface")
+        dgx_cache = os.path.expanduser("~/.cache/dreamference")
+        os.makedirs(hf_cache, exist_ok=True)
+        os.makedirs(dgx_cache, exist_ok=True)
+        os.makedirs(VLLM_CACHE_HOME, exist_ok=True)
+        
+        # Leave the host some CPU so the desktop keeps scheduling during model load.
+        total_cpus = os.cpu_count() or 1
+        cpus_limit = max(1.0, total_cpus * 0.7)
+
+        # The memory cap is what actually stops a hard freeze. On unified memory the weights
+        # vLLM pins come out of the same pool as the compositor's, and the kernel cannot
+        # reclaim driver-pinned pages — so it livelocks in reclaim instead of OOM-killing
+        # anything (journals from the freezes show NVRM NV_ERR_NO_MEMORY and page-cache
+        # flushing, but no oom-kill). Capping the container's cgroup gives the kernel a
+        # bounded scope it *can* kill, turning a power-button reset into a dead container.
+        # --memory-swap equal to --memory disables container swap: swapping 70+ GB of weights
+        # to a 16 GB swapfile is what drags the desktop under before the cap is ever reached.
+        #
+        # Size it against the arena, not against total memory. `total - reserve` produced a
+        # 110 GB cap for a 97.3 GB arena on 2026-08-14 — a ceiling the container could never
+        # reach, so it bounded nothing and the host froze underneath it. Anchored to the arena
+        # the cap is reachable by construction, and hitting it kills the container instead.
+        # Still clamped by the host reserve, so a reckless recipe cannot raise it back out of
+        # range.
+        from dreamference.hardware.hardware_manager import HardwareManager
+        total_mem_gb = HardwareManager.detect_gb10_hardware().total_unified_memory_gb
+        container_mem_gb = max(
+            1.0,
+            min(
+                total_mem_gb * float(gpu_memory_utilization)
+                + float(recipe.get("container_headroom_gb", CONTAINER_MEM_HEADROOM_GB)),
+                total_mem_gb - HOST_MEMORY_RESERVE_GB,
+            ),
+        )
+
+        cmd = [
+            "docker", "run",
+            "--ipc=host",
+            "--network", "host",
+            "--restart", "unless-stopped",
+            "--name", f"dreamference-vllm-{port}",
+            "--gpus", "all",
+            f"--cpus={cpus_limit:.1f}",
+            f"--memory={container_mem_gb:.0f}g",
+            f"--memory-swap={container_mem_gb:.0f}g",
+            f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
+            "-v", f"{hf_cache}:/root/.cache/huggingface",
+            "-v", f"{dgx_cache}:/root/.cache/dreamference",
+        ]
+        if token_env:
+            cmd.extend(["-e", f"HF_TOKEN={token_env}"])
+        # vLLM reports hardware, model architecture, quantisation and settings to stats.vllm.ai at
+        # start and every ten minutes after (no prompts). Found running on 2026-09-29; these turn
+        # it off, and DO_NOT_TRACK covers the other libraries in either engine's image that honour
+        # it.
+        for env_key, env_val in CONTAINER_TELEMETRY_OPT_OUT.items():
+            cmd.extend(["-e", f"{env_key}={env_val}"])
+        # Kernel-backend selection for some layers (notably NVFP4 MoE) is read from the process
+        # environment rather than CLI flags, so the recipe's env has to cross the container boundary.
+        for env_key, env_val in sorted(recipe.get("env", {}).items()):
+            cmd.extend(["-e", f"{env_key}={env_val}"])
         return cmd
 
     @classmethod
@@ -1547,22 +1640,31 @@ class VLLMServerManager:
         tensorize = use_tensorizer
         if tensorize is None:
             tensorize = get_model_launch_overrides(model).get("use_tensorizer", False)
-        download_model(model, hf_token=hf_token, auto_tensorize=tensorize)
+        # A recipe may pin the commits it was measured on; the engine is then told the same
+        # revision, so what is served is what was fetched.
+        download_model(model, hf_token=hf_token, auto_tensorize=tensorize, revision=overrides.get("revision"))
         if draft_model:
             download_model(draft_model, hf_token=hf_token, auto_tensorize=tensorize)
         if recipe_draft_model:
             # Not tensorized, unlike a caller-named drafter: the format buys nothing on a 1-2 GiB
             # checkpoint, and this one is named by HF repo ID rather than by the registry alias
             # the tensorizer cache keys on.
-            download_model(recipe_draft_model, hf_token=hf_token, auto_tensorize=False)
+            download_model(
+                recipe_draft_model, hf_token=hf_token, auto_tensorize=False,
+                revision=(overrides.get("speculative_config") or {}).get("revision"),
+            )
 
         # The compile cache persists across container lifetimes now, which means it also outlives
         # the recipe that produced it. Reconcile the two before the graph is loaded rather than
         # after.
-        self._reset_stale_compile_cache(
-            model, docker_image=docker_image, draft_model=draft_model,
-            num_speculative_tokens=num_speculative_tokens,
-        )
+        # vLLM's cache only: SGLang keeps its own under a separate directory, and running the
+        # reset for an SGLang model would re-stamp the signature and cost vLLM its graph when
+        # the default model comes back.
+        if not SGLangLaunchBuilder.is_sglang(overrides):
+            self._reset_stale_compile_cache(
+                model, docker_image=docker_image, draft_model=draft_model,
+                num_speculative_tokens=num_speculative_tokens,
+            )
 
         # Step 2: Build launch command
         cmd = self.build_launch_command(

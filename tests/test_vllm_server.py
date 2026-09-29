@@ -1,3 +1,4 @@
+import requests
 import pytest
 import signal
 import subprocess
@@ -1195,3 +1196,110 @@ def test_host_safety_ignores_sysctls_the_kernel_does_not_expose(monkeypatch):
     _pass_all_host_checks(monkeypatch)
     monkeypatch.setattr(VLLMServerManager, "_sysctl_int", staticmethod(lambda name: None))
     VLLMServerManager.check_host_safety()  # must not raise
+
+
+def test_an_sglang_recipe_launches_sglang_inside_the_same_guarded_container():
+    # Qwen3.8-27B is served by SGLang for its DFlash2 drafter. The engine changes; the container
+    # around it -- name, cgroup cap, CPU limit, OOM score, mounts -- must not, since the watchdog
+    # and every client address it by name and port.
+    mgr = VLLMServerManager()
+    cmd = mgr.build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    image = next(a for a in cmd if a.startswith("lmsysorg/sglang@sha256:"))
+    prefix, server = cmd[:cmd.index(image)], cmd[cmd.index(image) + 1:]
+
+    assert "--name" in prefix and prefix[prefix.index("--name") + 1] == "dreamference-vllm-8000"
+    assert any(a.startswith("--memory=") for a in prefix) and "--oom-score-adj=800" in prefix
+    assert "HF_HUB_OFFLINE=1" in prefix
+    assert "vllm" not in prefix and "--entrypoint" not in prefix
+
+    assert server[:3] == ["python3", "-m", "sglang.launch_server"]
+    def flag(name):
+        return server[server.index(name) + 1]
+    assert flag("--served-model-name") == "RadixArk/Qwen3.8-27B-NVFP4"
+    assert flag("--mem-fraction-static") == "0.5"
+    # Pinned commits go in as snapshot directories: SGLang dropped --revision on some lookups,
+    # which offline resolved through a refs/main the pinned download never wrote.
+    assert flag("--model-path").endswith("models--RadixArk--Qwen3.8-27B-NVFP4/snapshots/52d1adc5f38aa5ebf099c29ed7025ba34cfbb854")
+    assert flag("--served-model-name") == "RadixArk/Qwen3.8-27B-NVFP4"
+    assert "--revision" not in server
+    assert flag("--speculative-algorithm") == "DFLASH"
+    assert flag("--speculative-draft-model-path").endswith(
+        "models--maurienne-ai--Qwen3.8-27B-DFlash2-NVFP4-RTNcal/snapshots/bd7a934213c47a9e7ef69eef36bb3325f47fd1f1")
+    assert flag("--speculative-num-draft-tokens") == "16"
+    assert flag("--tool-call-parser") == "qwen3_coder"
+    assert "--speculative-config" not in server and "--max-model-len" not in server
+
+
+def test_an_sglang_model_leaves_the_vllm_compile_cache_alone(monkeypatch):
+    # The reset keys on the model, so running it for the SGLang model would re-stamp the
+    # signature and cost vLLM its compiled graph when the default model comes back.
+    from dreamference.hardware.hardware_telemetry import HardwareTelemetry
+    mgr = VLLMServerManager()
+    resets, downloads = [], []
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    monkeypatch.setattr(mgr, "ensure_docker_image", lambda image: True)
+    monkeypatch.setattr(mgr, "check_host_safety", lambda: None)
+    monkeypatch.setattr(mgr, "_evict_model_page_cache", lambda model: 0.0)
+    monkeypatch.setattr(mgr, "_reset_stale_compile_cache", lambda *a, **k: resets.append(a))
+    monkeypatch.setattr("dreamference.hardware.download_model", lambda *a, **k: downloads.append((a[0], k.get("revision"))) or True)
+    monkeypatch.setattr(
+        "dreamference.hardware.hardware_manager.HardwareManager.detect_gb10_hardware",
+        classmethod(lambda cls: HardwareTelemetry(
+            is_gb10=True, gpu_name="NVIDIA GB10", driver_version="0", arch="aarch64",
+            total_unified_memory_gb=121.0, available_memory_gb=110.0, used_memory_gb=11.0, vram_gb=0.0,
+        )),
+    )
+    monkeypatch.setattr(mgr, "build_launch_command", lambda **kwargs: None)
+    try:
+        mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=True)
+    except Exception:
+        pass  # the launch itself is stubbed out; what happened before it is the point
+    assert resets == []
+    assert ("qwen3.8-27b-nvfp4-dflash2", "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854") in downloads
+    assert ("maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal", "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1") in downloads
+
+
+def test_both_engines_run_with_usage_statistics_off(monkeypatch):
+    # vLLM reported hardware, model and settings to stats.vllm.ai every ten minutes (found
+    # 2026-09-29). The opt-out sits in the shared docker prefix, so SGLang gets it too.
+    from dreamference.vllm_server.vllm_server_manager import CONTAINER_TELEMETRY_OPT_OUT
+
+    mgr = VLLMServerManager()
+    monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
+    for model in ("qwen2.5-coder-32b", "qwen3.8-27b-nvfp4-dflash2"):
+        cmd = mgr.build_launch_command(model=model)
+        for key, value in CONTAINER_TELEMETRY_OPT_OUT.items():
+            assert f"{key}={value}" in cmd, (model, key)
+
+
+def test_warm_up_sends_one_discarded_chat_request(monkeypatch):
+    # The first batch after a boot runs at about two-thirds speed; `server start` sends one
+    # throwaway request so the user's first request is not the slow one.
+    from dreamference.vllm_server.vllm_server_manager import WARM_UP_MAX_TOKENS
+
+    mgr = VLLMServerManager(host="http://localhost:8000")
+    monkeypatch.setattr(mgr, "get_models", lambda *a, **k: ["served/model"])
+    sent = []
+
+    class Response:
+        status_code = 200
+
+    monkeypatch.setattr("requests.post", lambda url, json=None, timeout=None: sent.append((url, json)) or Response())
+    assert mgr.warm_up() is not None
+    url, body = sent[0]
+    assert url == "http://localhost:8000/v1/chat/completions"
+    assert body["model"] == "served/model" and body["max_tokens"] == WARM_UP_MAX_TOKENS
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError()))
+    assert mgr.warm_up() is None  # never fails the start
+
+    monkeypatch.setattr(mgr, "get_models", lambda *a, **k: [])
+    assert mgr.warm_up() is None
+
+
+def test_server_start_warms_up_before_reporting_ready():
+    import inspect
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+
+    source = inspect.getsource(DreamferenceCLIController.run_cli)
+    assert source.index("vllm_mgr.warm_up()") < source.index("✅ Server Ready!")
