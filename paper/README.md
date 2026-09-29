@@ -38,7 +38,7 @@ Every figure in the paper was measured on the author's GB10 or read from this re
 | Figure | Source |
 |---|---|
 | Upstream size (4,894 `.rs` files, 1.93M lines) | exported `codex-rs/` of `rust-v0.158.0`, excluding `puffin/` |
-| Patch series (13 patches, 17,288 B, 20 files, +57/−41) | `codex-patches/*.patch` |
+| Patch series (14 patches, 19,173 B, 22 files, +77/−41) | `codex-patches/*.patch` |
 | Initial series (406,116 B; 395,156 B in one patch) | `git ls-tree -l b03ad9b codex-patches/` |
 | Launcher (1,403 lines, 24 tests) | `puffin-rs/src/*.rs` |
 | Binary sizes (315 MB, 93 MB; 1.4 GB unstripped) | `~/.local/share/dreamference/puffin/bin/` |

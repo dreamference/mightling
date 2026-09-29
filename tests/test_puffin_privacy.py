@@ -64,3 +64,21 @@ def test_no_statsig_metrics_or_openai_plugin_sync(tmp_path):
     # The TUI fetched OpenAI's announcement tip from raw.githubusercontent.com on every start.
     tips = (rs / "tui" / "src" / "tooltips.rs").read_text()
     assert "no announcement fetch from raw.githubusercontent.com" in tips
+
+
+@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
+def test_doctor_checks_that_reach_openai_or_github_are_switched_off(tmp_path):
+    # `puffin doctor` checked sign-in, looked for updates on api.github.com, Homebrew and OpenAI's
+    # desktop feed, and probed chatgpt.com and the provider (api.openai.com when no config loads).
+    # Patch 0016 disables those four checks behind one constant; their code is kept.
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
+    cli = tmp_path / "src" / "codex-rs" / "cli" / "src"
+    doctor = (cli / "doctor.rs").read_text()
+    assert "const PUFFIN_DOCTOR_OFFLINE: bool = !cfg!(test);" in doctor
+    for function in ("fn auth_check(", "async fn websocket_reachability_check(",
+                     "async fn provider_reachability_check("):
+        body = doctor[doctor.index(function):]
+        assert body.index("if PUFFIN_DOCTOR_OFFLINE {") < body.index("\n}\n"), function
+    updates = (cli / "doctor" / "updates.rs").read_text()
+    body = updates[updates.index("async fn updates_check("):]
+    assert body.index("if super::PUFFIN_DOCTOR_OFFLINE {") < body.index("\n}\n")

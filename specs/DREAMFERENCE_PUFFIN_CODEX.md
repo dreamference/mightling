@@ -1,6 +1,6 @@
 # Puffin — Changes Made to Codex
 
-**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0015` bring it to 13 patches and 17,288 bytes (2026-09-29), touching 20 upstream files, under the 20,000-byte limit `test_the_patches_stay_small` enforces. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`.
+**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0016` bring it to 14 patches and 19,173 bytes (2026-09-29), touching 22 upstream files, under the 20,000-byte limit `test_the_patches_stay_small` enforces. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`.
 **Supersedes:** `DREAMFERENCE_CODEX.md`, which describes the older setup where an upstream `codex` on PATH was launched from Python.
 **Upstream:** [openai/codex](https://github.com/openai/codex), release `rust-v0.158.0`.
 
@@ -79,7 +79,7 @@ Only changes that cannot be made from outside are patches, and each is a one-lin
 
 The call sits in `cli_main`. That is after `arg0` dispatch, so the `codex-linux-sandbox`, `apply_patch` and `codex-execve-wrapper` aliases never reach it, and before Codex parses its command line.
 
-### `0005`–`0015` (switches: hide, reroute, replace, and closing network channels)
+### `0005`–`0016` (switches: hide, reroute, replace, and closing network channels)
 
 Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand that must not run is *also* refused by the launcher (§4, step 1). A hidden slash command (`is_visible() == false`) is gone from the popup, and typing it is not recognised either, because the command lookup only matches visible commands. In every case the code behind the command stays compiled.
 
@@ -96,6 +96,7 @@ Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand
 | `0013-disable-usage-analytics` | `analytics/src/client.rs` | The analytics client is constructed disabled, whatever `[analytics]` or the login say. It posted usage events to `chatgpt.com/backend-api/codex/analytics-events/events` whenever a ChatGPT login was present. |
 | `0014-puffin-home` | `cli/src/main.rs` | First statement of `main()`: `puffin_launcher::home::use_puffin_home()` sets `CODEX_HOME` to `~/.puffin` (unless already set), before `arg0` reads `.env` from the home folder. First run copies an allow-list from `~/.codex`, never `auth.json`. |
 | `0015-no-openai-network` | `otel/src/config.rs`, `core-plugins/src/manager.rs`, `core-plugins/src/remote_legacy.rs`, `tui/src/tooltips.rs` | Found by tracing sessions with no login: the Statsig OTEL metrics exporter (`ab.chatgpt.com`, default-on in release builds) resolves to none; the curated-plugin startup sync (`git ls-remote https://github.com/openai/plugins.git`) never starts; the featured-plugins request returns an empty list; the TUI's announcement fetch from `raw.githubusercontent.com` records "none" without fetching. With these and the launcher's `chatgpt_base_url` pointed at `127.0.0.1:9`, traced `exec` and TUI sessions contact only loopback services. |
+| `0016-doctor-offline` | `cli/src/doctor.rs`, `cli/src/doctor/updates.rs` | `puffin doctor` checked the ChatGPT/OpenAI sign-in, looked for updates on `api.github.com`, Homebrew and OpenAI's desktop feed (`persistent.oaistatic.com`, a hard-coded `chatgpt.com/backend-api` URL the `chatgpt_base_url` redirect does not cover), and probed the ChatGPT websocket and the provider (`api.openai.com` when no config loads). Those four checks are **switched off, not removed**: each returns "disabled in Puffin (no network)" while `PUFFIN_DOCTOR_OFFLINE` is true, and setting it to `false` restores them. The constant is `!cfg!(test)`, so upstream's own unit tests still run the real checks. The local checks (config, MCP, sandbox, state, terminal, git) are untouched. |
 
 ### What used to be patches
 

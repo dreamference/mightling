@@ -30,7 +30,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 
 \title{Puffin: A Vendor-Free Coding Agent on a Single Unified-Memory Workstation, Built from a
-17\,KB Patch Series over OpenAI Codex}
+19\,KB Patch Series over OpenAI Codex}
 
 \author{Dreamference\\
 \texttt{dgxcoder@dreamference.ai}}
@@ -163,7 +163,7 @@ memory headroom (\cref{sec:safety}).
   % row 1: the request path
   \node[box=1.3cm]  (user)     at (-0.2,0)  {terminal\\user};
   \node[box=3.1cm]  (launcher) at (2.8,0)   {\code{puffin-rs} launcher\\\scriptsize model discovery, config,\\help rebrand, update, \code{app}};
-  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 13 patches, 17.3\,KB};
+  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 14 patches, 19.2\,KB};
   \node[box=3.2cm]  (vllm)     at (12.6,0)  {vLLM container\\\scriptsize Qwen3.5-122B int4 + DFlash};
   % row 2
   \node[box=3.3cm]  (host)     at (6.9,-1.7)  {{\footnotesize\code{codex-code-mode-host}}\\\scriptsize V8, runs Code Mode JS};
@@ -229,7 +229,7 @@ Codex is vendored as a git submodule of our own GitHub fork, pinned to the stabl
 Moving to a new upstream release means bumping the submodule and resolving whichever hunks stop
 applying. Because the hunks are few and small, conflicts are local and obvious.
 
-\subsection{From 406\,KB to 17\,KB}
+\subsection{From 406\,KB to 19\,KB}
 
 The first working series had four patches totalling 406{,}116 bytes. \Cref{tab:patches} shows the
 current one. Four techniques made the difference.
@@ -285,8 +285,9 @@ Patch & Files & $+/-$ & Purpose \\
 0013 disable-usage-analytics & 1 & 2/1 & Construct the analytics client disabled \\
 0014 puffin-home & 1 & 2/0 & Use \code{\textasciitilde/.puffin}, never upstream's login \\
 0015 no-openai-network & 4 & 12/3 & Close the channels found by tracing (\S\ref{sec:egress}) \\
+0016 doctor-offline & 2 & 20/0 & Switch off \code{doctor}'s sign-in, update and reachability checks \\
 \midrule
-Total (13 patches, 17{,}288 bytes) & 20 & 57/41 & against 4{,}894 Rust files, 1.93M lines \\
+Total (14 patches, 19{,}173 bytes) & 22 & 77/41 & against 4{,}894 Rust files, 1.93M lines \\
 \bottomrule
 \end{tabularx}
 \caption{The patch series at the time of writing. Numbers 0003 and 0004 were retired when their
@@ -525,7 +526,7 @@ for example on SWE-bench \cite{jimenez2024swebench}. \Cref{sec:limits} discusses
 Metric & Value \\
 \midrule
 Upstream (Codex \code{rust-v0.158.0}) & 4{,}894 Rust files, 1.93M lines \\
-Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 17{,}288 B (13 patches) \\
+Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 19{,}173 B (14 patches) \\
 Upstream files touched / lines changed & 20 files / $+57,\ -41$ \\
 Launcher crate (\code{puffin-rs}) & 1{,}843 lines, 31 unit tests \\
 Agent binary, unstripped $\rightarrow$ stripped & 1.4\,GB $\rightarrow$ 315\,MB (+ 93\,MB Code Mode host) \\
@@ -605,7 +606,7 @@ beside a resident 122B model at all.
 
 \paragraph{Keep the fork boring.} Every behaviour that could live in a linked crate went there.
 Every remaining hook is a single call or predicate. The measure of success is how long an upstream
-bump takes, not how little code we wrote. A 17\,KB series that touches 20 files turns an upstream
+bump takes, not how little code we wrote. A 19\,KB series that touches 22 files turns an upstream
 release into an afternoon's review rather than a merge project.
 
 \paragraph{Presentation diffs are the expensive ones.} Almost all of the original series' size, 97\%,
