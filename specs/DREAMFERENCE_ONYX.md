@@ -1,4 +1,4 @@
-# Dreamference Onyx Integration & Branding (the Puffin web UI)
+# Puffin Onyx Integration & Branding (the web UI)
 
 > **Version:** 1.2.0
 > **Subject:** Onyx Lite deployment; provider registration; Puffin branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
@@ -41,7 +41,7 @@ Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 | `chat/onyx_ui_fonts.py`, `onyx_ui_overrides.py`, `onyx_ui_labels.py`, `onyx_ui_scripts.py` | The UI patches (§4) |
 | `chat/gmail_*`, `chat/image_search_service.py` | Sidecar services (§7, §8) |
 
-Dreamference never writes Onyx's compose files. Everything goes through `onyx-cli`:
+Puffin never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
 | Command (`puffin-admin puffin …`, alias `onyx`) | Does |
 |---|---|
@@ -77,7 +77,7 @@ Onyx has **no environment variable for the LLM provider**. Providers live in its
 
 ## 3. Branding (settings, persona, assets)
 
-Onyx's real white-labelling (`application_name`, `hide_onyx_branding`, custom logo and greeting) lives in `ee/`, behind `ENABLE_PAID_ENTERPRISE_EDITION_FEATURES`. That is a **paid** feature, and Dreamference does not set it. The rebrand uses community settings plus file patches.
+Onyx's real white-labelling (`application_name`, `hide_onyx_branding`, custom logo and greeting) lives in `ee/`, behind `ENABLE_PAID_ENTERPRISE_EDITION_FEATURES`. That is a **paid** feature, and Puffin does not set it. The rebrand uses community settings plus file patches.
 
 **Settings** (`PUT /admin/settings`):
 - `company_name = "Puffin"`;

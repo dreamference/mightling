@@ -1,4 +1,4 @@
-# Dreamference Codex Integration
+# Puffin Codex Integration
 
 > **Superseded by [`DREAMFERENCE_PUFFIN_CODEX.md`](DREAMFERENCE_PUFFIN_CODEX.md).** The agent is `puffin`: a Puffin-branded build of Codex, compiled from the `codex/` submodule plus `codex-patches/`, with the session setup in the Rust launcher `puffin-rs/`. This page only records what the two Python classes that remain still do, and one troubleshooting note.
 >

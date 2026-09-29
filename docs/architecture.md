@@ -2,9 +2,9 @@
 
 Puffin is a set of local services around one model server. Everything below runs on the GB10.
 
-The engine underneath is called **Dreamference**. That is why settings and paths are named
-`dreamference.toml`, `DREAMFERENCE_VLLM_HOST` and `~/.local/share/dreamference/`. Puffin is the
-product built on it.
+Puffin is made by **Dreamference**, and its Python side is the `dreamference` package. That is why
+settings and paths are named `dreamference.toml`, `DREAMFERENCE_VLLM_HOST` and
+`~/.local/share/dreamference/`.
 
 ```mermaid
 flowchart LR

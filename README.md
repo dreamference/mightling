@@ -15,14 +15,14 @@ No cloud model. No OpenAI account. No phone-home.
 </div>
 
 ```console
-$ puffin-admin server start        # load Qwen 3.5 122B-A10B on your GB10
+$ puffin-admin server start        # load Qwen3.8-27B on your GB10
 $ cd ~/my-project && puffin        # and code with it
 
 >_ Puffin (v0.158.0)
-model: Intel/Qwen3.5-122B-A10B-int4-AutoRound
+model: RadixArk/Qwen3.8-27B-NVFP4
 ```
 
-Puffin is the product of **Dreamference**, a local AI stack for the NVIDIA GB10. It gives you a
+Puffin, by **Dreamference**, is a local AI stack for the NVIDIA GB10. It gives you a
 terminal coding agent, a browser chat assistant and a desktop app, all answered by one model
 served on your own machine. Your code, your prompts and your conversations stay there.
 
@@ -119,14 +119,16 @@ speculative decoding. There is nothing to tune by hand.
 
 | Alias | Model | Precision | Memory |
 |---|---|---|---|
-| **`qwen3.5-122b-a10b-hybrid-dflash`** (default) | Qwen 3.5 122B-A10B with DFlash speculative decoding | INT4 + FP8 | 71.5 – 120 GB |
+| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B with DFlash2 speculative decoding, served by SGLang | NVFP4 | 20 – 70 GB |
+| `qwen3.5-122b-a10b-hybrid-dflash` (fallback) | Qwen 3.5 122B-A10B with DFlash speculative decoding | INT4 + FP8 | 71.5 – 120 GB |
 | `qwen3.5-122b-a10b-int4-dflash` | Qwen 3.5 122B-A10B with DFlash | INT4 | 71.5 – 120 GB |
 | `qwen3.5-122b-a10b-nvfp4` | Qwen 3.5 122B-A10B | NVFP4 | 78 – 120 GB |
 | `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B | NVFP4 | 25 – 60 GB |
 
-The default model measures **23.8 tokens/s on prose, 49.9 on code and 53.1 on JSON** on a GB10,
-single-stream, at a 32k context with eight slots. A small drafter proposes 12 tokens at a time and
-the large model checks them in one pass, which is why structured output is faster than prose.
+The default model measures **25.5 tokens/s on prose, 50.3 on code and 87.0 on JSON** on a GB10,
+single-stream, with a **262K-token context**. A small drafter proposes 16 tokens at a time and the
+model checks them in one pass, which is why structured output is faster than prose. Four agents
+working at once are no problem: memory stays well clear of the limit.
 [All models →](docs/models.md)
 
 ## Configuration
@@ -138,7 +140,7 @@ built-in default.
 ```toml
 # dreamference.toml
 vllm_host = "http://localhost:8000"
-model = "qwen3.5-122b-a10b-hybrid-dflash"
+model = "qwen3.8-27b-nvfp4-dflash2"
 agent_runner = "codex"      # codex is `puffin`; also goose, aider, cline, continue, openhands
 puffin_gmail = true         # let the agent read connected Gmail accounts
 ```
@@ -184,18 +186,18 @@ against a running model when one is up.
 
 Copyright (C) 2026 Dreamference contributors.
 
-Dreamference is free software: you can redistribute it and/or modify it under the terms of the
+Puffin is free software: you can redistribute it and/or modify it under the terms of the
 **GNU Affero General Public License** as published by the Free Software Foundation, either version
 3 of the License, or (at your option) any later version. The full text is in [`LICENSE`](LICENSE).
 
 The AGPL's [section 13](LICENSE) is the clause that distinguishes it from the GPL: if you run a
 modified version and let users interact with it **over a network**, those users must be offered the
-corresponding source. Dreamference ships a browser chat UI, so that clause is the operative one for
+corresponding source. Puffin ships a browser chat UI, so that clause is the operative one for
 anyone hosting a fork.
 
-This covers Dreamference's own code. The components it deploys keep their own licences: Codex
+This covers Puffin's own code. The components it deploys keep their own licences: Codex
 (Apache 2.0), vLLM (Apache 2.0), Onyx (its own terms, including an `ee/` directory that is *not*
-free software and which Dreamference deliberately leaves switched off), and the models, each under
+free software and which Puffin deliberately leaves switched off), and the models, each under
 the terms of its own weights licence.
 
 ## Contributing

@@ -1,4 +1,4 @@
-# Dreamference Code Indexing & Context Engine
+# Puffin Code Indexing & Context Engine
 
 > **Version:** 1.2.0
 > **Subject:** AST Extraction, Hybrid Search, SQLite/FTS5 Indexing, Testing

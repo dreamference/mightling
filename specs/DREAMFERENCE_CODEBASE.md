@@ -1,4 +1,4 @@
-# Dreamference Codebase Architecture & Reference
+# Puffin Codebase Architecture & Reference
 
 > **Version:** 1.2.0
 > **Subject:** Source Code Layout, Module Organization, Package Structure

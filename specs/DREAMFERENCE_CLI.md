@@ -1,4 +1,4 @@
-# Dreamference CLI Reference
+# Puffin CLI Reference
 
 > **Version:** 1.2.0 (`setup.py`)
 > **Subject:** Command Suite, Subcommands, Configuration, Environment Variables
@@ -45,7 +45,7 @@ These options come before the subcommand (`puffin-admin --agent aider run "…"`
 
 | Flag | Type | Description |
 | :--- | :--- | :--- |
-| `--config PATH` | Path | Custom Dreamference config file |
+| `--config PATH` | Path | Custom Puffin config file |
 | `--sandbox {none,apptainer,podman,docker}` | Choice | Rootless container sandbox engine |
 | `--agent {goose,cline,aider,continue,openhands,codex}` | Choice | Agent runner (default `codex`) |
 | `--hf-token TOKEN` | String | HuggingFace token (else `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN`) |
@@ -69,8 +69,8 @@ These options come before the subcommand (`puffin-admin --agent aider run "…"`
 | **`main-model set`** | Pin the main model in the config | `MODEL [--no-onyx]` |
 | **`main-model inspect`** | Probe the running main model | `[--deep]` |
 | **`diffusion-model set`** | Pin the diffusion model served beside the main one | `MODEL` |
-| **`clear model-cache`** | Delete the HF and Dreamference caches (see §4.17) | — |
-| **`clear tensorize-cache`** | Delete the Dreamference cache (see §4.18) | — |
+| **`clear model-cache`** | Delete the HF and `~/.cache/dreamference` model caches (see §4.17) | — |
+| **`clear tensorize-cache`** | Delete the tensorizer cache under `~/.cache/dreamference` (see §4.18) | — |
 | **`endpoints`** | Print endpoints and credentials | — |
 | **`server start`** | Launch vLLM, plus the diffusion sidecar | many; see §4.6 |
 | **`server stop` / `remove`** | Stop / remove the vLLM and diffusion containers | `[--port 8000] [--diffusion-port 8001]` |

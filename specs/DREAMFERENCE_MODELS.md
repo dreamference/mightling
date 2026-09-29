@@ -1,4 +1,4 @@
-# Dreamference Supported Models & Hardware
+# Puffin Supported Models & Hardware
 
 > **Version:** 1.2.0
 > **Subject:** NVIDIA GB10 Model Matrix & Default Model Selection

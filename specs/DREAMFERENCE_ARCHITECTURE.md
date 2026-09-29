@@ -1,4 +1,4 @@
-# Dreamference Architecture Overview
+# Puffin Architecture Overview
 
 > - **Version:** 1.2.0 (`dreamference.__version__`, `setup.py`)
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified LPDDR5X)
@@ -10,7 +10,7 @@
 
 ## 1. Executive Summary
 
-**Dreamference** is a local, air-gapped agentic coding platform for a single NVIDIA GB10. It serves open models with vLLM in Docker, and puts three front ends on the same local OpenAI-compatible endpoint:
+**Puffin** (by Dreamference) is a local, air-gapped agentic coding platform for a single NVIDIA GB10. It serves open models with vLLM in Docker, and puts three front ends on the same local OpenAI-compatible endpoint:
 
 - **`puffin`:** the terminal coding agent, and the default. It is a Puffin-branded build of OpenAI's Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`puffin-rs/`).
 - **Puffin web UI:** Onyx Lite, deployed and patched by `puffin-admin puffin …`. It is a browser chat with web search, image search, voice and Gmail, and it is also shown as a desktop window by the Tauri shell `puffin-app`.

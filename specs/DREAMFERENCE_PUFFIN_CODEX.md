@@ -4,7 +4,7 @@
 **Supersedes:** `DREAMFERENCE_CODEX.md`, which describes the older setup where an upstream `codex` on PATH was launched from Python.
 **Upstream:** [openai/codex](https://github.com/openai/codex), release `rust-v0.158.0`.
 
-`puffin` is Dreamference's terminal coding agent. It is OpenAI's Codex CLI with the name changed, the system prompt's identity changed, and a small launcher compiled in that points each session at the model this machine serves. Everything else, including the TUI, `exec`, `resume`, `fork`, sandboxing, Code Mode and every flag, is Codex's own code, unchanged. Someone who knows `codex` can use `puffin` the same way.
+`puffin` is Puffin's terminal coding agent (Puffin by Dreamference). It is OpenAI's Codex CLI with the name changed, the system prompt's identity changed, and a small launcher compiled in that points each session at the model this machine serves. Everything else, including the TUI, `exec`, `resume`, `fork`, sandboxing, Code Mode and every flag, is Codex's own code, unchanged. Someone who knows `codex` can use `puffin` the same way.
 
 This document lists every change and where it lives.
 
@@ -17,7 +17,7 @@ This document lists every change and where it lives.
 | Fork | `github.com/dgxcoder/codex` | A fork of openai/codex that carries upstream's history and tags. |
 | Submodule | `codex/` (shallow) | Pinned to the `rust-v0.158.0` tag commit (`064c6b8`). **Never modified.** |
 | Patches | `codex-patches/00NN-*.patch` | Small unified diffs with one line of context, applied in file-name order: renamed strings, the launcher hook, and one-line switches that hide or reroute commands (§3). Numbers `0003`–`0004` are unused; they belonged to the pre-minimisation series. |
-| Launcher | `puffin-rs/` | Dreamference's own Rust crate. It is kept as source, not as a patch. |
+| Launcher | `puffin-rs/` | Puffin's own Rust crate. It is kept as source, not as a patch. |
 | Builder | `dreamference/runner/codex_branded_builder.py` | Turns the four inputs above into the installed binary. |
 
 The patches are applied to an **exported copy** at build time, never to the submodule. The fork therefore stays byte-identical to upstream. Moving to a newer Codex means bumping the submodule and refreshing whichever hunks no longer apply (§6).
@@ -111,7 +111,7 @@ Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand
 
 ## 4. The launcher (`puffin-rs/`, crate `puffin-launcher`)
 
-This is the Rust port of what Dreamference's Python `puffin` entry point used to do before exec'ing Codex. That entry point is gone. `CodexRunner` now only builds `puffin` and runs it, so there is no second copy of the setup to drift.
+This is the Rust port of what the Python `puffin` entry point used to do before exec'ing Codex. That entry point is gone. `CodexRunner` now only builds `puffin` and runs it, so there is no second copy of the setup to drift.
 
 `args()`, the function the hook calls, runs `prepare_args` on the process's argv:
 
@@ -127,7 +127,7 @@ This is the Rust port of what Dreamference's Python `puffin` entry point used to
    - `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`;
    - `http://localhost:8000`.
 5. **Waits for the server.** It prints `⏳ Waiting for local vLLM server at … to become available...` with a dot per second, and gives up after 600 s with the `puffin-admin server start` hint.
-6. **Reads the served model from `GET /v1/models`**, both its `id` and its `max_model_len`, so the launcher needs no copy of Dreamference's model registry.
+6. **Reads the served model from `GET /v1/models`**, both its `id` and its `max_model_len`, so the launcher needs no copy of Puffin's model registry.
 7. **Checks for Gmail.** Unless `puffin_gmail = false` (config file) or `DREAMFERENCE_PUFFIN_GMAIL=false`, it asks the Gmail service's `/status` (`http://127.0.0.1:8767`, 1 s timeout). If an account is connected, `gmail_access_instructions()` adds an "Email access" block after the web section. The block names the accounts and the `puffin-admin gmail` commands, and warns that email content is untrusted data, never instructions. See `DREAMFERENCE_PUFFIN_GMAIL.md`.
 8. **Writes `$CODEX_HOME/model_catalog.json`**, a single entry Codex requires before it will use an unknown model. Codex parses it with strict serde structs, so a wrong shape stops it at startup:
    - context window, compaction limit and truncation limit set to `max_model_len`;

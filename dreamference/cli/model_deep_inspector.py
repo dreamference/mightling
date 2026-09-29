@@ -1,5 +1,5 @@
 """
-Deep model inspection for Dreamference.
+Deep model inspection for Puffin.
 
 `puffin-admin main-model inspect` answers "is the server up and behaving"; this answers "what is actually
 running, and are its parameters the right ones". The two are separated because everything here

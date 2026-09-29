@@ -1,7 +1,7 @@
 # Puffin PDF Search Tool — Technical Specification
 
 **Status:** Draft v1: **not implemented.** Nothing in `dreamference/` implements PDF search, as of 2026-09-28. The facts below about existing infrastructure (container names, tool registration, SearXNG, Infinity) were corrected against the code on that date; the design itself is unchanged.
-**Target:** Puffin (Dreamference Sidecar ecosystem)
+**Target:** Puffin (sidecar ecosystem)
 **Estimated effort:** ~4-5 days (sidecar app, SearXNG integration, PDF parsing, text embedding, semantic chunking, SSRF hardened downloader)
 
 ---
@@ -10,7 +10,7 @@
 
 Add a built-in `PDF Search` tool that lets the LLM search the internet for PDF documents, download them on the fly, extract their text, and return the most relevant excerpts. 
 
-Built on the Dreamference sidecar architecture (like the Image Search and Gmail tools), this tool would run as an independent container (`dreamference-pdf-search`; the deployment names its sidecars `dreamference-*`). It registers dynamically via Onyx's Custom Tool REST API. 
+Built on Puffin's sidecar architecture (like the Image Search and Gmail tools), this tool would run as an independent container (`dreamference-pdf-search`; the deployment names its sidecars `dreamference-*`). It registers dynamically via Onyx's Custom Tool REST API. 
 
 The tool queries the deployment's SearXNG instance with `filetype:pdf` filters, downloads the candidate PDFs with strict SSRF guards, extracts text using PyMuPDF, chunks the text, and runs it through the local Infinity embedding sidecar. The top-K most semantically relevant chunks are returned to the LLM as text along with source URLs and page numbers, enabling accurate, on-the-fly research without bloating the LLM's context window.
 

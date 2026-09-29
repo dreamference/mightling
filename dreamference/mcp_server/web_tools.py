@@ -1,5 +1,5 @@
 """
-Web access tools for the Dreamference MCP server.
+Web access tools for Puffin's MCP server.
 
 A deliberate departure from the project's air-gapped premise, and worth being explicit about: with
 these registered, the agent can reach the public internet. They exist because Codex cannot get web

@@ -1,4 +1,4 @@
-# Dreamference Agent Runtimes & Integration
+# Puffin Agent Runtimes & Integration
 
 > **Version:** 1.2.0
 > **Subject:** the agent runners: Codex (`puffin`, default), Goose, Cline, Aider, Continue, OpenHands.
@@ -203,7 +203,7 @@ It writes `~/.continue/config.json`. If the file exists, it replaces only `model
 {
   "models": [
     {
-      "title": "Dreamference local ({model alias})",
+      "title": "Puffin local ({model alias})",
       "provider": "openai",
       "model": "{hf_repo}",
       "apiBase": "{vllm_host}/v1/",
@@ -211,7 +211,7 @@ It writes `~/.continue/config.json`. If the file exists, it replaces only `model
     }
   ],
   "tabAutocompleteModel": {
-    "title": "Dreamference Tab Autocomplete",
+    "title": "Puffin Tab Autocomplete",
     "provider": "openai",
     "model": "{hf_repo}",
     "apiBase": "{vllm_host}/v1/",

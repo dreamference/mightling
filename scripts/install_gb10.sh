@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 git submodule update --init codex
 
-echo "🔧 Installing the Dreamference package (puffin-admin)..."
+echo "🔧 Installing Puffin's admin package (puffin-admin)..."
 python3 -m pip install -e .
 
 echo "⚙️  Writing the workspace configuration..."

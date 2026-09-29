@@ -1,4 +1,4 @@
-# Dreamference GB10 Inference Stack
+# Puffin GB10 Inference Stack
 
 > **Version:** 1.2.0
 > **Subject:** vLLM Launch Engine, Auto-Configuration, & Performance Optimization
@@ -133,8 +133,12 @@ The keys mirror `build_launch_command`'s parameters: `max_model_len`, `gpu_memor
 | `enable_prefix_caching` | `false` forces prefix caching off, whatever the config says (hybrid-GDN checkpoints cannot honour it) |
 | `generation_overrides` | Replaces, or with `None` disables, the default `--override-generation-config` |
 | `extra_args` | Verbatim flags appended to the command |
+| `engine` | `sglang` serves the model with SGLang instead of vLLM (§5.3) |
+| `revision` | Pinned checkpoint commit: downloaded at that commit and served from its snapshot directory |
+| `chat_template_patches` | (anchor, replacement) pairs applied to a copy of the checkpoint's chat template at launch (§5.3) |
+| `container_headroom_gb` | Memory added to the engine's fraction when sizing the container's cgroup cap |
 
-### 5.2. Default Model Recipe (`qwen3.5-122b-a10b-hybrid-dflash`)
+### 5.2. Previous Default Recipe (`qwen3.5-122b-a10b-hybrid-dflash`, now the fallback)
 
 | Setting | Value |
 | :------ | :---- |
@@ -149,6 +153,45 @@ The keys mirror `build_launch_command`'s parameters: `max_model_len`, `gpu_memor
 | `enable_prefix_caching` | `true` (explicit in the recipe) |
 | `env` | `VLLM_MARLIN_USE_ATOMIC_ADD=1`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` |
 | `extra_args` | `--max-num-seqs 8 --tensor-parallel-size 1 --dtype auto --default-chat-template-kwargs {"enable_thinking": false}` |
+
+### 5.3. The SGLang Engine and the Default Model (`qwen3.8-27b-nvfp4-dflash2`, since 2026-09-29)
+
+One entry is served by SGLang, because its speed is in a drafter only SGLang runs: Qwen3.8-27B's DFlash2 is a block-diffusion drafter that vLLM supports only through an unmerged pull request. The recipe follows hasso5703/dgx-spark-qwen38 (MIT), measured on a GB10.
+
+| Setting | Value |
+| :------ | :---- |
+| `engine` | `sglang` |
+| `docker_image` | `lmsysorg/sglang@sha256:d6e7288627be…` (v0.5.19, pinned by digest) |
+| checkpoint | `RadixArk/Qwen3.8-27B-NVFP4` @ `52d1adc`, served as its snapshot directory |
+| drafter | `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` @ `bd7a934`, 16 draft tokens, `modelopt_fp4` |
+| memory | `--mem-fraction-static 0.50`, cgroup cap = fraction + 24 GB headroom |
+| context | 262,144 tokens |
+| parsers | `qwen3_coder` tools, `qwen3` reasoning |
+| `extra_args` | flashinfer attention, chunked prefill 8192, mamba radix cache `extra_buffer`, bf16 SSM state, 96 mamba slots, 8 running requests, torch.compile to batch 4, 2 continuous decode steps, `--sleep-on-idle`, `--enable-metrics` |
+
+**How it is wired.** `SGLangLaunchBuilder` builds only the arguments after the image; the container comes from the same `docker run` prefix as vLLM's, so the memory cap, CPU limit, OOM score, mounts and PSI watchdog are engine-independent. Both engines get `VLLM_NO_USAGE_STATS=1` and `DO_NOT_TRACK=1`. The served model name is the repository ID, as with vLLM, so clients see no difference.
+
+**Four things found on the first launches, each now handled in code:**
+- **Revisions.** SGLang drops `--revision` on some offline config lookups, which then resolve through `refs/main`; a download by commit writes none, and the first launch failed in a restart loop. Pinned checkpoints are passed as their snapshot directories.
+- **The chat template.** Qwen3.8's own template answered HTTP 400 to the reasoning efforts `high`/`minimal` that Codex offers, and refused a system message after the first. `ChatTemplatePatcher` writes a patched copy under `~/.cache/dreamference/sglang/chat-templates` before launch (`high`/`max` → `xhigh`, `minimal` → `low`, a late system message becomes a `<system-reminder>`), and the start stops if an anchor no longer matches. The default effort also drops from `xhigh` to `medium`: the recipe's author measured `xhigh` at 3.19× the thinking tokens and a lower HumanEval (93.9% against 98.2%). puffin sends `none` and is unaffected.
+- **The sampler.** FlashInfer's kernel for *untruncated* sampling (top_p 1 and no top_k, which is what the completions endpoint does by default, since only the chat path applies the checkpoint's generation defaults) returned token 0, `!`, for 16 of 16 sampled completions requests on this GB10. Any top_p < 1 or any top_k was clean, and so was greedy decoding, which is why chat and puffin never showed it. The NVFP4 canary in `server start`, which samples with defaults on purpose, caught it. The recipe passes `--sampling-backend pytorch`: 0 of 16 corrupted, no measurable speed cost.
+- **The compile cache.** vLLM's signature-based reset is skipped for SGLang, whose torch.compile output lives under `~/.cache/dreamference/sglang/inductor`.
+
+**Measured on this GB10 (2026-09-29):** single stream, temperature 0, thinking off, median of three after a warm-up, decode net of time to first token:
+
+| | Qwen3.8-27B (SGLang + DFlash2) | 122B hybrid-dflash (vLLM + DFlash) |
+| :-- | --: | --: |
+| Prose | 25.5 tok/s | 23.8 |
+| Code | 50.3 | 49.9 |
+| JSON | 87.0 | 53.1 |
+| Prefill, 13K fresh tokens | 1,688 tok/s | not measured |
+| Prefill, 116K fresh tokens (needle retrieved) | 1,004 tok/s | beyond its 32K window |
+| Image input | correct ("Red; 42") | — |
+| 4 puffin tasks at once | all pass, 23 s wall, ≥39.8 GB available | not measured |
+| Host memory available while serving | ~38.7 GB | ~10 GB |
+| Live slash-command suite | 75 pass, 2 skip (1,101 s) | 75 pass, 2 skip (807 s) |
+
+Qwen3.8 figures are after the sampler change (the first measurement, before it, was 24.1 / 47.5 / 82.5). The 122B figures came from different prompts (`main-model inspect`), so decode is a tie within noise on prose and code. The suite's longer wall clock on the first runs was the harness, not the model: it waited up to 30 s to see a busy marker that a fast turn never showed (see `specs/README.md`).
 
 The resulting command is listed flag by flag in `DREAMFERENCE_CODEBASE.md` §5. The NVFP4 entries use the FlashInfer b12x kernels, selected through `env` and `moe_backend`, because the CUTLASS FP4 path corrupts output on SM121 (`DREAMFERENCE_MODELS.md` §2.1).
 

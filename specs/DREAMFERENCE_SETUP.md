@@ -1,4 +1,4 @@
-# Dreamference System Requirements & Setup
+# Puffin System Requirements & Setup
 
 > **Version:** 1.2.0
 > **Subject:** Installation, Hardware Detection, Quickstart, Helper Scripts

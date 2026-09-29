@@ -124,7 +124,7 @@ class GooseRunner:
                     {"role": "system", "content": "You are Goose, an autonomous coding agent. You have access to the local filesystem and can execute shell commands."},
                     {"role": "user", "content": "Pre-warm system prompt and MCP tools."}
                 ],
-                "tools": [{"type": "function", "function": {"name": "dreamference_mcp", "description": "Dreamference MCP tool", "parameters": {"type": "object", "properties": {}}}}],
+                "tools": [{"type": "function", "function": {"name": "dreamference_mcp", "description": "Puffin MCP tool", "parameters": {"type": "object", "properties": {}}}}],
                 "max_tokens": 1,
                 "temperature": 0.0
             }

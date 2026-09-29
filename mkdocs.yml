@@ -1,6 +1,6 @@
 site_name: Puffin
 site_description: A private AI assistant and coding agent that runs entirely on your NVIDIA GB10.
-copyright: Puffin is licensed AGPL-3.0-or-later.
+copyright: Puffin by Dreamference · licensed AGPL-3.0-or-later.
 
 theme:
   name: material

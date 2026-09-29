@@ -33,6 +33,7 @@
 19\,KB Patch Series over OpenAI Codex}
 
 \author{Dreamference\\
+Dreamference\\
 \texttt{dgxcoder@dreamference.ai}}
 
 \date{September 2026}
@@ -78,8 +79,8 @@ tool-calling loop, sandboxing, approval flows and the terminal user interface.
 
 Reusing a fast-moving upstream has a cost. A fork that edits the code freely soon stops being able
 to take upstream releases. A fork that edits nothing cannot remove the parts that assume a cloud.
-This paper reports how we navigated that tension in Puffin. Puffin is the terminal agent of
-\emph{Dreamference}, a local AI stack for the NVIDIA GB10.
+This paper reports how we navigated that tension in Puffin, a local AI stack for the NVIDIA GB10
+made by Dreamference; its subject is Puffin's terminal coding agent.
 
 \paragraph{What ``local'' means here.} The model, the agent and all session state run on one
 workstation. Source code, prompts, tool output and model traffic never leave it, no vendor

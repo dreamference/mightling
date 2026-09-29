@@ -49,9 +49,9 @@ to your Gmail, all answered by the same local model.
   you serve, not to a cloud model, and needs no OpenAI account. The web chat's telemetry is switched
   off, and so are Codex's usage analytics. See [Privacy & security](privacy.md) for exactly what
   does leave the machine.
-- **A large model on one desk.** The default model is Qwen 3.5 122B-A10B with speculative decoding.
-  On a GB10 it measures 23.8 tokens/s on prose, 49.9 on code and 53.1 on JSON, single-stream at a
-  32k context with eight slots. See [Models](models.md).
+- **A strong model on one desk.** The default model is Qwen3.8-27B with speculative decoding.
+  On a GB10 it measures 25.5 tokens/s on prose, 50.3 on code and 87.0 on JSON, single-stream, with
+  a 262K-token context, and leaves most of the machine's memory free. See [Models](models.md).
 - **Built to keep the machine up.** On the GB10, the GPU and the operating system share one pool of
   memory, so an oversized model load can freeze the whole machine. Puffin checks the host before
   loading and watches memory pressure while it loads. See [Architecture](architecture.md).

@@ -1,14 +1,14 @@
 # Puffin Image Search Tool — Technical Specification
 
 **Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft). Constants re-checked against `image_search_service.py` on 2026-09-28.
-**Target:** Puffin (Dreamference Sidecar ecosystem)
+**Target:** Puffin (sidecar ecosystem)
 **Source:** `dreamference/chat/image_search_service.py` (the sidecar), `OnyxRunner.enable_image_search` and siblings in `dreamference/chat/onyx_runner.py` (provisioning, registration, nginx), `GALLERY_SCRIPT`/`GALLERY_CSS` and `IMAGE_TOOL_STEP_SCRIPT` in the UI patch modules (presentation). Tests: `tests/test_image_search_service.py`, plus registration and nginx tests in `tests/test_onyx_runner.py`.
 
 ---
 
 ## 1. Overview
 
-A built-in `Image Search` tool lets the LLM search the internet for images and display them inline in chat. It is implemented as an independent **Dreamference sidecar container (`dreamference-image-search`, port 8768)** — the `dream-*` names of the v13 draft predate the deployment-wide rename to `dreamference-*` — and registered via Onyx's Custom Tool REST API, mirroring the Gmail integration.
+A built-in `Image Search` tool lets the LLM search the internet for images and display them inline in chat. It is implemented as an independent **Puffin sidecar container (`dreamference-image-search`, port 8768)** — the `dream-*` names of the v13 draft predate the deployment-wide rename to `dreamference-*` — and registered via Onyx's Custom Tool REST API, mirroring the Gmail integration.
 
 One `POST /search` call runs the whole funnel: SearXNG's image category with a **wide candidate pool (30)**, **in-memory thumbnail fetches** behind a hardened SSRF guard, a **SigLIP pre-filter**, **perceptual-hash collapse** of visual near-duplicates, a **vision rank-and-filter pass** by the served multimodal model (with the shortlist's full downloads already **prefetching speculatively**), then persistence of the winners into a local store that nginx serves back at `/puffin-images/{file_id}.jpg`. Caching locally is the point: hotlinked images die of CORP blocks and link rot; cached ones render permanently.
 

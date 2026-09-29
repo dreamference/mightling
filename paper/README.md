@@ -1,6 +1,6 @@
 # Puffin preprint
 
-LaTeX source for the arXiv preprint describing Puffin, Dreamference's terminal coding agent.
+LaTeX source for the arXiv preprint describing the terminal coding agent of Puffin (by Dreamference).
 
 ```bash
 make              # builds puffin.pdf inside the texlive/texlive container (no local TeX needed)
