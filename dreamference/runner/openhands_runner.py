@@ -9,12 +9,15 @@ and launches the OpenHands web UI.
 import os
 import subprocess
 import time
-from typing import Optional, List
+from typing import Final, List, Optional
 
 from dreamference.config import DreamferenceConfig
 from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.openhands_installer import OpenHandsInstaller, OPENHANDS_IMAGE
 from dreamference.hardware import resolve_model_hf_repo
+
+# Where the OpenHands web UI is published on the host; Onyx's web UI already owns 3000.
+OPENHANDS_HOST_PORT: Final[int] = 3001
 
 class OpenHandsRunner:
     """
@@ -34,7 +37,7 @@ class OpenHandsRunner:
     def run_session(self, prompt: Optional[str] = None, debug: bool = False) -> int:
         """
         Ensures local vLLM server is running, checks Docker daemon, pulls OpenHands image,
-        and launches OpenHands web UI container mapped to http://localhost:3000.
+        and launches the OpenHands web UI container on http://localhost:3001 (this machine only).
 
         Args:
             prompt (Optional[str]): Task prompt text.
@@ -66,7 +69,11 @@ class OpenHandsRunner:
         # Remove stale container if present
         subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        api_base = f"{self.config.vllm_host.rstrip('/')}/v1"
+        # From inside the container `localhost` is the container itself, so a loopback vLLM URL
+        # is rewritten to the Docker bridge gateway -- the same fix Onyx's provider needs.
+        from dreamference.chat.onyx_runner import OnyxRunner
+
+        api_base = OnyxRunner.resolve_container_vllm_url(self.config.vllm_host)
 
         cmd: List[str] = [
             "docker", "run", "--rm", "-it",
@@ -77,11 +84,14 @@ class OpenHandsRunner:
             "-e", f"WORKSPACE_BASE={cwd}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
             "-v", f"{cwd}:/opt/workspace_base",
-            "-p", "3000:3000",
+            # 3001, not 3000: Onyx's web UI owns 3000. And 127.0.0.1 only: this container mounts
+            # the Docker socket, so its UI on the network would hand root on this host to anyone
+            # who can reach it.
+            "-p", f"127.0.0.1:{OPENHANDS_HOST_PORT}:3000",
             OPENHANDS_IMAGE
         ]
 
-        print(f"\n🚀 Launching OpenHands Autonomous Agent Web UI on http://localhost:3000...")
+        print(f"\n🚀 Launching OpenHands Autonomous Agent Web UI on http://localhost:{OPENHANDS_HOST_PORT}...")
         print(f"   Local LLM Model: openai/{hf_model} ({self.config.vllm_host})")
         print(f"   Workspace Dir:   {cwd}\n")
 

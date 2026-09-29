@@ -67,3 +67,53 @@ def test_codex_runner_hands_arguments_and_host_to_puffin(tmp_path, monkeypatch):
     assert forwarded == ["/opt/puffin", "exec", "--json", "do it"]
     assert prompted == ["/opt/puffin", "fix the tests"]
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://gb10:9000"
+
+
+def test_openhands_stays_on_this_machine_and_off_onyx_port(monkeypatch):
+    # It mounts the Docker socket, so its UI must not be published on the network; 3000 belongs
+    # to Onyx; and from inside the container a loopback vLLM URL would point at the container.
+    from dreamference.config import DreamferenceConfig
+    from dreamference.runner.openhands_runner import OpenHandsRunner, OPENHANDS_HOST_PORT
+    from dreamference.runner.openhands_installer import OpenHandsInstaller
+    from dreamference.chat.onyx_runner import OnyxRunner
+
+    runner = OpenHandsRunner(config=DreamferenceConfig(vllm_host="http://localhost:8000"))
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(OpenHandsInstaller, "is_docker_available", classmethod(lambda cls: True))
+    monkeypatch.setattr(OpenHandsInstaller, "pull_image_if_missing", classmethod(lambda cls: True))
+    monkeypatch.setattr(OnyxRunner, "docker_bridge_gateway", classmethod(lambda cls: "172.17.0.1"))
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)
+
+    assert runner.run_session() == 0
+    cmd = calls[0]
+    assert cmd[cmd.index("-p") + 1] == f"127.0.0.1:{OPENHANDS_HOST_PORT}:3000"
+    assert OPENHANDS_HOST_PORT != 3000
+    assert "LLM_BASE_URL=http://172.17.0.1:8000/v1" in cmd
+
+
+def test_agents_only_name_the_model_the_server_serves(monkeypatch, tmp_path):
+    # The draft model is vLLM's internal speculative head, not a served model. Continue's
+    # autocomplete and Aider's architect mode both used to send requests naming it.
+    import json
+    from dreamference.config import DreamferenceConfig
+    from dreamference.hardware import resolve_model_hf_repo
+    from dreamference.runner import AiderRunner, ContinueRunner, AiderInstaller
+
+    config = DreamferenceConfig(config_file=str(tmp_path / "d.toml"), model="qwen3.6-35b-a3b-nvfp4",
+                                draft_model="qwen3.5-122b-a10b-dflash-draft")
+    served = resolve_model_hf_repo(config.model)
+
+    cont = json.loads(ContinueRunner(config=config).ensure_continue_config().read_text())
+    assert cont["tabAutocompleteModel"]["model"] == served
+
+    runner = AiderRunner(config=config)
+    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
+    monkeypatch.setattr(AiderInstaller, "is_installed", classmethod(lambda cls: True))
+    monkeypatch.setattr(AiderInstaller, "get_aider_executable", classmethod(lambda cls: "/bin/aider"), raising=False)
+    calls = []
+    monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)
+    runner.run_session()
+    models = [cmd[i + 1] for cmd in calls for i, arg in enumerate(cmd) if arg in ("--model", "--editor-model")]
+    assert models and all(m == f"openai/{served}" for m in models)

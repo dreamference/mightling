@@ -434,6 +434,23 @@ class DreamferenceConfig:
             env["HUGGING_FACE_HUB_TOKEN"] = self.hf_token
         return env
 
+    @staticmethod
+    def mcp_server_command() -> str:
+        """
+        The executable that serves Dreamference's MCP server (`puffin-admin mcp`) to an agent.
+
+        Its full path beside this interpreter when it exists, because an agent started from an
+        IDE or a desktop entry may not have the virtualenv on PATH. The command used to be
+        `dreamference`, which no longer exists, so Goose's extension failed to start.
+
+        Returns:
+            str: Absolute path to `puffin-admin`, or the bare name as a fallback.
+        """
+        import sys
+
+        candidate = os.path.join(os.path.dirname(sys.executable), "puffin-admin")
+        return candidate if os.access(candidate, os.X_OK) else "puffin-admin"
+
     def ensure_goose_config(self, extra_mcp_servers: Optional[Dict[str, Any]] = None) -> None:
         """
         Ensures ~/.config/goose/config.yaml is updated with local vLLM OpenAI endpoint settings,
@@ -464,7 +481,7 @@ class DreamferenceConfig:
                 "jetbrains_mcp": {
                     "enabled": True,
                     "type": "stdio",
-                    "cmd": "dreamference",
+                    "cmd": self.mcp_server_command(),
                     "args": ["mcp"]
                 }
             }
@@ -546,7 +563,7 @@ class DreamferenceConfig:
                 "jetbrains_mcp": {
                     "enabled": True,
                     "type": "stdio",
-                    "cmd": "dreamference",
+                    "cmd": self.mcp_server_command(),
                     "args": ["mcp"]
                 }
             }

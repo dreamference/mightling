@@ -264,6 +264,17 @@ class WebTools:
         ]
 
         answer = payload.get("answers") or []
+        failed = payload.get("unresponsive_engines") or []
+        if not results and not answer and failed:
+            # Every engine failed, which is not the same as the web having nothing to say. This
+            # used to come back as zero results: a SearXNG container whose DNS had gone stale
+            # answered every query that way, and the agent concluded the topic had no coverage.
+            return {
+                "query": query,
+                "error": "SearXNG could not reach any search engine: "
+                         + "; ".join(f"{name}: {reason}" for name, reason in failed),
+                "hint": "If this machine is online, restart the container: docker restart dreamference-searxng",
+            }
         return {
             "query": query,
             "result_count": len(results),

@@ -201,3 +201,49 @@ def test_requests_are_refused_while_the_model_loads():
         assert resp.status_code == 503
     finally:
         server.shutdown()
+
+
+def test_block_diffusion_fills_blocks_most_confident_first_and_stops_at_eos():
+    # The sidecar used to call transformers' left-to-right generate(), which is the wrong
+    # algorithm for a block-diffusion checkpoint and failed inside its remote code: it had never
+    # produced a token. This toy model "wants" the sequence 5 6 7 EOS and is surest of the
+    # latest position, so the order of commitment is visible.
+    import torch
+    from dreamference.vllm_server.diffusion_openai_service import block_diffusion_sample
+
+    MASK, EOS, VOCAB = 99, 9, 100
+    target = [5, 6, 7, EOS, 1, 1, 1, 1]
+    masks_seen = []
+
+    class Toy(torch.nn.Module):
+        dtype = torch.float32
+
+        def forward(self, input_ids, attention_mask):
+            masks_seen.append(attention_mask)
+            n = input_ids.shape[1]
+            logits = torch.zeros(1, n, VOCAB)
+            for position in range(2, n):
+                logits[0, position, target[position - 2]] = 1.0 + position  # later = surer
+            return type("Out", (), {"logits": logits})()
+
+    tokens = block_diffusion_sample(Toy(), torch.tensor([[3, 4]]), mask_id=MASK, eos_id=EOS,
+                                    max_new_tokens=8, block_size=4, steps=8)
+    assert tokens == [5, 6, 7]  # cut at EOS; the second block was never started
+    mask = masks_seen[0][0, 0]
+    assert mask.shape == (6, 6)
+    assert (mask[:2, 2:] < 0).all()  # the prompt does not see the block being generated
+    assert (mask[2:, :] == 0).all()  # the block sees the prompt and itself
+
+
+def test_imports_under_the_main_guard_are_not_load_requirements(tmp_path):
+    # The Tiny-A2D modeling file imports `dllm` only under `if __name__ == "__main__":`, and
+    # transformers' text scan refused to load it for that.
+    from dreamference.vllm_server.diffusion_openai_service import _imports_outside_main_guard
+
+    module = tmp_path / "modeling.py"
+    module.write_text(
+        "import torch\nfrom transformers.utils import x\n"
+        "def f():\n    import numpy\n"
+        "if __name__ == '__main__':\n    import dllm\n    from dllm import utils\n"
+    )
+    assert _imports_outside_main_guard(str(module)) == {"torch", "transformers", "numpy"}

@@ -74,6 +74,9 @@ class MCPServer:
                 }
             }
 
+        elif method == "ping":
+            return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
+
         elif method == "tools/list":
             return {
                 "jsonrpc": "2.0",
@@ -143,8 +146,13 @@ class MCPServer:
 
         elif tool_name == "ide_apply_diff":
             path: str = str(args.get("file_path", ""))
-            diff: str = str(args.get("diff_content", ""))
-            return {"status": "success", "message": f"Applied diff overlay to {path}", "diff_applied": diff}
+            # Nothing here writes files, and no IDE companion applies the diff. This used to answer
+            # "success", so an agent carried on as though an edit had landed that never did.
+            return {
+                "status": "not_applied",
+                "message": f"No IDE companion is connected to apply diffs; {path} is unchanged. "
+                           "Edit the file directly.",
+            }
 
         elif tool_name == "web_search":
             # requests is blocking, so it goes to a worker thread like the code search below;
@@ -193,13 +201,27 @@ class MCPServer:
                 continue
             try:
                 req: Dict[str, Any] = json.loads(line)
+            except ValueError as e:
+                self._write({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": f"Parse error: {e}"}})
+                continue
+            # A notification (no id) must never be answered: `notifications/initialized` used to
+            # get a -32601 error back, which strict clients treat as a protocol violation.
+            is_notification = isinstance(req, dict) and "id" not in req
+            try:
                 resp = await self.handle_request_async(req)
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
             except Exception as e:
-                err_resp = {"jsonrpc": "2.0", "error": {"code": -32700, "message": f"Parse error: {str(e)}"}}
-                sys.stdout.write(json.dumps(err_resp) + "\n")
-                sys.stdout.flush()
+                # Carries the request's id: a failing tool used to be reported as a parse error
+                # with no id, so the client waited for an answer that never came.
+                resp = {"jsonrpc": "2.0", "id": req.get("id") if isinstance(req, dict) else None,
+                        "error": {"code": -32603, "message": f"Internal error: {e}"}}
+            if not is_notification:
+                self._write(resp)
+
+    @staticmethod
+    def _write(message: Dict[str, Any]) -> None:
+        """Writes one JSON-RPC message to stdout as a single line."""
+        sys.stdout.write(json.dumps(message) + "\n")
+        sys.stdout.flush()
 
     def run_stdio(self) -> None:
         """Synchronous entrypoint launching run_stdio_async."""

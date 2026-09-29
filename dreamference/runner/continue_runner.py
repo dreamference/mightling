@@ -45,7 +45,10 @@ class ContinueRunner:
         config_path = continue_dir / "config.json"
 
         hf_model = resolve_model_hf_repo(self.config.model)
-        tab_model = resolve_model_hf_repo(self.config.draft_model) if self.config.draft_model else "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+        # The endpoint serves exactly one model. The draft model is a speculative head vLLM uses
+        # internally, not a model it serves, and the old 1.5B fallback was never served either, so
+        # every autocomplete request named a model that did not exist.
+        tab_model = hf_model
 
         config_data: Dict[str, Any] = {
             "models": [

@@ -125,6 +125,13 @@ class ModelMatrixRegistry:
             # images. Verified against the checkpoint's own config.json, not inferred from the name.
             supports_vision=True,
             launch_overrides={
+                # READ FIRST: on 2026-08-25 (f10bcda) every tuned value in this entry was moved to
+                # the default entry's recipe -- dense9 image, 32768 context, 0.70, 9048 batched
+                # tokens, prefix caching on, 12 speculative tokens, 8 sequences. Most per-setting
+                # comments below were written for the earlier values (kvfix2, 131072, 0.68, 8213,
+                # off, 8, 3) and record why those were chosen; they do not describe the numbers
+                # they sit above. The commit gave no reasons, so none are invented here.
+                #
                 # This model brings its own vLLM. The project's pinned image cannot run it: the
                 # load on 2026-08-15 reached 100% of the weights and then died in KV-cache
                 # profiling on the page-size unification assert described at attention_backend
@@ -200,11 +207,11 @@ class ModelMatrixRegistry:
                 # vLLM's own GPTQ/Marlin selection applies and guessing here would only override it.
                 "tool_call_parser": "qwen3_xml",
                 "reasoning_parser": "qwen3",
-                # 8213, not the upstream recipe's round 8192. vLLM reserves draft-token slots out
-                # of this budget — max_num_seqs * (num_speculative_tokens - 1) = 3 * 7 = 21 — and
-                # warns that the remainder is what prefill actually gets. At 8192 the chunk lands
-                # at 8171; adding the 21 back puts it at exactly 8192. Retuning either
-                # max-num-seqs or num_speculative_tokens changes this number.
+                # vLLM reserves draft-token slots out of this budget --
+                # max_num_seqs * (num_speculative_tokens - 1) = 8 * 11 = 88 -- and prefill gets
+                # the remainder, so 9048 leaves exactly 8960 = four 2240-token blocks. (The
+                # earlier 8213 was 8192 + 3 * 7.) Retuning either max-num-seqs or
+                # num_speculative_tokens changes this number.
                 "max_num_batched_tokens": 9048,
                 # 2026-08-24 ROOT CAUSE of the zero-hit isolation result (found by driving the
                 # real KVCacheManager offline inside the image, no GPU needed): vLLM's mamba

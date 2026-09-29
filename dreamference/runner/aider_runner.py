@@ -68,9 +68,9 @@ class AiderRunner:
             "--no-auto-commits" if self.config.sandbox != "none" else "--auto-commits",
         ]
 
-        if self.config.draft_model:
-            draft_hf = resolve_model_hf_repo(self.config.draft_model)
-            cmd.extend(["--editor-model", f"openai/{hf_model}", "--architect", "--model", f"openai/{draft_hf}"])
+        # No architect/editor split from the draft model: a draft model is the speculative head
+        # vLLM runs inside the one served model, not a model it serves, so `--model <draft>` made
+        # every request name a model that did not exist.
 
         if prompt:
             cmd.extend(["--message", prompt])
