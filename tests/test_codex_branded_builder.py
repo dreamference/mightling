@@ -116,3 +116,27 @@ def test_the_runner_resolves_the_branded_executable(tmp_path):
     binary.chmod(0o755)
     with patch.object(builder_module, "INSTALL_DIR", str(tmp_path)):
         assert CodexInstaller.get_codex_executable() == str(binary)
+
+
+def test_puffin_admin_is_linked_onto_path_for_the_models_shell(tmp_path, monkeypatch):
+    # Puffin's prompt tells the model to run `puffin-admin search` for web access, but the command
+    # lived only in the repository's virtualenv: every call from inside a session ended in
+    # "puffin-admin: command not found" (exit 127). conftest points both links into the test home.
+    import os
+    from dreamference.runner import codex_branded_builder as builder
+
+    binary = tmp_path / "puffin"
+    binary.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(builder.CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(binary)))
+    admin = builder.CodexBrandedBuilder.admin_executable_path()
+    assert admin and admin.endswith("puffin-admin")
+
+    builder.CodexBrandedBuilder.link_onto_path()
+    assert os.readlink(builder.PATH_LINK) == str(binary)
+    assert os.readlink(builder.ADMIN_PATH_LINK) == admin
+
+    # A real file of that name belongs to someone else and is left alone.
+    os.remove(builder.ADMIN_PATH_LINK)
+    open(builder.ADMIN_PATH_LINK, "w").write("mine")
+    builder.CodexBrandedBuilder.link_onto_path()
+    assert open(builder.ADMIN_PATH_LINK).read() == "mine"

@@ -21,6 +21,7 @@ crates it touches rather than the several hundred dependencies beneath them.
 
 import hashlib
 import os
+import sys
 import shutil
 import subprocess
 from typing import Final, List, Optional
@@ -57,6 +58,12 @@ BRANDED_EXECUTABLE_NAME: Final[str] = "puffin"
 # Where the user types `puffin`. A symlink rather than a copy, because Codex finds
 # codex-code-mode-host next to its own executable, and it resolves that through the link.
 PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin")
+
+# Where `puffin-admin` becomes reachable from any shell -- including the one `puffin` runs the
+# model's commands in. The prompt tells the model to use `puffin-admin search`/`fetch`/`gmail` for
+# web and mail access, but the command only existed inside the repository's virtualenv, so every
+# such call ended in "puffin-admin: command not found" (exit 127).
+ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-admin")
 
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
@@ -356,6 +363,8 @@ class CodexBrandedBuilder:
             bool: True if an up-to-date `puffin` is installed afterwards.
         """
         if not force and cls.is_current():
+            # Cheap and idempotent, so an install that predates a link still gets it.
+            cls.link_onto_path()
             return True
         # Every build starts by wiping the shared source tree, so two at once destroy each other
         # mid-compile ("Could not locate working directory"). An exclusive lock makes a second
@@ -430,19 +439,47 @@ class CodexBrandedBuilder:
         return True
 
     @classmethod
+    def admin_executable_path(cls) -> Optional[str]:
+        """
+        Returns the `puffin-admin` of the Python environment running this code, if it has one.
+
+        Returns:
+            Optional[str]: Absolute path of the console script beside this interpreter, or None.
+        """
+        candidate = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "puffin-admin")
+        return candidate if os.path.isfile(candidate) and os.access(candidate, os.X_OK) else None
+
+    @classmethod
     def link_onto_path(cls) -> None:
         """
-        Points `~/.local/bin/puffin` at the installed executable, so `puffin` works from any shell.
+        Points `~/.local/bin/puffin` and `~/.local/bin/puffin-admin` at their executables.
+
+        `puffin` so it works from any shell; `puffin-admin` so the model can run the web and mail
+        commands its prompt names from the shell `puffin` gives it.
+        """
+        cls._link(cls.executable_path(), PATH_LINK)
+        admin = cls.admin_executable_path()
+        if admin:
+            cls._link(admin, ADMIN_PATH_LINK)
+
+    @classmethod
+    def _link(cls, target: str, link: str) -> None:
+        """
+        Makes `link` a symlink to `target`.
 
         Only a missing file or an existing symlink is replaced; a real file of that name belongs to
         something else and is reported instead of overwritten.
+
+        Args:
+            target (str): What the link points at.
+            link (str): Path of the link.
         """
-        os.makedirs(os.path.dirname(PATH_LINK), exist_ok=True)
-        if os.path.lexists(PATH_LINK) and not os.path.islink(PATH_LINK):
-            print(f"⚠️ {PATH_LINK} exists and is not a link; leaving it. Run {cls.executable_path()} directly.")
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        if os.path.lexists(link) and not os.path.islink(link):
+            print(f"⚠️ {link} exists and is not a link; leaving it. Run {target} directly.")
             return
-        staging = f"{PATH_LINK}.new"
+        staging = f"{link}.new"
         if os.path.lexists(staging):
             os.remove(staging)
-        os.symlink(cls.executable_path(), staging)
-        os.replace(staging, PATH_LINK)
+        os.symlink(target, staging)
+        os.replace(staging, link)
