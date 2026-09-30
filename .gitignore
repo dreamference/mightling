@@ -45,6 +45,9 @@ ENV/
 # Tauri build output
 desktop/src-tauri/target/
 
+# puffin-code build output
+puffin-code-rs/target/
+
 # Tauri generated schemas (regenerated on every build)
 desktop/src-tauri/gen/schemas/
 

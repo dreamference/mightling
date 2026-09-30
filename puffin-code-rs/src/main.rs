@@ -1,0 +1,188 @@
+//! `puffin-code`: the command the agent runs to ask about code (spec §7.1).
+
+use std::process::ExitCode;
+
+use clap::{Args, Parser, Subcommand};
+
+use puffin_code::config::Settings;
+use puffin_code::output::{self, Page};
+use puffin_code::paths::Repo;
+use puffin_code::router::Context;
+
+#[derive(Parser)]
+#[command(name = "puffin-code", about = "Answers questions about this repository's code from an index", disable_version_flag = true)]
+struct Cli {
+    /// Print puffin-code's version and the tool versions it was built for.
+    #[arg(long, short = 'V')]
+    version: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Args, Clone, Default)]
+struct PageArgs {
+    /// Rows to print (default 40, at most 200).
+    #[arg(long)]
+    limit: Option<usize>,
+    /// Skip this many rows (the next page).
+    #[arg(long, default_value_t = 0)]
+    offset: usize,
+    /// The cursor printed with the previous page; the command fails if the index changed since.
+    #[arg(long)]
+    cursor: Option<String>,
+    /// Keep only rows under this path prefix or matching this glob.
+    #[arg(long)]
+    path: Option<String>,
+    /// Keep only compiler-exact rows.
+    #[arg(long)]
+    exact_only: bool,
+    /// Keep only rows of this kind: def, read, write, import.
+    #[arg(long)]
+    kind: Option<String>,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Where a name is defined.
+    Def { name: String, #[command(flatten)] page: PageArgs },
+    /// Every reference to a definition.
+    Refs { name: String, #[command(flatten)] page: PageArgs },
+    /// The definitions that refer to a definition.
+    Callers { name: String, #[command(flatten)] page: PageArgs },
+    /// What a definition's body refers to.
+    Callees { name: String, #[command(flatten)] page: PageArgs },
+    /// Implementations of a trait, interface or method.
+    Impl { name: String, #[command(flatten)] page: PageArgs },
+    /// One definition's source.
+    Show { name: String },
+    /// The definitions of a file.
+    Outline { file: String, #[command(flatten)] page: PageArgs },
+    /// Definitions whose name or body matches the words.
+    Search { words: Vec<String>, #[command(flatten)] page: PageArgs },
+    /// Which layers exist, how fresh they are, and what is excluded.
+    Status,
+    /// Re-index the repository (outside the sandbox), or ask the session to (inside it).
+    Index {
+        /// Also run the executing exact indexers (Rust, Java, .NET) in a trusted repository.
+        #[arg(long)]
+        exact: bool,
+        /// Include submodules in the universal layer.
+        #[arg(long)]
+        include_submodules: bool,
+        /// Run in the foreground and wait for the result.
+        #[arg(long)]
+        wait: bool,
+    },
+    /// Delete this repository's indexes.
+    Forget,
+    /// Print the `# Code navigation` prompt block for this repository (used by the launcher).
+    PromptBlock,
+    /// Own indexing for one repository while a `puffin` session lives (started by the launcher).
+    Session {
+        #[arg(long)]
+        parent_pid: Option<i32>,
+    },
+    /// Serve the same operations over MCP (stdio).
+    Mcp,
+    /// Supervise one index run (internal).
+    #[command(hide = true)]
+    Supervise { plan: String },
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    if cli.version {
+        println!("puffin-code {}", env!("CARGO_PKG_VERSION"));
+        for (tool, version) in puffin_code::PINNED_TOOLS {
+            println!("  {tool} {version}");
+        }
+        return ExitCode::SUCCESS;
+    }
+    let Some(command) = cli.command else {
+        eprintln!("puffin-code: a command is required; see `puffin-code --help`");
+        return ExitCode::from(2);
+    };
+    match run(command) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("puffin-code: {error:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(command: Command) -> anyhow::Result<ExitCode> {
+    let cwd = std::env::current_dir()?;
+    let repo = Repo::discover(&cwd)?;
+    let settings = Settings::load(&repo.root);
+    match command {
+        Command::PromptBlock => {
+            if let Some(block) = puffin_code::prompt::block(&repo) {
+                println!("{block}");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Session { parent_pid } => puffin_code::session::run(repo, settings, parent_pid).map(|_| ExitCode::SUCCESS),
+        Command::Index { exact, include_submodules, wait } => {
+            puffin_code::index::request_or_run(&repo, &settings, exact, include_submodules, wait)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Supervise { plan } => puffin_code::index::supervise(&plan).map(|_| ExitCode::SUCCESS),
+        Command::Forget => {
+            puffin_code::index::forget(&repo)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Mcp => puffin_code::mcp::serve(repo, settings).map(|_| ExitCode::SUCCESS),
+        Command::Status => {
+            let context = Context::load(repo, settings)?;
+            println!("{}", context.status().join("\n"));
+            Ok(ExitCode::SUCCESS)
+        }
+        query => answer(repo, settings, query),
+    }
+}
+
+fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<ExitCode> {
+    let limit_default = settings.row_limit;
+    let context = Context::load(repo, settings)?;
+    if !context.has_index() {
+        if context.repo.state_dir().join("code_index.building").exists() {
+            println!("index not ready yet: it is being built; use rg until `puffin-code status` reports it ready");
+        } else {
+            println!("no code index for this repository yet; run `puffin-code index`, and use rg meanwhile");
+        }
+        return Ok(ExitCode::from(3));
+    }
+    let (mut answer, body, page) = match command {
+        Command::Def { name, page } => (context.def(&name)?, None, page),
+        Command::Refs { name, page } => (context.refs(&name)?, None, page),
+        Command::Callers { name, page } => (context.callers(&name)?, None, page),
+        Command::Callees { name, page } => (context.callees(&name)?, None, page),
+        Command::Impl { name, page } => (context.implementations(&name)?, None, page),
+        Command::Outline { file, page } => (context.outline(&file)?, None, page),
+        Command::Search { words, page } => (context.search(&words.join(" "))?, None, page),
+        Command::Show { name } => {
+            let (answer, body) = context.show(&name)?;
+            (answer, body, PageArgs::default())
+        }
+        _ => unreachable!("handled in run"),
+    };
+    let page_options = Page {
+        limit: page.limit.unwrap_or(limit_default),
+        offset: page.offset,
+        cursor: page.cursor.clone(),
+        path: page.path.clone(),
+        exact_only: page.exact_only,
+        kind: page.kind.clone(),
+    };
+    output::narrow(&mut answer, &page_options)?;
+    if page.json {
+        println!("{}", serde_json::to_string_pretty(&answer)?);
+    } else {
+        println!("{}", output::render(&answer, &page_options, body.as_deref()));
+    }
+    Ok(ExitCode::SUCCESS)
+}
