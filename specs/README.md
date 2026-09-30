@@ -74,14 +74,6 @@ This directory holds the specification, split into focused documents. This page 
 
 The reconciliation on 2026-09-28 found these places where the **code** was wrong or unsafe. Most were fixed on 2026-09-29, and the individual specs now describe the fixed behaviour, each with a one-line note of what it replaced.
 
-### Still open
-
-| Where | Defect | Spec |
-|---|---|---|
-| vLLM engine (default recipe) | Died once with `CUBLAS_STATUS_INTERNAL_ERROR` in a bf16 GEMM with two requests running, KV cache at 92% and ~21 GB of host memory free (2026-09-29 11:49); Docker restarted it. Likely cuBLAS failing to get workspace under memory pressure; not reproduced | INFERENCE |
-| `HF_HOME` and the model container | The host downloads to `$HF_HOME/hub` when `HF_HOME` is set, but the container always mounts `~/.cache/huggingface`; with pinned checkpoints now served from their snapshot directories, a host with a custom `HF_HOME` would launch against a path the container cannot see. Pre-existing for vLLM, sharper for SGLang | INFERENCE |
-| `dreamference-searxng` | After 18 h up, the container's Docker-embedded DNS (`127.0.0.11`, as it is joined to `onyx_default`) answered SERVFAIL for every name, so every engine failed and both the agents' `web_search` and Onyx's web search came back empty. Fresh containers on the same two networks resolved fine and `docker restart` cleared it; the cause is not known. The empty result is now reported as an error naming each failed engine, with the restart as the hint | ONYX |
-
 ### Accepted by design
 
 | Where | Behaviour | Why it stays | Spec |
