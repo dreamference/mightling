@@ -396,3 +396,35 @@ fn a_query_during_a_graph_write_waits_for_it() {
     assert!(text.contains("exact shapes/cli.py:9"), "{text}");
     assert!(started.elapsed() >= std::time::Duration::from_millis(500));
 }
+
+#[test]
+fn a_stale_index_of_another_language_does_not_widen_the_answer() {
+    // cli.py changed after the Rust snapshot, but the Python store and the graph have both been
+    // re-indexed since: a Python name's answer is complete, and says 0 files changed.
+    let f = fixture();
+    f.append("shapes/cli.py", "\n# edited after the Rust snapshot\n");
+    f.commit("edit cli");
+    let head = git(&f.repo.root, &["rev-parse", "HEAD"]);
+    let stamp = puffin_code::manifest::FileStamp::of(&f.repo.root.join("shapes/cli.py")).unwrap();
+    let dir = f.repo.scip_dir();
+    let mut manifest = Manifest::load(&dir);
+    let python = manifest.runs.get_mut("scip-python:shapes").unwrap();
+    python.commit = Some(head.clone());
+    python.file_hashes.insert("shapes/cli.py".into(), stamp.clone());
+    manifest.save(&dir).unwrap();
+    rusqlite::Connection::open(&f.graph_db)
+        .unwrap()
+        .execute(
+            "UPDATE file_hashes SET sha256 = ?1, mtime_ns = ?2, size = ?3 WHERE rel_path = 'shapes/cli.py'",
+            rusqlite::params![stamp.sha256, stamp.mtime_ns, stamp.size as i64],
+        )
+        .unwrap();
+    let mut graph = puffin_code::manifest::GraphSnapshot::load(&dir).unwrap();
+    graph.commit = Some(head);
+    graph.save(&dir).unwrap();
+    let (_, out) = f.run(&["refs", "make_circle"]);
+    assert!(out.contains("changed since snapshot: 0 files\n"), "{out}");
+    assert!(out.contains("exact shapes/cli.py:9"), "{out}");
+    let (_, status) = f.run(&["status"]);
+    assert!(status.contains("rust-analyzer:geom: ok") && status.contains("1 files changed since"), "{status}");
+}

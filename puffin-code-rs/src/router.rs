@@ -87,6 +87,11 @@ pub struct Answer {
     /// Whether the answer claims anything about references (search and outline do not).
     #[serde(skip)]
     pub tagged: bool,
+    /// The changed and deleted files of the layers this answer draws on: the graph and the stores
+    /// that hold its symbol. A store that holds nothing of it (a Rust index for a Python name)
+    /// neither widens the text search nor the count.
+    #[serde(skip)]
+    pub scope: Option<(BTreeSet<String>, BTreeSet<String>)>,
 }
 
 /// A definition the query may mean.
@@ -280,9 +285,27 @@ impl Context {
         crate::manifest::hex(&hasher.finalize()[..4])
     }
 
-    /// Restricts the header's source line to the stores an answer actually drew on.
+    /// Restricts the header's source line, the changed count and the text search to the stores an
+    /// answer draws on, and the graph.
     fn set_sources(&self, answer: &mut Answer, stores: &BTreeSet<usize>) {
         answer.sources = self.sources(Some(stores));
+        let mut changed = BTreeSet::new();
+        let mut deleted = BTreeSet::new();
+        for set in self.graph_changes.iter().chain(stores.iter().map(|i| &self.store_changes[*i])) {
+            changed.extend(set.changed.iter().cloned());
+            deleted.extend(set.deleted.iter().cloned());
+        }
+        // Without a graph, a store-less answer still has to see every change.
+        if self.graph_changes.is_none() && stores.is_empty() {
+            changed = self.changed.clone();
+            deleted = self.deleted.clone();
+        }
+        answer.changed_files = changed.len() + deleted.len();
+        answer.scope = Some((changed, deleted));
+    }
+
+    fn answer_changed<'a>(&'a self, answer: &'a Answer) -> &'a BTreeSet<String> {
+        answer.scope.as_ref().map(|(c, _)| c).unwrap_or(&self.changed)
     }
 
     /// The header's source line: which snapshot each tag comes from.
@@ -463,9 +486,10 @@ impl Context {
         }
     }
 
-    /// Files to search by text: every changed file, plus tracked files no layer indexes.
-    fn text_files(&self) -> Vec<String> {
-        let mut files: BTreeSet<String> = self.changed.clone();
+    /// Files to search by text: every changed file of the answer's layers, plus tracked files no
+    /// layer indexes.
+    fn text_files(&self, changed: &BTreeSet<String>) -> Vec<String> {
+        let mut files: BTreeSet<String> = changed.clone();
         for file in &self.not_indexed_files {
             if !self.any_scip_fresh(file) {
                 files.insert(file.clone());
@@ -476,7 +500,8 @@ impl Context {
 
     /// Runs the text search and records its outcome on the answer.
     fn text_rows(&self, name: &str, answer: &mut Answer, keep: &dyn Fn(&str, u32) -> bool) -> Vec<Row> {
-        let files = self.text_files();
+        let changed = self.answer_changed(answer).clone();
+        let files = self.text_files(&changed);
         let scan = textscan::scan(&self.repo.root, &files, name, self.settings.scan_max_files, self.settings.scan_max_bytes);
         answer.changed_searched = Some(scan.over_limit.is_none());
         if let Some(why) = &scan.over_limit {
@@ -495,7 +520,7 @@ impl Context {
             .into_iter()
             .filter(|hit| keep(&hit.path, hit.line))
             .map(|hit| {
-                let why = if self.changed.contains(&hit.path) { "changed since snapshot" } else { "not indexed" };
+                let why = if changed.contains(&hit.path) { "changed since snapshot" } else { "not indexed" };
                 Row { tag: Some(Tag::Text), path: hit.path, line: hit.line, detail: why.to_string() }
             })
             .collect()
@@ -576,7 +601,8 @@ impl Context {
             answer.notes.push(graph_only_note(&candidate.path));
         }
         self.set_sources(&mut answer, &exact_stores);
-        rows.extend(self.text_rows(&candidate.name, &mut answer, &|path, _| !covered_exactly(path) || self.changed.contains(path)));
+        // Text files are changed or not indexed, so none of them is covered exactly.
+        rows.extend(self.text_rows(&candidate.name, &mut answer, &|_, _| true));
         answer.rows = dedup(rows);
         self.request_reindex(&mut answer);
         Ok(answer)
@@ -719,7 +745,8 @@ impl Context {
         } else {
             candidate.name.clone()
         };
-        rows.extend(self.text_rows(&trait_name, &mut answer, &|path, _| self.changed.contains(path)));
+        let changed = self.answer_changed(&answer).clone();
+        rows.extend(self.text_rows(&trait_name, &mut answer, &|path, _| changed.contains(path)));
         answer.rows = dedup(rows);
         self.request_reindex(&mut answer);
         Ok(answer)
