@@ -272,6 +272,10 @@ pub mod fake {
         pub scopes: Mutex<Vec<LiveScope>>,
         pub slice_max: Mutex<Option<u64>>,
         pub started: Mutex<Vec<(String, u64, Vec<String>)>>,
+        /// `freeze`, `thaw` and `stop` calls, in order.
+        pub actions: Mutex<Vec<String>>,
+        /// What a started scope runs instead of its command (`true` by default).
+        pub stand_in: Vec<String>,
         pub dir: PathBuf,
     }
 
@@ -283,6 +287,8 @@ pub mod fake {
                 scopes: Mutex::new(Vec::new()),
                 slice_max: Mutex::new(None),
                 started: Mutex::new(Vec::new()),
+                actions: Mutex::new(Vec::new()),
+                stand_in: vec!["true".to_string()],
                 dir: dir.to_path_buf(),
             }
         }
@@ -301,11 +307,20 @@ pub mod fake {
         fn start_scope(&self, unit: &str, cap: u64, argv: &[String], _log: &Path) -> Result<Child> {
             self.started.lock().unwrap().push((unit.to_string(), cap, argv.to_vec()));
             self.scopes.lock().unwrap().push(LiveScope { unit: unit.to_string(), cap, current: 0 });
-            Ok(Command::new("true").spawn()?)
+            Ok(Command::new(&self.stand_in[0]).args(&self.stand_in[1..]).spawn()?)
         }
-        fn freeze(&self, _unit: &str) -> Result<()> { Ok(()) }
-        fn thaw(&self, _unit: &str) -> Result<()> { Ok(()) }
-        fn stop(&self, _unit: &str) -> Result<()> { Ok(()) }
+        fn freeze(&self, unit: &str) -> Result<()> {
+            self.actions.lock().unwrap().push(format!("freeze {unit}"));
+            Ok(())
+        }
+        fn thaw(&self, unit: &str) -> Result<()> {
+            self.actions.lock().unwrap().push(format!("thaw {unit}"));
+            Ok(())
+        }
+        fn stop(&self, unit: &str) -> Result<()> {
+            self.actions.lock().unwrap().push(format!("stop {unit}"));
+            Ok(())
+        }
         fn lock_dir(&self) -> PathBuf { self.dir.clone() }
     }
 }

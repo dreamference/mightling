@@ -191,7 +191,9 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
             .save(&repo.scip_dir())?;
         }
         _ => {
-            let (scip_file, converted) = (run.scip_output.as_ref().unwrap(), run.converted.as_ref().unwrap());
+            let (Some(scip_file), Some(converted)) = (run.scip_output.as_ref(), run.converted.as_ref()) else {
+                return Ok(Outcome::Failed("the plan names no index to install".into()));
+            };
             if !converted.is_file() || !scip_file.is_file() {
                 return Ok(Outcome::Failed("the indexer wrote no index".into()));
             }
@@ -371,6 +373,52 @@ mod tests {
         let repo = Repo { root: plan.repo_root.clone(), main_root: plan.main_root.clone(), is_git: false };
         let manifest = crate::manifest::Manifest::load(&repo.scip_dir());
         assert_eq!(manifest.runs["scip-python:pkg"].status, "deferred: memory");
+    }
+
+    /// A scripted sequence of states, then idle.
+    struct Script(std::cell::RefCell<Vec<ModelState>>);
+    impl Probe for Script {
+        fn state(&self) -> ModelState {
+            let mut states = self.0.borrow_mut();
+            if states.is_empty() { ModelState::Idle } else { states.remove(0) }
+        }
+    }
+
+    #[test]
+    fn an_executing_run_is_frozen_while_the_model_works_and_thawed_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = FakeHost::new(dir.path(), 100);
+        host.stand_in = vec!["sleep".into(), "1".into()];
+        let mut plan = repo_and_plan(dir.path(), Kind::Executing, 1);
+        plan.runs[0].ceiling = 40 << 30;
+        // Idle to start, then busy for three polls, then idle.
+        let probe = Script(std::cell::RefCell::new(vec![ModelState::Idle, ModelState::Busy, ModelState::Busy, ModelState::Busy]));
+        execute(&plan, &host, &probe, Duration::from_millis(40));
+        let actions = host.actions.lock().unwrap().clone();
+        assert_eq!(actions, vec!["freeze puffin-index-test".to_string(), "thaw puffin-index-test".to_string()], "{actions:?}");
+    }
+
+    #[test]
+    fn a_short_run_is_never_frozen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = FakeHost::new(dir.path(), 100);
+        host.stand_in = vec!["sleep".into(), "0.5".into()];
+        let plan = repo_and_plan(dir.path(), Kind::Universal, 0);
+        let probe = Script(std::cell::RefCell::new(vec![ModelState::Idle, ModelState::Busy, ModelState::Busy]));
+        execute(&plan, &host, &probe, Duration::from_millis(40));
+        assert!(host.actions.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_run_in_flight_is_stopped_when_a_model_starts_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = FakeHost::new(dir.path(), 100);
+        host.stand_in = vec!["sleep".into(), "0.5".into()];
+        let plan = repo_and_plan(dir.path(), Kind::Executing, 1);
+        let probe = Script(std::cell::RefCell::new(vec![ModelState::Idle, ModelState::Loading]));
+        let out = execute(&plan, &host, &probe, Duration::from_millis(40));
+        assert_eq!(out[0].1, Outcome::Deferred("model-start"));
+        assert_eq!(*host.actions.lock().unwrap(), vec!["stop puffin-index-test".to_string()]);
     }
 
     #[test]
