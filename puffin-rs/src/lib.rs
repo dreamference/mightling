@@ -32,6 +32,7 @@ use toml_edit::Table;
 use toml_edit::value;
 
 pub mod app;
+pub mod code_index;
 pub mod help;
 pub mod home;
 
@@ -188,7 +189,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         .context("could not resolve CODEX_HOME")?
         .as_path()
         .to_path_buf();
-    let extra_instructions = if puffin_gmail_enabled() {
+    let mut extra_instructions = if puffin_gmail_enabled() {
         connected_gmail_accounts()
             .await
             .map(|accounts| gmail_access_instructions(&accounts))
@@ -196,6 +197,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     } else {
         String::new()
     };
+    // The code index: its session process starts here, outside the sandbox, and its prompt block
+    // joins the others (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2).
+    extra_instructions.push_str(&code_index::start_and_prompt_block());
     configure_codex_home(&codex_home, &host, &model, &extra_instructions)?;
     Ok(with_local_model_args(args, &model.id))
 }
