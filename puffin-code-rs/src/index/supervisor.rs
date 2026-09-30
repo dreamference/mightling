@@ -85,7 +85,8 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
     // The snapshot is what the run is about to see.
     let commit = repo.head();
     let dirty = store::dirty_files(repo);
-    let hashes = if run.kind == Kind::Universal { Default::default() } else { store::stamp_root(repo, &run.path_prefix) };
+    // Every file, not only the root's: the store will hold documents for what the root imports.
+    let hashes = if run.kind == Kind::Universal { Default::default() } else { store::stamp_root(repo, "") };
     let started_at = now_rfc3339();
 
     std::fs::create_dir_all(&run.spec.scratch)?;
@@ -110,6 +111,10 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
                 let _ = child.wait();
                 return Ok(Outcome::Deferred("model-start"));
             }
+            // Only the long, executing runs are frozen. A frozen codebase-memory missed its own
+            // daemon's 30 s start-up deadline and failed (2026-09-30); the universal and static
+            // runs take seconds, and the slice's CPU limit already bounds them.
+            ModelState::Busy if run.kind != Kind::Executing => idle_since = None,
             ModelState::Busy => {
                 idle_since = None;
                 if frozen_since.is_none() && host.freeze(&run.unit).is_ok() {
@@ -133,11 +138,22 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
     let duration = clock.elapsed().as_secs_f64();
     let peak = std::fs::read_to_string(&peak_file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(0);
     let bounded = peak > 0 && peak >= cap / 10 * 9;
-    let peak_mb = if status.success() { peak >> 20 } else { (peak.max(cap)) >> 20 };
+    // Only a run killed by the kernel records its cap as a lower bound on its peak (§6.4); a run
+    // that failed for any other reason keeps what it measured, or the next admission would ask
+    // for more than its ceiling and never start it again.
+    let killed = matches!(status.code(), Some(137) | None);
+    let peak_mb = if killed { peak.max(cap) >> 20 } else { peak >> 20 };
     keep_log(repo, run, &log);
     if !status.success() {
+        let log_text = std::fs::read_to_string(&log).unwrap_or_default();
         let why = match status.code() {
             Some(137) | None => "killed (memory cap reached?)".to_string(),
+            // Nothing is fetched on an indexer's behalf (§9.1): a missing dependency is the
+            // accepted outcome, recorded as such rather than retried.
+            _ if is_offline_failure(&log_text) => "offline".to_string(),
+            _ if log_text.contains("registry/cache") && log_text.contains("Read-only file system") => {
+                "dependencies not unpacked (run `cargo fetch` in the crate once)".to_string()
+            }
             Some(code) => format!("exit {code}; see {}", repo.state_dir().join("logs").join(format!("{}.log", run.unit)).display()),
         };
         // A killed run records its cap as the lower bound, so the next attempt is not doomed the
@@ -146,13 +162,17 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
         if run.kind == Kind::Universal {
             let mut snapshot = GraphSnapshot::load(&repo.scip_dir()).unwrap_or_default();
             snapshot.status = status_text;
-            snapshot.peak_rss_mb = peak_mb;
-            snapshot.peak_cap_bounded = true;
+            if killed {
+                snapshot.peak_rss_mb = peak_mb;
+                snapshot.peak_cap_bounded = true;
+            }
             snapshot.save(&repo.scip_dir())?;
         } else {
             store::record_outcome(repo, &run.indexer, &run.root, &status_text, |e| {
-                e.peak_rss_mb = peak_mb;
-                e.peak_cap_bounded = true;
+                if killed {
+                    e.peak_rss_mb = peak_mb;
+                    e.peak_cap_bounded = true;
+                }
                 e.cap_mb = cap >> 20;
             })?;
         }
@@ -197,6 +217,13 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
         }
     }
     Ok(Outcome::Ok)
+}
+
+/// Whether a run's log says it needed the network.
+pub fn is_offline_failure(log: &str) -> bool {
+    ["--offline", "failed to download", "network", "Could not resolve host", "ENOTFOUND", "offline mode"]
+        .iter()
+        .any(|needle| log.contains(needle))
 }
 
 /// `choom -n 1000 -- nice -n 10 ionice -c3 bwrap … -- sh -c '<run>; write the cgroup's peak'`.
@@ -353,5 +380,15 @@ mod tests {
         let argv = scope_argv(&plan.runs[0], &dir.path().join("scratch/peak"));
         let script = argv.last().unwrap();
         assert!(script.contains("memory.peak") && script.contains("exit $rc"), "{script}");
+    }
+}
+
+#[cfg(test)]
+mod offline_tests {
+    #[test]
+    fn a_missing_dependency_reads_as_offline() {
+        let log = "error: failed to get `serde` as a dependency of package `x`\n\nCaused by:\n  failed to download from registry\n  attempting to make an HTTP request, but --offline was specified";
+        assert!(super::is_offline_failure(log));
+        assert!(!super::is_offline_failure("error[E0308]: mismatched types"));
     }
 }

@@ -88,6 +88,7 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
             patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"}), \
             patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True), \
             patch.object(CodexBrandedBuilder, "build_web_tools", return_value=True), \
+            patch.object(CodexBrandedBuilder, "build_code_index", return_value=True), \
             patch.object(builder_module.subprocess, "call", side_effect=fake_call):
         assert CodexBrandedBuilder.build() is False
 
@@ -212,10 +213,50 @@ def test_the_web_commands_are_built_even_when_codex_is_current(monkeypatch):
     monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))
     monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
     monkeypatch.setattr(
-        CodexBrandedBuilder, "build_web_tools", classmethod(lambda cls, force=False: built.append(force) or True)
+        CodexBrandedBuilder, "build_web_tools", classmethod(lambda cls, force=False: built.append(("web", force)) or True)
+    )
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "build_code_index", classmethod(lambda cls, force=False: built.append(("code", force)) or True)
     )
     assert CodexBrandedBuilder.build() is True
-    assert built == [False]
+    assert built == [("web", False), ("code", False)]
+
+
+def test_puffin_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_path, monkeypatch):
+    # The prompt's `# Code navigation` block tells the model to run `puffin-code`; like the web
+    # commands it must be on the PATH of the shell puffin gives the model, or every call is exit 127.
+    calls = []
+
+    def fake_call(command, cwd=None, env=None):
+        calls.append((command, cwd, env))
+        release = tmp_path / "cache" / "target" / "release"
+        release.mkdir(parents=True, exist_ok=True)
+        (release / "puffin-code").write_text("#!/bin/sh\n")
+        (release / "puffin-code").chmod(0o755)
+        return 0
+
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(builder_module, "CODE_BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
+    monkeypatch.setattr(CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "puffin")))
+
+    assert CodexBrandedBuilder.build_code_index() is True
+    (command, cwd, env), = calls
+    assert cwd == builder_module.CODE_CRATE_DIR
+    assert command == ["cargo", "build", "--release", "--locked", "--bin", "puffin-code"]
+    assert env["CARGO_TARGET_DIR"] == str(tmp_path / "cache" / "target")
+    installed = tmp_path / "install" / "bin" / "puffin-code"
+    assert os.access(installed, os.X_OK)
+    assert os.readlink(builder_module.CODE_PATH_LINK) == str(installed)
+    # Current now: nothing is compiled again.
+    assert CodexBrandedBuilder.build_code_index() is True
+    assert len(calls) == 1
+
+
+def test_the_code_index_crate_is_committed_with_its_lockfile():
+    assert os.path.isfile(os.path.join(builder_module.CODE_CRATE_DIR, "Cargo.lock"))
+    assert os.path.isfile(os.path.join(builder_module.CODE_CRATE_DIR, "rust-toolchain.toml"))
 
 
 def test_the_web_crate_is_committed_with_its_lockfile():

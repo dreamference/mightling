@@ -80,6 +80,15 @@ WEB_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puff
 WEB_BUILD_STAMP_NAME: Final[str] = "web-build-key"
 WEB_BIN_NAMES: Final[tuple] = ("puffin-search", "puffin-fetch")
 
+# The code index router, `puffin-code` (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2): a crate of
+# its own for the same reasons as the web commands, built the same way. The prompt tells the model
+# to run it, so it is linked onto PATH beside the others.
+CODE_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "puffin-code-rs")
+CODE_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-code-build")
+CODE_BUILD_STAMP_NAME: Final[str] = "code-build-key"
+CODE_BIN_NAMES: Final[tuple] = ("puffin-code",)
+CODE_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-code")
+
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
 CODE_MODE_HOST_NAME: Final[str] = "codex-code-mode-host"
@@ -390,10 +399,11 @@ class CodexBrandedBuilder:
         Returns:
             bool: True if an up-to-date `puffin` and its web commands are installed afterwards.
         """
-        # First and independently: the web commands take seconds, and a stale Codex must not keep
-        # them from updating, nor they it.
+        # First and independently: the web commands and the code index take seconds, and a stale
+        # Codex must not keep them from updating, nor they it.
         web_ok = cls.build_web_tools(force=force)
-        return cls._build_codex(force=force) and web_ok
+        code_ok = cls.build_code_index(force=force)
+        return cls._build_codex(force=force) and web_ok and code_ok
 
     @classmethod
     def _build_codex(cls, force: bool = False) -> bool:
@@ -597,6 +607,21 @@ class CodexBrandedBuilder:
         )
 
     @classmethod
+    def build_code_index(cls, force: bool = False) -> bool:
+        """
+        Builds `puffin-code` from `puffin-code-rs/` unless it is current.
+
+        Args:
+            force (bool): Rebuild even if the installed binary matches the source.
+
+        Returns:
+            bool: True if it is installed and current afterwards.
+        """
+        return cls.build_crate(
+            CODE_CRATE_DIR, CODE_BUILD_CACHE_DIR, CODE_BUILD_STAMP_NAME, CODE_BIN_NAMES, force=force
+        )
+
+    @classmethod
     def console_script_path(cls, name: str) -> Optional[str]:
         """
         Returns a console script of the Python environment running this code, if it has one.
@@ -613,8 +638,8 @@ class CodexBrandedBuilder:
     @classmethod
     def link_onto_path(cls) -> None:
         """
-        Points `~/.local/bin/puffin`, `puffin-admin`, `puffin-search` and `puffin-fetch` at their
-        executables.
+        Points `~/.local/bin/puffin`, `puffin-admin`, `puffin-search`, `puffin-fetch` and
+        `puffin-code` at their executables.
 
         `puffin` so it works from any shell; the others so the model can run the web and mail
         commands its prompt names from the shell `puffin` gives it. A web command is linked only
@@ -624,7 +649,11 @@ class CodexBrandedBuilder:
         script = cls.console_script_path("puffin-admin")
         if script:
             cls._link(script, ADMIN_PATH_LINK)
-        for name, link in (("puffin-search", SEARCH_PATH_LINK), ("puffin-fetch", FETCH_PATH_LINK)):
+        for name, link in (
+            ("puffin-search", SEARCH_PATH_LINK),
+            ("puffin-fetch", FETCH_PATH_LINK),
+            ("puffin-code", CODE_PATH_LINK),
+        ):
             binary = os.path.join(INSTALL_DIR, "bin", name)
             if os.access(binary, os.X_OK):
                 cls._link(binary, link)

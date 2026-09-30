@@ -36,6 +36,10 @@ REAL_BRAND_INSTALL = OnyxBrandAssets.install
 REAL_FONTS_INSTALL = OnyxUIFonts.install
 REAL_START_STT_SERVER = OnyxRunner._start_stt_server
 REAL_ALLOW_LOCAL_VOICE_ENDPOINT = OnyxRunner._allow_local_voice_endpoint
+from dreamference.vllm_server.vllm_server_manager import VLLMServerManager  # noqa: E402
+
+# `server start` stops the code index's systemd scopes; the fixture below replaces it.
+REAL_STOP_INDEX_SCOPES = VLLMServerManager._stop_index_scopes
 # The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
 UI_PATCHERS = (OnyxBrandAssets, OnyxUIFonts, OnyxUILabels, OnyxUIOverrides, OnyxUIScripts)
 
@@ -70,6 +74,7 @@ def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(onyx_runner.OnyxRunner, "_allow_local_voice_endpoint", lambda self, *a, **k: True)
     for patcher in UI_PATCHERS:
         monkeypatch.setattr(patcher, "install", classmethod(lambda cls, container=None: True))
+    monkeypatch.setattr(VLLMServerManager, "_stop_index_scopes", classmethod(lambda cls: None))
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +92,11 @@ def _refuse_real_docker(monkeypatch):
             program = argv[0] if isinstance(argv, (list, tuple)) and argv else str(argv).split(" ")[0]
             if os.path.basename(str(program)) == "docker" and _changes_something(argv):
                 raise AssertionError(f"a test tried to run a real docker command: {argv!r}; mock it")
+            # `server start` stops the code index's scopes before its host-safety pre-flight
+            # (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §9.2): a test must never stop, freeze or
+            # start a unit of the user's own systemd.
+            if os.path.basename(str(program)) in ("systemctl", "systemd-run") and _changes_systemd(argv):
+                raise AssertionError(f"a test tried to run a real systemd command: {argv!r}; mock it")
             return original(*args, **kwargs)
         return run
 
@@ -97,6 +107,18 @@ def _refuse_real_docker(monkeypatch):
 # Docker subcommands that only read. Launch-command tests ask `docker info` and `docker image
 # inspect`, which change nothing; anything else touches the machine's containers.
 READ_ONLY_DOCKER: tuple = ("info", "version", "inspect", "ps", "images", "port", "logs", "stats")
+
+
+# systemctl verbs that only read.
+READ_ONLY_SYSTEMCTL: tuple = ("show", "status", "is-active", "is-enabled", "is-failed", "list-units", "show-environment", "cat")
+
+
+def _changes_systemd(argv) -> bool:
+    words = [str(w) for w in argv[1:]] if isinstance(argv, (list, tuple)) else str(argv).split()[1:]
+    if os.path.basename(str(argv[0] if isinstance(argv, (list, tuple)) else str(argv).split()[0])) == "systemd-run":
+        return True
+    verbs = [w for w in words if not w.startswith("-")]
+    return bool(verbs) and verbs[0] not in READ_ONLY_SYSTEMCTL
 
 
 def _changes_something(argv) -> bool:

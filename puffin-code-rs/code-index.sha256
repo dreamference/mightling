@@ -1,0 +1,6 @@
+# The pinned tools of the code index (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §3, §5), each checked
+# against this SHA-256 before it is installed. puffin-code's schema fingerprints belong to exactly
+# these versions: bump a line and the fingerprint together, never one alone.
+# <sha256>  <tool>  <version>  <url>  <member of the archive to install>
+c0e46c87cf37e35f1ac0bd9cc7e1d8b0ca4ef40034e1008805d709fa52a4e38a  codebase-memory-mcp  0.11.0  https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.11.0/codebase-memory-mcp-linux-arm64.tar.gz  codebase-memory-mcp
+6ab677dc2c4bf2955975d0530766152e45daaa988f9404068d8adecacd0bb24c  scip  0.10.0  https://github.com/scip-code/scip/releases/download/v0.10.0/scip-linux-arm64.tar.gz  scip

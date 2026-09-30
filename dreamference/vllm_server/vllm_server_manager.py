@@ -882,6 +882,28 @@ class VLLMServerManager:
         return cmd
 
     @classmethod
+    def _stop_index_scopes(cls) -> None:
+        """
+        Stops every running `puffin-code` index run before a model loads.
+
+        puffin-code runs its indexers in `puffin-index-*` scopes of the user's systemd
+        (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §9.2) and stops them itself when it sees a load,
+        but only after the load has begun; stopping them here keeps `check_host_safety()`'s view
+        of free memory true. A stopped run is recorded `deferred: model-start` and retried later.
+        Without a user systemd (a container, CI) there is nothing to stop.
+        """
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "stop", "puffin-index-*"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    @classmethod
     def check_host_safety(cls) -> None:
         """
         Verifies the host can survive loading a large model, and exits with instructions if not.
@@ -1501,6 +1523,9 @@ class VLLMServerManager:
                 "Current system does not meet the target specs."
             )
 
+        # The code index's runs must not share the machine with a model load: a frozen or running
+        # indexer holds memory the pre-flight below would count as free.
+        self._stop_index_scopes()
         self.check_host_safety()
 
         # Check memory availability.

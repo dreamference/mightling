@@ -57,7 +57,12 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
                 if interval_passed || request == Request::IndexExact {
                     pending = None;
                     last_start = Some(Instant::now());
-                    child = start(&repo, &settings, request == Request::IndexExact)?;
+                    let exact = request == Request::IndexExact || wants_exact(&repo, &settings);
+                    child = start(&repo, &settings, exact)?;
+                    if child.is_none() {
+                        // Nothing to run (no tools installed): nothing is being built either.
+                        let _ = std::fs::remove_file(state.join("code_index.building"));
+                    }
                 }
             }
         }

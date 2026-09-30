@@ -101,9 +101,19 @@ pub fn detect(repo: &Repo) -> Vec<Target> {
         names.sort();
         dirs.extend(names);
     }
+    // A top-level directory holding Python files git knows about, package or not (tests/,
+    // scripts/): scip-python indexes each as a root of its own.
+    // Tracked files only: an untracked scratch directory is the user's, not the project's.
+    let tracked = if repo.is_git { crate::paths::git_z(&repo.root, &["ls-files", "-z"]).unwrap_or_default() } else { Vec::new() };
+    let python_dirs: std::collections::BTreeSet<String> = tracked
+        .iter()
+        .filter(|f| f.ends_with(".py") || f.ends_with(".pyi"))
+        .filter_map(|f| f.split_once('/').map(|(top, _)| top.to_string()))
+        .collect();
     for dir in &dirs {
         let path = if dir.is_empty() { repo.root.clone() } else { repo.root.join(dir) };
-        if !dir.is_empty() && path.join("__init__.py").is_file() {
+        let is_python = if repo.is_git { python_dirs.contains(dir) } else { path.join("__init__.py").is_file() };
+        if !dir.is_empty() && is_python {
             out.push(Target { kind: Kind::Static, indexer: "scip-python", root: dir.clone() });
         }
         if let Ok(manifest) = std::fs::read_to_string(path.join("Cargo.toml")) {
@@ -193,11 +203,16 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
     let slug = super::store::slug(target.indexer, &target.root);
     let scratch = scratch_for(repo, &slug);
     let out = scratch.join("out");
+    let raw_file = out.join("raw.scip");
     let scip_file = out.join("index.scip");
     let converted = out.join("index.db");
+    let this = self_exe();
     let root_dir = if target.root.is_empty() { repo.root.clone() } else { repo.root.join(&target.root) };
     let convert = format!(
-        "&& {} expt-convert {} --output {}",
+        "&& {} scip-repair {} {} && {} expt-convert {} --output {}",
+        sh_quote(&this.to_string_lossy()),
+        sh_quote(&raw_file.to_string_lossy()),
+        sh_quote(&scip_file.to_string_lossy()),
         sh_quote(&scip.to_string_lossy()),
         sh_quote(&scip_file.to_string_lossy()),
         sh_quote(&converted.to_string_lossy())
@@ -217,7 +232,7 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
                 js = sh_quote(&js.to_string_lossy()),
                 name = sh_quote(if target.root.is_empty() { "root" } else { &target.root }),
                 root = sh_quote(if target.root.is_empty() { "." } else { &target.root }),
-                out = sh_quote(&scip_file.to_string_lossy()),
+                out = sh_quote(&raw_file.to_string_lossy()),
             );
             let mut env = base_env(&home, &format!("{}:/usr/bin:/bin", node_dir.to_string_lossy()));
             env.extend([
@@ -225,7 +240,13 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
                 ("PYTHONNOUSERSITE".into(), "1".into()),
                 ("npm_config_offline".into(), "true".into()),
             ]);
-            let read_only = vec![repo.root.clone(), paths::indexers_dir(), node_real.parent().unwrap().parent().unwrap().to_path_buf(), scip.parent().unwrap().to_path_buf()];
+            let read_only = vec![
+                repo.root.clone(),
+                paths::indexers_dir(),
+                node_real.parent().unwrap().parent().unwrap().to_path_buf(),
+                scip.parent().unwrap().to_path_buf(),
+                this.parent().unwrap().to_path_buf(),
+            ];
             (command, env, read_only, "0.6.6", settings.small_ceiling_mb << 20)
         }
         "rust-analyzer" => {
@@ -235,7 +256,7 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
                 "{ra} scip {src} --output {out} {convert}",
                 ra = sh_quote(&ra.to_string_lossy()),
                 src = sh_quote(&root_dir.to_string_lossy()),
-                out = sh_quote(&scip_file.to_string_lossy()),
+                out = sh_quote(&raw_file.to_string_lossy()),
             );
             let mut env = base_env(&home, &format!("{}:/usr/bin:/bin", toolchain_bin.to_string_lossy()));
             env.extend([
@@ -246,7 +267,7 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
                 ("CARGO_TARGET_DIR".into(), scratch.join("target").to_string_lossy().into_owned()),
                 ("CARGO_BUILD_JOBS".into(), "4".into()),
             ]);
-            let read_only = vec![rustup_home, cargo_home, root_dir.clone(), scip.parent().unwrap().to_path_buf()];
+            let read_only = vec![rustup_home, cargo_home, root_dir.clone(), scip.parent().unwrap().to_path_buf(), this.parent().unwrap().to_path_buf()];
             (command, env, read_only, "1.95.0", settings.memory_ceiling_mb << 20)
         }
         _ => return None,
@@ -274,6 +295,12 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
         ceiling,
         unit: format!("puffin-index-{}-{slug}", repo_id(repo)),
     })
+}
+
+/// This program, which the sandbox runs for `scip-repair` (`PUFFIN_CODE_SELF` in tests, whose
+/// own executable is the test harness).
+fn self_exe() -> PathBuf {
+    std::env::var_os("PUFFIN_CODE_SELF").map(PathBuf::from).unwrap_or_else(|| std::env::current_exe().unwrap_or_else(|_| PathBuf::from("puffin-code")))
 }
 
 /// Quotes a string for `sh`.

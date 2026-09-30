@@ -192,10 +192,11 @@ impl Context {
             }
             match ScipStore::open(&path, entry) {
                 Ok(store) => {
+                    // No scope: a store has documents outside its root (what the root imports),
+                    // and its snapshot stamps every file of the repository.
                     let stamps: HashMap<_, _> = store.entry.file_hashes.clone().into_iter().collect();
-                    let scope = (!store.entry.path_prefix.is_empty()).then(|| store.entry.path_prefix.clone());
                     let changes = layer_changes(
-                        &repo, &mut git, store.entry.commit.as_deref(), &store.entry.dirty_files, &stamps, scope.as_deref(), &is_state,
+                        &repo, &mut git, store.entry.commit.as_deref(), &store.entry.dirty_files, &stamps, None, &is_state,
                     );
                     if changes.method == Method::Stat {
                         method = Method::Stat;

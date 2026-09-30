@@ -63,7 +63,7 @@ pub fn spawn_supervisor_child(repo: &Repo, plan: &plan::Plan) -> Result<std::pro
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("plan-{}.json", std::process::id()));
     std::fs::write(&path, serde_json::to_vec_pretty(plan)?)?;
-    let log = std::fs::File::create(dir.join("supervisor.log"))?;
+    let log = std::fs::File::create(dir.join(format!("supervisor-{}.log", std::process::id())))?;
     let exe = std::env::current_exe()?;
     let child = unsafe {
         Command::new(exe)
@@ -145,6 +145,9 @@ pub fn write_cbmignore(repo: &Repo, include_submodules: bool) -> Result<()> {
     }
     if repo.is_git {
         exclude_from_git(repo, ".cbmignore")?;
+        // The state directory holds stores, logs and plans; a repository that does not ignore it
+        // would otherwise list every one of them in `git status` on each query.
+        exclude_from_git(repo, ".dreamference/")?;
     }
     Ok(())
 }

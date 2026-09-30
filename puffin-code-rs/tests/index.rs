@@ -28,6 +28,7 @@ fn env() -> &'static Env {
         std::env::set_var("RUSTUP_HOME", std::env::var("RUSTUP_HOME").unwrap_or_else(|_| real_home.join(".rustup").to_string_lossy().into()));
         std::env::set_var("PUFFIN_CODE_TOOLS_DIR", puffin_code::paths::install_bin_dir());
         std::env::set_var("PUFFIN_CODE_INDEXERS_DIR", puffin_code::paths::indexers_dir());
+        std::env::set_var("PUFFIN_CODE_SELF", env!("CARGO_BIN_EXE_puffin-code"));
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(home.join(".cargo/bin")).unwrap();

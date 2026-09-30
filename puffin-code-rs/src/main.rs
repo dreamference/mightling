@@ -90,6 +90,9 @@ enum Command {
     /// Supervise one index run (internal).
     #[command(hide = true)]
     Supervise { plan: String },
+    /// Add the SymbolInformation an indexer left out, so expt-convert accepts the index (internal).
+    #[command(hide = true)]
+    ScipRepair { input: std::path::PathBuf, output: std::path::PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -115,6 +118,14 @@ fn main() -> ExitCode {
 }
 
 fn run(command: Command) -> anyhow::Result<ExitCode> {
+    if let Command::ScipRepair { input, output } = &command {
+        let (fixed, added) = puffin_code::scip_store::repair_missing_symbol_information(&std::fs::read(input)?)?;
+        std::fs::write(output, fixed)?;
+        if added > 0 {
+            eprintln!("scip-repair: added {added} missing SymbolInformation entries");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
     let cwd = std::env::current_dir()?;
     let repo = Repo::discover(&cwd)?;
     let settings = Settings::load(&repo.root);

@@ -915,6 +915,16 @@ class DreamferenceCLIController:
         codex_subparsers.add_parser("start", help="Start puffin's app-server daemon in the background")
         codex_subparsers.add_parser("stop", help="Stop puffin's app-server daemon")
 
+        # Command: puffin-admin code -- the code index's tools. `puffin-code` itself is a Rust
+        # binary built beside `puffin` (`codex build`); what it runs to index (codebase-memory, the
+        # scip CLI, scip-python) is pinned by checksum and installed here, the one step that uses
+        # the network (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §5).
+        code_parser = subparsers.add_parser("code", help="Install the pinned tools of puffin-code's code index")
+        code_subparsers = code_parser.add_subparsers(dest="code_command", help="Code index commands")
+        code_subparsers.add_parser(
+            "setup", help="Install codebase-memory-mcp, the scip CLI and scip-python, each checked against its pin"
+        )
+
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
         bench_parser.add_argument("--port", type=int, default=8000, help="Port of the server to benchmark")
@@ -2093,6 +2103,13 @@ class DreamferenceCLIController:
                     vllm_mgr.show_request_logs(port=args.port)
                 except KeyboardInterrupt:
                     print("\nStopped tailing logs.")
+
+        elif args.command == "code":
+            from dreamference.cli.code_index_setup import CodeIndexSetup
+            if args.code_command == "setup":
+                sys.exit(0 if CodeIndexSetup.install() else 1)
+            print("usage: puffin-admin code setup")
+            sys.exit(2)
 
         elif args.command == "codex":
             import subprocess

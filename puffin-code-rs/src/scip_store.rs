@@ -58,6 +58,24 @@ pub struct ScipStore {
     conn: Connection,
     pub entry: RunEntry,
     pub path: PathBuf,
+    /// Repository path → document path. An indexer also writes documents for files outside its
+    /// root that the root imports (scip-python: `../dreamference/…` in the `tests` store).
+    docs: HashMap<String, String>,
+}
+
+/// Joins a root's prefix and a document path, resolving `.` and `..`.
+pub fn join_normalized(prefix: &str, doc: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in prefix.split('/').chain(doc.split('/')) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    parts.join("/")
 }
 
 impl ScipStore {
@@ -80,28 +98,27 @@ impl ScipStore {
         if !has_names {
             bail!("{} has not been post-processed; run `puffin-code index` to rebuild it", path.display());
         }
-        Ok(ScipStore { conn, entry, path: path.to_path_buf() })
+        let docs = {
+            let mut stmt = conn.prepare("SELECT relative_path FROM documents")?;
+            let docs = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            docs.into_iter().map(|d| (join_normalized(&entry.path_prefix, &d), d)).collect()
+        };
+        Ok(ScipStore { conn, entry, path: path.to_path_buf(), docs })
     }
 
-    /// The store's document path for a repository-relative path, if it is under this root.
-    pub fn doc_path<'a>(&self, repo_path: &'a str) -> Option<&'a str> {
-        repo_path.strip_prefix(self.entry.path_prefix.as_str())
+    /// The store's document path for a repository-relative path, if it has one.
+    pub fn doc_path(&self, repo_path: &str) -> Option<&str> {
+        self.docs.get(repo_path).map(String::as_str)
     }
 
     /// The repository-relative path of a document path.
     pub fn repo_path(&self, doc_path: &str) -> String {
-        format!("{}{}", self.entry.path_prefix, doc_path)
+        join_normalized(&self.entry.path_prefix, doc_path)
     }
 
     /// Whether the store has a document for this repository-relative path.
     pub fn covers(&self, repo_path: &str) -> bool {
-        let Some(doc) = self.doc_path(repo_path) else { return false };
-        self.conn
-            .query_row("SELECT 1 FROM documents WHERE relative_path = ?1", [doc], |_| Ok(()))
-            .optional()
-            .ok()
-            .flatten()
-            .is_some()
+        self.docs.contains_key(repo_path)
     }
 
     /// Definitions of symbols whose descriptor name is `query`'s last segment and whose path the
@@ -304,10 +321,8 @@ impl ScipStore {
     }
 
     /// The store's documents, repository-relative.
-    pub fn documents(&self) -> Result<BTreeSet<String>> {
-        let mut stmt = self.conn.prepare("SELECT relative_path FROM documents")?;
-        let docs = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(docs.into_iter().map(|d| self.repo_path(&d)).collect())
+    pub fn documents(&self) -> BTreeSet<String> {
+        self.docs.keys().cloned().collect()
     }
 }
 
@@ -501,6 +516,84 @@ fn symbol_relationships(info: &[u8], out: &mut Vec<(String, Relationship)>) -> R
     Ok(())
 }
 
+/// Adds a minimal `SymbolInformation` for every symbol a document defines without one.
+///
+/// scip-python emits such definitions (on this repository's `tests/`), and `expt-convert` stops on
+/// the first with "has definition occurrence, but no SymbolInformation", leaving the root without
+/// an exact layer. The repair keeps every other byte of the index as it was. Returns the repaired
+/// index and how many entries were added.
+pub fn repair_missing_symbol_information(index: &[u8]) -> Result<(Vec<u8>, usize)> {
+    let mut out = Vec::with_capacity(index.len() + 1024);
+    let mut added = 0;
+    let mut reader = Wire::new(index);
+    while let Some((field, value, raw)) = reader.next_raw()? {
+        match (field, value) {
+            (2, Value::Bytes(document)) => {
+                let (fixed, n) = repair_document(document)?;
+                added += n;
+                put_len_field(&mut out, 2, &fixed);
+            }
+            _ => out.extend_from_slice(raw),
+        }
+    }
+    Ok((out, added))
+}
+
+fn repair_document(document: &[u8]) -> Result<(Vec<u8>, usize)> {
+    let mut out = Vec::with_capacity(document.len() + 64);
+    let mut defined: Vec<String> = Vec::new();
+    let mut described: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut reader = Wire::new(document);
+    while let Some((field, value, raw)) = reader.next_raw()? {
+        out.extend_from_slice(raw);
+        match (field, value) {
+            (2, Value::Bytes(occurrence)) => {
+                let occ = decode_occurrence(occurrence)?;
+                if occ.roles & ROLE_DEFINITION != 0 && !occ.symbol.is_empty() && !occ.symbol.starts_with("local ") {
+                    defined.push(occ.symbol);
+                }
+            }
+            (3, Value::Bytes(info)) => {
+                let mut r = Wire::new(info);
+                while let Some((f, v)) = r.next()? {
+                    if let (1, Value::Bytes(symbol)) = (f, v) {
+                        described.insert(String::from_utf8_lossy(symbol).into_owned());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut added = 0;
+    for symbol in defined {
+        if described.insert(symbol.clone()) {
+            let mut info = Vec::new();
+            put_len_field(&mut info, 1, symbol.as_bytes());
+            put_len_field(&mut out, 3, &info);
+            added += 1;
+        }
+    }
+    Ok((out, added))
+}
+
+fn put_varint(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+fn put_len_field(out: &mut Vec<u8>, field: u32, bytes: &[u8]) {
+    put_varint(out, (u64::from(field) << 3) | 2);
+    put_varint(out, bytes.len() as u64);
+    out.extend_from_slice(bytes);
+}
+
 enum Value<'a> {
     Varint(u64),
     Bytes(&'a [u8]),
@@ -534,6 +627,13 @@ impl<'a> Wire<'a> {
         bail!("varint too long")
     }
 
+    /// Like [`Wire::next`], with the field's raw bytes (key and value) for copying it unchanged.
+    fn next_raw(&mut self) -> Result<Option<(u32, Value<'a>, &'a [u8])>> {
+        let start = self.pos;
+        let bytes = self.bytes;
+        Ok(self.next()?.map(|(field, value)| (field, value, &bytes[start..self.pos])))
+    }
+
     fn next(&mut self) -> Result<Option<(u32, Value<'a>)>> {
         if self.done() {
             return Ok(None);
@@ -563,5 +663,15 @@ impl<'a> Wire<'a> {
             bail!("truncated message");
         }
         Ok(Some((field, value)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn documents_outside_the_root_map_back_into_the_repository() {
+        assert_eq!(super::join_normalized("tests/", "../dreamference/a.py"), "dreamference/a.py");
+        assert_eq!(super::join_normalized("tests/", "test_a.py"), "tests/test_a.py");
+        assert_eq!(super::join_normalized("", "./src/lib.rs"), "src/lib.rs");
     }
 }

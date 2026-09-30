@@ -223,6 +223,14 @@ Start puffin's app-server daemon in the background.
 
 Stop puffin's app-server daemon.
 
+### `puffin-admin code`
+
+Install the pinned tools of puffin-code's code index.
+
+#### `puffin-admin code setup`
+
+Install codebase-memory-mcp, the scip CLI and scip-python, each checked against its pin.
+
 ### `puffin-admin benchmark_server`
 
 Run vLLM serve benchmark using Sonnet dataset.

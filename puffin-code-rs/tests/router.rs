@@ -298,3 +298,83 @@ fn the_same_answers_over_mcp() {
     let text = lines[2]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("exact shapes/cli.py:9"), "{text}");
 }
+
+#[test]
+fn a_definition_without_symbol_information_is_repaired() {
+    // Drop every SymbolInformation from the recorded index, as scip-python did for tests/: the
+    // repair restores one per defined symbol, and the rest of the index is unchanged.
+    let original = std::fs::read(common::fixture_dir().join("stores/shapes.scip")).unwrap();
+    let (again, added) = puffin_code::scip_store::repair_missing_symbol_information(&original).unwrap();
+    assert_eq!(added, 0);
+    assert_eq!(again, original);
+    let stripped = strip_symbol_information(&original);
+    let (fixed, added) = puffin_code::scip_store::repair_missing_symbol_information(&stripped).unwrap();
+    assert!(added > 5, "{added}");
+    assert_eq!(puffin_code::scip_store::relationships(&fixed).unwrap().len(), 0);
+}
+
+fn strip_symbol_information(index: &[u8]) -> Vec<u8> {
+    // A tiny rewriter for the test: drop field 3 of each document (field 2 of the index).
+    fn varint(b: &[u8], p: &mut usize) -> u64 {
+        let mut v = 0;
+        let mut s = 0;
+        loop {
+            let x = b[*p];
+            *p += 1;
+            v |= u64::from(x & 0x7f) << s;
+            if x & 0x80 == 0 {
+                return v;
+            }
+            s += 7;
+        }
+    }
+    fn put(out: &mut Vec<u8>, mut v: u64) {
+        loop {
+            let x = (v & 0x7f) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(x);
+                return;
+            }
+            out.push(x | 0x80);
+        }
+    }
+    fn fields(b: &[u8]) -> Vec<(u64, &[u8], Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut p = 0;
+        while p < b.len() {
+            let start = p;
+            let key = varint(b, &mut p);
+            match key & 7 {
+                0 => {
+                    varint(b, &mut p);
+                    out.push((key, &b[start..p], Vec::new()));
+                }
+                2 => {
+                    let len = varint(b, &mut p) as usize;
+                    out.push((key, &b[start..p + len], b[p..p + len].to_vec()));
+                    p += len;
+                }
+                _ => panic!("unexpected wire type"),
+            }
+        }
+        out
+    }
+    let mut out = Vec::new();
+    for (key, raw, value) in fields(index) {
+        if key >> 3 == 2 {
+            let mut doc = Vec::new();
+            for (k, r, _) in fields(&value) {
+                if k >> 3 != 3 {
+                    doc.extend_from_slice(r);
+                }
+            }
+            put(&mut out, key);
+            put(&mut out, doc.len() as u64);
+            out.extend_from_slice(&doc);
+        } else {
+            out.extend_from_slice(raw);
+        }
+    }
+    out
+}

@@ -72,7 +72,7 @@ pub fn fixture() -> Fixture {
             path_prefix: prefix.clone(),
             version: "fixture".to_string(),
             commit: Some(commit.clone()),
-            file_hashes: store::stamp_root(&repo, &prefix),
+            file_hashes: store::stamp_root(&repo, ""),
             ..RunEntry::default()
         };
         store::install(&repo, entry, &work, &stores.join(format!("{name}.scip"))).unwrap();
