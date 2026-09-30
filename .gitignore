@@ -41,7 +41,7 @@ ENV/
 .gemini/
 .aider*
 .claude/
-config/
+/config/
 
 # Tauri build output
 desktop/src-tauri/target/
