@@ -19,8 +19,7 @@ from rich.table import Table
 from dreamference.config import DreamferenceConfig
 from dreamference.config.dreamference_config import DEFAULT_MODEL, DEFAULT_DIFFUSION_MODEL
 from dreamference.runner import (
-    GooseRunner, ClineRunner, ClineInstaller,
-    AiderRunner, AiderInstaller,
+    ClineRunner, ClineInstaller,
     ContinueRunner, ContinueInstaller,
     OpenHandsRunner, OpenHandsInstaller,
     CodexRunner, CodexInstaller
@@ -562,7 +561,7 @@ class DreamferenceCLIController:
     @classmethod
     def handle_status(cls) -> None:
         """
-        Executes `puffin-admin status` command, displaying hardware metrics, vLLM health, Goose/Cline/Aider/Continue/OpenHands config,
+        Executes `puffin-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
         and context engine index telemetry in formatted Rich panels.
         """
         cls.display_header()
@@ -570,7 +569,6 @@ class DreamferenceCLIController:
         config = DreamferenceConfig()
         vllm_mgr = VLLMServerManager(host=config.vllm_host)
         vllm_status = vllm_mgr.get_server_status()
-        goose_runner = GooseRunner(config=config)
         # Imported here, not at module scope: the context engine pulls in torch, which
         # costs ~2.1s and 0.7 GB. `puffin-admin mcp` never needs it, and Codex starts one of
         # those per session on a box that is already tight on memory.
@@ -605,9 +603,7 @@ class DreamferenceCLIController:
             vllm_str = f"[yellow]Starting ({vllm_status['loading_status']})[/yellow]"
         else:
             vllm_str = f"[red]Offline ({config.vllm_host})[/red]"
-        goose_str = "[green]Installed[/green]" if goose_runner.is_goose_installed() else "[yellow]Not Found[/yellow]"
         cline_str = "[green]Extension Ready[/green]" if ClineInstaller.is_cline_extension_installed() else "[yellow]Extension Available[/yellow]"
-        aider_str = "[green]CLI Ready[/green]" if AiderInstaller.is_installed() else "[yellow]CLI Available[/yellow]"
         continue_str = "[green]Extension Ready[/green]" if ContinueInstaller.is_continue_extension_installed() else "[yellow]Extension Available[/yellow]"
         openhands_str = "[green]Docker Image Ready[/green]" if OpenHandsInstaller.is_image_downloaded() else "[yellow]Docker Available[/yellow]"
         codex_str = "[green]CLI Ready[/green]" if CodexInstaller.is_installed() else "[yellow]CLI Available[/yellow]"
@@ -637,9 +633,7 @@ class DreamferenceCLIController:
             "MoE Kernel Backend",
             recipe.get("moe_backend") or "[yellow]vLLM default (no model recipe)[/yellow]"
         )
-        agent_table.add_row("Goose CLI Runtime", goose_str)
         agent_table.add_row("Cline Extension Runtime", cline_str)
-        agent_table.add_row("Aider CLI Runtime", aider_str)
         agent_table.add_row("Continue IDE Runtime", continue_str)
         agent_table.add_row("OpenHands Docker Runtime", openhands_str)
         agent_table.add_row("Codex CLI Runtime", codex_str)
@@ -649,7 +643,6 @@ class DreamferenceCLIController:
         if not config.config_file_path.exists():
             config_path += " (not present; built-in defaults)"
         agent_table.add_row("Puffin Config Path", config_path)
-        agent_table.add_row("Goose Config Path", str(config.config_path))
 
         console.print(Panel(agent_table, title="[bold]🤖 vLLM & Agent Status[/bold]", border_style="magenta"))
 
@@ -763,9 +756,9 @@ class DreamferenceCLIController:
         """
         parser = argparse.ArgumentParser(
             prog="puffin-admin",
-            description="Puffin by Dreamference: autonomous local agentic coding engine powered by Goose, Cline, Aider, Continue, OpenHands & NVIDIA GB10"
+            description="Puffin by Dreamference: autonomous local agentic coding engine powered by Codex, Cline, Continue, OpenHands & NVIDIA GB10"
         )
-        agent_choices = ["goose", "cline", "aider", "continue", "openhands", "codex"]
+        agent_choices = ["codex", "cline", "continue", "openhands"]
 
         parser.add_argument("--config", default=None, help="Path to custom Puffin config file (.toml, .yaml or .json)")
         parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
@@ -1137,19 +1130,15 @@ class DreamferenceCLIController:
             guided_decoding_backend=guided_decoding_backend
         )
 
-        # Instantiate selected runner (Goose by default, or Cline/Aider/Continue/OpenHands)
+        # Instantiate selected runner (Codex by default, or Cline/Continue/OpenHands)
         if config.agent_runner == "cline":
             runner = ClineRunner(config=config)
-        elif config.agent_runner == "aider":
-            runner = AiderRunner(config=config)
         elif config.agent_runner == "continue":
             runner = ContinueRunner(config=config)
         elif config.agent_runner == "openhands":
             runner = OpenHandsRunner(config=config)
-        elif config.agent_runner == "codex":
-            runner = CodexRunner(config=config)
         else:
-            runner = GooseRunner(config=config)
+            runner = CodexRunner(config=config)
 
         # Dispatch subcommand logic
         if args.command == "model":
@@ -1862,7 +1851,6 @@ class DreamferenceCLIController:
             target_config_path = getattr(args, "config", None)
             resolved_path = ConfigPathResolver.resolve_path(target_config_path)
             saved_config_path = generate_default_init_config(resolved_path)
-            config.ensure_goose_config()
             from dreamference.context_engine import ContextEngine
             ctx_engine = ContextEngine()
             summary = ctx_engine.index_workspace(force_reindex=True)
@@ -1872,8 +1860,7 @@ class DreamferenceCLIController:
             # failed with UnboundLocalError.
             console.print("[bold green]✅ Puffin workspace initialized successfully![/bold green]")
             console.print(f"   [cyan]Puffin Config:[/cyan]       {saved_config_path}")
-            console.print(f"   [cyan]Active Agent:[/cyan]    {config.agent_runner.upper()} (Default: GOOSE)")
-            console.print(f"   [cyan]Goose Config:[/cyan]    {config.config_path}")
+            console.print(f"   [cyan]Active Agent:[/cyan]    {config.agent_runner.upper()} (Default: CODEX)")
             console.print(f"   [cyan]Target Model:[/cyan]    {config.model}")
             if config.draft_model:
                 console.print(f"   [cyan]Draft Model:[/cyan]     {config.draft_model} ({config.num_speculative_tokens} tokens)")

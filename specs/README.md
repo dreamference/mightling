@@ -37,7 +37,7 @@ This directory holds the specification, split into focused documents. This page 
 | Document | What it covers |
 |---|---|
 | [DREAMFERENCE_PUFFIN_CODEX.md](./DREAMFERENCE_PUFFIN_CODEX.md) | **`puffin`**: the Codex fork, patch series, Rust launcher, build, `update`, `app`, `/usage` |
-| [DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md) | All agent runners: Codex (default), Goose, Cline, Aider, Continue, OpenHands |
+| [DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md) | All agent runners: Codex (default), Cline, Continue, OpenHands |
 | [DREAMFERENCE_PUFFIN_GMAIL.md](./DREAMFERENCE_PUFFIN_GMAIL.md) | Read-only Gmail for the terminal agent (`puffin-admin gmail`) |
 | [DREAMFERENCE_CODEX.md](./DREAMFERENCE_CODEX.md) | Superseded Codex page; what `CodexRunner`/`CodexInstaller` still do |
 | [DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md) | The context engine (`puffin-admin index`, MCP `workspace_search_code`), with known gaps |
@@ -93,10 +93,9 @@ The reconciliation on 2026-09-28 found these places where the **code** was wrong
 | `clear tensorize-cache` / `clear model-cache` | Deleted the *parents*: all of `~/.cache/dreamference` (build and compile caches) and all of `~/.cache/huggingface` (including the login token) | Remove only `tensorizer/` and `hub/`, and report files a container left behind as root |
 | `puffin-admin clear-tensorize-cache` | Parsed and did nothing | Same as `clear tensorize-cache` |
 | `ensure_docker_image()` | Built the plain `Dockerfile` under a pinned DFlash tag | Builds only `DEFAULT_VLLM_IMAGE`; for other missing local tags, says how they are built |
-| Goose config | MCP extension ran `dreamference mcp` | Runs `puffin-admin mcp` by its full venv path |
 | OpenHands runner | Port 3000 (Onyx's), on every interface, with the Docker socket mounted; `LLM_BASE_URL` pointed at the container's own localhost | `127.0.0.1:3001`; vLLM reached through the bridge gateway |
 | Onyx web UI | nginx published on every interface, so the default admin account was reachable from the LAN | `configure()` binds ports 80 and 3000 to 127.0.0.1 through Onyx's `.env` |
-| Continue runner, Aider runner | Named the draft model (a speculative head, not a served model) for autocomplete / as the architect | Name the served model only |
+| Continue runner | Named the draft model (a speculative head, not a served model) for autocomplete | Names the served model only |
 | Context engine | Embeddings were never computed (a one-shot iterator was read twice), never stored (sqlite-vec not loaded, `hash()` row ids), never reloaded; no nomic prefixes | Stored in a plain table, reloaded by `load_index`, `search_document:`/`search_query:` prefixes, keyword-only when the model is unavailable |
 | `puffin` launcher | Refused-command check read the first argument only | Finds the subcommand from Codex's own option definitions |
 | `puffin` | Fresh `CODEX_HOME` opened on the ChatGPT sign-in screen; shared upstream's `~/.codex` and its ChatGPT login; Codex usage analytics on | `-c model_provider` on launch; own `~/.puffin`; analytics client disabled (patch 0013) |
@@ -119,6 +118,6 @@ The reconciliation on 2026-09-28 found these places where the **code** was wrong
 | Qwen3.8's chat template | Answered HTTP 400 to Codex's reasoning efforts `high`/`minimal` and refused a system message after the first | Patched on a copy at launch (`ChatTemplatePatcher`); a non-matching anchor stops the start |
 | SGLang launch with pinned checkpoints | Restart loop: SGLang dropped `--revision` on offline lookups, and a download by commit writes no `refs/main` | Pinned checkpoints are served from their snapshot directories |
 | vLLM usage statistics | Reported hardware, model and settings to stats.vllm.ai every ten minutes | `VLLM_NO_USAGE_STATS=1` and `DO_NOT_TRACK=1` in every model container |
-| `puffin` /pets and the TUI update check; Aider | /pets fetched art from OpenAI's CDN; a `true` in config.toml re-enabled the update check to api.github.com; Aider checked PyPI, offered PostHog and fetched litellm's price table from GitHub | /pets hidden (patch 0010), the launcher forces the update check off and drops `tui.pet`, Aider runs with its opt-outs |
+| `puffin` /pets and the TUI update check | /pets fetched art from OpenAI's CDN; a `true` in config.toml re-enabled the update check to api.github.com | /pets hidden (patch 0010), the launcher forces the update check off and drops `tui.pet` |
 | `puffin-admin model list` | `UnboundLocalError` on `Table`: a local import elsewhere in `run_cli` made the name local to the whole function | Local re-imports of module-level names removed |
 | `puffin-admin server` / `clear` / `model` / `main-model` / `diffusion-model` without a subcommand | Printed nothing and exited 0 | Print the group's help and exit 1, like `desktop` and `puffin` |

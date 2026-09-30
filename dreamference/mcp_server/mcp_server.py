@@ -2,7 +2,7 @@
 Async Stdio Model Context Protocol (MCP) Server.
 
 This module provides the MCPServer class which runs an asynchronous JSON-RPC stdio server loop
-enabling Goose AI Agent, JetBrains, and VS Code companion tools.
+enabling Codex, JetBrains, and VS Code companion tools.
 """
 
 import sys

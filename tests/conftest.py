@@ -113,7 +113,7 @@ def _changes_something(argv) -> bool:
 
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path_factory, monkeypatch):
-    # Runners write their agents' configs under `~`: `~/.continue/config.json`, Goose's config,
+    # Runners write their agents' configs under `~`: `~/.continue/config.json`, Codex's home,
     # and more. Tests used to run against the real home folder, and every run rewrote the user's
     # Continue config with a test model the machine does not serve. Each test gets its own home.
     home = tmp_path_factory.mktemp("home")

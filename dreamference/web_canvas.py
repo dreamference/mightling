@@ -189,11 +189,11 @@ CANVAS_HTML = """<!DOCTYPE html>
               +128GB Unified Memory
               +Blackwell Tensor Cores
             }
-            class GooseAgent {
+            class CodexAgent {
               +ContextEngine AST
               +vLLM Local Server
             }
-            GB10Hardware <|-- GooseAgent : Accelerated By
+            GB10Hardware <|-- CodexAgent : Accelerated By
         </div>
       </div>
 

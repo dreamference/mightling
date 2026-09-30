@@ -43,8 +43,6 @@
 - **For the desktop window:** GTK/WebKit 4.1 development headers, Rust and the Tauri CLI. `puffin-admin desktop install` fetches all three; the headers need `sudo apt-get`.
 - **Optional agents:**
   - VS Code / VSCodium, for Cline and Continue;
-  - `aider-chat`, for Aider;
-  - Apptainer or Podman, for Goose sandboxing.
 
 ### 1.4. Privileges
 
@@ -82,7 +80,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e .       # installs the `puffin-admin` console script into .venv/bin
 
 .venv/bin/puffin-admin init                  # default model qwen3.5-122b-a10b-hybrid-dflash: downloads weights,
-                                             # writes dreamference.toml and the Goose config, indexes the workspace
+                                             # writes dreamference.toml, indexes the workspace
 .venv/bin/puffin-admin codex build           # builds puffin from codex/ + codex-patches/ + puffin-rs/,
                                              # links ~/.local/bin/puffin (first build: long; later: incremental)
 .venv/bin/puffin-admin server start          # vLLM + diffusion sidecar; exits when healthy
@@ -112,7 +110,7 @@ A published GitHub release carries `puffin` and `codex-code-mode-host` for linux
 4. `puffin-admin codex build`, so `puffin` exists when it finishes.
 5. Tells you to run `puffin-admin server start`, then `puffin`.
 
-Until 2026-09-29 it defaulted to `qwen3.6-35b-a3b-nvfp4`, installed Goose, and never built `puffin`.
+Until 2026-09-29 it defaulted to `qwen3.6-35b-a3b-nvfp4` and never built `puffin`.
 
 ---
 
@@ -125,14 +123,6 @@ All in `scripts/` at the repository root.
 A thin wrapper over `puffin-admin server start`: each argument given becomes `--model`, `--port`, `--draft-model` or `--num-speculative-tokens`, and anything omitted takes the configured value. The launch therefore gets what the CLI gives it — the alias resolved to its HF repo, the registry recipe and pinned image, the host-safety checks and the PSI watchdog.
 
 Until 2026-09-29 it ran `python3 -m vllm.entrypoints.openai.api_server` directly, outside Docker, with the alias unresolved and the removed `--speculative-model` flags.
-
-### 4.2. `scripts/run_goose.sh`
-
-```bash
-./scripts/run_goose.sh "task prompt"
-```
-
-Runs `puffin-admin run --agent goose "$@"`, which checks the server, writes Goose's config for the served model id and provisions Goose if it is missing (`DREAMFERENCE_AGENTS.md`). Until 2026-09-29 it exported `GOOSE_MODEL` as the alias, which vLLM does not serve, and called `goose` directly.
 
 ---
 

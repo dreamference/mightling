@@ -48,9 +48,8 @@ class OpenHandsRunner:
         """
         # Step 1: Ensure local vLLM endpoint is online
         if not self.vllm_manager.check_health():
-            from dreamference.runner.goose_runner import GooseRunner
-            goose_runner = GooseRunner(config=self.config)
-            if not goose_runner.wait_for_vllm():
+            from dreamference.runner.vllm_readiness_waiter import VLLMReadinessWaiter
+            if not VLLMReadinessWaiter(config=self.config).wait_for_vllm():
                 return 1
 
         # Step 2: Ensure Docker is running

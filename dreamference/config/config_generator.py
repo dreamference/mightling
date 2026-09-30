@@ -17,7 +17,7 @@ def generate_default_init_config(target_path: Path) -> Path:
     """
     default_content = (
         'vllm_host = "http://localhost:8000"\n'
-        'agent_runner = "aider"\n'
+        'agent_runner = "codex"\n'
     )
     with open(target_path, "w", encoding="utf-8") as f:
         f.write(default_content)

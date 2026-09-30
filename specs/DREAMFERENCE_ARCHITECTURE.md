@@ -14,7 +14,7 @@
 
 - **`puffin`:** the terminal coding agent, and the default. It is a Puffin-branded build of OpenAI's Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`puffin-rs/`).
 - **Puffin web UI:** Onyx Lite, deployed and patched by `puffin-admin puffin …`. It is a browser chat with web search, image search, voice and Gmail, and it is also shown as a desktop window by the Tauri shell `puffin-app`.
-- **Other agents:** Goose, Cline, Aider, Continue and OpenHands, through `puffin-admin run --agent …`.
+- **Other agents:** Cline, Continue and OpenHands, through `puffin-admin run --agent …`.
 
 Everything is administered through **`puffin-admin`**, the Python CLI.
 
@@ -22,7 +22,7 @@ Everything is administered through **`puffin-admin`**, the Python CLI.
 +------------------------------------------------------------------------------------+
 |  Front ends                                                                        |
 |   puffin (Rust, Codex fork)   Puffin web UI (Onyx Lite) / puffin-app   IDEs (MCP)  |
-|   puffin-admin run --agent goose|cline|aider|continue|openhands                    |
+|   puffin-admin run --agent cline|continue|openhands                                |
 +-----------------------+--------------------------------+---------------------------+
                         | OpenAI-compatible HTTP          | stdio MCP (puffin-admin mcp)
 +-----------------------v--------------------------------v---------------------------+
@@ -72,7 +72,7 @@ Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
 3. config file (`--config`, `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`/`.json`, `~/.config/dreamference/config.toml`);
 4. module-level `DEFAULT_*` constant.
 
-`save_config()` writes only values that differ from the defaults. The package also writes the Goose config and the Goose environment.
+`save_config()` writes only values that differ from the defaults.
 
 ### 3.2. `hardware/`: models, downloads, telemetry
 
@@ -134,7 +134,7 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 - [x] GB10 model matrix, unified-memory targeting and host-safety guards
 - [x] Docker vLLM lifecycle, weight pre-download, tensorizer, benchmark, deep inspection
 - [x] Diffusion sidecar beside the main model
-- [x] Agent runners (Goose, Cline, Aider, Continue, OpenHands) and the stdio MCP server
+- [x] Agent runners (Cline, Continue, OpenHands) and the stdio MCP server
 - [x] Context engine (AST, FTS5, TF-IDF, embeddings) and web canvas
 - [x] `puffin`: branded Codex from a pinned fork, Rust launcher, `update`, `app`, `/usage`
 - [x] Puffin web UI (Onyx Lite) with branding, web and image search, voice, Gmail; desktop window

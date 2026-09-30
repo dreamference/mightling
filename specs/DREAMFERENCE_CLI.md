@@ -24,7 +24,7 @@
 - `puffin-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
 - `puffin`: **not** a Python entry point. It is the Rust binary built by `puffin-admin codex build`: Codex with Puffin's branding and launcher compiled in, linked at `~/.local/bin/puffin`. It takes Codex's command line. See `DREAMFERENCE_PUFFIN_CODEX.md`.
 
-There is no `chat` subcommand any more (removed 2026-09-28). The interactive agent is `puffin`. The other agents (Goose, Cline, Aider, Continue, OpenHands) are reachable through `puffin-admin run "…" --agent …`.
+There is no `chat` subcommand any more (removed 2026-09-28). The interactive agent is `puffin`. The other agents (Cline, Continue, OpenHands) are reachable through `puffin-admin run "…" --agent …`.
 
 **Framework:** argparse + Rich terminal UI. Parsing is strict: every command rejects unknown arguments.
 
@@ -41,13 +41,13 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 
 ## 2. Global Options
 
-These options come before the subcommand (`puffin-admin --agent aider run "…"`). `init` and `run` also accept most of them after the subcommand.
+These options come before the subcommand (`puffin-admin --agent cline run "…"`). `init` and `run` also accept most of them after the subcommand.
 
 | Flag | Type | Description |
 | :--- | :--- | :--- |
 | `--config PATH` | Path | Custom Puffin config file |
 | `--sandbox {none,apptainer,podman,docker}` | Choice | Rootless container sandbox engine |
-| `--agent {goose,cline,aider,continue,openhands,codex}` | Choice | Agent runner (default `codex`) |
+| `--agent {codex,cline,continue,openhands}` | Choice | Agent runner (default `codex`) |
 | `--hf-token TOKEN` | String | HuggingFace token (else `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN`) |
 
 `--debug` and `--cave` belong to `run`; they are not global.
@@ -58,7 +58,7 @@ These options come before the subcommand (`puffin-admin --agent aider run "…"`
 
 | Subcommand | Description | Key Args |
 | :--- | :--- | :--- |
-| **`init`** | Download weights, write the config, write the Goose config, force a workspace re-index | `[--model] [--vllm-host] [--draft-model] [--sandbox] [--agent] [--hf-token]` |
+| **`init`** | Download weights, write the config, force a workspace re-index | `[--model] [--vllm-host] [--draft-model] [--sandbox] [--agent] [--hf-token]` |
 | **`run`** | Run one task with the selected agent | `PROMPT [--model] [--draft-model] [--sandbox] [--agent] [--hf-token] [--debug] [--cave]` |
 | **`status`** | Hardware, vLLM and agent, and context-index panels | — |
 | **`index`** | AST + FTS5 + TF-IDF + embedding workspace index | `[--dir PATH] [--force]` |
@@ -100,8 +100,7 @@ puffin-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST]
 **Behaviour:**
 1. Downloads the main (and draft) weights into the HF cache, tensorizing them if `use_tensorizer` is set.
 2. Writes a minimal `dreamference.toml` via `config_generator.generate_default_init_config`, at the path `ConfigPathResolver` resolves.
-3. Writes the Goose config (`~/.config/goose/config.yaml`).
-4. Forces a full workspace re-index (`ContextEngine.index_workspace(force_reindex=True)`).
+3. Forces a full workspace re-index (`ContextEngine.index_workspace(force_reindex=True)`).
 
 ---
 
@@ -125,17 +124,15 @@ puffin-admin diffusion-model set MODEL
 puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug] [--cave]
 ```
 
-**Behaviour:** dispatches on `config.agent_runner` to one of `GooseRunner`, `ClineRunner`, `AiderRunner`, `ContinueRunner`, `OpenHandsRunner` or `CodexRunner`, then calls `run_session(prompt=…, debug=…)`.
+**Behaviour:** dispatches on `config.agent_runner` to one of `CodexRunner` (also for any unrecognised value), `ClineRunner`, `ContinueRunner` or `OpenHandsRunner`, then calls `run_session(prompt=…, debug=…)`.
 
 - **Codex (default):**
   - builds `puffin` if it is missing or stale;
   - runs `puffin "PROMPT"`, passing the vLLM host as `DREAMFERENCE_VLLM_HOST`;
   - with `--debug`, sets `RUST_LOG=codex_mcp=trace,codex_core=debug,codex_app_server=debug,info`.
-- **Goose:** `goose run --text "PROMPT"`.
-- **Aider:** `aider … --message "PROMPT"`.
 - **Cline:** prints the prompt and opens VS Code.
 - **Continue / OpenHands:** launch their UI; the prompt is unused.
-- **`--cave`:** injects the terse Cave Mode prompt into the Goose instructions, or into `.clinerules` for Cline.
+- **`--cave`:** injects the terse Cave Mode prompt into `.clinerules` for Cline.
 
 ---
 
@@ -149,8 +146,8 @@ puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent �
    - active agent runner (default CODEX), configured model, tensorize status, draft model;
    - sandbox, HF token presence;
    - prefix caching / chunked prefill, multi-step scheduling, KV cache dtype (`from model recipe` unless overridden), tool-call parser;
-   - install state of each agent (Goose, Cline, Aider, Continue, OpenHands, Codex);
-   - config paths.
+   - install state of each agent (Cline, Continue, OpenHands, Codex);
+   - the Puffin config path.
 3. **Context Engine Index Status:** indexed files, AST symbols, index path, SQLite store path. Shown only when an index exists.
 
 ---
@@ -416,13 +413,11 @@ puffin_gmail = true
 | `DREAMFERENCE_DRAFT_MODEL` | (unset) | Draft model alias |
 | `DREAMFERENCE_SPECULATIVE_TOKENS` | `8` | Speculative token count |
 | `DREAMFERENCE_SANDBOX` | `none` | Sandbox engine |
-| `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | `codex` | Agent runner (`codex`, `goose`, `cline`, `aider`, `continue`, `openhands`) |
+| `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | `codex` | Agent runner (`codex`, `cline`, `continue`, `openhands`) |
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_PUFFIN_GMAIL` | `true` | Add the Gmail section to `puffin`'s prompt when an account is connected |
 | `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN` | (unset) | HuggingFace token |
 | `HF_HOME` | `~/.cache/huggingface` | HF cache root (the hub cache is `$HF_HOME/hub`) |
-
-Goose processes additionally get `GOOSE_PROVIDER=openai`, `OPENAI_BASE_URL`, `OPENAI_API_KEY=gb10-local-token`, `GOOSE_MODEL`, `GOOSE_ALLOW_SHELL`, `GOOSE_ALLOW_READ` and `GOOSE_TELEMETRY_OFF` from `DreamferenceConfig.get_env_vars()`.
 
 **Tuning keys** (config file or CLI only, no environment variable):
 - `enable_prefix_caching`;

@@ -1,23 +1,16 @@
 import os
 from dreamference.config import DreamferenceConfig
 from dreamference.runner import (
-    GooseRunner, SandboxManager, ClineRunner, ClineInstaller,
-    AiderRunner, AiderInstaller,
+    SandboxManager, ClineRunner, ClineInstaller,
     ContinueRunner, ContinueInstaller,
     OpenHandsRunner, OpenHandsInstaller
 )
 
 def test_runner_sandbox_prefix_none():
-    config = DreamferenceConfig(sandbox="none")
-    runner = GooseRunner(config=config)
-    prefix = runner.get_sandbox_command_prefix()
-    assert prefix == []
+    assert SandboxManager.get_prefix("none", os.getcwd()) == []
 
 def test_runner_sandbox_prefix_docker():
-    config = DreamferenceConfig(sandbox="docker")
-    runner = GooseRunner(config=config)
-    prefix = runner.get_sandbox_command_prefix()
-    assert isinstance(prefix, list)
+    assert isinstance(SandboxManager.get_prefix("docker", os.getcwd()), list)
 
 def test_cline_runner_clinerules_creation(tmp_path):
     orig_cwd = os.getcwd()
@@ -42,7 +35,7 @@ def test_continue_runner_config_creation():
     assert "nvidia/Qwen3.6-35B-A3B-NVFP4" in content
 
 def test_agent_runner_choices():
-    for agent in ["goose", "cline", "aider", "continue", "openhands"]:
+    for agent in ["codex", "cline", "continue", "openhands"]:
         cfg = DreamferenceConfig(agent_runner=agent)
         assert cfg.agent_runner == agent
 
@@ -93,13 +86,12 @@ def test_openhands_stays_on_this_machine_and_off_onyx_port(monkeypatch):
     assert "LLM_BASE_URL=http://172.17.0.1:8000/v1" in cmd
 
 
-def test_agents_only_name_the_model_the_server_serves(monkeypatch, tmp_path):
+def test_agents_only_name_the_model_the_server_serves(tmp_path):
     # The draft model is vLLM's internal speculative head, not a served model. Continue's
-    # autocomplete and Aider's architect mode both used to send requests naming it.
+    # autocomplete used to send requests naming it.
     import json
     from dreamference.config import DreamferenceConfig
     from dreamference.hardware import resolve_model_hf_repo
-    from dreamference.runner import AiderRunner, ContinueRunner, AiderInstaller
 
     config = DreamferenceConfig(config_file=str(tmp_path / "d.toml"), model="qwen3.6-35b-a3b-nvfp4",
                                 draft_model="qwen3.5-122b-a10b-dflash-draft")
@@ -108,32 +100,17 @@ def test_agents_only_name_the_model_the_server_serves(monkeypatch, tmp_path):
     cont = json.loads(ContinueRunner(config=config).ensure_continue_config().read_text())
     assert cont["tabAutocompleteModel"]["model"] == served
 
-    runner = AiderRunner(config=config)
-    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
-    monkeypatch.setattr(AiderInstaller, "is_installed", classmethod(lambda cls: True))
-    monkeypatch.setattr(AiderInstaller, "get_aider_executable", classmethod(lambda cls: "/bin/aider"), raising=False)
-    calls = []
-    monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)
-    runner.run_session()
-    models = [cmd[i + 1] for cmd in calls for i, arg in enumerate(cmd) if arg in ("--model", "--editor-model")]
-    assert models and all(m == f"openai/{served}" for m in models)
 
+def test_readiness_waiter_needs_health_and_a_completion(monkeypatch):
+    # /health answers before the engine can generate, so the waiter also needs a completion.
+    from dreamference.runner import VLLMReadinessWaiter
 
-def test_aider_runs_without_update_checks_or_analytics(monkeypatch, tmp_path):
-    # Aider asked PyPI for updates, offered PostHog analytics, and its litellm fetched a price
-    # table from GitHub on import; the audit of 2026-09-29 found all three.
-    from dreamference.config import DreamferenceConfig
-    from dreamference.runner import AiderRunner, AiderInstaller
+    waiter = VLLMReadinessWaiter(config=DreamferenceConfig())
+    monkeypatch.setattr(waiter.vllm_manager, "check_health", lambda timeout=None: True)
+    monkeypatch.setattr("time.sleep", lambda s: None)
 
-    runner = AiderRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml")))
-    monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
-    monkeypatch.setattr(AiderInstaller, "install_if_missing", classmethod(lambda cls: True), raising=False)
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/aider")
-    calls = []
-    monkeypatch.setattr("subprocess.call", lambda cmd, env=None, **k: calls.append((cmd, env)) or 0)
+    monkeypatch.setattr(waiter, "_pre_warm", lambda: True)
+    assert waiter.wait_for_vllm(max_wait=5) is True
 
-    runner.run_session("hi")
-    cmd, env = calls[0]
-    for flag in ("--no-check-update", "--no-show-release-notes", "--analytics-disable"):
-        assert flag in cmd
-    assert env["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"
+    monkeypatch.setattr(waiter, "_pre_warm", lambda: False)
+    assert waiter.wait_for_vllm(max_wait=0) is False

@@ -3,18 +3,16 @@ Main Dreamference Configuration Class.
 
 This module provides the DreamferenceConfig class which merges CLI parameters, environment
 variables, `.dreamference/config.yaml`, and system defaults into a unified settings object.
-It also manages Goose AI Agent configuration files (~/.config/goose/config.yaml).
 """
 
 import os
-import json
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, Final
 
 from dreamference.hardware import MODEL_MATRIX, check_model_compatibility
 from dreamference.hardware.model_matrix_registry import DEFAULT_MODEL_ALIAS, DEFAULT_DIFFUSION_MODEL_ALIAS
 from dreamference.config.config_path_resolver import ConfigPathResolver
-from dreamference.config.config_file_storage_manager import ConfigFileStorageManager, yaml
+from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
 
 # System defaults
 DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
@@ -36,14 +34,6 @@ DEFAULT_ENABLE_AUTO_TOOL_CHOICE: Final[bool] = True
 DEFAULT_TOOL_CALL_PARSER: Final[str] = "hermes"
 DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
 
-HERMES_TOOL_CALL_PROMPT: Final[str] = (
-    "When you need to execute a tool, format your tool call strictly using <tool_call> tags as follows:\n"
-    "<tool_call>\n"
-    "{\"name\": \"function_name\", \"arguments\": {\"arg\": \"val\"}}\n"
-    "</tool_call>"
-)
-
-
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
 DEFAULT_CAVE_MODE: Final[bool] = False
 DEFAULT_USE_TENSORIZER: Final[bool] = False
@@ -57,8 +47,6 @@ CAVE_MODE_PROMPT: Final[str] = (
     "Do not apologize. Output only the exact shell commands, tool calls, or code modifications "
     "required to complete the user's objective. If asked a question, answer in 15 words or less."
 )
-
-GOOSE_CONFIG_PATH: Final[Path] = Path.home() / ".config" / "goose" / "config.yaml"
 
 class DreamferenceConfig:
     """
@@ -177,7 +165,7 @@ class DreamferenceConfig:
             )
         ).lower()
 
-        # 6. Primary AI agent runner ('goose' [default] or 'cline')
+        # 6. Agent runner ('codex' [default], 'cline', 'continue' or 'openhands')
         self.agent_runner: str = (
             agent_runner
             if agent_runner is not None
@@ -271,9 +259,6 @@ class DreamferenceConfig:
             self.puffin_gmail = env_puffin_gmail.lower() in ("1", "true", "yes")
         else:
             self.puffin_gmail = bool(self.file_data.get("puffin_gmail", DEFAULT_PUFFIN_GMAIL))
-
-        # Path to official Goose config file
-        self.config_path: Path = GOOSE_CONFIG_PATH
 
     @property
     def model(self) -> str:
@@ -376,25 +361,6 @@ class DreamferenceConfig:
         from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
         return VLLMServerManager().resolve_tool_call_parser(self.model)
 
-    def build_instructions(self) -> str:
-        """
-        Builds the Goose `instructions` block for the configured model.
-
-        The Hermes prompt teaches the model to wrap tool calls in `<tool_call>` tags, which is only
-        correct when vLLM is running the hermes parser. Models served through a different parser
-        (Qwen 3.6 emits XML) already produce the format their parser expects, and instructing them
-        to emit Hermes tags instead yields tool calls that the server cannot parse.
-
-        Returns:
-            str: Instructions text, possibly empty when no prompt is warranted.
-        """
-        parts = []
-        if self.resolve_tool_call_parser() == "hermes":
-            parts.append(HERMES_TOOL_CALL_PROMPT)
-        if self.cave_mode:
-            parts.append(CAVE_MODE_PROMPT)
-        return "\n\n".join(parts)
-
     def validate_model(self) -> Tuple[bool, str]:
         """
         Validates selected main and draft models against GB10 hardware memory specs.
@@ -406,178 +372,3 @@ class DreamferenceConfig:
             from dreamference.hardware import check_speculative_compatibility
             return check_speculative_compatibility(self.model, self.draft_model)
         return check_model_compatibility(self.model)
-
-    def get_env_vars(self) -> Dict[str, str]:
-        """
-        Generates environment variables required for Goose agent processes.
-        Includes GOOSE_ALLOW_SHELL=1 and GOOSE_ALLOW_READ=1 so the built-in
-        developer extension can execute real OS shell commands (/bin/bash -c ...)
-        instead of emitting simulated JSON tool calls.
-
-        Returns:
-            Dict[str, str]: Environment variables dictionary (GOOSE_PROVIDER, OPENAI_BASE_URL, HF_TOKEN, etc.).
-        """
-        from dreamference.hardware import resolve_model_hf_repo
-        resolved_model = resolve_model_hf_repo(self.model)
-        base_url = self.vllm_host.rstrip("/") + "/v1"
-        env: Dict[str, str] = {
-            "GOOSE_PROVIDER": "openai",
-            "OPENAI_BASE_URL": base_url,
-            "OPENAI_API_KEY": "gb10-local-token",
-            "GOOSE_MODEL": resolved_model,
-            "GOOSE_ALLOW_SHELL": "1",
-            "GOOSE_ALLOW_READ": "1",
-            "GOOSE_TELEMETRY_OFF": "1",
-        }
-        if self.hf_token:
-            env["HF_TOKEN"] = self.hf_token
-            env["HUGGING_FACE_HUB_TOKEN"] = self.hf_token
-        return env
-
-    @staticmethod
-    def mcp_server_command() -> str:
-        """
-        The executable that serves Dreamference's MCP server (`puffin-admin mcp`) to an agent.
-
-        Its full path beside this interpreter when it exists, because an agent started from an
-        IDE or a desktop entry may not have the virtualenv on PATH. The command used to be
-        `dreamference`, which no longer exists, so Goose's extension failed to start.
-
-        Returns:
-            str: Absolute path to `puffin-admin`, or the bare name as a fallback.
-        """
-        import sys
-
-        candidate = os.path.join(os.path.dirname(sys.executable), "puffin-admin")
-        return candidate if os.access(candidate, os.X_OK) else "puffin-admin"
-
-    def ensure_goose_config(self, extra_mcp_servers: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Ensures ~/.config/goose/config.yaml is updated with local vLLM OpenAI endpoint settings,
-        the built-in "developer" extension (real OS shell execution via /bin/bash with allow_shell), and the stdio MCP extension.
-        When cave_mode=True, injects the strict Cave Mode system prompt via the "instructions" key.
-
-        Args:
-            extra_mcp_servers (Optional[Dict[str, Any]]): Optional additional MCP extensions to merge.
-        """
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        from dreamference.hardware import resolve_model_hf_repo
-        resolved_model = resolve_model_hf_repo(self.model)
-        base_url = self.vllm_host.rstrip("/") + "/v1"
-        config_data: Dict[str, Any] = {
-            "provider": "openai",
-            "openai": {
-                "base_url": base_url,
-                "api_key": "gb10-local-token",
-                "model": resolved_model
-            },
-            "extensions": {
-                "developer": {
-                    "enabled": True,
-                    "type": "builtin",
-                    "allow_shell": True
-                },
-                "jetbrains_mcp": {
-                    "enabled": True,
-                    "type": "stdio",
-                    "cmd": self.mcp_server_command(),
-                    "args": ["mcp"]
-                }
-            }
-        }
-        config_data["instructions"] = self.build_instructions()
-
-        if extra_mcp_servers:
-            config_data["extensions"].update(extra_mcp_servers)
-
-        if yaml:
-            if self.config_path.exists():
-                try:
-                    with open(self.config_path, "r", encoding="utf-8") as f:
-                        existing = yaml.safe_load(f) or {}
-                    if isinstance(existing, dict):
-                        # Deep-merge extensions so developer + jetbrains_mcp are never lost
-                        if "extensions" in existing and isinstance(existing["extensions"], dict):
-                            existing["extensions"].update(config_data.get("extensions", {}))
-                            config_data["extensions"] = existing["extensions"]
-                        existing.update(config_data)
-                        config_data = existing
-                        # Force developer extension (with allow_shell) so real /bin/bash is always used
-                        if "extensions" not in config_data or not isinstance(config_data["extensions"], dict):
-                            config_data["extensions"] = {}
-                        config_data["extensions"]["developer"] = {
-                            "enabled": True,
-                            "type": "builtin",
-                            "allow_shell": True
-                        }
-                        # Re-assert our instructions: the merge above lets a stale user-authored
-                        # block (or a previous model's tool-call format) win otherwise.
-                        config_data["instructions"] = self.build_instructions()
-                except Exception:
-                    pass
-
-            print(f"[dreamference] Writing Goose config to {self.config_path}")
-            print(f"[dreamference] Final developer extension: {config_data.get('extensions', {}).get('developer')}")
-            if self.cave_mode:
-                print(f"[dreamference] Final instructions (cave): {config_data.get('instructions', '')[:80]}...")
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config_data, f, default_flow_style=False)
-        else:
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=2)
-
-    def write_temporary_goose_config(self, extra_mcp_servers: Optional[Dict[str, Any]] = None) -> "Path":
-        """
-        Creates a fresh Goose config file in /tmp/dreamference with a random name.
-        The file contains the local vLLM endpoint, developer extension (with allow_shell),
-        jetbrains_mcp, and cave instructions when enabled.
-        The caller is responsible for deleting the file after use.
-
-        Returns:
-            Path: Absolute path to the generated temporary config file.
-        """
-        import uuid
-        from pathlib import Path as _Path
-
-        tmp_dir = _Path("/tmp/dreamference")
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = tmp_dir / f"goose_{uuid.uuid4().hex}.yaml"
-
-        from dreamference.hardware import resolve_model_hf_repo
-        resolved_model = resolve_model_hf_repo(self.model)
-        base_url = self.vllm_host.rstrip("/") + "/v1"
-        config_data: Dict[str, Any] = {
-            "provider": "openai",
-            "openai": {
-                "base_url": base_url,
-                "api_key": "gb10-local-token",
-                "model": resolved_model
-            },
-            "extensions": {
-                "developer": {
-                    "enabled": True,
-                    "type": "builtin",
-                    "allow_shell": True
-                },
-                "jetbrains_mcp": {
-                    "enabled": True,
-                    "type": "stdio",
-                    "cmd": self.mcp_server_command(),
-                    "args": ["mcp"]
-                }
-            }
-        }
-        config_data["instructions"] = self.build_instructions()
-
-        if extra_mcp_servers:
-            config_data["extensions"].update(extra_mcp_servers)
-
-        if yaml:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                yaml.dump(config_data, f, default_flow_style=False)
-        else:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=2)
-
-        return temp_path

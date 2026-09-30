@@ -187,7 +187,7 @@ The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAU
 | `puffin-api_server-1`, `puffin-web_server-1`, `puffin-relational_db-1`, `puffin-nginx-1`, `puffin-code-interpreter-1` | `puffin-admin puffin start` (Onyx Lite via `onyx-cli`) | Container names pinned to `puffin-*` in the lite overlay |
 | `dreamference-gmail`, `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `puffin-admin puffin configure` | Sidecars joined to Onyx's network; published on loopback only (gmail 8767, image search 8768, stt 8100) |
 | `dreamference-searxng` | **Started by hand** (the command is in `web_tools.py`'s error message) | `127.0.0.1:8888`; `configure` only joins it to Onyx's network |
-| `dreamference-openhands` | `puffin-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, UI on **`127.0.0.1:3001`** (`OPENHANDS_HOST_PORT`): not 3000, which is Onyx's, and loopback only because the container mounts the Docker socket (`DREAMFERENCE_AGENTS.md` §7) |
+| `dreamference-openhands` | `puffin-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, UI on **`127.0.0.1:3001`** (`OPENHANDS_HOST_PORT`): not 3000, which is Onyx's, and loopback only because the container mounts the Docker socket (`DREAMFERENCE_AGENTS.md` §5) |
 
 **OpenHands launch:**
 

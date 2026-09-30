@@ -141,16 +141,16 @@ built-in default.
 # dreamference.toml
 vllm_host = "http://localhost:8000"
 model = "qwen3.8-27b-nvfp4-dflash2"
-agent_runner = "codex"      # codex is `puffin`; also goose, aider, cline, continue, openhands
+agent_runner = "codex"      # codex is `puffin`; also cline, continue, openhands
 puffin_gmail = true         # let the agent read connected Gmail accounts
 ```
 
 ## Other agents
 
-`puffin` is the default, but the same server can drive Goose, Aider, Cline, Continue or OpenHands:
+`puffin` is the default, but the same server can drive Cline, Continue or OpenHands:
 
 ```bash
-puffin-admin run --agent aider "add type hints to utils.py"
+puffin-admin run --agent cline "add type hints to utils.py"
 ```
 
 ## Architecture

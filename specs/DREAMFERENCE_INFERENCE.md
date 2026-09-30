@@ -21,7 +21,7 @@
 
 ## 1. GB10 Inference Stack Overview
 
-The server is started only by `puffin-admin server start`. Agents never start it: they wait for it (`DREAMFERENCE_AGENTS.md` §8, or `puffin`'s launcher).
+The server is started only by `puffin-admin server start`. Agents never start it: they wait for it (`DREAMFERENCE_AGENTS.md` §6, or `puffin`'s launcher).
 
 ```
 puffin-admin server start [--model <alias>]

@@ -125,7 +125,7 @@ These are recorded here because the spec used to promise otherwise.
 
 | Test File | Scope |
 | :-------- | :---- |
-| `test_config.py` | `DreamferenceConfig`, env vars, Goose config, cave mode |
+| `test_config.py` | `DreamferenceConfig`: four-tier resolution, model pinning, tool-call parser |
 | `test_context_engine.py` | Indexing and search |
 | `test_hardware.py` | GB10 detection, model matrix, downloads |
 | `test_vllm_server.py` | Launch command and recipe layering, host safety, compile-cache reset |

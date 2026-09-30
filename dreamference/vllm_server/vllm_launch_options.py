@@ -28,7 +28,7 @@ class VLLMLaunchOptions:
         num_scheduler_steps (int): Multi-step scheduling iteration count.
         attention_backend (str): Attention implementation backend ('FLASHINFER', 'FLASH_ATTN', 'auto').
         kv_cache_dtype (str): Precision datatype for KV cache ('auto', 'fp8').
-    enable_auto_tool_choice (bool): Enable automatic tool choice for function calling (Goose).
+    enable_auto_tool_choice (bool): Enable automatic tool choice for function calling.
     tool_call_parser (str): Tool-call parser name (e.g. 'hermes').
     max_num_batched_tokens (int): Max tokens per batch when chunked prefill is enabled (GB10 optimization).
     guided_decoding_backend (Optional[str]): Structured-outputs backend for deterministic JSON/tool-call

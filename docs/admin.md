@@ -15,7 +15,7 @@ and web search is a command of its own, `puffin-search`; see [Terminal agent](pu
 |---|---|
 | `--config` | Path to custom Puffin config file (.toml, .yaml or .json) |
 | `--sandbox` | Rootless container sandbox isolation engine. One of: `none`, `apptainer`, `podman`, `docker`. |
-| `--agent` | Select primary AI agent runner (default: codex) One of: `goose`, `cline`, `aider`, `continue`, `openhands`, `codex`. |
+| `--agent` | Select primary AI agent runner (default: codex) One of: `codex`, `cline`, `continue`, `openhands`. |
 | `--hf-token` | HuggingFace API access token (or set via HF_TOKEN env var) |
 
 ## Commands
@@ -30,7 +30,7 @@ Initialize .dreamference project workspace and agent configs.
 | `--vllm-host` | vLLM server URL. |
 | `--draft-model` | Speculative decoding draft model name. |
 | `--sandbox` | Rootless container sandbox engine. One of: `none`, `apptainer`, `podman`, `docker`. |
-| `--agent` | Primary AI agent runner. One of: `goose`, `cline`, `aider`, `continue`, `openhands`, `codex`. |
+| `--agent` | Primary AI agent runner. One of: `codex`, `cline`, `continue`, `openhands`. |
 | `--hf-token` | HuggingFace API access token. |
 
 ### `puffin-admin run`
@@ -43,7 +43,7 @@ Run an autonomous coding task.
 | `--model` | Model name served on vLLM GB10 endpoint. |
 | `--draft-model` | Speculative decoding draft model name. |
 | `--sandbox` | Rootless container sandbox engine. One of: `none`, `apptainer`, `podman`, `docker`. |
-| `--agent` | Primary AI agent runner. One of: `goose`, `cline`, `aider`, `continue`, `openhands`, `codex`. |
+| `--agent` | Primary AI agent runner. One of: `codex`, `cline`, `continue`, `openhands`. |
 | `--hf-token` | HuggingFace API access token. |
 | `--debug` | Enable verbose debug output. |
 | `--cave` | Enable Cave Mode strict prompt (no explanations, only commands/code) |

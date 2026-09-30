@@ -34,10 +34,10 @@
 
 | Package | Role |
 | :--- | :--- |
-| `dreamference/config/` | 4-tier config resolution, config generation, Goose YAML and environment |
+| `dreamference/config/` | 4-tier config resolution, config generation |
 | `dreamference/hardware/` | GB10 detection and telemetry, model matrix, HF downloads and tensorization |
 | `dreamference/vllm_server/` | Docker vLLM lifecycle, launch arguments, host-safety guards, diffusion sidecar |
-| `dreamference/runner/` | Six agent installer/runner pairs, sandbox prefixes, the `puffin` builder |
+| `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, sandbox prefixes, the `puffin` builder |
 | `dreamference/chat/` | Onyx Lite (Puffin web UI) lifecycle and patches, Gmail, image search, desktop window |
 | `dreamference/context_engine/` | AST symbols, TF-IDF, FTS5 and dense retrieval |
 | `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, and web tools |
@@ -58,7 +58,7 @@ dreamference/
 │   ├── model_deep_inspector.py           # ModelDeepInspector (main-model inspect --deep)
 │   └── sonnet_dataset.py                 # embedded Sonnet corpus for benchmark_server
 ├── config/
-│   ├── dreamference_config.py            # DreamferenceConfig: 4-tier resolution, Goose config/env
+│   ├── dreamference_config.py            # DreamferenceConfig: 4-tier resolution
 │   ├── config_path_resolver.py           # ConfigPathResolver
 │   ├── config_file_storage_manager.py    # ConfigFileStorageManager
 │   └── config_generator.py               # generate_default_init_config (functions, no class)
@@ -83,12 +83,11 @@ dreamference/
 ├── runner/
 │   ├── codex_runner.py / codex_installer.py    # CodexRunner / CodexInstaller (default agent)
 │   ├── codex_branded_builder.py                 # CodexBrandedBuilder (builds puffin)
-│   ├── goose_runner.py / goose_installer.py     # GooseRunner (also wait_for_vllm) / GooseInstaller
 │   ├── cline_runner.py / cline_installer.py
-│   ├── aider_runner.py / aider_installer.py
 │   ├── continue_runner.py / continue_installer.py
 │   ├── openhands_runner.py / openhands_installer.py
-│   └── sandbox_manager.py                       # SandboxManager
+│   ├── vllm_readiness_waiter.py                 # VLLMReadinessWaiter (wait_for_vllm)
+│   └── sandbox_manager.py                       # SandboxManager (no runner applies it)
 ├── chat/
 │   ├── onyx_runner.py / onyx_installer.py       # OnyxRunner / OnyxInstaller
 │   ├── onyx_ui_overrides.py                     # OnyxUIOverrides (appended CSS)
@@ -118,8 +117,7 @@ dreamference/
 
 scripts/                                  # at the repository root, not inside the package
 ├── install_gb10.sh                       # full installation
-├── run_vllm_gb10.sh                      # foreground vLLM launch
-└── run_goose.sh                          # Goose session wrapper
+└── run_vllm_gb10.sh                      # foreground vLLM launch
 
 puffin-rs/src/{lib,help,app,update,usage}.rs   # launcher compiled into puffin
 codex-patches/00NN-*.patch                      # patch series for the codex/ submodule
@@ -132,7 +130,7 @@ desktop/src-tauri/                              # Tauri shell (binary puffin-app
 
 ### 3.1. `config/`
 
-`DreamferenceConfig.__init__` resolves every field: constructor argument, then `DREAMFERENCE_*` env var, then config file, then `DEFAULT_*`. It also writes and merges the Goose config (`ensure_goose_config`), provides the Goose environment (`get_env_vars`), validates the memory budget (`validate_model`), and resolves the tool-call parser. `ConfigPathResolver` finds the file: `--config`, `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml|.json`, `~/.config/dreamference/config.toml`. `save_config()` writes only non-default values.
+`DreamferenceConfig.__init__` resolves every field: constructor argument, then `DREAMFERENCE_*` env var, then config file, then `DEFAULT_*`. It also validates the memory budget (`validate_model`), and resolves the tool-call parser. `ConfigPathResolver` finds the file: `--config`, `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml|.json`, `~/.config/dreamference/config.toml`. `save_config()` writes only non-default values.
 
 ### 3.2. `hardware/`
 
@@ -145,7 +143,7 @@ desktop/src-tauri/                              # Tauri shell (binary puffin-app
 
 ### 3.4. `runner/`
 
-Six pairs: Codex (default), Goose, Cline, Aider, Continue and OpenHands, plus `SandboxManager` (used by Goose) and `CodexBrandedBuilder`. See `DREAMFERENCE_AGENTS.md`.
+Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessWaiter` (the non-Codex runners' wait for the server), `SandboxManager` (which no runner applies) and `CodexBrandedBuilder`. See `DREAMFERENCE_AGENTS.md`.
 
 ### 3.5. `chat/`
 
@@ -178,7 +176,7 @@ Import from the **subpackage** facade. The root package re-exports nothing, so `
 from dreamference.config import DreamferenceConfig
 from dreamference.context_engine import ContextEngine
 from dreamference.hardware import HardwareManager, resolve_model_hf_repo
-from dreamference.runner import CodexRunner, GooseRunner
+from dreamference.runner import CodexRunner, ClineRunner
 from dreamference.vllm_server import VLLMServerManager
 ```
 

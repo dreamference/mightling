@@ -39,7 +39,6 @@ ENV/
 .dreamference/
 .antigravity/
 .gemini/
-.aider*
 .claude/
 /config/
 

@@ -48,11 +48,9 @@ def test_paths_resolved_from_home_at_import_are_redirected_in_tests():
     # compile-signature file and the next real `server start` discarded the torch.compile cache.
     import os
     from conftest import REAL_HOME
-    from dreamference.config import dreamference_config
     from dreamference.runner import codex_branded_builder
     from dreamference.vllm_server import vllm_server_manager
 
-    for path in (vllm_server_manager.VLLM_CACHE_HOME, dreamference_config.GOOSE_CONFIG_PATH,
-                 codex_branded_builder.INSTALL_DIR, codex_branded_builder.PATH_LINK):
+    for path in (vllm_server_manager.VLLM_CACHE_HOME, codex_branded_builder.INSTALL_DIR, codex_branded_builder.PATH_LINK):
         assert not str(path).startswith(REAL_HOME + os.sep), path
         assert str(path).startswith(os.environ["HOME"]), path

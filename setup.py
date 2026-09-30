@@ -19,7 +19,7 @@ setup(
         "einops>=0.7.0",
         "fonttools[woff]>=4.50.0",
         # Imported directly (brand assets, image search, web tools), not just a dependency of a
-        # dependency: they were only ever present locally because aider-chat pulled them in.
+        # dependency: they were only ever present locally because another package pulled them in.
         "Pillow>=10.0.0",
         "beautifulsoup4>=4.12.0",
     ],
