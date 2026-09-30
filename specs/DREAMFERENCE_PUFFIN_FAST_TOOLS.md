@@ -8,7 +8,7 @@
 - the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `puffin-admin search`;
 - admission control from [PUFFIN_NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) and host safety (`check_host_safety`).
 
-**Needs no Codex patch.** The patch budget has 682 bytes left, so everything here lives in the launcher, the registry and `puffin-admin`.
+**Needs no Codex patch.** The patch budget has 658 bytes left, so everything here lives in the launcher, the registry and `puffin-admin`.
 
 ---
 
@@ -98,7 +98,7 @@ Codex already lets the main model spawn subagents and name their model (`spawn_a
 ### 4.4 Not proposed
 
 - **A fast-apply model** (Morph/Relace/Mercury Apply-Edit): §1 shows the main model already copies at ~126 tok/s.
-- **Routing `/compact` or commit messages** to it: compaction is inside Codex (a patch, and the budget is 682 bytes); commit messages are below one canvas.
+- **Routing `/compact` or commit messages** to it: compaction is inside Codex (a patch, and the budget is 658 bytes); commit messages are below one canvas.
 - **Using it as the main model's drafter:** that is DFlash2's role already.
 
 ---

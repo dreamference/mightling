@@ -30,7 +30,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 
 \title{Puffin: A Vendor-Free Coding Agent on a Single Unified-Memory Workstation, Built from a
-19\,KB Patch Series over OpenAI Codex}
+21\,KB Patch Series over OpenAI Codex}
 
 \author{Dreamference\\
 Dreamference\\
@@ -50,8 +50,8 @@ vLLM as the fallback. Source code, prompts and
 inference never leave the machine, and no vendor account is involved. Puffin is a fork of
 the Codex CLI (release \code{rust-v0.158.0}, 4{,}894 Rust source files, 1.93 million lines). Its
 central engineering choice is to keep the fork almost identical to upstream. The upstream tree is
-never edited. Each build exports it, applies a series of fourteen patches totalling 19.3\,KB (22 files,
-$+79/-41$ lines), and links in a separate crate that does the actual work of localisation: model
+never edited. Each build exports it, applies a series of fourteen patches totalling 21.3\,KB (24 files,
+$+89/-46$ lines), and links in a separate crate that does the actual work of localisation: model
 discovery, configuration, prompt rebranding, help-text rewriting, a release-based updater and
 refusal of cloud-bound commands. We report how the series shrank from an initial 406\,KB and which
 techniques did it. We also report an inventory of the cloud dependencies we had to switch off,
@@ -105,7 +105,7 @@ SearXNG, and they can contain fragments of code or context.
 \begin{itemize}
   \item A \textbf{patch-minimal fork method} for a large Rust agent (\cref{sec:fork}). The method has
     four parts: an unmodified pinned submodule, a build-time export, a small series of one- and
-    two-line hooks, and an external crate linked into the binary. We quantify the result: 19.3\,KB
+    two-line hooks, and an external crate linked into the binary. We quantify the result: 21.3\,KB
     of patches against a 1.93M-line upstream. We also report the techniques that reduced the
     series from 406\,KB.
   \item An \textbf{inventory of the cloud surface} of a modern coding-agent client, and how each part
@@ -168,7 +168,7 @@ concurrent sequences, a configuration forced by memory headroom (\cref{sec:safet
   % row 1: the request path
   \node[box=1.3cm]  (user)     at (-0.2,0)  {terminal\\user};
   \node[box=3.1cm]  (launcher) at (2.8,0)   {\code{puffin-rs} launcher\\\scriptsize model discovery, config,\\help rebrand, update, \code{app}};
-  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 14 patches, 19.3\,KB};
+  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 14 patches, 21.3\,KB};
   \node[box=3.2cm]  (vllm)     at (12.6,0)  {SGLang container\\\scriptsize Qwen3.8-27B NVFP4 + DFlash2};
   % row 2
   \node[box=3.3cm]  (host)     at (6.9,-1.7)  {{\footnotesize\code{codex-code-mode-host}}\\\scriptsize V8, runs Code Mode JS};
@@ -234,7 +234,7 @@ Codex is vendored as a git submodule of our own GitHub fork, pinned to the stabl
 Moving to a new upstream release means bumping the submodule and resolving whichever hunks stop
 applying. Because the hunks are few and small, conflicts are local and obvious.
 
-\subsection{From 406\,KB to 19\,KB}
+\subsection{From 406\,KB to 21\,KB}
 
 The first working series had four patches totalling 406{,}116 bytes. \Cref{tab:patches} shows the
 current one. Four techniques made the difference.
@@ -277,7 +277,7 @@ repurposes a ChatGPT-plan screen as local token statistics.
 \toprule
 Patch & Files & $+/-$ & Purpose \\
 \midrule
-0001 brand-puffin-name & 9 & 15/14 & Product name in TUI header, status card, \code{exec} banner, fixed usage strings \\
+0001 brand-puffin-name & 11 & 19/18 & Product name in TUI header, status card, slash-command list, \code{exec} banner and reply label, fixed usage strings \\
 0002 puffin-launcher-hook & 2 & 2/1 & One dependency line; route argv through the launcher \\
 0005 hide-openai-login & 2 & 4/0 & Hide \code{login}/\code{logout} and \code{/logout} \\
 0006 hide-cloud & 1 & 2/1 & Hide \code{cloud} (kept for a private cloud) \\
@@ -289,10 +289,10 @@ Patch & Files & $+/-$ & Purpose \\
 0012 hide-auto-review & 1 & 2/0 & Hide \code{/approve} (defaults to a hosted review model) \\
 0013 disable-usage-analytics & 1 & 2/1 & Construct the analytics client disabled \\
 0014 puffin-home & 1 & 2/0 & Use \code{\textasciitilde/.puffin}, never upstream's login \\
-0015 no-openai-network & 4 & 12/3 & Close the channels found by tracing (\S\ref{sec:egress}) \\
+0015 no-openai-network & 4 & 20/4 & Close the channels found by tracing (\S\ref{sec:egress}); drop Codex's own tips \\
 0016 doctor-offline & 2 & 20/0 & Switch off \code{doctor}'s sign-in, update and reachability checks \\
 \midrule
-Total (14 patches, 19{,}318 bytes) & 22 & 79/41 & against 4{,}894 Rust files, 1.93M lines \\
+Total (14 patches, 21{,}342 bytes) & 24 & 89/46 & against 4{,}894 Rust files, 1.93M lines \\
 \bottomrule
 \end{tabularx}
 \caption{The patch series at the time of writing. Numbers 0003 and 0004 were retired when their
@@ -531,8 +531,8 @@ for example on SWE-bench \cite{jimenez2024swebench}. \Cref{sec:limits} discusses
 Metric & Value \\
 \midrule
 Upstream (Codex \code{rust-v0.158.0}) & 4{,}894 Rust files, 1.93M lines \\
-Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 19{,}318 B (14 patches) \\
-Upstream files touched / lines changed & 22 files / $+79,\ -41$ \\
+Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 21{,}342 B (14 patches) \\
+Upstream files touched / lines changed & 24 files / $+89,\ -46$ \\
 Launcher crate (\code{puffin-rs}) & 1{,}843 lines, 31 unit tests \\
 Agent binary, unstripped $\rightarrow$ stripped & 1.4\,GB $\rightarrow$ 315\,MB (+ 93\,MB Code Mode host) \\
 Incremental rebuild after a launcher edit & $\approx$7 min (thin LTO relink) \\
@@ -612,7 +612,7 @@ beside a resident model at all.
 
 \paragraph{Keep the fork boring.} Every behaviour that could live in a linked crate went there.
 Every remaining hook is a single call or predicate. The measure of success is how long an upstream
-bump takes, not how little code we wrote. A 19\,KB series that touches 22 files turns an upstream
+bump takes, not how little code we wrote. A 21\,KB series that touches 24 files turns an upstream
 release into an afternoon's review rather than a merge project.
 
 \paragraph{Presentation diffs are the expensive ones.} Almost all of the original series' size, 97\%,
@@ -681,7 +681,7 @@ rather than any serving algorithm.
 
 Puffin shows that a production coding-agent client can be made vendor-free, with its model on a single
 unified-memory workstation without giving up the ability to take upstream releases. The fork adds
-a 19.3\,KB patch series and a 1.8k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
+a 21.3\,KB patch series and a 1.8k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
 surface is audited and neutralised explicitly, and the host is protected by admission checks and a
 pressure watchdog. The next steps are a task-level accuracy evaluation, the fix for first-run
 onboarding, and the two-layer code index.

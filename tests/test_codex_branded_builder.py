@@ -45,8 +45,11 @@ def test_the_patches_stay_small():
     # into the same binary; the patches are only the places Codex has to call it or say "Puffin".
     # (The prompt rename used to be a ~390 KB patch to models.json; it is now rebrand() in Rust.)
     # Each hide/disable hook costs ~550 bytes, mostly diff headers, so the cap allows a few more of
-    # those; it exists to catch a return to whole-file patches, not to count one-line hooks.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 20_000
+    # those; it exists to catch a return to whole-file patches, not to count one-line hooks. Raised
+    # from 20,000 on 2026-09-30, explicitly and only by what was needed, for the product-name hooks
+    # in 0001 (slash-command descriptions, the Full Access warning, `exec`'s reply label); the
+    # Night Shift patch will need another explicit raise.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 22_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
@@ -140,3 +143,19 @@ def test_puffin_admin_is_linked_onto_path_for_the_models_shell(tmp_path, monkeyp
     open(builder.ADMIN_PATH_LINK, "w").write("mine")
     builder.CodexBrandedBuilder.link_onto_path()
     assert open(builder.ADMIN_PATH_LINK).read() == "mine"
+
+
+@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
+def test_the_remaining_codex_names_on_screen_say_puffin(tmp_path):
+    # Found by driving the real TUI through every popup/inline slash command, an approval prompt,
+    # each subcommand's --help and `exec` (2026-09-30): the slash list said "exit Codex" and
+    # "choose what Codex is allowed to do", /permissions warned "Codex can edit files outside this
+    # workspace", and `puffin exec` labelled the model's replies "codex".
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
+    rs = tmp_path / "src" / "codex-rs"
+    popup = (rs / "tui" / "src" / "bottom_pane" / "command_popup.rs").read_text()
+    assert 'item.description().replace("Codex", "Puffin")' in popup
+    permissions = (rs / "tui" / "src" / "chatwidget" / "permissions_menu.rs").read_text()
+    assert "Puffin can edit files outside this workspace" in permissions
+    exec_output = (rs / "exec" / "src" / "event_processor_with_human_output.rs").read_text()
+    assert '"codex".style' not in exec_output and exec_output.count('"puffin".style') == 2

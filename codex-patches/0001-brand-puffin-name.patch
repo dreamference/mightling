@@ -37,11 +37,21 @@ diff --git a/codex-rs/exec/src/event_processor_with_human_output.rs b/codex-rs/e
 index 222bc48..17fa132 100644
 --- a/codex-rs/exec/src/event_processor_with_human_output.rs
 +++ b/codex-rs/exec/src/event_processor_with_human_output.rs
+@@ -102,3 +102,3 @@
+                     "{}\n{}",
+-                    "codex".style(self.italic).style(self.magenta),
++                    "puffin".style(self.italic).style(self.magenta),
+                     text
 @@ -218,3 +218,3 @@ impl EventProcessor for EventProcessorWithHumanOutput {
          const VERSION: &str = env!("CARGO_PKG_VERSION");
 -        eprintln!("OpenAI Codex v{VERSION}\n--------");
 +        eprintln!("Puffin v{VERSION}\n--------");
          for (key, value) in config_summary_entries(config, session_configured_event) {
+@@ -420,3 +420,3 @@
+                 "{}\n{}",
+-                "codex".style(self.italic).style(self.magenta),
++                "puffin".style(self.italic).style(self.magenta),
+                 message
 diff --git a/codex-rs/tui/src/chatwidget.rs b/codex-rs/tui/src/chatwidget.rs
 index 5ca4182..c1a7ea0 100644
 --- a/codex-rs/tui/src/chatwidget.rs
@@ -99,3 +109,19 @@ index 369a674..74897a5 100644
 -            Span::from("OpenAI Codex").bold(),
 +            Span::from("Puffin").bold(),
              Span::from(" ").dim(),
+diff --git a/codex-rs/tui/src/bottom_pane/command_popup.rs b/codex-rs/tui/src/bottom_pane/command_popup.rs
+--- a/codex-rs/tui/src/bottom_pane/command_popup.rs
++++ b/codex-rs/tui/src/bottom_pane/command_popup.rs
+@@ -209,3 +209,3 @@
+                 let name = format!("/{}", item.command());
+-                let description = item.description().to_string();
++                let description = item.description().replace("Codex", "Puffin");
+                 GenericDisplayRow {
+diff --git a/codex-rs/tui/src/chatwidget/permissions_menu.rs b/codex-rs/tui/src/chatwidget/permissions_menu.rs
+--- a/codex-rs/tui/src/chatwidget/permissions_menu.rs
++++ b/codex-rs/tui/src/chatwidget/permissions_menu.rs
+@@ -13,3 +13,3 @@
+         "full-access" => {
+-            "Use with caution: Codex can edit files outside this workspace and access the internet without approval"
++            "Use with caution: Puffin can edit files outside this workspace and access the internet without approval"
+         }
