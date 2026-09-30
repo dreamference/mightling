@@ -1,6 +1,6 @@
 # Puffin Code Index — codebase-memory-mcp + SCIP
 
-**Status:** proposed. Nothing in this spec is implemented yet. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools. Revised again the same day: freshness is now decided for the whole repository, not only for the files an answer already names (§7.3), the router is a binary of its own, `puffin-code`, not a subcommand compiled into `puffin` (§4.2), and memory admission covers every indexer run on the host, not each executing run on its own (§6.4).
+**Status:** implemented on 2026-10-01 in `puffin-code-rs/`, with the differences and the parts not built listed in §14; the rest of this document is the design as specified. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools. Revised again the same day: freshness is now decided for the whole repository, not only for the files an answer already names (§7.3), the router is a binary of its own, `puffin-code`, not a subcommand compiled into `puffin` (§4.2), and memory admission covers every indexer run on the host, not each executing run on its own (§6.4).
 **Target:** the `puffin` terminal agent. The same index is also offered over MCP to Claude Code and to IDEs.
 **Builds on:** the `puffin-search` / `puffin-admin gmail` pattern of giving the local model shell commands rather than MCP tools, and of putting each such command on `PATH` as a program of its own beside `puffin`. `puffin-code` is a separate Rust binary (§4.2); the launcher in `puffin-rs/` only starts it and asks it for the prompt block. It also builds on the builder's rule that nothing ever runs Cargo inside the `codex/` submodule.
 
@@ -520,4 +520,66 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **scip-java and scip-dotnet under read-only caches** are unmeasured; the redirections named in §9.1 are from the tools' documentation.
 - **Connecting to an existing Unix socket from inside the sandbox** (the runtime directory is read-only there) is untested; the design does not rely on it (§4).
 - **The changed-set search matches names, not symbols.** It cannot see a reference through an alias or a name built at run time, and it reports same-named symbols as `heuristic (text)`. How often an alias hides a new reference in practice is unmeasured; the re-index the query requests closes the gap within one run.
+- **`expt-convert` rejects indexes a real indexer writes** (definitions without `SymbolInformation`); `scip-repair` (§14.2) covers the one case seen. Another rejection would leave that root on the universal layer, recorded as `failed`.
 - **Several repositories:** start with the working directory only.
+
+## 14. Implementation (2026-10-01)
+
+`puffin-code` is built from `puffin-code-rs/` (its own lockfile, toolchain 1.95.0), installed and linked by `puffin-admin codex build`, and started by the launcher (`puffin-rs/src/code_index.rs`). `puffin-admin code setup` installs the pinned tools. 55 Rust tests (`cargo test --locked` in `puffin-code-rs/`) and 9 Python tests (`tests/test_code_index.py`, plus the builder's) cover it.
+
+### 14.1 Measured on this repository
+
+| Quantity | Value |
+|---|---|
+| Launch-time run through the session and supervisor | codebase-memory (3,689 nodes once `.cbmignore` listed the submodules: an incremental run drops `codex/`, which had been 132,225 of 137,176 nodes), scip-python over `dreamference/`, `tests/`, `scripts/` and two other tracked Python directories (peaks 166–629 MiB each), rust-analyzer over `puffin-code-rs/` and `puffin-web-rs/` (1,027 and 1,203 MiB), each in its own scope of `puffin-index.slice`, in the sandbox of §9.1 |
+| Query latency, 20 runs each, warm, this repository | `refs ModelDownloader` p50 0.09 s, p95 0.11 s; `callers VLLMServerManager.check_health` p95 0.12 s; `def resolve_model_hf_repo` p95 0.12 s (§10's bound is 0.2 s) |
+| The §2 replay | `refs ModelDownloader` now lists `diffusion_server_manager.py` and `sglang_launch_builder.py`: as `heuristic (text)` rows against the morning's snapshot, as `exact` rows once re-indexed; `tests/` callers are exact through the tests store |
+| A hostile `build.rs` in the rust-analyzer sandbox | could not create a file in `$CARGO_HOME`, open `$CARGO_HOME/bin/cargo` for writing, read a marker in `$HOME`, or overwrite the store; the index was still written (test, run for real) |
+
+### 14.2 Where the code differs from the text above
+
+- **One store per run** (§6.2, §7.5): `scip/<indexer>-<root>.db` and `.scip`, with `manifest.json` keyed `<indexer>:<root>`, not a single `index.db`. A definition's references are gathered from every store that has a document at its location.
+- **Documents outside a root** (§6.2): scip-python writes documents for what a root imports (`../dreamference/…` in the `tests` store). Paths are normalised back into the repository, snapshots stamp every file (not only the root's), and changed sets are computed without a root scope.
+- **The changed set of an answer** (§7.3) is the graph's plus that of the stores holding the symbol, not the union over all stores: a stale Rust index no longer widens a Python name's text search and count.
+- **Freshness cost** (§7.3): `git diff`, `git status`, `git ls-files` (for the graph's not-indexed files), `git submodule status` and two `git rev-parse`, not two calls; still 0.09–0.12 s per answer.
+- **No `scip` crate** (§3, §7.5): a small protobuf wire reader decodes the chunks, streaming, instead of parsing a whole `Index`.
+- **`expt-convert` stores no relationships and scip-python and rust-analyzer leave `display_name` empty.** Post-processing adds `puffin_names` (each symbol's descriptor name) and `puffin_relationships` (read from the `.scip`), excluded from the fingerprint. rust-analyzer emits no relationships at all: `impl` for Rust reads the `impl#[Type][Trait]member` symbol strings. Roles come from the decoded occurrences; `mentions.role` is a per-chunk set.
+- **`scip-repair`** (new): scip-python wrote definitions without `SymbolInformation` for this repository's `tests/`, and `expt-convert` stops on the first. `puffin-code scip-repair` adds the missing entries (every other byte kept) inside the sandbox, before conversion.
+- **Stores are switched from WAL to rollback journal** after conversion: a WAL database cannot be opened read-only where its directory is not writable (the read-only sandbox). Old `-wal`/`-shm` files are removed before a new store is renamed into place.
+- **Identity** (§7.4): candidates come from the SCIP stores as well as the graph (a name the graph lacks, in a submodule or an ignored file, still resolves); a query may name a definition as `path:line`; an identity found by name keeps its references `exact` (only the definition is `heuristic`).
+- **Only executing runs are frozen** (§9.2): a frozen codebase-memory missed its daemon's 30 s start-up deadline and failed; the universal and static runs take seconds and the slice's CPU limit bounds them.
+- **Only a killed run records its cap as its peak** (§6.4): a run that failed otherwise kept a cap-sized "peak" whose need exceeded its ceiling, and was never admitted again.
+- **The sandbox also hides `/run`, `/var/tmp` and `/dev/shm`** (§9.1): the Docker socket and the user's systemd bus are there, and a Unix socket on a read-only bind is still connectable. codebase-memory's own cache directory is its one writable bind outside scratch.
+- **Detection** (§6.1): every top-level directory holding tracked `.py` files is a scip-python root (not only packages; untracked directories are the user's); a crate that inherits from a workspace elsewhere is not a root.
+- **Tools** are resolved from Puffin's install directories only; scip-python runs on the `node` recorded at setup.
+- **Test seams**: `PUFFIN_CODE_GRAPH_DB`, `PUFFIN_CODE_PROJECT`, `PUFFIN_CODE_STATE_DIR`, `PUFFIN_CODE_ROOT`, `PUFFIN_CODE_TOOLS_DIR`, `PUFFIN_CODE_INDEXERS_DIR`, `PUFFIN_CODE_SCRATCH_DIR`, `PUFFIN_CODE_SELF`; the tests also cut `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR`, so none of them can reach the user's systemd. conftest refuses a mutating `systemctl` or any `systemd-run`, as it does `docker`.
+
+### 14.3 Not built
+
+- `impact` (§7.1); the prompt block does not name it.
+- The fallback converter and the CLI fallback ladder (§4, §7.5): an unknown schema is reported, naming `puffin-code index` or `puffin update`, and the other layer answers.
+- The scratch-copy exact index of a submodule (§6.2); `--include-submodules` changes only `.cbmignore`.
+- scip-typescript, scip-clang, scip-java, scip-go and scip-dotnet (§6.1); search by meaning (§4).
+- Night Shift scheduling (§6.3) and `puffin-admin mcp` re-pointed at the router (§8).
+
+### 14.4 §12, covered and not
+
+| §12 item | State |
+|---|---|
+| Router merging, de-duplication, ambiguity, a changed set requesting a re-index | covered |
+| Recorded fixtures, schema fingerprints (a changed schema is refused) | covered |
+| Direct reads during a write (busy timeout); `mutation_gen` retry | busy wait covered; the retry is implemented, not tested |
+| Join by location, 0-/1-based lines | covered through the fixtures |
+| Changed since the snapshot: edited, new, committed, stale for SCIP but fresh for the graph, deleted, `not checked`, lost commit, read-only sandbox | covered |
+| Hostile build script, no writable bind outside scratch, tmpfs before binds | covered |
+| Killed at the memory cap | not testable without a real scope (§12's own rule); evidence: the 8 GB kill of 2026-09-28 and the capped runs of 2026-09-30 (§2) |
+| `failed: offline` | log classification covered; no fixture run |
+| Untrusted repository gets no executing index, whatever it ships | covered |
+| scip-python's environment | covered, run for real |
+| Session: lock, parent exit, junk requests, no systemd bus | covered |
+| Admission: floor, headroom of live scopes, racing admissions, one executing run, slice limits, `choom` | covered with a fake host |
+| Scheduler: coalescing, idle gauges of both engines, freeze and thaw | idle and loading covered; coalescing implemented, not tested; thaw not tested |
+| Model load: no start while loading, stopped not frozen, `server start` stops the scopes | covered |
+| Worktrees | covered |
+| Output budget, stable pages, refused stale cursor, answer size | covered |
+| Launcher: no `puffin-code`, no block | covered standalone; not yet run in the Codex export |
