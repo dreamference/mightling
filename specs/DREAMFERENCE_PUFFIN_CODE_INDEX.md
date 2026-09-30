@@ -1,6 +1,6 @@
 # Puffin Code Index — codebase-memory-mcp + SCIP
 
-**Status:** proposed. Nothing in this spec is implemented yet.
+**Status:** proposed. Nothing in this spec is implemented yet. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools.
 **Target:** the `puffin` terminal agent. The same index is also offered over MCP to Claude Code and to IDEs.
 **Builds on:** the launcher in `puffin-rs/`. It handles `puffin app` and `puffin update` before Codex parses argv, and `puffin code` would be handled the same way. It also builds on the `puffin-admin search` / `gmail` pattern of giving the local model shell commands rather than MCP tools, and on the builder's rule that nothing ever runs Cargo inside the `codex/` submodule.
 
@@ -19,10 +19,10 @@ Today it answers these with `rg` and file reads, one round at a time. On the 4,8
 
 The index has two layers:
 
-- **codebase-memory-mcp** is the universal layer. It covers every language and every file, stays current as files change, and adds search by meaning. Its references are approximate but good.
-- **SCIP** is the exact layer. It covers buildable projects in languages that have a compiler-based indexer, and gives compiler-exact definitions and references, as a snapshot.
+- **codebase-memory-mcp** is the universal layer. It covers every language and every file, stays current cheaply, and answers names, outlines, text search and approximate call edges. Measured here, its call edges find **about 80% of the files that reference a Rust function and 58% for Python (52% for methods)** (§2). It is a fast, broad first answer, never the last word on "who calls this".
+- **SCIP** is the exact layer: compiler-exact definitions and references, as a snapshot. For Python and TypeScript it runs no project code and is cheap, so it runs **for every repository by default**. For Rust, Java and .NET it executes the project's build logic and needs about 21 GiB on Codex, so it runs only for trusted repositories and only when memory admits it.
 
-A router in `puffin-rs` answers each question from the better layer. It tags every result `exact` or `heuristic`, and says what it could not resolve.
+A router in `puffin-rs` answers each question from the better layer. It tags every result `exact` or `heuristic`, and says what it could not resolve or did not index.
 
 **Non-goals:**
 - Editing code: the index answers questions, and the agent edits.
@@ -30,23 +30,67 @@ A router in `puffin-rs` answers each question from the better layer. It tags eve
 - Documents: PDF, Office and Markdown are indexed by a separate knowledge-layer spec.
 - Anything that needs a network at query time.
 
-## 2. Components
+## 2. What was measured (2026-09-30)
 
-| Component | Version checked | Licence | Why this one |
+On this GB10, with the default model (Qwen3.8-27B on SGLang) resident and idle, about 35 GiB of host memory available. Every number here is from a run, not from a README. "Derived" rows follow from measured ones; "unmeasured" rows are open (§13).
+
+| Quantity | Value | Kind |
+|---|---|---|
+| codebase-memory CLI, any command, incl. `list_projects` | **6.6 s** per invocation (fixed start-up: each call spawns an internal daemon, `--cbm-daemon-internal`, which exits afterwards) | measured |
+| codebase-memory CLI with another server already running | 2.5–3.3 s | measured |
+| codebase-memory CLI with `CBM_SEMANTIC_ENABLED=0` (and `CBM_LSP_DISABLED=1`) | still 6.6 s: the start-up is not the embedding model | measured |
+| codebase-memory as a long-lived MCP (stdio) process | 6.4 s once, then **12–105 ms** per query (`search_graph`, `trace_path`, `get_file_outline`) | measured |
+| Direct read-only SQL on its graph database (`nodes`/`edges`) | **< 10 ms** for "callers of X", with call-site lines | measured |
+| Its network use during a query | none beyond its own Unix socket and a `git rev-parse` (strace on `connect`/`execve`) | measured |
+| Its line numbers | **1-based** (a definition at `grep -n` line 793 is reported as 793) | measured |
+| Index of this repository **with** the `codex/` submodule | 7,096 files (6,879 of them in `codex/`), ~45 s, ~450 MB peak, **665 MB** database | measured 2026-09-29 |
+| Index of this repository **without** the submodule | 236 files, **9.4 s** (6.6 s of it start-up), 142 MiB peak, **21 MB** database | measured |
+| Incremental re-index after a one-line edit, and a no-change re-index | 8.9 s each (start-up dominated) | measured |
+| Its call-edge recall vs rust-analyzer SCIP, Codex (15,660 functions with cross-file references, file level, indexed files only) | **78%** (`CALLS`+`USAGE`); 80% counting `IMPORTS` | measured |
+| Its call-edge recall vs scip-python, `dreamference/` (154 functions, file level, re-exports in `__init__.py` excluded) | **58%**; methods 52%, functions 86% | measured |
+| Its coverage gaps | it applies the **superproject's** `.gitignore` inside a submodule (git does not): this repository's `config/` rule silently dropped `codex/codex-rs/core/src/config/` (a 4,926-line module) and our own tracked `dreamference/config/`. 3,683 Rust reference files fell outside its coverage | measured |
+| `rust-analyzer scip` (1.95.0) on Codex, full, cold (build scripts compiled) | **completes under a 22 GiB cap: 691 s wall, peak ≥ 21.3 GiB**; 355 MB `.scip`, 4,687 documents, 3.53 M occurrences | measured; the peak is cap-bounded (both runs ended within 1 GiB of the cap, and cgroup `memory.peak` includes page cache), so the unconstrained peak is unknown |
+| Same, warm (build-script cache reused) | 569 s, peak ≥ 21.5 GiB | measured, cap-bounded |
+| Host memory available, lowest during those runs | 10.1 GiB (earlyoom's SIGTERM line is ~6.2 GiB, 5% of 121.6 GiB) | measured |
+| A `no-macros` mode (`--config-path` disabling build scripts and proc-macros) | **does not exist**: scip mode hard-codes `load_out_dirs_from_check`, the proc-macro server and cache priming (verified in `cli/scip.rs`); the config is accepted and ignored | verified in source and by run |
+| Decoding the 355 MB Codex `.scip` whole (`scip stats`) | 2.0 s, 2.1 GB | measured |
+| `scip expt-convert` (scip CLI v0.10.0) on it | 9.8 s, 2.7 GB peak, **186 MB** SQLite; symbol→references lookup **2 ms** | measured |
+| scip-python 0.6.6 on `dreamference/` (81 files) | **19 s, 2.1 GiB peak, 2.7 MB**; resolves `vllm_mgr.start_server(…)` to `VLLMServerManager.start_server` and not to `DiffusionServerManager.start_server` (codebase-memory found **no** caller of either) | measured |
+| What scip-python executes | by default `pip3 list` and `python3` from `PATH` (here the repository's own `.venv`), and even a `node` found there; with `--environment <file>` and a `PATH` without the repository, only the system `python3 -c "import os…"` to read `sys.path`, with identical references | measured (strace on `execve`) |
+| `defn_enclosing_ranges` in the store | maps a reference to its innermost enclosing definition (line 2007 of the CLI controller → `DreamferenceCLIController#run_cli()`), 0-based lines | measured |
+| SGLang's idle gauges | `sglang:num_running_reqs`, `sglang:num_queue_reqs` (0 when idle), on `/metrics` of the served model | measured |
+| Licences | codebase-memory-mcp MIT; scip CLI, scip-typescript, scip-clang, scip-java, scip-go, scip-dotnet Apache-2.0; scip-python MIT (Pyright's); all maintained (pushed within the last month) | verified |
+| Decode rate while indexing, frozen/unfrozen scopes, scip-typescript cost, codebase-memory's search by meaning quality | — | **unmeasured** (§10) |
+
+Consequences for the design, each carried into the sections below:
+
+1. **No per-query CLI.** At 6.6 s a call, the CLI cannot serve queries. The router reads codebase-memory's database directly (§7.5), with a fallback ladder.
+2. **Exact layer by language, not by trust alone.** Static indexers (scip-python, scip-typescript) run for every repository; executing ones (rust-analyzer, scip-java, scip-dotnet) need trust and admission.
+3. **Submodules are excluded by default** (97% of this repository's universal index was the `codex/` submodule), and indexed deliberately when wanted.
+4. **Admission from measured numbers:** the Codex exact index needs more than 21 GiB and runs only when the machine can spare it.
+5. **The query store is the `scip` CLI's own SQLite export**, pinned and fingerprinted, with our converter as the fallback.
+
+## 3. Components
+
+| Component | Version pinned | Licence | Role |
 |---|---|---|---|
-| [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) | v0.11.0 (2026-09-15), `codebase-memory-mcp-linux-arm64.tar.gz`, 45k★ | MIT | One C binary. 158 tree-sitter grammars and the `nomic-embed-code` model are compiled in. Its "Hybrid LSP" type resolution covers 13 languages, including Rust (traits, UFCS) and Python. It has a call graph, `trace_path`, `detect_changes` (blast radius) and search by meaning. Its README states "makes no network request of its own accord" and "collects no telemetry". It has 17 MCP tools, each also runnable as a one-shot CLI (`cli <tool> --format json`). |
-| [SCIP protocol](https://github.com/scip-code/scip) and the `scip` Rust crate | crate 0.10.0 (2026-09-03) | Apache-2.0 | The index format rust-analyzer writes. The crate reads it natively in `puffin-rs`. |
-| `rust-analyzer scip` | from the pinned toolchain (`rustup component add rust-analyzer`) | MIT/Apache-2.0 | Exact Rust definitions and references, including trait dispatch and macros. |
-| `scip-python` (Pyright), `scip-typescript`, `scip-clang`, `scip-java`, `scip-go`, `scip-dotnet` | pinned per release | **verify each before bundling** | Exact references for the other major languages. Only languages whose project builds get this layer. |
+| [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) | v0.11.0 (2026-09-15), `linux-arm64` | MIT | Universal layer: builds the graph (158 tree-sitter grammars, "Hybrid LSP" resolution for 13 languages), keeps it incrementally, and serves search by meaning when a session asks for it. Configured through `CBM_CACHE_DIR`, `CBM_RUNTIME_DIR`, `CBM_MEM_BUDGET_MB` (a hard budget since v0.11.0), `CBM_WORKERS`, `CBM_ALLOWED_ROOT`, `CBM_SEMANTIC_ENABLED`, and a per-repository `.cbmignore`. |
+| [scip CLI](https://github.com/scip-code/scip) | v0.10.0 (2026-09-03), `scip-linux-arm64.tar.gz`, sha256 `6ab677dc2c4bf2955975d0530766152e45daaa988f9404068d8adecacd0bb24c` | Apache-2.0 | `expt-convert` builds the query store (§7.5). |
+| `scip` Rust crate | 0.10.0 | Apache-2.0 | Decodes the occurrence blobs of the store in `puffin-rs`. |
+| `rust-analyzer scip` | from the pinned toolchain (1.95.0) | MIT/Apache-2.0 | Exact Rust layer. Executes build scripts and proc-macros (§9.1). |
+| scip-python | 0.6.6 (npm `@sourcegraph/scip-python`) | MIT | Exact Python layer. Static (Pyright). |
+| scip-typescript | pinned at setup | Apache-2.0 | Exact TypeScript/JavaScript layer. Static. |
+| scip-clang, scip-java, scip-go, scip-dotnet | pinned at setup | Apache-2.0 | Exact layers for C/C++, JVM, Go and .NET (§6.1). |
 
 Rejected, with the reason:
 - jCodeMunch: its licence forbids renaming, modified redistribution and commercial use.
 - GitNexus: PolyForm Noncommercial.
 - codegraph: MIT, but has telemetry on by default and no search by meaning.
-- Serena: GPL-3.0, heavier, and has no graph or search by meaning. Its MIT SolidLSP layer remains an option if a live language server is ever needed.
+- Serena: GPL-3.0, heavier, and has no graph or search by meaning. Its MIT SolidLSP layer remains an option if a live language server is ever needed; note that a live rust-analyzer on a large workspace has been reported at 40+ GB (serena#1556), which is why this design uses rust-analyzer only as a batch indexer under a cap.
+- The `dreamference` context engine (TF-IDF + FTS5 + file embeddings): kept until the router passes §10, then retired (§8).
 - The full survey is in the session record of 2026-09-28.
 
-## 3. Architecture
+## 4. Architecture
 
 ```
             agent (puffin, local model)          Claude Code / IDE
@@ -54,133 +98,130 @@ Rejected, with the reason:
                       ▼                                ▼
         puffin code <cmd>  ─────────────  puffin code mcp
                       │   (same router, puffin-rs/src/code_index/)
-          ┌───────────┴───────────────┐
-          ▼                           ▼
-  codebase-memory-mcp            SCIP reader (`scip` crate)
-  (one-shot CLI, JSON)           .dreamference/scip/index.db (§6.5)
-  graph, BM25, semantic,         exact defs/refs for files unchanged
-  incremental re-index at        since the snapshot
-  launch / on demand (§3.1)
+          ┌───────────┴─────────────────────────┐
+          ▼                                     ▼
+  codebase-memory graph (SQLite)          SCIP query store (SQLite)
+  read directly, read-only (§7.5)         .dreamference/scip/index.db
+  written only by its indexer, run        built by `scip expt-convert`
+  detached at launch / on demand          after each exact run (§6)
 ```
 
-- **Both layers stay unmodified.** codebase-memory-mcp is invoked as a pinned binary. SCIP files are produced by the upstream indexers. The only new code is the router and the SCIP scheduler.
-- **No long-lived process by default.** `puffin code …` runs codebase-memory's one-shot CLI, which by its README "leaves no standing process behind", and reads the SCIP query store (§6.5) with indexed lookups, never the raw `.scip` file. Freshness comes from incremental re-indexing at defined moments (§3.1), not from a resident daemon. codebase-memory's own watcher is opt-in.
-- **Why Rust, in the launcher:** it keeps `puffin` self-contained. `puffin code` works in any shell with no Python environment, like `puffin app` and `puffin update`. The `scip` crate is the reference reader.
+- **Both tools stay unmodified.** codebase-memory is a pinned binary that writes its graph; the scip CLI and the indexers are pinned binaries that write SCIP. The new code is the router, the scheduler and the store's small post-processing (§7.5).
+- **Queries never start a tool.** A `puffin code refs` opens two SQLite files read-only, runs indexed lookups and exits: milliseconds, and no process survives it. The tools run only to *index*, started by the session thread outside the sandbox (below), under §9's limits.
+- **Two sides of the sandbox.** The agent runs `puffin code …` as a shell command, and Codex runs every such command inside its bwrap sandbox (`workspace-write` or `read-only`): the process can read the two databases and write only under the working directory and `/tmp`. Probed with `puffin sandbox` in `workspace-write` mode: reading the graph database works; `~/.cache` is a read-only file system; `$XDG_RUNTIME_DIR` is visible but read-only; `systemd-run --user` fails ("Failed to connect to bus"); and nothing it starts outlives it. So the design splits:
+  - **Queries are pure readers.** `puffin code refs|def|callers|…` opens the databases read-only and exits. That is all it may do.
+  - **Everything that starts an indexer belongs to the `puffin` process itself**, which runs *outside* the sandbox for the whole session (the launcher is linked into it, patch `0002`). A session thread in it owns indexing: the launch-time runs, the supervisor of §9.2, and a request queue. A query that wants a re-index appends one line to `<repo>/.dreamference/code_index.requests` when it can write there; the session thread drains it every few seconds, coalesces (§9.2) and runs what admission allows. In a `read-only` sandbox the query cannot write the request, so it only says in its header that the index is stale; the next launch refreshes it.
+  - **`puffin code mcp`** (for Claude Code and IDEs) runs outside any sandbox and may do both.
+- **The fallback ladder**, used only when the direct read is impossible (the graph's schema fingerprint does not match the pinned one, §7.5): the CLI, correct at 6.6 s per call. A session-scoped codebase-memory child (12–105 ms per query) is reachable only from `puffin code mcp`, which can hold it; from inside the sandbox there is no channel to it.
+- **Search by meaning** needs the embedding model compiled into codebase-memory, so it is served only by `puffin code mcp`'s session child, and only when `puffin_code_semantic = true`. It is off by default: it returned unrelated build files for plain questions on this repository (2026-09-29), and upstream has open issues on it (#1155, #1462). `search` without it is FTS5 over names, qualified names and bodies, ranked by BM25 (§7.1).
+- **Why Rust, in the launcher:** it keeps `puffin` self-contained. `puffin code` works in any shell with no Python environment, like `puffin app` and `puffin update`, and rusqlite plus the `scip` crate are all it needs.
 
-### 3.1 Lifecycle of the universal layer
-
-`index_repository` is what creates a codebase-memory project at all, so the launcher owns when that happens:
+### 4.1 Lifecycle of the universal layer
 
 - **First run:**
-  - at `puffin` launch, the launcher calls `cli index_status` for the working directory's repository root;
-  - if the repository has no project, it starts `cli index_repository --repo-path <root>` **detached**, under §8's memory limit and priority, and continues launching.
-  - It never indexes synchronously in the agent's path; the session starts immediately with `rg` available.
-- **Prompt timing:** the prompt is assembled once, at launch, so a session that starts during a first index would never hear about `puffin code` if the block were simply omitted. Instead:
-  - **Index ready:** the full `# Code navigation` block (§7).
-  - **Index building:** a reduced block: "a code index is being built; use `rg` until `puffin code status` reports it ready, then use `puffin code …`". `puffin code` commands answer "index not ready yet (N% done)" rather than failing obscurely.
+  - at `puffin` launch, the launcher checks for the repository's project in codebase-memory's cache (by reading the `projects` table directly, not through the CLI);
+  - if there is none, it starts `index_repository` **detached**, under §9's limits, and continues launching. It never indexes in the agent's path.
+- **Prompt timing:** the prompt is assembled once, at launch:
+  - **Index ready:** the full `# Code navigation` block (§8).
+  - **Index building:** a reduced block: "a code index is being built; use `rg` until `puffin code status` reports it ready". `puffin code` answers "index not ready yet" rather than failing obscurely.
   - **No repository, or indexing disabled or failed:** no block.
 - **Keeping it current, without a daemon:**
-  - an incremental `index_repository` runs detached at every `puffin` launch, which is cheap when little changed;
+  - an incremental `index_repository` runs detached at every `puffin` launch (8.9 s measured, almost all fixed start-up);
   - it also runs on `puffin code index`;
-  - it does **not** run inside a query. A query that finds its result files newer than the last index (by the mtime and size check of §6.3) answers at once, marks those rows `heuristic (stale)`, and starts the incremental run detached for the next query. Re-indexing on the query path would put an unbounded wait in front of every `refs`/`impact`.
-  - codebase-memory's background watcher is off (`watcher_enabled = false`, `auto_watch = false`) unless the user sets `puffin_code_watch = true`. That keeps §3's "no long-lived process" true.
+  - it never runs inside a query. A query whose result files changed since the last index (§7.3) answers at once, tags those rows `heuristic (stale)`, and queues a re-index request for the session thread (§4).
+  - codebase-memory's watcher stays off (`watcher_enabled = false`, `auto_watch = false`) unless `puffin_code_watch = true`.
+- **Scope, written by the launcher:**
+  - **Submodules are excluded.** The launcher keeps a managed block in `<repo>/.cbmignore` listing every submodule path (`git submodule status`), and adds `.cbmignore` to `.git/info/exclude`, so the file never shows up in `git status`. `puffin code index --include-submodules` indexes them deliberately.
+  - **Ignore rules inside submodules.** codebase-memory applies the superproject's `.gitignore` inside a submodule, which git does not. When submodules are included, the router reports every excluded subtree from `index_coverage` in `puffin code status`, so the gap is visible rather than silent.
+  - **Tracked files an ignore rule matches are skipped** (this repository's `config/` rule drops the tracked `dreamference/config/`). The router lists them from `index_coverage` (`not_indexed_dir`/`not_indexed_file`) and answers queries touching them with `rg`-backed `heuristic` rows.
+- **Git worktrees share the main worktree's index.** A worktree (`git rev-parse --git-common-dir` differs from `--git-dir`) is not indexed as a project of its own, which would cost a full database per worktree (Night Shift and fan-out create many). The router maps its paths onto the main worktree's project, and files whose hash differs are stale by §7.3, which is the safe direction.
 - **Data:**
-  - graphs live where codebase-memory keeps them, `~/.cache/codebase-memory-mcp/`;
+  - graphs live in codebase-memory's cache, `CBM_CACHE_DIR` (default `~/.cache/codebase-memory-mcp/`);
   - `puffin code status` reports their disk use;
-  - `puffin code forget [<repo>]` runs `delete_project`, and the launcher offers it when a project's root no longer exists.
-- **Expected cost:** to be measured, as for §5.4. Its README claims the Linux kernel (75k files) in 3 minutes on an M3 Pro, so this repository (6.5k files) should index well under a minute, but that is unverified here.
+  - `puffin code forget [<repo>]` deletes a project, and the launcher offers it when a project's root no longer exists.
 
-## 4. Distribution
+## 5. Distribution
 
-- **Pinned binary, verified:**
-  - The Puffin release workflow downloads the pinned codebase-memory-mcp release for `linux-arm64` and checks it against the release's `checksums.txt`.
-  - The expected SHA-256 is committed in `puffin-rs/codebase-memory.sha256`, the same trust model as the rusty_v8 archive.
-  - It is shipped beside `puffin` in `~/.local/share/dreamference/puffin/bin/` and attached to Puffin releases, so `puffin update` refreshes it.
-  - `puffin-admin codex build` fetches the same pinned archive for local builds.
-- **Fork only when a patch is needed.** No change to codebase-memory is required for this spec. If one becomes necessary, for example §10's SCIP import, fork it to `dgxcoder/codebase-memory-mcp` as a submodule and build from source (`build/c/codebase-memory-mcp`), following the Codex pattern: pinned tag, patches in a directory, submodule never edited. The MIT notice must stay in the shipped files.
+- **Pinned binaries, verified:**
+  - The Puffin release workflow downloads the pinned codebase-memory-mcp and scip CLI releases for `linux-arm64` and checks each against its published checksum.
+  - The expected SHA-256s are committed in `puffin-rs/code-index.sha256`, the same trust model as the rusty_v8 archive.
+  - They are shipped beside `puffin` in `~/.local/share/dreamference/puffin/bin/` and attached to Puffin releases, so `puffin update` refreshes them together with the router that knows their schema fingerprints (§7.5).
+  - `puffin-admin codex build` fetches the same pinned archives for local builds.
+- **Fork only when a patch is needed.** No change to codebase-memory is required. If one becomes necessary, for example §11's SCIP import or a fix for its submodule ignore handling, fork it to `dgxcoder/codebase-memory-mcp` as a submodule and build from source, following the Codex pattern: pinned tag, patches in a directory, submodule never edited. The MIT notice must stay in the shipped files.
 - **SCIP indexers:**
-  - `rust-analyzer` comes from rustup, the same toolchain as the Codex build.
-  - The others are fetched at *install* time by `puffin-admin code setup`, never at query time, and pinned by version and checksum.
-  - A machine that cannot fetch them still gets the universal layer.
+  - `rust-analyzer` comes from rustup, the toolchain the Codex build already pins.
+  - scip-python and scip-typescript are npm packages; `puffin-admin code setup` installs them into `~/.local/share/dreamference/puffin/indexers/`, pinned by version and by the lockfile's `integrity` hashes. They need Node.js; a machine without it keeps the universal layer for those languages and says so in `puffin code status`.
+  - The rest are fetched by `puffin-admin code setup` when their language is present, pinned by version and checksum.
+  - Nothing is ever fetched at index or query time.
 
-## 5. The SCIP layer
+## 6. The SCIP layer
 
-### 5.1 Which indexers run
+### 6.1 Which indexers run
 
 Detection is by project files at the repository root and in immediate subdirectories. A monorepo can get several.
 
-| Found | Indexer | Command (run under §8's limits and §8.1's sandbox) |
-|---|---|---|
-| `Cargo.toml` (workspace or crate) | rust-analyzer | `rust-analyzer scip <dir> --output <out>` |
-| `pyproject.toml` / `setup.py` / `requirements.txt` | scip-python | `scip-python index --project-name <p> --output <out>` |
-| `tsconfig.json` / `jsconfig.json` / `package.json` | scip-typescript | `scip-typescript index --output <out>` |
-| `compile_commands.json` | scip-clang | `scip-clang --compdb-path=compile_commands.json` |
-| `build.gradle*` / `pom.xml` / `build.sbt` | scip-java | `scip-java index` |
-| `go.mod` | scip-go | `scip-go` |
-| `*.sln` / `*.csproj` | scip-dotnet | `scip-dotnet index` |
+| Found | Indexer | Executes project code? | Runs |
+|---|---|---|---|
+| `pyproject.toml` / `setup.py` / `requirements.txt` / `*.py` package | scip-python | **no, when run as below**; by default it runs `pip3` and `python3` from `PATH`, i.e. the repository's venv (§2) | **every repository**, automatically |
+| `tsconfig.json` / `jsconfig.json` / `package.json` | scip-typescript | **no** | **every repository**, automatically |
+| `compile_commands.json` | scip-clang | no, given the compdb | every repository, on demand |
+| `go.mod` | scip-go | no code, but `go list` would download | every repository, on demand, offline enforced |
+| `Cargo.toml` (workspace or crate) | rust-analyzer | **yes**: build scripts and proc-macros, always (§2) | trusted repositories, under admission (§6.4) |
+| `build.gradle*` / `pom.xml` / `build.sbt` | scip-java | **yes**: the build | trusted repositories, under admission |
+| `*.sln` / `*.csproj` | scip-dotnet | treat as **yes** | trusted repositories, under admission |
 
-A project that fails to build or index keeps the universal layer only. The failure is recorded in the manifest, not retried in a loop.
+**scip-python is only static when Puffin controls its environment.** It is run with `--environment <file>` (the package list Puffin writes, empty for an untrusted repository), a `PATH` holding only Puffin's own Node.js and the system `/usr/bin`, and `PYTHONSAFEPATH=1` and `PYTHONNOUSERSITE=1`, so the one Python it still starts (to read `sys.path`) is the system interpreter and cannot import a `sitecustomize.py` from the repository. Measured: no `pip3`, no repository interpreter, identical references. The same `PATH` rule applies to scip-typescript's `node`.
 
-### 5.2 Where output goes
+The static indexers run for untrusted repositories too because, run this way, they cannot execute anything from it, and because the universal layer alone gets Python method callers wrong half the time (§2). They still run inside the sandbox of §9.1, with no network. A project that fails to index keeps the universal layer only; the failure is recorded in the manifest, not retried in a loop.
 
-- **Files:** `<repo>/.dreamference/scip/<indexer>.scip`, the query store `index.db` built from it (§6.5), and `manifest.json`: `{indexer, version, mode, commit, path_prefix, dirty_files, file_hashes, started, duration_s, peak_rss_mb, cap_mb, status}`. `status` is one of `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy` or `deferred: model-start`. `mode` is `full` or `no-macros` (§5.5). `.dreamference/` is already git-ignored.
-- **Never index inside a submodule's checkout with a build tool that writes to it.** rust-analyzer runs `cargo metadata` and build scripts, and even `cargo tree` rewrites a submodule's `Cargo.lock`. This project's `codex/` workspace is indexed from the builder's exported copy (`~/.cache/dreamference/puffin-codex/src/codex-rs`), and paths are remapped back to `codex/codex-rs/…`. In general, a submodule is indexed from a scratch export (`git archive`), never in place.
-- **`CARGO_TARGET_DIR` points at a scratch directory** so indexing never touches a build cache that another build is using.
+### 6.2 Where output goes
 
-### 5.3 When it runs
+- **Files:** `<repo>/.dreamference/scip/<indexer>.scip`, the query store `index.db` (§7.5), and `manifest.json`: `{indexer, version, commit, path_prefix, dirty_files, file_hashes, started, duration_s, peak_rss_mb, peak_cap_bounded, cap_mb, status}`. `status` is one of `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy` or `deferred: model-start`. `.dreamference/` is already git-ignored.
+- **Paths are relative to the indexed root**, for every indexer: rust-analyzer's are relative to the workspace (`core/src/…`), scip-python's to the `--target-only` directory (`cli/…` for `dreamference/cli/…`). The manifest's `path_prefix` restores the repository path.
+- **Never index inside a submodule's checkout with a build tool that writes to it.** rust-analyzer runs `cargo metadata` and build scripts, and even `cargo tree` rewrites a submodule's `Cargo.lock`. This project's `codex/` workspace is indexed from a scratch copy of the builder's export (`~/.cache/dreamference/puffin-codex/src/codex-rs`), never from the export itself, which the builder owns, and paths are remapped to `codex/codex-rs/…`.
+- **`CARGO_TARGET_DIR` points at a scratch directory** so indexing never touches a build cache another build is using. The build-script cache it accumulates is what makes the second Rust run ~2 minutes faster (§2).
 
-- **Automatic triggers, for trusted repositories only (§8):** in the background, never blocking a session:
-  - at `puffin` start when there is no index, or the index is older than `HEAD` by more than N commits;
-  - after a commit;
-  - when idle.
+### 6.3 When it runs
+
+- **Static indexers (Python, TypeScript):** after the universal index at launch when the manifest is older than `HEAD` or files changed, detached; and on `puffin code index`. Cheap enough (19 s for `dreamference/`) to follow every launch.
+- **Executing indexers, trusted repositories only (§9.1):** in the background, never blocking a session:
+  - when no exact index exists, or it is older than `HEAD` by more than `code_index_stale_commits` commits (default 20);
+  - when idle, preferring the moments the model server is stopped (§6.4);
+  - in the Night Shift window, before night tasks start, so they begin with a fresh index (see `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`).
 - **On demand:** `puffin code index --exact`.
-- **Before a risky operation:** when the router answers `references`/`impact` for a symbol whose files changed since the snapshot (§6.3). This only *requests* a run; the answer itself is given immediately, from both layers with stale rows tagged `heuristic`.
-- **Every trigger goes through the scheduler of §8.2:** one run in flight per repository, later requests coalesced into one, a minimum interval between runs, idle-gated and frozen while the model is busy. A lock file, like the builder's `flock`, makes that hold across sessions.
-- **Every start goes through §5.5's memory admission.**
+- **Before a risky operation:** when `refs`/`impact` touches a symbol whose files changed since the snapshot (§7.3's staleness check). This only *requests* a run; the answer is given immediately, stale rows tagged.
+- **Every trigger goes through the scheduler of §9.2,** and every executing run through §6.4's admission.
 
-### 5.4 Cost on this machine (measured 2026-09-28)
+### 6.4 Memory admission
 
-`rust-analyzer scip` (toolchain 1.95.0) on the Codex workspace, from the builder's exported copy, inside an 8 GB cgroup cap, while the model server was resident (about 13 GB of host memory available):
+A fixed cap either kills the run (8 GB did, on 2026-09-28) or has to be sized for the worst repository, taking memory from the model. Executing indexers therefore go through admission control:
 
-| Phase | Measured | Notes |
-|---|---|---|
-| 1. Compile and run build scripts and proc-macros | 560 of them. At least 2 min wall, 7 min 21 s CPU (about 3.7 cores on average, of 20) | Lower bound: the run was cut off by a harness timeout before phase 1 ended. The output is cached in the scratch target directory. |
-| 1, second run | All 560 loaded from that cache in about 1 s | The cache makes phase 1 a one-time cost per dependency set. |
-| 2. Analysis and SCIP emission | **OOM-killed by the 8 GB cgroup cap 78 s in** (1 min 17 s CPU) | The cap did its job: only the indexer died, not the host. No SCIP file has been produced for Codex yet. |
+- **Reserve:** `code_index_reserve = earlyoom SIGTERM threshold + 4 GiB`, read from earlyoom's `-m` percentage and `MemTotal` (on this machine 6.2 + 4 = ~10.2 GiB). The model's memory is already allocated when it is resident, so `MemAvailable` excludes it; the reserve protects the host, the session and the model's transient allocations. On 2026-09-29 an index run that ignored this pushed the host under earlyoom's line and earlyoom killed vLLM.
+- **Cap at start:** `cap = min(code_index_memory_ceiling, MemAvailable − code_index_reserve)`, ceiling default 40 GiB.
+- **Admit only a run that can finish:** the manifest's `peak_rss_mb` for this indexer and repository must satisfy `cap ≥ 1.2 × peak_rss_mb`. Otherwise the run is not started: `status: "deferred: memory"`, and `puffin code status` says so.
+- **Cap-bounded peaks are marked.** When a run's peak ends within 10% of its cap (`peak_cap_bounded: true`), the recorded peak is a lower bound: the cgroup was reclaiming against the cap. The next admitted run gets `min(ceiling, 1.5 × peak)` if available, so the first uncapped run raises the record. An OOM-killed run records its cap as the lower bound, so the next attempt is not doomed the same way.
+- **What this means for Codex today:** recorded peak ≥ 21.5 GiB, cap-bounded, so admission needs `cap ≥ 25.8 GiB`, i.e. `MemAvailable ≥ ~36 GiB`. With Qwen3.8 resident the machine has 35–38 GiB available, so a run is admitted only at the quiet end of that range; with the model server stopped (~100 GiB available) always. Scheduled runs therefore prefer `puffin-admin server stop`, idle periods with no server, and the Night Shift window. While no fresh exact index exists, the router serves the last snapshot, with changed files tagged `heuristic (stale)`.
+- **The conversion is admitted too:** `expt-convert` peaked at 2.7 GB on Codex and runs under the same cap right after the indexer.
+- **Partitioning, as an option to measure, not a plan:** index the workspace in passes over subsets of `[workspace] members`, merged in the store. The caveat stands: `codex-cli`'s dependency closure is most of the workspace, so the passes that matter may peak almost as high as the whole.
 
-So for this repository, the exact layer **does not fit its own default budget**. Its true peak memory and total time are unknown. The next measurement is a run with a 24 GB cap while the model server is stopped; record the peak here. Section 5.5 is written so that the layer degrades safely until then.
+## 7. The router
 
-### 5.5 Memory admission, not a fixed cap
-
-A fixed cap either kills the run, as above, or has to be sized for the worst repository. On GB10 that is memory taken from the model. Exact indexing therefore goes through admission control:
-
-- **Budget at start:** `cap = min(code_index_memory_ceiling, MemAvailable − code_index_reserve)`. The reserve protects the resident model and the session: default 8 GB, and 16 GB while a vLLM container is loading or serving.
-- **Refuse rather than fail:** if the manifest has a previous `peak_rss_mb` for this indexer and repository, and `cap < 1.2 × peak_rss_mb`, the run is not started. The manifest records `status: "deferred: memory"`, and `puffin code status` says so. A run that is OOM-killed records the cap it died at as a lower bound for `peak_rss_mb`, so the next attempt is not doomed the same way. This makes `peak_rss_mb`, already in the manifest, the value that drives the decision.
-- **Expected steady state on this machine:** given §5.4, the Codex exact index refreshes when the model server is stopped (`puffin-admin server stop`, or idle with no server). While the model is resident, the router serves the last snapshot, with changed files tagged `heuristic (stale)`.
-- **Prefer the empty machine:** with no vLLM container resident, about 100 GB is available. Scheduled runs (§5.3) are placed there first: at `puffin-admin server stop`, or when the server is not running at an idle trigger. A run started while the model is resident gets the reduced budget above.
-- **Cheaper configurations, to verify in §9:**
-  - `rust-analyzer scip --config-path` takes a JSON Cargo configuration. `cargo.buildScripts.enable = false` and `procMacro.enable = false` skip phase 1 and should lower phase 2's memory. The cost is that code generated by `build.rs` or proc-macros is missing from the index, which matters for `serde`/`clap` derives and `thiserror`. A run with this configuration is recorded in the manifest as `mode: "no-macros"`. Every row it produces is tagged `exact (no-macros)`, and any answer that uses it carries a fixed header note: "derive- and proc-macro-generated code is absent: `impl` and `refs` into generated code are incomplete".
-  - `--exclude-vendored-libraries` drops vendored code from the output.
-- **Partitioning, as an option to measure, not a plan:** index the workspace in several passes. Each pass exports a scratch copy whose `[workspace] members` is a subset, and the resulting SCIP files are merged in the query store (§6.5). The merge is safe because rust-analyzer's symbol strings carry the crate name and version. The caveat is serious: `codex-cli`'s dependency closure is most of the workspace, so the passes that matter may peak almost as high as the whole. §9 measures the peak per partition before this is adopted.
-
-## 6. The router
-
-### 6.1 Operations
+### 7.1 Operations
 
 | `puffin code …` | Answered by | Notes |
 |---|---|---|
-| `search <text>` | codebase-memory `search_graph`, BM25 plus semantic | Names, meaning and text. Always the universal layer. |
-| `outline <file>` | codebase-memory `get_file_outline` | |
-| `show <symbol>` | codebase-memory `get_code_snippet` | Returns one symbol's source, not the whole file. |
-| `def <symbol>` | SCIP if fresh (§6.3), else codebase-memory | |
-| `refs <symbol>` | SCIP for fresh files, codebase-memory for stale ones, merged | Tagged per row. |
-| `callers` / `callees <symbol>` | codebase-memory `trace_path` (depth 1–5), with SCIP-exact rows substituted where available | |
-| `impl <trait-or-interface>` | SCIP (implementation relationships), else codebase-memory `IMPLEMENTS` edges | |
-| `impact <symbol-or-diff>` | codebase-memory `detect_changes`, cross-checked with SCIP refs | Answers "what breaks". |
-| `status` | both | Layers present, freshness, languages covered, last index time. |
-| `index [--exact]` | both | Re-index. `--exact` also schedules SCIP. |
+| `search <text>` | the graph's `nodes_fts` (FTS5, BM25) over names, qualified names and bodies | `nodes_fts` is contentless (`content=''`): it returns rowids, joined back to `nodes` for names and locations. Semantic ranking only through `puffin code mcp` with `puffin_code_semantic = true` (§4). |
+| `outline <file>` | the graph's `nodes` for that file, ordered by line | |
+| `show <symbol>` | the definition's `file:start-end` from the graph, read from disk | Returns one symbol's source, not the whole file. |
+| `def <symbol>` | SCIP if fresh (§7.3), else the graph | |
+| `refs <symbol>` | SCIP for fresh files, the graph for stale or unindexed ones, merged | Tagged per row. |
+| `callers` / `callees <symbol>` | SCIP references mapped to their innermost enclosing definition (`defn_enclosing_ranges` in the store, verified §2), else the graph's `CALLS`/`USAGE` edges | For Python and Rust the graph finds 58% and 78% of calling files (§2); graph-only answers carry a header note saying so. |
+| `impl <trait-or-interface>` | SCIP `relationships` (`is_implementation`), else the graph's `IMPLEMENTS`/`OVERRIDE` edges | |
+| `impact <symbol-or-diff>` | SCIP references, transitive to depth N via enclosing definitions; the graph's edges for stale files | Answers "what breaks". |
+| `status` | both | Layers present, freshness, languages covered, excluded subtrees, disk use, last index time, deferred runs and why. |
+| `index [--exact] [--include-submodules]` | both | Re-index. `--exact` also schedules executing indexers. |
 
-### 6.2 Output
+### 7.2 Output
 
 Output is plain text, compact, one row per result, which is the shape the local model reads best:
 
@@ -193,104 +234,77 @@ heuristic codex-rs/exec/src/lib.rs:77
 unresolved 1 call through `dyn ConfigSource` in codex-rs/core/src/lib.rs:2204
 ```
 
-The source and commit are stated once in the header, not repeated per row. Paths tokenise poorly, so each row costs about 15–20 tokens even when it carries nothing but the tag, path and line.
+The source and commit are stated once in the header. `--json` gives the same data for tools. The `unresolved` line is mandatory whenever either layer reports calls it could not resolve, and a `not indexed` line lists touched paths outside a layer's coverage (§4.1). They are what tell the agent it has to verify.
 
-`--json` gives the same data for tools. The `unresolved` line is mandatory whenever either layer reports calls it could not resolve. It is what tells the agent it has to verify.
+**Every answer is bounded by construction.** The served model's context is 262,144 tokens, so the bound is no longer about fitting the window. It is about cost: every token of tool output is re-read on later turns, and a cold prefill runs at ~1,700 tokens/s (~1,000 at 116K tokens), so a 5,000-token answer costs about 3 s on every later turn the prefix cache misses, and dilutes the model's attention.
 
-**Every answer is bounded by construction.** The served model's context is 32,768 tokens (`max_model_len` in the registry), and that holds the system prompt, the conversation and every tool output. A `refs` on a common method can return hundreds of rows, so an uncapped answer could fill a fifth of the window by itself.
+- **Row cap:** 40 rows by default (`--limit N`, hard ceiling 200). At 15–20 tokens a row plus the header and at most 15 summary lines, a full answer stays under about 1,000 tokens (§10's acceptance figure).
+- **Grouping first, rows second:** above the cap, the answer opens with a per-file summary sorted by count, limited to 15 files. The rows follow, taken from those files.
+- **The header always states what was cut:** `refs Config::load (312 results in 41 files; showing 40; next: --offset 40)`.
+- **Narrowing flags:** `--path <glob>`; `--kind def|read|write|import` from SCIP roles where the indexer distinguishes them (scip-python marks imports as reads, so `--kind import` is unavailable for Python and says so); `--exact-only`; `--offset N`, a cursor invalidated with an error, not silently shifted, if the index changes between pages (detected by the graph's `store_meta.mutation_gen` and the store's run id).
+- **The prompt block is budgeted too:** the `# Code navigation` block of §8 rides on every turn and is kept under 250 tokens.
 
-- **Row cap:** 40 rows by default (`--limit N`, hard ceiling 200). At 15–20 tokens a row, plus the header and at most 15 summary lines (next bullet, about 10 tokens each), a full answer stays under about 1,000 tokens. That is the §9 acceptance figure.
-- **Grouping first, rows second:** above the cap, the answer opens with a per-file summary, sorted by count (`12  codex-rs/core/src/config.rs`), limited to 15 files. The rows follow, taken from those files.
-- **The header always states what was cut:** `refs Config::load (312 results in 41 files; showing 40; next: --offset 40)`. The model can then page, or narrow the query, instead of assuming the list is complete.
-- **Narrowing flags:**
-  - `--path <glob>`;
-  - `--kind def|read|write|import`, from SCIP `symbol_roles`;
-  - `--exact-only`;
-  - `--offset N`, a stable cursor that is invalidated with an error, not silently shifted, if the index changes between pages.
-- **Use the upstream limits:** codebase-memory's CLI already takes `result_limit`/`result_offset` and `max_output_tokens`. The router passes the budget down rather than fetching everything and cutting afterwards.
-- **The prompt block is budgeted too:** the `# Code navigation` block of §7 rides on every turn, so it is kept under 250 tokens. The command list is one line each, and details live in `puffin code --help`.
+### 7.3 Freshness and merging
 
-### 6.3 Freshness and merging
+- **A file is fresh for SCIP** when its current content hash equals `file_hashes[path]` in the SCIP manifest; **fresh for the graph** when it matches the graph's own `file_hashes(rel_path, sha256, mtime_ns, size)` table, which codebase-memory already maintains.
+- **Only the files an answer touches are checked, and cheaply:** by `(mtime, size)` first, hashed only if either differs. A 40-row answer costs at most 41 `stat` calls in the common case.
+- **`refs` and `def`** use SCIP rows for fresh files and graph rows for stale or unindexed ones.
+- **Rows present in both** are de-duplicated by `(path, line)`; the SCIP row wins and is tagged `exact`.
+- **Stale share:** if more than 20% of the files a result touches are stale, the router *requests* a background run and says so in the header. It never runs one in the query's path.
 
-- **A file is fresh for SCIP** when its current content hash equals `file_hashes[path]` in the manifest.
-- **Only the files an answer touches are checked, and cheaply:** the definition's file plus the files in the rows being printed, not the whole repository. Each is checked by `(mtime, size)` against the manifest first, and hashed only if either differs. A 40-row answer therefore costs at most 41 `stat` calls in the common case, not 4,800 hashes.
-- **`refs` and `def`** use SCIP rows for fresh files and codebase-memory rows for stale or unindexed files.
-- **Rows present in both** are de-duplicated by `(path, line)`. The SCIP row wins and is tagged `exact`.
-- **Stale share:** if more than 20% of the files a result touches are stale, the router *requests* a background SCIP run from §8.2's scheduler, which coalesces it with other requests, and says so in the output header. It never runs one in the query's path.
+### 7.4 Joining the two layers: symbol identity
 
-### 6.4 Joining the two layers: symbol identity
+The layers name things differently. The graph has qualified names (`dreamference.vllm_server.vllm_server_manager.VLLMServerManager.start_server`, prefixed by the project name). SCIP has opaque symbol strings (`rust-analyzer cargo codex-core 0.158.0 config/load_config_as_toml_with_cli_overrides().`, ``scip-python python dreamference <hash> `dreamference.vllm_server.vllm_server_manager`/VLLMServerManager#start_server().``) and a role bitmask with `Definition = 1`. The shared key is the **definition's location**:
 
-The layers name things differently. codebase-memory has qualified names such as `Config::load`. SCIP indexes nothing by name: every occurrence carries an opaque *symbol string* (rust-analyzer writes e.g. `rust-analyzer cargo codex-core 0.158.0 config/Config#load().`) and a `symbol_roles` bitmask in which `Definition = 1`. The shared key is therefore the **definition's location**, and the join runs as follows:
-
-1. **Name to candidates.** The agent types a name as it sees it in code: `Config::load`, `load`, `dreamference.runner.codex_runner.CodexRunner.run_session`. `search_graph` returns candidate definitions, each with `(path, range)`. If there are several, the router lists them with their paths and asks for a qualified name; it never guesses.
-2. **Location to SCIP symbol.** For the chosen definition, the router looks up the SCIP `Document` for that path, through the query store of §6.5, never by decoding the `.scip` file at query time. It takes the occurrence whose `symbol_roles & Definition` is set and whose range overlaps the definition's name range. That occurrence's symbol string is the exact identity.
-3. **Symbol to exact references.** Every occurrence of that symbol string across all SCIP documents is an exact reference. Its roles distinguish reads, writes and imports, and `relationships` give `is_implementation`, `is_reference` and `is_type_definition`, which answer `impl`.
-4. **Fallback when step 2 cannot run.** The definition's file may be stale (hash mismatch, §6.3), or have no SCIP document. The router then searches the SCIP symbol table (`SymbolInformation`, by `display_name` and by symbol-string suffix, e.g. `Config#load().`). It does this through the store's indexed `display_name` and reversed-symbol columns, not by scanning every document.
+1. **Name to candidates.** The agent types a name as it sees it in code. The graph's `nodes` (by `name`, then `qualified_name` suffix) returns candidate definitions with `(file_path, start_line, end_line)`. Several candidates are listed with their paths; the router never guesses.
+2. **Location to SCIP symbol.** For the chosen definition, the router finds the store's definition mention (role & 1) whose document is that file and whose chunk range contains the definition line, decodes that chunk's occurrences, and takes the one overlapping the name. Its symbol string is the exact identity.
+3. **Symbol to exact references.** Every mention of that symbol is an exact reference. Roles distinguish reads and writes where the indexer sets them; `relationships` give `is_implementation`, `is_reference` and `is_type_definition`, which answer `impl`.
+4. **Fallback when step 2 cannot run** (the definition's file is stale, or has no SCIP document): the router searches the store's `global_symbols` by `display_name` and by symbol-string suffix, through indexes the router adds after conversion (§7.5).
    - Exactly one match: use it, and tag the definition `heuristic` (located by name, not by position).
-   - Several matches: list them.
-   - No match: codebase-memory only, all rows `heuristic`.
-5. **Coordinates.** SCIP ranges are **0-based** lines and columns (`[startLine, startChar, endLine, endChar]`, or three elements when the range is on one line). The coordinate convention of codebase-memory's CLI output must be pinned against v0.11.0 with a recorded fixture. All rows are normalised to **1-based lines** (what editors and `rg` show) before de-duplication on `(path, line)` and before printing. An off-by-one here would silently turn every overlap into a duplicate pair, so the fixture test in §11 checks it.
-6. **Path mapping.** SCIP documents store paths relative to the indexed root. For an exported copy (§5.2) the manifest records `path_prefix` (e.g. `codex/codex-rs/`), and it is prepended before comparison. Hashes are compared against the file at the mapped repository path, so files that differ from the export (patched, or uncommitted) are simply stale, which is the safe direction.
+   - Several: list them. None: graph only, all rows `heuristic`.
+5. **Coordinates.** SCIP ranges are **0-based**; the graph's lines are **1-based** (measured, §2). Everything is normalised to 1-based lines before de-duplication and printing. A fixture test (§12) catches any regression, because an off-by-one would turn every overlap into a duplicate pair.
+6. **Paths.** SCIP document paths are relative to the indexed root, the graph's to the repository; the manifest's `path_prefix` bridges them (§6.2).
 
-### 6.5 The query store
+### 7.5 The two stores, read directly
 
-A `.scip` file is one protobuf message covering the whole project. Decoding it in every `puffin code refs` would cost seconds and gigabytes per query on a workspace this size, in a process that exists for a single answer. So the router pays that cost once per index run:
+**The SCIP query store** is `scip expt-convert` output from the pinned scip CLI:
+- `documents(id, relative_path, language, …)`, `chunks(id, document_id, start_line, end_line, occurrences BLOB)`, `global_symbols(id, symbol, display_name, kind, enclosing_symbol, relationships BLOB, …)`, `mentions(chunk_id, symbol_id, role)`, and `defn_enclosing_ranges`, indexed on `mentions(symbol_id, role)`, `global_symbols(symbol)` and the chunk ranges.
+- After conversion the router adds its own indexes, `global_symbols(display_name)` and a reversed-symbol column for suffix lookups, and records the run id. The database is written as `index.db.new` and renamed into place atomically.
+- A reference lookup is a join through `mentions` to a chunk (2 ms measured); exact positions come from decoding that chunk's occurrence blob with the `scip` crate, a few KB per chunk.
+- **`expt-convert` is marked experimental.** The router pins the scip CLI version and a **schema fingerprint** (the SHA-256 of the ordered `sql` column of `sqlite_master`). On a mismatch it builds the store with its own converter instead (the table layout of the previous revision of this spec: `documents`, `symbols`, `occurrences` stored 1-based, `relationships`), decoding the `.scip` whole with the `scip` crate (2 s and 2.1 GB on Codex).
+- The `.scip` file is kept so the store can be rebuilt without re-indexing; queries never touch it.
 
-- **Conversion after each successful run:** `puffin-rs` decodes the `.scip` file with the `scip` crate and writes `.dreamference/scip/index.db`, a SQLite database, then replaces the previous one atomically (write `index.db.new`, then `rename`).
-  - A SCIP index is a single protobuf message, so it is decoded whole, not streamed. The conversion's peak memory is a small multiple of the file size.
-  - It is written by the router, not by the `scip` CLI, because whether the pinned `scip` CLI has a SQLite export is unverified.
-  - The conversion runs inside the same memory admission (§5.5) and scheduling (§8.2) as the indexer.
-- **Tables:**
-  - `documents(id, path, mtime, size, hash, source_run)`: this is also where §6.3's freshness facts live;
-  - `symbols(id, symbol, display_name, kind, rev_symbol)`, where `rev_symbol` is the symbol string reversed, so that suffix lookups become prefix scans;
-  - `occurrences(symbol_id, document_id, line, col, end_line, end_col, roles)`, stored **already 1-based**, so §6.4 step 5 is paid once;
-  - `relationships(symbol_id, target_id, kind)`, for `impl`.
-  - Indexes on `occurrences(symbol_id)`, `occurrences(document_id, line)`, `symbols(symbol)`, `symbols(display_name)` and `symbols(rev_symbol)`.
-- **Several SCIP files merge into one store:** one per indexer, or per partition (§5.5). Rows are keyed by symbol string, which is globally unique, and `source_run` records where each document came from, so a partition can be replaced without rebuilding the others.
-- **Query cost:** opening the database read-only and running two or three indexed lookups is milliseconds, and stays so as the repository grows. Queries never touch the `.scip` file. It is kept only so the store can be rebuilt without re-indexing.
+**The codebase-memory graph** is read in place, read-only:
+- Tables used: `nodes(project, label, name, qualified_name, file_path, start_line, end_line, properties)`, `edges(project, source_id, target_id, type, properties)` (with the call-site line in `properties`), `nodes_fts`, `file_hashes`, `index_coverage`, `projects`, `store_meta`. All the joins the router needs are covered by the tool's own indexes.
+- **Compatibility:** the router pins a schema fingerprint per codebase-memory version, like the SCIP store's. A mismatch drops to the fallback ladder of §4 and logs once; it never guesses at a changed schema.
+- **Concurrency:** the database uses a rollback journal (`journal_mode = delete`), so a query that coincides with a detached re-index commit can see `SQLITE_BUSY`. The router opens it read-only with a 2 s busy timeout, reads `store_meta.mutation_gen` before and after its lookups, and retries once if it changed. It opens the file by path for each query and never holds a handle, because an upgrade replaces the file (v0.11.0's release notes: "the first run after upgrading rebuilds your index once").
 
-## 7. Agent interface
+## 8. Agent interface
 
-- **Prompt:** the launcher appends a `# Code navigation` block to the model's prompt, next to web access and Gmail. The block covers:
-  - the commands in §6.1;
-  - the meaning of `exact`/`heuristic`/`unresolved`;
-  - one rule: *before changing a signature, renaming or deleting, run `puffin code refs`. If any row is `heuristic` or `unresolved`, confirm with `rg` and run the build or tests after the edit.*
-- **Ready, building or absent:** the block is full, reduced or absent according to the index state at launch (§3.1), so the model is never told to rely on a command that cannot answer, and is still told the index is coming.
-- **MCP:** `puffin code mcp` serves the same operations over stdio for Claude Code and IDEs. It replaces jCodeMunch in `~/.claude.json` once this is implemented. The local model keeps using shell commands, because it does not reliably call MCP tools under Codex's Code Mode (see `codex_runner.py`'s history).
+- **Prompt:** the launcher appends a `# Code navigation` block to the model's prompt, next to web access and Gmail. It covers the commands of §7.1, the meaning of `exact`/`heuristic`/`unresolved`/`not indexed`, and one rule: *before changing a signature, renaming or deleting, run `puffin code refs`. If any row is `heuristic`, `unresolved` or `not indexed`, confirm with `rg` and run the build or tests after the edit.*
+- **Ready, building or absent:** the block is full, reduced or absent according to the index state at launch (§4.1).
+- **MCP:**
+  - `puffin code mcp` serves the same operations over stdio for Claude Code and IDEs, and replaces jCodeMunch in `~/.claude.json` once implemented.
+  - `puffin-admin mcp`'s `workspace_search_code` is re-pointed at the router; the `dreamference` context engine (per-file TF-IDF, FTS5 and embeddings) is retired once the router passes §10, since it answers a subset of `puffin code search` with no call graph.
+  - The local model keeps using shell commands, because it does not reliably call MCP tools under Codex's Code Mode (see `codex_runner.py`'s history).
 
-## 8. Resources and safety
+## 9. Resources and safety
 
-On GB10, host RAM and GPU memory are the same memory, and running it out can freeze the host, not just kill a process (see `psi_watchdog.py`).
+On GB10, host RAM and GPU memory are the same memory, and running it out can freeze the host, not just kill a process (see `psi_watchdog.py`). On 2026-09-29 an unconstrained index of this repository (the old `dreamference` context engine walking 2.3 GB of files) pushed available memory under earlyoom's line and earlyoom killed vLLM. Everything below exists so that cannot recur.
 
-- **Memory limits:**
-  - SCIP indexing always runs under `systemd-run --user --scope -p MemoryMax=<cap> -p MemorySwapMax=0`, so exhaustion OOM-kills the indexer instead of stalling the host.
-  - `<cap>` comes from §5.5's admission control, not a fixed default. A fixed 8 GB was measured to be too small for the Codex workspace (§5.4).
-  - codebase-memory indexing runs under the same kind of limit, with its own ceiling. Its pipeline is RAM-first, per its README.
-- **Sharing the machine with inference:** see §8.2. `nice`/`ionice` alone are not enough on this machine.
-- **Watcher:** codebase-memory's watcher is off unless the user sets `puffin_code_watch = true` (§3.1). That maps to its `watcher_enabled` / `auto_watch` settings.
+- **Memory limits:** every indexer, universal or exact, runs under `systemd-run --user --scope -p MemoryMax=<cap> -p MemorySwapMax=0`, so exhaustion OOM-kills the indexer instead of stalling the host. `<cap>` comes from §6.4 for executing indexers; for codebase-memory and the static indexers it is a fixed ceiling (default 4 GiB; measured peaks 142 MiB and 2.1 GiB), with `CBM_MEM_BUDGET_MB` set below it so the tool budgets itself before the cgroup has to act.
+- **Sharing the machine with inference:** §9.2. `nice`/`ionice` alone are not enough on this machine.
 
-### 8.1 Exact indexing executes project code
+### 9.1 Exact indexing executes project code
 
-SCIP indexing is not a passive read. The first rust-analyzer run on this machine compiled **and ran** 560 build scripts and proc-macros from the Codex dependency tree (`Loading build script aws-lc-sys run` in its log). Indexing an untrusted repository with the exact layer means running that repository's code.
-
-| Indexer | Executes project code? | Why |
-|---|---|---|
-| rust-analyzer | **yes** | Runs `build.rs` scripts and proc-macros, and `cargo metadata`, which fetches missing crates unless offline |
-| scip-java | **yes** | Runs the Gradle, Maven or sbt build |
-| scip-dotnet | treat as **yes** | MSBuild evaluation and restore run project-defined logic |
-| scip-go | no code, but **network** | Loads packages via `go list`, which downloads modules unless offline |
-| scip-clang | no, given an existing `compile_commands.json` | Parses with Clang. *Generating* the compdb (CMake, `bear -- make`) does execute the build, and is the user's job, not the indexer's |
-| scip-typescript | no | Static analysis with the TypeScript compiler, over `node_modules` as present |
-| scip-python | no | Static analysis with Pyright |
-| codebase-memory-mcp | no | Parses with tree-sitter and its own resolver; runs nothing from the repository |
+The Rust exact layer always runs the repository's build scripts and proc-macros (§2: it cannot be turned off in scip mode). Indexing an untrusted repository with an executing indexer means running that repository's code.
 
 Three rules follow.
 
-- **Trust gate.**
-  - Exact indexing runs only for repositories the user has marked trusted: `trusted = true` in `<repo>/.dreamference/code_index.toml`, or Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, the `ProjectConfig.trust_level` the TUI already asks about).
-  - Untrusted repositories get the universal layer only, and `puffin code status` says so in one line.
-  - Indexers marked "no" in the table may run on an untrusted repository on demand (`puffin code index --exact`), still inside the sandbox, but never automatically.
-- **Sandbox, in addition to the memory limit.** Every SCIP indexer runs as `systemd-run … -- bwrap …`, with the network removed and the filesystem read-only except for its outputs. For rust-analyzer:
+- **Trust gate for executing indexers** (rust-analyzer, scip-java, scip-dotnet):
+  - they run only for repositories the user has marked trusted: `trusted = true` in `<repo>/.dreamference/code_index.toml`, or Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, which the TUI already asks about);
+  - untrusted repositories get the universal layer plus the static exact layers, and `puffin code status` says so in one line.
+- **Sandbox, for every indexer.** Each runs as `systemd-run … -- bwrap …`, with the network removed and the filesystem read-only except for its outputs. For rust-analyzer (this is the command that produced §2's measurements, less the paths):
   ```
   systemd-run --user --scope --unit="puffin-index-$REPO_ID" \
     -p MemoryMax="$CAP" -p MemorySwapMax=0 \
@@ -298,114 +312,104 @@ Three rules follow.
     nice -n 10 ionice -c3 \
     bwrap --die-with-parent --unshare-net --unshare-pid \
           --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
-          --bind "$SCRATCH_TARGET" "$SCRATCH_TARGET" \
+          --bind "$SCRATCH" "$SCRATCH" \
           --bind "$REPO/.dreamference/scip" "$REPO/.dreamference/scip" \
           --bind "$CARGO_HOME" "$CARGO_HOME" \
-          --setenv CARGO_NET_OFFLINE true --setenv CARGO_TARGET_DIR "$SCRATCH_TARGET" \
+          --setenv CARGO_NET_OFFLINE true --setenv CARGO_TARGET_DIR "$SCRATCH/target" \
           --setenv CARGO_BUILD_JOBS 4 \
           -- rust-analyzer scip "$SRC" --output "$REPO/.dreamference/scip/rust-analyzer.scip"
   ```
   - `/usr/bin/bwrap` is already installed; it is Codex's own sandbox.
-  - The scope is named (`puffin-index-<repo id>`) so that §8.2's poller can `freeze`/`thaw` it, and so that `puffin code status` can find a run in progress. `$CAP` comes from §5.5, and `$INDEX_CPUS` is the four-core set of §8.2.
-  - The router creates `$REPO/.dreamference/scip` and `$SCRATCH_TARGET` beforehand, because bwrap cannot bind a path that does not exist.
-  - `$CARGO_HOME` is writable only because Cargo takes a lock file there even when offline; with no network, nothing can be fetched into it.
-  - `$SRC` is read-only. If Cargo needs to rewrite the lockfile, the run fails and is recorded. The remedy is an exported scratch copy, as for `codex/` (§5.2), where `$SRC` is additionally bound writable.
+  - The scope is named so §9.2's supervisor can `freeze`/`thaw` it and `puffin code status` can find a run in progress.
+  - The router creates the bound directories beforehand, because bwrap cannot bind a path that does not exist.
+  - `$CARGO_HOME` is writable only because Cargo takes a lock file there even offline; with no network, nothing can be fetched into it.
+  - `$SRC` is read-only. A run that needs to rewrite the lockfile fails and is recorded; the remedy is a scratch copy, as for `codex/` (§6.2).
 - **Offline is enforced, not assumed.**
-  - Environment: `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly`, `GOPROXY=off`, and `npm_config_offline=true`.
+  - Environment: `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly`, `GOPROXY=off`, `npm_config_offline=true`.
   - Nothing ever runs `npm install`, `pip install` or a dependency download on the indexer's behalf.
-  - An indexer that needs something not already on disk fails, and the manifest records `status: "failed: offline"`. That is the accepted outcome, not a retry.
-  - The Codex workspace qualifies because the puffin build already filled `~/.cargo/registry` with its dependencies.
-- **Air-gapped, stated precisely:** no network access is *permitted* to any indexer at index time, and none is used at query time. The only downloads happen at install (`puffin-admin code setup`, `puffin update`), each pinned by checksum like the rusty_v8 archive.
-- **Scope:** only the current repository is indexed, or explicitly listed ones. `~`, `/` and anything over `code_index_max_files` are never indexed (default 50,000, codebase-memory's `auto_index_limit`).
+  - An indexer that needs something not on disk fails with `status: "failed: offline"`. That is the accepted outcome, not a retry.
+- **Air-gapped, stated precisely:** no network access is *permitted* to any indexer at index time, and none is used at query time. The only downloads happen at install (`puffin-admin code setup`, `puffin update`), each pinned by checksum. codebase-memory's own traffic was checked with strace: none (§2).
+- **Scope:** only the current repository is indexed, or explicitly listed ones. `~`, `/` and anything over `code_index_max_files` (default 50,000) are never indexed.
 
-### 8.2 Indexing must not slow the model
+### 9.2 Indexing must not slow the model
 
-On GB10, token generation is limited by memory bandwidth, and CPU, GPU and model weights share the same LPDDR5X. Background indexing competes for that bandwidth, which `nice` and `ionice` do not limit. Phase 1 of §5.4 averaged about 3.7 busy cores and would take more if allowed. The number to protect is the single-stream decode rate recorded in `CLAUDE.md` for the default model: prose 23.8, code 49.9, JSON 53.1 tokens/s.
+On GB10, token generation is limited by memory bandwidth, and CPU, GPU and model weights share the same LPDDR5X. Background indexing competes for that bandwidth, which `nice` and `ionice` do not limit. The Codex exact run averaged about 3.7 busy cores in its first phase. The number to protect is the default model's single-stream decode rate: Qwen3.8-27B, 25.5 / 50.3 / 87.0 tokens/s on prose / code / JSON (`DREAMFERENCE_INFERENCE.md` §5.3).
 
-- **Start only when the model is idle.** vLLM's `/metrics` exposes `vllm:num_requests_running` and `vllm:num_requests_waiting` (verified on this server). An exact-indexing run starts only when both are 0, or when no vLLM container is running (§5.5).
+- **Start only when the model is idle.** The supervisor reads the served model's `/metrics` and treats it as idle when the engine's request gauges are 0: `sglang:num_running_reqs` and `sglang:num_queue_reqs` on SGLang, `vllm:num_requests_running` and `vllm:num_requests_waiting` on vLLM, whichever answers. No model server at all also counts as idle.
 - **Never alongside a model load.**
-  - A vLLM container that exists (`docker ps`) but does not answer `/metrics` is **loading**. Nothing starts then, because §5.5's admission would wrongly pass: `MemAvailable` is still high before the weights are mapped.
-  - If a run is in flight when a load begins, it is **stopped**, not frozen, because frozen memory stays resident. It is recorded as `status: "deferred: model-start"`.
-  - `puffin-admin server start` itself stops every `puffin-index-*` scope before its host-safety pre-flight, which is one `systemctl --user stop 'puffin-index-*'` thanks to the named scope of §8.1. This keeps the unified-memory guarantee of `check_host_safety()` intact.
+  - A model container (`dreamference-vllm-<port>`, the name both engines use) that exists but does not answer `/health` is **loading**. Nothing starts then: `MemAvailable` is still high before the weights are mapped, so admission would wrongly pass.
+  - A run in flight when a load begins is **stopped**, not frozen, because frozen memory stays resident; it is recorded as `deferred: model-start`.
+  - `puffin-admin server start` stops every `puffin-index-*` scope before its host-safety pre-flight (`systemctl --user stop 'puffin-index-*'`), keeping `check_host_safety()`'s guarantee intact.
 - **Pause instead of competing:**
-  - The indexer cannot watch the model itself: it runs in `bwrap --unshare-net` and has no route to `localhost:8000`.
-  - So `puffin code index` starts a detached **supervisor process** outside the sandbox. The supervisor creates and owns the scope, polls `/metrics` every 2 s, applies the rules above, enforces the frozen-time limit, writes the manifest, and exits when the scope ends. It lives exactly as long as one run, so §3's "no long-lived process" holds.
-  - When a request appears, the supervisor runs `systemctl --user freeze <scope>`, and `thaw` once the model has been idle for 10 s (verified supported on systemd 255).
-  - Freezing keeps every byte of progress, so a long run finishes in the model's idle gaps rather than being killed and restarted.
-  - A run that stays frozen for more than 30 minutes is stopped and recorded as `status: "deferred: busy"`.
-- **Cap what it can take while running:** `-p CPUQuota=400% -p AllowedCPUs=<4 cores>` on the scope (both verified accepted on systemd 255), with `CARGO_BUILD_JOBS=4` and the Go and MSBuild equivalents. Four cores is the default, configurable as `code_index_cpus`. The same caps apply to codebase-memory's `index_repository`.
-- **One run at a time, coalesced:** several triggers can each ask for a multi-minute whole-workspace run: after a commit, when idle, at launch, and when too many files are stale (§6.3). The scheduler keeps at most one exact run in flight per repository. Requests that arrive during a run collapse into a single follow-up, and a follow-up waits at least `code_index_min_interval` (default 15 minutes) after the previous run ended, unless it is `puffin code index --exact`.
+  - The indexer cannot watch the model itself: it has no network in its sandbox. `puffin code index` therefore starts a detached **supervisor** outside the sandbox that creates and owns the scope, polls `/metrics` every 2 s, applies these rules, writes the manifest, and exits when the scope ends. It lives exactly as long as one run.
+  - When a request appears, the supervisor runs `systemctl --user freeze <scope>`, and `thaw` once the model has been idle for 10 s (supported on systemd 255).
+  - A run frozen for more than 30 minutes is stopped and recorded as `deferred: busy`.
+- **Cap what it can take while running:** `-p CPUQuota=400% -p AllowedCPUs=<4 cores>` on the scope, `CARGO_BUILD_JOBS=4` and the Go and MSBuild equivalents, `CBM_WORKERS=4` for codebase-memory. Newer rust-analyzer than the pinned 1.95.0 adds `--num-threads`; the router passes 4 once the toolchain has it.
+- **One run at a time, coalesced:** at most one exact run in flight per repository; requests during a run collapse into one follow-up, which waits at least `code_index_min_interval` (default 15 minutes) unless it is `puffin code index --exact`. A lock file makes this hold across sessions, and Night Shift's admission counts an exact run as work in progress.
 
-## 9. Evaluation (before building the router)
+## 10. Evaluation (before building the router)
 
-The bake-off decides whether codebase-memory is good enough as the universal layer, and how much SCIP adds.
+§2 already answers the cost and correctness questions the first draft left open: the universal layer is too inaccurate on call edges to stand alone (78% Rust, 58% Python), and the exact layer is affordable for static languages and admissible for Codex only when the machine is quiet. What remains:
 
-1. **Question set:** 15–20 real questions about this repository. At least 8 are about `codex/codex-rs` Rust (trait methods, re-exports, macro-generated code, `dyn` dispatch) and at least 5 about `dreamference/` Python.
-2. **Ground truth:** SCIP from `rust-analyzer` and `scip-python`, spot-checked by hand for the `unresolved` cases.
-3. **Contenders:**
-   - codebase-memory-mcp;
-   - `rg`/`ast-grep` as the baseline;
-   - optionally octocode with `--with-lsp=rust-analyzer`, and codegraph.
+1. **Question set:** 15–20 real questions about this repository: at least 8 about `codex/codex-rs` Rust (trait methods, re-exports, macro-generated code, `dyn` dispatch) and at least 5 about `dreamference/` Python.
+2. **Ground truth:** SCIP from rust-analyzer and scip-python (both now produced on this machine), spot-checked by hand for `unresolved` cases.
+3. **Contenders:** the router (both layers); the graph alone; `rg`/`ast-grep` as the baseline.
 4. **Metrics:**
-   - reference recall and precision against ground truth;
-   - wall time per question;
-   - output tokens per answer;
-   - index time and peak memory on the Codex workspace, for each of:
-     - the full exact index;
-     - the `no-macros` configuration;
-     - each candidate partition (§5.5).
-   - decode tokens/s of the default model while an exact index runs, frozen and unfrozen, against the `CLAUDE.md` baseline (§8.2).
+   - reference recall and precision against ground truth, line level (§2's figures are file level);
+   - wall time per question and output tokens per answer;
+   - the unconstrained peak of the Codex exact index: one run with the model server stopped and a 40 GiB cap;
+   - the model's decode rate while an exact index runs, frozen and unfrozen, against §9.2's baseline;
+   - the quality of search by meaning, before it is ever enabled by default.
 5. **Acceptance:**
-   - codebase-memory reaches at least 90% recall on Rust references and 95% on Python;
+   - the router's `refs`/`callers` recall is at least 98% of SCIP's on fresh files, and every miss is visible as `heuristic`, `unresolved` or `not indexed`;
    - its answers cost fewer tokens than the `rg` baseline;
-   - it indexes this repository within the §8 limits;
-   - **query latency:** p95 at most 200 ms for `refs`/`def` on a warm page cache, from process start to last byte;
+   - **query latency:** p95 at most 200 ms for `refs`/`def`/`callers`, from process start to last byte, on a warm page cache (the direct reads of §7.5 measured under 10 ms);
    - **answer size:** no answer exceeds 1,000 tokens at the default limit;
-   - **inference cost:** the model's decode rate while indexing runs within §8.2's caps stays within 5% of baseline. With the scope frozen it is indistinguishable from baseline;
-   - **exact layer admitted:** the exact index for Codex completes under §5.5's admission control with the model server stopped. The peak is recorded in §5.4. If the peak exceeds what is available with the model resident, the exact layer for Codex is documented as "model-stopped only".
+   - **inference cost:** the decode rate while indexing runs within §9.2's caps stays within 5% of baseline; with the scope frozen it is indistinguishable from baseline;
+   - **admission:** the Codex exact index completes under §6.4 with the model server stopped, and its peak replaces §2's cap-bounded figure.
 
-   If Rust recall misses the target, SCIP becomes mandatory for Rust `refs`/`impact`, not an optimisation, and §10's SCIP import moves up.
+## 11. Later: SCIP inside the graph
 
-## 10. Later: SCIP inside the graph
+If the router shows that the graph's edges are wrong in concentrated places, the better long-term design is to fork codebase-memory and add SCIP import: exact SCIP edges would replace its `CALLS` edges for indexed files, so its `trace_path` and `detect_changes` become exact too, inside one graph. It is C, and a larger change, so it is deferred until the router has shown where it matters. The same fork would fix its application of the superproject's ignore rules inside submodules (§4.1).
 
-If §9 shows that codebase-memory's approximate edges are wrong in concentrated places, the better long-term design is to fork it and add SCIP import. Exact SCIP edges would replace its `CALLS`/`RESOLVED_CALLS` edges for indexed files, so `trace_path` and `detect_changes` become exact too, inside one graph. It is C, and it is a larger change, so it is deferred until the router has shown where it matters.
-
-## 11. Tests
+## 12. Tests
 
 - **Router unit tests** (`puffin-rs`, `cargo test -p puffin-launcher` in the export):
-  - merging with fresh, stale and missing files;
-  - de-duplication;
-  - `unresolved` always printed when reported;
-  - ambiguous names listed, not guessed;
-  - stale threshold triggers a re-index request.
-- **Fixture repository** with a tiny Rust crate and Python package with known references, committed under `tests/fixtures/code_index/`. Its tests check exact rows against SCIP and heuristic rows against codebase-memory. They are skipped when the binaries are absent.
+  - merging with fresh, stale and missing files; de-duplication; `unresolved` and `not indexed` always printed when reported; ambiguous names listed, not guessed; the stale threshold requests a re-index.
+- **Fixtures** under `tests/fixtures/code_index/`: a tiny Rust crate and Python package with known references, plus **recorded stores**: a codebase-memory v0.11.0 graph database and an `expt-convert` store for them. Router tests run against the recorded stores, so they need neither binary; tests that regenerate them are skipped when the binaries are absent.
+- **Schema fingerprints:** a test computes both stores' fingerprints from the recorded fixtures and compares them with the pinned values, so a version bump that changes a schema fails CI rather than a user's query. A mismatched fixture must send the router down the fallback ladder, not into a wrong answer.
+- **Direct reads:** a query during a simulated write (a held `BEGIN EXCLUSIVE` on a copy) waits and retries within the busy timeout; a `mutation_gen` change between two reads causes one retry; the router holds no handle after it exits.
+- **Join (§7.4):** a recorded SCIP chunk and a recorded graph node for the same definition resolve to the same symbol; their rows de-duplicate to one per `(path, line)`, which catches a 0-/1-based mismatch; a stale definition file falls back to the `display_name` search and tags the result `heuristic`.
 - **Safety:**
-  - indexing a submodule never writes to the submodule (`git status --porcelain` empty afterwards);
-  - SCIP runs are killed at the memory cap, not left to exhaust the host (fixture with a tiny cap);
-  - no network access during `index` or queries: a fixture crate with a missing dependency must fail with `failed: offline`, not fetch it;
-  - an untrusted fixture repository never gets an exact index, and its `build.rs` (which writes a marker file) never runs.
-- **Join (§6.4):**
-  - a recorded SCIP fixture and a recorded codebase-memory v0.11.0 CLI response for the same file resolve to the same symbol;
-  - their rows de-duplicate to one per `(path, line)`, which catches a 0-/1-based mismatch;
-  - a stale definition file falls back to the `display_name` search and tags the result `heuristic`.
-- **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while it is building, and absent without a repository (§3.1). It stays under 250 tokens.
+  - indexing a submodule never writes to it (`git status --porcelain` empty afterwards);
+  - indexer runs are killed at the memory cap, not left to exhaust the host (fixture with a tiny cap);
+  - no network during `index` or queries: a fixture crate with a missing dependency must fail with `failed: offline`;
+  - an untrusted fixture repository never gets an executing index, and its `build.rs` (which writes a marker file) never runs, while its Python package does get a static exact index.
+- **Isolation from the user's machine**, the lesson of 2026-09-29 (tests recreated live containers and wrote the real compile-signature file):
+  - tests set `CBM_CACHE_DIR` under their temporary home and `CBM_RUNTIME_DIR` to a **short** private directory (mode 0700; the socket path must stay under 108 bytes, or the CLI fails with "secure CLI coordination could not be created");
+  - no test creates a real `systemd-run` scope or freezes a real unit: `puffin-index-*` scope creation is behind a seam the tests replace, the way `tests/conftest.py` refuses real mutating `docker` commands.
+- **Sandbox sides (§4):** `puffin code refs` run under Codex's `read-only` sandbox answers from both stores and writes nothing; under `workspace-write` a stale answer appends exactly one request line, and the session thread coalesces ten such lines into one run.
+- **scip-python's environment:** a fixture repository whose `.venv/bin/python3` and `sitecustomize.py` write marker files is indexed without either marker appearing.
+- **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while building, absent without a repository, and under 250 tokens.
 - **Performance:**
-  - **Output budget:** a fixture symbol with 500 references prints the totals header, at most 15 file-summary lines and 40 rows. `--offset 40` returns the next 40. An `--offset` taken before a re-index fails with an error rather than shifting.
-  - **Query store:** `refs` never opens the `.scip` file (the test deletes it after conversion and queries still succeed). The store's lines are 1-based. Two partitions merged into one store answer a cross-partition `refs`.
+  - **Output budget:** a fixture symbol with 500 references prints the totals header, at most 15 file-summary lines and 40 rows; `--offset 40` returns the next 40; an `--offset` taken before a re-index fails with an error.
   - **Freshness cost:** a `refs` on a 40-row result `stat`s at most 41 files and hashes none when nothing changed.
-  - **Admission:** with `peak_rss_mb` recorded above the available cap, the run is not started and the status is `deferred: memory`. An OOM-killed run records its cap as the new lower bound.
-  - **Scheduler:** five triggers in quick succession produce one run and one coalesced follow-up. A run is not started while `vllm:num_requests_running > 0` (fake `/metrics` endpoint). A scope frozen mid-run resumes on thaw and completes with the same output as an uninterrupted run.
-  - **Model load:** with a vLLM container present but `/metrics` not answering, no run starts. A run in flight is stopped, not frozen, and recorded as `deferred: model-start`. `puffin-admin server start` stops any `puffin-index-*` scope before its pre-flight.
+  - **Admission:** with `peak_rss_mb` above the available cap, the run is not started (`deferred: memory`); a cap-bounded peak raises the next cap; an OOM-killed run records its cap as the new lower bound.
+  - **Scheduler:** five triggers in quick succession produce one run and one coalesced follow-up; no run starts while the engine's request gauges are non-zero (fake `/metrics` for both `vllm:` and `sglang:` names); a frozen scope resumes on thaw with the same output as an uninterrupted run.
+  - **Model load:** with a model container present but `/health` not answering, no run starts; a run in flight is stopped, not frozen (`deferred: model-start`); `puffin-admin server start` stops any `puffin-index-*` scope before its pre-flight.
+  - **Worktrees:** a query in a linked worktree reads the main worktree's project, and files that differ are tagged stale.
 
-## 12. Open questions and unverified claims
+## 13. Open questions and unverified claims
 
-- **codebase-memory's figures are its own:** the "Hybrid LSP" accuracy ("target ~95% resolution on idiomatic code") and the performance figures (Linux kernel in 3 min on an M3 Pro). §9 measures them here.
-- **Its CLI output shape** for `trace_path`/`detect_changes` in `--format json` has to be pinned in the router against v0.11.0. A version bump could change it, so the router's parser is tested against recorded fixtures.
-- **SCIP freshness for rust-analyzer is whole-workspace.** Per-crate re-indexing would make the exact layer much cheaper after small edits. Whether rust-analyzer's `scip` command can be scoped to a crate is not verified.
-- **Licences of the non-Rust SCIP indexers** must each be checked before they are bundled.
-- **True cost of the exact layer on Codex:** peak memory and total time are unknown. The one full run was OOM-killed at 8 GB (§5.4).
-- **Does partitioning lower the peak?** It may not, because the dependency closure of the crates that matter is most of the workspace (§5.5).
-- **What the `no-macros` configuration saves** in memory, and what it loses in references, is unmeasured.
-- **The `scip` CLI's SQLite export:** whether the pinned version has one is unverified. §6.5 does not rely on it.
-- **Does freezing a scope mid-analysis leave rust-analyzer healthy?** It is a plain `SIGSTOP`-equivalent via cgroup freeze, so it should, but that is untested.
-- **Several repositories:** whether `puffin code` indexes several repositories per session, or only the working directory's, is left to implementation. Start with the working directory only.
+- **The unconstrained peak of the Codex exact index** is unknown: ≥ 21.5 GiB, cap-bounded (§2). One run with the model server stopped and a 40 GiB cap settles it.
+- **The decode-rate cost of indexing beside the model**, frozen and unfrozen, is unmeasured.
+- **Does freezing a scope mid-analysis leave rust-analyzer healthy?** A cgroup freeze is `SIGSTOP`-like, so it should, but it is untested.
+- **scip-typescript's cost and correctness here** are unmeasured; this repository has little TypeScript beyond the desktop app.
+- **Search by meaning** is off by default until measured (§4); upstream issues #1155 and #1462 suggest it is weak.
+- **codebase-memory's call-edge gaps** are upstream issues (#1153 method calls through instances, #1271 polymorphic Python calls, #1277 cross-file receiver inference, #1354 TypeScript cross-file methods). A release that fixes them changes §2's recall figures, not this design: the exact layer stays the authority where it exists.
+- **Its application of the superproject's `.gitignore` inside submodules** is a bug to report upstream; the design works around it (§4.1).
+- **`expt-convert`'s schema** may change: that is why it is pinned and fingerprinted, with our converter as the fallback (§7.5).
+- **SCIP freshness for rust-analyzer is whole-workspace.** It has no crate-scoped mode (its `scip` flags are `--output`, `--config-path` and `--exclude-vendored-libraries`), so the exact Rust layer after a small edit is a full re-run.
+- **Partitioning** may not lower the peak, because the dependency closure of the crates that matter is most of the workspace (§6.4).
+- **Connecting to an existing Unix socket from inside the sandbox** (the runtime directory is read-only there) is untested; the design does not rely on it (§4).
+- **Several repositories:** start with the working directory only.
