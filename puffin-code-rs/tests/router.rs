@@ -378,3 +378,21 @@ fn strip_symbol_information(index: &[u8]) -> Vec<u8> {
     }
     out
 }
+
+#[test]
+fn a_query_during_a_graph_write_waits_for_it() {
+    // codebase-memory commits with a rollback journal: a reader meeting the write lock waits (2 s
+    // busy timeout) instead of failing (§7.5).
+    let f = fixture();
+    let writer = rusqlite::Connection::open(&f.graph_db).unwrap();
+    writer.execute_batch("BEGIN EXCLUSIVE; UPDATE store_meta SET v = v WHERE k = 'mutation_gen';").unwrap();
+    let child = f.command(&["refs", "make_circle"]).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    let started = std::time::Instant::now();
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    writer.execute_batch("COMMIT;").unwrap();
+    let out = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("exact shapes/cli.py:9"), "{text}");
+    assert!(started.elapsed() >= std::time::Duration::from_millis(500));
+}

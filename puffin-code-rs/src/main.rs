@@ -158,7 +158,7 @@ fn run(command: Command) -> anyhow::Result<ExitCode> {
 
 fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<ExitCode> {
     let limit_default = settings.row_limit;
-    let context = Context::load(repo, settings)?;
+    let mut context = Context::load(repo.clone(), settings.clone())?;
     if !context.has_index() {
         if context.repo.state_dir().join("code_index.building").exists() {
             println!("index not ready yet: it is being built; use rg until `puffin-code status` reports it ready");
@@ -167,21 +167,16 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
         }
         return Ok(ExitCode::from(3));
     }
-    let (mut answer, body, page) = match command {
-        Command::Def { name, page } => (context.def(&name)?, None, page),
-        Command::Refs { name, page } => (context.refs(&name)?, None, page),
-        Command::Callers { name, page } => (context.callers(&name)?, None, page),
-        Command::Callees { name, page } => (context.callees(&name)?, None, page),
-        Command::Impl { name, page } => (context.implementations(&name)?, None, page),
-        Command::Outline { file, page } => (context.outline(&file)?, None, page),
-        Command::Search { words, page } => (context.search(&words.join(" "))?, None, page),
-        Command::Show { name } => {
-            let (answer, body) = context.show(&name)?;
-            (answer, body, PageArgs::default())
+    // One retry if codebase-memory committed a re-index while this answer was read (§7.5).
+    let (mut answer, body, page) = match compute(&context, &command) {
+        Ok(result) if !context.graph_changed_since_load() => result,
+        _ => {
+            context = Context::load(repo, settings)?;
+            compute(&context, &command)?
         }
-        _ => unreachable!("handled in run"),
     };
     let page_options = Page {
+
         limit: page.limit.unwrap_or(limit_default),
         offset: page.offset,
         cursor: page.cursor.clone(),
@@ -196,4 +191,23 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
         println!("{}", output::render(&answer, &page_options, body.as_deref()));
     }
     Ok(ExitCode::SUCCESS)
+}
+
+type Computed = (puffin_code::router::Answer, Option<String>, PageArgs);
+
+fn compute(context: &Context, command: &Command) -> anyhow::Result<Computed> {
+    Ok(match command {
+        Command::Def { name, page } => (context.def(name)?, None, page.clone()),
+        Command::Refs { name, page } => (context.refs(name)?, None, page.clone()),
+        Command::Callers { name, page } => (context.callers(name)?, None, page.clone()),
+        Command::Callees { name, page } => (context.callees(name)?, None, page.clone()),
+        Command::Impl { name, page } => (context.implementations(name)?, None, page.clone()),
+        Command::Outline { file, page } => (context.outline(file)?, None, page.clone()),
+        Command::Search { words, page } => (context.search(&words.join(" "))?, None, page.clone()),
+        Command::Show { name } => {
+            let (answer, body) = context.show(name)?;
+            (answer, body, PageArgs::default())
+        }
+        _ => unreachable!("handled in run"),
+    })
 }

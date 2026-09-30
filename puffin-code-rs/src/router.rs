@@ -122,6 +122,8 @@ pub struct Context {
     pub not_indexed_files: BTreeSet<String>,
     pub not_indexed_dirs: Vec<String>,
     pub method: Method,
+    /// `store_meta.mutation_gen` when the graph was opened (§7.5's concurrency rule).
+    pub graph_generation: Option<String>,
 }
 
 impl Context {
@@ -213,7 +215,9 @@ impl Context {
             changed.extend(set.changed.iter().cloned());
             deleted.extend(set.deleted.iter().cloned());
         }
+        let graph_generation = graph.as_ref().map(|g| g.mutation_gen());
         Ok(Context {
+            graph_generation,
             repo,
             settings,
             graph,
@@ -228,6 +232,17 @@ impl Context {
             not_indexed_dirs,
             method,
         })
+    }
+
+    /// Whether codebase-memory committed a re-index while this context was answering: its
+    /// database uses a rollback journal, so a query that straddles a commit may have read both
+    /// sides of it. The caller answers again, once (§7.5).
+    pub fn graph_changed_since_load(&self) -> bool {
+        let Some(before) = &self.graph_generation else { return false };
+        match GraphStore::open(&self.repo) {
+            Ok(Some(graph)) => graph.mutation_gen() != *before,
+            _ => false,
+        }
     }
 
     /// Whether any layer can answer at all.
