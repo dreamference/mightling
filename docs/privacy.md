@@ -42,10 +42,11 @@ a URL, a mailbox read.
   admin account is not reachable from other machines on your network; `configure` applies this.
   OpenHands, if you use it, is published on `127.0.0.1:3001`, and the diffusion model's endpoint
   listens on `127.0.0.1:8001`.
-  **The main model server is the exception:** vLLM listens on every interface at port 8000, with no
-  API key, because the web chat and OpenHands run in Docker containers and reach it through the
-  Docker bridge, which a loopback-only server would not answer. Another machine on your network can
-  therefore send it prompts (it reads nothing of yours, but it can use the model). On a network
+  **The main model server is the exception, by design:** Puffin assumes your local network is
+  trusted. The model server listens on every interface at port 8000, with no API key, because the
+  web chat and OpenHands run in Docker containers and reach it through the Docker bridge, which a
+  loopback-only server would not answer. Another machine on your network can therefore send it
+  prompts (it reads nothing of yours, but it can use the model). If you run Puffin on a network
   you do not trust, block the port for everything but the bridge, for example
   `sudo ufw deny in on <your-LAN-interface> to any port 8000`.
 

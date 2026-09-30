@@ -24,7 +24,7 @@ Make "your code stays on your machine" something a user can check, not a promise
 
 **Non-goals:**
 - **Calling it air-gapped.** Web search and `puffin-admin fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them.
-- **Inbound exposure.** vLLM listening on `0.0.0.0:8000` is a separate open item ([README](./README.md), "Still open").
+- **Inbound exposure.** The model server listening on `0.0.0.0:8000` is accepted by design: Puffin assumes the local network is trusted ([README](./README.md), "Accepted by design").
 - **Containers.** The web chat's own egress (Onyx, SearXNG, the sidecars) is out of scope. Onyx's telemetry is handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md)).
 
 ---
