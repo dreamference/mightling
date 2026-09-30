@@ -53,7 +53,7 @@ Exit; the containers keep running (--restart unless-stopped)
 
 - `start_server()` calls `download_model()` for the main model, for `--draft-model` if given, and for the recipe's drafter (`get_speculative_draft_repo`) before the container starts. vLLM therefore never has to fetch weights during the load, which is the one phase this host cannot afford surprises in.
 - `ModelDownloader` tries `huggingface_hub.snapshot_download` first, then the `huggingface-cli` binary. If both fail, the fetch is left to vLLM.
-- The cache is `~/.cache/huggingface/hub/` (`$HF_HOME/hub` if set), mounted into the container at `/root/.cache/huggingface`.
+- The cache is `~/.cache/huggingface/hub/` (`$HF_HOME/hub` if set, `$HF_HUB_CACHE` if that is set), resolved as huggingface_hub resolves it. `ModelDownloader.container_volume_args()` mounts the resolved home into every model container (server, diffusion sidecar, tensorizer) at `/root/.cache/huggingface`, and a hub moved by `HF_HUB_CACHE` at `/root/.cache/huggingface/hub`, so snapshot paths handed to the engine exist inside it. Until 2026-09-30 the mount was always `~/.cache/huggingface`, whatever `HF_HOME` said.
 
 ### 2.1. HF Token Handling
 

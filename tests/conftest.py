@@ -118,6 +118,10 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # Continue config with a test model the machine does not serve. Each test gets its own home.
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))
+    # The HuggingFace cache follows these before HOME; a user's own setting would lead a test
+    # that builds a docker command into creating folders in the real cache.
+    for name in ("HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME"):
+        monkeypatch.delenv(name, raising=False)
 
     # HOME alone does not reach paths a module resolved at import, like VLLM_CACHE_HOME: a test
     # that ran start_server stamped the real ~/.cache/dreamference/vllm/.compile_signature with a

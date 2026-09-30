@@ -151,11 +151,10 @@ class DiffusionServerManager:
             list: Full docker run argv.
         """
         from dreamference.hardware import resolve_model_hf_repo
+        from dreamference.hardware.model_downloader import ModelDownloader
 
         hf_repo = resolve_model_hf_repo(model)
         docker_image = self.resolve_docker_image(model, main_model)
-        hf_cache = os.path.expanduser("~/.cache/huggingface")
-        os.makedirs(hf_cache, exist_ok=True)
 
         cmd = [
             "docker", "run", "-d",
@@ -166,7 +165,7 @@ class DiffusionServerManager:
             f"--memory={CONTAINER_MEMORY_CAP_GB}g",
             f"--memory-swap={CONTAINER_MEMORY_CAP_GB}g",
             f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
-            "-v", f"{hf_cache}:/root/.cache/huggingface",
+            *ModelDownloader.container_volume_args(),
             "-v", f"{self.service_script_path()}:{CONTAINER_SERVICE_PATH}:ro",
             "-e", f"DREAMFERENCE_DIFFUSION_MODEL_ID={hf_repo}",
             "-e", f"DREAMFERENCE_DIFFUSION_PORT={port}",

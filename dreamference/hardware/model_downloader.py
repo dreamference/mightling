@@ -2,14 +2,14 @@
 HuggingFace Model Pre-downloader for Dreamference.
 
 This module handles pre-flight downloads of model weights from HuggingFace Hub into local cache
-prior to launching vLLM or Goose sessions. It prioritizes local cache to minimize HF API calls.
+prior to launching the model server. It prioritizes local cache to minimize HF API calls.
 """
 
 import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
 class ModelDownloader:
@@ -18,22 +18,68 @@ class ModelDownloader:
     Prioritizes local cache to minimize HuggingFace Hub API calls.
     """
 
-    # Standard HuggingFace cache location
-    HF_CACHE_HOME = Path.home() / ".cache" / "huggingface" / "hub"
+    # Where every model container sees the HuggingFace home and its hub; container-side paths
+    # (SGLang's snapshot directories, the tensorizer's source) are built against these.
+    CONTAINER_HF_HOME = "/root/.cache/huggingface"
+    CONTAINER_HF_HUB_DIR = f"{CONTAINER_HF_HOME}/hub"
     TENSORIZER_CACHE_HOME = Path.home() / ".cache" / "dreamference" / "tensorizer"
+
+    @classmethod
+    def get_hf_home(cls) -> Path:
+        """
+        Gets the HuggingFace home directory, resolved as huggingface_hub resolves it.
+
+        `HF_HOME`, then `$XDG_CACHE_HOME/huggingface`, then `~/.cache/huggingface`. The home holds
+        the hub, the login token and the remote-code modules cache.
+
+        Returns:
+            Path: HuggingFace home directory path.
+        """
+        hf_home = os.getenv("HF_HOME")
+        if hf_home:
+            return Path(hf_home).expanduser()
+        xdg_cache = os.getenv("XDG_CACHE_HOME")
+        if xdg_cache:
+            return Path(xdg_cache).expanduser() / "huggingface"
+        # Resolved per call, not at import, so it follows HOME.
+        return Path.home() / ".cache" / "huggingface"
 
     @classmethod
     def get_hf_cache_dir(cls) -> Path:
         """
-        Gets the HuggingFace cache directory, respecting HF_HOME environment variable.
+        Gets the HuggingFace hub cache directory, where snapshot_download writes.
+
+        `HF_HUB_CACHE` when set, otherwise `hub` under the home from get_hf_home().
 
         Returns:
             Path: HuggingFace hub cache directory path.
         """
-        hf_home = os.getenv("HF_HOME")
-        if hf_home:
-            return Path(hf_home) / "hub"
-        return cls.HF_CACHE_HOME
+        hub_cache = os.getenv("HF_HUB_CACHE")
+        if hub_cache:
+            return Path(hub_cache).expanduser()
+        return cls.get_hf_home() / "hub"
+
+    @classmethod
+    def container_volume_args(cls) -> List[str]:
+        """
+        Builds the `docker run` mounts that show a container the host's HuggingFace cache.
+
+        The container always sees it at CONTAINER_HF_HOME, whatever the host calls it: a host with
+        a custom `HF_HOME` downloads there, and a fixed `~/.cache/huggingface` mount would hand the
+        engine a snapshot path that does not exist inside the container. A hub moved out of the
+        home by `HF_HUB_CACHE` gets a mount of its own over CONTAINER_HF_HUB_DIR.
+
+        Returns:
+            List[str]: `-v` options, with the host directories created if missing.
+        """
+        home = cls.get_hf_home()
+        hub = cls.get_hf_cache_dir()
+        home.mkdir(parents=True, exist_ok=True)
+        args = ["-v", f"{home}:{cls.CONTAINER_HF_HOME}"]
+        if hub != home / "hub":
+            hub.mkdir(parents=True, exist_ok=True)
+            args += ["-v", f"{hub}:{cls.CONTAINER_HF_HUB_DIR}"]
+        return args
 
     @classmethod
     def get_tensorizer_cache_dir(cls) -> Path:
@@ -178,7 +224,6 @@ class ModelDownloader:
         # Attempt 1: Try containerized vllm-tensorizer if Docker is available
         if shutil.which("docker"):
             try:
-                hf_cache = os.path.expanduser("~/.cache/huggingface")
                 dgx_cache = os.path.expanduser("~/.cache/dreamference")
                 hf_base = cls.get_hf_cache_dir()
                 dgx_base = cls.get_dgx_cache_dir()
@@ -186,7 +231,7 @@ class ModelDownloader:
                 if snapshot_dir.is_relative_to(hf_base) and tdir.is_relative_to(dgx_base):
                     snap_rel = snapshot_dir.relative_to(hf_base)
                     tdir_rel = tdir.relative_to(dgx_base)
-                    container_snap = f"/root/.cache/huggingface/{snap_rel}"
+                    container_snap = f"{cls.CONTAINER_HF_HUB_DIR}/{snap_rel}"
                     container_tfile = f"/root/.cache/dreamference/{tdir_rel}/model.tensors"
 
                     from dreamference.vllm_server.vllm_server_manager import VLLMServerManager, DEFAULT_VLLM_IMAGE
@@ -230,7 +275,7 @@ class ModelDownloader:
                         f"--memory={container_mem_gb:.0f}g",
                         f"--memory-swap={container_mem_gb:.0f}g",
                         f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
-                        "-v", f"{hf_cache}:/root/.cache/huggingface",
+                        *cls.container_volume_args(),
                         "-v", f"{dgx_cache}:/root/.cache/dreamference",
                         "--entrypoint", "python3",
                         DEFAULT_VLLM_IMAGE,

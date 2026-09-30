@@ -3,6 +3,7 @@ import pytest
 import signal
 import subprocess
 import time
+from pathlib import Path
 from dreamference.vllm_server import VLLMServerManager, VLLMStartupMonitor, VLLMServerStatus
 from dreamference.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
 
@@ -1230,6 +1231,42 @@ def test_an_sglang_recipe_launches_sglang_inside_the_same_guarded_container():
     assert "--speculative-config" not in server and "--max-model-len" not in server
 
 
+def test_a_custom_hf_home_is_what_the_model_container_mounts(tmp_path, monkeypatch):
+    # The host downloads into $HF_HOME/hub, and SGLang is handed snapshot directories under the
+    # container's hub. The container used to mount ~/.cache/huggingface whatever HF_HOME said, so
+    # on such a host the engine was pointed at a path the container could not see.
+    hf_home = tmp_path / "hf"
+    monkeypatch.setenv("HF_HOME", str(hf_home))
+    cmd = VLLMServerManager().build_launch_command(model="qwen3.8-27b-nvfp4-dflash2")
+    mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-v"]
+
+    assert f"{hf_home}:/root/.cache/huggingface" in mounts
+    assert not any(m.endswith(":/root/.cache/huggingface") and m != f"{hf_home}:/root/.cache/huggingface"
+                   for m in mounts)
+    assert cmd[cmd.index("--model-path") + 1].startswith("/root/.cache/huggingface/hub/models--")
+
+
+def test_a_hub_moved_out_of_the_home_gets_its_own_mount(tmp_path, monkeypatch):
+    from dreamference.hardware.model_downloader import ModelDownloader
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "weights"))
+    assert ModelDownloader.get_hf_cache_dir() == tmp_path / "weights"
+    assert ModelDownloader.container_volume_args() == [
+        "-v", f"{tmp_path / 'hf'}:/root/.cache/huggingface",
+        "-v", f"{tmp_path / 'weights'}:/root/.cache/huggingface/hub",
+    ]
+
+
+def test_the_diffusion_sidecar_mounts_the_same_hf_home(tmp_path, monkeypatch):
+    from dreamference.hardware.model_matrix_registry import DEFAULT_DIFFUSION_MODEL_ALIAS, DEFAULT_MODEL_ALIAS
+    from dreamference.vllm_server import DiffusionServerManager
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    cmd = DiffusionServerManager().build_launch_command(DEFAULT_DIFFUSION_MODEL_ALIAS, DEFAULT_MODEL_ALIAS, port=8001)
+    assert f"{tmp_path / 'hf'}:/root/.cache/huggingface" in cmd
+
+
 def test_an_sglang_model_leaves_the_vllm_compile_cache_alone(monkeypatch):
     # The reset keys on the model, so running it for the SGLang model would re-stamp the
     # signature and cost vLLM its compiled graph when the default model comes back.
@@ -1250,6 +1287,12 @@ def test_an_sglang_model_leaves_the_vllm_compile_cache_alone(monkeypatch):
         )),
     )
     monkeypatch.setattr(mgr, "build_launch_command", lambda **kwargs: None)
+    # The template is read from the checkpoint in the HuggingFace cache, which the test's home
+    # does not have (this test used to pass by reading the real one).
+    monkeypatch.setattr(
+        "dreamference.vllm_server.chat_template_patcher.ChatTemplatePatcher.prepare",
+        classmethod(lambda cls, *a: Path("/nonexistent/chat_template.jinja")),
+    )
     try:
         mgr.start_server(model="qwen3.8-27b-nvfp4-dflash2", background=True)
     except Exception:

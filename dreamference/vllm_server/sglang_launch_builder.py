@@ -13,12 +13,15 @@ watchdog -- so this class produces only what follows the image name.
 
 from typing import Any, Dict, Final, List, Optional
 
+from dreamference.hardware.model_downloader import ModelDownloader
+
 # Where SGLang's torch.compile output lands inside the container. Under the dreamference cache
 # mount, like vLLM's, so a compiled graph survives the container (a cold compile is minutes).
 CONTAINER_SGLANG_INDUCTOR_DIR: Final[str] = "/root/.cache/dreamference/sglang/inductor"
 
-# The host's HuggingFace cache as the container sees it (the docker prefix mounts it here).
-CONTAINER_HF_HUB_DIR: Final[str] = "/root/.cache/huggingface/hub"
+# The host's HuggingFace hub as the container sees it, wherever HF_HOME puts it on the host
+# (the docker prefix mounts it here).
+CONTAINER_HF_HUB_DIR: Final[str] = ModelDownloader.CONTAINER_HF_HUB_DIR
 
 
 class SGLangLaunchBuilder:

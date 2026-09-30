@@ -80,6 +80,12 @@ The reconciliation on 2026-09-28 found these places where the **code** was wrong
 |---|---|---|---|
 | Model server on `0.0.0.0:8000` | Listens on every interface with no API key, so any machine on the LAN can send it prompts | Puffin assumes the local network is trusted (decided 2026-09-30). The server must answer on the Docker bridge for Onyx and OpenHands, and binding the bridge address alone would break every `localhost:8000` client. On an untrusted network the user blocks the port with a firewall rule (`docs/privacy.md`) | INFERENCE |
 
+### Fixed on 2026-09-30
+
+| Where | Was | Now |
+|---|---|---|
+| `HF_HOME` and the model containers | The host downloaded to `$HF_HOME/hub`, but the model server, the diffusion sidecar and the tensorizer container always mounted `~/.cache/huggingface`, so a host with a custom `HF_HOME` launched SGLang against snapshot paths the container could not see (and the tensorizer's container path also lacked `hub/`) | `ModelDownloader.container_volume_args()` mounts the resolved home (`HF_HOME`, `$XDG_CACHE_HOME/huggingface`, `~/.cache/huggingface`) at `/root/.cache/huggingface`, plus a separate hub mount when `HF_HUB_CACHE` moves it |
+
 ### Fixed on 2026-09-29
 
 | Where | Was | Now |

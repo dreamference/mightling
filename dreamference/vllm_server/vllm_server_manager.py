@@ -818,9 +818,8 @@ class VLLMServerManager:
         Returns:
             List[str]: `docker run` and its options, up to but excluding the image.
         """
-        hf_cache = os.path.expanduser("~/.cache/huggingface")
+        from dreamference.hardware.model_downloader import ModelDownloader
         dgx_cache = os.path.expanduser("~/.cache/dreamference")
-        os.makedirs(hf_cache, exist_ok=True)
         os.makedirs(dgx_cache, exist_ok=True)
         os.makedirs(VLLM_CACHE_HOME, exist_ok=True)
         
@@ -865,7 +864,7 @@ class VLLMServerManager:
             f"--memory={container_mem_gb:.0f}g",
             f"--memory-swap={container_mem_gb:.0f}g",
             f"--oom-score-adj={CONTAINER_OOM_SCORE_ADJ}",
-            "-v", f"{hf_cache}:/root/.cache/huggingface",
+            *ModelDownloader.container_volume_args(),
             "-v", f"{dgx_cache}:/root/.cache/dreamference",
         ]
         if token_env:
@@ -1716,8 +1715,7 @@ class VLLMServerManager:
         
         # Configure HuggingFace to use local cache exclusively when possible
         from dreamference.hardware.model_downloader import ModelDownloader
-        hf_cache_dir = str(ModelDownloader.get_hf_cache_dir().parent)
-        env["HF_HOME"] = hf_cache_dir
+        env["HF_HOME"] = str(ModelDownloader.get_hf_home())
         
         # Set HF_HUB_OFFLINE to 0 (default) to allow cache-first behavior
         # Models must be pre-downloaded or vLLM will download on first load

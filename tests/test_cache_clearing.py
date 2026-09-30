@@ -15,8 +15,7 @@ def _layout(tmp_path, monkeypatch):
         path.mkdir(parents=True)
         (path / "f").write_text("x")
     (hf / "token").write_text("hf_secret")
-    monkeypatch.delenv("HF_HOME", raising=False)
-    monkeypatch.setattr(ModelDownloader, "HF_CACHE_HOME", hf / "hub")
+    monkeypatch.setenv("HF_HOME", str(hf))
     monkeypatch.setattr(ModelDownloader, "TENSORIZER_CACHE_HOME", dream / "tensorizer")
     return hf, dream
 
