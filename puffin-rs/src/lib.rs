@@ -55,6 +55,13 @@ pub const OFFLINE_CHATGPT_BASE_URL: &str = "http://127.0.0.1:9/backend-api/";
 /// runs to several minutes.
 const MAX_WAIT: Duration = Duration::from_secs(600);
 
+/// Set by `puffin-admin codex test` for Codex's own test suite. Its integration tests start this
+/// binary against mock model providers they configure themselves; with the launcher in the way
+/// they would instead be pointed at the model server running on this machine, reach it, and test
+/// that rather than Codex. With this set the launcher leaves a model command line as it is. The
+/// refused commands stay refused: they are part of what Puffin ships, so their tests are skipped.
+pub const UPSTREAM_TESTS_ENV: &str = "PUFFIN_UPSTREAM_TESTS";
+
 /// Codex subcommands that never open a session, so `puffin apply` or `puffin completion bash`
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
@@ -179,7 +186,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(app::open(&user_args[index + 1..]).await);
     }
-    if !needs_model(&user_args, subcommand) {
+    if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
 
@@ -662,6 +669,19 @@ mod tests {
 
     fn strings(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn under_codex_tests_a_model_command_line_is_left_as_it_is() {
+        // Without the switch this would wait for a model server and rewrite the arguments.
+        // SAFETY: this test is the only reader or writer of PUFFIN_UPSTREAM_TESTS.
+        unsafe { std::env::set_var(UPSTREAM_TESTS_ENV, "1") };
+        let args: Vec<OsString> = ["puffin", "exec", "hello"].iter().map(OsString::from).collect();
+        let prepared = prepare_args(&codex_like(), args.clone()).await;
+        let refused = prepare_args(&codex_like(), vec!["puffin".into(), "login".into()]).await;
+        unsafe { std::env::remove_var(UPSTREAM_TESTS_ENV) };
+        assert_eq!(prepared.unwrap(), args);
+        assert!(refused.is_err(), "refused commands stay refused under Codex's tests");
     }
 
     #[test]
