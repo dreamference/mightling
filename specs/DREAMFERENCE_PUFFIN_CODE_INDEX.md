@@ -525,7 +525,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 
 ## 14. Implementation (2026-10-01)
 
-`puffin-code` is built from `puffin-code-rs/` (its own lockfile, toolchain 1.95.0), installed and linked by `puffin-admin codex build`, and started by the launcher (`puffin-rs/src/code_index.rs`). `puffin-admin code setup` installs the pinned tools. 55 Rust tests (`cargo test --locked` in `puffin-code-rs/`) and 9 Python tests (`tests/test_code_index.py`, plus the builder's) cover it.
+`puffin-code` is built from `puffin-code-rs/` (its own lockfile, toolchain 1.95.0), installed and linked by `puffin-admin codex build`, and started by the launcher (`puffin-rs/src/code_index.rs`). `puffin-admin code setup` installs the pinned tools. 58 Rust tests (`cargo test --locked` in `puffin-code-rs/`) and 9 Python tests (`tests/test_code_index.py`, plus the builder's) cover it.
 
 ### 14.1 Measured on this repository
 
@@ -552,6 +552,8 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **The sandbox also hides `/run`, `/var/tmp` and `/dev/shm`** (§9.1): the Docker socket and the user's systemd bus are there, and a Unix socket on a read-only bind is still connectable. codebase-memory's own cache directory is its one writable bind outside scratch.
 - **Detection** (§6.1): every top-level directory holding tracked `.py` files is a scip-python root (not only packages; untracked directories are the user's); a crate that inherits from a workspace elsewhere is not a root.
 - **Tools** are resolved from Puffin's install directories only; scip-python runs on the `node` recorded at setup.
+- **Executing indexes refresh rarely by design** (§6.3): a session re-runs them only past `code_index_stale_commits` or on `puffin-code index --exact`, so after an ordinary session this repository's Rust stores were about ten commits behind. Their answers stay complete through the text search; `puffin-code index --exact` refreshes them.
+- **State on disk**: this repository's `.dreamference/scip/` held about 30 MB of stores and logs, and codebase-memory keeps one database per indexed repository in its cache, including throwaway ones. `puffin-code forget` removes a repository's; nothing prunes the cache yet.
 - **Test seams**: `PUFFIN_CODE_GRAPH_DB`, `PUFFIN_CODE_PROJECT`, `PUFFIN_CODE_STATE_DIR`, `PUFFIN_CODE_ROOT`, `PUFFIN_CODE_TOOLS_DIR`, `PUFFIN_CODE_INDEXERS_DIR`, `PUFFIN_CODE_SCRATCH_DIR`, `PUFFIN_CODE_SELF`; the tests also cut `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR`, so none of them can reach the user's systemd. conftest refuses a mutating `systemctl` or any `systemd-run`, as it does `docker`.
 
 ### 14.3 Not built
@@ -578,8 +580,8 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 | scip-python's environment | covered, run for real |
 | Session: lock, parent exit, junk requests, no systemd bus | covered |
 | Admission: floor, headroom of live scopes, racing admissions, one executing run, slice limits, `choom` | covered with a fake host |
-| Scheduler: coalescing, idle gauges of both engines, freeze and thaw | idle and loading covered; coalescing implemented, not tested; thaw not tested |
+| Scheduler: coalescing, idle gauges of both engines, freeze and thaw | gauges, freeze, thaw and never freezing a short run covered; coalescing implemented, not tested |
 | Model load: no start while loading, stopped not frozen, `server start` stops the scopes | covered |
 | Worktrees | covered |
 | Output budget, stable pages, refused stale cursor, answer size | covered |
-| Launcher: no `puffin-code`, no block | covered standalone; not yet run in the Codex export |
+| Launcher: no `puffin-code`, no block | covered, in the Codex export (`cargo test -p puffin-launcher`, 33 tests); run live: `puffin exec -s read-only` started `puffin-code session --parent-pid <puffin>`, the catalog carried the `# Code navigation` block, and the model ran `puffin-code refs` inside the read-only sandbox and read its answer |
