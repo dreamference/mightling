@@ -4,7 +4,7 @@
 **Goal:** let `puffin` hand long, low-judgement outputs (file scaffolds, tests, docstrings, docs, commit and PR text, summaries of long tool output) to a fast diffusion model, so the main model spends its time on the decisions.
 **Builds on:**
 - the diffusion slot beside the main model (`DiffusionServerManager`, `diffusion-model set`, port 8001; [INFERENCE](./DREAMFERENCE_INFERENCE.md), CLAUDE.md "Every configuration names a diffusion model");
-- the launcher in `puffin-rs/`, which already handles `puffin app` and `puffin update` before Codex parses argv, and would handle `puffin fast` the same way (the pattern [PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) proposes for `puffin code`);
+- the launcher in `puffin-rs/`, which already handles `puffin app` and `puffin update` before Codex parses argv, and would handle `puffin fast` the same way ([PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) chose the other route, a separate `puffin-code` binary, because its router is large and changes often; §4.2 there gives the trade-off);
 - the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `puffin-search`;
 - admission control from [PUFFIN_NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) and host safety (`check_host_safety`).
 

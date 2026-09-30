@@ -14,7 +14,7 @@ published, `puffin update` installs new releases in place, after verifying their
 
 Today the agent explores code with text search and file reads, one round at a time. On a large
 repository that is slow, costs many tokens, and misses calls made through traits, generics or
-re-exports. The design adds `puffin code`, backed by two layers:
+re-exports. The design adds `puffin-code`, a command of its own beside `puffin`, backed by two layers:
 
 - **A fast, always-current index for every language.** It is built on
   [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (MIT): 158 languages,

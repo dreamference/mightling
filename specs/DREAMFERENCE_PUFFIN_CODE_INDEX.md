@@ -1,8 +1,8 @@
 # Puffin Code Index — codebase-memory-mcp + SCIP
 
-**Status:** proposed. Nothing in this spec is implemented yet. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools.
+**Status:** proposed. Nothing in this spec is implemented yet. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools. Revised again the same day: freshness is now decided for the whole repository, not only for the files an answer already names (§7.3), and the router is a binary of its own, `puffin-code`, not a subcommand compiled into `puffin` (§4.2).
 **Target:** the `puffin` terminal agent. The same index is also offered over MCP to Claude Code and to IDEs.
-**Builds on:** the launcher in `puffin-rs/`. It handles `puffin app` and `puffin update` before Codex parses argv, and `puffin code` would be handled the same way. It also builds on the `puffin-search` / `puffin-admin gmail` pattern of giving the local model shell commands rather than MCP tools, and on the builder's rule that nothing ever runs Cargo inside the `codex/` submodule.
+**Builds on:** the `puffin-search` / `puffin-admin gmail` pattern of giving the local model shell commands rather than MCP tools, and of putting each such command on `PATH` as a program of its own beside `puffin`. `puffin-code` is a separate Rust binary (§4.2); the launcher in `puffin-rs/` only starts it and asks it for the prompt block. It also builds on the builder's rule that nothing ever runs Cargo inside the `codex/` submodule.
 
 ---
 
@@ -22,7 +22,7 @@ The index has two layers:
 - **codebase-memory-mcp** is the universal layer. It covers every language and every file, stays current cheaply, and answers names, outlines, text search and approximate call edges. Measured here, its call edges find **about 80% of the files that reference a Rust function and 58% for Python (52% for methods)** (§2). It is a fast, broad first answer, never the last word on "who calls this".
 - **SCIP** is the exact layer: compiler-exact definitions and references, as a snapshot. For Python and TypeScript it runs no project code and is cheap, so it runs **for every repository by default**. For Rust, Java and .NET it executes the project's build logic and needs about 21 GiB on Codex, so it runs only for trusted repositories and only when memory admits it.
 
-A router in `puffin-rs` answers each question from the better layer. It tags every result `exact` or `heuristic`, and says what it could not resolve or did not index.
+A router, the `puffin-code` binary, answers each question from the better layer. It tags every result `exact` or `heuristic`, and says what it could not resolve or did not index.
 
 **Non-goals:**
 - Editing code: the index answers questions, and the agent edits.
@@ -57,6 +57,9 @@ On this GB10, with the default model (Qwen3.8-27B on SGLang) resident and idle, 
 | `scip expt-convert` (scip CLI v0.10.0) on it | 9.8 s, 2.7 GB peak, **186 MB** SQLite; symbol→references lookup **2 ms** | measured |
 | scip-python 0.6.6 on `dreamference/` (81 files) | **19 s, 2.1 GiB peak, 2.7 MB**; resolves `vllm_mgr.start_server(…)` to `VLLMServerManager.start_server` and not to `DiffusionServerManager.start_server` (codebase-memory found **no** caller of either) | measured |
 | What scip-python executes | by default `pip3 list` and `python3` from `PATH` (here the repository's own `.venv`), and even a `node` found there; with `--environment <file>` and a `PATH` without the repository, only the system `python3 -c "import os…"` to read `sys.path`, with identical references | measured (strace on `execve`) |
+| A snapshot replayed against a later tree: the scip-python store of `dreamference/` at `706c511`, queried at `8c2f9a3` (5 commits later, 23 Python files changed, 4 of them deleted) | `ModelDownloader`: the store names 5 files, 2 of them edited since. **2 more files reference it now** (`diffusion_server_manager.py`, `sglang_launch_builder.py`, both edited after the snapshot) and appear in no row; a file created after the snapshot (`runner/vllm_readiness_waiter.py`) references `VLLMServerManager`, `DreamferenceConfig` and `resolve_model_hf_repo` and appears in none of their answers. A freshness check that visits only the files an answer names never looks at any of them | measured |
+| Finding those files | `git diff --name-only <snapshot> HEAD` plus `git status --porcelain`: **39 ms**; a whole-word search for the name over the 19 changed files still present: 3 ms, and it finds both missing files; the same search over all 4,900 Rust files of Codex: 21 ms (warm page cache) | measured |
+| git inside Codex's sandbox | `git diff --name-only` and `git status --porcelain` run under `puffin sandbox`; `.git` is read-only there (`touch .git/x` fails), so the router passes `--no-optional-locks` and never refreshes git's index | measured |
 | `defn_enclosing_ranges` in the store | maps a reference to its innermost enclosing definition (line 2007 of the CLI controller → `DreamferenceCLIController#run_cli()`), 0-based lines | measured |
 | SGLang's idle gauges | `sglang:num_running_reqs`, `sglang:num_queue_reqs` (0 when idle), on `/metrics` of the served model | measured |
 | Licences | codebase-memory-mcp MIT; scip CLI, scip-typescript, scip-clang, scip-java, scip-go, scip-dotnet Apache-2.0; scip-python MIT (Pyright's); all maintained (pushed within the last month) | verified |
@@ -69,6 +72,7 @@ Consequences for the design, each carried into the sections below:
 3. **Submodules are excluded by default** (97% of this repository's universal index was the `codex/` submodule), and indexed deliberately when wanted.
 4. **Admission from measured numbers:** the Codex exact index needs more than 21 GiB and runs only when the machine can spare it.
 5. **The query store is the `scip` CLI's own SQLite export**, pinned and fingerprinted, with our converter as the fallback.
+6. **A snapshot cannot say what it is missing.** A file that gained a reference after the snapshot is in no row, so checking the rows' files cannot find it. Every query therefore computes the files changed since each layer's snapshot and searches them for the name (§7.3).
 
 ## 3. Components
 
@@ -76,7 +80,7 @@ Consequences for the design, each carried into the sections below:
 |---|---|---|---|
 | [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) | v0.11.0 (2026-09-15), `linux-arm64` | MIT | Universal layer: builds the graph (158 tree-sitter grammars, "Hybrid LSP" resolution for 13 languages), keeps it incrementally, and serves search by meaning when a session asks for it. Configured through `CBM_CACHE_DIR`, `CBM_RUNTIME_DIR`, `CBM_MEM_BUDGET_MB` (a hard budget since v0.11.0), `CBM_WORKERS`, `CBM_ALLOWED_ROOT`, `CBM_SEMANTIC_ENABLED`, and a per-repository `.cbmignore`. |
 | [scip CLI](https://github.com/scip-code/scip) | v0.10.0 (2026-09-03), `scip-linux-arm64.tar.gz`, sha256 `6ab677dc2c4bf2955975d0530766152e45daaa988f9404068d8adecacd0bb24c` | Apache-2.0 | `expt-convert` builds the query store (§7.5). |
-| `scip` Rust crate | 0.10.0 | Apache-2.0 | Decodes the occurrence blobs of the store in `puffin-rs`. |
+| `scip` Rust crate | 0.10.0 | Apache-2.0 | Decodes the occurrence blobs of the store in `puffin-code`. |
 | `rust-analyzer scip` | from the pinned toolchain (1.95.0) | MIT/Apache-2.0 | Exact Rust layer. Executes build scripts and proc-macros (§9.1). |
 | scip-python | 0.6.6 (npm `@sourcegraph/scip-python`) | MIT | Exact Python layer. Static (Pyright). |
 | scip-typescript | pinned at setup | Apache-2.0 | Exact TypeScript/JavaScript layer. Static. |
@@ -96,8 +100,8 @@ Rejected, with the reason:
             agent (puffin, local model)          Claude Code / IDE
                       │ shell                          │ MCP (stdio)
                       ▼                                ▼
-        puffin code <cmd>  ─────────────  puffin code mcp
-                      │   (same router, puffin-rs/src/code_index/)
+        puffin-code <cmd>  ─────────────  puffin-code mcp
+                      │   (one binary, crate puffin-code-rs/)
           ┌───────────┴─────────────────────────┐
           ▼                                     ▼
   codebase-memory graph (SQLite)          SCIP query store (SQLite)
@@ -107,50 +111,71 @@ Rejected, with the reason:
 ```
 
 - **Both tools stay unmodified.** codebase-memory is a pinned binary that writes its graph; the scip CLI and the indexers are pinned binaries that write SCIP. The new code is the router, the scheduler and the store's small post-processing (§7.5).
-- **Queries never start a tool.** A `puffin code refs` opens two SQLite files read-only, runs indexed lookups and exits: milliseconds, and no process survives it. The tools run only to *index*, started by the session thread outside the sandbox (below), under §9's limits.
-- **Two sides of the sandbox.** The agent runs `puffin code …` as a shell command, and Codex runs every such command inside its bwrap sandbox (`workspace-write` or `read-only`): the process can read the two databases and write only under the working directory and `/tmp`. Probed with `puffin sandbox` in `workspace-write` mode: reading the graph database works; `~/.cache` is a read-only file system; `$XDG_RUNTIME_DIR` is visible but read-only; `systemd-run --user` fails ("Failed to connect to bus"); and nothing it starts outlives it. So the design splits:
-  - **Queries are pure readers.** `puffin code refs|def|callers|…` opens the databases read-only and exits. That is all it may do.
-  - **Everything that starts an indexer belongs to the `puffin` process itself**, which runs *outside* the sandbox for the whole session (the launcher is linked into it, patch `0002`). A session thread in it owns indexing: the launch-time runs, the supervisor of §9.2, and a request queue. A query that wants a re-index appends one line to `<repo>/.dreamference/code_index.requests` when it can write there; the session thread drains it every few seconds, coalesces (§9.2) and runs what admission allows. In a `read-only` sandbox the query cannot write the request, so it only says in its header that the index is stale; the next launch refreshes it.
-  - **`puffin code mcp`** (for Claude Code and IDEs) runs outside any sandbox and may do both.
-- **The fallback ladder**, used only when the direct read is impossible (the graph's schema fingerprint does not match the pinned one, §7.5): the CLI, correct at 6.6 s per call. A session-scoped codebase-memory child (12–105 ms per query) is reachable only from `puffin code mcp`, which can hold it; from inside the sandbox there is no channel to it.
-- **Search by meaning** needs the embedding model compiled into codebase-memory, so it is served only by `puffin code mcp`'s session child, and only when `puffin_code_semantic = true`. It is off by default: it returned unrelated build files for plain questions on this repository (2026-09-29), and upstream has open issues on it (#1155, #1462). `search` without it is FTS5 over names, qualified names and bodies, ranked by BM25 (§7.1).
-- **Why Rust, in the launcher:** it keeps `puffin` self-contained. `puffin code` works in any shell with no Python environment, like `puffin app` and `puffin update`, and rusqlite plus the `scip` crate are all it needs.
+- **Queries never start a tool.** A `puffin-code refs` opens two SQLite files read-only, runs indexed lookups and exits: milliseconds, and no process survives it. The tools run only to *index*, started by the session process outside the sandbox (below), under §9's limits.
+- **Two sides of the sandbox.** The agent runs `puffin-code …` as a shell command, and Codex runs every such command inside its bwrap sandbox (`workspace-write` or `read-only`): the process can read the two databases and write only under the working directory and `/tmp`. Probed with `puffin sandbox` in `workspace-write` mode: reading the graph database works; `~/.cache` is a read-only file system; `$XDG_RUNTIME_DIR` is visible but read-only; `systemd-run --user` fails ("Failed to connect to bus"); and nothing it starts outlives it. So the design splits:
+  - **Queries are pure readers.** `puffin-code refs|def|callers|…` opens the databases read-only and exits. That is all it may do.
+  - **Everything that starts an indexer belongs to `puffin-code session`**, a process the launcher starts at `puffin` launch, *outside* the sandbox, for as long as that `puffin` lives (§4.2). It owns indexing: the launch-time runs, the supervisor of §9.2, and a request queue. A query that wants a re-index appends one line to `<repo>/.dreamference/code_index.requests` when it can write there; the session process drains it every few seconds, coalesces (§9.2) and runs what admission allows. A line is a fixed word (`index` or `index-exact`) and nothing else: the file is written from inside the sandbox, so the session process treats it as untrusted and ignores any other content. In a `read-only` sandbox the query cannot write the request, so it only says in its header that the index is stale; the next launch refreshes it.
+  - **`puffin-code index` typed by the user** in an ordinary shell is outside any sandbox and runs the index itself. Typed by the agent, it is inside the sandbox, cannot create a scope, and queues a request instead; it tells the two apart by whether the user's systemd bus answers.
+  - **`puffin-code mcp`** (for Claude Code and IDEs) runs outside any sandbox and may do both.
+- **The fallback ladder**, used only when the direct read is impossible (the graph's schema fingerprint does not match the pinned one, §7.5): the CLI, correct at 6.6 s per call. A session-scoped codebase-memory child (12–105 ms per query) is reachable only from `puffin-code mcp`, which can hold it; from inside the sandbox there is no channel to it.
+- **Search by meaning** needs the embedding model compiled into codebase-memory, so it is served only by `puffin-code mcp`'s session child, and only when `puffin_code_semantic = true`. It is off by default: it returned unrelated build files for plain questions on this repository (2026-09-29), and upstream has open issues on it (#1155, #1462). `search` without it is FTS5 over names, qualified names and bodies, ranked by BM25 (§7.1).
+- **Why Rust:** `puffin-code` works in any shell with no Python environment, and the model's shell has none on `PATH` (the reason `puffin-admin` had to be linked there). rusqlite plus the `scip` crate are all it needs.
 
 ### 4.1 Lifecycle of the universal layer
 
 - **First run:**
-  - at `puffin` launch, the launcher checks for the repository's project in codebase-memory's cache (by reading the `projects` table directly, not through the CLI);
+  - at `puffin` launch, the session process (`puffin-code session`, §4.2) checks for the repository's project in codebase-memory's cache (by reading the `projects` table directly, not through the CLI);
   - if there is none, it starts `index_repository` **detached**, under §9's limits, and continues launching. It never indexes in the agent's path.
 - **Prompt timing:** the prompt is assembled once, at launch:
   - **Index ready:** the full `# Code navigation` block (§8).
-  - **Index building:** a reduced block: "a code index is being built; use `rg` until `puffin code status` reports it ready". `puffin code` answers "index not ready yet" rather than failing obscurely.
+  - **Index building:** a reduced block: "a code index is being built; use `rg` until `puffin-code status` reports it ready". `puffin-code` answers "index not ready yet" rather than failing obscurely.
   - **No repository, or indexing disabled or failed:** no block.
 - **Keeping it current, without a daemon:**
   - an incremental `index_repository` runs detached at every `puffin` launch (8.9 s measured, almost all fixed start-up);
-  - it also runs on `puffin code index`;
-  - it never runs inside a query. A query whose result files changed since the last index (§7.3) answers at once, tags those rows `heuristic (stale)`, and queues a re-index request for the session thread (§4).
+  - it also runs on `puffin-code index`;
+  - it never runs inside a query. A query answers at once from the snapshots, covers the files changed since them with a text search (§7.3), and queues a re-index request for the session process (§4) when any file is changed.
+  - **The agent's own edits are the normal case, not the exception.** Between two launches the graph sees nothing the session wrote, and a file the agent created is in neither layer. §7.3's changed set is what covers that gap; the re-index only turns its `heuristic` rows back into `exact` ones.
   - codebase-memory's watcher stays off (`watcher_enabled = false`, `auto_watch = false`) unless `puffin_code_watch = true`.
-- **Scope, written by the launcher:**
-  - **Submodules are excluded.** The launcher keeps a managed block in `<repo>/.cbmignore` listing every submodule path (`git submodule status`), and adds `.cbmignore` to `.git/info/exclude`, so the file never shows up in `git status`. `puffin code index --include-submodules` indexes them deliberately.
-  - **Ignore rules inside submodules.** codebase-memory applies the superproject's `.gitignore` inside a submodule, which git does not. When submodules are included, the router reports every excluded subtree from `index_coverage` in `puffin code status`, so the gap is visible rather than silent.
+- **Scope, written by the session process:**
+  - **Submodules are excluded.** The session process keeps a managed block in `<repo>/.cbmignore` listing every submodule path (`git submodule status`), and adds `.cbmignore` to `.git/info/exclude`, so the file never shows up in `git status`. `puffin-code index --include-submodules` indexes them deliberately.
+  - **Ignore rules inside submodules.** codebase-memory applies the superproject's `.gitignore` inside a submodule, which git does not. When submodules are included, the router reports every excluded subtree from `index_coverage` in `puffin-code status`, so the gap is visible rather than silent.
   - **Tracked files an ignore rule matches are skipped** (this repository's `config/` rule drops the tracked `dreamference/config/`). The router lists them from `index_coverage` (`not_indexed_dir`/`not_indexed_file`) and answers queries touching them with `rg`-backed `heuristic` rows.
 - **Git worktrees share the main worktree's index.** A worktree (`git rev-parse --git-common-dir` differs from `--git-dir`) is not indexed as a project of its own, which would cost a full database per worktree (Night Shift and fan-out create many). The router maps its paths onto the main worktree's project, and files whose hash differs are stale by §7.3, which is the safe direction.
 - **Data:**
   - graphs live in codebase-memory's cache, `CBM_CACHE_DIR` (default `~/.cache/codebase-memory-mcp/`);
-  - `puffin code status` reports their disk use;
-  - `puffin code forget [<repo>]` deletes a project, and the launcher offers it when a project's root no longer exists.
+  - `puffin-code status` reports their disk use;
+  - `puffin-code forget [<repo>]` deletes a project, and `puffin-code status` offers it when a project's root no longer exists.
+
+### 4.2 A binary of its own: `puffin-code`
+
+The router is not compiled into `puffin`. It is a separate program, installed and linked beside `puffin`, `puffin-admin` and `puffin-search`.
+
+- **Source:** the crate `puffin-code-rs/` at the repository root, a Cargo workspace of its own with its own committed `Cargo.lock`. It is not copied into the Codex export and is not a member of Codex's workspace, so it builds with `cargo build --release --locked` in its own directory and none of the builder's Codex rules (the export, the patches, no `--locked`) apply to it.
+- **Why not inside `puffin`:**
+  - **Build cost.** A change to the router would otherwise mean rebuilding Codex: about ten minutes, a 330 MB binary, and a link step that has to be scheduled around the model server's memory. The router alone builds in a fraction of that and can be rebuilt while the model is serving.
+  - **No Codex patch and no launcher growth.** rusqlite and the `scip` crate stay out of Codex's dependency graph, and the patch series does not grow.
+  - **It is useful without `puffin`.** Claude Code and IDEs start `puffin-code mcp` directly; a user can run `puffin-code refs` in any shell.
+  - **Tests run where the code is:** `cargo test --locked` in `puffin-code-rs/`, with no export directory.
+  - **Isolation.** A crash or a hang in the index cannot take the agent's process with it.
+- **What the launcher still does, and all it does:**
+  1. at launch, outside the sandbox, it starts `puffin-code session --parent-pid <pid>` detached and continues; the session process exits when that `puffin` does. With several `puffin` sessions in one repository, a lock under `<repo>/.dreamference/` makes one session process the owner and the others exit at once; when the owner's `puffin` ends, the next launch takes over;
+  2. it runs `puffin-code prompt-block` (a read of index state, milliseconds) and appends what it prints to the model's prompt (§8). The text lives in `puffin-code`, so the commands and the prompt that describes them cannot drift apart.
+  - If `puffin-code` is not installed, both steps are skipped and `puffin` runs as it does today, with no `# Code navigation` block.
+- **Install and `PATH`:** the binary goes to `~/.local/share/dreamference/puffin/bin/puffin-code` with `~/.local/bin/puffin-code` linked to it, by the same builder step that links `puffin`, `puffin-admin` and `puffin-search`. The link is not optional: the prompt tells the model to run `puffin-code`, and a command missing from its shell's `PATH` ends in exit 127, as `puffin-admin` did before it was linked.
+- **Versions move together.** `puffin-code` pins the schema fingerprints of the two stores (§7.5) and the checksums of the pinned tools (§5), so it is built, released and updated with them: `puffin-admin codex build` builds it as a second, independent Cargo run, the release workflow attaches it, and `puffin update` installs it with `puffin`. `puffin-code --version` prints its own version and the pinned tool versions.
+- **Configuration:** it reads the same files the launcher does (`DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`, `~/.config/dreamference/config.toml`) for the model server's address and the `code_index_*` / `puffin_code_*` keys, and `$CODEX_HOME/config.toml` for project trust (§9.1). It needs no running model server and no `puffin`.
 
 ## 5. Distribution
 
 - **Pinned binaries, verified:**
   - The Puffin release workflow downloads the pinned codebase-memory-mcp and scip CLI releases for `linux-arm64` and checks each against its published checksum.
-  - The expected SHA-256s are committed in `puffin-rs/code-index.sha256`, the same trust model as the rusty_v8 archive.
-  - They are shipped beside `puffin` in `~/.local/share/dreamference/puffin/bin/` and attached to Puffin releases, so `puffin update` refreshes them together with the router that knows their schema fingerprints (§7.5).
-  - `puffin-admin codex build` fetches the same pinned archives for local builds.
+  - The expected SHA-256s are committed in `puffin-code-rs/code-index.sha256`, the same trust model as the rusty_v8 archive.
+  - They are shipped beside `puffin` and `puffin-code` in `~/.local/share/dreamference/puffin/bin/` and attached to Puffin releases, so `puffin update` refreshes them together with the `puffin-code` that knows their schema fingerprints (§7.5).
+  - `puffin-admin codex build` fetches the same pinned archives for local builds, and builds and links `puffin-code` (§4.2).
 - **Fork only when a patch is needed.** No change to codebase-memory is required. If one becomes necessary, for example §11's SCIP import or a fix for its submodule ignore handling, fork it to `dgxcoder/codebase-memory-mcp` as a submodule and build from source, following the Codex pattern: pinned tag, patches in a directory, submodule never edited. The MIT notice must stay in the shipped files.
 - **SCIP indexers:**
   - `rust-analyzer` comes from rustup, the toolchain the Codex build already pins.
-  - scip-python and scip-typescript are npm packages; `puffin-admin code setup` installs them into `~/.local/share/dreamference/puffin/indexers/`, pinned by version and by the lockfile's `integrity` hashes. They need Node.js; a machine without it keeps the universal layer for those languages and says so in `puffin code status`.
+  - scip-python and scip-typescript are npm packages; `puffin-admin code setup` installs them into `~/.local/share/dreamference/puffin/indexers/`, pinned by version and by the lockfile's `integrity` hashes. They need Node.js; a machine without it keeps the universal layer for those languages and says so in `puffin-code status`.
   - The rest are fetched by `puffin-admin code setup` when their language is present, pinned by version and checksum.
   - Nothing is ever fetched at index or query time.
 
@@ -176,20 +201,20 @@ The static indexers run for untrusted repositories too because, run this way, th
 
 ### 6.2 Where output goes
 
-- **Files:** `<repo>/.dreamference/scip/<indexer>.scip`, the query store `index.db` (§7.5), and `manifest.json`: `{indexer, version, commit, path_prefix, dirty_files, file_hashes, started, duration_s, peak_rss_mb, peak_cap_bounded, cap_mb, status}`. `status` is one of `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy` or `deferred: model-start`. `.dreamference/` is already git-ignored.
+- **Files:** `<repo>/.dreamference/scip/<indexer>.scip`, the query store `index.db` (§7.5), and `manifest.json`: `{indexer, version, commit, path_prefix, dirty_files, file_hashes, started, duration_s, peak_rss_mb, peak_cap_bounded, cap_mb, status}`. `status` is one of `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy` or `deferred: model-start`. The session process also writes `graph.json` beside it after every universal run: `{commit, dirty_files, finished}`, so the graph's snapshot has a commit too (codebase-memory records file hashes but no commit). `.dreamference/` is already git-ignored.
 - **Paths are relative to the indexed root**, for every indexer: rust-analyzer's are relative to the workspace (`core/src/…`), scip-python's to the `--target-only` directory (`cli/…` for `dreamference/cli/…`). The manifest's `path_prefix` restores the repository path.
 - **Never index inside a submodule's checkout with a build tool that writes to it.** rust-analyzer runs `cargo metadata` and build scripts, and even `cargo tree` rewrites a submodule's `Cargo.lock`. This project's `codex/` workspace is indexed from a scratch copy of the builder's export (`~/.cache/dreamference/puffin-codex/src/codex-rs`), never from the export itself, which the builder owns, and paths are remapped to `codex/codex-rs/…`.
 - **`CARGO_TARGET_DIR` points at a scratch directory** so indexing never touches a build cache another build is using. The build-script cache it accumulates is what makes the second Rust run ~2 minutes faster (§2).
 
 ### 6.3 When it runs
 
-- **Static indexers (Python, TypeScript):** after the universal index at launch when the manifest is older than `HEAD` or files changed, detached; and on `puffin code index`. Cheap enough (19 s for `dreamference/`) to follow every launch.
+- **Static indexers (Python, TypeScript):** after the universal index at launch when the manifest is older than `HEAD` or files changed, detached; and on `puffin-code index`. Cheap enough (19 s for `dreamference/`) to follow every launch.
 - **Executing indexers, trusted repositories only (§9.1):** in the background, never blocking a session:
   - when no exact index exists, or it is older than `HEAD` by more than `code_index_stale_commits` commits (default 20);
   - when idle, preferring the moments the model server is stopped (§6.4);
   - in the Night Shift window, before night tasks start, so they begin with a fresh index (see `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`).
-- **On demand:** `puffin code index --exact`.
-- **Before a risky operation:** when `refs`/`impact` touches a symbol whose files changed since the snapshot (§7.3's staleness check). This only *requests* a run; the answer is given immediately, stale rows tagged.
+- **On demand:** `puffin-code index --exact`.
+- **Before a risky operation:** when `refs`/`impact` runs while any file has changed since the snapshot (§7.3's changed set). This only *requests* a run; the answer is given immediately, with the changed files searched by text and their rows tagged.
 - **Every trigger goes through the scheduler of §9.2,** and every executing run through §6.4's admission.
 
 ### 6.4 Memory admission
@@ -198,7 +223,7 @@ A fixed cap either kills the run (8 GB did, on 2026-09-28) or has to be sized fo
 
 - **Reserve:** `code_index_reserve = earlyoom SIGTERM threshold + 4 GiB`, read from earlyoom's `-m` percentage and `MemTotal` (on this machine 6.2 + 4 = ~10.2 GiB). The model's memory is already allocated when it is resident, so `MemAvailable` excludes it; the reserve protects the host, the session and the model's transient allocations. On 2026-09-29 an index run that ignored this pushed the host under earlyoom's line and earlyoom killed vLLM.
 - **Cap at start:** `cap = min(code_index_memory_ceiling, MemAvailable − code_index_reserve)`, ceiling default 40 GiB.
-- **Admit only a run that can finish:** the manifest's `peak_rss_mb` for this indexer and repository must satisfy `cap ≥ 1.2 × peak_rss_mb`. Otherwise the run is not started: `status: "deferred: memory"`, and `puffin code status` says so.
+- **Admit only a run that can finish:** the manifest's `peak_rss_mb` for this indexer and repository must satisfy `cap ≥ 1.2 × peak_rss_mb`. Otherwise the run is not started: `status: "deferred: memory"`, and `puffin-code status` says so.
 - **Cap-bounded peaks are marked.** When a run's peak ends within 10% of its cap (`peak_cap_bounded: true`), the recorded peak is a lower bound: the cgroup was reclaiming against the cap. The next admitted run gets `min(ceiling, 1.5 × peak)` if available, so the first uncapped run raises the record. An OOM-killed run records its cap as the lower bound, so the next attempt is not doomed the same way.
 - **What this means for Codex today:** recorded peak ≥ 21.5 GiB, cap-bounded, so admission needs `cap ≥ 25.8 GiB`, i.e. `MemAvailable ≥ ~36 GiB`. With Qwen3.8 resident the machine has 35–38 GiB available, so a run is admitted only at the quiet end of that range; with the model server stopped (~100 GiB available) always. Scheduled runs therefore prefer `puffin-admin server stop`, idle periods with no server, and the Night Shift window. While no fresh exact index exists, the router serves the last snapshot, with changed files tagged `heuristic (stale)`.
 - **The conversion is admitted too:** `expt-convert` peaked at 2.7 GB on Codex and runs under the same cap right after the indexer.
@@ -208,16 +233,16 @@ A fixed cap either kills the run (8 GB did, on 2026-09-28) or has to be sized fo
 
 ### 7.1 Operations
 
-| `puffin code …` | Answered by | Notes |
+| `puffin-code …` | Answered by | Notes |
 |---|---|---|
-| `search <text>` | the graph's `nodes_fts` (FTS5, BM25) over names, qualified names and bodies | `nodes_fts` is contentless (`content=''`): it returns rowids, joined back to `nodes` for names and locations. Semantic ranking only through `puffin code mcp` with `puffin_code_semantic = true` (§4). |
+| `search <text>` | the graph's `nodes_fts` (FTS5, BM25) over names, qualified names and bodies | `nodes_fts` is contentless (`content=''`): it returns rowids, joined back to `nodes` for names and locations. Semantic ranking only through `puffin-code mcp` with `puffin_code_semantic = true` (§4). |
 | `outline <file>` | the graph's `nodes` for that file, ordered by line | |
 | `show <symbol>` | the definition's `file:start-end` from the graph, read from disk | Returns one symbol's source, not the whole file. |
-| `def <symbol>` | SCIP if fresh (§7.3), else the graph | |
-| `refs <symbol>` | SCIP for fresh files, the graph for stale or unindexed ones, merged | Tagged per row. |
-| `callers` / `callees <symbol>` | SCIP references mapped to their innermost enclosing definition (`defn_enclosing_ranges` in the store, verified §2), else the graph's `CALLS`/`USAGE` edges | For Python and Rust the graph finds 58% and 78% of calling files (§2); graph-only answers carry a header note saying so. |
-| `impl <trait-or-interface>` | SCIP `relationships` (`is_implementation`), else the graph's `IMPLEMENTS`/`OVERRIDE` edges | |
-| `impact <symbol-or-diff>` | SCIP references, transitive to depth N via enclosing definitions; the graph's edges for stale files | Answers "what breaks". |
+| `def <symbol>` | SCIP if fresh (§7.3), else the graph | A definition written since the snapshots is found by the changed-set search (§7.3) and tagged `heuristic (text)`. |
+| `refs <symbol>` | SCIP for fresh files; for every file changed since the snapshot, the graph where it is fresh **and** a whole-word text search (§7.3); merged | Tagged per row. |
+| `callers` / `callees <symbol>` | SCIP references mapped to their innermost enclosing definition (`defn_enclosing_ranges` in the store, verified §2), else the graph's `CALLS`/`USAGE` edges | For Python and Rust the graph finds 58% and 78% of calling files (§2); graph-only answers carry a header note saying so. A text hit in a changed file is mapped to its enclosing definition through the graph's outline when the graph is fresh for that file, and printed as a bare `file:line` otherwise. |
+| `impl <trait-or-interface>` | SCIP `relationships` (`is_implementation`), else the graph's `IMPLEMENTS`/`OVERRIDE` edges | Changed files are searched for the trait's name (§7.3). |
+| `impact <symbol-or-diff>` | SCIP references, transitive to depth N via enclosing definitions; the graph's edges for stale files | Answers "what breaks". Text hits in changed files count at depth 1 and are not followed further; the header says so. |
 | `status` | both | Layers present, freshness, languages covered, excluded subtrees, disk use, last index time, deferred runs and why. |
 | `index [--exact] [--include-submodules]` | both | Re-index. `--exact` also schedules executing indexers. |
 
@@ -226,15 +251,21 @@ A fixed cap either kills the run (8 GB did, on 2026-09-28) or has to be sized fo
 Output is plain text, compact, one row per result, which is the shape the local model reads best:
 
 ```
-refs codex_core::config::Config::load   (12 results; 10 exact, 2 heuristic)
-exact = SCIP rust-analyzer @ 47f4d81; heuristic = codebase-memory (file edited since)
+refs codex_core::config::Config::load   (13 results; 10 exact, 3 heuristic)
+exact = SCIP rust-analyzer @ 47f4d81; heuristic = codebase-memory or text search
+changed since snapshot: 6 files, all searched
 exact     codex-rs/cli/src/main.rs:1041
 exact     codex-rs/tui/src/app.rs:318
 heuristic codex-rs/exec/src/lib.rs:77
+heuristic (text) codex-rs/core/src/session.rs:412
 unresolved 1 call through `dyn ConfigSource` in codex-rs/core/src/lib.rs:2204
 ```
 
-The source and commit are stated once in the header. `--json` gives the same data for tools. The `unresolved` line is mandatory whenever either layer reports calls it could not resolve, and a `not indexed` line lists touched paths outside a layer's coverage (§4.1). They are what tell the agent it has to verify.
+The source and commit are stated once in the header. `--json` gives the same data for tools. Four lines are mandatory, because they are what tell the agent it has to verify:
+- **`changed since snapshot`**, on every answer, with the number of files changed since the older of the two snapshots and whether they were searched. `0 files` is the only state in which an all-`exact` answer is complete.
+- **`unresolved`**, whenever either layer reports calls it could not resolve.
+- **`not indexed`**, listing touched paths outside a layer's coverage (§4.1).
+- **`not checked`**, whenever the changed set was too large to search (§7.3). It names the count and says the answer may be missing references from those files.
 
 **Every answer is bounded by construction.** The served model's context is 262,144 tokens, so the bound is no longer about fitting the window. It is about cost: every token of tool output is re-read on later turns, and a cold prefill runs at ~1,700 tokens/s (~1,000 at 116K tokens), so a 5,000-token answer costs about 3 s on every later turn the prefix cache misses, and dilutes the model's attention.
 
@@ -246,11 +277,30 @@ The source and commit are stated once in the header. `--json` gives the same dat
 
 ### 7.3 Freshness and merging
 
-- **A file is fresh for SCIP** when its current content hash equals `file_hashes[path]` in the SCIP manifest; **fresh for the graph** when it matches the graph's own `file_hashes(rel_path, sha256, mtime_ns, size)` table, which codebase-memory already maintains.
-- **Only the files an answer touches are checked, and cheaply:** by `(mtime, size)` first, hashed only if either differs. A 40-row answer costs at most 41 `stat` calls in the common case.
-- **`refs` and `def`** use SCIP rows for fresh files and graph rows for stale or unindexed ones.
-- **Rows present in both** are de-duplicated by `(path, line)`; the SCIP row wins and is tagged `exact`.
-- **Stale share:** if more than 20% of the files a result touches are stale, the router *requests* a background run and says so in the header. It never runs one in the query's path.
+A snapshot goes stale in two ways, and only the first is visible from its own rows:
+
+- **A file the answer names has changed.** Its rows may point at the wrong lines.
+- **A file the answer does not name now references the symbol:** one created since the snapshot, or an edit that added a call. It is in no row, so no check of the rows' files can find it. Measured in §2: five commits after a snapshot, `ModelDownloader` had two such files and three other symbols had one. The agent's own edits create these in every session, and `refs` is asked right after them.
+
+Freshness is therefore decided for the repository, not for the answer:
+
+- **The changed set `C`, computed on every query.** For each layer, the files that differ from its snapshot:
+  - `git --no-optional-locks diff --name-only <snapshot commit> HEAD`, plus `git --no-optional-locks status --porcelain` (modified, staged, deleted and untracked files outside the ignore rules), plus the snapshot's own `dirty_files`;
+  - the snapshot commit is `manifest.json`'s `commit` for SCIP and `graph.json`'s for the graph (§6.2);
+  - each candidate is confirmed against that layer's hash table (`file_hashes[path]` in the SCIP manifest; the graph's `file_hashes(rel_path, sha256, mtime_ns, size)`), by `(mtime, size)` first and by hash only if either differs. A path with no entry is new; a path that no longer exists is deleted;
+  - measured: 39 ms for both git calls on this repository, inside the sandbox too (§2).
+- **When git cannot answer** (the snapshot commit is gone after a rebase and garbage collection, or the directory is not a git repository): every file of `git ls-files -co --exclude-standard`, or of the layer's own file table, is checked by `(mtime, size)` against the hash tables. That is one `stat` per file, bounded by `code_index_max_files`.
+- **A file outside `C` is fresh** for that layer; its rows are served as they are. Rows in a deleted file are dropped, and the header counts them.
+- **Every file in `C` is searched for the symbol's bare name, as a whole word.** This is the only step that can see a reference added since the snapshot:
+  - the router reads the files itself (no `rg` binary is needed) and matches the last path segment of the symbol (`load` for `Config::load`), on word boundaries;
+  - a hit on a `(path, line)` no layer already reports becomes a row tagged `heuristic (text)`;
+  - where the graph is fresh for the file, its rows are merged in as before (`heuristic`). The text search still runs there, because the graph finds only 58% of Python callers and 78% of Rust ones (§2) and a miss would otherwise leave no trace;
+  - it over-reports: another symbol with the same name matches too. That is the safe direction, and the tag says so. It cannot see a reference through an alias (`from m import f as g`) or a name built at run time; §13 records it.
+- **Bounded:** at most `code_index_scan_max_files` files (default 2,000) and 64 MiB are read. Above either, nothing is searched, the mandatory `not checked` line (§7.2) gives the count, and no row of the answer is called complete. Measured: 3 ms for 19 files; 21 ms for a whole-word search of all 4,900 Rust files of Codex (§2), so the bound is a guard against a pathological tree, not a cost the agent will meet.
+- **`refs` and `def`** use SCIP rows for files fresh for SCIP, graph rows for files fresh only for the graph, and text rows for every file in `C`.
+- **Rows present in more than one source** are de-duplicated by `(path, line)`; SCIP wins over the graph, and the graph over text.
+- **Any changed file requests a run.** If `C` is not empty, the router *requests* a background re-index (§4) and says so in the header. It never runs one in the query's path. Until the run finishes, the text rows are what keep the answer complete.
+- **Cost:** two git calls, one `stat` per file of `C`, and a read of those files. Files outside `C` are not touched at all, so an answer on an unchanged tree costs the 39 ms of git and nothing else.
 
 ### 7.4 Joining the two layers: symbol identity
 
@@ -281,11 +331,11 @@ The layers name things differently. The graph has qualified names (`dreamference
 
 ## 8. Agent interface
 
-- **Prompt:** the launcher appends a `# Code navigation` block to the model's prompt, next to web access and Gmail. It covers the commands of §7.1, the meaning of `exact`/`heuristic`/`unresolved`/`not indexed`, and one rule: *before changing a signature, renaming or deleting, run `puffin code refs`. If any row is `heuristic`, `unresolved` or `not indexed`, confirm with `rg` and run the build or tests after the edit.*
+- **Prompt:** the launcher appends a `# Code navigation` block to the model's prompt, next to web access and Gmail. The text is what `puffin-code prompt-block` prints (§4.2). It covers the commands of §7.1, the meaning of `exact`/`heuristic`/`unresolved`/`not indexed`/`not checked`, and one rule: *before changing a signature, renaming or deleting, run `puffin-code refs`. If any row is `heuristic`, `unresolved` or `not indexed`, or the answer has a `not checked` line, confirm with `rg` and run the build or tests after the edit.*
 - **Ready, building or absent:** the block is full, reduced or absent according to the index state at launch (§4.1).
 - **MCP:**
-  - `puffin code mcp` serves the same operations over stdio for Claude Code and IDEs, and replaces jCodeMunch in `~/.claude.json` once implemented.
-  - `puffin-admin mcp`'s `workspace_search_code` is re-pointed at the router; the `dreamference` context engine (per-file TF-IDF, FTS5 and embeddings) is retired once the router passes §10, since it answers a subset of `puffin code search` with no call graph.
+  - `puffin-code mcp` serves the same operations over stdio for Claude Code and IDEs, and replaces jCodeMunch in `~/.claude.json` once implemented.
+  - `puffin-admin mcp`'s `workspace_search_code` is re-pointed at the router; the `dreamference` context engine (per-file TF-IDF, FTS5 and embeddings) is retired once the router passes §10, since it answers a subset of `puffin-code search` with no call graph.
   - The local model keeps using shell commands, because it does not reliably call MCP tools under Codex's Code Mode (see `codex_runner.py`'s history).
 
 ## 9. Resources and safety
@@ -303,7 +353,7 @@ Three rules follow.
 
 - **Trust gate for executing indexers** (rust-analyzer, scip-java, scip-dotnet):
   - they run only for repositories the user has marked trusted: `trusted = true` in `<repo>/.dreamference/code_index.toml`, or Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, which the TUI already asks about);
-  - untrusted repositories get the universal layer plus the static exact layers, and `puffin code status` says so in one line.
+  - untrusted repositories get the universal layer plus the static exact layers, and `puffin-code status` says so in one line.
 - **Sandbox, for every indexer.** Each runs as `systemd-run … -- bwrap …`, with the network removed and the filesystem read-only except for its outputs. For rust-analyzer (this is the command that produced §2's measurements, less the paths):
   ```
   systemd-run --user --scope --unit="puffin-index-$REPO_ID" \
@@ -320,7 +370,7 @@ Three rules follow.
           -- rust-analyzer scip "$SRC" --output "$REPO/.dreamference/scip/rust-analyzer.scip"
   ```
   - `/usr/bin/bwrap` is already installed; it is Codex's own sandbox.
-  - The scope is named so §9.2's supervisor can `freeze`/`thaw` it and `puffin code status` can find a run in progress.
+  - The scope is named so §9.2's supervisor can `freeze`/`thaw` it and `puffin-code status` can find a run in progress.
   - The router creates the bound directories beforehand, because bwrap cannot bind a path that does not exist.
   - `$CARGO_HOME` is writable only because Cargo takes a lock file there even offline; with no network, nothing can be fetched into it.
   - `$SRC` is read-only. A run that needs to rewrite the lockfile fails and is recorded; the remedy is a scratch copy, as for `codex/` (§6.2).
@@ -341,11 +391,11 @@ On GB10, token generation is limited by memory bandwidth, and CPU, GPU and model
   - A run in flight when a load begins is **stopped**, not frozen, because frozen memory stays resident; it is recorded as `deferred: model-start`.
   - `puffin-admin server start` stops every `puffin-index-*` scope before its host-safety pre-flight (`systemctl --user stop 'puffin-index-*'`), keeping `check_host_safety()`'s guarantee intact.
 - **Pause instead of competing:**
-  - The indexer cannot watch the model itself: it has no network in its sandbox. `puffin code index` therefore starts a detached **supervisor** outside the sandbox that creates and owns the scope, polls `/metrics` every 2 s, applies these rules, writes the manifest, and exits when the scope ends. It lives exactly as long as one run.
+  - The indexer cannot watch the model itself: it has no network in its sandbox. The session process (or a `puffin-code index` typed by the user, §4) therefore starts a detached **supervisor** outside the sandbox that creates and owns the scope, polls `/metrics` every 2 s, applies these rules, writes the manifest, and exits when the scope ends. It lives exactly as long as one run.
   - When a request appears, the supervisor runs `systemctl --user freeze <scope>`, and `thaw` once the model has been idle for 10 s (supported on systemd 255).
   - A run frozen for more than 30 minutes is stopped and recorded as `deferred: busy`.
 - **Cap what it can take while running:** `-p CPUQuota=400% -p AllowedCPUs=<4 cores>` on the scope, `CARGO_BUILD_JOBS=4` and the Go and MSBuild equivalents, `CBM_WORKERS=4` for codebase-memory. Newer rust-analyzer than the pinned 1.95.0 adds `--num-threads`; the router passes 4 once the toolchain has it.
-- **One run at a time, coalesced:** at most one exact run in flight per repository; requests during a run collapse into one follow-up, which waits at least `code_index_min_interval` (default 15 minutes) unless it is `puffin code index --exact`. A lock file makes this hold across sessions, and Night Shift's admission counts an exact run as work in progress.
+- **One run at a time, coalesced:** at most one exact run in flight per repository; requests during a run collapse into one follow-up, which waits at least `code_index_min_interval` (default 15 minutes) unless it is `puffin-code index --exact`. A lock file makes this hold across sessions, and Night Shift's admission counts an exact run as work in progress.
 
 ## 10. Evaluation (before building the router)
 
@@ -356,12 +406,14 @@ On GB10, token generation is limited by memory bandwidth, and CPU, GPU and model
 3. **Contenders:** the router (both layers); the graph alone; `rg`/`ast-grep` as the baseline.
 4. **Metrics:**
    - reference recall and precision against ground truth, line level (§2's figures are file level);
+   - **recall after edits:** the same questions asked of a snapshot some commits old (as in §2's replay), and again after adding a reference in an edited file and in a new file without re-indexing;
    - wall time per question and output tokens per answer;
    - the unconstrained peak of the Codex exact index: one run with the model server stopped and a 40 GiB cap;
    - the model's decode rate while an exact index runs, frozen and unfrozen, against §9.2's baseline;
    - the quality of search by meaning, before it is ever enabled by default.
 5. **Acceptance:**
-   - the router's `refs`/`callers` recall is at least 98% of SCIP's on fresh files, and every miss is visible as `heuristic`, `unresolved` or `not indexed`;
+   - the router's `refs`/`callers` recall is at least 98% of SCIP's on fresh files, and every miss is visible as `heuristic`, `unresolved`, `not indexed` or `not checked`;
+   - **no silent miss after an edit:** every reference by name added since the snapshot, in an edited file or a new one, appears in the answer (under any tag), or the answer carries a `not checked` line;
    - its answers cost fewer tokens than the `rg` baseline;
    - **query latency:** p95 at most 200 ms for `refs`/`def`/`callers`, from process start to last byte, on a warm page cache (the direct reads of §7.5 measured under 10 ms);
    - **answer size:** no answer exceeds 1,000 tokens at the default limit;
@@ -374,12 +426,20 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 
 ## 12. Tests
 
-- **Router unit tests** (`puffin-rs`, `cargo test -p puffin-launcher` in the export):
-  - merging with fresh, stale and missing files; de-duplication; `unresolved` and `not indexed` always printed when reported; ambiguous names listed, not guessed; the stale threshold requests a re-index.
+- **Router unit tests** (`cargo test --locked` in `puffin-code-rs/`):
+  - merging with fresh, stale and missing files; de-duplication; `unresolved` and `not indexed` always printed when reported; ambiguous names listed, not guessed; a non-empty changed set requests a re-index.
 - **Fixtures** under `tests/fixtures/code_index/`: a tiny Rust crate and Python package with known references, plus **recorded stores**: a codebase-memory v0.11.0 graph database and an `expt-convert` store for them. Router tests run against the recorded stores, so they need neither binary; tests that regenerate them are skipped when the binaries are absent.
 - **Schema fingerprints:** a test computes both stores' fingerprints from the recorded fixtures and compares them with the pinned values, so a version bump that changes a schema fails CI rather than a user's query. A mismatched fixture must send the router down the fallback ladder, not into a wrong answer.
 - **Direct reads:** a query during a simulated write (a held `BEGIN EXCLUSIVE` on a copy) waits and retries within the busy timeout; a `mutation_gen` change between two reads causes one retry; the router holds no handle after it exits.
 - **Join (§7.4):** a recorded SCIP chunk and a recorded graph node for the same definition resolve to the same symbol; their rows de-duplicate to one per `(path, line)`, which catches a 0-/1-based mismatch; a stale definition file falls back to the `display_name` search and tags the result `heuristic`.
+- **Changed since the snapshot (§7.3):** against a recorded store of the fixture package,
+  - a call added to a file the snapshot already had, and a call in a file created afterwards, both appear in `refs` tagged `heuristic (text)`, and the header reads `changed since snapshot: 2 files, all searched`;
+  - the same holds when the graph is fresh for the edited file but has no edge for the call (the 58% case): the text row is still printed;
+  - an unchanged tree prints `changed since snapshot: 0 files` and only `exact` rows;
+  - rows in a deleted file are dropped and counted;
+  - with `code_index_scan_max_files = 1` and two changed files, nothing is searched and the `not checked` line is printed;
+  - with the snapshot commit missing from the repository, the fallback by `stat` finds the same changed set;
+  - run under Codex's `read-only` sandbox, the git calls succeed and `.git` is not written (`--no-optional-locks`).
 - **Safety:**
   - indexing a submodule never writes to it (`git status --porcelain` empty afterwards);
   - indexer runs are killed at the memory cap, not left to exhaust the host (fixture with a tiny cap);
@@ -388,12 +448,18 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **Isolation from the user's machine**, the lesson of 2026-09-29 (tests recreated live containers and wrote the real compile-signature file):
   - tests set `CBM_CACHE_DIR` under their temporary home and `CBM_RUNTIME_DIR` to a **short** private directory (mode 0700; the socket path must stay under 108 bytes, or the CLI fails with "secure CLI coordination could not be created");
   - no test creates a real `systemd-run` scope or freezes a real unit: `puffin-index-*` scope creation is behind a seam the tests replace, the way `tests/conftest.py` refuses real mutating `docker` commands.
-- **Sandbox sides (§4):** `puffin code refs` run under Codex's `read-only` sandbox answers from both stores and writes nothing; under `workspace-write` a stale answer appends exactly one request line, and the session thread coalesces ten such lines into one run.
+- **Sandbox sides (§4):** `puffin-code refs` run under Codex's `read-only` sandbox answers from both stores and writes nothing; under `workspace-write` a stale answer appends exactly one request line, and the session process coalesces ten such lines into one run.
 - **scip-python's environment:** a fixture repository whose `.venv/bin/python3` and `sitecustomize.py` write marker files is indexed without either marker appearing.
 - **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while building, absent without a repository, and under 250 tokens.
+- **The separate binary (§4.2):**
+  - with `puffin-code` absent from the install directory, `puffin` launches, starts nothing and adds no block (launcher test, in the export);
+  - the builder links `~/.local/bin/puffin-code` beside the other three commands, and refreshes the link when the binary is current (Python test, as for `puffin-admin`);
+  - `puffin-code session` exits when its parent pid is gone, and a second one for the same repository exits at once while the first holds the lock;
+  - a request file holding anything but the fixed words starts no run;
+  - `puffin-code index` with no systemd user bus queues a request and starts no process.
 - **Performance:**
   - **Output budget:** a fixture symbol with 500 references prints the totals header, at most 15 file-summary lines and 40 rows; `--offset 40` returns the next 40; an `--offset` taken before a re-index fails with an error.
-  - **Freshness cost:** a `refs` on a 40-row result `stat`s at most 41 files and hashes none when nothing changed.
+  - **Freshness cost:** on an unchanged tree a `refs` runs the two git calls and opens no source file; with `k` changed files it `stat`s and reads exactly those `k`.
   - **Admission:** with `peak_rss_mb` above the available cap, the run is not started (`deferred: memory`); a cap-bounded peak raises the next cap; an OOM-killed run records its cap as the new lower bound.
   - **Scheduler:** five triggers in quick succession produce one run and one coalesced follow-up; no run starts while the engine's request gauges are non-zero (fake `/metrics` for both `vllm:` and `sglang:` names); a frozen scope resumes on thaw with the same output as an uninterrupted run.
   - **Model load:** with a model container present but `/health` not answering, no run starts; a run in flight is stopped, not frozen (`deferred: model-start`); `puffin-admin server start` stops any `puffin-index-*` scope before its pre-flight.
@@ -412,4 +478,5 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **SCIP freshness for rust-analyzer is whole-workspace.** It has no crate-scoped mode (its `scip` flags are `--output`, `--config-path` and `--exclude-vendored-libraries`), so the exact Rust layer after a small edit is a full re-run.
 - **Partitioning** may not lower the peak, because the dependency closure of the crates that matter is most of the workspace (§6.4).
 - **Connecting to an existing Unix socket from inside the sandbox** (the runtime directory is read-only there) is untested; the design does not rely on it (§4).
+- **The changed-set search matches names, not symbols.** It cannot see a reference through an alias or a name built at run time, and it reports same-named symbols as `heuristic (text)`. How often an alias hides a new reference in practice is unmeasured; the re-index the query requests closes the gap within one run.
 - **Several repositories:** start with the working directory only.
