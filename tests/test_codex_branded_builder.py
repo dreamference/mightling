@@ -87,6 +87,7 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
             patch.object(CodexBrandedBuilder, "prepare_source", return_value=True), \
             patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"}), \
             patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True), \
+            patch.object(CodexBrandedBuilder, "build_web_tools", return_value=True), \
             patch.object(builder_module.subprocess, "call", side_effect=fake_call):
         assert CodexBrandedBuilder.build() is False
 
@@ -121,31 +122,106 @@ def test_the_runner_resolves_the_branded_executable(tmp_path):
         assert CodexInstaller.get_codex_executable() == str(binary)
 
 
-def test_puffin_admin_and_search_are_linked_onto_path_for_the_models_shell(tmp_path, monkeypatch):
-    # Puffin's prompt tells the model to run `puffin-search` and `puffin-admin fetch` for web
-    # access, but the commands lived only in the repository's virtualenv: every call from inside a
-    # session ended in "command not found" (exit 127). conftest points the links into the test home.
+def test_puffin_admin_and_the_web_commands_are_linked_onto_path_for_the_models_shell(tmp_path, monkeypatch):
+    # Puffin's prompt tells the model to run `puffin-search` and `puffin-fetch` for web access,
+    # but the commands lived only in the repository's virtualenv: every call from inside a session
+    # ended in "command not found" (exit 127). conftest points the links into the test home.
     import os
     from dreamference.runner import codex_branded_builder as builder
 
     binary = tmp_path / "puffin"
     binary.write_text("#!/bin/sh\n")
     monkeypatch.setattr(builder.CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(binary)))
+    monkeypatch.setattr(builder, "INSTALL_DIR", str(tmp_path / "install"))
     admin = builder.CodexBrandedBuilder.console_script_path("puffin-admin")
-    search = builder.CodexBrandedBuilder.console_script_path("puffin-search")
     assert admin and admin.endswith("puffin-admin")
-    assert search and search.endswith("puffin-search")
 
+    # A web command is linked only once its binary exists: never a dangling link.
     builder.CodexBrandedBuilder.link_onto_path()
     assert os.readlink(builder.PATH_LINK) == str(binary)
     assert os.readlink(builder.ADMIN_PATH_LINK) == admin
-    assert os.readlink(builder.SEARCH_PATH_LINK) == search
+    assert not os.path.lexists(builder.SEARCH_PATH_LINK) and not os.path.lexists(builder.FETCH_PATH_LINK)
+
+    installed = {}
+    for name in ("puffin-search", "puffin-fetch"):
+        path = tmp_path / "install" / "bin" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+        installed[name] = str(path)
+    builder.CodexBrandedBuilder.link_onto_path()
+    # The Rust binaries, not a console script of this virtualenv.
+    assert os.readlink(builder.SEARCH_PATH_LINK) == installed["puffin-search"]
+    assert os.readlink(builder.FETCH_PATH_LINK) == installed["puffin-fetch"]
 
     # A real file of that name belongs to someone else and is left alone.
     os.remove(builder.ADMIN_PATH_LINK)
     open(builder.ADMIN_PATH_LINK, "w").write("mine")
     builder.CodexBrandedBuilder.link_onto_path()
     assert open(builder.ADMIN_PATH_LINK).read() == "mine"
+
+
+def test_the_web_commands_build_from_their_own_crate_with_its_lockfile(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_call(command, cwd=None, env=None):
+        calls.append((command, cwd, env))
+        release = tmp_path / "cache" / "target" / "release"
+        release.mkdir(parents=True, exist_ok=True)
+        for name in builder_module.WEB_BIN_NAMES:
+            (release / name).write_text("#!/bin/sh\n")
+            (release / name).chmod(0o755)
+        return 0
+
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(builder_module, "WEB_BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
+    monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
+
+    assert not CodexBrandedBuilder.web_tools_are_current()
+    assert CodexBrandedBuilder.build_web_tools() is True
+    (command, cwd, env), = calls
+    assert cwd == builder_module.WEB_CRATE_DIR
+    assert command[:4] == ["cargo", "build", "--release", "--locked"]
+    assert [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"] == ["puffin-search", "puffin-fetch"]
+    assert env["CARGO_TARGET_DIR"] == str(tmp_path / "cache" / "target")
+    for name in builder_module.WEB_BIN_NAMES:
+        assert os.access(tmp_path / "install" / "bin" / name, os.X_OK)
+
+    # Current now, so a second build compiles nothing.
+    assert CodexBrandedBuilder.web_tools_are_current()
+    assert CodexBrandedBuilder.build_web_tools() is True
+    assert len(calls) == 1
+
+
+def test_the_web_crate_key_changes_with_its_source(tmp_path):
+    crate = tmp_path / "puffin-web-rs"
+    (crate / "src").mkdir(parents=True)
+    (crate / "src" / "lib.rs").write_text("// one")
+    (crate / "target").mkdir()
+    first = CodexBrandedBuilder.crate_key(str(crate))
+    (crate / "target" / "junk").write_text("build output is not source")
+    assert CodexBrandedBuilder.crate_key(str(crate)) == first
+    (crate / "src" / "lib.rs").write_text("// two")
+    assert CodexBrandedBuilder.crate_key(str(crate)) != first
+
+
+def test_the_web_commands_are_built_even_when_codex_is_current(monkeypatch):
+    built = []
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: True))
+    monkeypatch.setattr(CodexBrandedBuilder, "link_onto_path", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "build_web_tools", classmethod(lambda cls, force=False: built.append(force) or True)
+    )
+    assert CodexBrandedBuilder.build() is True
+    assert built == [False]
+
+
+def test_the_web_crate_is_committed_with_its_lockfile():
+    # `--locked` fails without it, and the release build must resolve exactly what was tested.
+    assert os.path.isfile(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.lock"))
+    assert os.path.isfile(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.toml"))
 
 
 @pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")

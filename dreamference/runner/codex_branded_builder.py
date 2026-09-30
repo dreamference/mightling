@@ -17,6 +17,10 @@ Cargo build.
 The compiled output is keyed by the source commit, the patch contents and the launcher's source, so an unchanged tree is
 not rebuilt, and Cargo's target directory is kept across builds so a patch edit recompiles only the
 crates it touches rather than the several hundred dependencies beneath them.
+
+The agent's web commands, `puffin-search` and `puffin-fetch`, are built here too, from the
+standalone crate `puffin-web-rs/`: a separate Cargo build with its own lockfile, target directory
+and stamp, installed beside `puffin`, so either can be rebuilt without the other.
 """
 
 import hashlib
@@ -59,12 +63,22 @@ BRANDED_EXECUTABLE_NAME: Final[str] = "puffin"
 # codex-code-mode-host next to its own executable, and it resolves that through the link.
 PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin")
 
-# Where `puffin-admin` and `puffin-search` become reachable from any shell -- including the one
-# `puffin` runs the model's commands in. The prompt tells the model to use `puffin-search` and
-# `puffin-admin fetch`/`gmail` for web and mail access, but the commands only existed inside the
-# repository's virtualenv, so every such call ended in "command not found" (exit 127).
+# Where `puffin-admin` and the web commands become reachable from any shell -- including the one
+# `puffin` runs the model's commands in. The prompt tells the model to use `puffin-search`,
+# `puffin-fetch` and `puffin-admin gmail` for web and mail access, but the commands only existed
+# inside the repository's virtualenv, so every such call ended in "command not found" (exit 127).
 ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-admin")
 SEARCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-search")
+FETCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-fetch")
+
+# The agent's web commands, `puffin-search` and `puffin-fetch`: a small Rust crate of its own rather
+# than part of the launcher, so changing them never relinks Codex, and a static binary rather than
+# a console script, so they do not depend on this virtualenv. Built with its own lockfile into its
+# own target directory, installed beside `puffin`, and stamped separately from the Codex build.
+WEB_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "puffin-web-rs")
+WEB_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-web")
+WEB_BUILD_STAMP_NAME: Final[str] = "web-build-key"
+WEB_BIN_NAMES: Final[tuple] = ("puffin-search", "puffin-fetch")
 
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
@@ -174,8 +188,21 @@ class CodexBrandedBuilder:
         Returns:
             List[str]: Absolute paths under `puffin-rs/`, excluding any local build output.
         """
+        return cls.crate_files(PUFFIN_CRATE_DIR)
+
+    @classmethod
+    def crate_files(cls, crate_dir: str) -> List[str]:
+        """
+        Lists a crate's source files, in a stable order.
+
+        Args:
+            crate_dir (str): The crate's directory.
+
+        Returns:
+            List[str]: Absolute paths under `crate_dir`, excluding any local build output.
+        """
         found: List[str] = []
-        for root, dirs, files in os.walk(PUFFIN_CRATE_DIR):
+        for root, dirs, files in os.walk(crate_dir):
             dirs[:] = sorted(d for d in dirs if d != "target")
             found.extend(os.path.join(root, name) for name in sorted(files))
         return found
@@ -361,6 +388,22 @@ class CodexBrandedBuilder:
             force (bool): Rebuild even if the installed binaries match the current inputs.
 
         Returns:
+            bool: True if an up-to-date `puffin` and its web commands are installed afterwards.
+        """
+        # First and independently: the web commands take seconds, and a stale Codex must not keep
+        # them from updating, nor they it.
+        web_ok = cls.build_web_tools(force=force)
+        return cls._build_codex(force=force) and web_ok
+
+    @classmethod
+    def _build_codex(cls, force: bool = False) -> bool:
+        """
+        Builds and installs the branded Codex unless the installed copy is already current.
+
+        Args:
+            force (bool): Rebuild even if the installed binaries match the current inputs.
+
+        Returns:
             bool: True if an up-to-date `puffin` is installed afterwards.
         """
         if not force and cls.is_current():
@@ -440,12 +483,126 @@ class CodexBrandedBuilder:
         return True
 
     @classmethod
+    def crate_key(cls, crate_dir: str) -> str:
+        """
+        Identifies a standalone crate's build by the exact bytes of its source files.
+
+        Args:
+            crate_dir (str): The crate's directory.
+
+        Returns:
+            str: A short key.
+        """
+        digest = hashlib.sha256()
+        for path in cls.crate_files(crate_dir):
+            digest.update(os.path.relpath(path, crate_dir).encode())
+            with open(path, "rb") as handle:
+                digest.update(handle.read())
+        return digest.hexdigest()[:12]
+
+    @classmethod
+    def crate_is_current(cls, crate_dir: str, stamp_name: str, bin_names: tuple) -> bool:
+        """
+        Checks that a standalone crate's binaries are installed and built from its current source.
+
+        Args:
+            crate_dir (str): The crate's directory.
+            stamp_name (str): The stamp file under the install directory that records its key.
+            bin_names (tuple): The binaries it installs.
+
+        Returns:
+            bool: True if no rebuild is needed.
+        """
+        stamp = os.path.join(INSTALL_DIR, stamp_name)
+        if not os.path.isfile(stamp):
+            return False
+        with open(stamp) as handle:
+            if handle.read().strip() != cls.crate_key(crate_dir):
+                return False
+        return all(
+            os.access(os.path.join(INSTALL_DIR, "bin", name), os.X_OK) for name in bin_names
+        )
+
+    @classmethod
+    def build_crate(
+        cls, crate_dir: str, cache_dir: str, stamp_name: str, bin_names: tuple, force: bool = False
+    ) -> bool:
+        """
+        Builds a standalone crate of Puffin's commands and installs its binaries beside `puffin`.
+
+        Unlike the Codex build this compiles the crate in place, with `--locked` against its own
+        committed lockfile, into its own target directory: it is Dreamference's source, not an
+        export, and sharing Codex's target directory would make each rebuild wait on Codex's lock.
+
+        Args:
+            crate_dir (str): The crate's directory.
+            cache_dir (str): Where its Cargo target directory lives.
+            stamp_name (str): The stamp file under the install directory that records its key.
+            bin_names (tuple): The binaries to install.
+            force (bool): Rebuild even if the installed binaries match the source.
+
+        Returns:
+            bool: True if its current binaries are installed afterwards.
+        """
+        if not force and cls.crate_is_current(crate_dir, stamp_name, bin_names):
+            cls.link_onto_path()
+            return True
+        if not DesktopInstaller.install_rust():
+            return False
+        environment = DesktopRunner._environment()
+        environment["CARGO_TARGET_DIR"] = os.path.join(cache_dir, "target")
+        command = ["cargo", "build", "--release", "--locked"]
+        for name in bin_names:
+            command += ["--bin", name]
+        print(f"🔨 Building {', '.join(bin_names)}...")
+        if subprocess.call(command, cwd=crate_dir, env=environment) != 0:
+            print(f"❌ The {os.path.basename(crate_dir)} build failed; see the cargo output above.")
+            return False
+        bin_dir = os.path.join(INSTALL_DIR, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        for name in bin_names:
+            # Renamed over the old file, so a command running now keeps its binary.
+            staging = os.path.join(bin_dir, f".{name}.new")
+            shutil.copy2(os.path.join(cache_dir, "target", "release", name), staging)
+            os.replace(staging, os.path.join(bin_dir, name))
+        with open(os.path.join(INSTALL_DIR, stamp_name), "w") as handle:
+            handle.write(f"{cls.crate_key(crate_dir)}\n")
+        cls.link_onto_path()
+        print(f"✅ Installed {', '.join(bin_names)} in {bin_dir}")
+        return True
+
+    @classmethod
+    def web_tools_are_current(cls) -> bool:
+        """
+        Checks that `puffin-search` and `puffin-fetch` are installed and built from current source.
+
+        Returns:
+            bool: True if no rebuild is needed.
+        """
+        return cls.crate_is_current(WEB_CRATE_DIR, WEB_BUILD_STAMP_NAME, WEB_BIN_NAMES)
+
+    @classmethod
+    def build_web_tools(cls, force: bool = False) -> bool:
+        """
+        Builds `puffin-search` and `puffin-fetch` from `puffin-web-rs/` unless they are current.
+
+        Args:
+            force (bool): Rebuild even if the installed binaries match the source.
+
+        Returns:
+            bool: True if both are installed and current afterwards.
+        """
+        return cls.build_crate(
+            WEB_CRATE_DIR, WEB_BUILD_CACHE_DIR, WEB_BUILD_STAMP_NAME, WEB_BIN_NAMES, force=force
+        )
+
+    @classmethod
     def console_script_path(cls, name: str) -> Optional[str]:
         """
         Returns a console script of the Python environment running this code, if it has one.
 
         Args:
-            name (str): The script's name, e.g. `puffin-admin` or `puffin-search`.
+            name (str): The script's name, e.g. `puffin-admin`.
 
         Returns:
             Optional[str]: Absolute path of the console script beside this interpreter, or None.
@@ -456,16 +613,21 @@ class CodexBrandedBuilder:
     @classmethod
     def link_onto_path(cls) -> None:
         """
-        Points `~/.local/bin/puffin`, `puffin-admin` and `puffin-search` at their executables.
+        Points `~/.local/bin/puffin`, `puffin-admin`, `puffin-search` and `puffin-fetch` at their
+        executables.
 
-        `puffin` so it works from any shell; the other two so the model can run the web and mail
-        commands its prompt names from the shell `puffin` gives it.
+        `puffin` so it works from any shell; the others so the model can run the web and mail
+        commands its prompt names from the shell `puffin` gives it. A web command is linked only
+        once its binary is installed, so a link never dangles.
         """
         cls._link(cls.executable_path(), PATH_LINK)
-        for name, link in (("puffin-admin", ADMIN_PATH_LINK), ("puffin-search", SEARCH_PATH_LINK)):
-            script = cls.console_script_path(name)
-            if script:
-                cls._link(script, link)
+        script = cls.console_script_path("puffin-admin")
+        if script:
+            cls._link(script, ADMIN_PATH_LINK)
+        for name, link in (("puffin-search", SEARCH_PATH_LINK), ("puffin-fetch", FETCH_PATH_LINK)):
+            binary = os.path.join(INSTALL_DIR, "bin", name)
+            if os.access(binary, os.X_OK):
+                cls._link(binary, link)
 
     @classmethod
     def _link(cls, target: str, link: str) -> None:

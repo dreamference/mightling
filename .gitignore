@@ -50,3 +50,6 @@ desktop/src-tauri/gen/schemas/
 
 # MkDocs build output (the product site)
 site/
+
+# Local builds of the standalone Rust crates (the builder uses ~/.cache/dreamference/*/target).
+/puffin-web-rs/target/

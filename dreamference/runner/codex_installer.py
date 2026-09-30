@@ -48,12 +48,13 @@ class CodexInstaller:
     @classmethod
     def is_installed(cls) -> bool:
         """
-        Checks that the branded build is installed and matches the current submodule and patches.
+        Checks that the branded build and the web commands its prompt names are installed and
+        match the current submodule, patches and sources.
 
         Returns:
             bool: True if no build is needed.
         """
-        return CodexBrandedBuilder.is_current()
+        return CodexBrandedBuilder.is_current() and CodexBrandedBuilder.web_tools_are_current()
 
     @classmethod
     def install_if_missing(cls) -> bool:

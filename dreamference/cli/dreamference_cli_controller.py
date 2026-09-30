@@ -1025,8 +1025,8 @@ class DreamferenceCLIController:
         # it from any workspace. It replaced a repo script that only existed inside this checkout,
         # paired with an AGENTS.md that is workspace-scoped too — in any other directory both the
         # instruction and the command vanished. `puffin-admin` is on PATH wherever the venv is.
-        # Search, its companion, is a command of its own: `puffin-search`
-        # (dreamference/cli/puffin_search_command.py).
+        # Search, its companion, is a command of its own: `puffin-search`, a Rust binary built from
+        # puffin-web-rs/ with `puffin-fetch` beside it.
         #
         # Not an MCP tool: Codex exposes MCP tools only inside its `exec` JS runtime, and this
         # model does not reliably wrap calls that way. The shell it always uses correctly.
