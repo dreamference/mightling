@@ -163,7 +163,7 @@ The router is not compiled into `puffin`. It is a separate program, installed an
   - If `puffin-code` is not installed, both steps are skipped and `puffin` runs as it does today, with no `# Code navigation` block.
 - **Install and `PATH`:** the binary goes to `~/.local/share/dreamference/puffin/bin/puffin-code` with `~/.local/bin/puffin-code` linked to it, by the same builder step that links `puffin`, `puffin-admin` and `puffin-search`. The link is not optional: the prompt tells the model to run `puffin-code`, and a command missing from its shell's `PATH` ends in exit 127, as `puffin-admin` did before it was linked.
 - **Versions move together.** `puffin-code` pins the schema fingerprints of the two stores (§7.5) and the checksums of the pinned tools (§5), so it is built, released and updated with them: `puffin-admin codex build` builds it as a second, independent Cargo run, the release workflow attaches it, and `puffin update` installs it with `puffin`. `puffin-code --version` prints its own version and the pinned tool versions.
-- **Configuration:** it reads the same files the launcher does (`DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`, `~/.config/dreamference/config.toml`) for the model server's address and the `code_index_*` / `puffin_code_*` keys, and `$CODEX_HOME/config.toml` for project trust (§9.1). It needs no running model server and no `puffin`.
+- **Configuration:** it reads the same files the launcher does (`DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`, `~/.config/dreamference/config.toml`) for the model server's address and the `code_index_*` / `puffin_code_*` keys, and `$CODEX_HOME/config.toml` for project trust (§9.1). `CODEX_HOME` resolves as in `puffin-rs/src/home.rs`: `~/.puffin` unless set, never upstream's `~/.codex`. It needs no running model server and no `puffin`.
 
 ## 5. Distribution
 
@@ -269,7 +269,7 @@ The source and commit are stated once in the header. `--json` gives the same dat
 
 **Every answer is bounded by construction.** The served model's context is 262,144 tokens, so the bound is no longer about fitting the window. It is about cost: every token of tool output is re-read on later turns, and a cold prefill runs at ~1,700 tokens/s (~1,000 at 116K tokens), so a 5,000-token answer costs about 3 s on every later turn the prefix cache misses, and dilutes the model's attention.
 
-- **Row cap:** 40 rows by default (`--limit N`, hard ceiling 200). At 15–20 tokens a row plus the header and at most 15 summary lines, a full answer stays under about 1,000 tokens (§10's acceptance figure).
+- **Row cap:** 40 rows by default (`--limit N`, hard ceiling 200). Rows are ordered `exact`, then `heuristic`, then `heuristic (text)`, so text hits on a common name never push exact rows off the first page. At 15–20 tokens a row plus the header and at most 15 summary lines, a full answer stays under about 1,000 tokens (§10's acceptance figure).
 - **Grouping first, rows second:** above the cap, the answer opens with a per-file summary sorted by count, limited to 15 files. The rows follow, taken from those files.
 - **The header always states what was cut:** `refs Config::load (312 results in 41 files; showing 40; next: --offset 40)`.
 - **Narrowing flags:** `--path <glob>`; `--kind def|read|write|import` from SCIP roles where the indexer distinguishes them (scip-python marks imports as reads, so `--kind import` is unavailable for Python and says so); `--exact-only`; `--offset N`, a cursor invalidated with an error, not silently shifted, if the index changes between pages (detected by the graph's `store_meta.mutation_gen` and the store's run id).
@@ -352,7 +352,8 @@ The Rust exact layer always runs the repository's build scripts and proc-macros 
 Three rules follow.
 
 - **Trust gate for executing indexers** (rust-analyzer, scip-java, scip-dotnet):
-  - they run only for repositories the user has marked trusted: `trusted = true` in `<repo>/.dreamference/code_index.toml`, or Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, which the TUI already asks about);
+  - they run only for repositories the user has marked trusted through Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, which the TUI already asks about);
+  - **nothing inside the repository can grant trust.** A file there can be shipped in a clone and written by the agent from inside the `workspace-write` sandbox, so a `trusted` key in `<repo>/.dreamference/` or in a repository's `dreamference.toml` is ignored. `$CODEX_HOME` is outside the workspace and read-only in the sandbox;
   - untrusted repositories get the universal layer plus the static exact layers, and `puffin-code status` says so in one line.
 - **Sandbox, for every indexer.** Each runs as `systemd-run … -- bwrap …`, with the network removed and the filesystem read-only except for its outputs. For rust-analyzer (this is the command that produced §2's measurements, less the paths):
   ```
@@ -444,7 +445,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
   - indexing a submodule never writes to it (`git status --porcelain` empty afterwards);
   - indexer runs are killed at the memory cap, not left to exhaust the host (fixture with a tiny cap);
   - no network during `index` or queries: a fixture crate with a missing dependency must fail with `failed: offline`;
-  - an untrusted fixture repository never gets an executing index, and its `build.rs` (which writes a marker file) never runs, while its Python package does get a static exact index.
+  - an untrusted fixture repository never gets an executing index, and its `build.rs` (which writes a marker file) never runs, while its Python package does get a static exact index. The same holds when the fixture ships `.dreamference/code_index.toml` and `dreamference.toml` with `trusted = true`;
 - **Isolation from the user's machine**, the lesson of 2026-09-29 (tests recreated live containers and wrote the real compile-signature file):
   - tests set `CBM_CACHE_DIR` under their temporary home and `CBM_RUNTIME_DIR` to a **short** private directory (mode 0700; the socket path must stay under 108 bytes, or the CLI fails with "secure CLI coordination could not be created");
   - no test creates a real `systemd-run` scope or freezes a real unit: `puffin-index-*` scope creation is behind a seam the tests replace, the way `tests/conftest.py` refuses real mutating `docker` commands.
