@@ -34,7 +34,7 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 - **Agents:** `run`, `codex {build,start,stop}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`
 - **Web UI and desktop:** `puffin {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
-- **Agent tools:** `search`, `fetch`, `gmail {search,read,status}`
+- **Agent tools:** `fetch`, `gmail {search,read,status}`; search is its own command, `puffin-search` (§4.16)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
 
 ---
@@ -316,12 +316,12 @@ puffin-admin codex stop
 
 ---
 
-### 4.16. `search`, `fetch`, `gmail`
+### 4.16. `puffin-search`, `fetch`, `gmail`
 
 These are the commands the `puffin` agent is told to use in its prompt.
 
 ```bash
-puffin-admin search "QUERY" [-n 5] [--json]          # local SearXNG
+puffin-search "QUERY" [-n 5] [--json]                # local SearXNG
 puffin-admin fetch URL [--max-chars 8000]            # readable text of one page
 puffin-admin gmail search "GMAIL QUERY" [-n 10] [--json]
 puffin-admin gmail read MESSAGE_ID [--max-chars 8000] [--json]
@@ -329,6 +329,8 @@ puffin-admin gmail status [--json]
 ```
 
 `gmail` talks to the `dreamference-gmail` service that the web UI already runs, and is read-only. See `DREAMFERENCE_PUFFIN_GMAIL.md`.
+
+Search is a console script of its own, `puffin-search` (`PuffinSearchCommand` in `dreamference/cli/puffin_search_command.py`, declared in `setup.py`), rather than a `puffin-admin` subcommand: it is the agent's most frequent command, and `puffin-admin` administers the machine. It was `puffin-admin search` until 2026-09-30, and that subcommand is gone rather than aliased. `puffin-admin codex build` links it into `~/.local/bin` beside `puffin` and `puffin-admin`.
 
 ---
 

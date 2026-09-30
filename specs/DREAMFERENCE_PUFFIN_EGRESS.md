@@ -113,7 +113,7 @@ The allowlist is `airlock.allow` in `$CODEX_HOME/config.toml`, written by the la
 |---|---|---|
 | vLLM port (from the resolved `vllm_host`) | model server | The agent's model. |
 | `8767` | Gmail search service | `puffin-admin gmail`. |
-| `8888` | SearXNG | `puffin-admin search` (§5). |
+| `8888` | SearXNG | `puffin-search` (§5). |
 
 **The diffusion endpoint (`8001`) is not allowed:** the agent does not use it. Unix sockets on the host are unaffected by a network namespace, which is intended: the Docker socket, the D-Bus session and the like stay reachable. If one of them should be closed too, that belongs to Codex's command sandbox, not the airlock.
 
@@ -135,7 +135,7 @@ The ledger is appended to `~/.puffin/airlock/ledger.jsonl`:
 
 ## 5. Search and fetch, honestly
 
-- **Search goes out by design:** `puffin-admin search` reaches SearXNG on `127.0.0.1:8888`, and SearXNG queries the upstream engines from outside the airlock. The ledger cannot see those queries. The airlock's own docs and the agent's prompt must say plainly that searches leave the machine through SearXNG.
+- **Search goes out by design:** `puffin-search` reaches SearXNG on `127.0.0.1:8888`, and SearXNG queries the upstream engines from outside the airlock. The ledger cannot see those queries. The airlock's own docs and the agent's prompt must say plainly that searches leave the machine through SearXNG.
 - **`puffin-admin fetch`** connects directly to the URL, so it fails inside the airlock. It fails with its existing error path, and the ledger records the lookup.
 
 **The prompt must match the mode.** The launcher writes the model catalog, including `WEB_ACCESS_INSTRUCTIONS`, at every start. In airlock mode it writes a variant:
@@ -165,7 +165,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
   - launcher unit tests for the allowlist, the socket-path length check and the resolver stub;
   - a live test in which an airlocked `puffin exec` session answers through vLLM;
   - inside the same session, a `curl https://example.com` run by the agent fails, and `example.com` appears in the ledger;
-  - `puffin-admin gmail status` and `puffin-admin search` still work inside it;
+  - `puffin-admin gmail status` and `puffin-search` still work inside it;
   - Codex's command sandbox still starts inside the airlock (§4.2, not yet verified).
 
 ---

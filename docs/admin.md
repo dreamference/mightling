@@ -1,8 +1,8 @@
 # `puffin-admin` reference
 
 `puffin-admin` runs everything around the agent: the model server, the web chat, the desktop app,
-models, and the helper commands the agent calls (`search`, `fetch`, `gmail`). The agent itself is
-`puffin`; see [Terminal agent](puffin.md).
+models, and the helper commands the agent calls (`fetch`, `gmail`). The agent itself is `puffin`,
+and web search is a command of its own, `puffin-search`; see [Terminal agent](puffin.md).
 
 !!! note "Generated from the CLI"
     This page is generated from `puffin-admin`'s own argument parser by
@@ -319,16 +319,6 @@ Build a distributable desktop bundle.
 #### `puffin-admin desktop status`
 
 Report whether the desktop app can be built and launched.
-
-### `puffin-admin search`
-
-Search the web via the local SearXNG instance.
-
-| Option | Description |
-|---|---|
-| `query` | Search terms. |
-| `-n`, `--max-results` | Results to return. |
-| `--json` | Emit raw JSON. |
 
 ### `puffin-admin fetch`
 

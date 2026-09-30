@@ -26,6 +26,7 @@ setup(
     entry_points={
         "console_scripts": [
             "puffin-admin=dreamference.cli:main",
+            "puffin-search=dreamference.cli.puffin_search_command:PuffinSearchCommand.main",
         ],
     },
 )

@@ -112,7 +112,7 @@ dreamference/
 └── mcp_server/
     ├── mcp_server.py                     # MCPServer
     ├── mcp_tool_registry.py              # MCPToolRegistry
-    ├── web_tools.py                      # WebTools (web_search / web_fetch, puffin-admin search / fetch)
+    ├── web_tools.py                      # WebTools (web_search / web_fetch, puffin-search, puffin-admin fetch)
     ├── ide_state.py                      # IDEState
     └── editor_selection.py               # EditorSelection
 
@@ -162,7 +162,7 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and sqlite-vec embeddings, written to
 - `web_search`, `web_fetch`;
 - `workspace_search_code`.
 
-`WebTools` also backs `puffin-admin search` and `fetch`.
+`WebTools` also backs `puffin-search` and `puffin-admin fetch`.
 
 ### 3.8. `cli/`
 

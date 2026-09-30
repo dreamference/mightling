@@ -3,7 +3,7 @@
 ## You have web access
 
 ```bash
-puffin-admin search "your query here"        # search; -n N for more results (default 5)
+puffin-search "your query here"              # search; -n N for more results (default 5)
 puffin-admin fetch "https://example.com"     # fetch a page as readable text
 ```
 

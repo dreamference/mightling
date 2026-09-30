@@ -2,7 +2,7 @@
 
 **Status:** implemented (re-checked against the code 2026-09-28) — `dreamference/chat/gmail_client.py`, `puffin-admin gmail`, the launcher's prompt block in `puffin-rs/src/lib.rs`, per-account `errors` in the service. Default-on when connected (§5's open decision), opt out with `puffin_gmail = false`.
 **Target:** the `puffin` terminal agent (`puffin`, the Puffin-branded Codex with the launcher in `puffin-rs/` compiled in)
-**Builds on:** the Gmail search service already running for the Onyx web UI (`dreamference/chat/gmail_search_service.py`, container `dreamference-gmail`), and the `puffin-admin search` / `puffin-admin fetch` pattern that gives the same agent web access.
+**Builds on:** the Gmail search service already running for the Onyx web UI (`dreamference/chat/gmail_search_service.py`, container `dreamference-gmail`), and the `puffin-search` / `puffin-admin fetch` pattern that gives the same agent web access.
 
 ---
 
@@ -17,7 +17,7 @@ Let the terminal agent answer mailbox questions — "what did Alice send about t
 The agent reaches web search through two shell commands described in its system prompt (`WEB_ACCESS_INSTRUCTIONS` in `puffin-rs/src/lib.rs`). Gmail uses the same mechanism, for the reasons already recorded there:
 
 - **MCP is effectively unreachable for this model.** With `code_mode` on, Codex exposes MCP tools only inside its `exec` JavaScript runtime as `tools.mcp__<server>__<tool>(…)`. The served Qwen model calls the namespace directly, gets `unsupported call`, and gives up. This is the same failure that retired the SearXNG MCP wrapper.
-- **Shell commands are used reliably.** The model already runs `puffin-admin search` / `fetch` correctly from any workspace, because the instruction travels in the session's prompt rather than a workspace `AGENTS.md`.
+- **Shell commands are used reliably.** The model already runs `puffin-search` / `puffin-admin fetch` correctly from any workspace, because the instruction travels in the session's prompt rather than a workspace `AGENTS.md`.
 - **No Codex patch is needed.** The branded build (`codex-patches/`) stays a branding-only diff series.
 
 ## 3. Commands

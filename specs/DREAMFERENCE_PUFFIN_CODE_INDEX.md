@@ -2,7 +2,7 @@
 
 **Status:** proposed. Nothing in this spec is implemented yet. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools.
 **Target:** the `puffin` terminal agent. The same index is also offered over MCP to Claude Code and to IDEs.
-**Builds on:** the launcher in `puffin-rs/`. It handles `puffin app` and `puffin update` before Codex parses argv, and `puffin code` would be handled the same way. It also builds on the `puffin-admin search` / `gmail` pattern of giving the local model shell commands rather than MCP tools, and on the builder's rule that nothing ever runs Cargo inside the `codex/` submodule.
+**Builds on:** the launcher in `puffin-rs/`. It handles `puffin app` and `puffin update` before Codex parses argv, and `puffin code` would be handled the same way. It also builds on the `puffin-search` / `puffin-admin gmail` pattern of giving the local model shell commands rather than MCP tools, and on the builder's rule that nothing ever runs Cargo inside the `codex/` submodule.
 
 ---
 

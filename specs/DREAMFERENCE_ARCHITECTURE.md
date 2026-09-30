@@ -28,7 +28,7 @@ Everything is administered through **`puffin-admin`**, the Python CLI.
 +-----------------------v--------------------------------v---------------------------+
 |  dreamference/ (Python)                                                            |
 |   config  hardware  vllm_server  runner  chat  context_engine  mcp_server  cli     |
-|   agent tools: puffin-admin search / fetch (SearXNG), gmail (read-only service)    |
+|   agent tools: puffin-search, puffin-admin fetch (SearXNG), gmail (read-only)      |
 +-----------------------+------------------------------------------------------------+
                         | docker run
 +-----------------------v------------------------------------------------------------+

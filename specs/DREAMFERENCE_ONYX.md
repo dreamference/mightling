@@ -197,7 +197,7 @@ Onyx has first-class SearXNG support (`WebSearchProviderType.SEARXNG`, no API ke
 - **Why a provider, not a prompt:**
   - The only global prompt hook, `user_preferences`, is capped at 500 characters.
   - Reaching SearXNG through the LLM-driven `open_url` tool would require SSRF protection set to `disabled`. The admin-configured provider's client does no SSRF validation, so the secure `validate_all` default stays untouched.
-- **Other users:** `puffin-admin search` and the MCP `web_search` tool use the same container, via `127.0.0.1:8888`.
+- **Other users:** `puffin-search` and the MCP `web_search` tool use the same container, via `127.0.0.1:8888`.
 
 ---
 

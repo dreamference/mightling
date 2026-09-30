@@ -1026,20 +1026,17 @@ class DreamferenceCLIController:
             "uninstall", help="Permanently delete the Onyx deployment and all its data"
         )
 
-        # Command: puffin-admin search / puffin-admin fetch
+        # Command: puffin-admin fetch
         #
-        # Web access as CLI subcommands rather than repo scripts, because the agent should find
-        # them from any workspace. These replaced repo scripts that only existed inside this
-        # checkout, paired with an AGENTS.md that is workspace-scoped too — in any other directory
-        # both the instruction and the command vanished. `puffin-admin` is on PATH wherever the venv is.
+        # Web access as a CLI subcommand rather than a repo script, because the agent should find
+        # it from any workspace. It replaced a repo script that only existed inside this checkout,
+        # paired with an AGENTS.md that is workspace-scoped too — in any other directory both the
+        # instruction and the command vanished. `puffin-admin` is on PATH wherever the venv is.
+        # Search, its companion, is a command of its own: `puffin-search`
+        # (dreamference/cli/puffin_search_command.py).
         #
         # Not an MCP tool: Codex exposes MCP tools only inside its `exec` JS runtime, and this
         # model does not reliably wrap calls that way. The shell it always uses correctly.
-        search_parser = subparsers.add_parser("search", help="Search the web via the local SearXNG instance")
-        search_parser.add_argument("query", nargs="+", help="Search terms")
-        search_parser.add_argument("-n", "--max-results", type=int, default=5, help="Results to return")
-        search_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
-
         fetch_parser = subparsers.add_parser("fetch", help="Fetch a URL and print its readable text")
         fetch_parser.add_argument("url", help="Absolute http(s) URL")
         fetch_parser.add_argument("--max-chars", type=int, default=8000, help="Characters to return")
@@ -1834,28 +1831,6 @@ class DreamferenceCLIController:
                 sys.exit(onyx_runner.stop())
             elif args.onyx_command == "uninstall":
                 sys.exit(onyx_runner.uninstall())
-
-        elif args.command == "search":
-            from dreamference.mcp_server.web_tools import WebTools
-            import json as _json
-
-            payload = WebTools.search(" ".join(args.query), max_results=args.max_results)
-            if payload.get("error"):
-                print(f"❌ {payload['error']}")
-                if payload.get("hint"):
-                    print(f"💡 {payload['hint']}")
-                sys.exit(1)
-            if args.json:
-                print(_json.dumps(payload, indent=2))
-            else:
-                for answer in payload.get("answers", []):
-                    print(f"ANSWER: {answer}\n")
-                for i, r in enumerate(payload.get("results", []), 1):
-                    print(f"{i}. {r['title']}")
-                    print(f"   {r['url']}")
-                    if r.get("snippet"):
-                        print(f"   {r['snippet'][:200]}")
-            sys.exit(0)
 
         elif args.command == "gmail":
             sys.exit(cls.handle_gmail(args))

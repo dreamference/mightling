@@ -91,7 +91,7 @@ pub const WEB_ACCESS_INSTRUCTIONS: &str = r#"
 
 You have web access through two shell commands, run like any other command:
 
-    puffin-admin search "your query here"        # search; -n N for more results (default 5)
+    puffin-search "your query here"              # search; -n N for more results (default 5)
     puffin-admin fetch "https://example.com"     # fetch a page as readable text
 
 Use them whenever the answer depends on something you cannot know from training or from the files
@@ -117,7 +117,7 @@ pub const GMAIL_SERVICE_URL: &str = "http://127.0.0.1:8767";
 /// Added after the web section, and only when an account is connected: naming a command that
 /// answers "not connected" teaches the model to try, fail, and conclude it has no mail access.
 /// The last paragraph matters most. Email is attacker-written text arriving in the context of an
-/// agent with a shell, and `puffin-admin fetch`/`search` can carry data out in a URL.
+/// agent with a shell, and `puffin-admin fetch` and `puffin-search` can carry data out in a URL.
 pub fn gmail_access_instructions(accounts: &str) -> String {
     format!(
         r#"
@@ -897,7 +897,7 @@ mod tests {
             &prompt[..80.min(prompt.len())]
         );
         assert!(!prompt.contains("Codex") && !prompt.contains("based on GPT"));
-        assert!(prompt.contains("puffin-admin search"));
+        assert!(prompt.contains("puffin-search \"") && !prompt.contains("puffin-admin search"));
     }
 
     #[test]
@@ -927,10 +927,10 @@ mod tests {
         let model = ServedModel { id: "m".into(), max_model_len: 1024 };
         let with_gmail = model_catalog(&model, &gmail_access_instructions("a@x.com"));
         let prompt = with_gmail["models"][0]["base_instructions"].as_str().unwrap_or_default();
-        assert!(prompt.contains("puffin-admin search") && prompt.contains("puffin-admin gmail read"));
+        assert!(prompt.contains("puffin-search") && prompt.contains("puffin-admin gmail read"));
         let without = model_catalog(&model, "");
         let prompt = without["models"][0]["base_instructions"].as_str().unwrap_or_default();
-        assert!(prompt.contains("puffin-admin search") && !prompt.contains("puffin-admin gmail"));
+        assert!(prompt.contains("puffin-search") && !prompt.contains("puffin-admin gmail"));
     }
 
     #[test]

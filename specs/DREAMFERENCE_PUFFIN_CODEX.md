@@ -134,7 +134,7 @@ This is the Rust port of what the Python `puffin` entry point used to do before 
    - one reasoning level, `none`;
    - `visibility = "list"`;
    - `tool_mode = "code_mode"`, so the model gets Code Mode's `exec` tool;
-   - `base_instructions`: the longest bundled template, passed through `rebrand()` (the opening sentence, which also claims a GPT model, becomes `You are Puffin, a coding agent.`, and every later `Codex` becomes `Puffin`), followed by `WEB_ACCESS_INSTRUCTIONS`, which tells the model to use `puffin-admin search` and `puffin-admin fetch`, then the Gmail block from step 7 if any.
+   - `base_instructions`: the longest bundled template, passed through `rebrand()` (the opening sentence, which also claims a GPT model, becomes `You are Puffin, a coding agent.`, and every later `Codex` becomes `Puffin`), followed by `WEB_ACCESS_INSTRUCTIONS`, which tells the model to use `puffin-search` and `puffin-admin fetch`, then the Gmail block from step 7 if any.
 9. **Edits `$CODEX_HOME/config.toml` with `toml_edit`.** Editing the document rather than appending text means a top-level key can never be absorbed into the preceding table, which twice stopped Codex from starting. It sets:
    - `model_catalog_json`, always;
    - `suppress_unstable_features_warning = true` and `check_for_update_on_startup = false`, only if absent. The update check would offer to replace Puffin with upstream Codex.
@@ -175,7 +175,7 @@ Run them in the **export** directory, never in `codex/`: `cargo test --release -
 - **`codex-code-mode-host`**, crate names and the `CODEX_HOME` variable name: renaming them would break lookups inside Codex. The *folder* it points at is Puffin's own (§4).
 - **OpenAI-hosted features.** Gmail and the other connectors (`codex_apps`) need a ChatGPT login and run on OpenAI's servers, so they never activate in an `--oss` session. Local mail access is `puffin-admin gmail` (`DREAMFERENCE_PUFFIN_GMAIL.md`). Upstream's `app` is replaced by the launcher (§4, step 2).
 - **Still visible and unchanged:** `/model` (vLLM serves one model, so the picker lists one entry), `/memories`, `/import`, `/ide`, `/daemon`, and the `plugin` / `doctor` subcommands. The last two still refer to OpenAI's marketplace and to `chatgpt.com` connectivity checks. These were reviewed on 2026-09-28 and left for later decisions.
-- **The tools the agent calls.** The launcher is Rust, but `puffin-admin search`, `puffin-admin fetch` and `puffin-admin gmail` are Python.
+- **The tools the agent calls.** The launcher is Rust, but `puffin-search`, `puffin-admin fetch` and `puffin-admin gmail` are Python.
 
 ---
 

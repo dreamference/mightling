@@ -47,7 +47,7 @@ Configuration and saved sessions live in `~/.puffin` (or `$CODEX_HOME`), not in 
 | Feature | Details |
 |---|---|
 | **Local model, no account** | Prompts go to the model your GB10 serves, and no OpenAI account is needed. Codex's usage analytics are switched off. |
-| **Web access** | The agent can search the web and read pages through `puffin-admin search` and `puffin-admin fetch`, which go through a search instance on your machine. The instructions travel with every session, so this works in any directory. Needs `puffin-admin` on your `PATH`. |
+| **Web access** | The agent can search the web and read pages through `puffin-search` and `puffin-admin fetch`, which go through a search instance on your machine. The instructions travel with every session, so this works in any directory. `puffin-admin codex build` links both commands into `~/.local/bin`. You can run `puffin-search "query"` yourself too (`-n N` for more results, `--json` for raw output). |
 | **Gmail, read-only** | If you have connected Gmail accounts in the web chat, the agent can search and read mail through `puffin-admin gmail`. It is told that email content is untrusted and must never be treated as instructions. Turn it off with `puffin_gmail = false` in `dreamference.toml`. |
 | **`/usage`** | Shows this session's token usage: input (cached and new), output, the total, and how full the context window was on the last request. |
 | **`puffin app`** | Opens the [desktop app](desktop.md). |

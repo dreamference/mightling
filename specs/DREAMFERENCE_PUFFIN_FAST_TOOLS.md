@@ -5,7 +5,7 @@
 **Builds on:**
 - the diffusion slot beside the main model (`DiffusionServerManager`, `diffusion-model set`, port 8001; [INFERENCE](./DREAMFERENCE_INFERENCE.md), CLAUDE.md "Every configuration names a diffusion model");
 - the launcher in `puffin-rs/`, which already handles `puffin app` and `puffin update` before Codex parses argv, and would handle `puffin fast` the same way (the pattern [PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) proposes for `puffin code`);
-- the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `puffin-admin search`;
+- the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `puffin-search`;
 - admission control from [PUFFIN_NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) and host safety (`check_host_safety`).
 
 **Needs no Codex patch.** The patch budget has 658 bytes left, so everything here lives in the launcher, the registry and `puffin-admin`.
@@ -66,7 +66,7 @@ It goes into the **existing diffusion slot**: a registry entry `diffusiongemma-2
 
 ### 4.1 Phase 1: `puffin fast` — one-shot shell tools (no agent loop)
 
-The local model already calls `puffin-admin search` because its prompt tells it to; `puffin fast` works the same way, and needs only chat completions from the diffusion server (§7 explains why not the Responses API yet). Implemented in the launcher (`puffin-rs/src/fast.rs`), dispatched before Codex parses argv, like `puffin app`.
+The local model already calls `puffin-search` because its prompt tells it to; `puffin fast` works the same way, and needs only chat completions from the diffusion server (§7 explains why not the Responses API yet). Implemented in the launcher (`puffin-rs/src/fast.rs`), dispatched before Codex parses argv, like `puffin app`.
 
 | Command | Does | Writes files? |
 |---|---|---|

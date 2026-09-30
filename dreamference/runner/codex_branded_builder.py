@@ -59,11 +59,12 @@ BRANDED_EXECUTABLE_NAME: Final[str] = "puffin"
 # codex-code-mode-host next to its own executable, and it resolves that through the link.
 PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin")
 
-# Where `puffin-admin` becomes reachable from any shell -- including the one `puffin` runs the
-# model's commands in. The prompt tells the model to use `puffin-admin search`/`fetch`/`gmail` for
-# web and mail access, but the command only existed inside the repository's virtualenv, so every
-# such call ended in "puffin-admin: command not found" (exit 127).
+# Where `puffin-admin` and `puffin-search` become reachable from any shell -- including the one
+# `puffin` runs the model's commands in. The prompt tells the model to use `puffin-search` and
+# `puffin-admin fetch`/`gmail` for web and mail access, but the commands only existed inside the
+# repository's virtualenv, so every such call ended in "command not found" (exit 127).
 ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-admin")
+SEARCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-search")
 
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
@@ -439,28 +440,32 @@ class CodexBrandedBuilder:
         return True
 
     @classmethod
-    def admin_executable_path(cls) -> Optional[str]:
+    def console_script_path(cls, name: str) -> Optional[str]:
         """
-        Returns the `puffin-admin` of the Python environment running this code, if it has one.
+        Returns a console script of the Python environment running this code, if it has one.
+
+        Args:
+            name (str): The script's name, e.g. `puffin-admin` or `puffin-search`.
 
         Returns:
             Optional[str]: Absolute path of the console script beside this interpreter, or None.
         """
-        candidate = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "puffin-admin")
+        candidate = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), name)
         return candidate if os.path.isfile(candidate) and os.access(candidate, os.X_OK) else None
 
     @classmethod
     def link_onto_path(cls) -> None:
         """
-        Points `~/.local/bin/puffin` and `~/.local/bin/puffin-admin` at their executables.
+        Points `~/.local/bin/puffin`, `puffin-admin` and `puffin-search` at their executables.
 
-        `puffin` so it works from any shell; `puffin-admin` so the model can run the web and mail
+        `puffin` so it works from any shell; the other two so the model can run the web and mail
         commands its prompt names from the shell `puffin` gives it.
         """
         cls._link(cls.executable_path(), PATH_LINK)
-        admin = cls.admin_executable_path()
-        if admin:
-            cls._link(admin, ADMIN_PATH_LINK)
+        for name, link in (("puffin-admin", ADMIN_PATH_LINK), ("puffin-search", SEARCH_PATH_LINK)):
+            script = cls.console_script_path(name)
+            if script:
+                cls._link(script, link)
 
     @classmethod
     def _link(cls, target: str, link: str) -> None:

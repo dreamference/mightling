@@ -21,8 +21,8 @@ OUTPUT: Final[str] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspat
 HEADER: Final[str] = """# `puffin-admin` reference
 
 `puffin-admin` runs everything around the agent: the model server, the web chat, the desktop app,
-models, and the helper commands the agent calls (`search`, `fetch`, `gmail`). The agent itself is
-`puffin`; see [Terminal agent](puffin.md).
+models, and the helper commands the agent calls (`fetch`, `gmail`). The agent itself is `puffin`,
+and web search is a command of its own, `puffin-search`; see [Terminal agent](puffin.md).
 
 !!! note "Generated from the CLI"
     This page is generated from `puffin-admin`'s own argument parser by

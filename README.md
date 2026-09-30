@@ -106,8 +106,8 @@ puffin-admin codex build             # compiles puffin and links it into ~/.loca
 cd ~/my-project && puffin            # start coding
 ```
 
-`puffin-admin` has to be on the `PATH` the agent inherits: it reaches the web and Gmail by running
-`puffin-admin search`, `fetch` and `gmail` as shell commands. The default model also runs on a
+`puffin-admin` and `puffin-search` have to be on the `PATH` the agent inherits: it reaches the web
+and Gmail by running `puffin-search`, `puffin-admin fetch` and `puffin-admin gmail` as shell commands. The default model also runs on a
 custom vLLM image, built in two stages from [`Dockerfile.dflash`](Dockerfile.dflash) and
 [`Dockerfile.dense`](Dockerfile.dense), which `server start` cannot build for you yet; the full
 walkthrough, including the web chat and desktop app, is in [Get started](docs/getting-started.md).
