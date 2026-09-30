@@ -62,6 +62,7 @@ On this GB10, with the default model (Qwen3.8-27B on SGLang) resident and idle, 
 | git inside Codex's sandbox | `git diff --name-only` and `git status --porcelain` run under `puffin sandbox`; `.git` is read-only there (`touch .git/x` fails), so the router passes `--no-optional-locks` and never refreshes git's index | measured |
 | One limit for all index runs | a scope started with `systemd-run --user --scope --slice=puffin-index.slice` lands in `…/user@1000.service/puffin.slice/puffin-index.slice/`; `systemctl --user set-property --runtime <slice> MemoryMax=… CPUQuota=400%` takes effect at once (`memory.max` and `cpu.max` of the slice read back the new values), systemd 255. `choom -n 1000 -- <cmd>` raises `oom_score_adj` without privileges | measured (with a throwaway slice) |
 | `defn_enclosing_ranges` in the store | maps a reference to its innermost enclosing definition (line 2007 of the CLI controller → `DreamferenceCLIController#run_cli()`), 0-based lines | measured |
+| The indexing sandbox, probed with a crate whose `build.rs` reports what it can reach | with `$CARGO_HOME` bound read-write (the first draft's command): it can open `~/.cargo/bin/cargo` for writing and create files in `$CARGO_HOME`, and it sees `~/.ssh`, `~/.puffin/config.toml` and `~/.config/dreamference`. With the home directory a tmpfs and `$RUSTUP_HOME`, `$CARGO_HOME` and the source bound read-only: none of those, and `cargo check --offline` (0.4 s, one registry dependency) and `rust-analyzer scip` (1.95.0, 3.1 s, build script run, `.scip` written to the scratch directory) both still succeed | measured |
 | SGLang's idle gauges | `sglang:num_running_reqs`, `sglang:num_queue_reqs` (0 when idle), on `/metrics` of the served model | measured |
 | Licences | codebase-memory-mcp MIT; scip CLI, scip-typescript, scip-clang, scip-java, scip-go, scip-dotnet Apache-2.0; scip-python MIT (Pyright's); all maintained (pushed within the last month) | verified |
 | Decode rate while indexing, frozen/unfrozen scopes, scip-typescript cost, codebase-memory's search by meaning quality | — | **unmeasured** (§10) |
@@ -203,7 +204,7 @@ The static indexers run for untrusted repositories too because, run this way, th
 
 ### 6.2 Where output goes
 
-- **Files:** `<repo>/.dreamference/scip/<indexer>.scip`, the query store `index.db` (§7.5), and `manifest.json`: `{indexer, version, commit, path_prefix, dirty_files, file_hashes, started, duration_s, peak_rss_mb, peak_cap_bounded, cap_mb, status}`. `status` is one of `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy` or `deferred: model-start`. The session process also writes `graph.json` beside it after every universal run: `{commit, dirty_files, finished}`, so the graph's snapshot has a commit too (codebase-memory records file hashes but no commit). `.dreamference/` is already git-ignored.
+- **Files:** `<repo>/.dreamference/scip/<indexer>.scip` (moved there by the supervisor after the run, never written in place by the indexer, §9.1), the query store `index.db` (§7.5), and `manifest.json`: `{indexer, version, commit, path_prefix, dirty_files, file_hashes, started, duration_s, peak_rss_mb, peak_cap_bounded, cap_mb, status}`. `status` is one of `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy` or `deferred: model-start`. The session process also writes `graph.json` beside it after every universal run: `{commit, dirty_files, finished}`, so the graph's snapshot has a commit too (codebase-memory records file hashes but no commit). `.dreamference/` is already git-ignored.
 - **Paths are relative to the indexed root**, for every indexer: rust-analyzer's are relative to the workspace (`core/src/…`), scip-python's to the `--target-only` directory (`cli/…` for `dreamference/cli/…`). The manifest's `path_prefix` restores the repository path.
 - **Never index inside a submodule's checkout with a build tool that writes to it.** rust-analyzer runs `cargo metadata` and build scripts, and even `cargo tree` rewrites a submodule's `Cargo.lock`. This project's `codex/` workspace is indexed from a scratch copy of the builder's export (`~/.cache/dreamference/puffin-codex/src/codex-rs`), never from the export itself, which the builder owns, and paths are remapped to `codex/codex-rs/…`.
 - **`CARGO_TARGET_DIR` points at a scratch directory** so indexing never touches a build cache another build is using. The build-script cache it accumulates is what makes the second Rust run ~2 minutes faster (§2).
@@ -374,7 +375,7 @@ Three rules follow.
   - they run only for repositories the user has marked trusted through Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, which the TUI already asks about);
   - **nothing inside the repository can grant trust.** A file there can be shipped in a clone and written by the agent from inside the `workspace-write` sandbox, so a `trusted` key in `<repo>/.dreamference/` or in a repository's `dreamference.toml` is ignored. `$CODEX_HOME` is outside the workspace and read-only in the sandbox;
   - untrusted repositories get the universal layer plus the static exact layers, and `puffin-code status` says so in one line.
-- **Sandbox, for every indexer.** Each runs as `systemd-run … -- bwrap …`, with the network removed and the filesystem read-only except for its outputs. For rust-analyzer (this is the command that produced §2's measurements, less the paths):
+- **Sandbox, for every indexer.** Each runs as `systemd-run … -- bwrap …`, with the network removed, the home directory hidden, and nothing writable except a scratch directory of its own. For rust-analyzer (§2's measurements were taken with an earlier, looser form of this command; the differences are the binds, which cost nothing):
   ```
   systemd-run --user --scope --unit="puffin-index-$REPO_ID" \
     --slice=puffin-index.slice \
@@ -382,18 +383,24 @@ Three rules follow.
     choom -n 1000 -- nice -n 10 ionice -c3 \
     bwrap --die-with-parent --unshare-net --unshare-pid \
           --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+          --tmpfs "$HOME" \
+          --ro-bind "$RUSTUP_HOME" "$RUSTUP_HOME" \
+          --ro-bind "$CARGO_HOME" "$CARGO_HOME" \
+          --ro-bind "$SRC" "$SRC" \
           --bind "$SCRATCH" "$SCRATCH" \
-          --bind "$REPO/.dreamference/scip" "$REPO/.dreamference/scip" \
-          --bind "$CARGO_HOME" "$CARGO_HOME" \
           --setenv CARGO_NET_OFFLINE true --setenv CARGO_TARGET_DIR "$SCRATCH/target" \
           --setenv CARGO_BUILD_JOBS 4 \
-          -- rust-analyzer scip "$SRC" --output "$REPO/.dreamference/scip/rust-analyzer.scip"
+          -- rust-analyzer scip "$SRC" --output "$SCRATCH/out/rust-analyzer.scip"
   ```
+  - **Nothing outside `$SCRATCH` is writable, `$CARGO_HOME` included.** The first draft bound `$CARGO_HOME` read-write, on the belief that Cargo needs its lock file there. It does not: Cargo skips the lock on a read-only file system (measured, §2). And the write access was an escape: a build script could replace `~/.cargo/bin/cargo` or add a `rustc-wrapper` to `~/.cargo/config.toml`, and that code would run unsandboxed the next time anyone ran Cargo, for example in `puffin-admin codex build`, which builds `puffin` itself. It also runs with no one asking: the exact index starts in the background at launch. Codex's own sandbox never gives the agent's builds that access.
+  - **The home directory is an empty tmpfs**, with only the toolchain, Cargo's registry and the source bound back, read-only. A build script has no reason to read `~/.ssh`, `$CODEX_HOME` or the mail service's credentials, and with them hidden it cannot copy them into an output the agent (which has the network) can later read. Binds are given after the tmpfs they sit under, or bwrap hides them again; that includes a source or scratch directory under `/tmp`.
+  - **The output is not written into the repository by the indexer.** It writes `$SCRATCH/out/`, empty at the start of each run. The supervisor, outside the sandbox, checks that the file decodes as SCIP and then moves it to `<repo>/.dreamference/scip/` and writes the manifest. With `.dreamference/scip` bound writable, as in the first draft, a build script could overwrite `index.db`, `manifest.json` or another indexer's `.scip`, and the router would serve its content tagged `exact`; a run killed half-way would also leave a truncated `.scip` in place of the last good one.
+  - **Other executing indexers follow the same shape:** their caches are bound read-only (`~/.m2` and `~/.gradle` for scip-java, `~/.nuget/packages` for scip-dotnet) and their writable state is redirected into `$SCRATCH` (`GRADLE_USER_HOME` is a scratch directory whose read-only cache is supplied through `GRADLE_RO_DEP_CACHE`; `DOTNET_CLI_HOME`, `NUGET_HTTP_CACHE_PATH`). An indexer that cannot work without writing to its real cache fails and is recorded; it is not given the cache.
+  - **A dependency Cargo has downloaded but not yet unpacked** (`registry/cache` without `registry/src`) cannot be unpacked into a read-only `$CARGO_HOME`. The run fails with `failed: dependencies not unpacked` and `puffin-code status` names the remedy: one `cargo fetch` or build by the user.
   - `/usr/bin/bwrap` is already installed; it is Codex's own sandbox.
   - The CPU limits are on the slice, not the scope (§6.4), so they bound all runs together. The measurements of §2 were taken with them on a single scope, which is the same limit for one run. systemd places `puffin-index.slice` under `puffin.slice`, from its name.
   - The scope is named so §9.2's supervisor can `freeze`/`thaw` it and `puffin-code status` can find a run in progress.
-  - The router creates the bound directories beforehand, because bwrap cannot bind a path that does not exist.
-  - `$CARGO_HOME` is writable only because Cargo takes a lock file there even offline; with no network, nothing can be fetched into it.
+  - The session process creates the bound directories beforehand, because bwrap cannot bind a path that does not exist.
   - `$SRC` is read-only. A run that needs to rewrite the lockfile fails and is recorded; the remedy is a scratch copy, as for `codex/` (§6.2).
 - **Offline is enforced, not assumed.**
   - Environment: `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly`, `GOPROXY=off`, `npm_config_offline=true`.
@@ -463,6 +470,9 @@ If the router shows that the graph's edges are wrong in concentrated places, the
   - run under Codex's `read-only` sandbox, the git calls succeed and `.git` is not written (`--no-optional-locks`).
 - **Safety:**
   - indexing a submodule never writes to it (`git status --porcelain` empty afterwards);
+  - **the sandbox holds against a hostile build script:** a fixture crate's `build.rs` tries to create a file in `$CARGO_HOME`, to open `$CARGO_HOME/bin/cargo` for writing, to read a marker file placed in the test's home, and to overwrite `<repo>/.dreamference/scip/index.db`. All four fail, the index still completes, and the previous `index.db` and `.scip` are byte-identical afterwards (skipped without `bwrap`, `cargo` and `rust-analyzer`; the test's home and `CARGO_HOME` are its own, never the user's);
+  - a run killed before it finishes leaves the last good `.scip` and store in place;
+  - the bwrap argument list built for each executing indexer contains no read-write bind outside its scratch directory (checked on the argument list, so it runs everywhere);
   - indexer runs are killed at the memory cap, not left to exhaust the host (fixture with a tiny cap);
   - no network during `index` or queries: a fixture crate with a missing dependency must fail with `failed: offline`;
   - an untrusted fixture repository never gets an executing index, and its `build.rs` (which writes a marker file) never runs, while its Python package does get a static exact index. The same holds when the fixture ships `.dreamference/code_index.toml` and `dreamference.toml` with `trusted = true`;
@@ -506,6 +516,8 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **`expt-convert`'s schema** may change: that is why it is pinned and fingerprinted, with our converter as the fallback (§7.5).
 - **SCIP freshness for rust-analyzer is whole-workspace.** It has no crate-scoped mode (its `scip` flags are `--output`, `--config-path` and `--exclude-vendored-libraries`), so the exact Rust layer after a small edit is a full re-run.
 - **Partitioning** may not lower the peak, because the dependency closure of the crates that matter is most of the workspace (§6.4).
+- **The tightened sandbox is measured on a probe crate, not on Codex.** A full `rust-analyzer scip` of the Codex workspace with the home directory hidden and `$CARGO_HOME` read-only has not been run; a proc-macro or build script that expects something else under the home directory would fail there, and would be recorded as a failed run.
+- **scip-java and scip-dotnet under read-only caches** are unmeasured; the redirections named in §9.1 are from the tools' documentation.
 - **Connecting to an existing Unix socket from inside the sandbox** (the runtime directory is read-only there) is untested; the design does not rely on it (§4).
 - **The changed-set search matches names, not symbols.** It cannot see a reference through an alias or a name built at run time, and it reports same-named symbols as `heuristic (text)`. How often an alias hides a new reference in practice is unmeasured; the re-index the query requests closes the gap within one run.
 - **Several repositories:** start with the working directory only.
