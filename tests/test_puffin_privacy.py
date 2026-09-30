@@ -95,3 +95,17 @@ def test_pets_are_hidden_because_their_art_comes_from_openai(tmp_path):
     launcher = open(os.path.join(os.path.dirname(__file__), os.pardir, "puffin-rs", "src", "lib.rs")).read()
     assert 'tui.remove("pet");' in launcher
     assert 'doc["check_for_update_on_startup"] = value(false);' in launcher
+
+
+@pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
+def test_tips_naming_codex_chatgpt_or_openai_are_never_shown(tmp_path):
+    # The session header and the turn tips showed Codex's own tips ("*New* Build faster with
+    # Codex.", "run `codex resume`", the Codex forum, the ChatGPT desktop app). Patch 0015 drops
+    # the plan-based promotions and filters every tip through render_tooltip.
+    assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
+    tips = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "tooltips.rs").read_text()
+    get_tooltip = tips[tips.index("pub(crate) fn get_tooltip("):]
+    get_tooltip = get_tooltip[:get_tooltip.index("\n}\n")]
+    assert "preferred_tooltip(" not in get_tooltip
+    render = tips[tips.index("pub(crate) fn render_tooltip("):]
+    assert '["codex", "chatgpt", "openai"]' in render[:render.index("let mut rendered")]

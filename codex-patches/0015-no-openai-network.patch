@@ -31,10 +31,25 @@ index 69ad3b6..42b1fa4 100644
 +            if true {
                  return OtelExporter::None;
 diff --git a/codex-rs/tui/src/tooltips.rs b/codex-rs/tui/src/tooltips.rs
-index a8cceac..cf06f60 100644
+index a8cceac..8fa61fc 100644
 --- a/codex-rs/tui/src/tooltips.rs
 +++ b/codex-rs/tui/src/tooltips.rs
-@@ -248,3 +248,5 @@ pub(crate) mod announcement {
+@@ -76,3 +76,5 @@
+     let mut rng = rand::rng();
+-    preferred_tooltip(&mut rng, plan, fast_mode_enabled).or_else(|| pick_tooltip(&mut rng, keymap))
++    // Puffin: no Codex or ChatGPT promotions.
++    let _ = (plan, fast_mode_enabled);
++    pick_tooltip(&mut rng, keymap)
+ }
+@@ -214,2 +216,7 @@
+ pub(crate) fn render_tooltip(mut template: &str, keymap: Option<&RuntimeKeymap>) -> Option<String> {
++    // Puffin: no tips that name Codex, ChatGPT or OpenAI.
++    let lower = template.to_lowercase();
++    if ["codex", "chatgpt", "openai"].iter().any(|w| lower.contains(w)) {
++        return None;
++    }
+     let mut rendered = String::new();
+@@ -248,3 +255,5 @@
      pub(crate) fn prewarm(http_client_factory: HttpClientFactory) {
 -        if ANNOUNCEMENT_TIP.get().is_some() {
 +        // Puffin: no announcement fetch from raw.githubusercontent.com (OpenAI's own promotions).
