@@ -1,6 +1,6 @@
 # Puffin Code Index — codebase-memory-mcp + SCIP
 
-**Status:** proposed. Nothing in this spec is implemented yet. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools. Revised again the same day: freshness is now decided for the whole repository, not only for the files an answer already names (§7.3), and the router is a binary of its own, `puffin-code`, not a subcommand compiled into `puffin` (§4.2).
+**Status:** proposed. Nothing in this spec is implemented yet. The design below was revised on 2026-09-30 after measuring both layers on this machine (§2): several assumptions of the first draft did not survive contact with the tools. Revised again the same day: freshness is now decided for the whole repository, not only for the files an answer already names (§7.3), the router is a binary of its own, `puffin-code`, not a subcommand compiled into `puffin` (§4.2), and memory admission covers every indexer run on the host, not each executing run on its own (§6.4).
 **Target:** the `puffin` terminal agent. The same index is also offered over MCP to Claude Code and to IDEs.
 **Builds on:** the `puffin-search` / `puffin-admin gmail` pattern of giving the local model shell commands rather than MCP tools, and of putting each such command on `PATH` as a program of its own beside `puffin`. `puffin-code` is a separate Rust binary (§4.2); the launcher in `puffin-rs/` only starts it and asks it for the prompt block. It also builds on the builder's rule that nothing ever runs Cargo inside the `codex/` submodule.
 
@@ -60,6 +60,7 @@ On this GB10, with the default model (Qwen3.8-27B on SGLang) resident and idle, 
 | A snapshot replayed against a later tree: the scip-python store of `dreamference/` at `706c511`, queried at `8c2f9a3` (5 commits later, 23 Python files changed, 4 of them deleted) | `ModelDownloader`: the store names 5 files, 2 of them edited since. **2 more files reference it now** (`diffusion_server_manager.py`, `sglang_launch_builder.py`, both edited after the snapshot) and appear in no row; a file created after the snapshot (`runner/vllm_readiness_waiter.py`) references `VLLMServerManager`, `DreamferenceConfig` and `resolve_model_hf_repo` and appears in none of their answers. A freshness check that visits only the files an answer names never looks at any of them | measured |
 | Finding those files | `git diff --name-only <snapshot> HEAD` plus `git status --porcelain`: **39 ms**; a whole-word search for the name over the 19 changed files still present: 3 ms, and it finds both missing files; the same search over all 4,900 Rust files of Codex: 21 ms (warm page cache) | measured |
 | git inside Codex's sandbox | `git diff --name-only` and `git status --porcelain` run under `puffin sandbox`; `.git` is read-only there (`touch .git/x` fails), so the router passes `--no-optional-locks` and never refreshes git's index | measured |
+| One limit for all index runs | a scope started with `systemd-run --user --scope --slice=puffin-index.slice` lands in `…/user@1000.service/puffin.slice/puffin-index.slice/`; `systemctl --user set-property --runtime <slice> MemoryMax=… CPUQuota=400%` takes effect at once (`memory.max` and `cpu.max` of the slice read back the new values), systemd 255. `choom -n 1000 -- <cmd>` raises `oom_score_adj` without privileges | measured (with a throwaway slice) |
 | `defn_enclosing_ranges` in the store | maps a reference to its innermost enclosing definition (line 2007 of the CLI controller → `DreamferenceCLIController#run_cli()`), 0-based lines | measured |
 | SGLang's idle gauges | `sglang:num_running_reqs`, `sglang:num_queue_reqs` (0 when idle), on `/metrics` of the served model | measured |
 | Licences | codebase-memory-mcp MIT; scip CLI, scip-typescript, scip-clang, scip-java, scip-go, scip-dotnet Apache-2.0; scip-python MIT (Pyright's); all maintained (pushed within the last month) | verified |
@@ -73,6 +74,7 @@ Consequences for the design, each carried into the sections below:
 4. **Admission from measured numbers:** the Codex exact index needs more than 21 GiB and runs only when the machine can spare it.
 5. **The query store is the `scip` CLI's own SQLite export**, pinned and fingerprinted, with our converter as the fallback.
 6. **A snapshot cannot say what it is missing.** A file that gained a reference after the snapshot is in no row, so checking the rows' files cannot find it. Every query therefore computes the files changed since each layer's snapshot and searches them for the name (§7.3).
+7. **Memory is one pool, so admission is one ledger.** Every index run on the host, of every kind and from every session, is admitted against the same budget and runs inside one slice whose limits the kernel enforces (§6.4).
 
 ## 3. Components
 
@@ -219,14 +221,31 @@ The static indexers run for untrusted repositories too because, run this way, th
 
 ### 6.4 Memory admission
 
-A fixed cap either kills the run (8 GB did, on 2026-09-28) or has to be sized for the worst repository, taking memory from the model. Executing indexers therefore go through admission control:
+A fixed cap either kills the run (8 GB did, on 2026-09-28) or has to be sized for the worst repository, taking memory from the model. Runs therefore go through admission control.
 
+**Admission is host-wide and covers every run.** The earlier revision admitted only executing indexers, one repository at a time, and gave the universal and static indexers a fixed 4 GiB cap with no check. Host memory is one pool, so that left three ways to repeat the 2026-09-29 kill:
+
+- **A run nobody admitted.** The universal and static indexers start at every `puffin` launch. With the 122B fallback model resident the host has about 4 GB above earlyoom's line; one scip-python run (2.1 GiB measured on 81 files, 4 GiB allowed) can cross it, and earlyoom then kills the largest process, which is the model server.
+- **Two runs that each fit alone.** A cap is computed from `MemAvailable` at the start, but an indexer takes minutes to grow into it. Two sessions in two repositories, started seconds apart, both read the same `MemAvailable`: two Rust runs would each be given 25.8 GiB out of the same 36.
+- **Per-scope CPU limits add up.** `CPUQuota=400%` on each of N scopes is N × 4 cores, which is what §9.2 exists to prevent.
+
+So:
+
+- **One slice.** Every index scope, of every kind, is started with `--slice=puffin-index.slice`. The slice carries the aggregate limits, enforced by the kernel however many sessions and repositories are involved: `MemoryMax` (set by the admitter, below), `MemorySwapMax=0`, `CPUQuota=400%` and `AllowedCPUs=<4 cores>`. Verified on this machine (§2). Each scope keeps its own `MemoryMax` inside it, so one run cannot take another's share.
+- **One ledger.** Admission runs under an exclusive `flock` on `$XDG_RUNTIME_DIR/puffin-index/admission.lock`, held only while deciding. Under the lock the admitter:
+  1. lists the live scopes of the slice and reads each one's cap (`memory.max`) and use (`memory.current`);
+  2. computes `budget = MemAvailable − code_index_reserve − Σ (cap − use)` over them: what is left after every run already admitted grows into its cap;
+  3. gives the new run `cap = min(ceiling for its kind, budget)` and starts it only if `cap ≥ need` (below);
+  4. sets the slice's `MemoryMax` to the sum of the live caps, and releases the lock once the scope exists.
+  The ledger is the cgroup tree itself, so a crashed session leaves nothing stale: a scope that is gone is no longer counted.
 - **Reserve:** `code_index_reserve = earlyoom SIGTERM threshold + 4 GiB`, read from earlyoom's `-m` percentage and `MemTotal` (on this machine 6.2 + 4 = ~10.2 GiB). The model's memory is already allocated when it is resident, so `MemAvailable` excludes it; the reserve protects the host, the session and the model's transient allocations. On 2026-09-29 an index run that ignored this pushed the host under earlyoom's line and earlyoom killed vLLM.
-- **Cap at start:** `cap = min(code_index_memory_ceiling, MemAvailable − code_index_reserve)`, ceiling default 40 GiB.
-- **Admit only a run that can finish:** the manifest's `peak_rss_mb` for this indexer and repository must satisfy `cap ≥ 1.2 × peak_rss_mb`. Otherwise the run is not started: `status: "deferred: memory"`, and `puffin-code status` says so.
+- **Ceilings by kind:** universal and static indexers 4 GiB (`code_index_small_ceiling`); executing indexers `code_index_memory_ceiling`, default 40 GiB.
+- **Need, and the first run:** `need = 1.2 × peak_rss_mb` from the manifest for this indexer and repository. With no record yet, a floor by kind stands in: 512 MiB for the universal indexer (142 MiB measured), 3 GiB for a static one (2.1 GiB measured), 8 GiB for an executing one. A run the budget cannot cover is not started: `status: "deferred: memory"`, `puffin-code status` says so, and queries keep answering from the last snapshot plus §7.3's text search.
+- **At most one executing run on the host**, not one per repository: a lock in `$XDG_RUNTIME_DIR/puffin-index/` held for the run's life. Universal and static runs may start beside it when the budget admits them; the slice's CPU limit is shared between them.
+- **If the host crosses the line anyway, the indexer dies first.** Every indexer is started through `choom -n 1000`, so earlyoom and the kernel, which both pick by `oom_score`, choose an index run before the model server.
 - **Cap-bounded peaks are marked.** When a run's peak ends within 10% of its cap (`peak_cap_bounded: true`), the recorded peak is a lower bound: the cgroup was reclaiming against the cap. The next admitted run gets `min(ceiling, 1.5 × peak)` if available, so the first uncapped run raises the record. An OOM-killed run records its cap as the lower bound, so the next attempt is not doomed the same way.
-- **What this means for Codex today:** recorded peak ≥ 21.5 GiB, cap-bounded, so admission needs `cap ≥ 25.8 GiB`, i.e. `MemAvailable ≥ ~36 GiB`. With Qwen3.8 resident the machine has 35–38 GiB available, so a run is admitted only at the quiet end of that range; with the model server stopped (~100 GiB available) always. Scheduled runs therefore prefer `puffin-admin server stop`, idle periods with no server, and the Night Shift window. While no fresh exact index exists, the router serves the last snapshot, with changed files tagged `heuristic (stale)`.
-- **The conversion is admitted too:** `expt-convert` peaked at 2.7 GB on Codex and runs under the same cap right after the indexer.
+- **What this means for Codex today:** recorded peak ≥ 21.5 GiB, cap-bounded, so admission needs `cap ≥ 25.8 GiB`, i.e. `MemAvailable ≥ ~36 GiB` with no other index run holding part of the budget. With Qwen3.8 resident the machine has 35–38 GiB available, so a run is admitted only at the quiet end of that range; with the model server stopped (~100 GiB available) always. Scheduled runs therefore prefer `puffin-admin server stop`, idle periods with no server, and the Night Shift window. While no fresh exact index exists, the router serves the last snapshot, with changed files tagged `heuristic (stale)`.
+- **The conversion is admitted too:** `expt-convert` peaked at 2.7 GB on Codex and runs in the indexer's scope, under the same cap, right after it.
 - **Partitioning, as an option to measure, not a plan:** index the workspace in passes over subsets of `[workspace] members`, merged in the store. The caveat stands: `codex-cli`'s dependency closure is most of the workspace, so the passes that matter may peak almost as high as the whole.
 
 ## 7. The router
@@ -342,7 +361,7 @@ The layers name things differently. The graph has qualified names (`dreamference
 
 On GB10, host RAM and GPU memory are the same memory, and running it out can freeze the host, not just kill a process (see `psi_watchdog.py`). On 2026-09-29 an unconstrained index of this repository (the old `dreamference` context engine walking 2.3 GB of files) pushed available memory under earlyoom's line and earlyoom killed vLLM. Everything below exists so that cannot recur.
 
-- **Memory limits:** every indexer, universal or exact, runs under `systemd-run --user --scope -p MemoryMax=<cap> -p MemorySwapMax=0`, so exhaustion OOM-kills the indexer instead of stalling the host. `<cap>` comes from §6.4 for executing indexers; for codebase-memory and the static indexers it is a fixed ceiling (default 4 GiB; measured peaks 142 MiB and 2.1 GiB), with `CBM_MEM_BUDGET_MB` set below it so the tool budgets itself before the cgroup has to act.
+- **Memory limits:** every indexer, universal or exact, runs under `systemd-run --user --scope -p MemoryMax=<cap> -p MemorySwapMax=0`, so exhaustion OOM-kills the indexer instead of stalling the host. `<cap>` comes from §6.4's admission for **every** run; for codebase-memory and the static indexers it is at most 4 GiB (measured peaks 142 MiB and 2.1 GiB), with `CBM_MEM_BUDGET_MB` set below it so the tool budgets itself before the cgroup has to act. No indexer starts without being admitted, at launch or otherwise, and all of them share `puffin-index.slice`, whose limits hold for the sum.
 - **Sharing the machine with inference:** §9.2. `nice`/`ionice` alone are not enough on this machine.
 
 ### 9.1 Exact indexing executes project code
@@ -358,9 +377,9 @@ Three rules follow.
 - **Sandbox, for every indexer.** Each runs as `systemd-run … -- bwrap …`, with the network removed and the filesystem read-only except for its outputs. For rust-analyzer (this is the command that produced §2's measurements, less the paths):
   ```
   systemd-run --user --scope --unit="puffin-index-$REPO_ID" \
-    -p MemoryMax="$CAP" -p MemorySwapMax=0 \
-    -p CPUQuota=400% -p AllowedCPUs="$INDEX_CPUS" -- \
-    nice -n 10 ionice -c3 \
+    --slice=puffin-index.slice \
+    -p MemoryMax="$CAP" -p MemorySwapMax=0 -- \
+    choom -n 1000 -- nice -n 10 ionice -c3 \
     bwrap --die-with-parent --unshare-net --unshare-pid \
           --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
           --bind "$SCRATCH" "$SCRATCH" \
@@ -371,6 +390,7 @@ Three rules follow.
           -- rust-analyzer scip "$SRC" --output "$REPO/.dreamference/scip/rust-analyzer.scip"
   ```
   - `/usr/bin/bwrap` is already installed; it is Codex's own sandbox.
+  - The CPU limits are on the slice, not the scope (§6.4), so they bound all runs together. The measurements of §2 were taken with them on a single scope, which is the same limit for one run. systemd places `puffin-index.slice` under `puffin.slice`, from its name.
   - The scope is named so §9.2's supervisor can `freeze`/`thaw` it and `puffin-code status` can find a run in progress.
   - The router creates the bound directories beforehand, because bwrap cannot bind a path that does not exist.
   - `$CARGO_HOME` is writable only because Cargo takes a lock file there even offline; with no network, nothing can be fetched into it.
@@ -386,7 +406,7 @@ Three rules follow.
 
 On GB10, token generation is limited by memory bandwidth, and CPU, GPU and model weights share the same LPDDR5X. Background indexing competes for that bandwidth, which `nice` and `ionice` do not limit. The Codex exact run averaged about 3.7 busy cores in its first phase. The number to protect is the default model's single-stream decode rate: Qwen3.8-27B, 25.5 / 50.3 / 87.0 tokens/s on prose / code / JSON (`DREAMFERENCE_INFERENCE.md` §5.3).
 
-- **Start only when the model is idle.** The supervisor reads the served model's `/metrics` and treats it as idle when the engine's request gauges are 0: `sglang:num_running_reqs` and `sglang:num_queue_reqs` on SGLang, `vllm:num_requests_running` and `vllm:num_requests_waiting` on vLLM, whichever answers. No model server at all also counts as idle.
+- **Start only when the model is idle.** This and the next rule hold for every kind of run, including the launch-time universal and static ones. The supervisor reads the served model's `/metrics` and treats it as idle when the engine's request gauges are 0: `sglang:num_running_reqs` and `sglang:num_queue_reqs` on SGLang, `vllm:num_requests_running` and `vllm:num_requests_waiting` on vLLM, whichever answers. No model server at all also counts as idle.
 - **Never alongside a model load.**
   - A model container (`dreamference-vllm-<port>`, the name both engines use) that exists but does not answer `/health` is **loading**. Nothing starts then: `MemAvailable` is still high before the weights are mapped, so admission would wrongly pass.
   - A run in flight when a load begins is **stopped**, not frozen, because frozen memory stays resident; it is recorded as `deferred: model-start`.
@@ -395,8 +415,8 @@ On GB10, token generation is limited by memory bandwidth, and CPU, GPU and model
   - The indexer cannot watch the model itself: it has no network in its sandbox. The session process (or a `puffin-code index` typed by the user, §4) therefore starts a detached **supervisor** outside the sandbox that creates and owns the scope, polls `/metrics` every 2 s, applies these rules, writes the manifest, and exits when the scope ends. It lives exactly as long as one run.
   - When a request appears, the supervisor runs `systemctl --user freeze <scope>`, and `thaw` once the model has been idle for 10 s (supported on systemd 255).
   - A run frozen for more than 30 minutes is stopped and recorded as `deferred: busy`.
-- **Cap what it can take while running:** `-p CPUQuota=400% -p AllowedCPUs=<4 cores>` on the scope, `CARGO_BUILD_JOBS=4` and the Go and MSBuild equivalents, `CBM_WORKERS=4` for codebase-memory. Newer rust-analyzer than the pinned 1.95.0 adds `--num-threads`; the router passes 4 once the toolchain has it.
-- **One run at a time, coalesced:** at most one exact run in flight per repository; requests during a run collapse into one follow-up, which waits at least `code_index_min_interval` (default 15 minutes) unless it is `puffin-code index --exact`. A lock file makes this hold across sessions, and Night Shift's admission counts an exact run as work in progress.
+- **Cap what all runs can take together:** `CPUQuota=400%` and `AllowedCPUs=<4 cores>` on `puffin-index.slice` (§6.4), so two sessions indexing two repositories still share four cores; `CARGO_BUILD_JOBS=4` and the Go and MSBuild equivalents, `CBM_WORKERS=4` for codebase-memory. Newer rust-analyzer than the pinned 1.95.0 adds `--num-threads`; the router passes 4 once the toolchain has it.
+- **One run at a time, coalesced:** at most one executing run in flight on the host (§6.4), and one run of each kind per repository; requests during a run collapse into one follow-up, which waits at least `code_index_min_interval` (default 15 minutes) unless it is `puffin-code index --exact`. A lock file makes this hold across sessions, and Night Shift's admission counts an exact run as work in progress.
 
 ## 10. Evaluation (before building the router)
 
@@ -462,12 +482,20 @@ If the router shows that the graph's edges are wrong in concentrated places, the
   - **Output budget:** a fixture symbol with 500 references prints the totals header, at most 15 file-summary lines and 40 rows; `--offset 40` returns the next 40; an `--offset` taken before a re-index fails with an error.
   - **Freshness cost:** on an unchanged tree a `refs` runs the two git calls and opens no source file; with `k` changed files it `stat`s and reads exactly those `k`.
   - **Admission:** with `peak_rss_mb` above the available cap, the run is not started (`deferred: memory`); a cap-bounded peak raises the next cap; an OOM-killed run records its cap as the new lower bound.
+  - **Host-wide admission (§6.4),** against a fake cgroup tree and a fake `MemAvailable`:
+    - with the budget below the static floor, a launch starts neither the universal nor the static indexer and records `deferred: memory`;
+    - two admissions raced from two processes for two repositories, each fitting alone and not together, start exactly one run;
+    - a live scope using 1 GiB of a 20 GiB cap takes 19 GiB off the next budget;
+    - a first run with no recorded peak uses its kind's floor;
+    - a second executing run for another repository waits while the first holds the host lock;
+    - every scope is created in `puffin-index.slice`, the slice's `MemoryMax` equals the sum of the live caps, and the indexer's command starts with `choom -n 1000`.
   - **Scheduler:** five triggers in quick succession produce one run and one coalesced follow-up; no run starts while the engine's request gauges are non-zero (fake `/metrics` for both `vllm:` and `sglang:` names); a frozen scope resumes on thaw with the same output as an uninterrupted run.
   - **Model load:** with a model container present but `/health` not answering, no run starts; a run in flight is stopped, not frozen (`deferred: model-start`); `puffin-admin server start` stops any `puffin-index-*` scope before its pre-flight.
   - **Worktrees:** a query in a linked worktree reads the main worktree's project, and files that differ are tagged stale.
 
 ## 13. Open questions and unverified claims
 
+- **The first-run floors of §6.4** (512 MiB, 3 GiB, 8 GiB) come from one repository's measurements. A large Python or TypeScript project may need more than the 4 GiB small ceiling; it is then killed at its cap, recorded, and not retried in a loop (§6.1), which is safe and leaves that language on the universal layer. Whether the small ceiling should grow with a recorded peak, as the executing one does, is open.
 - **The unconstrained peak of the Codex exact index** is unknown: ≥ 21.5 GiB, cap-bounded (§2). One run with the model server stopped and a 40 GiB cap settles it.
 - **The decode-rate cost of indexing beside the model**, frozen and unfrozen, is unmeasured.
 - **Does freezing a scope mid-analysis leave rust-analyzer healthy?** A cgroup freeze is `SIGSTOP`-like, so it should, but it is untested.
