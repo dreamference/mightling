@@ -273,3 +273,28 @@ fn no_index_says_so() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("run `puffin-code index`"));
 }
 
+
+#[test]
+fn the_same_answers_over_mcp() {
+    use std::io::Write;
+    let f = fixture();
+    let mut child = f
+        .command(&["mcp"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(stdin, r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18"}}}}"#).unwrap();
+    writeln!(stdin, r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#).unwrap();
+    writeln!(stdin, r#"{{"jsonrpc":"2.0","id":2,"method":"tools/list"}}"#).unwrap();
+    writeln!(stdin, r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"code_refs","arguments":{{"name":"make_circle"}}}}}}"#).unwrap();
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    let lines: Vec<serde_json::Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0]["result"]["serverInfo"]["name"], "puffin-code");
+    assert!(lines[1]["result"]["tools"].as_array().unwrap().iter().any(|t| t["name"] == "code_refs"));
+    let text = lines[2]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("exact shapes/cli.py:9"), "{text}");
+}

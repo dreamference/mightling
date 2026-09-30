@@ -78,9 +78,36 @@ pub fn cache_dir() -> PathBuf {
     }
 }
 
-/// codebase-memory's project name for a root: the path without its leading slash, `/` → `-`.
+/// codebase-memory's project name for a root: the path without its leading slash, `/` → `-`,
+/// runs of `-` collapsed (`/tmp/-x/repo` is `tmp-x-repo`).
 pub fn project_name(root: &Path) -> String {
-    root.to_string_lossy().trim_start_matches('/').replace('/', "-")
+    let dashed = root.to_string_lossy().trim_start_matches('/').replace('/', "-");
+    let mut out = String::with_capacity(dashed.len());
+    for c in dashed.chars() {
+        if !(c == '-' && out.ends_with('-')) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The database whose `projects` table names `root`, when the name derived from the path does not
+/// match (a naming rule of codebase-memory's this code does not know).
+fn find_by_root(cache: &Path, root: &Path) -> Option<(PathBuf, String)> {
+    let root = root.to_string_lossy();
+    for entry in std::fs::read_dir(cache).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().map(|e| e != "db").unwrap_or(true) || path.file_name()? == "_config.db" {
+            continue;
+        }
+        let Ok(conn) = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY) else { continue };
+        let name: Option<String> =
+            conn.query_row("SELECT name FROM projects WHERE root_path = ?1", [root.as_ref()], |r| r.get(0)).optional().ok().flatten();
+        if let Some(name) = name {
+            return Some((path, name));
+        }
+    }
+    None
 }
 
 /// The graph database and project for a repository: `PUFFIN_CODE_GRAPH_DB` and
@@ -88,9 +115,15 @@ pub fn project_name(root: &Path) -> String {
 /// `<cache>/<project>.db` for the main worktree.
 pub fn locate(repo: &Repo) -> (PathBuf, String) {
     let project = std::env::var("PUFFIN_CODE_PROJECT").unwrap_or_else(|_| project_name(&repo.main_root));
-    let path = std::env::var("PUFFIN_CODE_GRAPH_DB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| cache_dir().join(format!("{project}.db")));
+    if let Ok(path) = std::env::var("PUFFIN_CODE_GRAPH_DB") {
+        return (PathBuf::from(path), project);
+    }
+    let path = cache_dir().join(format!("{project}.db"));
+    if !path.is_file() {
+        if let Some(found) = find_by_root(&cache_dir(), &repo.main_root) {
+            return found;
+        }
+    }
     (path, project)
 }
 

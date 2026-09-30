@@ -264,12 +264,19 @@ impl Context {
         crate::manifest::hex(&hasher.finalize()[..4])
     }
 
+    /// Restricts the header's source line to the stores an answer actually drew on.
+    fn set_sources(&self, answer: &mut Answer, stores: &BTreeSet<usize>) {
+        answer.sources = self.sources(Some(stores));
+    }
+
     /// The header's source line: which snapshot each tag comes from.
-    fn sources(&self) -> Vec<String> {
+    fn sources(&self, only: Option<&BTreeSet<usize>>) -> Vec<String> {
         let mut exact: Vec<String> = self
             .stores
             .iter()
-            .map(|s| {
+            .enumerate()
+            .filter(|(i, _)| only.map(|set| set.contains(i)).unwrap_or(true))
+            .map(|(_, s)| {
                 let commit = s.entry.commit.as_deref().map(|c| &c[..c.len().min(7)]).unwrap_or("no commit");
                 format!("{} {}@ {commit}", s.entry.indexer, if s.entry.root.is_empty() { String::new() } else { format!("{} ", s.entry.root) })
             })
@@ -287,7 +294,7 @@ impl Context {
         Answer {
             op: op.to_string(),
             query: query.to_string(),
-            sources: self.sources(),
+            sources: self.sources(None),
             changed_files: self.changed.len() + self.deleted.len(),
             cursor: self.cursor(),
             tagged: true,
@@ -552,6 +559,7 @@ impl Context {
         if candidate.scip.is_empty() {
             answer.notes.push(graph_only_note(&candidate.path));
         }
+        self.set_sources(&mut answer, &exact_stores);
         rows.extend(self.text_rows(&candidate.name, &mut answer, &|path, _| !covered_exactly(path) || self.changed.contains(path)));
         answer.rows = dedup(rows);
         self.request_reindex(&mut answer);
@@ -565,6 +573,8 @@ impl Context {
         let candidates = self.resolve(query)?;
         let name = query_segments(query).last().cloned().unwrap_or_default();
         let mut rows = Vec::new();
+        let used: BTreeSet<usize> = candidates.iter().flat_map(|c| c.scip.iter().map(|(i, _, _)| *i)).collect();
+        self.set_sources(&mut answer, &used);
         for c in &candidates {
             let fresh = c.scip.iter().any(|(i, _, _)| self.scip_fresh(*i, &c.path));
             let tag = if fresh && !c.by_name { Tag::Exact } else { Tag::Heuristic };
@@ -618,6 +628,7 @@ impl Context {
         self.note_missing_layers(&mut answer);
         let Some(candidate) = self.resolve_one(query, &mut answer)? else { return Ok(answer) };
         answer.query = format!("{}  ({}:{})", candidate.display, candidate.path, candidate.line);
+        self.set_sources(&mut answer, &candidate.scip.iter().map(|(i, _, _)| *i).collect());
         let mut rows = Vec::new();
         let mut seen: BTreeSet<String> = BTreeSet::new();
         let exact = candidate.scip.iter().find(|(i, _, _)| self.scip_fresh(*i, &candidate.path));
@@ -657,6 +668,7 @@ impl Context {
         self.note_missing_layers(&mut answer);
         let Some(candidate) = self.resolve_one(query, &mut answer)? else { return Ok(answer) };
         answer.query = format!("{}  ({}:{})", candidate.display, candidate.path, candidate.line);
+        self.set_sources(&mut answer, &candidate.scip.iter().map(|(i, _, _)| *i).collect());
         let mut rows = Vec::new();
         for (i, _, symbol) in &candidate.scip {
             let store = &self.stores[*i];
@@ -795,6 +807,15 @@ impl Context {
             (None, Some(error)) => lines.push(format!("universal: unavailable: {error}")),
             (None, None) => lines.push("universal: not built yet (`puffin-code index`)".to_string()),
         }
+        if !self.changed.is_empty() || !self.deleted.is_empty() {
+            let listed: Vec<String> = self.changed.iter().chain(self.deleted.iter()).take(8).cloned().collect();
+            let more = (self.changed.len() + self.deleted.len()).saturating_sub(listed.len());
+            lines.push(format!(
+                "changed since the snapshots: {}{}",
+                listed.join(", "),
+                if more > 0 { format!(" and {more} more") } else { String::new() }
+            ));
+        }
         let manifest = Manifest::load(&self.repo.scip_dir());
         if manifest.runs.is_empty() {
             lines.push("exact: no SCIP index yet".to_string());
@@ -816,10 +837,20 @@ impl Context {
         for error in &self.store_errors {
             lines.push(format!("exact: unreadable: {error}"));
         }
-        if !self.not_indexed_dirs.is_empty() {
-            lines.push(format!("not indexed by the graph (searched by text): {}", self.not_indexed_dirs.join(", ")));
-        }
         let submodules = self.repo.submodules();
+        let dirs: Vec<&String> = self
+            .not_indexed_dirs
+            .iter()
+            .filter(|d| d.ends_with('/') && !submodules.iter().any(|s| d.trim_end_matches('/') == s))
+            .collect();
+        let files = self.not_indexed_dirs.iter().filter(|d| !d.ends_with('/') && !submodules.contains(d)).count();
+        if !dirs.is_empty() || files > 0 {
+            lines.push(format!(
+                "not indexed by the graph (searched by text): {}{}",
+                dirs.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(", "),
+                if files > 0 { format!("{}{files} single files (mostly binary)", if dirs.is_empty() { "" } else { "; " }) } else { String::new() }
+            ));
+        }
         if !submodules.is_empty() {
             lines.push(format!("submodules excluded: {} (`puffin-code index --include-submodules`)", submodules.join(", ")));
         }

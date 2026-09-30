@@ -370,6 +370,9 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
     )?;
     tx.execute("INSERT INTO puffin_meta (k, v) VALUES ('postprocessed', '1')", [])?;
     tx.commit()?;
+    // expt-convert writes WAL mode, and a WAL database cannot be opened read-only where its
+    // directory is not writable (the read-only sandbox): the reader must create `-shm`.
+    conn.pragma_update(None, "journal_mode", "DELETE")?;
     Ok(())
 }
 

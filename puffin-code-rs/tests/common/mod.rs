@@ -94,6 +94,21 @@ impl Fixture {
     }
 
     pub fn run_in(&self, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String) {
+        let mut command = self.command_in(cwd, args);
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let out = command.output().unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.code().unwrap_or(-1), text)
+    }
+
+    /// The command, isolated from the machine, for callers that spawn it themselves.
+    pub fn command(&self, args: &[&str]) -> Command {
+        self.command_in(&self.repo.root, args)
+    }
+
+    fn command_in(&self, cwd: &Path, args: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_puffin-code"));
         command
             .args(args)
@@ -104,13 +119,16 @@ impl Fixture {
             .env_remove("DREAMFERENCE_CONFIG_PATH")
             .env_remove("CODEX_HOME")
             .env_remove("PUFFIN_CODE_STATE_DIR")
-            .env_remove("PUFFIN_CODE_ROOT");
-        for (key, value) in env {
-            command.env(key, value);
-        }
-        let out = command.output().unwrap();
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        (out.status.code().unwrap_or(-1), text)
+            .env_remove("PUFFIN_CODE_ROOT")
+            // Nothing a test runs may reach the machine's own runtime directory, tools or caches.
+            .env("XDG_RUNTIME_DIR", self.dir.path().join("run"))
+            // No systemd bus: as inside Codex's sandbox, and so no test can create a real scope.
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+            .env("PUFFIN_CODE_TOOLS_DIR", self.dir.path().join("no-tools"))
+            .env("PUFFIN_CODE_INDEXERS_DIR", self.dir.path().join("no-indexers"))
+            .env("PUFFIN_CODE_SCRATCH_DIR", self.dir.path().join("scratch"))
+            .env("CBM_CACHE_DIR", self.dir.path().join("cbm-cache"));
+        command
     }
 
     pub fn write(&self, rel: &str, content: &str) {

@@ -77,6 +77,10 @@ pub fn install(repo: &Repo, mut entry: RunEntry, converted: &Path, scip_file: &P
     std::fs::copy(converted, &staged_db)?;
     std::fs::copy(scip_file, &staged_scip)?;
     std::fs::rename(&staged_scip, dir.join(format!("{stem}.scip")))?;
+    // A journal left beside the old store must not meet the new one.
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let _ = std::fs::remove_file(dir.join(format!("{stem}.db{suffix}")));
+    }
     std::fs::rename(&staged_db, dir.join(format!("{stem}.db")))?;
     entry.store = format!("{stem}.db");
     entry.status = "ok".to_string();

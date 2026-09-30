@@ -71,7 +71,7 @@ impl SymbolName {
 /// Splits what the agent typed (`Config::load`, `Circle.area`, `area`) into segments.
 pub fn query_segments(query: &str) -> Vec<String> {
     query
-        .split(|c| c == '.' || c == ':' || c == '/' || c == '#')
+        .split(['.', ':', '/', '#'])
         .map(|s| s.trim_end_matches("()"))
         .filter(|s| !s.is_empty())
         .map(str::to_string)

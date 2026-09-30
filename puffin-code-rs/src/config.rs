@@ -97,7 +97,12 @@ fn config_file(repo_root: &Path) -> Option<PathBuf> {
 /// clone, and the agent can write it from inside the workspace-write sandbox. Only
 /// `[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml` counts.
 pub fn is_trusted(root: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(paths::codex_home().join("config.toml")) else { return false };
+    is_trusted_in(&paths::codex_home(), root)
+}
+
+/// [`is_trusted`] against a given `$CODEX_HOME`.
+pub fn is_trusted_in(codex_home: &Path, root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(codex_home.join("config.toml")) else { return false };
     let Ok(table) = text.parse::<toml::Table>() else { return false };
     let Some(projects) = table.get("projects").and_then(toml::Value::as_table) else { return false };
     let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
