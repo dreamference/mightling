@@ -20,7 +20,7 @@
 
 **Version:** `dreamference.__version__ == "1.2.0"`.
 
-**Architecture:** eight subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `puffin-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
+**Architecture:** eight subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `puffin-rs/`, the web commands `puffin-web-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
 
 **Dead shims:** the top-level `dreamference/<name>.py` modules (`cli.py`, `config.py`, `hardware.py`, …) contain `from dreamference.<name>.__init__ import *`. They **never execute**: Python resolves the same-named package directory first. Editing them has no effect.
 
@@ -111,7 +111,7 @@ dreamference/
 └── mcp_server/
     ├── mcp_server.py                     # MCPServer
     ├── mcp_tool_registry.py              # MCPToolRegistry
-    ├── web_tools.py                      # WebTools (web_search / web_fetch, puffin-search, puffin-admin fetch)
+    ├── web_tools.py                      # WebTools (the MCP web_search / web_fetch tools)
     ├── ide_state.py                      # IDEState
     └── editor_selection.py               # EditorSelection
 
@@ -120,6 +120,7 @@ scripts/                                  # at the repository root, not inside t
 └── run_vllm_gb10.sh                      # foreground vLLM launch
 
 puffin-rs/src/{lib,help,app,update,usage}.rs   # launcher compiled into puffin
+puffin-web-rs/src/{lib,search,fetch,html_text}.rs, src/bin/   # puffin-search, puffin-fetch
 codex-patches/00NN-*.patch                      # patch series for the codex/ submodule
 desktop/src-tauri/                              # Tauri shell (binary puffin-app)
 ```
@@ -160,7 +161,7 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and sqlite-vec embeddings, written to
 - `web_search`, `web_fetch`;
 - `workspace_search_code`.
 
-`WebTools` also backs `puffin-search` and `puffin-admin fetch`.
+`WebTools` is the MCP server's copy of what `puffin-search` and `puffin-fetch` do; those two are Rust (`puffin-web-rs/`, `DREAMFERENCE_PUFFIN_CODEX.md` §4.1), and the two implementations are kept in step by hand.
 
 ### 3.8. `cli/`
 

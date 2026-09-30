@@ -34,7 +34,7 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 - **Agents:** `run`, `codex {build,start,stop}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`
 - **Web UI and desktop:** `puffin {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
-- **Agent tools:** `fetch`, `gmail {search,read,status}`; search is its own command, `puffin-search` (§4.16)
+- **Agent tools:** `gmail {search,read,status}`; search and fetch are commands of their own, `puffin-search` and `puffin-fetch` (§4.16)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
 
 ---
@@ -313,13 +313,13 @@ puffin-admin codex stop
 
 ---
 
-### 4.16. `puffin-search`, `fetch`, `gmail`
+### 4.16. `puffin-search`, `puffin-fetch`, `gmail`
 
 These are the commands the `puffin` agent is told to use in its prompt.
 
 ```bash
 puffin-search "QUERY" [-n 5] [--json]                # local SearXNG
-puffin-admin fetch URL [--max-chars 8000]            # readable text of one page
+puffin-fetch URL [--max-chars 8000] [--json]         # readable text of one page
 puffin-admin gmail search "GMAIL QUERY" [-n 10] [--json]
 puffin-admin gmail read MESSAGE_ID [--max-chars 8000] [--json]
 puffin-admin gmail status [--json]
@@ -327,7 +327,7 @@ puffin-admin gmail status [--json]
 
 `gmail` talks to the `dreamference-gmail` service that the web UI already runs, and is read-only. See `DREAMFERENCE_PUFFIN_GMAIL.md`.
 
-Search is a console script of its own, `puffin-search` (`PuffinSearchCommand` in `dreamference/cli/puffin_search_command.py`, declared in `setup.py`), rather than a `puffin-admin` subcommand: it is the agent's most frequent command, and `puffin-admin` administers the machine. It was `puffin-admin search` until 2026-09-30, and that subcommand is gone rather than aliased. `puffin-admin codex build` links it into `~/.local/bin` beside `puffin` and `puffin-admin`.
+Search and fetch are programs of their own rather than `puffin-admin` subcommands: they are the agent's most frequent commands, and `puffin-admin` administers the machine. Both are Rust binaries from `puffin-web-rs/` (`DREAMFERENCE_PUFFIN_CODEX.md` §4.1), not console scripts, so they work from a shell with no virtualenv; `puffin-admin codex build` installs them beside `puffin` and links them into `~/.local/bin`. They were `puffin-admin search` and `puffin-admin fetch` until 2026-09-30; both subcommands are gone rather than aliased.
 
 ---
 

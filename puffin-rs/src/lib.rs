@@ -93,11 +93,11 @@ pub const WEB_ACCESS_INSTRUCTIONS: &str = r#"
 You have web access through two shell commands, run like any other command:
 
     puffin-search "your query here"              # search; -n N for more results (default 5)
-    puffin-admin fetch "https://example.com"     # fetch a page as readable text
+    puffin-fetch "https://example.com"           # fetch a page as readable text
 
 Use them whenever the answer depends on something you cannot know from training or from the files
 in front of you: today's weather or tides, current events, release versions, live documentation,
-anything dated. Search first, then `puffin-admin fetch` a promising URL when the snippets are not enough.
+anything dated. Search first, then `puffin-fetch` a promising URL when the snippets are not enough.
 
 Do not say you cannot browse the web. You can, through these commands.
 
@@ -118,7 +118,7 @@ pub const GMAIL_SERVICE_URL: &str = "http://127.0.0.1:8767";
 /// Added after the web section, and only when an account is connected: naming a command that
 /// answers "not connected" teaches the model to try, fail, and conclude it has no mail access.
 /// The last paragraph matters most. Email is attacker-written text arriving in the context of an
-/// agent with a shell, and `puffin-admin fetch` and `puffin-search` can carry data out in a URL.
+/// agent with a shell, and `puffin-fetch` and `puffin-search` can carry data out in a URL.
 pub fn gmail_access_instructions(accounts: &str) -> String {
     format!(
         r#"
@@ -902,6 +902,7 @@ mod tests {
         );
         assert!(!prompt.contains("Codex") && !prompt.contains("based on GPT"));
         assert!(prompt.contains("puffin-search \"") && !prompt.contains("puffin-admin search"));
+        assert!(prompt.contains("puffin-fetch \"") && !prompt.contains("puffin-admin fetch"));
     }
 
     #[test]

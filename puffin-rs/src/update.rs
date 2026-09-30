@@ -3,9 +3,11 @@
 //! Codex's own `update` picks an installer (npm, brew, OpenAI's install script) from how Codex was
 //! installed, which would put upstream Codex in Puffin's place. Patch 0008 sends the subcommand
 //! here instead. The release workflow attaches, per target, a gzipped `puffin`, a gzipped
-//! `codex-code-mode-host` and a `sha256sums` file covering both; this downloads the latest
-//! published release's three assets, verifies both archives against the checksum file, and swaps
-//! the two binaries in next to the running executable.
+//! `codex-code-mode-host`, the gzipped web commands `puffin-search` and `puffin-fetch`, and a
+//! `sha256sums` file covering all of them; this downloads the latest published release's assets,
+//! verifies every archive against the checksum file, and swaps the binaries in next to the running
+//! executable. The web commands are optional, because releases made before they were Rust binaries
+//! do not carry them; the installed ones are then kept.
 //!
 //! The repository is private, so the GitHub API needs a token: `GH_TOKEN`, `GITHUB_TOKEN`, or
 //! whatever `gh auth token` prints.
@@ -29,6 +31,10 @@ pub const PUFFIN_VERSION: Option<&str> = option_env!("PUFFIN_VERSION");
 
 /// Code Mode's host process, which Codex looks for next to its own executable under this name.
 const CODE_MODE_HOST: &str = "codex-code-mode-host";
+
+/// The agent's web commands (`puffin-web-rs/`), installed beside `puffin` and linked into
+/// `~/.local/bin`, because the prompt names them and the model's shell must find them.
+pub const WEB_COMMANDS: [&str; 2] = ["puffin-search", "puffin-fetch"];
 
 /// What `puffin update` should do, given this build's version and the latest release's.
 #[derive(Debug, PartialEq, Eq)]
@@ -66,6 +72,11 @@ pub fn asset_names(target: &str) -> [String; 3] {
         format!("{CODE_MODE_HOST}-{target}.gz"),
         format!("puffin-{target}.sha256sums"),
     ]
+}
+
+/// Asset names of the web commands for a target, in `WEB_COMMANDS` order.
+pub fn web_asset_names(target: &str) -> [String; 2] {
+    WEB_COMMANDS.map(|name| format!("{name}-{target}.gz"))
 }
 
 /// Parses `sha256sum` output: `<hex>  <name>` per line, with an optional `*` before binary names.
@@ -197,10 +208,18 @@ pub async fn run() -> anyhow::Result<()> {
         .to_string_lossy()
         .into_owned();
 
-    // Both are downloaded and verified before either is replaced, so a failure part-way leaves
-    // the installation as it was.
+    // Everything is downloaded and verified before anything is replaced, so a failure part-way
+    // leaves the installation as it was.
+    let mut wanted = vec![(puffin_asset, exe_name), (host_asset, CODE_MODE_HOST.to_string())];
+    for (asset, name) in web_asset_names(&target).into_iter().zip(WEB_COMMANDS) {
+        if assets.contains_key(asset.as_str()) {
+            wanted.push((asset, name.to_string()));
+        } else {
+            println!("ℹ️  release {tag} carries no {name}; keeping the installed one");
+        }
+    }
     let mut binaries = Vec::new();
-    for (asset, installed) in [(puffin_asset, exe_name), (host_asset, CODE_MODE_HOST.to_string())] {
+    for (asset, installed) in wanted {
         let archive = download(asset.clone()).await?;
         let expected = sums
             .get(&asset)
@@ -214,9 +233,35 @@ pub async fn run() -> anyhow::Result<()> {
     }
     for (installed, binary) in binaries {
         replace(install_dir, &installed, &binary)?;
+        if WEB_COMMANDS.contains(&installed.as_str()) {
+            link_onto_path(install_dir, &installed);
+        }
     }
     println!("✅ Puffin {latest} installed in {}", install_dir.display());
     Ok(())
+}
+
+/// Links `~/.local/bin/<name>` to the installed command, as `puffin-admin codex build` does. Only
+/// a missing file or an existing link is replaced: a real file of that name belongs to something
+/// else, and is reported instead.
+fn link_onto_path(install_dir: &Path, name: &str) {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let bin = Path::new(&home).join(".local").join("bin");
+    let link = bin.join(name);
+    if link.exists() && !link.is_symlink() {
+        println!("⚠️  {} exists and is not a link; leaving it", link.display());
+        return;
+    }
+    let staging = bin.join(format!(".{name}.link"));
+    let _ = std::fs::remove_file(&staging);
+    let linked = std::fs::create_dir_all(&bin)
+        .and_then(|()| std::os::unix::fs::symlink(install_dir.join(name), &staging))
+        .and_then(|()| std::fs::rename(&staging, &link));
+    if let Err(error) = linked {
+        println!("⚠️  could not link {}: {error}", link.display());
+    }
 }
 
 /// Writes next to the target and renames over it, so a running `puffin` keeps its own file and a
@@ -262,5 +307,12 @@ mod tests {
         assert_eq!(host, "codex-code-mode-host-aarch64-unknown-linux-gnu.gz");
         assert_eq!(sums, "puffin-aarch64-unknown-linux-gnu.sha256sums");
         assert_eq!(hex_sha256(b"abc").len(), 64);
+        assert_eq!(
+            web_asset_names("aarch64-unknown-linux-gnu"),
+            [
+                "puffin-search-aarch64-unknown-linux-gnu.gz".to_string(),
+                "puffin-fetch-aarch64-unknown-linux-gnu.gz".to_string()
+            ]
+        );
     }
 }

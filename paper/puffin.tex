@@ -174,7 +174,7 @@ concurrent sequences, a configuration forced by memory headroom (\cref{sec:safet
   \node[box=3.3cm]  (host)     at (6.9,-1.7)  {{\footnotesize\code{codex-code-mode-host}}\\\scriptsize V8, runs Code Mode JS};
   \node[box=3.2cm]  (watch)    at (12.6,-1.7) {PSI watchdog\\\scriptsize + admission checks};
   % row 3
-  \node[box=3.1cm]  (tools)    at (2.8,-3.5)  {shell tools\\\scriptsize\code{puffin-search}, \code{fetch}, \code{gmail}};
+  \node[box=3.1cm]  (tools)    at (2.8,-3.5)  {shell tools\\\scriptsize\code{puffin-search}, \code{puffin-fetch}, \code{gmail}};
   \node[box=3.3cm]  (svc)      at (6.9,-3.5)  {SearXNG,\\Gmail service};
   \node[box=3.2cm]  (diff)     at (12.6,-3.5) {diffusion sidecar\\\scriptsize started first, 8\,GB cap};
   % the binary
@@ -203,9 +203,10 @@ Finally it prepends the options that point Codex at the local provider. From the
 Codex, and every upstream flag and subcommand behaves as documented, apart from the cloud surfaces
 listed in \cref{sec:cloud}.
 
-Web search, page fetching and Gmail reading are provided by \code{puffin-admin}, the Python
-management CLI. The agent invokes them as shell commands (\cref{sec:local}). The same
-\code{puffin-admin} manages the vLLM container, a small diffusion-model sidecar, a browser chat UI
+Web search and page fetching are two small Rust programs, \code{puffin-search} and
+\code{puffin-fetch}, installed beside \code{puffin}; Gmail reading is provided by
+\code{puffin-admin}, the Python management CLI. The agent invokes them as shell commands
+(\cref{sec:local}). The same \code{puffin-admin} manages the vLLM container, a small diffusion-model sidecar, a browser chat UI
 built on Onyx \cite{onyx}, and the build of \code{puffin} itself.
 
 \section{A patch-minimal fork}
@@ -451,7 +452,7 @@ runtime, as \code{tools.mcp\_\_server\_\_tool(args)}. We wired a SearXNG \cite{s
 for web search. The server initialised and its tools reached the model's context, but the local
 model repeatedly called the namespace directly, received \emph{unsupported call}, and gave up.
 Plain shell commands described in the system prompt worked reliably:
-\code{puffin-search}, \code{puffin-admin fetch} and, later, \code{gmail search|read|status}. This is one
+\code{puffin-search}, \code{puffin-fetch} and, later, \code{gmail search|read|status}. This is one
 model on one harness and should not be over-generalised. Still, it suggests that for local models,
 the tool surface a vendor harness assumes may need to be flattened back into the shell.
 

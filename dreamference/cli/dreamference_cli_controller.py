@@ -1029,20 +1029,10 @@ class DreamferenceCLIController:
             "uninstall", help="Permanently delete the Onyx deployment and all its data"
         )
 
-        # Command: puffin-admin fetch
-        #
-        # Web access as a CLI subcommand rather than a repo script, because the agent should find
-        # it from any workspace. It replaced a repo script that only existed inside this checkout,
-        # paired with an AGENTS.md that is workspace-scoped too — in any other directory both the
-        # instruction and the command vanished. `puffin-admin` is on PATH wherever the venv is.
-        # Search, its companion, is a command of its own: `puffin-search`, a Rust binary built from
-        # puffin-web-rs/ with `puffin-fetch` beside it.
-        #
-        # Not an MCP tool: Codex exposes MCP tools only inside its `exec` JS runtime, and this
-        # model does not reliably wrap calls that way. The shell it always uses correctly.
-        fetch_parser = subparsers.add_parser("fetch", help="Fetch a URL and print its readable text")
-        fetch_parser.add_argument("url", help="Absolute http(s) URL")
-        fetch_parser.add_argument("--max-chars", type=int, default=8000, help="Characters to return")
+        # Web access is not here. Searching and fetching are the agent's commands, `puffin-search`
+        # and `puffin-fetch`: Rust binaries built from puffin-web-rs/ and installed beside `puffin`,
+        # so they work from any shell without this virtualenv. `puffin-admin fetch` was retired on
+        # 2026-09-30, as `puffin-admin search` was before it.
 
         # Command: puffin-admin gmail -- read-only mail access for the puffin agent, in the same shape
         # as search/fetch and for the same reason (a shell command the model uses reliably). It is a
@@ -1833,20 +1823,6 @@ class DreamferenceCLIController:
 
         elif args.command == "gmail":
             sys.exit(cls.handle_gmail(args))
-
-        elif args.command == "fetch":
-            from dreamference.mcp_server.web_tools import WebTools
-
-            payload = WebTools.fetch(args.url, max_chars=args.max_chars)
-            if payload.get("error"):
-                print(f"❌ {payload['error']}")
-                sys.exit(1)
-            if payload.get("title"):
-                print(f"# {payload['title']}\n")
-            print(payload.get("text", ""))
-            if payload.get("truncated"):
-                print(f"\n[truncated at {args.max_chars} chars]")
-            sys.exit(0)
 
         elif args.command == "init":
             cls.display_header()

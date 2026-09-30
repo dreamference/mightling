@@ -10,9 +10,10 @@ from dreamference.runner import codex_branded_builder as builder_module
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def test_puffin_admin_no_longer_has_a_search_subcommand():
+@pytest.mark.parametrize("retired", [["search", "q"], ["fetch", "https://example.com"]])
+def test_puffin_admin_no_longer_has_the_web_subcommands(retired):
     with pytest.raises(SystemExit):
-        DreamferenceCLIController.build_parser().parse_args(["search", "q"])
+        DreamferenceCLIController.build_parser().parse_args(retired)
 
 
 def test_the_web_commands_are_not_console_scripts():

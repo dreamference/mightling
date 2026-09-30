@@ -31,11 +31,11 @@ This installs `puffin-admin`. Put the environment on your `PATH`, for example in
 export PATH="$HOME/puffin/.venv/bin:$PATH"
 ```
 
-!!! warning "`puffin-admin` and `puffin-search` have to be on your PATH"
-    The agent searches the web by running `puffin-search`, and reads pages and Gmail by running
-    `puffin-admin fetch` and `gmail`, as shell commands. If they are not on the `PATH` the agent
-    inherits, those commands fail and the agent concludes it has no web access.
-    `puffin-admin codex build` links both into `~/.local/bin`.
+!!! warning "`puffin-admin`, `puffin-search` and `puffin-fetch` have to be on your PATH"
+    The agent searches the web and reads pages by running `puffin-search` and `puffin-fetch`, and
+    reads Gmail by running `puffin-admin gmail`, as shell commands. If they are not on the `PATH`
+    the agent inherits, those commands fail and the agent concludes it has no web access.
+    `puffin-admin codex build` links all three into `~/.local/bin`.
 
 ## 2. Start the model server
 

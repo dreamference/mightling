@@ -28,7 +28,7 @@ Everything is administered through **`puffin-admin`**, the Python CLI.
 +-----------------------v--------------------------------v---------------------------+
 |  dreamference/ (Python)                                                            |
 |   config  hardware  vllm_server  runner  chat  context_engine  mcp_server  cli     |
-|   agent tools: puffin-search, puffin-admin fetch (SearXNG), gmail (read-only)      |
+|   agent tools: gmail (read-only); puffin-search, puffin-fetch are Rust (below)     |
 +-----------------------+------------------------------------------------------------+
                         | docker run
 +-----------------------v------------------------------------------------------------+
@@ -123,6 +123,7 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 | `codex/` | Submodule: the `dgxcoder/codex` fork, pinned to `rust-v0.158.0`, never edited |
 | `codex-patches/` | Patch series applied to an exported copy at build time |
 | `puffin-rs/` | The launcher crate compiled into `puffin` |
+| `puffin-web-rs/` | `puffin-search` and `puffin-fetch`, the agent's web commands: a standalone crate installed beside `puffin` |
 | `desktop/` | Tauri project for `puffin-app` |
 | `dreamference/web_canvas.py` | `puffin-admin web` status page |
 | `.github/workflows/release.yml` | Manually triggered release: Python dist, desktop bundles, `puffin` binaries |

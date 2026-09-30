@@ -1,6 +1,6 @@
 # Puffin — Changes Made to Codex
 
-**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0016` bring it to 14 patches and 21,342 bytes (2026-09-30: `0010` also hides `/pets`, `0015` drops Codex's own startup tips and promotions, and `0001` renames the last Codex names found on screen — the slash-command descriptions, the Full Access warning in `/permissions`, and `puffin exec`'s reply label), touching 24 upstream files, under the 22,000-byte limit `test_the_patches_stay_small` enforces. The limit was 20,000 until those names; it is raised explicitly, and only by what a hook needs. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`.
+**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0016` bring it to 14 patches and 21,342 bytes (2026-09-30: `0010` also hides `/pets`, `0015` drops Codex's own startup tips and promotions, and `0001` renames the last Codex names found on screen — the slash-command descriptions, the Full Access warning in `/permissions`, and `puffin exec`'s reply label), touching 24 upstream files, under the 22,000-byte limit `test_the_patches_stay_small` enforces. The limit was 20,000 until those names; it is raised explicitly, and only by what a hook needs. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`. The agent's web commands, `puffin-search` and `puffin-fetch`, are Rust binaries from the standalone crate `puffin-web-rs/` since 2026-09-30 (§4.1).
 **Supersedes:** `DREAMFERENCE_CODEX.md`, which describes the older setup where an upstream `codex` on PATH was launched from Python.
 **Upstream:** [openai/codex](https://github.com/openai/codex), release `rust-v0.158.0`.
 
@@ -18,7 +18,8 @@ This document lists every change and where it lives.
 | Submodule | `codex/` (shallow) | Pinned to the `rust-v0.158.0` tag commit (`064c6b8`). **Never modified.** |
 | Patches | `codex-patches/00NN-*.patch` | Small unified diffs with one line of context, applied in file-name order: renamed strings, the launcher hook, and one-line switches that hide or reroute commands (§3). Numbers `0003`–`0004` are unused; they belonged to the pre-minimisation series. |
 | Launcher | `puffin-rs/` | Puffin's own Rust crate. It is kept as source, not as a patch. |
-| Builder | `dreamference/runner/codex_branded_builder.py` | Turns the four inputs above into the installed binary. |
+| Web commands | `puffin-web-rs/` | `puffin-search` and `puffin-fetch`, the commands the prompt gives the model for the web. A standalone crate, built beside Codex rather than inside it (§4.1). |
+| Builder | `dreamference/runner/codex_branded_builder.py` | Turns the inputs above into the installed binaries. |
 
 The patches are applied to an **exported copy** at build time, never to the submodule. The fork therefore stays byte-identical to upstream. Moving to a newer Codex means bumping the submodule and refreshing whichever hunks no longer apply (§6).
 
@@ -50,6 +51,7 @@ Running `cargo` inside `codex/` is forbidden: even `cargo tree` rewrites the sub
 
    Each is written to a temporary name and renamed into place. `~/.local/bin/puffin` is then symlinked to the installed binary. The helper is still found through the link, because Codex resolves its own executable path. The link only replaces a missing file or an existing symlink.
 7. **Stamp.** A `build-key` file records a hash of every input: the source commit, the patch bytes, the launcher source and the profile overrides. An unchanged tree is not rebuilt; any change to an input triggers a rebuild.
+8. **Web commands** (`build_web_tools()`, run first and independently of steps 0–7). `cargo build --release --locked --bin puffin-search --bin puffin-fetch` in `puffin-web-rs/` itself, against its own committed `Cargo.lock`, with `CARGO_TARGET_DIR=~/.cache/dreamference/puffin-web/target`. The two binaries are installed beside `puffin` the same way (temporary name, then rename), linked as `~/.local/bin/puffin-search` and `~/.local/bin/puffin-fetch`, and stamped in their own `web-build-key` (a hash of the crate's source). A change to the crate never relinks Codex, and a Codex rebuild never recompiles the crate. `CodexInstaller.is_installed()` requires both builds to be current. The helper behind it, `build_crate()`, takes any standalone crate of Puffin commands, so a later one (`puffin-code-rs/`, `DREAMFERENCE_PUFFIN_CODE_INDEX.md` §4.2) can use it as it is.
 
 **Host requirements:** Rust through rustup (the toolchain version is pinned by `codex-rs/rust-toolchain.toml` and fetched on first use), `git`, `tar`, `perl` and a C compiler. No `libssl-dev` (the launcher crate enables `openssl-sys/vendored`, §4) and no `libcap-dev`: the bundled `bwrap` binary is not built, and Codex falls back to the system's `/usr/bin/bwrap`.
 
@@ -134,7 +136,7 @@ This is the Rust port of what the Python `puffin` entry point used to do before 
    - one reasoning level, `none`;
    - `visibility = "list"`;
    - `tool_mode = "code_mode"`, so the model gets Code Mode's `exec` tool;
-   - `base_instructions`: the longest bundled template, passed through `rebrand()` (the opening sentence, which also claims a GPT model, becomes `You are Puffin, a coding agent.`, and every later `Codex` becomes `Puffin`), followed by `WEB_ACCESS_INSTRUCTIONS`, which tells the model to use `puffin-search` and `puffin-admin fetch`, then the Gmail block from step 7 if any.
+   - `base_instructions`: the longest bundled template, passed through `rebrand()` (the opening sentence, which also claims a GPT model, becomes `You are Puffin, a coding agent.`, and every later `Codex` becomes `Puffin`), followed by `WEB_ACCESS_INSTRUCTIONS`, which tells the model to use `puffin-search` and `puffin-fetch` (§4.1), then the Gmail block from step 7 if any.
 9. **Edits `$CODEX_HOME/config.toml` with `toml_edit`.** Editing the document rather than appending text means a top-level key can never be absorbed into the preceding table, which twice stopped Codex from starting. It sets:
    - `model_catalog_json`, always;
    - `suppress_unstable_features_warning = true` and `check_for_update_on_startup = false`, only if absent. The update check would offer to replace Puffin with upstream Codex.
@@ -149,7 +151,7 @@ The hook then parses the result with `help::parse` (`help.rs`), not `MultitoolCl
 
 | Module | Reached from | What it does |
 | --- | --- | --- |
-| `update.rs` | `puffin update` (patch `0008`) | Asks the GitHub API for the latest *published* release of `dgxcoder/dgxcoder`; drafts and pre-releases are not offered. The repo is private, so it authenticates with `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`. It compares the release with `PUFFIN_VERSION`; a source build has none and always installs. It downloads the gzipped `puffin` and `codex-code-mode-host` and the `sha256sums` file, verifies both archives before replacing either, and swaps them in next to the running executable. |
+| `update.rs` | `puffin update` (patch `0008`) | Asks the GitHub API for the latest *published* release of `dgxcoder/dgxcoder`; drafts and pre-releases are not offered. The repo is private, so it authenticates with `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`. It compares the release with `PUFFIN_VERSION`; a source build has none and always installs. It downloads the gzipped `puffin` and `codex-code-mode-host` and the `sha256sums` file, and the gzipped `puffin-search` and `puffin-fetch` when the release carries them (older releases do not; the installed ones are then kept), verifies every archive before replacing any, swaps them in next to the running executable, and links the web commands into `~/.local/bin`. |
 | `usage.rs` | `/usage` (patch `0011`) | Formats the session's input tokens (cached / new), output tokens (plus reasoning tokens), total, and the last request's share of the context window, or "No tokens used yet in this session." |
 | `app.rs` | `puffin app` (step 2) | Opens `puffin-app`. |
 | `help.rs` | every parse | Rebrands the help tree (above). |
@@ -167,6 +169,38 @@ The crate's unit tests cover:
 
 Run them in the **export** directory, never in `codex/`: `cargo test --release -p puffin-launcher`. `tests/test_puffin_slash_commands.py` drives every slash command against the installed binary on a pseudo-terminal. It skips its live cases when no model server answers.
 
+### 4.1 The web commands (`puffin-web-rs/`)
+
+`puffin-search` and `puffin-fetch` are the two shell commands `WEB_ACCESS_INSTRUCTIONS` gives the model: search through the SearXNG instance on `127.0.0.1:8888`, then fetch a promising result as readable text. Until 2026-09-30 they were Python, `puffin-search` a console script of the repository's virtualenv and fetching a `puffin-admin` subcommand, so the model's web access depended on that virtualenv staying on the `PATH` of the shell `puffin` gives it. When it was not, every call ended in exit 127 and the model concluded it had no web. They are now static Rust binaries installed beside `puffin` (§2, step 8), with no Python involved.
+
+**Where the crate lives.** A standalone crate with its own lockfile, not a module of the launcher and not a member of `puffin-code-rs/`:
+- inside the launcher, every change would relink the 330 MB Codex binary, a link step that has to be scheduled around the model server's memory; the crate alone builds in seconds while the model serves;
+- `puffin-code-rs/` was being created at the same time. Both crates follow the same shape (own lockfile, own target directory, `build_crate()`), so they can become members of one Cargo workspace later without changing how either is built or installed.
+
+**Behaviour carried over from `WebTools`** (`dreamference/mcp_server/web_tools.py`):
+- **Search:** `GET /search?q=…&format=json&categories=general&language=en` on `DREAMFERENCE_SEARXNG_URL` (default `http://127.0.0.1:8888`); `-n N` results (default 5, at least 1), up to three direct answers, snippets cut at 200 characters in text mode; `--json` prints `{query, result_count, answers, results: [{title, url, snippet, engine}]}`.
+- **Its errors:** an empty query; an unreachable instance, with the `docker run` line that starts it; a response that is not JSON, with the `search.formats` hint; and a search in which *every* engine failed, which names each engine and its reason and suggests restarting the container, because an empty result there once read as "the web has nothing on this".
+- **Fetch:** http and https only (a `file://` argument is refused before any request, with `urlparse`'s wording); 25 s to connect and per read, not in total; up to 10 redirects; a 5 MiB cap enforced while the body streams; `--max-chars` (default 8,000, at most 100,000) counted in characters; `--json` prints `{url, final_url, status, content_type, title, text, truncated}`.
+- **Text extraction:** `script`, `style`, `noscript`, `svg`, `canvas`, `template`, `iframe` and `form` are dropped with their subtrees; every other text node is joined with a newline; runs of spaces and tabs become one space and blank-line runs become one blank line. The title is the first `<title>`. Non-HTML responses (plain text, JSON, source) are returned as they are. The tree comes from html5ever, walked iteratively (20,000 nested elements parse without overflowing the stack).
+- **Output and exit codes:** the same text layout, `❌`/`💡` lines on stdout, exit 1 on a reported error and 2 on a usage error.
+
+**Deliberate differences, each found in the comparison below:**
+- **Character sets.** The charset comes from `Content-Type`, then from a `<meta>` declaration in the first 1,024 bytes, then UTF-8; a byte-order mark overrides all three. `requests` decodes any `text/*` response that names no charset as ISO-8859-1 and never reads `<meta>`, which garbled docs.python.org (`re â\x80\x94 Regular expression…` in the title), doc.rust-lang.org, MDN and gnu.org's language list.
+- **SearXNG's HTTP errors** are reported as the status it answered, with the `search.formats` hint for 403 (its answer to a JSON request when the format is off), where the Python version called any status "unreachable" and suggested starting an instance that was running.
+- **Proxies.** SearXNG is always reached directly. `puffin-fetch` honours `<scheme>_proxy` and `all_proxy` (lower case over upper) and skips hosts `no_proxy` names (exact host, domain suffix, `*`), as `requests` does, minus address ranges (`10.0.0.0/8`). ureq's own detection would ignore `no_proxy`.
+- **Cookies** are kept for the life of one command, as `requests` keeps them across a redirect chain. Without them theweathernetwork.com ended on a `?_guid_iss_=1` bounce URL; nothing is written to disk.
+- **JSON output** is UTF-8 rather than `\uXXXX` escapes, and `final_url` is normalised (`https://example.com/` for `https://example.com`).
+
+**Measured on 2026-09-30:**
+- **Text:** 16 real pages (Wikipedia, BBC Weather, docs.python.org, doc.rust-lang.org, MDN, GitHub page, raw file and API, Hacker News, gnu.org, a weather site, httpbin's HTML page, a redirect, two error pages) fetched by both implementations: identical text on every page served with a charset or plain ASCII; on the four affected by the ISO-8859-1 default, a word-sequence similarity of 0.978–0.999 in which every difference is Python's mojibake. Titles identical except the docs.python.org one. The two HTTP errors (404, 403) are reported by both.
+- **Search:** six queries through both, back to back: the same five URLs for four, and 3 or 4 of 5 shared for the other two, which is SearXNG's engine variance between two calls rather than a difference in the client.
+- **Start-up:** 1.4 ms per `puffin-search --help` against 151 ms for the Python console script; a search round trip 0.2–0.35 s against 0.4–0.7 s.
+- **In a session** (2026-10-01, rebuilt `puffin`, `puffin exec -s workspace-write`, asked for Lisbon's weather): the model ran `puffin-search` and `puffin-fetch` from its shell with no virtualenv on `PATH`. Every SearXNG engine was rate-limited at the time; `puffin-search` said so, naming each engine, and the model went on to fetch a forecast with `puffin-fetch` and cited it.
+
+**Tests:** 22 unit tests (HTML extraction, charset choice, URL checks, SearXNG mapping and the failed-engines error, rendering, proxy choice) and 12 that run the two binaries against a local server standing in for SearXNG and for web pages: query parameters, redirects and `final_url`, 403 and non-JSON answers, the size cap, no proxy for SearXNG, and `http_proxy`/`no_proxy` for fetch. `cargo test --release --locked` in `puffin-web-rs/`; the release job runs them too. `tests/test_web_commands.py` and `tests/test_codex_branded_builder.py` cover the build, the install, the links, and that neither command is a console script any more (in a shell with the virtualenv active, `.venv/bin` comes first on `PATH`, so a leftover script would shadow the binary).
+
+**Known duplication.** `WebTools` stays, because the MCP server's `web_search` and `web_fetch` tools use it, so the same behaviour now exists twice and is kept in step by hand. The follow-up is to have `WebTools` run the two binaries with `--json`; the MCP server would then depend on a Rust build being installed, which is why it was not done here.
+
 ---
 
 ## 5. What is deliberately not changed
@@ -175,7 +209,7 @@ Run them in the **export** directory, never in `codex/`: `cargo test --release -
 - **`codex-code-mode-host`**, crate names and the `CODEX_HOME` variable name: renaming them would break lookups inside Codex. The *folder* it points at is Puffin's own (§4).
 - **OpenAI-hosted features.** Gmail and the other connectors (`codex_apps`) need a ChatGPT login and run on OpenAI's servers, so they never activate in an `--oss` session. Local mail access is `puffin-admin gmail` (`DREAMFERENCE_PUFFIN_GMAIL.md`). Upstream's `app` is replaced by the launcher (§4, step 2).
 - **Still visible and unchanged:** `/model` (vLLM serves one model, so the picker lists one entry), `/memories`, `/import`, `/ide`, `/daemon`, and the `plugin` / `doctor` subcommands. The last two still refer to OpenAI's marketplace and to `chatgpt.com` connectivity checks. These were reviewed on 2026-09-28 and left for later decisions.
-- **The tools the agent calls.** The launcher is Rust, but `puffin-search`, `puffin-admin fetch` and `puffin-admin gmail` are Python.
+- **`puffin-admin gmail`**, the agent's mail command, is still Python: it is a thin client of the Gmail service the web UI runs. The web commands became Rust on 2026-09-30 (§4.1).
 
 ---
 

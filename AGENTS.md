@@ -4,7 +4,7 @@
 
 ```bash
 puffin-search "your query here"              # search; -n N for more results (default 5)
-puffin-admin fetch "https://example.com"     # fetch a page as readable text
+puffin-fetch "https://example.com"           # fetch a page as readable text
 ```
 
 Do not use `curl` or `wget` for this — the sandbox usually blocks them, which looks like the site

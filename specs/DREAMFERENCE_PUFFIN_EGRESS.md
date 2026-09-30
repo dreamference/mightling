@@ -23,7 +23,7 @@ Make "your code stays on your machine" something a user can check, not a promise
 - **Our own record:** tracing puffin found five channels to OpenAI or GitHub. One needed a ChatGPT login; four needed none: Statsig metrics, featured plugins, a startup `git ls-remote` and the TUI announcement tip. All five are closed (`0013`, `0015`), and traced `exec` and TUI sessions now reach only `127.0.0.1:8000` (vLLM) and `127.0.0.1:8767` (the Gmail service). Phase 1 makes that trace a command anyone can rerun; Phase 2 makes a regression fail locally instead of leaking.
 
 **Non-goals:**
-- **Calling it air-gapped.** Web search and `puffin-admin fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them.
+- **Calling it air-gapped.** Web search and `puffin-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them.
 - **Inbound exposure.** The model server listening on `0.0.0.0:8000` is accepted by design: Puffin assumes the local network is trusted ([README](./README.md), "Accepted by design").
 - **Containers.** The web chat's own egress (Onyx, SearXNG, the sidecars) is out of scope. Onyx's telemetry is handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md)).
 
@@ -136,7 +136,7 @@ The ledger is appended to `~/.puffin/airlock/ledger.jsonl`:
 ## 5. Search and fetch, honestly
 
 - **Search goes out by design:** `puffin-search` reaches SearXNG on `127.0.0.1:8888`, and SearXNG queries the upstream engines from outside the airlock. The ledger cannot see those queries. The airlock's own docs and the agent's prompt must say plainly that searches leave the machine through SearXNG.
-- **`puffin-admin fetch`** connects directly to the URL, so it fails inside the airlock. It fails with its existing error path, and the ledger records the lookup.
+- **`puffin-fetch`** connects directly to the URL (or through `https_proxy` when set), so it fails inside the airlock. It fails with its existing error path, and the ledger records the lookup.
 
 **The prompt must match the mode.** The launcher writes the model catalog, including `WEB_ACCESS_INSTRUCTIONS`, at every start. In airlock mode it writes a variant:
 - search is available, and its queries leave the machine;

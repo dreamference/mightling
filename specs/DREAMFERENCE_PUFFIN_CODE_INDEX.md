@@ -151,7 +151,7 @@ Rejected, with the reason:
 
 ### 4.2 A binary of its own: `puffin-code`
 
-The router is not compiled into `puffin`. It is a separate program, installed and linked beside `puffin`, `puffin-admin` and `puffin-search`.
+The router is not compiled into `puffin`. It is a separate program, installed and linked beside `puffin`, `puffin-admin`, `puffin-search` and `puffin-fetch`.
 
 - **Source:** the crate `puffin-code-rs/` at the repository root, a Cargo workspace of its own with its own committed `Cargo.lock`. It is not copied into the Codex export and is not a member of Codex's workspace, so it builds with `cargo build --release --locked` in its own directory and none of the builder's Codex rules (the export, the patches, no `--locked`) apply to it.
 - **Why not inside `puffin`:**
