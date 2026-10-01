@@ -131,6 +131,9 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
     for not_indexed in &answer.not_indexed {
         out.push(format!("not indexed {not_indexed}"));
     }
+    if let Some(submodules) = &answer.submodules_not_indexed {
+        out.push(format!("submodules not indexed: {submodules}"));
+    }
     if let Some(not_checked) = &answer.not_checked {
         out.push(format!("not checked {not_checked}"));
     }

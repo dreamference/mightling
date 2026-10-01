@@ -41,14 +41,50 @@ impl ChangeSet {
 /// Git's view of the working tree, computed at most once per query.
 pub struct GitView<'a> {
     repo: &'a Repo,
+    /// The submodules that are indexed (§4.3). The superproject's git sees each as one entry, so
+    /// their files are listed, and their changes found, by asking git inside each of them.
+    included: Vec<String>,
     status: Option<BTreeSet<String>>,
     diffs: HashMap<String, Option<BTreeSet<String>>>,
     all: Option<BTreeSet<String>>,
 }
 
 impl<'a> GitView<'a> {
+    /// The view for `repo`, with the submodules §4.3 includes (decided here, from the settings).
     pub fn new(repo: &'a Repo) -> Self {
-        GitView { repo, status: None, diffs: HashMap::new(), all: None }
+        let settings = crate::config::Settings::load(&repo.root);
+        let included = crate::submodules::included(&crate::submodules::evaluate(repo, &settings));
+        GitView::with_included(repo, included)
+    }
+
+    /// The view when the caller has already decided which submodules are indexed.
+    pub fn with_included(repo: &'a Repo, included: Vec<String>) -> Self {
+        GitView { repo, included, status: None, diffs: HashMap::new(), all: None }
+    }
+
+    /// Every file of an included submodule, with the submodule's path as its prefix.
+    fn submodule_files(&self, submodule: &str) -> Vec<String> {
+        git_z(&self.repo.root.join(submodule), &["ls-files", "-co", "--exclude-standard", "-z"])
+            .unwrap_or_default()
+            .into_iter()
+            .map(|file| format!("{submodule}/{file}"))
+            .collect()
+    }
+
+    /// Adds what an included submodule contributes to a set of superproject paths. Where the set
+    /// names the submodule itself (its commit moved, or its checkout is dirty) or a submodule it
+    /// is nested in, every file of it becomes a candidate: each is then confirmed against the
+    /// layer's hashes, so this over-asks and never under-reports.
+    fn expand_submodules(&self, paths: &mut BTreeSet<String>) {
+        for submodule in &self.included {
+            let moved = paths.iter().any(|path| path == submodule || submodule.starts_with(&format!("{path}/")));
+            if moved {
+                paths.extend(self.submodule_files(submodule));
+            }
+        }
+        for submodule in &self.included {
+            paths.remove(submodule);
+        }
     }
 
     /// Paths `git status` reports: modified, staged, deleted, renamed (both sides) and untracked.
@@ -56,21 +92,15 @@ impl<'a> GitView<'a> {
         if self.status.is_none() {
             let mut paths = BTreeSet::new();
             if self.repo.is_git {
-                if let Ok(entries) = git_z(&self.repo.root, &["status", "--porcelain", "-z", "-uall"]) {
-                    let mut iter = entries.into_iter();
-                    while let Some(entry) = iter.next() {
-                        if entry.len() < 4 {
-                            continue;
-                        }
-                        let code = &entry[..2];
-                        paths.insert(entry[3..].to_string());
-                        // A rename or copy is followed by its source path.
-                        if code.contains('R') || code.contains('C') {
-                            if let Some(source) = iter.next() {
-                                paths.insert(source);
-                            }
-                        }
-                    }
+                paths.extend(status_paths(&self.repo.root));
+                self.expand_submodules(&mut paths);
+                // The superproject can be told to ignore a submodule's dirt (`ignore = dirty`), so
+                // each included submodule is asked itself as well.
+                for submodule in &self.included {
+                    paths.extend(status_paths(&self.repo.root.join(submodule)).into_iter().map(|path| format!("{submodule}/{path}")));
+                }
+                for submodule in &self.included {
+                    paths.remove(submodule);
                 }
             }
             self.status = Some(paths);
@@ -83,9 +113,11 @@ impl<'a> GitView<'a> {
     pub fn diff(&mut self, commit: &str) -> Option<&BTreeSet<String>> {
         if !self.diffs.contains_key(commit) {
             let paths = if self.repo.is_git {
-                git_z(&self.repo.root, &["diff", "--name-only", "-z", "--no-renames", commit, "HEAD", "--"])
-                    .ok()
-                    .map(|v| v.into_iter().collect())
+                git_z(&self.repo.root, &["diff", "--name-only", "-z", "--no-renames", commit, "HEAD", "--"]).ok().map(|v| {
+                    let mut paths: BTreeSet<String> = v.into_iter().collect();
+                    self.expand_submodules(&mut paths);
+                    paths
+                })
             } else {
                 None
             };
@@ -97,15 +129,42 @@ impl<'a> GitView<'a> {
     /// Every tracked and untracked-but-not-ignored file (`git ls-files -co --exclude-standard`).
     pub fn all_files(&mut self) -> &BTreeSet<String> {
         if self.all.is_none() {
-            let files = if self.repo.is_git {
+            let mut files: BTreeSet<String> = if self.repo.is_git {
                 git_z(&self.repo.root, &["ls-files", "-co", "--exclude-standard", "-z"]).map(|v| v.into_iter().collect()).unwrap_or_default()
             } else {
                 BTreeSet::new()
             };
+            for submodule in &self.included {
+                files.remove(submodule);
+                files.extend(self.submodule_files(submodule));
+            }
             self.all = Some(files);
         }
         self.all.as_ref().unwrap()
     }
+}
+
+/// The paths `git status` reports in `dir`: modified, staged, deleted, renamed (both sides) and
+/// untracked.
+fn status_paths(dir: &Path) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    if let Ok(entries) = git_z(dir, &["status", "--porcelain", "-z", "-uall"]) {
+        let mut iter = entries.into_iter();
+        while let Some(entry) = iter.next() {
+            if entry.len() < 4 {
+                continue;
+            }
+            let code = &entry[..2];
+            paths.insert(entry[3..].to_string());
+            // A rename or copy is followed by its source path.
+            if code.contains('R') || code.contains('C') {
+                if let Some(source) = iter.next() {
+                    paths.insert(source);
+                }
+            }
+        }
+    }
+    paths
 }
 
 /// One layer's changed set.

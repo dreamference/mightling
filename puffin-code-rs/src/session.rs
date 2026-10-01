@@ -29,7 +29,7 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
     if flock(&lock, false).is_err() {
         return Ok(()); // another session owns this repository
     }
-    let has_index = crate::prompt::block(&repo) == Some(crate::prompt::READY);
+    let has_index = crate::prompt::ready(&repo);
     if !has_index {
         let _ = std::fs::write(state.join("code_index.building"), "");
     }
@@ -90,7 +90,7 @@ fn wants_exact(repo: &Repo, settings: &Settings) -> bool {
 }
 
 fn start(repo: &Repo, settings: &Settings, exact: bool) -> Result<Option<std::process::Child>> {
-    index::write_cbmignore(repo, false)?;
+    index::write_cbmignore(repo, settings)?;
     let (plan, _) = plan::build(repo, settings, exact);
     if plan.runs.is_empty() {
         return Ok(None);

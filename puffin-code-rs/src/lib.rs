@@ -24,6 +24,7 @@ pub mod router;
 pub mod scip_store;
 pub mod scip_symbol;
 pub mod session;
+pub mod submodules;
 pub mod textscan;
 
 /// The versions of the external tools this build of puffin-code knows the output of. The schema

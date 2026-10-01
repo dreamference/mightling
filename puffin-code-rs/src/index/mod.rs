@@ -25,7 +25,7 @@ use crate::requests::{self, Request};
 use host::{Host, SystemdHost};
 
 /// `puffin-code index`: run the plan now when this process can create scopes, else queue it.
-pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, include_submodules: bool, wait: bool) -> Result<()> {
+pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, wait: bool) -> Result<()> {
     let host = SystemdHost;
     if !host.can_create_scopes() {
         let request = if exact { Request::IndexExact } else { Request::Index };
@@ -33,7 +33,7 @@ pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, include_sub
         println!("queued: the puffin session outside the sandbox will re-index when the model is idle");
         return Ok(());
     }
-    write_cbmignore(repo, include_submodules)?;
+    write_cbmignore(repo, settings)?;
     // Typed by the user: the on-demand indexers (scip-clang, scip-go) run too.
     let (plan, skipped) = plan::build_with(repo, settings, exact, true);
     for why in &skipped {
@@ -107,18 +107,24 @@ pub fn running(repo: &Repo) -> bool {
         .unwrap_or(false)
 }
 
-const CBMIGNORE_BEGIN: &str = "# BEGIN puffin-code managed: submodules are not indexed (puffin-code index --include-submodules)";
+const CBMIGNORE_BEGIN: &str = "# BEGIN puffin-code managed: submodules that are not indexed (see `puffin-code submodules`)";
+const CBMIGNORE_BEGIN_PREFIX: &str = "# BEGIN puffin-code managed";
 const CBMIGNORE_END: &str = "# END puffin-code managed";
 
-/// Keeps the managed block of `.cbmignore` listing the submodules (spec §4.1), and keeps the file
-/// out of `git status` through `.git/info/exclude`.
-pub fn write_cbmignore(repo: &Repo, include_submodules: bool) -> Result<()> {
+/// Keeps the managed block of `.cbmignore` listing the submodules §4.3 leaves out (spec §4.1),
+/// and keeps the file out of `git status` through `.git/info/exclude`.
+///
+/// The block is output, rewritten from the policy before every run: editing it changes nothing
+/// for longer than one run. The policy is decided for the main worktree, whose index this is.
+pub fn write_cbmignore(repo: &Repo, settings: &Settings) -> Result<()> {
     let path = repo.main_root.join(".cbmignore");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let main = Repo { root: repo.main_root.clone(), main_root: repo.main_root.clone(), is_git: repo.is_git };
+    let excluded: Vec<String> = crate::submodules::evaluate(&main, settings).into_iter().filter(|s| !s.indexed).map(|s| s.path).collect();
     let mut kept: Vec<&str> = Vec::new();
     let mut inside = false;
     for line in existing.lines() {
-        if line == CBMIGNORE_BEGIN {
+        if line.starts_with(CBMIGNORE_BEGIN_PREFIX) {
             inside = true;
         } else if line == CBMIGNORE_END {
             inside = false;
@@ -127,14 +133,13 @@ pub fn write_cbmignore(repo: &Repo, include_submodules: bool) -> Result<()> {
         }
     }
     let mut text = kept.join("\n");
-    let submodules = repo.submodules();
-    if !include_submodules && !submodules.is_empty() {
+    if !excluded.is_empty() {
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }
         text.push_str(CBMIGNORE_BEGIN);
         text.push('\n');
-        for submodule in &submodules {
+        for submodule in &excluded {
             text.push_str(&format!("{submodule}/\n"));
         }
         text.push_str(CBMIGNORE_END);

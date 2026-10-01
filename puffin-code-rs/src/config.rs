@@ -30,6 +30,11 @@ pub struct Settings {
     pub semantic: bool,
     /// Whether indexing is on at all.
     pub enabled: bool,
+    /// Tracked files above which a submodule that is yours is not indexed automatically (§4.3).
+    /// Honoured only from a file outside the repository: see `submodules::evaluate`.
+    pub submodule_max_files: usize,
+    /// The file the settings were read from, if any.
+    pub config_path: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -46,6 +51,8 @@ impl Default for Settings {
             stale_commits: 20,
             semantic: false,
             enabled: true,
+            submodule_max_files: 5000,
+            config_path: None,
         }
     }
 }
@@ -55,7 +62,8 @@ impl Settings {
     /// `~/.config/dreamference/config.toml`, the first that exists; every key is optional.
     pub fn load(repo_root: &Path) -> Settings {
         let mut settings = Settings::default();
-        let Some(table) = config_file(repo_root).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok()) else {
+        settings.config_path = config_file(repo_root);
+        let Some(table) = settings.config_path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.parse::<toml::Table>().ok()) else {
             return settings;
         };
         let int = |key: &str| table.get(key).and_then(toml::Value::as_integer).filter(|v| *v >= 0).map(|v| v as u64);
@@ -70,6 +78,7 @@ impl Settings {
         if let Some(v) = int("code_index_small_ceiling_mb") { settings.small_ceiling_mb = v }
         if let Some(v) = int("code_index_min_interval_s") { settings.min_interval_s = v }
         if let Some(v) = int("code_index_stale_commits") { settings.stale_commits = v }
+        if let Some(v) = int("code_index_submodule_max_files") { settings.submodule_max_files = v as usize }
         if let Some(v) = table.get("puffin_code_semantic").and_then(toml::Value::as_bool) { settings.semantic = v }
         if let Some(v) = table.get("code_index_enabled").and_then(toml::Value::as_bool) { settings.enabled = v }
         if let Ok(host) = std::env::var("DREAMFERENCE_VLLM_HOST") {

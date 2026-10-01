@@ -265,6 +265,31 @@ pub fn detect(repo: &Repo) -> Vec<Target> {
     out
 }
 
+/// The targets inside the submodules §4.3 includes, with each root carrying the submodule's path
+/// as its prefix, and what was left out and why.
+///
+/// A submodule is treated as the superproject is: its root and its immediate subdirectories.
+/// Only the static indexers run there. The executing ones (rust-analyzer, scip-java,
+/// scip-dotnet) build the project, and a build tool must never write into a submodule's
+/// checkout; they need a scratch copy of it, which is not built yet.
+pub fn detect_in_submodules(repo: &Repo, decisions: &[crate::submodules::Submodule]) -> (Vec<Target>, Vec<String>) {
+    let mut targets = Vec::new();
+    let mut skipped = Vec::new();
+    for submodule in decisions.iter().filter(|s| s.indexed) {
+        let dir = repo.root.join(&submodule.path);
+        let inside = Repo { root: dir.clone(), main_root: dir, is_git: true };
+        for target in detect(&inside) {
+            let root = if target.root.is_empty() { submodule.path.clone() } else { format!("{}/{}", submodule.path, target.root) };
+            if target.kind == Kind::Executing {
+                skipped.push(format!("{} for {root}: not run in a submodule yet (it needs a scratch copy of the checkout)", target.indexer));
+            } else {
+                targets.push(Target { root, ..target });
+            }
+        }
+    }
+    (targets, skipped)
+}
+
 /// A short, stable id for a repository, for unit and directory names.
 pub fn repo_id(repo: &Repo) -> String {
     use sha2::{Digest, Sha256};
@@ -369,7 +394,8 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
                 env = sh_quote(&environment.to_string_lossy()),
                 node = sh_quote(&node_real.to_string_lossy()),
                 js = sh_quote(&js.to_string_lossy()),
-                name = sh_quote(if target.root.is_empty() { "root" } else { &target.root }),
+                // A root inside a submodule has a `/` in it, which a project name must not.
+                name = sh_quote(&if target.root.is_empty() { "root".to_string() } else { target.root.replace('/', "-") }),
                 root = sh_quote(if target.root.is_empty() { "." } else { &target.root }),
                 out = sh_quote(&raw_file.to_string_lossy()),
             );
@@ -658,7 +684,9 @@ pub fn build_with(repo: &Repo, settings: &Settings, exact: bool, on_demand: bool
         None => skipped.push("codebase-memory-mcp is not installed (`puffin-admin code setup`)".to_string()),
     }
     let trusted = crate::config::is_trusted(&repo.main_root);
-    for target in detect(repo) {
+    let (in_submodules, skipped_in_submodules) = detect_in_submodules(repo, &crate::submodules::evaluate(repo, settings));
+    skipped.extend(skipped_in_submodules);
+    for target in detect(repo).into_iter().chain(in_submodules) {
         if target.kind == Kind::Executing && !(exact && trusted) {
             if !trusted {
                 skipped.push(format!("{} for {}: the repository is not trusted", target.indexer, display_root(&target.root)));

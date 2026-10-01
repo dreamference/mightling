@@ -69,12 +69,19 @@ enum Command {
         /// Also run the executing exact indexers (Rust, Java, .NET) in a trusted repository.
         #[arg(long)]
         exact: bool,
-        /// Include submodules in the universal layer.
-        #[arg(long)]
+        /// Removed: it lasted one run. Use `puffin-code submodules include <path>`.
+        #[arg(long, hide = true)]
         include_submodules: bool,
         /// Run in the foreground and wait for the result.
         #[arg(long)]
         wait: bool,
+    },
+    /// Which submodules are indexed and why; `include`, `exclude` or `auto <path>` records your choice.
+    Submodules {
+        /// include, exclude or auto.
+        verb: Option<String>,
+        /// The submodule's path or name.
+        path: Option<String>,
     },
     /// Delete this repository's indexes.
     Forget,
@@ -138,7 +145,26 @@ fn run(command: Command) -> anyhow::Result<ExitCode> {
         }
         Command::Session { parent_pid } => puffin_code::session::run(repo, settings, parent_pid).map(|_| ExitCode::SUCCESS),
         Command::Index { exact, include_submodules, wait } => {
-            puffin_code::index::request_or_run(&repo, &settings, exact, include_submodules, wait)?;
+            if include_submodules {
+                anyhow::bail!("--include-submodules is gone (it lasted one run): choose per submodule with `puffin-code submodules include <path>`");
+            }
+            puffin_code::index::request_or_run(&repo, &settings, exact, wait)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Submodules { verb, path } => {
+            let lines = match (verb, path) {
+                (None, _) => puffin_code::submodules::listing(&repo, &puffin_code::submodules::evaluate(&repo, &settings)),
+                (Some(verb), Some(path)) => {
+                    let lines = puffin_code::submodules::change(&repo, &settings, &verb, &path)?;
+                    // A change adds or drops the submodule's files: ask for a re-index, as a
+                    // query that found changed files does. Without a session, the next launch or
+                    // `puffin-code index` picks it up.
+                    let _ = puffin_code::requests::append(&repo.state_dir(), puffin_code::requests::Request::Index);
+                    lines
+                }
+                (Some(verb), None) => anyhow::bail!("`puffin-code submodules {verb}` needs the submodule's path"),
+            };
+            println!("{}", lines.join("\n"));
             Ok(ExitCode::SUCCESS)
         }
         Command::Supervise { plan } => puffin_code::index::supervise(&plan).map(|_| ExitCode::SUCCESS),

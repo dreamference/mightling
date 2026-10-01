@@ -25,6 +25,7 @@ use crate::paths::Repo;
 use crate::requests;
 use crate::scip_store::{ScipStore, ROLE_DEFINITION, ROLE_IMPORT, ROLE_READ, ROLE_WRITE};
 use crate::scip_symbol::{self, query_segments};
+use crate::submodules::{self, Submodule};
 use crate::textscan;
 
 /// How far a row can be trusted.
@@ -76,6 +77,9 @@ pub struct Answer {
     /// Set when the changed set was too large to search (§7.3): the mandatory `not checked` line.
     pub not_checked: Option<String>,
     pub not_indexed: Vec<String>,
+    /// The submodules left out of the index and why (§4.3): a definition that lives in one is
+    /// reported as not found, and this line is what says why.
+    pub submodules_not_indexed: Option<String>,
     pub unresolved: Vec<String>,
     pub notes: Vec<String>,
     /// Rows dropped because their file was deleted since the snapshot.
@@ -129,12 +133,16 @@ pub struct Context {
     pub method: Method,
     /// `store_meta.mutation_gen` when the graph was opened (§7.5's concurrency rule).
     pub graph_generation: Option<String>,
+    /// Every submodule with its decision (§4.3), recomputed for this query.
+    pub submodules: Vec<Submodule>,
 }
 
 impl Context {
     /// Opens both layers and computes their changed sets.
     pub fn load(repo: Repo, settings: Settings) -> Result<Context> {
-        let mut git = GitView::new(&repo);
+        let decisions = submodules::evaluate(&repo, &settings);
+        let left_out: Vec<String> = decisions.iter().filter(|s| !s.indexed).map(|s| s.path.clone()).collect();
+        let mut git = GitView::with_included(&repo, submodules::included(&decisions));
         // puffin-code's own state (stores, manifests, requests) is never part of a changed set,
         // whether or not the repository ignores it.
         let state_prefix = repo
@@ -155,13 +163,12 @@ impl Context {
         let graph_changes = match &graph {
             Some(graph) => {
                 let excluded: Vec<String> = graph.not_indexed()?.into_iter().collect();
-                let submodules = repo.submodules();
                 let is_excluded = |path: &str| {
                     is_state(path) || excluded.iter().any(|dir| path == dir || path.starts_with(&format!("{dir}/")))
                 };
                 // Tracked files an ignore rule dropped: covered by text instead (§4.1).
                 for file in git.all_files().clone() {
-                    if !is_state(&file) && is_excluded(&file) && !submodules.iter().any(|s| file.starts_with(&format!("{s}/"))) {
+                    if !is_state(&file) && is_excluded(&file) && !left_out.iter().any(|s| file == *s || file.starts_with(&format!("{s}/"))) {
                         not_indexed_files.insert(file);
                     }
                 }
@@ -236,6 +243,7 @@ impl Context {
             not_indexed_files,
             not_indexed_dirs,
             method,
+            submodules: decisions,
         })
     }
 
@@ -336,6 +344,7 @@ impl Context {
             sources: self.sources(None),
             changed_files: self.changed.len() + self.deleted.len(),
             cursor: self.cursor(),
+            submodules_not_indexed: submodules::not_indexed_line(&self.submodules),
             tagged: true,
             ..Answer::default()
         }
@@ -883,7 +892,8 @@ impl Context {
         // The languages the repository has that no exact index covers yet, and why.
         let tools = crate::index::plan::Tools::find();
         let trusted = crate::config::is_trusted(&self.repo.main_root);
-        for target in crate::index::plan::detect(&self.repo) {
+        let (in_submodules, skipped_in_submodules) = crate::index::plan::detect_in_submodules(&self.repo, &self.submodules);
+        for target in crate::index::plan::detect(&self.repo).into_iter().chain(in_submodules) {
             let key = crate::index::store::key(target.indexer, &target.root);
             if manifest.runs.contains_key(&key) {
                 continue;
@@ -897,7 +907,10 @@ impl Context {
             };
             lines.push(format!("exact: {} for {}: {why}", target.indexer, crate::index::plan::display_root(&target.root)));
         }
-        let submodules = self.repo.submodules();
+        for why in skipped_in_submodules {
+            lines.push(format!("exact: {why}"));
+        }
+        let submodules: Vec<String> = self.submodules.iter().filter(|s| !s.indexed).map(|s| s.path.clone()).collect();
         let dirs: Vec<&String> = self
             .not_indexed_dirs
             .iter()
@@ -911,8 +924,16 @@ impl Context {
                 if files > 0 { format!("{}{files} single files (mostly binary)", if dirs.is_empty() { "" } else { "; " }) } else { String::new() }
             ));
         }
-        if !submodules.is_empty() {
-            lines.push(format!("submodules excluded: {} (`puffin-code index --include-submodules`)", submodules.join(", ")));
+        for submodule in &self.submodules {
+            lines.push(format!(
+                "submodule {}: {} ({})",
+                submodule.path,
+                if submodule.indexed { "indexed" } else { "not indexed" },
+                submodule.reason.label()
+            ));
+        }
+        if !self.submodules.is_empty() {
+            lines.push("submodules: `puffin-code submodules` shows the evidence; `include|exclude|auto <path>` changes it".to_string());
         }
         if !crate::config::is_trusted(&self.repo.main_root) {
             lines.push("untrusted: executing indexers (Rust, Java, .NET) do not run here; trust the project in puffin to enable them".to_string());
