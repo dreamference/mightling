@@ -17,7 +17,7 @@ import pytest
 from dreamference.night_shift import NightShiftQueue
 from dreamference.night_shift.night_shift_task_run import NUDGE
 from dreamference.swe_bench import (
-    SweBenchCommand, SweBenchDocker, SweBenchEvaluator, SweBenchHarness, SweBenchImages,
+    SweBenchCodeIndex, SweBenchCommand, SweBenchDocker, SweBenchEvaluator, SweBenchHarness, SweBenchImages,
     SweBenchInstanceRun, SweBenchReport, SweBenchRunStore, SweBenchRunner, SweBenchRuntime,
     SweBenchSettings,
 )
@@ -119,6 +119,12 @@ class FakeDocker:
                                BASE_COMMIT=box["env"]["BASE_COMMIT"])
             result = subprocess.run(["bash", "-c", args[at + 2]], capture_output=True, text=True, env=environment)
             return subprocess.CompletedProcess(args, result.returncode, result.stdout, result.stderr)
+        if verb == "create":
+            return done(0, f"copy-of-{args[1].split(':')[-1]}\n")
+        if verb == "cp":
+            Path(args[-1]).mkdir(parents=True)
+            (Path(args[-1]) / "widget.py").write_text("def widget():\n    return 1\n")
+            return done()
         if verb == "stop":
             for process in self.processes:
                 process.stopped = True
@@ -160,6 +166,15 @@ class FakeDocker:
             return process
         if mode == "error":
             return FakeProcess(1)
+        if "puffin-code" in box["env"].get("PATH", ""):
+            # An agent that has the index uses it once before it edits.
+            stdout.write((json.dumps({"type": "item.completed", "item": {
+                "type": "command_execution", "command": "/bin/bash -lc 'puffin-code refs widget'", "exit_code": 0}}) + "\n").encode())
+        stdout.write((json.dumps({"type": "item.completed", "item": {
+            "type": "command_execution", "command": "/bin/bash -lc 'grep -rn widget .'", "exit_code": 0}}) + "\n").encode())
+        stdout.write((json.dumps({"type": "turn.completed", "usage": {
+            "input_tokens": 1000, "cached_input_tokens": 900, "output_tokens": 50}}) + "\n").encode())
+        stdout.flush()
         acts = mode in ("change", "binary") or (mode == "stall_then_act" and prompt == NUDGE)
         if acts:
             (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX\n")
@@ -255,6 +270,24 @@ def bench(tmp_path, monkeypatch):
         lambda cls: [i.replace("__", "-") for i in IDS if i != "beta__gadget-9"]))
     monkeypatch.setattr(SweBenchRuntime, "installed_puffin", classmethod(lambda cls: "/opt/none/puffin"))
     monkeypatch.setattr(SweBenchRuntime, "ensure", classmethod(lambda cls, puffin, patchelf: "runtime-hash"))
+    index_calls = []
+
+    def fake_puffin_code(command, **kwargs):
+        index_calls.append((list(command), kwargs.get("cwd"), dict(kwargs.get("env") or {})))
+        if "index" in command:
+            environment = kwargs["env"]
+            assert Path(kwargs["cwd"], "widget.py").is_file(), "indexed in the copy of /testbed"
+            assert list(Path(environment["PUFFIN_CODE_INDEXERS_DIR"]).iterdir()) == [], "universal layer only"
+            (Path(environment["CBM_CACHE_DIR"]) / "_config.db").write_text("")
+            (Path(environment["CBM_CACHE_DIR"]) / "host-path-testbed.db").write_text("graph")
+        return subprocess.CompletedProcess(command, 0, "puffin-index-x-codebase-memory: ok\n", "")
+
+    installed = tmp_path / "installed" / "puffin-code"
+    installed.parent.mkdir()
+    installed.write_text("binary")
+    monkeypatch.setattr(SweBenchCodeIndex, "execute", staticmethod(fake_puffin_code))
+    monkeypatch.setattr(SweBenchCodeIndex, "host_binary", classmethod(lambda cls: str(installed)))
+    monkeypatch.setattr(SweBenchRuntime, "host_libraries", classmethod(lambda cls, binary: (str(installed), [])))
     monkeypatch.setattr(SweBenchRunner, "admission", QuietMachine)
     monkeypatch.setattr(SweBenchRunner, "host", FakeHost)
     monkeypatch.setattr(SweBenchRunner, "sleep", staticmethod(lambda seconds: time.sleep(0.01)))
@@ -270,7 +303,8 @@ def bench(tmp_path, monkeypatch):
     snapshot.with_suffix(".meta.json").write_text(json.dumps(
         {"revision": "rev-1", "rows": len(IDS), "dataset": "SWE-bench/SWE-bench_Verified"}))
     SweBenchRunner.smoke_path().write_text(json.dumps({"passed": True, "harness": swe_bench_settings.HARNESS_VERSION}))
-    return {"docker": docker, "harness": harness, "settings": SweBenchSettings({"task_timeout": "5s"})}
+    return {"docker": docker, "harness": harness, "settings": SweBenchSettings({"task_timeout": "5s"}),
+            "index_calls": index_calls}
 
 
 def run(bench, **arguments):
@@ -695,6 +729,120 @@ def test_mcnemar_and_the_paired_interval():
     assert SweBenchReport.mcnemar(3, 3) == 1.0
     low, high = SweBenchReport.paired_interval(10, 0, 20)
     assert low > 0 and high > low
+
+
+# -- the code-index arm ---------------------------------------------------------------------------
+
+def test_without_the_code_index_the_container_gets_nothing_of_puffin_code(bench):
+    run(bench, instances=["acme__widget-1"])
+    created = next(call for call in bench["docker"].calls if call[0] == "run")
+    assert "puffin-code" not in json.dumps(created) and "PUFFIN_CODE" not in json.dumps(created)
+    assert bench["index_calls"] == []
+    store = SweBenchRunStore("r1")
+    assert store.manifest()["code_index"] == "off" and "index" not in store.state("acme__widget-1")
+    assert "Code index          off" in SweBenchReport.render(store)
+
+
+def test_with_the_code_index_the_repository_is_indexed_on_the_host_and_mounted_read_only(bench):
+    assert run(bench, instances=["acme__widget-1"], code_index="universal") == 0
+    docker = bench["docker"]
+    # Indexed from a copy of /testbed taken out of the image, before any agent container exists.
+    order = [call[0] for call in docker.calls if call[0] in ("create", "cp", "run")]
+    assert order == ["create", "cp", "run"]
+    [(command, cwd, environment)] = [call for call in bench["index_calls"] if "index" in call[0]]
+    assert command[1:] == ["index", "--wait"] and cwd.endswith("/testbed")
+    directory = SweBenchCodeIndex.index_dir(row("acme__widget-1"))
+    assert environment["PUFFIN_CODE_STATE_DIR"] == str(directory / "state")
+    assert not (directory / "testbed").exists()  # the copy is not kept
+    created = next(call for call in docker.calls if call[0] == "run")
+    mounts = [created[i + 1] for i, word in enumerate(created) if word == "-v"]
+    assert f"{directory}:/puffin-index:ro" in mounts
+    assert f"{SweBenchCodeIndex.runtime_dir()}:/opt/puffin-code:ro" in mounts
+    env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
+    assert env["PUFFIN_CODE_BIN"] == "/opt/puffin-code/bin/puffin-code"
+    assert env["PUFFIN_CODE_STATE_DIR"] == "/puffin-index/state"
+    assert env["PUFFIN_CODE_GRAPH_DB"] == "/puffin-index/cbm/host-path-testbed.db"
+    assert env["PUFFIN_CODE_PROJECT"] == "host-path-testbed"
+    assert env["PATH"].startswith("/opt/puffin-code/bin:/opt/miniconda3/envs/testbed/bin:")
+    store = SweBenchRunStore("r1")
+    state = store.state("acme__widget-1")
+    assert store.manifest()["code_index"] == "universal"
+    assert state["index"]["layers"] == ["universal"] and state["index"]["cached"] is False
+    assert store.log_stats("acme__widget-1") == {
+        "commands": 2, "puffin_code_calls": 1, "input_tokens": 1000, "cached_input_tokens": 900, "output_tokens": 50}
+    report = SweBenchReport.render(store)
+    assert "Code index          universal" in report and "called puffin-code 1 time(s), in 1 of 1 instance(s)" in report
+
+
+def test_an_index_is_cached_by_repository_and_commit_and_its_time_is_not_the_agents(bench, monkeypatch):
+    run(bench, name="a", instances=["acme__widget-1"], code_index="universal")
+    builds = len([call for call in bench["index_calls"] if "index" in call[0]])
+    run(bench, name="b", instances=["acme__widget-1"], code_index="universal")
+    assert len([call for call in bench["index_calls"] if "index" in call[0]]) == builds
+    state = SweBenchRunStore("b").state("acme__widget-1")
+    assert state["index"]["cached"] is True
+    # The agent's clock starts at its container, after every index is built.
+    record = SweBenchCodeIndex.record(row("acme__widget-1"))
+    record["seconds"] = 5000.0
+    (SweBenchCodeIndex.index_dir(row("acme__widget-1")) / "index.json").write_text(json.dumps(record))
+    run(bench, name="c", instances=["acme__widget-1"], code_index="universal")
+    state = SweBenchRunStore("c").state("acme__widget-1")
+    assert state["index"]["seconds"] == 5000.0 and state["wall_s"] < 60
+
+
+def test_a_run_whose_index_cannot_be_built_does_not_start(bench, monkeypatch, capsys):
+    monkeypatch.setattr(SweBenchCodeIndex, "execute", staticmethod(
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1 if "index" in command else 0, "", "boom")))
+    assert run(bench, instances=["acme__widget-1"], code_index="universal") == 1
+    assert "a run measures one arm" in capsys.readouterr().out
+    assert not any(call[0] == "run" for call in bench["docker"].calls)
+    assert run(bench, name="x", instances=["acme__widget-1"], code_index="exact") == 1
+
+
+def test_a_resumed_run_keeps_its_arm(bench):
+    run(bench, instances=["acme__widget-1"], code_index="universal")
+    store = SweBenchRunStore("r1")
+    manifest = store.manifest()
+    manifest["instances"].append("acme__widget-2")
+    manifest["images"]["acme__widget-2"] = {"image": f"{REPOSITORY}:acme-widget-2", "digest": "d"}
+    store.manifest_path.write_text(json.dumps(manifest))
+    assert run(bench) == 0  # no --code-index on the resume
+    assert store.state("acme__widget-2")["index"]["layers"] == ["universal"]
+
+
+def test_against_sets_the_two_arms_side_by_side(bench):
+    ids = ["acme__widget-1", "acme__widget-2", "beta__gadget-7"]
+    bench["docker"].modes = {"acme__widget-2": "empty"}
+    run(bench, name="without", instances=ids)
+    bench["docker"].modes = {"beta__gadget-7": "empty"}
+    run(bench, name="with", instances=ids, code_index="universal")
+    for name in ("with", "without"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("with"), SweBenchRunStore("without"))
+    assert "differs: code_index: universal | off" in text
+    assert "Side by side, on the 3 instance(s) graded in both (one run per arm is one sample of each):" in text
+    lines = {line.split()[0] + " " + line.split()[1]: line for line in text.splitlines() if len(line.split()) > 2}
+    assert lines["code index"].split()[-2:] == ["universal", "off"]
+    assert lines["resolved 2"].split()[1:] == ["2", "(66.7%)", "2", "(66.7%)"]
+    assert lines["puffin-code calls"].split()[-2:] == ["3", "0"]
+    assert lines["instances using"].split()[-2:] == ["3", "0"]
+    assert lines["input tokens"].split()[-2:] == ["3,000", "3,000"]
+    assert "Resolved in both: 1, only with: 1, only without: 1, neither: 0" in text
+    assert "In with the agent called puffin-code in 3 of 3 instances" in text
+    assert "No measurable difference." in text
+    row_line = next(line for line in text.splitlines() if line.strip().startswith("acme__widget-2"))
+    assert "only with" in row_line and "1 puffin-code" in row_line
+
+
+def test_an_arm_that_never_used_the_index_is_said_to_prove_nothing(bench, monkeypatch):
+    run(bench, name="without", instances=["acme__widget-1"])
+    run(bench, name="with", instances=["acme__widget-1"], code_index="universal")
+    for name in ("with", "without"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    monkeypatch.setattr(SweBenchRunStore, "log_stats", lambda self, instance_id: {
+        "commands": 3, "puffin_code_calls": 0, "input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1})
+    text = SweBenchReport.against(SweBenchRunStore("with"), SweBenchRunStore("without"))
+    assert "In with the agent never called puffin-code: this comparison says nothing about the index." in text
 
 
 # -- setup, smoke, the runtime, the command line --------------------------------------------------

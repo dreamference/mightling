@@ -142,6 +142,42 @@ class SweBenchRunStore:
         """
         return self.directory / "logs" / f"{instance_id}.jsonl"
 
+    def log_stats(self, instance_id: str) -> Dict[str, int]:
+        """
+        Counts what the agent did, from `puffin exec`'s events: its commands, how many of them
+        called `puffin-code`, and the tokens of every turn.
+
+        Args:
+            instance_id: The instance.
+
+        Returns:
+            Dict[str, int]: `commands`, `puffin_code_calls`, `input_tokens`,
+            `cached_input_tokens`, `output_tokens`; zeros when there is no log.
+        """
+        stats = {"commands": 0, "puffin_code_calls": 0, "input_tokens": 0, "cached_input_tokens": 0,
+                 "output_tokens": 0}
+        try:
+            lines = self.log_path(instance_id).read_text(errors="replace").splitlines()
+        except OSError:
+            return stats
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue  # the first line of every log is not JSON
+            if not isinstance(event, dict):
+                continue
+            item = event.get("item") or {}
+            if event.get("type") == "item.completed" and item.get("type") == "command_execution":
+                stats["commands"] += 1
+                if "puffin-code" in str(item.get("command", "")):
+                    stats["puffin_code_calls"] += 1
+            elif event.get("type") == "turn.completed":
+                usage = event.get("usage") or {}
+                for key in ("input_tokens", "cached_input_tokens", "output_tokens"):
+                    stats[key] += int(usage.get(key) or 0)
+        return stats
+
     # -- predictions ---------------------------------------------------------------------------
 
     @property

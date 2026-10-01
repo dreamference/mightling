@@ -309,6 +309,7 @@ The agent phase: one puffin exec per instance, producing predictions.jsonl.
 | `--name` | The run's name; an existing run of that name is resumed. |
 | `--eval` | Grade the predictions when the agent phase ends. |
 | `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
+| `--code-index` | universal: index each instance's repository on the host and give the agent puffin-code (default off) One of: `off`, `universal`. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing) |

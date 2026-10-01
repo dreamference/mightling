@@ -111,7 +111,8 @@ class SweBenchInstanceRun:
 
     def __init__(self, store: SweBenchRunStore, row: Dict[str, Any], image: str, model_name: str,
                  settings: "swe_bench_settings.SweBenchSettings", runtime_dir: Path, model_url: str,
-                 deadline: float, extra_env: Optional[Dict[str, str]] = None) -> None:
+                 deadline: float, extra_env: Optional[Dict[str, str]] = None,
+                 code_index: Optional[Dict[str, Any]] = None) -> None:
         """
         Args:
             store: The run's files.
@@ -124,6 +125,8 @@ class SweBenchInstanceRun:
             deadline: `time.time()` by which the instance must stop (its timeout, or the run's
                 `--until`).
             extra_env: More environment for the container (the cave-mode and air-gap levels).
+            code_index: How the container is given a code index (`mounts`, `env`, `path`, and
+                the index's `record`); None for the arm without one.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -136,6 +139,7 @@ class SweBenchInstanceRun:
         self.model_url = model_url
         self.deadline = deadline
         self.extra_env = dict(extra_env or {})
+        self.code_index = code_index
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -187,6 +191,10 @@ class SweBenchInstanceRun:
         """
         state: Dict[str, Any] = {"instance_id": self.instance_id, "image": self.image, "status": "running",
                                  "started": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(self.started))}
+        if self.code_index:
+            # Built before the agent started and outside its time limit; recorded beside it.
+            record = self.code_index.get("record", {})
+            state["index"] = {key: record.get(key) for key in ("layers", "seconds", "cached", "bytes")}
         self.store.write_state(self.instance_id, state)
         patch = ""
         try:
@@ -274,6 +282,11 @@ class SweBenchInstanceRun:
             "GIT_CONFIG_VALUE_0": "/testbed",
             **self.extra_env,
         }
+        mounts: List[str] = []
+        if self.code_index:
+            environment.update(self.code_index["env"])
+            environment["PATH"] = f"{self.code_index['path']}:{CONTAINER_PATH}"
+            mounts = list(self.code_index["mounts"])
         command = ["run", "-d", "--init", "--name", self.container,
                    "--label", f"puffin.swe-bench.run={self.store.name}",
                    "--network", swe_bench_settings.NETWORK_NAME,
@@ -283,6 +296,8 @@ class SweBenchInstanceRun:
                    "-v", f"{self.runtime_dir}:{CONTAINER_MOUNT}:ro",
                    "-v", f"{self.scratch}:{SCRATCH_MOUNT}",
                    "-w", "/testbed"]
+        for mount in mounts:
+            command += ["-v", mount]
         for key, value in environment.items():
             command += ["-e", f"{key}={value}"]
         command += [self.image, "sleep", "infinity"]

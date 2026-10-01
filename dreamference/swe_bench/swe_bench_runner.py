@@ -23,6 +23,7 @@ from dreamference.night_shift.night_shift_host import NightShiftHost
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_runner import NightShiftRunner
 from dreamference.swe_bench import swe_bench_settings
+from dreamference.swe_bench.swe_bench_code_index import ARMS, SweBenchCodeIndex
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
@@ -129,7 +130,8 @@ class SweBenchRunner:
     @classmethod
     def build_manifest(cls, name: str, dataset: str, selected: List[str], excluded: Dict[str, str],
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
-                       runtime_hash: str, puffin_bin: str, parallel: int) -> Dict[str, Any]:
+                       runtime_hash: str, puffin_bin: str, parallel: int,
+                       code_index: str = "off") -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -169,6 +171,7 @@ class SweBenchRunner:
             "runtime_hash": runtime_hash,
             "cave_mode": config.puffin_cave_mode,
             "airgapped": "off (the container has no network; see the spec's §12)",
+            "code_index": code_index,
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
             "task_memory": settings.task_memory,
@@ -193,6 +196,7 @@ class SweBenchRunner:
             limit: Optional[int] = None, subset: Optional[str] = None, name: Optional[str] = None,
             evaluate: bool = False, until: Optional[str] = None, idle_minutes: Optional[float] = None,
             ignore_sessions: bool = False, keep_images: bool = True, require_smoke: bool = True,
+            code_index: str = "off",
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
@@ -210,6 +214,8 @@ class SweBenchRunner:
             keep_images: With `evaluate`, False works one repository at a time and removes its
                 images once it is graded, to make room for the next repository's.
             require_smoke: Refuse to run unless a smoke has passed on this machine.
+            code_index: `off`, or `universal` to index each instance's repository on the host
+                and give the agent `puffin-code` (a new run only; a resumed run keeps its arm).
             settings: Benchmark settings; defaults to the config file's.
 
         Returns:
@@ -217,6 +223,9 @@ class SweBenchRunner:
             not run.
         """
         settings = settings or swe_bench_settings.SweBenchSettings()
+        if code_index not in ARMS:
+            print(f"❌ --code-index is one of: {', '.join(ARMS)}.")
+            return 1
         if require_smoke and not cls.smoke_passed():
             print("❌ No smoke has passed on this machine with this harness version: "
                   "run `puffin-admin swe-bench smoke` first.")
@@ -266,7 +275,7 @@ class SweBenchRunner:
                 problems = SweBenchEvaluator.validate(dataset, selected, settings)
                 excluded = {i: problem for i, problem in problems.items() if problem}
                 manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
-                                              served, runtime_hash, puffin_bin, parallel)
+                                              served, runtime_hash, puffin_bin, parallel, code_index)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                 print(f"❌ Run {store.name} was started with another puffin build or model "
@@ -283,10 +292,28 @@ class SweBenchRunner:
 
             finished = set(store.finished())
             pending = [i for i in manifest["instances"] if i not in finished]
+            rows = {row["instance_id"]: row for row in SweBenchHarness.rows(manifest["dataset"])}
+            indexes: Dict[str, Dict[str, Any]] = {}
+            if manifest.get("code_index", "off") != "off" and pending:
+                # Every index is built before the first agent starts: an index run beside the
+                # agents would compete with them, and its time is not the agent's.
+                if SweBenchCodeIndex.ensure_runtime(SweBenchHarness.tool("patchelf")) is None:
+                    return 1
+                print(f"🗂️  Indexing {len(pending)} repositories on the host (universal layer)...", flush=True)
+                for instance_id in pending:
+                    image = manifest["images"][instance_id]["image"]
+                    record = SweBenchCodeIndex.ensure(rows[instance_id], image) \
+                        if SweBenchDocker.ensure_image(image) else None
+                    if record is None:
+                        print(f"❌ {instance_id} has no index, and a run measures one arm: not started.")
+                        return 1
+                    indexes[instance_id] = dict(
+                        SweBenchCodeIndex.container_arguments(rows[instance_id], record), record=record)
+                    print(f"   {instance_id}: index {'cached' if record['cached'] else 'built'} "
+                          f"({record['seconds']:.0f} s)", flush=True)
             print(f"🏁 SWE-bench run {store.name}: {len(pending)} instance(s) to run, "
                   f"{len(finished)} done, {len(manifest.get('excluded', {}))} excluded; "
                   f"up to {parallel} at once on {served[0]}.")
-            rows = {row["instance_id"]: row for row in SweBenchHarness.rows(manifest["dataset"])}
             interrupted = False
             previous = signal.getsignal(signal.SIGTERM)
             if threading.current_thread() is threading.main_thread():
@@ -298,7 +325,8 @@ class SweBenchRunner:
                 groups = cls.by_repository(pending, rows) if cycling else {None: pending}
                 for repo, group in groups.items():
                     stopped = cls.schedule(store, group, rows, manifest, settings, runtime_hash,
-                                           model_url, vllm_host, puffin_bin, parallel, end, extra_env)
+                                           model_url, vllm_host, puffin_bin, parallel, end, extra_env,
+                                           indexes)
                     if evaluate:
                         graded_now = [i for i in manifest["instances"] if repo is None or rows[i]["repo"] == repo]
                         SweBenchEvaluator.grade(store, settings, only=graded_now)
@@ -327,7 +355,8 @@ class SweBenchRunner:
     def schedule(cls, store: SweBenchRunStore, pending: List[str], rows: Dict[str, Dict[str, Any]],
                  manifest: Dict[str, Any], settings: "swe_bench_settings.SweBenchSettings",
                  runtime_hash: str, model_url: str, vllm_host: str, puffin_bin: str, parallel: int,
-                 end: Optional[datetime], extra_env: Dict[str, str]) -> Optional[str]:
+                 end: Optional[datetime], extra_env: Dict[str, str],
+                 indexes: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[str]:
         """
         Starts instances while the machine is quiet, memory and disk admit one more and `--until`
         has not passed; waits for the running ones.
@@ -357,7 +386,8 @@ class SweBenchRunner:
                         run = SweBenchInstanceRun(
                             store, rows[instance_id], manifest["images"][instance_id]["image"],
                             manifest["model_name_or_path"], settings, SweBenchRuntime.directory(),
-                            model_url, time.time() + settings.task_timeout_s, extra_env)
+                            model_url, time.time() + settings.task_timeout_s, extra_env,
+                            (indexes or {}).get(instance_id))
                         thread = threading.Thread(target=cls._run_one, args=(run,),
                                                   name=f"swe-{instance_id}", daemon=True)
                         thread.start()

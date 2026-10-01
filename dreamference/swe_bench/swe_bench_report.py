@@ -22,7 +22,7 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "airgapped", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "cave_mode", "airgapped", "code_index", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit",
 )
 
@@ -57,6 +57,9 @@ class SweBenchReport:
         resolved = [i for i in instances if (results.get(i) or {}).get("resolved")]
         graded = [i for i in instances if i in results]
         walls = [state["wall_s"] for i, state in states.items() if i in finished and "wall_s" in state]
+        stats = {i: store.log_stats(i) for i in instances if i in finished}
+        index_seconds = [float((state.get("index") or {}).get("seconds") or 0)
+                         for i, state in states.items() if i in finished and state.get("index")]
         per_repo: Dict[str, List[int]] = {}
         for instance_id in instances:
             counts = per_repo.setdefault(instance_id.rsplit("-", 1)[0].replace("__", "/"), [0, 0])
@@ -68,7 +71,13 @@ class SweBenchReport:
             "finished": len(finished & set(instances)), "graded": len(graded),
             "resolved": len(resolved), "resolved_ids": resolved, "statuses": statuses,
             "test_patch_failed": sum(1 for i in graded if results[i].get("test_patch_failed")),
-            "walls": walls, "per_repo": per_repo,
+            "walls": walls, "per_repo": per_repo, "states": states, "stats": stats,
+            "code_index": manifest.get("code_index", "off"), "index_seconds": index_seconds,
+            "tokens": {key: sum(entry[key] for entry in stats.values())
+                       for key in ("input_tokens", "cached_input_tokens", "output_tokens")},
+            "commands": sum(entry["commands"] for entry in stats.values()),
+            "puffin_code_calls": sum(entry["puffin_code_calls"] for entry in stats.values()),
+            "puffin_code_users": sum(1 for entry in stats.values() if entry["puffin_code_calls"]),
         }
 
     @classmethod
@@ -110,6 +119,10 @@ class SweBenchReport:
             lines.append(f"Median wall time    {cls.duration(statistics.median(summary['walls']))} per instance, "
                          f"up to {manifest.get('parallelism')} at once; "
                          f"{cls.duration(sum(summary['walls']))} of agent time in all")
+        tokens = summary["tokens"]
+        lines.append(f"Tokens              {tokens['input_tokens']:,} in ({tokens['cached_input_tokens']:,} cached), "
+                     f"{tokens['output_tokens']:,} out; {summary['commands']:,} commands")
+        lines.append(cls.code_index_line(summary))
         if summary["grading"] is not None:
             grader = summary["grader"]
             lines.append(f"Grading {summary['grading']}: harness {grader.get('harness')}, dataset revision "
@@ -123,6 +136,26 @@ class SweBenchReport:
                       f"timeout {int(manifest.get('task_timeout_s', 0)) // 60} min; nudges {manifest.get('nudges')}.",
                   "", CAVEATS]
         return "\n".join(lines) + "\n"
+
+    @classmethod
+    def code_index_line(cls, summary: Dict[str, Any]) -> str:
+        """
+        Says whether the agent had `puffin-code`, what the indexes cost and whether it used them.
+
+        Args:
+            summary: A run's summary.
+
+        Returns:
+            str: One line of the report.
+        """
+        if summary["code_index"] == "off":
+            return "Code index          off: the agent had no puffin-code and navigated with grep and find"
+        seconds = summary["index_seconds"]
+        built = (f"indexes took {cls.duration(sum(seconds))} in all, median {cls.duration(statistics.median(seconds))}, "
+                 "outside the agent's time") if seconds else "no index time recorded"
+        return (f"Code index          {summary['code_index']}: {built}; the agent called puffin-code "
+                f"{summary['puffin_code_calls']} time(s), in {summary['puffin_code_users']} of "
+                f"{summary['finished']} instance(s)")
 
     @classmethod
     def write(cls, store: SweBenchRunStore) -> Optional[str]:
@@ -181,8 +214,84 @@ class SweBenchReport:
                          f"(95% interval {100 * low:+.1f} to {100 * high:+.1f}; McNemar exact p = {p_value:.3f})")
             if low <= 0 <= high:
                 lines.append("No measurable difference.")
+        lines += cls.arms(store.name, ours, other.name, theirs, both)
         lines += ["", CAVEATS]
         return "\n".join(lines) + "\n"
+
+    @classmethod
+    def arms(cls, name: str, ours: Dict[str, Any], other: str, theirs: Dict[str, Any],
+             both: List[str]) -> List[str]:
+        """
+        Sets two runs side by side on the instances both graded: the rates, the cost, the code
+        index, and one row per instance.
+
+        Args:
+            name: The first run's name.
+            ours: Its summary.
+            other: The second run's name.
+            theirs: Its summary.
+            both: The instances graded in both.
+
+        Returns:
+            List[str]: The lines of the table.
+        """
+        if not both:
+            return []
+        lines = ["", f"Side by side, on the {len(both)} instance(s) graded in both "
+                     "(one run per arm is one sample of each):",
+                 f"{'':<22}{name:>18}{other:>18}"]
+
+        def row(label: str, first: Any, second: Any) -> str:
+            return f"{label:<22}{str(first):>18}{str(second):>18}"
+
+        def column(summary: Dict[str, Any]) -> Dict[str, Any]:
+            stats = [summary["stats"].get(i, {}) for i in both]
+            walls = [summary["states"].get(i, {}).get("wall_s") for i in both]
+            walls = [wall for wall in walls if wall is not None]
+            index = [float((summary["states"].get(i, {}).get("index") or {}).get("seconds") or 0) for i in both]
+            resolved = sum(1 for i in both if summary["results"][i].get("resolved"))
+            return {
+                "code index": summary["code_index"],
+                "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
+                "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",
+                "agent time": cls.duration(sum(walls)),
+                "input tokens": f"{sum(s.get('input_tokens', 0) for s in stats):,}",
+                "output tokens": f"{sum(s.get('output_tokens', 0) for s in stats):,}",
+                "commands": f"{sum(s.get('commands', 0) for s in stats):,}",
+                "puffin-code calls": sum(s.get("puffin_code_calls", 0) for s in stats),
+                "instances using it": sum(1 for s in stats if s.get("puffin_code_calls")),
+                "index time": cls.duration(sum(index)) if summary["code_index"] != "off" else "none",
+            }
+
+        first, second = column(ours), column(theirs)
+        lines += [row(label, first[label], second[label]) for label in first]
+        outcome = {(True, True): "both", (True, False): f"only {name}", (False, True): f"only {other}",
+                   (False, False): "neither"}
+        counts: Dict[str, int] = {}
+        table = []
+        for instance_id in both:
+            a, b = ours["results"][instance_id], theirs["results"][instance_id]
+            verdict = outcome[(bool(a.get("resolved")), bool(b.get("resolved")))]
+            counts[verdict] = counts.get(verdict, 0) + 1
+            cells = []
+            for summary in (ours, theirs):
+                state = summary["states"].get(instance_id, {})
+                calls = summary["stats"].get(instance_id, {}).get("puffin_code_calls", 0)
+                cells.append(f"{state.get('status', '?')} {state.get('wall_s', '?')} s"
+                             + (f", {calls} puffin-code" if summary["code_index"] != "off" else ""))
+            table.append(f"  {instance_id:<34} {verdict:<16} {cells[0]:<28} {cells[1]}")
+        lines.append("Resolved in " + ", ".join(f"{label}: {counts.get(label, 0)}"
+                                                 for label in ("both", f"only {name}", f"only {other}", "neither")))
+        for summary, run in ((ours, name), (theirs, other)):
+            if summary["code_index"] != "off":
+                users = sum(1 for i in both if summary["stats"].get(i, {}).get("puffin_code_calls"))
+                if users == 0:
+                    lines.append(f"In {run} the agent never called puffin-code: this comparison says nothing about the index.")
+                else:
+                    lines.append(f"In {run} the agent called puffin-code in {users} of {len(both)} instances; "
+                                 "the others ran as if there were no index.")
+        lines += ["", f"  {'instance':<34} {'resolved in':<16} {name:<28} {other}"] + table
+        return lines
 
     @classmethod
     def mcnemar(cls, only_first: int, only_second: int) -> float:

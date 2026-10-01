@@ -408,7 +408,43 @@ All on 2026-10-01, on the GB10 with the default model resident (Qwen3.8-27B NVFP
 - **`smoke`:** passed in 3 min 35 s with a one-minute idle wait. The five resolve with their gold patch and none with the no-op; the agent fixed `sympy__sympy-13480` in 43 s (one-line fix, graded resolved); the agent container peaked at 113 MiB.
 - **The sample.** `~/.cache/dreamference/swe-bench/sample-25.txt`: the 25 Verified instances with an arm64 image whose `sha256(instance_id)` is smallest, so it is fixed and not chosen by difficulty. One astropy, thirteen django, one pytest, one scikit-learn, three sphinx (one excluded), six sympy.
 
-The 25-instance run, its interruption and resume, and the run-to-run spread are recorded below as they complete.
+- **The 25-instance run (`acc-25`), without the code index.** 24 ran (one excluded by validation), **13 resolved, 54.2%**; one timeout (`sympy__sympy-13877`, 45 min), no empty patch, stall or agent error; the counts add up to 25 with the exclusion. Per repository: django 7 of 13, sympy 2 of 6, sphinx 2 of 2, astropy 1 of 1, pytest 1 of 1, scikit-learn 0 of 1. Median 5 min 49 s per instance, 3 h 58 min of agent time, about 2 h 15 min on the clock; 50.7 M input tokens (49.3 M of them cached), 306 K output tokens, 2,288 commands. Agent containers peaked at 88-184 MiB, grading containers at 122 MiB. earlyoom logged nothing but its periodic memory line, and the model server answered throughout.
+- **Two at a time, not three.** With 8G caps and about 28 GiB available, Night Shift's start check admitted two containers (§12.3); the run said so each time it waited.
+- **Interrupted on purpose and resumed.** After four predictions, SIGTERM to the `puffin-admin` process: it exited in 4 s, left no container, four parseable predictions, and the two instances it cut off in state `interrupted` with no prediction. The same command with the same `--name` then ran the remaining 20, those two among them. (The first SIGTERM went to the wrong process, a shell wrapper, and did nothing; that was the test's mistake, not the command's.)
+- **`eval acc-25` through the command** found everything graded and printed 24 graded, 13 resolved; the grading itself had run inside `run --eval`.
+- **No turn spent on the web commands.** The 24 logs mention `puffin-search` once and `pip install` once (both inside quoted text), so §5.2's worry did not show at this size.
+- **Not run:** the run-to-run spread of §7.3 item 3 (the time went to the code-index arm of §13, which is a different configuration and not a spread measurement), and the connection trace of item 5 (the internal network was checked by hand: the model server answers, `github.com` does not).
+
+---
+
+## 13. The code index as an arm (2026-10-02)
+
+`swe-bench run --code-index universal` gives the agent `puffin-code` ([PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md)); the default, `off`, is the agent of §12, which navigates with `grep` and `find` because the runtime carries nothing of the index. The arm is recorded in the manifest (`code_index`), a resumed run keeps the arm it started with, and `report --against` lists it among the fields that differ.
+
+### 13.1 How it works
+
+1. **The repository is indexed on the host, before any agent starts.** For each instance, `/testbed` is copied out of the instance image (`docker create`, `docker cp`, no container ever runs), `puffin-code index --wait` is run in the copy with `PUFFIN_CODE_STATE_DIR` and `CBM_CACHE_DIR` pointing into `~/.cache/dreamference/swe-bench/index/<repo>@<base commit>/`, and the copy is deleted. The index run is admitted against the host's memory budget and runs in `puffin-index.slice`, like any other. All indexes are built before the first agent container starts: Night Shift's admission refuses to start beside an index run, and index time is not the agent's time. It is recorded per instance (`index.seconds`, `index.cached`) and reported separately.
+2. **The index is mounted read-only**, with a relocated `puffin-code` (`runtime-code/`, the same loader-and-libc treatment as `puffin`, kept in a directory of its own so the `puffin` runtime's hash, which a manifest pins, does not move). Four variables tell `puffin-code` where things are: `PUFFIN_CODE_BIN` (the launcher then appends `puffin-code prompt-block` to the model's prompt by itself), `PUFFIN_CODE_STATE_DIR`, `PUFFIN_CODE_GRAPH_DB` and `PUFFIN_CODE_PROJECT` (the graph names its project after the host path it was built at). `puffin-code` is put first on the container's `PATH`.
+3. **Queries only read**, which is the code-index spec's own rule. A file the agent edits is answered by text search and tagged `heuristic (text)`, as on the host. The launcher also starts `puffin-code session`, which cannot write its lock on the read-only mount and exits; nothing depends on it.
+4. **A run whose index cannot be built does not start:** a run measures one arm.
+
+### 13.2 Only the universal layer
+
+The exact (SCIP) layer is left out, by pointing `PUFFIN_CODE_INDEXERS_DIR` at an empty directory so scip-python counts as not installed. Measured on `sympy__sympy-13480` with both layers: 1,022 s, scip-python at 1.6-1.7 GiB per directory, and the run for the `sympy/` package itself ended with Node's "JavaScript heap out of memory" at 2 GB, leaving exact data only for `bin/`, `doc/` and `examples/`. Every instance is a different commit, so nothing is shared between instances. The universal layer alone took 19-29 s per repository with the model idle (79 s for django with two agents running). So every answer the agent gets in this arm is tagged `heuristic`, and the result says nothing about the exact layer.
+
+### 13.3 Checked
+
+- A host-built index is accepted in the container: `status`, `refs`, `callers` and `prompt-block` answered there, in milliseconds, and after an edit the changed file's rows turned to `heuristic (text)`.
+- The prompt block arrives: the with-arm's `model_catalog.json` contains `# Code navigation`; the without-arm's 24 logs and catalogs contain neither that heading nor one mention of `puffin-code`.
+- `puffin` was not rebuilt between the arms: both manifests carry the same `runtime_hash`.
+
+### 13.4 The report
+
+`report` prints, for one run, the tokens, the command count and a `Code index` line: the arm, what the indexes cost, and in how many instances the agent called `puffin-code` at all (counted from `puffin exec`'s command events). `report <run> --against <other>` sets two runs side by side on the instances both graded: resolved in each, median and total agent time, input and output tokens, commands, `puffin-code` calls, instances that used it, index time, then how many were resolved in both, only one or neither, and one row per instance. If the agent never called `puffin-code`, the report says the comparison says nothing about the index; otherwise it says in how many instances it was used. The paired interval and "No measurable difference." of §6.3 apply unchanged.
+
+### 13.5 With and without, measured
+
+(filled in below)
 
 ---
 
