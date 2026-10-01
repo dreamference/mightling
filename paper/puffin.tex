@@ -30,13 +30,13 @@
 \newcommand{\code}[1]{\texttt{#1}}
 
 \title{Puffin: A Vendor-Free Coding Agent on a Single Unified-Memory Workstation, Built from a
-21\,KB Patch Series over OpenAI Codex}
+27\,KB Patch Series over OpenAI Codex}
 
 \author{Dreamference\\
 Dreamference\\
 \texttt{dgxcoder@dreamference.ai}}
 
-\date{September 2026}
+\date{October 2026}
 
 \begin{document}
 \maketitle
@@ -50,17 +50,20 @@ vLLM as the fallback. Source code, prompts and
 inference never leave the machine, and no vendor account is involved. Puffin is a fork of
 the Codex CLI (release \code{rust-v0.158.0}, 4{,}894 Rust source files, 1.93 million lines). Its
 central engineering choice is to keep the fork almost identical to upstream. The upstream tree is
-never edited. Each build exports it, applies a series of fourteen patches totalling 21.3\,KB (24 files,
-$+89/-46$ lines), and links in a separate crate that does the actual work of localisation: model
+never edited. Each build exports it, applies a series of sixteen patches totalling 26.9\,KB (27 files,
+$+109/-47$ lines), and links in a separate crate that does the actual work of localisation: model
 discovery, configuration, prompt rebranding, help-text rewriting, a release-based updater and
 refusal of cloud-bound commands. We report how the series shrank from an initial 406\,KB and which
 techniques did it. We also report an inventory of the cloud dependencies we had to switch off,
 integration findings that are not visible from the documentation, and the host-safety layer that
-unified memory forced on us after model loads froze the machine. A 70-test live suite, covering
-every slash command, runs against the local model: 65 tests pass, 2 are skipped by design, and the
-3 failures expose two test-harness bugs and one real first-run defect. We close with the design of a two-layer
-code index (a tree-sitter knowledge graph plus compiler-exact SCIP data) and are explicit about what
-we have not yet measured, notably task-level coding accuracy.
+unified memory forced on us after model loads froze the machine. A 77-test live suite, covering
+every slash command, runs against the local model: 75 tests pass and 2 are skipped by design; three
+earlier failures exposed two test-harness bugs and one real first-run defect, since fixed. We then
+report three things built on the fork, each from the same launcher crate or beside it: a
+terse-answer mode that halves answers to questions and leaves coding work unchanged, a two-layer
+code index (a tree-sitter knowledge graph plus compiler-exact SCIP data) served by a router of its
+own, and an overnight task queue that works in git worktrees. We are explicit about what we have
+not yet measured, notably task-level coding accuracy.
 \end{abstract}
 
 \section{Introduction}
@@ -97,7 +100,9 @@ agent or user invokes explicitly:
 \end{itemize}
 Gmail access can be switched off (\code{puffin\_gmail = false}). Web search cannot yet: the
 agent reaches it only through the shell commands its prompt describes, but that prompt section is
-always present. Updates and builds happen only when the user starts them. No model traffic leaves
+always present; a three-level switch for it (\code{/airgapped}: every search engine, DuckDuckGo
+only, or no network at all, the last enforced by the command sandbox) is specified but not built.
+Updates and builds happen only when the user starts them. No model traffic leaves
 the machine, with one exception: search queries the agent composes go to upstream engines through
 SearXNG, and they can contain fragments of code or context.
 
@@ -105,7 +110,7 @@ SearXNG, and they can contain fragments of code or context.
 \begin{itemize}
   \item A \textbf{patch-minimal fork method} for a large Rust agent (\cref{sec:fork}). The method has
     four parts: an unmodified pinned submodule, a build-time export, a small series of one- and
-    two-line hooks, and an external crate linked into the binary. We quantify the result: 21.3\,KB
+    two-line hooks, and an external crate linked into the binary. We quantify the result: 26.9\,KB
     of patches against a 1.93M-line upstream. We also report the techniques that reduced the
     series from 406\,KB.
   \item An \textbf{inventory of the cloud surface} of a modern coding-agent client, and how each part
@@ -117,9 +122,14 @@ SearXNG, and they can contain fragments of code or context.
   \item A \textbf{host-safety layer for unified memory} (\cref{sec:safety}). It combines pre-load
     admission checks with a pressure-stall watchdog, and was motivated by real incidents in which
     model loads froze the workstation.
-  \item An \textbf{evaluation} of what exists (\cref{sec:eval}), a design for code indexing that
-    combines a tree-sitter graph with SCIP (\cref{sec:index}), and lessons for fork-based agent
-    products (\cref{sec:lessons}).
+  \item A \textbf{measured cost model for a local agent's output} and the terse-answer mode built on
+    it (\cref{sec:local}): on this machine one token of prose costs the time of about 67 prompt
+    tokens, and three quarters of the agent's output is tool-call arguments that no speaking style
+    touches.
+  \item An \textbf{evaluation} of what exists (\cref{sec:eval}), an implemented code index that
+    combines a tree-sitter graph with SCIP and reports which of the two answered
+    (\cref{sec:index}), an overnight task queue (\cref{sec:night}), and lessons for fork-based
+    agent products (\cref{sec:lessons}).
 \end{itemize}
 
 \section{Background}
@@ -168,14 +178,14 @@ concurrent sequences, a configuration forced by memory headroom (\cref{sec:safet
   % row 1: the request path
   \node[box=1.3cm]  (user)     at (-0.2,0)  {terminal\\user};
   \node[box=3.1cm]  (launcher) at (2.8,0)   {\code{puffin-rs} launcher\\\scriptsize model discovery, config,\\help rebrand, update, \code{app}};
-  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 14 patches, 21.3\,KB};
+  \node[box=3.3cm]  (codex)    at (6.9,0)   {Codex core + TUI\\\scriptsize 16 patches, 26.9\,KB};
   \node[box=3.2cm]  (vllm)     at (12.6,0)  {SGLang container\\\scriptsize Qwen3.8-27B NVFP4 + DFlash2};
   % row 2
   \node[box=3.3cm]  (host)     at (6.9,-1.7)  {{\footnotesize\code{codex-code-mode-host}}\\\scriptsize V8, runs Code Mode JS};
   \node[box=3.2cm]  (watch)    at (12.6,-1.7) {PSI watchdog\\\scriptsize + admission checks};
   % row 3
-  \node[box=3.1cm]  (tools)    at (2.8,-3.5)  {shell tools\\\scriptsize\code{puffin-search}, \code{puffin-fetch}, \code{gmail}};
-  \node[box=3.3cm]  (svc)      at (6.9,-3.5)  {SearXNG,\\Gmail service};
+  \node[box=3.1cm]  (tools)    at (2.8,-3.5)  {shell tools\\\scriptsize\code{puffin-search}, \code{puffin-fetch}, \code{puffin-code}, \code{gmail}};
+  \node[box=3.3cm]  (svc)      at (6.9,-3.5)  {SearXNG, Gmail service,\\code index};
   \node[box=3.2cm]  (diff)     at (12.6,-3.5) {diffusion sidecar\\\scriptsize started first, 8\,GB cap};
   % the binary
   \begin{scope}[on background layer]
@@ -197,17 +207,19 @@ crate or in separate local services.}
 
 \Cref{fig:overview} shows the running system. The user types \code{puffin}, a single Rust binary.
 Before Codex parses its command line, the linked launcher crate runs several steps. It finds the
-local vLLM server and waits for it if it is still loading. It asks the server which model it serves
+local model server and waits for it if it is still loading. It asks the server which model it serves
 and how long that model's context is. It writes the model catalogue and configuration Codex needs.
 Finally it prepends the options that point Codex at the local provider. From then on the process is
 Codex, and every upstream flag and subcommand behaves as documented, apart from the cloud surfaces
 listed in \cref{sec:cloud}.
 
 Web search and page fetching are two small Rust programs, \code{puffin-search} and
-\code{puffin-fetch}, installed beside \code{puffin}; Gmail reading is provided by
+\code{puffin-fetch}, installed beside \code{puffin}; code navigation is a third,
+\code{puffin-code} (\cref{sec:index}); Gmail reading is provided by
 \code{puffin-admin}, the Python management CLI. The agent invokes them as shell commands
-(\cref{sec:local}). The same \code{puffin-admin} manages the vLLM container, a small diffusion-model sidecar, a browser chat UI
-built on Onyx \cite{onyx}, and the build of \code{puffin} itself.
+(\cref{sec:local}). The same \code{puffin-admin} manages the model-server container, a small
+diffusion-model sidecar, a browser chat UI built on Onyx \cite{onyx}, the nightly run of queued
+tasks (\cref{sec:night}), and the build of \code{puffin} itself.
 
 \section{A patch-minimal fork}
 \label{sec:fork}
@@ -232,10 +244,14 @@ Codex is vendored as a git submodule of our own GitHub fork, pinned to the stabl
     sources and the compiler-profile overrides. An unchanged key skips the build.
 \end{enumerate}
 
+The three shell tools are not part of that build. \code{puffin-search} and \code{puffin-fetch}
+share one crate and \code{puffin-code} has another, each with its own lockfile, built
+\code{-{}-locked} and keyed separately, so changing them never relinks Codex.
+
 Moving to a new upstream release means bumping the submodule and resolving whichever hunks stop
 applying. Because the hunks are few and small, conflicts are local and obvious.
 
-\subsection{From 406\,KB to 21\,KB}
+\subsection{From 406\,KB to 27\,KB}
 
 The first working series had four patches totalling 406{,}116 bytes. \Cref{tab:patches} shows the
 current one. Four techniques made the difference.
@@ -271,6 +287,14 @@ mark a subcommand \code{hide = true}, or send a subcommand's dispatch into the l
 largest remaining hunks are presentation strings (patch 0001) and \code{/usage} (0011), which
 repurposes a ChatGPT-plan screen as local token statistics.
 
+\paragraph{New features cost a hook, not a diff.} The series reached its smallest size, about
+9\,KB, when the four techniques above were done; everything since has been added behaviour. The
+last two patches are features rather than removals: \code{/cavemode} (0017, \cref{sec:local}) and
+\code{/night} (0018, \cref{sec:night}). Each adds a slash-command variant, its description and the
+dispatch arms that call into the launcher crate, where the logic lives (566 and 769 lines with their tests). A test
+caps the series' total size. The cap is raised only explicitly, in the commit that needs it and
+with the reason recorded, so the series cannot grow by drift.
+
 \begin{table}[t]
 \centering
 \small
@@ -278,26 +302,29 @@ repurposes a ChatGPT-plan screen as local token statistics.
 \toprule
 Patch & Files & $+/-$ & Purpose \\
 \midrule
-0001 brand-puffin-name & 11 & 19/18 & Product name in TUI header, status card, slash-command list, \code{exec} banner and reply label, fixed usage strings \\
+0001 brand-puffin-name & 12 & 20/19 & Product name in TUI header, status card, slash-command list, \code{exec} banner and reply label, fixed usage strings \\
 0002 puffin-launcher-hook & 2 & 2/1 & One dependency line; route argv through the launcher \\
 0005 hide-openai-login & 2 & 4/0 & Hide \code{login}/\code{logout} and \code{/logout} \\
 0006 hide-cloud & 1 & 2/1 & Hide \code{cloud} (kept for a private cloud) \\
 0007 hide-remote-control & 1 & 2/0 & Hide \code{remote-control} \\
 0008 puffin-update & 1 & 2/2 & Send \code{update} to the launcher's release updater \\
 0009 remove-feedback & 2 & 3/1 & Remove \code{/feedback} (uploads session logs) \\
-0010 hide-voice & 1 & 2/1 & Hide \code{/voice} (hosted realtime API) \\
+0010 hide-voice & 1 & 4/1 & Hide \code{/voice} (hosted realtime API) and \code{/pets} (art fetched from OpenAI's CDN) \\
 0011 usage-token-stats & 4 & 7/17 & \code{/usage} shows local token statistics \\
 0012 hide-auto-review & 1 & 2/0 & Hide \code{/approve} (defaults to a hosted review model) \\
 0013 disable-usage-analytics & 1 & 2/1 & Construct the analytics client disabled \\
 0014 puffin-home & 1 & 2/0 & Use \code{\textasciitilde/.puffin}, never upstream's login \\
 0015 no-openai-network & 4 & 20/4 & Close the channels found by tracing (\S\ref{sec:egress}); drop Codex's own tips \\
 0016 doctor-offline & 2 & 20/0 & Switch off \code{doctor}'s sign-in, update and reachability checks \\
+0017 cave-mode & 5 & 10/0 & \code{/cavemode}; register the terse-answer section the launcher supplies \\
+0018 night-slash-command & 2 & 7/0 & \code{/night}: queue a task for the overnight run \\
 \midrule
-Total (14 patches, 21{,}342 bytes) & 24 & 89/46 & against 4{,}894 Rust files, 1.93M lines \\
+Total (16 patches, 26{,}933 bytes) & 27 & 109/47 & against 4{,}894 Rust files, 1.93M lines \\
 \bottomrule
 \end{tabularx}
 \caption{The patch series at the time of writing. Numbers 0003 and 0004 were retired when their
-content moved into the launcher crate.}
+content moved into the launcher crate. The total counts each upstream file once; the per-patch
+column counts it once per patch.}
 \label{tab:patches}
 \end{table}
 
@@ -419,10 +446,22 @@ withdrawn (\cref{sec:lessons}).
 
 \paragraph{Discover, do not configure.} The local server's model can change between sessions, and
 an earlier version of our launcher left Codex advertising the previous model with the wrong context
-length. vLLM's \code{/v1/models} endpoint reports both the served model's identifier and its
+length. The server's \code{/v1/models} endpoint reports both the served model's identifier and its
 \code{max\_model\_len}. The launcher therefore derives the model catalogue entry from the running
 server, with no copy of the model registry: context window, auto-compaction limit and truncation
 policy all come from that value.
+
+That value turned out not to be the whole truth. The default model is launched with a 262{,}144-token
+context and reports it, but the server's KV-cache pool, sized at launch from free memory and shared
+by every stream, held 156{,}907 tokens when we looked. Both the window the catalogue advertises and
+the compaction limit derived from it are therefore above what the server can hold. It has not
+mattered yet: none of the 111 recorded sessions contains a compaction, and the largest peaked at
+71{,}421 prompt tokens (median 14{,}153). The limit can be lowered without a patch, through Codex's
+own \code{model\_auto\_compact\_token\_limit}; a deliberately extreme 6{,}000 made one small task
+compact seven times and run thirteen commands where three were needed, because the model re-ran
+what each summary had dropped. Tying the limit to the pool is specified but not yet done. We also
+tried the 0.5B diffusion sidecar as a compressor of tool output: of 50 file names, hashes and
+numbers in a \code{git log}, 14 survived, so it has no role in compaction.
 
 \paragraph{The catalogue is a hard schema.} Codex refuses a model it has no catalogue entry for, and
 parses entries with strict \code{serde} structs. A wrongly shaped field is a start-up failure, not
@@ -455,6 +494,42 @@ Plain shell commands described in the system prompt worked reliably:
 \code{puffin-search}, \code{puffin-fetch} and, later, \code{gmail search|read|status}. This is one
 model on one harness and should not be over-generalised. Still, it suggests that for local models,
 the tool surface a vendor harness assumes may need to be flattened back into the shell.
+
+\paragraph{Prose is the expensive output.} Hosted agents are priced per token, so the usual argument
+for terse output is money. Locally the currency is time, and its exchange rate is lopsided. This
+model decodes prose at 25.5 tokens/s and reads a prompt at about 1{,}700, so one token of prose
+costs the time of about 67 prompt tokens; and 81\% of the input of our recorded sessions came from
+the prefix cache. A few hundred tokens of standing instructions are therefore nearly free, while
+every sentence of answer is not. We also measured where the output goes: across 52 recorded
+sessions with tool calls, 75.5\% of output tokens were tool-call arguments, 23.1\% final answers
+and 1.3\% commentary between calls.
+
+Puffin therefore answers tersely by default. A \emph{cave mode} level (\code{off}, \code{lite},
+\code{full} or \code{ultra}; \code{/cavemode} switches it mid-session) is delivered as a section of
+model-visible session state that the launcher crate contributes through Codex's extension
+registry: the level's text once, then a one-line reminder at the start of each later user turn.
+The system prompt is untouched, so \code{off} is exactly upstream behaviour. In a benchmark of 532
+single-turn runs and 11 sessions of eight or nine turns, the default level, \code{ultra} (at most
+three sentences of prose outside code unless the user asks for more), cut answers to questions to
+0.42--0.57 of their length at \code{off} and wall time to 0.41--0.74, and passed 35 of 36
+correctness checks, the same number as \code{off}. On coding tasks no level moved answer length
+or wall time beyond the noise. This reproduces locally what a paired study of the public
+``caveman'' skill found on a hosted agent, about 8.5\% fewer output tokens with quality unchanged
+\cite{shiryaev2026caveman}, and for the same reason: an agent's output is mostly tool calls and
+code. Three further observations shaped the design:
+\begin{itemize}
+  \item \emph{Content rules work; grammar rules do not.} Answer-first, one option instead of a
+    menu, no unrequested code and a numeric sentence cap shortened answers. Dropping articles
+    did not happen (the article rate stayed between 5.9\% and 9.5\%), and would have saved little:
+    in this model's tokenizer the usual abbreviations are one token, as are the words they replace.
+  \item \emph{Numbers hold; adjectives do not.} ``At most three sentences'' is followed; ``short''
+    barely is.
+  \item \emph{A level fades over a session unless it is repeated.} Without the per-turn reminder
+    the cap stopped holding after a few turns; with it, turns five to eight of a session summed to
+    0.49 of the same turns at \code{off}.
+\end{itemize}
+We compress only what the model writes. Compressing what it \emph{reads} is reported to make
+models answer longer and less accurately \cite{adeyemi2026cavewoman}.
 
 \paragraph{Untrusted content.} Email gives an agent that holds a shell a prompt-injection channel.
 Gmail access is read-only by construction. \code{gmail read} frames every message between
@@ -509,14 +584,17 @@ afford:
     during a reclaim livelock.
 \end{enumerate}
 
-\paragraph{Consequences for serving.} These margins are why the model runs at a 32k context rather
-than 131k: a longer context was refused at start-up for want of 3.3\,GiB of KV cache. They also
+\paragraph{Consequences for serving.} These margins are why the 122B fallback model runs at a 32k
+context rather than 131k: a longer context was refused at start-up for want of 3.3\,GiB of KV
+cache. (The 27B default leaves about 38\,GB free and runs at 262k.) They also
 fix the order of start-up. The diffusion sidecar starts \emph{before} vLLM, with a fixed 8\,GB
 cgroup cap, because vLLM's pre-flight reads current free memory. A resident sidecar is accounted
 for, whereas the reverse order lets a marginal check pass and then lose the memory mid-load.
 Every heavy background job we have added since runs under
-\code{systemd-run -p MemoryMax=\ldots{} -p MemorySwapMax=0}. Code indexing, for example, uses a cap,
-so exhaustion kills the job instead of the host (\cref{sec:index}).
+\code{systemd-run -p MemoryMax=\ldots{} -p MemorySwapMax=0}, so exhaustion kills the job instead
+of the host. Index runs share one slice and one memory ledger (\cref{sec:index}); each overnight
+task has a scope of its own (\cref{sec:night}); and while a night run holds its lock, a model
+load, a build of \code{puffin} and a re-index all refuse to start.
 
 \section{Evaluation}
 \label{sec:eval}
@@ -532,20 +610,25 @@ for example on SWE-bench \cite{jimenez2024swebench}. \Cref{sec:limits} discusses
 Metric & Value \\
 \midrule
 Upstream (Codex \code{rust-v0.158.0}) & 4{,}894 Rust files, 1.93M lines \\
-Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 21{,}342 B (14 patches) \\
-Upstream files touched / lines changed & 24 files / $+89,\ -46$ \\
-Launcher crate (\code{puffin-rs}) & 1{,}843 lines, 31 unit tests \\
+Patch series, initial $\rightarrow$ current & 406{,}116 B (4 patches) $\rightarrow$ 26{,}933 B (16 patches) \\
+Upstream files touched / lines changed & 27 files / $+109,\ -47$ \\
+Launcher crate (\code{puffin-rs}) & 3{,}359 lines, 59 unit tests \\
+Code-index router (\code{puffin-code}) & 6{,}107 lines, 73 tests \\
 Agent binary, unstripped $\rightarrow$ stripped & 1.4\,GB $\rightarrow$ 315\,MB (+ 93\,MB Code Mode host) \\
 Incremental rebuild after a launcher edit & $\approx$7 min (thin LTO relink) \\
-Management and services (Python) & 81 modules, 20.9k lines; 427 tests \\
-\quad without a model server & 364 pass, 63 skip (need live server) \\
+Management and services (Python) & 87 modules, 23.2k lines; 511 tests \\
+\quad without a model server & 448 pass, 63 skip (need live server) \\
+\quad with the default model serving & 509 pass, 2 skip; 775.5\,s \\
 Live slash-command suite, Qwen3.8-27B (default) & 77 tests: 75 pass, 2 skip; 651.3\,s \\
 Live slash-command suite, Qwen3.5-122B (fallback) & 77 tests: 75 pass, 2 skip; 806.7\,s \\
-Decode throughput, single stream, 32k context & prose 23.8 / code 49.9 / JSON 53.1 tok/s \\
+Decode throughput, default, single stream, 262k context & prose 25.5 / code 50.3 / JSON 87.0 tok/s \\
+Decode throughput, fallback, single stream, 32k context & prose 23.8 / code 49.9 / JSON 53.1 tok/s \\
+Code-index query, warm, this repository (20 runs) & p50 0.09\,s, p95 0.11--0.12\,s \\
+Overnight task, live (one task, \cref{sec:night}) & 7\,s; test passed; checkout untouched \\
 \bottomrule
 \end{tabular}
-\caption{Measurements on one GB10 (128\,GB). Throughput is from the model registry's benchmark
-record for the default configuration, not re-measured for this paper.}
+\caption{Measurements on one GB10 (128\,GB). Sizes are binary megabytes. Throughput is from the
+model registry's benchmark record for each configuration, not re-measured for this paper.}
 \label{tab:eval}
 \end{table}
 
@@ -571,49 +654,152 @@ diagnosed from the session transcript.
     user would: it says ``go ahead'' once, and fails only if the file still does not appear.
 \end{enumerate}
 
-\paragraph{Throughput.} Decode speed for JSON (53.1 tokens/s) and code (49.9) is roughly twice
-that for prose (23.8). This is consistent with speculative decoding accepting longer drafts on
-predictable, structured output, although we have not measured acceptance lengths per category. If
-it holds, it suits an agent whose output is dominated by tool calls and code.
+\paragraph{Throughput.} On both models, decode speed for code is about twice that for prose (50.3
+against 25.5 tokens/s on the default, 49.9 against 23.8 on the fallback), and JSON is faster still
+(87.0 and 53.1). This is consistent with speculative decoding accepting longer drafts on
+predictable, structured output, although we have not measured acceptance lengths per category. It
+suits an agent whose output is dominated by tool calls and code: 75.5\% of output tokens in our
+recorded sessions were tool-call arguments (\cref{sec:local}).
 
-\section{Towards compiler-exact code navigation}
+\section{Compiler-exact code navigation}
 \label{sec:index}
 
-Today the agent navigates with \code{rg} and file reads. On the 4{,}894-file upstream workspace this
-costs many rounds, and it silently misses calls through traits, generics and re-exports. We surveyed
-open-source code-intelligence tools with the constraints of a vendor-free AGPL product in mind. The
-constraints were a compatible licence, no network or telemetry, Rust and Python support, and arm64
-availability. We selected a two-layer design, now specified in the repository.
+An agent that navigates with \code{rg} and file reads spends many rounds on the 4{,}894-file
+upstream workspace, and it silently misses calls through traits, generics and re-exports. We
+surveyed open-source code-intelligence tools with the constraints of a vendor-free AGPL product in
+mind: a compatible licence, no network or telemetry, and arm64 availability. The result is a
+two-layer index, implemented as \code{puffin-code}, a Rust binary of its own beside \code{puffin}.
 \begin{itemize}
   \item \emph{Universal layer}: codebase-memory-mcp \cite{codebasememorymcp,vogel2026codebasememory}.
-    It is a single MIT-licensed C binary with 158 tree-sitter \cite{treesitter} grammars and a code
-    embedding model compiled in. It builds a call graph and supports semantic search. Its authors
-    report approximate type resolution, with a target of about 95\% on idiomatic Python.
-  \item \emph{Exact layer}: SCIP \cite{scip} indexes produced by compiler front-ends, such as
-    rust-analyzer and Pyright-based \code{scip-python}, for projects that build.
+    It is a single MIT-licensed C binary with 158 tree-sitter \cite{treesitter} grammars. It builds
+    an approximate call graph for every language.
+  \item \emph{Exact layer}: SCIP \cite{scip} indexes produced by compiler front-ends
+    (\cref{tab:indexers}), converted to SQLite by the \code{scip} tool.
 \end{itemize}
-A router in the launcher answers each question from the better layer. It joins the two through the
-definition's location, which maps a qualified name to an opaque SCIP symbol. It tags every result
-\emph{exact} or \emph{heuristic}, and reports calls it could not resolve. The agent's prompt then
-requires verification whenever a result is heuristic or unresolved and the change is a rename,
-signature change or deletion. This follows the graph-guided localisation idea of LocAgent
-\cite{chen2025locagent} and the multi-view serving of CodeNib \cite{yu2026codenib}, specialised to a
-single self-contained machine.
+\code{puffin-code} answers \code{def}, \code{refs}, \code{callers}, \code{callees}, \code{impl},
+\code{show}, \code{outline} and \code{search} by reading both stores directly as SQLite. It joins
+them through a definition's location, tags every row \emph{exact} or \emph{heuristic}, and the
+agent's prompt requires verification when a heuristic row decides a rename, a signature change
+or a deletion. This follows the graph-guided localisation idea of LocAgent
+\cite{chen2025locagent} and the multi-view serving of CodeNib \cite{yu2026codenib}, specialised to
+a single self-contained machine.
 
-The first attempts to index the upstream workspace with \code{rust-analyzer scip} under an 8\,GB
-cgroup cap were OOM-killed within the cap. The host was unaffected. Before indexing, the indexer compiles and runs the
-workspace's build scripts and procedural macros, of which several hundred were loaded before the
-kill. The same fact is why the design indexes only trusted repositories and runs indexers in a
-network-less sandbox. The memory cost of exact indexing
-on a workspace of this size is an open measurement. It will decide whether exact indexing can run
-beside a resident model at all.
+\begin{table}[t]
+\centering
+\small
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+Language & Indexer & Runs / state on this machine \\
+\midrule
+Python & scip-python & every repository; static once its environment is controlled \\
+TypeScript, JavaScript & scip-typescript & every repository; 732 files in about 2\,s, 271\,MiB peak \\
+Go & scip-go & on request, offline enforced; 21\,MiB peak on a fixture module \\
+Rust & rust-analyzer & trusted repositories only: it runs build scripts and procedural macros \\
+Java, Kotlin & scip-java & trusted only, on a scratch copy; never run here (no JDK~17) \\
+C\#, VB & scip-dotnet & trusted only, on a scratch copy; never run here (no .NET SDK) \\
+C, C++ & scip-clang & no linux-arm64 build upstream; universal layer only \\
+\bottomrule
+\end{tabularx}
+\caption{The exact layer by language. Indexers that execute project code run only in repositories
+the user has marked trusted.}
+\label{tab:indexers}
+\end{table}
+
+\paragraph{Why two layers.} We measured the universal layer against the exact one before building
+the router. At file level, its call edges recalled 78\% of what rust-analyzer's SCIP index holds
+for the upstream workspace (15{,}660 functions with cross-file references), and 58\% of what
+scip-python holds for our own Python package: 86\% for functions but 52\% for methods. For a
+method of one class that shares its name with a method of another, it found no caller of either,
+where scip-python resolved each call to the right class. The approximate layer is good enough to
+orient and not good enough to rename by.
+
+\paragraph{What measurement changed.} Several assumptions of the first design did not survive the
+tools.
+\begin{itemize}
+  \item \emph{No per-query command line.} The universal layer's CLI takes 6.6\,s per invocation,
+    all of it fixed start-up, while the same question as a read-only SQL query on its database
+    takes under 10\,ms. The router reads the database.
+  \item \emph{Exact Rust indexing is expensive, and now measured.} The first attempts under an
+    8\,GB cap were OOM-killed inside the cap. Under a 22\,GiB cap, \code{rust-analyzer scip} on
+    the upstream workspace completes in 691\,s cold and 569\,s warm, with a peak of at least
+    21.3\,GiB (cap-bounded, so the unconstrained peak is unknown). There is no cheaper mode: its
+    SCIP path always runs build scripts and procedural macros. Such a run is admitted only when
+    the machine can spare the memory.
+  \item \emph{A snapshot cannot say what it is missing.} Replaying a store five commits old found
+    two files that had gained a reference since, and that appeared in no row. Checking the
+    freshness of the files an answer names can never find them. Every query therefore asks git
+    which files changed since each layer's snapshot (39\,ms) and searches those for the name
+    (3\,ms), marking what it finds as heuristic text matches. An edit is never a silent miss.
+  \item \emph{The vendored upstream swamped the index.} With the Codex submodule included, 97\% of
+    the universal index of our repository was third-party code. Submodules are now excluded. The
+    policy we specified but have not built indexes a submodule only when it is the user's own, by
+    two offline tests (same remote namespace, and most recent commits by the superproject's
+    authors), because the URL alone does not tell a fork of someone else's project from one's own
+    work.
+\end{itemize}
+
+\paragraph{Safety.} Queries only read: they run inside the agent's sandbox, where \code{.git} is
+read-only. Indexing is a separate process the launcher starts outside it. Every index run of every
+kind is admitted against one host-wide memory budget and runs in a network-less Bubblewrap sandbox
+inside one systemd slice. In that sandbox a deliberately hostile build script could not write to
+the Cargo home, read a marker file in the home directory or overwrite the store, and the index was
+still produced. Starting the model server stops those scopes before its own pre-flight.
+
+\paragraph{Results and gaps.} On our repository, warm queries answer in 0.09\,s at the median and
+0.11--0.12\,s at the 95th percentile, and \code{refs} on a TypeScript type in the upstream schema
+returns the same 48 files a whole-word search finds, in 40\,ms. Not built or not measured: an
+\code{impact} query, a fallback when a store's schema is unknown, the submodule policy, any run of
+the Java and .NET indexers, search by meaning, and the effect of an index run on decode speed.
+
+\section{Unattended overnight work}
+\label{sec:night}
+
+Tokens cost nothing on a machine one already owns, and it is idle at night. \emph{Night Shift}
+lets the user queue coding tasks during the day (\code{/night add}, optionally with the test
+command that decides success) and finds a branch and a report for each in the morning. Its two
+halves share only files. The slash command, in the launcher crate behind one hook patch, writes a
+task record and never calls the model, so it answers at once, mid-turn included. The runner, in
+\code{puffin-admin} and started by a systemd user timer, works through the queue.
+
+Each task runs \code{puffin exec} in a git worktree of its own, on a branch named after the task,
+inside a transient systemd scope with a memory cap. The runner, not the agent, commits: the
+agent's sandbox cannot write the repository's metadata. Nothing is merged, pushed or rebased. The
+live suite had shown a failure mode that matters when nobody is watching: the model sometimes
+announces a change and ends its turn (\cref{sec:eval}). A task whose worktree is unchanged and
+whose last message announces work is therefore resumed with ``go ahead'', at most twice, and
+otherwise recorded as stalled. A task the window cuts off keeps its worktree and session and is
+resumed the next night.
+
+The run never starts or loads the model server, and gives way to the user. Admission requires the
+server to be answering, the host-safety checks of \cref{sec:safety} to pass, memory headroom, no
+build or index run in progress, and a period in which no request reached the model. Two details
+came from measurement.
+\begin{itemize}
+  \item \emph{Parallelism cannot assume the full context.} The obvious rule, the KV pool divided
+    by the context length, gives zero on the default model (\cref{sec:local}). Each task is
+    budgeted 49{,}152 tokens, which gave two or three concurrent tasks depending on the launch.
+    Nothing yet enforces that budget on a task.
+  \item \emph{Idle is a counter, not a gauge.} A gauge of running requests sampled every 30\,s
+    misses short requests, so the run also requires the server's prompt-token counter to stay
+    unchanged.
+\end{itemize}
+
+One task has run for real: a repository with a function that subtracts where it should add, and
+a failing test. Queued from a shell and listed in the interactive interface, it was fixed in 7\,s;
+the detected test command passed; the commit sat on its own branch, and the checkout was
+untouched. That run exposed a defect: the commit also carried the byte-code files a test run leaves in a
+repository that does not ignore them. The runner now stages the agent's changes before its own
+test run, which removes its share of them; what the agent's own commands leave is still committed. Stalls, resumption and parallel tasks are covered by 34 tests
+against a scripted stand-in for the agent, not by live runs. One limit is deliberate for now and
+stated in the specification: the runner's own test run is not sandboxed, so it executes code the
+model wrote with the user's rights, bounded only by the scope's memory cap.
 
 \section{Lessons}
 \label{sec:lessons}
 
 \paragraph{Keep the fork boring.} Every behaviour that could live in a linked crate went there.
 Every remaining hook is a single call or predicate. The measure of success is how long an upstream
-bump takes, not how little code we wrote. A 21\,KB series that touches 24 files turns an upstream
+bump takes, not how little code we wrote. A 27\,KB series that touches 27 files turns an upstream
 release into an afternoon's review rather than a merge project.
 
 \paragraph{Presentation diffs are the expensive ones.} Almost all of the original series' size, 97\%,
@@ -671,20 +857,32 @@ rather than any serving algorithm.
     configuration.
   \item \textbf{Throughput is not re-measured.} The throughput figures come from the system's own
     benchmark record at the time the default model was chosen.
-  \item \textbf{Known open defects:} the first-run sign-in screen (\cref{sec:eval}) and the
-    first-argument-only refusal check (\cref{sec:cloud}).
-  \item \textbf{Code index not built.} The code-index design is specified but not implemented. Its
-    key memory measurement is open.
+  \item \textbf{Upstream's own tests are not green.} In the last full run of Codex's own suite
+    against the patched tree (20{,}380 tests, 20{,}362 passed), sixteen app-server tests timed out
+    for a reason we have not confirmed. That run predates \code{/cavemode} and \code{/night},
+    which change the screen snapshots that list the slash commands; the suite has not been re-run
+    since.
+  \item \textbf{The code index is partial.} The Java and .NET indexers have never run (the machine
+    has no JDK~17 or .NET SDK), C and C++ have no exact layer on this architecture, submodules are
+    not indexed, and neither search by meaning nor the effect of an index run on decode speed has
+    been measured (\cref{sec:index}).
+  \item \textbf{Night Shift has run once.} One task, live. Stalls, resumption and parallel tasks
+    are covered only by tests against a scripted stand-in, and its own test run is not sandboxed
+    (\cref{sec:night}).
+  \item \textbf{The advertised context exceeds the KV pool.} What the server does with a session
+    larger than its pool is untested (\cref{sec:local}).
 \end{itemize}
 
 \section{Conclusion}
 
 Puffin shows that a production coding-agent client can be made vendor-free, with its model on a single
 unified-memory workstation without giving up the ability to take upstream releases. The fork adds
-a 21.3\,KB patch series and a 1.8k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
+a 26.9\,KB patch series and a 3.4k-line crate to a 1.93M-line codebase. The localisation lives in a separate crate, the cloud
 surface is audited and neutralised explicitly, and the host is protected by admission checks and a
-pressure watchdog. The next steps are a task-level accuracy evaluation, the fix for first-run
-onboarding, and the two-layer code index.
+pressure watchdog. The same structure carried three features after the fork was done (a
+terse-answer mode, a code index and an overnight queue) for two more hooks and no change to the
+method. The next steps are a task-level accuracy evaluation, a compaction limit tied to the
+server's KV pool, and the network-level switch.
 
 \section*{Availability}
 The system is developed in a private repository at the time of writing. The patch series, launcher
