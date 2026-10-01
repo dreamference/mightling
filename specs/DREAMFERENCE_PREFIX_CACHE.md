@@ -2,6 +2,8 @@
 
 **Status:** v5 — Deployed. As of the registry on 2026-09-28: `hybrid-dflash` on `dense5` (region-adaptive chunking, 9048 budget), and the `int4-dflash` fallback moved to `dense9` (1120 grid + opt-in caching, §6.1), with `enable_prefix_caching: True` on both.
 
+**Scope (noted 2026-10-01):** this document covers the two vLLM 122B DFlash recipes, of which `hybrid-dflash` is now the fallback. The default model since 2026-09-29, `qwen3.8-27b-nvfp4-dflash2`, runs on SGLang, whose prefix caching is its own radix cache (`--mamba-radix-cache-strategy extra_buffer` in the recipe) and is not described here.
+
 **Date:** 2026-08-24
 **Patch:** `runtime/patch_mamba_chunk_align.py`
 **Registry context:** `qwen3.5-122b-a10b-hybrid-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense5`) / `qwen3.5-122b-a10b-int4-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense9`; it was `kvfix2` when this document was first written). The patches live in `runtime/` and are baked in by `Dockerfile.dense`, which also bakes `patch_opt_in_cache.py`.
