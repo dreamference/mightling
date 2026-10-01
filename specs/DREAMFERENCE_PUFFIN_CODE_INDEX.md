@@ -198,9 +198,11 @@ A submodule is indexed only when it belongs to the same organisation as the repo
 | unavailable | passes | **indexed** | `yours (by authorship)` |
 | unavailable | fails, or no commits readable | not indexed | `third-party` / `unknown` |
 
+  The other reasons, which apply before or after the tests: `too large` and `not checked out` (below), `parent not indexed` for a nested submodule, and `included by you` / `excluded by you` for an explicit choice.
+
   - **A fork stays third-party until the user says otherwise.** A fork carrying a few of our commits on top of upstream's history fails the majority test over 200 commits. That is intended: the cost and the noise of indexing someone else's project are the same whoever forked it.
   - **This repository**, as a check that the tests are calibrated: `fano` is indexed (same namespace; the 200 commits the test reads are all ours, 212 of 216 overall), and `codex` is not (same namespace; 0 of its 1 commit ours, shallow, detached at `rust-v0.158.0`). `fano` was excluded before this section; `codex` stays excluded.
-- **Size guard for automatic inclusion.** A submodule that passes both tests but has more than `code_index_submodule_max_files` tracked files (default 5,000) is not indexed automatically (reason `too large`, with the count). The policy above names the conditions under which a submodule *may* be indexed, not ones that oblige it to be. At this repository's measured rate (7,096 files: ~45 s, 665 MB of graph, §2), 5,000 files are about half a minute and half a gigabyte on every first run; above that, the user decides. The key is read only from the user-level config (`~/.config/dreamference/config.toml` or `DREAMFERENCE_CONFIG_PATH`), never from a `dreamference.toml` in the repository, for the reason below. Admission (§6.4) still applies to whatever is included.
+- **Size guard for automatic inclusion.** A submodule that passes both tests but has more than `code_index_submodule_max_files` tracked files (default 5,000) is not indexed automatically (reason `too large`, with the count). The policy above names the conditions under which a submodule *may* be indexed, not ones that oblige it to be. At this repository's measured rate (7,096 files: ~45 s, 665 MB of graph, §2), 5,000 files are about half a minute and half a gigabyte on every first run; above that, the user decides. The key is honoured only when the file it comes from is outside the repository, whichever way that file was found (`DREAMFERENCE_CONFIG_PATH` can point anywhere, including into the workspace), for the reason below. Admission (§6.4) still applies to whatever is included.
 - **Not checked out** (`-` in `git submodule status`): nothing is on disk, so nothing is indexed (reason `not checked out`), whatever the policy says.
 - **Nested submodules** (`git submodule status --recursive`) are considered only when their parent is indexed, and are tested against the top-level superproject's namespace and authors, never their parent's: a third-party library's own submodules are not ours because the library's authors wrote them.
 
@@ -571,7 +573,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
   - under Codex's `read-only` and `workspace-write` sandboxes, `include` fails with the message of §4.3 and writes nothing; a `.cbmignore` or `dreamference.toml` edited inside the repository changes nothing after the next run;
   - codebase-memory's incremental run both **adds** a newly included submodule's files and **drops** a newly excluded one's (§14.1 measured the drop, not the add);
   - every answer carries the `submodules not indexed` line while one is left out, and the prompt block names it, still under 250 tokens with five excluded submodules of long paths;
-  - `code_index_submodule_max_files` in the repository's `dreamference.toml` is ignored;
+  - `code_index_submodule_max_files` in a file inside the repository is ignored, both as `./dreamference.toml` and when `DREAMFERENCE_CONFIG_PATH` points at it;
   - **this repository**, read-only: `fano` is `yours` and `codex` is `third-party` (skipped where the submodules are not checked out).
 - **The separate binary (§4.2):**
   - with `puffin-code` absent from the install directory, `puffin` launches, starts nothing and adds no block (launcher test, in the export);
