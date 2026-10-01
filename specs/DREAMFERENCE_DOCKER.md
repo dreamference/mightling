@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Docker vLLM Architecture, Model Downloads, Tensorization, Cache Management
-> **Checked against the code:** 2026-09-29 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`)
+> **Checked against the code:** 2026-10-01 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`; the launch line against `build_launch_command()` output)
 
 ---
 
@@ -106,9 +106,9 @@ Tensorizer serializes weights into one `model.tensors` file for faster loading. 
 docker run --ipc=host --network host --restart unless-stopped \
   --name dreamference-vllm-<port> --gpus all \
   --cpus=<n> --memory=<N>g --memory-swap=<N>g --oom-score-adj=800 \
-  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -v <$HF_HOME or ~/.cache/huggingface>:/root/.cache/huggingface \
   -v ~/.cache/dreamference:/root/.cache/dreamference \
-  [-e HF_TOKEN=<token>] [recipe env] \
+  -e VLLM_NO_USAGE_STATS=1 -e DO_NOT_TRACK=1 [-e HF_TOKEN=<token>] [recipe env] \
   -e VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm -e CUTE_DSL_ARCH=sm_121a -e VLLM_LOGGING_LEVEL=DEBUG \
   -e VLLM_DEBUG_LOG_API_SERVER_RESPONSE=1 -e VLLM_DEBUG_LOG_API_SERVER_REQUEST=1 \
   --entrypoint vllm <image> serve <hf_repo> [vllm flags]
@@ -152,14 +152,15 @@ It is NVIDIA's NGC vLLM image, which includes the May 2026 SM12x FlashInfer back
 
 ### 5.2. Per-model images
 
-A recipe can pin its own engine in `launch_overrides["docker_image"]`. The current DFlash entries do:
+A recipe can pin its own image in `launch_overrides["docker_image"]`, and name its engine in `launch_overrides["engine"]`. The default model and the two 122B DFlash entries do:
 
 | Model | Image | Built from |
 | --- | --- | --- |
-| `qwen3.5-122b-a10b-hybrid-dflash` (default) | `dreamference-vllm-dflash:0.23.0-aeon-dense5` | `Dockerfile.dense`, on top of `dreamference-vllm-dflash:0.23.0-aeon-kvfix2` |
+| `qwen3.8-27b-nvfp4-dflash2` (default, SGLang) | `lmsysorg/sglang@sha256:d6e7288627be…` (pinned by digest) | Pulled from the registry, not built |
+| `qwen3.5-122b-a10b-hybrid-dflash` (fallback) | `dreamference-vllm-dflash:0.23.0-aeon-dense5` | `Dockerfile.dense`, on top of `dreamference-vllm-dflash:0.23.0-aeon-kvfix2` |
 | `qwen3.5-122b-a10b-int4-dflash` | `dreamference-vllm-dflash:0.23.0-aeon-dense9` | same lineage |
 
-The chain begins at `Dockerfile.dflash`, `FROM ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`, which is the AEON sm121 vLLM the DGX Spark DFlash recipe is built on. The kvfix layers bake in KV page-size unification, mamba prefix alignment and block-table fixes. The dense layer adds the Entrpi dense-bandwidth patches. These images are ~41 GB each and are built by hand with `docker build -f Dockerfile.dense …`; nothing in the CLI builds them.
+The DFlash vLLM chain begins at `Dockerfile.dflash`, `FROM ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`, which is the AEON sm121 vLLM the DGX Spark DFlash recipe is built on. The kvfix layers bake in KV page-size unification, mamba prefix alignment and block-table fixes. The dense layer adds the Entrpi dense-bandwidth patches. These images are ~41 GB each and are built by hand with `docker build -f Dockerfile.dense …`; nothing in the CLI builds them.
 
 The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAULT_VLLM_IMAGE`.
 

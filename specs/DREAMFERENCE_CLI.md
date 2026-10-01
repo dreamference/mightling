@@ -185,10 +185,10 @@ Per-model flags come from the model matrix's `launch_overrides`. Options given h
 **Docker command** (`VLLMServerManager.start_server`):
 ```bash
 docker run --ipc=host --network host --restart unless-stopped --name dreamference-vllm-<port> --gpus all \
-  --cpus=<limit> --memory=<N>g --memory-swap=<N>g \
-  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  --cpus=<limit> --memory=<N>g --memory-swap=<N>g --oom-score-adj=800 \
+  -v <$HF_HOME or ~/.cache/huggingface>:/root/.cache/huggingface \
   -v ~/.cache/dreamference:/root/.cache/dreamference \
-  [-e HF_TOKEN=<token>] [recipe env vars] \
+  -e VLLM_NO_USAGE_STATS=1 -e DO_NOT_TRACK=1 [-e HF_TOKEN=<token>] [recipe env vars] \
   -e VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm -e CUTE_DSL_ARCH=sm_121a -e VLLM_LOGGING_LEVEL=DEBUG \
   -e VLLM_DEBUG_LOG_API_SERVER_RESPONSE=1 -e VLLM_DEBUG_LOG_API_SERVER_REQUEST=1 \
   --entrypoint vllm <image> serve <hf_repo> [vllm flags]

@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Source Code Layout, Module Organization, Package Structure
-> **Checked against the code:** 2026-09-28
+> **Checked against the code:** 2026-10-01 (module tree against the source tree; §5 against `build_launch_command()` output)
 
 ---
 
@@ -12,7 +12,7 @@
 - [2. Module Structure](#2-module-structure)
 - [3. Subsystem Packages](#3-subsystem-packages)
 - [4. Import Conventions](#4-import-conventions)
-- [5. vLLM Launch Command for the Default Model](#5-vllm-launch-command-for-the-default-model)
+- [5. Launch Commands for the Default and Fallback Models](#5-launch-commands-for-the-default-and-fallback-models)
 
 ---
 
@@ -20,7 +20,7 @@
 
 **Version:** `dreamference.__version__ == "1.2.0"`.
 
-**Architecture:** eight subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `puffin-rs/`, the web commands `puffin-web-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
+**Architecture:** nine subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `puffin-rs/`, the web commands `puffin-web-rs/`, the code index `puffin-code-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
 
 **Dead shims:** the top-level `dreamference/<name>.py` modules (`cli.py`, `config.py`, `hardware.py`, …) contain `from dreamference.<name>.__init__ import *`. They **never execute**: Python resolves the same-named package directory first. Editing them has no effect.
 
@@ -36,12 +36,13 @@
 | :--- | :--- |
 | `dreamference/config/` | 4-tier config resolution, config generation |
 | `dreamference/hardware/` | GB10 detection and telemetry, model matrix, HF downloads and tensorization |
-| `dreamference/vllm_server/` | Docker vLLM lifecycle, launch arguments, host-safety guards, diffusion sidecar |
-| `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, sandbox prefixes, the `puffin` builder |
-| `dreamference/chat/` | Onyx Lite (Puffin web UI) lifecycle and patches, Gmail, image search, desktop window |
+| `dreamference/vllm_server/` | Docker model-server lifecycle (vLLM and SGLang), launch arguments, chat-template patching, host-safety guards, diffusion sidecar |
+| `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, the `puffin` builder, the Codex test runner |
+| `dreamference/chat/` | Onyx Lite (Puffin web UI) lifecycle and patches, Gmail, image search, the SearXNG sidecar and the sidecar network, desktop window |
 | `dreamference/context_engine/` | AST symbols, TF-IDF, FTS5 and dense retrieval |
 | `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, and web tools |
-| `dreamference/cli/` | `puffin-admin`, deep model inspection, benchmark dataset |
+| `dreamference/cli/` | `puffin-admin`, deep model inspection, benchmark dataset, code-index tool setup |
+| `dreamference/night_shift/` | Night Shift: the overnight run of the `/night` queue, its timer and report |
 
 ---
 
@@ -56,7 +57,8 @@ dreamference/
 ├── cli/
 │   ├── dreamference_cli_controller.py    # DreamferenceCLIController, main()
 │   ├── model_deep_inspector.py           # ModelDeepInspector (main-model inspect --deep)
-│   └── sonnet_dataset.py                 # embedded Sonnet corpus for benchmark_server
+│   ├── sonnet_dataset.py                 # embedded Sonnet corpus for benchmark_server
+│   └── code_index_setup.py               # CodeIndexSetup, PinnedTool (puffin-admin code setup)
 ├── config/
 │   ├── dreamference_config.py            # DreamferenceConfig: 4-tier resolution
 │   ├── config_path_resolver.py           # ConfigPathResolver
@@ -72,6 +74,8 @@ dreamference/
 ├── vllm_server/
 │   ├── vllm_server_manager.py            # VLLMServerManager
 │   ├── vllm_launch_options.py            # VLLMLaunchOptions
+│   ├── sglang_launch_builder.py          # SGLangLaunchBuilder (engine: sglang, the default model)
+│   ├── chat_template_patcher.py          # ChatTemplatePatcher (chat_template_patches, on a copy)
 │   ├── vllm_log_streamer.py              # VLLMLogStreamer
 │   ├── vllm_server_status.py             # VLLMServerStatus
 │   ├── vllm_startup_monitor.py           # VLLMStartupMonitor
@@ -82,7 +86,8 @@ dreamference/
 │   └── diffusion_openai_service.py       # DiffusionModelRunner (runs inside the sidecar container)
 ├── runner/
 │   ├── codex_runner.py / codex_installer.py    # CodexRunner / CodexInstaller (default agent)
-│   ├── codex_branded_builder.py                 # CodexBrandedBuilder (builds puffin)
+│   ├── codex_branded_builder.py                 # CodexBrandedBuilder (builds puffin, the web commands, puffin-code)
+│   ├── codex_test_runner.py                     # CodexTestRunner (puffin-admin codex test)
 │   ├── cline_runner.py / cline_installer.py
 │   ├── continue_runner.py / continue_installer.py
 │   ├── openhands_runner.py / openhands_installer.py
@@ -97,7 +102,9 @@ dreamference/
 │   ├── gmail_search_service.py                  # GmailSearchService (container service)
 │   ├── gmail_credentials.py                     # GmailCredentials
 │   ├── gmail_client.py                          # GmailClient (puffin-admin gmail)
-│   ├── image_search_service.py                  # HardenedFetcher, ImageStore, FetchRejected
+│   ├── image_search_service.py                  # ImageSearchService, HardenedFetcher, ImageStore, SearxngClient, SiglipClient, VisionRanker, FetchRejected
+│   ├── searxng_sidecar.py                       # SearxngSidecar (puffin-admin searxng start)
+│   ├── sidecar_network.py                       # SidecarNetwork (the user-defined network sidecars are created on)
 │   └── desktop_runner.py / desktop_installer.py # DesktopRunner / DesktopInstaller (puffin-app)
 ├── context_engine/
 │   ├── context_engine.py                 # ContextEngine
@@ -107,19 +114,30 @@ dreamference/
 │   ├── embedding_calculator.py           # EmbeddingCalculator (nomic-embed-text-v1.5)
 │   ├── code_symbol.py                    # CodeSymbol
 │   └── indexed_file.py                   # IndexedFile
-└── mcp_server/
-    ├── mcp_server.py                     # MCPServer
-    ├── mcp_tool_registry.py              # MCPToolRegistry
-    ├── web_tools.py                      # WebTools (the MCP web_search / web_fetch tools)
-    ├── ide_state.py                      # IDEState
-    └── editor_selection.py               # EditorSelection
+├── mcp_server/
+│   ├── mcp_server.py                     # MCPServer
+│   ├── mcp_tool_registry.py              # MCPToolRegistry
+│   ├── web_tools.py                      # WebTools (the MCP web_search / web_fetch tools)
+│   ├── ide_state.py                      # IDEState
+│   └── editor_selection.py               # EditorSelection
+└── night_shift/
+    ├── night_shift_runner.py             # NightShiftRunner (puffin-admin night run: admission, scheduling)
+    ├── night_shift_task_run.py           # NightShiftTaskRun (one task: worktree, puffin exec, tests, commit)
+    ├── night_shift_queue.py              # NightShiftQueue (the files under $CODEX_HOME/night)
+    ├── night_shift_host.py               # NightShiftHost (read-only probes of the server and the host)
+    ├── night_shift_settings.py           # NightShiftSettings (the [night] table)
+    ├── night_shift_report.py             # NightShiftReport (the morning report)
+    └── night_shift_scheduler.py          # NightShiftScheduler (the systemd user timer)
 
 scripts/                                  # at the repository root, not inside the package
 ├── install_gb10.sh                       # full installation
-└── run_vllm_gb10.sh                      # foreground vLLM launch
+├── run_vllm_gb10.sh                      # thin wrapper over puffin-admin server start
+├── gen_admin_reference.py                # regenerates docs/admin.md from build_parser()
+└── cave_mode_bench/                      # the cave-mode benchmark and its level texts
 
-puffin-rs/src/{lib,help,app,update,usage}.rs   # launcher compiled into puffin
+puffin-rs/src/{lib,help,home,app,update,usage,cave,night,code_index}.rs   # launcher compiled into puffin
 puffin-web-rs/src/{lib,search,fetch,html_text}.rs, src/bin/   # puffin-search, puffin-fetch
+puffin-code-rs/src/                             # puffin-code, the code index (router, SCIP stores, session, MCP)
 codex-patches/00NN-*.patch                      # patch series for the codex/ submodule
 desktop/src-tauri/                              # Tauri shell (binary puffin-app)
 ```
@@ -134,24 +152,24 @@ desktop/src-tauri/                              # Tauri shell (binary puffin-app
 
 ### 3.2. `hardware/`
 
-`ModelMatrixRegistry.MATRIX` is the source of truth for models and their `launch_overrides`, which is the per-model vLLM recipe, including an optional pinned `docker_image`. `ModelSpec` also records `supports_vision` and `is_diffusion`. `ModelDownloader` manages the HF cache (`$HF_HOME/hub`) and the tensorizer cache (`~/.cache/dreamference/tensorizer`).
+`ModelMatrixRegistry.MATRIX` is the source of truth for models and their `launch_overrides`, which is the per-model recipe, including an optional pinned `docker_image` and an optional `engine` (`sglang` for the default model; vLLM otherwise). `ModelSpec` also records `supports_vision` and `is_diffusion`. `ModelDownloader` manages the HF cache (`$HF_HOME/hub`) and the tensorizer cache (`~/.cache/dreamference/tensorizer`).
 
 ### 3.3. `vllm_server/`
 
-- **`VLLMServerManager`:** builds the `docker run … vllm serve` command (§5), runs the host-safety pre-flight (`check_host_safety`), starts under `MemoryPressureWatchdog`, stops, removes, tails logs, and resets a stale torch.compile cache (`_reset_stale_compile_cache`).
+- **`VLLMServerManager`:** builds the `docker run …` command (§5; for an `engine: sglang` recipe `SGLangLaunchBuilder` supplies what follows the image, and `ChatTemplatePatcher` the patched template), runs the host-safety pre-flight (`check_host_safety`), starts under `MemoryPressureWatchdog`, stops, removes, tails logs, and resets a stale torch.compile cache (`_reset_stale_compile_cache`).
 - **`DiffusionServerManager`:** runs the diffusion sidecar (`diffusion_openai_service.py`) in the main model's image before vLLM starts, capped at 8 GB.
 
 ### 3.4. `runner/`
 
-Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessWaiter` (the non-Codex runners' wait for the server) and `CodexBrandedBuilder`. See `DREAMFERENCE_AGENTS.md`.
+Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessWaiter` (the non-Codex runners' wait for the server), `CodexBrandedBuilder` and `CodexTestRunner`. See `DREAMFERENCE_AGENTS.md`.
 
 ### 3.5. `chat/`
 
-The Puffin web UI and its companions: Onyx deployment and configuration, the four kinds of UI patch (CSS, fonts, labels, scripts) plus brand assets, the Gmail service and client, the image-search sidecar, and the Tauri desktop window. See `DREAMFERENCE_ONYX.md` and `CLAUDE.md`.
+The Puffin web UI and its companions: Onyx deployment and configuration, the four kinds of UI patch (CSS, fonts, labels, scripts) plus brand assets, the Gmail service and client, the image-search sidecar, the SearXNG sidecar with the user-defined network the sidecars are created on, and the Tauri desktop window. See `DREAMFERENCE_ONYX.md` and `CLAUDE.md`.
 
 ### 3.6. `context_engine/`
 
-AST symbol extraction, TF-IDF, SQLite FTS5 and sqlite-vec embeddings, written to `.dreamference/`. See `DREAMFERENCE_CONTEXT.md`.
+AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float32 blobs (sqlite-vec is not used), written to `.dreamference/`. See `DREAMFERENCE_CONTEXT.md`.
 
 ### 3.7. `mcp_server/`
 
@@ -164,7 +182,11 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and sqlite-vec embeddings, written to
 
 ### 3.8. `cli/`
 
-`DreamferenceCLIController.build_parser()` / `run_cli()`, `ModelDeepInspector` and the Sonnet dataset. See `DREAMFERENCE_CLI.md`.
+`DreamferenceCLIController.build_parser()` / `run_cli()`, `ModelDeepInspector`, the Sonnet dataset and `CodeIndexSetup`. See `DREAMFERENCE_CLI.md`.
+
+### 3.9. `night_shift/`
+
+`NightShiftRunner.run()` is `puffin-admin night run`: admission, then a scheduling loop that starts one `NightShiftTaskRun` per queued task, each in its own git worktree under a memory-capped systemd scope. `NightShiftQueue` reads and writes the task files the launcher (`puffin-rs/src/night.rs`) creates, under the same per-task locks. See `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`.
 
 ---
 
@@ -195,15 +217,39 @@ __all__ = ["DreamferenceConfig", "ConfigPathResolver", ...]
 
 ---
 
-## 5. vLLM Launch Command for the Default Model
+## 5. Launch Commands for the Default and Fallback Models
 
-The output of `VLLMServerManager().build_launch_command("qwen3.5-122b-a10b-hybrid-dflash")` on this machine on 2026-09-28, with default config:
+### 5.1. The default: `qwen3.8-27b-nvfp4-dflash2` (SGLang)
+
+The output of `VLLMServerManager().build_launch_command("qwen3.8-27b-nvfp4-dflash2")` on this machine on 2026-10-01, with default config:
+
+| Parameter / Flag | Value | Source |
+| :--- | :--- | :--- |
+| Docker image | `lmsysorg/sglang@sha256:d6e7288627be…` | `launch_overrides["docker_image"]`, pinned by digest |
+| Container limits | `--cpus=14.0 --memory=85g --memory-swap=85g --oom-score-adj=800`, `--restart unless-stopped` | Derived from the host, `gpu_memory_utilization` 0.5 and the recipe's `container_headroom_gb` 24 |
+| Container env | `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1`, `HF_HUB_OFFLINE=1`, `TORCHINDUCTOR_CACHE_DIR=/root/.cache/dreamference/sglang/inductor` | The launcher |
+| Entry | `python3 -m sglang.launch_server` | `SGLangLaunchBuilder` |
+| `--model-path` | the checkpoint's **snapshot directory** under the mounted HF cache, at the pinned revision | `hf_repo_id` and `revision` |
+| `--served-model-name` | `RadixArk/Qwen3.8-27B-NVFP4` | `hf_repo_id` |
+| `--context-length` | `262144` | Recipe `max_model_len` |
+| `--mem-fraction-static` | `0.5` | Recipe `gpu_memory_utilization` |
+| `--tool-call-parser` / `--reasoning-parser` | `qwen3_coder` / `qwen3` | Recipe |
+| `--speculative-algorithm`, `--speculative-draft-model-path`, `--speculative-num-draft-tokens`, `--speculative-draft-model-quantization` | `DFLASH`, the drafter's snapshot directory, `16`, `modelopt_fp4` | Recipe `speculative_config` |
+| `--chat-template` | a patched copy under `~/.cache/dreamference/chat-templates/` | `ChatTemplatePatcher`, from the recipe's `chat_template_patches` |
+| `--attention-backend` / `--sampling-backend` | `flashinfer` / `pytorch` | Recipe `extra_args` |
+| `--chunked-prefill-size`, `--max-running-requests`, `--cuda-graph-max-bs`, `--torch-compile-max-bs`, `--num-continuous-decode-steps` | `8192`, `8`, `8`, `4`, `2` | Recipe `extra_args` |
+| `--mamba-radix-cache-strategy`, `--mamba-ssm-dtype`, `--max-mamba-cache-size` | `extra_buffer`, `bfloat16`, `96` | Recipe `extra_args` |
+| `--trust-remote-code`, `--tp-size 1`, `--disable-prefill-cuda-graph`, `--disable-flashinfer-autotune`, `--enable-torch-compile`, `--sleep-on-idle`, `--enable-metrics` | flags | Builder and recipe `extra_args` |
+
+### 5.2. The fallback: `qwen3.5-122b-a10b-hybrid-dflash` (vLLM)
+
+The output of `VLLMServerManager().build_launch_command("qwen3.5-122b-a10b-hybrid-dflash")` on this machine, with default config (first recorded 2026-09-28, re-run 2026-10-01):
 
 | Parameter / Flag | Value | Source |
 | :--- | :--- | :--- |
 | Docker image | `dreamference-vllm-dflash:0.23.0-aeon-dense5` | `launch_overrides["docker_image"]`; the project default `DEFAULT_VLLM_IMAGE` is `dreamference-vllm-tensorizer:26.07-py3` |
 | Container limits | `--cpus=14.0 --memory=93g --memory-swap=93g --oom-score-adj=800`, `--restart unless-stopped` | Derived from the host and `gpu_memory_utilization` |
-| Container env | `VLLM_MARLIN_USE_ATOMIC_ADD=1`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` (recipe); `VLLM_CACHE_ROOT`, `CUTE_DSL_ARCH=sm_121a`, `VLLM_LOGGING_LEVEL=DEBUG`, request/response debug logging (always) | Recipe `env` plus the launcher |
+| Container env | `VLLM_MARLIN_USE_ATOMIC_ADD=1`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` (recipe); `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1`, `VLLM_CACHE_ROOT`, `CUTE_DSL_ARCH=sm_121a`, `VLLM_LOGGING_LEVEL=DEBUG`, request/response debug logging (always) | Recipe `env` plus the launcher |
 | Model | `Intel/Qwen3.5-122B-A10B-int4-AutoRound` | `hf_repo_id` |
 | `--max-model-len` | `32768` | Recipe |
 | `--gpu-memory-utilization` | `0.7` | Recipe |
@@ -227,4 +273,4 @@ The recipe is data in `hardware/model_matrix_registry.py`. Change it there, not 
 
 - **[DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md):** system overview
 - **[DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md):** context engine internals
-- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM configuration and launch
+- **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM and SGLang configuration and launch

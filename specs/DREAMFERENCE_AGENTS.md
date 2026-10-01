@@ -1,8 +1,8 @@
 # Puffin Agent Runtimes & Integration
 
-> **Version:** 1.3.0
+> **Version:** 1.2.0
 > **Subject:** the agent runners: Codex (`puffin`, default), Cline, Continue, OpenHands.
-> **Checked against the code:** 2026-09-30 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
+> **Checked against the code:** 2026-10-01 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
 
 ---
 
@@ -177,7 +177,7 @@ The prompt is unused.
 2. the model's `launch_overrides["tool_call_parser"]`;
 3. a guess from the name: `mistral` → `mistral`, otherwise `hermes`.
 
-The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call>` blocks, while Qwen 3.5/3.6 emit XML. The default model `qwen3.5-122b-a10b-hybrid-dflash` resolves to `qwen3_xml` (reasoning parser `qwen3`), and Qwen 2.5 Coder resolves to `hermes`.
+The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call>` blocks, while Qwen 3.5/3.6 emit XML. The default model `qwen3.8-27b-nvfp4-dflash2` (served by SGLang) resolves to `qwen3_coder`, the 122B and 35B vLLM recipes to `qwen3_xml` (reasoning parser `qwen3` for all of them), and Qwen 2.5 Coder resolves to `hermes`.
 
 
 ## 8. Failure Modes

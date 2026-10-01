@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Installation, Hardware Detection, Quickstart, Helper Scripts
-> **Checked against the code:** 2026-09-29 (`setup.py`, `scripts/`, `dreamference/`)
+> **Checked against the code:** 2026-10-01 (`setup.py`, `scripts/`, `dreamference/`)
 
 ---
 
@@ -22,7 +22,7 @@
 ### 1.1. Hardware
 
 - **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU). Any host with ≥ 100 GB RAM also qualifies by the detection heuristic (§2), but the recipes and images target SM121.
-- NVMe storage: the model caches plus the DFlash vLLM images (~41 GB each) take hundreds of GB.
+- NVMe storage: the model caches plus the model-server images (the fallback's DFlash vLLM images are ~41 GB each) take hundreds of GB.
 
 ### 1.2. Operating System and Drivers
 
@@ -41,8 +41,11 @@
   - no `libssl-dev` or `libcap-dev` is needed.
 - **For the web UI:** `onyx-cli`, installed via pip by `OnyxInstaller` when missing.
 - **For the desktop window:** GTK/WebKit 4.1 development headers, Rust and the Tauri CLI. `puffin-admin desktop install` fetches all three; the headers need `sudo apt-get`.
+- **For the code index:** `puffin-admin code setup` installs the pinned tools `puffin-code` runs; Go, a JDK 17+ and a .NET SDK 8+ are optional and only enable their languages' exact indexers.
+- **For Night Shift:** a systemd user session (`puffin-admin night enable` installs a user timer; lingering must be on for it to fire while logged out).
 - **Optional agents:**
   - VS Code / VSCodium, for Cline and Continue;
+  - Docker, for OpenHands.
 
 ### 1.4. Privileges
 
@@ -79,23 +82,27 @@ cd dgxcoder                      # the codex/ submodule is shallow; add --depth 
 python3 -m venv .venv
 .venv/bin/pip install -e .       # installs the `puffin-admin` console script into .venv/bin
 
-.venv/bin/puffin-admin init                  # default model qwen3.5-122b-a10b-hybrid-dflash: downloads weights,
+.venv/bin/puffin-admin init                  # default model qwen3.8-27b-nvfp4-dflash2: downloads weights,
                                              # writes dreamference.toml, indexes the workspace
 .venv/bin/puffin-admin codex build           # builds puffin from codex/ + codex-patches/ + puffin-rs/,
-                                             # links ~/.local/bin/puffin (first build: long; later: incremental)
-.venv/bin/puffin-admin server start          # vLLM + diffusion sidecar; exits when healthy
+                                             # also puffin-search, puffin-fetch and puffin-code; links them into
+                                             # ~/.local/bin (first build: long; later: incremental)
+.venv/bin/puffin-admin server start          # model server (SGLang for the default) + diffusion sidecar; exits when healthy
 puffin                                       # the terminal agent
 ```
 
 **Extras:**
 - **Web UI:** `puffin-admin puffin start`, then `puffin-admin puffin configure`.
 - **Desktop window:** `puffin-admin desktop install`, then `puffin-admin desktop run`, or `puffin app`.
+- **Web search for `puffin`:** `puffin-admin searxng start` (the web UI's `configure` also sets it up).
+- **Code index:** `puffin-admin code setup`.
+- **Night Shift:** `puffin-admin night enable`; tasks are queued from `puffin` with `/night add`.
 
-**Model images.** The default model pins `dreamference-vllm-dflash:0.23.0-aeon-dense5`, a locally built image. It is not pulled and not built automatically: build it from `Dockerfile.dflash` → `Dockerfile.dense` before the first `server start` (`DREAMFERENCE_DOCKER.md` §5.2–5.3).
+**Model images.** The default model pins `lmsysorg/sglang` by digest; being registry-qualified, it is pulled by `server start` when missing. The fallback `qwen3.5-122b-a10b-hybrid-dflash` pins `dreamference-vllm-dflash:0.23.0-aeon-dense5`, a locally built image. That one is not pulled and not built automatically: build it from `Dockerfile.dflash` → `Dockerfile.dense` before the first `server start --model qwen3.5-122b-a10b-hybrid-dflash` (`DREAMFERENCE_DOCKER.md` §5.2–5.3).
 
 ### 3.2. Prebuilt `puffin`
 
-A published GitHub release carries `puffin` and `codex-code-mode-host` for linux-arm64. Once a release exists, `puffin update` installs or refreshes them, and a source checkout is then only needed for `puffin-admin`. As of 2026-09-28 no release has been published.
+A published GitHub release carries `puffin` and `codex-code-mode-host` for linux-arm64. Once a release exists, `puffin update` installs or refreshes them, and a source checkout is then only needed for `puffin-admin`. As of 2026-10-01 no release has been published.
 
 ### 3.3. `scripts/install_gb10.sh`
 
@@ -137,6 +144,7 @@ Until 2026-09-29 it ran `python3 -m vllm.entrypoints.openai.api_server` directly
 | `puffin: command not found` | `puffin-admin codex build`, then make sure `~/.local/bin` is on `PATH` |
 | `puffin-admin codex build` says the submodule is not checked out | `git submodule update --init codex` |
 | `puffin` waits forever "for local vLLM server" | `puffin-admin server start`; check `DREAMFERENCE_VLLM_HOST` / `vllm_host` |
+| `puffin-search` says every engine failed with a connection error after a reboot | The SearXNG container was created on Docker's default bridge and started before the host had DNS: `puffin-admin searxng start` recreates it on the sidecar network (`DREAMFERENCE_DOCKER.md` §6) |
 | First `puffin-admin index` fails offline | The nomic embedding model is downloaded on first use; fetch it while online (`DREAMFERENCE_CONTEXT.md` §5) |
 
 ---
@@ -149,7 +157,8 @@ puffin-admin model list             # the model matrix
 puffin --version                    # "puffin 0.158.0"
 puffin exec "say hello"             # a one-shot answer from the local model (needs the server)
 puffin-admin index --force          # (re)builds .dreamference/ in the current directory
-.venv/bin/python -m pytest tests/ -q   # 364 passed, 63 skipped without a model server (2026-09-30)
+.venv/bin/python -m pytest tests/ -q   # 521 tests on 2026-10-01; 63 of them need a running model server and are
+                                       # skipped without one (the full run then takes ~13 minutes instead of ~25 s)
 ```
 
 ---

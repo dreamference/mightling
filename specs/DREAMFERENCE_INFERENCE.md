@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** vLLM Launch Engine, Auto-Configuration, & Performance Optimization
-> **Checked against the code:** 2026-09-29 (`dreamference/vllm_server/vllm_server_manager.py`)
+> **Checked against the code:** 2026-10-01 (`dreamference/vllm_server/vllm_server_manager.py`, `psi_watchdog.py`; constants compared value by value)
 
 ---
 
@@ -222,7 +222,7 @@ Every current matrix entry sets its own context length and utilisation.
 - `--ipc=host --network host --restart unless-stopped --gpus all`;
 - `--cpus` and a memory limit derived from `gpu_memory_utilization` plus headroom, below total memory minus a 12 GB host reserve (`HOST_MEMORY_RESERVE_GB`);
 - `--memory-swap` equal to the memory limit, and `--oom-score-adj=800`;
-- env `VLLM_CACHE_ROOT`, `CUTE_DSL_ARCH=sm_121a`, `VLLM_LOGGING_LEVEL=DEBUG`, and API request/response debug logging.
+- env `VLLM_NO_USAGE_STATS=1` and `DO_NOT_TRACK=1` for every engine; for vLLM also `VLLM_CACHE_ROOT`, `CUTE_DSL_ARCH=sm_121a`, `VLLM_LOGGING_LEVEL=DEBUG` and API request/response debug logging; for SGLang `HF_HUB_OFFLINE=1` and `TORCHINDUCTOR_CACHE_DIR` (§5.3).
 
 ---
 
@@ -230,7 +230,7 @@ Every current matrix entry sets its own context length and utilisation.
 
 On GB10, host RAM and GPU memory are the same memory. A load that exhausts it can freeze the whole machine rather than OOM the container. There are two layers, both of which must be kept when touching `start_server()`:
 
-- **Before the load:** `check_host_safety()` inspects swap, `sysctl` values and whether `earlyoom` or `systemd-oomd` is present and configured. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. Either one aborts with an explanation rather than risking a lockup.
+- **Before the load:** `check_host_safety()` inspects swap (at least 64 GB, `MIN_SWAP_GB`), `sysctl` values (`vm.min_free_kbytes` ≥ 1,048,576 and `vm.watermark_scale_factor` ≥ 200) and whether `earlyoom` or `systemd-oomd` is present and configured (earlyoom's memory threshold at most 6%, `MAX_EARLYOOM_MEM_PCT`; the suggested setting is `-m 5,2 -s 100 -r 60`). `puffin-admin server start` also refuses while a Night Shift run holds its lock, and stops running `puffin-index-*` scopes first. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. Either one aborts with an explanation rather than risking a lockup.
 - **During the load, `MemoryPressureWatchdog` (`psi_watchdog.py`):** it samples `/proc/pressure/memory` once a second and resolves the container's cgroup. It trips when `full avg10` ≥ 60% holds for 5 s (`PSI_FULL_LIMIT_PCT`, `PSI_TRIP_DURATION_S`), or at once when `full avg60` ≥ 25% (`PSI_SUSTAINED_AVG60_PCT`). The kill paths, in order:
   1. direct `SIGKILL` to the cgroup's PIDs, if permitted;
   2. a kill request over dockerd's unix socket;
