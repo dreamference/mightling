@@ -48,7 +48,7 @@ Gemini contributes no catalogue: its part of this is the `~/.agents/skills` and 
 
 ### 2.2 Measured live (the installed 17-patch build, Qwen3.8-27B)
 
-One `puffin exec` in a scratch repository holding three probe skills, plus a second run for the symlink.
+`puffin exec` runs in a scratch repository holding three probe skills; one run per row group.
 
 | Probe | Result |
 |---|---|
@@ -58,6 +58,8 @@ One `puffin exec` in a scratch repository holding three probe skills, plus a sec
 | A skill with Hermes's and OpenClaw's frontmatter (`platforms: [macos]`, `required_environment_variables`, `metadata.hermes`, `metadata.openclaw.requires.bins` naming a binary that is not installed, `always: true`), one directory deeper (`<category>/<name>/`) | loaded and used. Nothing was gated: a macOS-only skill needing a missing binary is offered on this Linux machine |
 | The same skill under `.claude/skills/` in the repository | **not found**: hidden directories other than `.agents` and `.codex` are not roots |
 | A symlink `.agents/skills/hermes` → a directory laid out as `~/.hermes/skills/<category>/<name>/` | found and used: a symlinked foreign root works, hidden target and category level included |
+| Under `-s workspace-write`, `touch` through a symlink in the writable workspace to a folder outside it (under `~/.cache`) | "Read-only file system"; the same `touch` on a plain file in the workspace succeeded. (Writes under the repository's `.agents/` are refused too: Codex protects that folder) |
+| `-c 'skills.config=[{name="claude-probe",enabled=false}]'` | the skill is gone from the model's list; the others remain. The `name` selector was tested, the `path` selector was not |
 
 Also on this machine: `~/.puffin/skills` holds `pdf` and `jupyter-notebook` from OpenAI's catalogue (installed on 2026-10-01 by another task), `~/.claude/skills` holds only `synced/`, and there is no `~/.gemini`, `~/.hermes` or `~/.openclaw`. The nine installed skills' descriptions total about 620 characters, 3% of the budget.
 
@@ -95,7 +97,7 @@ Why not copy: `puffin` already copied `~/.codex/skills` once, on first run (`puf
 - `~/.agents/skills` needs no link: Codex scans it already.
 - **Repository skills.** `.claude/skills` and `.gemini/skills` of the repository being worked in are not roots, and the launcher must not write into the user's repository to link them. They are offered through a per-repository directory outside the repository, `~/.puffin/skills/repo-<hash of the repository root>/claude -> <repo>/.claude/skills`, created at start when the launcher's working directory is inside a repository that has such a folder, and pruned when the repository or folder is gone. Consequence, stated: these skills are user-scope for precedence (§7) and are visible only while that repository's link exists, i.e. to sessions started after it was created, in any directory. That is wider than Claude Code's own scoping; §11 lists it as open.
 - **Switching a source off**: `puffin skill source <claude|gemini|hermes|openclaw> off` records it in `~/.puffin/puffin-skills.toml` and removes the link; `on` restores it. Default: on for every source whose folder exists.
-- **Writability.** Commit `77b9471` put `~/.puffin/skills` in the sandbox's writable roots so the built-in installer works. The bind is of that path; a link's target lies outside it and stays read-only to sandboxed commands, so the agent cannot rewrite another agent's skills through the link. To be verified when built (§9), since it is the property that keeps a compromised session from editing `~/.claude/skills`.
+- **Writability.** Commit `77b9471` put `~/.puffin/skills` in the sandbox's writable roots so the built-in installer works. The bind is of that path; a link's target lies outside it and stays read-only to sandboxed commands, so the agent cannot rewrite another agent's skills through the link. Measured with a stand-in (§2.2): from a writable workspace, writing through a symlink to a folder under `~/.cache` failed with "Read-only file system". To be repeated with the real `~/.puffin/skills` root when built, since it is the property that keeps a compromised session from editing `~/.claude/skills`.
 
 Trap recorded for whoever builds this: Codex skips hidden directories while scanning, which is why the links are named `from-…` and not `.claude`.
 
@@ -249,8 +251,8 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 1. One real skill from each catalogue, installed by hand and run against the local model on a task it is meant for: OpenAI `pdf`, Anthropic `skills/webapp-testing` or another Apache-licensed one, one ClawHub skill, one Hermes optional skill, and one skill a Gemini CLI user published. For each: does the model choose it, read it, follow it, and finish. Then the same five with the §5 glossary added by hand. This decides whether the glossary earns its 190 tokens, and it is the only evidence of fitness on Qwen3.8; today's evidence is one code-word probe.
 2. ClawHub: the unauthenticated download and verdict endpoints.
 3. Hermes: where optional skills live in its repository, and how many skills a default install puts in `~/.hermes/skills` (the budget question of §7).
-4. That a link's target outside `~/.puffin/skills` is read-only inside the workspace-write sandbox (§3).
-5. That a `[[skills.config]]` entry with `path` and `enabled = false` removes a skill from the catalogue in the pinned version, and what happens when the path no longer exists.
+4. The read-only link target of §3, repeated with the real writable root `~/.puffin/skills` in a scratch home (measured so far from a workspace).
+5. `[[skills.config]]` with the `path` selector (the `name` selector is measured), written in `config.toml` rather than passed with `-c`, and what happens when the path no longer exists. §4 and §7 need `path`, because two skills may share a name.
 
 ---
 
