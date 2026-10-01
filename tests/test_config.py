@@ -140,3 +140,13 @@ def test_unpinned_diffusion_model_is_not_fossilised_into_the_config(tmp_path):
         ).diffusion_model == "some-future-diffusion-default"
     finally:
         cfg_mod.DEFAULT_DIFFUSION_MODEL = original_default
+
+
+def test_saving_keeps_tables_other_readers_own(tmp_path):
+    # `[night]` is read by Night Shift, not by DreamferenceConfig; a save used to drop it.
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+    path = tmp_path / "dreamference.toml"
+    path.write_text('agent_runner = "codex"\n\n[night]\nwindow = "02:00-05:00"\n')
+    ConfigFileStorageManager.save_config_dict(path, {"agent_runner": "cline"})
+    saved = ConfigFileStorageManager.load_config_dict(path)
+    assert saved == {"agent_runner": "cline", "night": {"window": "02:00-05:00"}}

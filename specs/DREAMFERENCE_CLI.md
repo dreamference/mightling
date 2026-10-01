@@ -430,7 +430,7 @@ window = "01:00-07:00"
 
 A `sandbox = …` line left in an older file is ignored: the option was removed on 2026-10-01.
 
-**Known defect (found 2026-10-01): `save_config()` drops the `[night]` table.** It rewrites the file from `DreamferenceConfig`'s flat fields, so `puffin-admin main-model set`, `diffusion-model set` and `init` remove a `[night]` table from the file they write (checked on a scratch file: `[night] window` was gone after one `save_config()`). Until that is fixed, re-add the table after those commands, or keep Night Shift on its defaults. `/cavemode default` edits the file in place and keeps it.
+**Fixed 2026-10-01: `save_config()` used to drop the `[night]` table.** It rewrote the file from `DreamferenceConfig`'s flat fields, so `puffin-admin main-model set`, `diffusion-model set` and `init` removed Night Shift's settings. `ConfigFileStorageManager.save_config_dict()` now carries over every table already in the file that the saved keys do not name; `test_saving_keeps_tables_other_readers_own` covers it.
 
 `save_config()` deliberately writes only values that differ from the defaults, so a round trip does not fossilise defaults into the TOML.
 

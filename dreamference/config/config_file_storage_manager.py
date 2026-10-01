@@ -62,6 +62,13 @@ class ConfigFileStorageManager:
             Path: Path object pointing to written file.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Tables in the file (`[night]`) belong to other readers, not to the flat keys being
+        # saved: until 2026-10-01 `main-model set` and `init` silently removed Night Shift's
+        # settings by rewriting the file from the flat keys alone.
+        if path.is_file():
+            tables = {key: value for key, value in cls.load_config_dict(path).items()
+                      if isinstance(value, dict) and key not in data}
+            data = {**data, **tables}
         if toml and path.suffix == ".toml":
             with open(path, "w", encoding="utf-8") as f:
                 toml.dump(data, f)
