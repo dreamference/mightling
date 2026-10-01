@@ -56,7 +56,7 @@ code has moved:
 | Binary sizes (315 MB, 93 MB, binary megabytes; 1.4 GB unstripped) | `~/.local/share/dreamference/puffin/bin/` |
 | Python (87 modules, 23.2k lines) | `dreamference/**/*.py` |
 | Python tests (511; 509 pass and 2 skip in 775.5 s with the server; 63 skip without it) | `pytest tests/`, 2026-10-01 |
-| Live suite (77 tests: 75 pass, 2 skip; 651.3 s and 806.7 s) | runs made when the default model changed (2026-09-29); their logs were not kept, so re-run before submission. The earlier 65/3/2 run is `~/.cache/dreamference/slash-tests.log` |
+| Live suite (77 tests: 75 pass, 2 skip; 651.3 s and 806.7 s) | source of the two timings not located in the repository or caches on 2026-10-01; the figures predate this revision, so re-run before submission. The full `pytest tests/` run of 2026-10-01 (509 pass, 2 skip) confirms 75 pass and 2 skip on the default model. The earlier 65/3/2 run is `~/.cache/dreamference/slash-tests.log` |
 | Throughput (25.5 / 50.3 / 87.0 default; 23.8 / 49.9 / 53.1 fallback) | registry entries in `model_matrix_registry.py` |
 | Host-safety thresholds | `psi_watchdog.py`, `vllm_server_manager.py` constants |
 | Cave mode (output shares, 67:1 cost ratio, benchmark ratios, 35 of 36 checks) | `specs/DREAMFERENCE_PUFFIN_CAVE_MODE.md` §1 |

@@ -288,7 +288,7 @@ largest remaining hunks are presentation strings (patch 0001) and \code{/usage} 
 repurposes a ChatGPT-plan screen as local token statistics.
 
 \paragraph{New features cost a hook, not a diff.} The series reached its smallest size, about
-9\,KB, when the four techniques above were done; everything since has been added behaviour. The
+9\,KB, when the four techniques above were done; everything since has been hooks, most of them removals. The
 last two patches are features rather than removals: \code{/cavemode} (0017, \cref{sec:local}) and
 \code{/night} (0018, \cref{sec:night}). Each adds a slash-command variant, its description and the
 dispatch arms that call into the launcher crate, where the logic lives (566 and 769 lines with their tests). A test
