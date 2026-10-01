@@ -1,0 +1,316 @@
+"""
+`puffin-admin audit egress`: where does a `puffin` session connect?
+(specs/DREAMFERENCE_PUFFIN_EGRESS.md §3)
+
+This module provides the EgressAudit class. It runs one real `puffin exec` session under
+`strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network
+destination, every name asked of a resolver and every process the session started, with a
+verdict. It makes "your code stays on your machine" something a user can check and re-check
+after each Codex bump, instead of a promise.
+
+The audit reads; the one thing it writes outside its scratch directory is the `--json` result
+under `$CODEX_HOME/audit/`.
+"""
+
+import datetime
+import hashlib
+import json
+import os
+import shutil
+import signal
+import subprocess
+import tempfile
+from dataclasses import asdict
+from typing import Any, Dict, Final, List, Optional, Tuple
+from urllib.parse import urlparse
+
+from dreamference.audit.egress_trace import EgressTrace
+from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED, EgressVerdict
+from dreamference.audit.strace_parser import StraceParser
+
+DEFAULT_PROMPT: Final[str] = "Reply with exactly: pong"
+
+# The syscalls traced. `sendmmsg` is how glibc sends a lookup's queries (the spec's first list
+# had only sendto and sendmsg, which leaves a DNS query without its name).
+TRACED_SYSCALLS: Final[str] = "connect,sendto,sendmsg,sendmmsg,execve"
+
+SESSION_TIMEOUT_S: Final[int] = 300
+
+# Loopback services a session may reach besides the model server (spec §4.3).
+GMAIL_PORT: Final[int] = 8767
+SEARXNG_PORT: Final[int] = 8888
+
+# Where the launcher points `chatgpt_base_url`, so that a ChatGPT-backend call no patch closed
+# fails on this machine. A connect there is exactly such a call.
+CHATGPT_BLACKHOLE_PORT: Final[int] = 9
+
+
+class EgressAudit:
+    """Traces one session and judges where it connected."""
+
+    @classmethod
+    def allowed_ports(cls, vllm_host: str) -> Dict[int, str]:
+        """
+        The loopback ports a session may connect to.
+
+        Args:
+            vllm_host (str): The model server's base URL.
+
+        Returns:
+            Dict[int, str]: Port to the service behind it.
+        """
+        parsed = urlparse(vllm_host if "://" in vllm_host else f"http://{vllm_host}")
+        model_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        return {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG"}
+
+    @classmethod
+    def judge(cls, trace: EgressTrace, allowed: Dict[int, str], replied: bool) -> EgressVerdict:
+        """
+        Decides the verdict (§3.2): a pass needs every IP destination on loopback and on the
+        allowlist, no DNS query, and no git command that reaches a network.
+
+        Args:
+            trace (EgressTrace): What the session did.
+            allowed (Dict[int, str]): The allowed loopback ports.
+            replied (bool): Whether the session produced a reply. Without one nothing was shown,
+                and that is not a pass.
+
+        Returns:
+            EgressVerdict: The verdict and its reasons.
+        """
+        problems: List[str] = []
+        for target, count in sorted(trace.destinations.items()):
+            address, _, port = target.rpartition(":")
+            address = address.strip("[]")
+            if not StraceParser.is_loopback(address):
+                problems.append(f"connected to {target} ({count}x): not on this machine")
+            elif int(port) == CHATGPT_BLACKHOLE_PORT:
+                problems.append(f"connected to {target} ({count}x): a ChatGPT-backend call that no patch closes "
+                                "(it failed here only because the launcher redirects that URL)")
+            elif int(port) not in allowed:
+                problems.append(f"connected to {target} ({count}x): a local port that is not on the allowlist")
+        for name, count in sorted(trace.dns_names.items()):
+            problems.append(f"asked a resolver for {name} ({count}x)")
+        if trace.dns_servers and not trace.dns_names:
+            servers = ", ".join(sorted(trace.dns_servers))
+            problems.append(f"sent a DNS query to {servers} whose name could not be read")
+        for command in trace.networked_git:
+            problems.append(f"ran a git command that reaches a network: {command}")
+        if problems:
+            return EgressVerdict(FAIL, problems)
+        if not replied:
+            return EgressVerdict(TRACE_FAILED, ["the session produced no reply, so the trace shows nothing"])
+        if not trace.processes:
+            return EgressVerdict(TRACE_FAILED, ["strace recorded no process: it could not attach"])
+        return EgressVerdict(PASS)
+
+    @classmethod
+    def trace_session(cls, puffin_bin: str, vllm_host: str, prompt: str, work_dir: str) -> Tuple[EgressTrace, bool, str]:
+        """
+        Runs `puffin exec` under strace in a throwaway repository with a throwaway `CODEX_HOME`,
+        so no login, history or config of the user's influences the result, and none is touched.
+
+        The code index is switched off for the session (`code_index_enabled = false` in the
+        throwaway config): its indexers run detached in their own network-less sandbox and
+        outlive the session, so they are not part of what this trace can show.
+
+        Args:
+            puffin_bin (str): The `puffin` executable.
+            vllm_host (str): The model server's base URL.
+            prompt (str): The prompt to send.
+            work_dir (str): A scratch directory, owned by the caller.
+
+        Returns:
+            Tuple[EgressTrace, bool, str]: The parsed trace, whether the session replied, and the
+            path of the raw trace.
+        """
+        repo = os.path.join(work_dir, "repo")
+        home = os.path.join(work_dir, "home")
+        os.makedirs(repo)
+        os.makedirs(home)
+        with open(os.path.join(repo, "README.md"), "w") as handle:
+            handle.write("A throwaway repository for `puffin-admin audit egress`.\n")
+        git = ["git", "-c", "user.name=audit", "-c", "user.email=audit@localhost", "-c", "commit.gpgsign=false"]
+        for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "audit"]):
+            subprocess.run(git + args, cwd=repo, capture_output=True, check=False)
+        config = os.path.join(work_dir, "config.toml")
+        with open(config, "w") as handle:
+            handle.write(f"vllm_host = {json.dumps(vllm_host)}\ncode_index_enabled = false\n")
+        trace_path = os.path.join(work_dir, "trace.txt")
+        reply_path = os.path.join(work_dir, "reply.txt")
+        env = dict(os.environ)
+        env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
+        command = ["strace", "-f", "-qq", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path,
+                   puffin_bin, "exec", "--skip-git-repo-check", "-o", reply_path, prompt]
+        try:
+            # Its own process group, so a session that never answers is stopped with everything
+            # it started: strace alone, killed, would leave `puffin` waiting for the server.
+            process = subprocess.Popen(command, cwd=repo, env=env, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            try:
+                process.wait(timeout=SESSION_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                for sig in (signal.SIGTERM, signal.SIGKILL):
+                    try:
+                        os.killpg(process.pid, sig)
+                        process.wait(timeout=10)
+                        break
+                    except (ProcessLookupError, subprocess.TimeoutExpired):
+                        continue
+        except OSError:
+            pass
+        text = ""
+        if os.path.isfile(trace_path):
+            with open(trace_path, errors="replace") as handle:
+                text = handle.read()
+        replied = os.path.isfile(reply_path) and bool(open(reply_path, errors="replace").read().strip())
+        return StraceParser.parse(text), replied, trace_path
+
+    @classmethod
+    def render(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: Dict[int, str]) -> List[str]:
+        """
+        Renders the report: the verdict and anything unexpected first, then everything seen.
+
+        Args:
+            trace (EgressTrace): What the session did.
+            verdict (EgressVerdict): The verdict.
+            allowed (Dict[int, str]): The allowed loopback ports.
+
+        Returns:
+            List[str]: The lines to print.
+        """
+        mark = {PASS: "✅", FAIL: "❌"}.get(verdict.status, "⚠️ ")
+        lines = [f"{mark} Egress audit: {verdict.status}"]
+        lines += [f"   - {problem}" for problem in verdict.problems]
+        lines.append("Network destinations:")
+        if not trace.destinations:
+            lines.append("   none")
+        for target, count in sorted(trace.destinations.items()):
+            port = int(target.rpartition(":")[2])
+            address = target.rpartition(":")[0].strip("[]")
+            label = allowed.get(port, "not on the allowlist") if StraceParser.is_loopback(address) else "not on this machine"
+            lines.append(f"   {target:<24} {count:>4}x  {label}")
+        names = ", ".join(f"{name} ({count}x)" for name, count in sorted(trace.dns_names.items())) or "none"
+        lines.append(f"DNS queries: {names}")
+        sockets = ", ".join(sorted(trace.unix_sockets)) or "none"
+        lines.append(f"Unix sockets: {sockets}")
+        programs = ", ".join(f"{name} ({count})" for name, count in sorted(trace.processes.items(), key=lambda item: (-item[1], item[0])))
+        lines.append(f"Processes started: {programs or 'none'}")
+        lines.append(f"Networked git commands: {'; '.join(trace.networked_git) or 'none'}")
+        return lines
+
+    @classmethod
+    def build_identity(cls, puffin_bin: str) -> Dict[str, Any]:
+        """
+        Says which build was audited, so two audits can be compared across builds.
+
+        Args:
+            puffin_bin (str): The `puffin` executable.
+
+        Returns:
+            Dict[str, Any]: `puffin --version`, the Codex tag, the installed build's key, whether
+            that build matches this checkout, and each patch's hash.
+        """
+        from dreamference.runner.codex_branded_builder import (
+            BUILD_STAMP_NAME, CODEX_RELEASE_TAG, INSTALL_DIR, CodexBrandedBuilder,
+        )
+        try:
+            version = subprocess.run([puffin_bin, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            version = ""
+        build_key = ""
+        stamp = os.path.join(INSTALL_DIR, BUILD_STAMP_NAME)
+        if os.path.isfile(stamp):
+            with open(stamp) as handle:
+                build_key = handle.read().strip()
+        patches = {}
+        for path in CodexBrandedBuilder.patches():
+            with open(path, "rb") as handle:
+                patches[os.path.basename(path)] = hashlib.sha256(handle.read()).hexdigest()
+        return {
+            "puffin_version": version,
+            "codex_tag": CODEX_RELEASE_TAG,
+            "build_key": build_key,
+            # The patch hashes are the checkout's; they describe the audited binary only when it
+            # was built from this checkout as it is now.
+            "build_matches_checkout": bool(build_key) and build_key == CodexBrandedBuilder.build_key(),
+            "patches": patches,
+        }
+
+    @classmethod
+    def run(cls, prompt: Optional[str] = None, write_json: bool = False,
+            puffin_bin: Optional[str] = None, vllm_host: Optional[str] = None) -> int:
+        """
+        Runs the audit and prints its report.
+
+        Args:
+            prompt (Optional[str]): The prompt for the traced session; a one-word reply by default.
+            write_json (bool): Also write the full result to `$CODEX_HOME/audit/<timestamp>.json`.
+            puffin_bin (Optional[str]): The `puffin` executable; the installed build by default.
+            vllm_host (Optional[str]): The model server; the configured one by default.
+
+        Returns:
+            int: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
+        """
+        from dreamference.runner.codex_installer import CodexInstaller
+        if shutil.which("strace") is None:
+            print("⚠️  Egress audit: trace failed")
+            print("   - strace is not installed: sudo apt-get install strace")
+            return 2
+        puffin_bin = puffin_bin or CodexInstaller.get_codex_executable()
+        if not puffin_bin:
+            print("⚠️  Egress audit: trace failed")
+            print("   - puffin is not built: run `puffin-admin codex build` first.")
+            return 2
+        if vllm_host is None:
+            from dreamference.config import DreamferenceConfig
+            vllm_host = DreamferenceConfig().vllm_host
+        allowed = cls.allowed_ports(vllm_host)
+        print(f"🚀 Tracing one `puffin exec` session against {vllm_host} (throwaway repository and CODEX_HOME)...")
+        work_dir = tempfile.mkdtemp(prefix="puffin-audit-")
+        try:
+            trace, replied, _ = cls.trace_session(puffin_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir)
+            verdict = cls.judge(trace, allowed, replied)
+            for line in cls.render(trace, verdict, allowed):
+                print(line)
+            if verdict.status == TRACE_FAILED:
+                print(f"💡 The session needs the model server at {vllm_host}: `puffin-admin server start`.")
+            if write_json:
+                print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(puffin_bin))}")
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        return verdict.exit_code
+
+    @classmethod
+    def write_result(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: Dict[int, str],
+                     identity: Dict[str, Any]) -> str:
+        """
+        Writes the full result as JSON under `$CODEX_HOME/audit/`.
+
+        Args:
+            trace (EgressTrace): What the session did.
+            verdict (EgressVerdict): The verdict.
+            allowed (Dict[int, str]): The allowed loopback ports.
+            identity (Dict[str, Any]): Which build was audited.
+
+        Returns:
+            str: The file written.
+        """
+        from dreamference.runner.codex_installer import CodexInstaller
+        directory = os.path.join(CodexInstaller.home_dir(), "audit")
+        os.makedirs(directory, exist_ok=True)
+        now = datetime.datetime.now().astimezone()
+        path = os.path.join(directory, f"{now:%Y%m%d-%H%M%S}.json")
+        result = {
+            "at": now.isoformat(timespec="seconds"),
+            "session": "exec",
+            "verdict": verdict.status,
+            "problems": verdict.problems,
+            "allowed_loopback_ports": {str(port): service for port, service in allowed.items()},
+            **asdict(trace),
+            **identity,
+        }
+        with open(path, "w") as handle:
+            json.dump(result, handle, indent=2)
+            handle.write("\n")
+        return path

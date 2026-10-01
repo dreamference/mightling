@@ -271,6 +271,19 @@ Work through the queue now, until the window ends.
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing; their requests still pause the run) |
 
+### `puffin-admin audit`
+
+Check what a puffin session does on the network.
+
+#### `puffin-admin audit egress`
+
+Trace one real puffin session and list every network destination and process, with a verdict.
+
+| Option | Description |
+|---|---|
+| `--prompt` | Prompt for the traced session (default: a one-word reply) |
+| `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
+
 ### `puffin-admin benchmark_server`
 
 Run vLLM serve benchmark using Sonnet dataset.

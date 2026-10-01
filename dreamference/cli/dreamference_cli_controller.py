@@ -960,6 +960,14 @@ class DreamferenceCLIController:
         night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open puffin sessions to close (for testing; their requests still pause the run)")
 
+        # Command: puffin-admin audit (what does puffin do on the network?)
+        audit_parser = subparsers.add_parser("audit", help="Check what a puffin session does on the network")
+        audit_subparsers = audit_parser.add_subparsers(dest="audit_command")
+        audit_egress_parser = audit_subparsers.add_parser(
+            "egress", help="Trace one real puffin session and list every network destination and process, with a verdict")
+        audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
+        audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
+
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
         bench_parser.add_argument("--port", type=int, default=8000, help="Port of the server to benchmark")
@@ -2118,6 +2126,14 @@ class DreamferenceCLIController:
                     vllm_mgr.show_request_logs(port=args.port)
                 except KeyboardInterrupt:
                     print("\nStopped tailing logs.")
+
+        elif args.command == "audit":
+            from dreamference.audit import EgressAudit
+            if args.audit_command == "egress":
+                # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
+                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json))
+            print("usage: puffin-admin audit {egress}")
+            sys.exit(2)
 
         elif args.command == "night":
             from dreamference.night_shift import NightShiftRunner, NightShiftScheduler, NightShiftSettings
