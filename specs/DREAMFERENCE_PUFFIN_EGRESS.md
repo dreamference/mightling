@@ -1,6 +1,7 @@
 # Puffin Egress — audit and airlock
 
 **Status:** proposed. Nothing in this spec is implemented yet. The mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2), but not built.
+**Superseded in part (2026-10-01):** the airlock's switch is now the `on` level of `/airgapped` ([PUFFIN_AIRGAPPED §5.4](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)), not `puffin --airlock`. The mechanism (§4.1, §4.2), the ledger (§4.4) and the audit (§3) stand; the surface (§2), the allowlist (§4.3) and §5 are read through that spec, which allows only the model server at `on`.
 **Target:** the `puffin` terminal agent. `puffin-admin` runs the audit.
 **Builds on:**
 - the network-channel work of patches `0013` and `0015` ([PUFFIN_CODEX](./DREAMFERENCE_PUFFIN_CODEX.md));
@@ -23,7 +24,7 @@ Make "your code stays on your machine" something a user can check, not a promise
 - **Our own record:** tracing puffin found five channels to OpenAI or GitHub. One needed a ChatGPT login; four needed none: Statsig metrics, featured plugins, a startup `git ls-remote` and the TUI announcement tip. All five are closed (`0013`, `0015`), and traced `exec` and TUI sessions now reach only `127.0.0.1:8000` (vLLM) and `127.0.0.1:8767` (the Gmail service). Phase 1 makes that trace a command anyone can rerun; Phase 2 makes a regression fail locally instead of leaking.
 
 **Non-goals:**
-- **Calling it air-gapped.** Web search and `puffin-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them.
+- **Calling it air-gapped.** Web search and `puffin-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them. The command `/airgapped` keeps to this: only its `on` level, which allows neither, carries the word ([PUFFIN_AIRGAPPED §1](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)).
 - **Inbound exposure.** The model server listening on `0.0.0.0:8000` is accepted by design: Puffin assumes the local network is trusted ([README](./README.md), "Accepted by design").
 - **Containers.** The web chat's own egress (Onyx, SearXNG, the sidecars) is out of scope. Onyx's telemetry is handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md)).
 
@@ -31,7 +32,7 @@ Make "your code stays on your machine" something a user can check, not a promise
 
 ## 2. Surface
 
-No new slash command: the patch budget is reserved for `/night` ([NIGHT_SHIFT §3](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md)), and neither phase needs one.
+This spec adds no slash command of its own. (When it was written the patch budget was reserved for `/night`, which is now built; the airlock's switch has since moved to `/airgapped`, see the note at the top.)
 
 | Command | Phase | Effect |
 |---|---|---|
@@ -178,7 +179,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 - **Airlock:**
   - an airlocked TUI session works as usual: model, slash commands, Gmail, search;
   - removing `0015` from the build and repeating the session leaves the Statsig, plugin and announcement lookups in the ledger, and sends nothing out.
-- **Docs:** nothing describes the airlock as air-gapped.
+- **Docs:** nothing describes a mode that allows search or fetch as air-gapped.
 
 ---
 
