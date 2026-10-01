@@ -1172,7 +1172,10 @@ def test_a_tampered_credentials_file_is_refused_rather_than_half_read(tmp_path):
     GmailSearchService.save_token("me@gmail.com", "ya29.tok", 3600, str(tmp_path))
     stored = json.loads((tmp_path / "credentials.json").read_text())
     account = stored["accounts"]["me@gmail.com"]
-    account["access_token"] = "A" + account["access_token"][1:]
+    # A different first character every time: writing a fixed "A" left the file untouched whenever
+    # the random nonce already began with one, and the release's test gate failed on that 1 in 64.
+    first = account["access_token"][0]
+    account["access_token"] = ("B" if first == "A" else "A") + account["access_token"][1:]
     (tmp_path / "credentials.json").write_text(json.dumps(stored))
 
     assert GmailSearchService.credentials(str(tmp_path)) == []
