@@ -66,7 +66,7 @@ The Codex source is never edited ([PUFFIN_CODEX §1](./DREAMFERENCE_PUFFIN_CODEX
 - membership in `supports_inline_args()` and `available_during_task()`;
 - one arm in `dispatch_command` and one in `dispatch_command_with_args`. Both call `puffin_launcher::night::command(&args, &cwd)`, which returns the lines to print, and add them with `add_plain_history_lines`, as `/usage` does.
 
-**Budget.** The patch series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands at 21,342 bytes since the product-name hooks in `0001`. That leaves 658 bytes, which `0017` will not fit: it raises the cap explicitly, as the name hooks did.
+**Budget.** The patch series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands at 21,807 bytes since the product-name hooks in `0001`. That leaves 193 bytes, which `0017` will not fit: it raises the cap explicitly, as the name hooks did.
 - Adding a variant needs an arm in every exhaustive `match` over `SlashCommand`. Across the three files that is about six places, judging by where `Goal` appears.
 - Where `_ =>` defaults already exist, rely on them.
 - If `0017` cannot fit, raise the cap in the same commit and say why. Do not trim the other patches.

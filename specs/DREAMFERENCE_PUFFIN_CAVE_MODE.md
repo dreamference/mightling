@@ -237,7 +237,7 @@ Everything else (parsing, the tiers, the files, the texts, the printed lines) li
 
 ### 5.5 Budget
 
-The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands at 21,342. These hooks are nine hunks in five files, about 2.3 KB with diff headers, so the patch raises the cap to 24,000 in the same commit, explicitly and only by what it needs, as the product-name hooks did on 2026-09-30. If `/night` lands first, its own raise comes first and this one is added on top.
+The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands at 21,807. These hooks are nine hunks in five files, about 2.3 KB with diff headers, so the patch raises the cap to 24,000 in the same commit, explicitly and only by what it needs, as the product-name hooks did on 2026-09-30. If `/night` lands first, its own raise comes first and this one is added on top.
 
 ---
 
