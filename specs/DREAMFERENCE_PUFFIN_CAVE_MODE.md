@@ -308,7 +308,7 @@ The series was capped at 22,000 bytes (`test_the_patches_stay_small`) and stood 
 - **The texts are files**, `puffin-rs/cave/*.txt`, byte-for-byte `scripts/cave_mode_bench/levels/` (a Python test compares them), included with `include_str!`; the markers are stripped at run time because the harness adds them back.
 - **The older `cave_mode` setting** (`puffin-admin run --cave`, which writes a fixed prompt into Cline's `.clinerules`) is unrelated and unchanged.
 
-**Checked against the live model** (Qwen3.8-27B on SGLang), with the built binary:
+**Checked against the live model** (Qwen3.8-27B on SGLang), with the binary `puffin-admin codex build` installed from the committed patches:
 
 | Check | Result |
 |---|---|
@@ -318,6 +318,9 @@ The series was capped at 22,000 bytes (`test_the_patches_stay_small`) and stood 
 | TUI, `/cavemode full`, two turns | full's full text before the first turn after the switch, full's reminder before the second |
 | TUI, `/cavemode off`, one turn | the off text once, and no reminder in the following turn |
 | TUI, `/cavemode ultra`, a turn, `/compact`, a turn | ultra's full text after the switch; after the compaction the history held no cave text, and the next turn's re-injected initial context carried ultra's **full text**, not a reminder (§5.2's expectation, now observed) |
+| TUI, typing `/cav` | the popup offers `/cavemode`, "set how terse Puffin's answers are" |
+| TUI, `/cavemode default full` | `puffin_cave_mode = "full"` appended to the configured TOML file with its other keys kept, the session file set to `full`, both reported |
+| TUI, `puffin resume --last` after that | `/cavemode` reports `full (this session)`: the level belongs to the session and survives a resume |
 | The compaction summary at `ultra` | normal prose with headings ("**Task:** User sends single-word prompts; assistant replies with exactly that one word."), as §4 requires |
 
 Not checked: how Qwen3.8's chat template renders the per-turn developer message (§5.2 expects a `<system-reminder>` inside the user turn); the rollout shows it as its own developer message in the right place, but the rendered prompt at the server was not inspected.
