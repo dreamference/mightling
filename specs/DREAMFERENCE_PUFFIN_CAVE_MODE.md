@@ -24,7 +24,7 @@ Measured on this GB10 with Qwen3.8-27B NVFP4 on SGLang (thinking off), before wr
 | What reading costs | ~250 words a minute is ~5.5 tokens a second: the user reads about five times slower than the model writes. A 400-token answer is some 70 s of reading |
 | What the prompt asks for today | `base_instructions()` takes the longest bundled Codex template (gpt-5.5's), which carries Codex's "friendly" voice: "a vivid inner life … playful … wry humor", "user updates frequently, every 30s", "engineering prose with some life in it". 959 of the prompt's 4,989 tokens are voice |
 | Qwen3.8's tokenizer on caveman's word rules | `configuration`/`cfg`, `implementation`/`impl`, `request`/`req`, `function`/`fn`, `authentication`/`auth`, `database`/`DB`: **one token each**. `X → Y` and `X causes Y`: 3 tokens each. `when it is not` 4, `when not` 2. Abbreviations and arrows save nothing; only leaving words out does |
-| The benchmark (§1.1), 532 single-turn runs and 11 sessions of 8–9 turns | On questions, the default level (`ultra`) cut final answers to about half of `off`'s (0.42–0.59 in four batches) and wall time to 0.41–0.74 of it; on coding tasks nothing moved beyond the noise. 35 of 36 checks passed at `ultra` in the confirmation batch, as at `off`. In a session, the level holds only with a one-line reminder each turn |
+| The benchmark (§1.1), 532 single-turn runs and 11 sessions of 8–9 turns | On questions, the default level (`ultra`) cut final answers to about half of `off`'s (0.42–0.57 in the three batches with the text appended as designed, 0.59 for the rejected `B` design) and wall time to 0.41–0.74 of it; on coding tasks nothing moved beyond the noise. 35 of 36 checks passed at `ultra` in the confirmation batch, as at `off`. In a session, the level holds only with a one-line reminder each turn |
 
 Outside evidence, in the same direction:
 
@@ -104,7 +104,7 @@ What the same question gets (the traceback task, batch 3, rep 9; real outputs, q
 - **full v3** (136): "You're deleting keys while iterating the dict itself, which invalidates the iterator and raises `RuntimeError`." Then the fix, two code blocks, one line of verification.
 - **ultra v3** (123): "You're deleting keys from a dict while looping over it — the size changes mid-iteration. Fix: iterate over a snapshot, or build a new dict." One code block with both.
 
-And the irreversible-action question (batch 3, rep 8), where every level must still warn in full sentences: `off` answered in 180 tokens (339 in the next repetition); ultra in 43: "No. `git reset --hard` discards your uncommitted changes in app.py. Use `git reset --soft HEAD~1` instead, which undoes the commit while keeping everything staged for re-commit."
+And the irreversible-action question (batch 3, rep 8), where every level must still warn in full sentences: `off` answered in 180 tokens (339 in the next repetition); ultra in 43: "No. `git reset --hard` discards your uncommitted changes in app.py. Use `git reset --soft HEAD~1` instead, which undoes the commit while keeping everything staged for re-commit." (The model's wording: the uncommitted edits stay unstaged.)
 
 ---
 
@@ -183,7 +183,10 @@ fn section(level: Level, turn: &str) -> WorldStateSectionContribution {
         Level::Off => json!({"level": "off"}),
         _ => json!({"level": level.name(), "turn": turn}),
     };
-    WorldStateSectionContribution::new("cave_mode", value, move |previous| {
+    WorldStateSectionContribution::new("cave_mode", value.clone(), move |previous| {
+        if matches!(previous, Known(v) if *v == value) {
+            return None;                                   // same level, same turn: a later step
+        }
         let before = match previous {
             Known(v) => v.get("level").and_then(Value::as_str),
             _ => None,
@@ -204,7 +207,7 @@ A step inside the same turn has the same value, so nothing is added between tool
 Why this mechanism:
 - **The prefix cache survives.** Fragments are appended; nothing earlier is rewritten. A switch costs the prefill of ~400 tokens (~0.25 s) and a turn ~45 tokens, where changing the system prompt would re-read the whole conversation: at 116K tokens, about two minutes at ~1,000 tok/s. Over a 100-turn session the reminders add ~4,500 tokens of history, which compaction handles like any other.
 - **It takes effect mid-turn.** World State is recomputed before every model request, so `/cavemode full` typed while the agent works applies to its next message.
-- **It survives compaction.** The retained-fragment matcher tells Codex the *full text* must still be in history; when compaction drops it, `render_history_diff` treats the section as absent and the full text is sent again. The matcher recognises only the current level's full text: neither a reminder nor an older level's text counts, because a reminder pointing at rules the model can no longer see would hold nothing.
+- **It is designed to survive compaction.** The retained-fragment matcher tells Codex the *full text* must still be in history; where the history is diffed against retained items (`render_history_diff`), a section whose fragment is missing is treated as absent and its full text is sent again. The matcher recognises only the current level's full text: neither a reminder nor an older level's text counts, because a reminder pointing at rules the model can no longer see would hold nothing. Whether the step after a compaction takes that path, rather than diffing against a persisted snapshot that still says "known", was read from the code, not observed; Phase 1 checks it (§7).
 - **`off` costs nothing when never used.** A session that starts at `off` gets no fragment at all, so it is exactly upstream Codex. A session switched to `off` gets two lines saying the earlier rules no longer apply (the `DISABLED_INSTRUCTIONS` pattern of `git-attribution`).
 - **The model sees it where it sees other developer messages.** Qwen3.8's patched chat template turns a system message after the first into a `<system-reminder>` inside the user turn (registry `chat_template_patches`); the benchmark's reminder was placed the same way.
 
@@ -260,7 +263,7 @@ The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands 
 
 **Phase 0, measure (done for Qwen3.8, §1.1).** The default was chosen by the rule in §1.2, written before the confirmation batch ran. Re-run `scripts/cave_mode_bench` whenever the default model changes or a level text is edited, with `off` interleaved in the same batch, and apply the same rule.
 
-**Phase 1, build.** `puffin-rs/src/cave.rs` (levels, texts, reminders, resolution, `command()`, the World State section), the hook patch with the cap raise, `puffin_cave_mode` in `DreamferenceConfig`, the tests of §8, and a paragraph in `specs/DREAMFERENCE_PUFFIN_CODEX.md` and `docs/puffin.md`. Two checks belong to this phase because the benchmark could not make them: that the reminder reaches the model as its own `<system-reminder>` before the model's first message of each turn (the benchmark placed it inside the user's message), and what a compaction summary looks like at `ultra` (it must be normal prose, §4).
+**Phase 1, build.** `puffin-rs/src/cave.rs` (levels, texts, reminders, resolution, `command()`, the World State section), the hook patch with the cap raise, `puffin_cave_mode` in `DreamferenceConfig`, the tests of §8, and a paragraph in `specs/DREAMFERENCE_PUFFIN_CODEX.md` and `docs/puffin.md`. Three checks belong to this phase because the benchmark could not make them: that the reminder reaches the model as its own `<system-reminder>` before the model's first message of each turn (the benchmark placed it inside the user's message); that after `/compact` and one more turn the rollout holds the level's full text again, not only a reminder (§5.2); and what a compaction summary looks like at `ultra` (it must be normal prose, §4).
 
 **Phase 2, look at real sessions.** After two weeks of use, the same split as §1's first row over `~/.puffin/sessions`: final-answer tokens (median, p90) before and after, how often `/cavemode` is used and to which level. Frequent switches to `full` or `off` mean the default is wrong for this user, whatever the benchmark said.
 
@@ -274,7 +277,7 @@ The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands 
 - **Configuration** (`tests/`): `DreamferenceConfig.puffin_cave_mode` through all four tiers; an invalid value rejected; `save_config()` omitting the default; `DEFAULT_PUFFIN_CAVE_MODE` equal to the default in `puffin-rs/src/cave.rs` (read from the source, as other cross-language constants are).
 - **Patch size:** `test_the_patches_stay_small` with the raised cap and a comment saying why.
 - **Prompt check** (needs the model server only for `/v1/models`; skipped without it): `puffin debug prompt-input "hi"` contains exactly one `<cave_mode>` developer fragment, the default level's full text; with `DREAMFERENCE_PUFFIN_CAVE_MODE=off`, none.
-- **Live, two turns** (`puffin exec`, then `exec resume --last`): the rollout holds the full text before turn 1 and the reminder before the model's first message of turn 2, and nothing between tool calls of one turn.
+- **Live, two turns** (`puffin exec`, then `exec resume --last`): the rollout holds the full text before turn 1 and the reminder before the model's first message of turn 2, and nothing between tool calls of one turn. Then `/compact` and one more turn: the full text is in the history again.
 - **Live slash-command suite** (`tests/test_puffin_slash_commands.py` enumerates slash commands from the source, so a visible `/cavemode` must get a case): `/cavemode` lists the levels; `/cavemode full`, then a question, and the rollout holds full's text after ultra's; `/cavemode off` adds the off text and no reminder follows; `/cavemode loud` prints the usage line and changes nothing.
 - **The benchmark** (`scripts/cave_mode_bench`) is not part of the suite; it drives the real model for about an hour. Phase 0 says when to run it.
 
@@ -288,7 +291,7 @@ The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands 
 - **Content displaced, not cut.** Once (§1.1) `ultra` met its cap by writing the answer into a file the user had not asked for and describing the file. A rule against it ("never move an answer into a file to stay under the cap") is the same kind of Phase 1 change, with the same re-run.
 - **The model changes.** The texts were tuned on Qwen3.8 with thinking off; CAVEWOMAN found robustness to terse output differs between models in ways size does not predict. With thinking on, the visible answer is no longer the only reasoning and terseness is safer still; either way Phase 0 is re-run.
 - **Tuning to the benchmark.** The texts went through four versions on nine tasks. The rules added along the way are general (answer every question, show the fix, a sentence cap), but Phase 2's real-session check is the guard against having fitted the nine.
-- **Compaction summaries.** Exempt by rule, but written with the level in context; Phase 1 reads one.
+- **Compaction.** Two open points, both Phase 1 checks: whether the full text really comes back after `/compact` (§5.2), and whether the summary, exempt by rule but written with the level in context, is normal prose.
 - **Open: should a fork or side conversation inherit the parent's level?** The extension sees only the new thread's id; inheriting needs the parent's, which the fork request carries. Deferred until someone asks.
 
 ---
