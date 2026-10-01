@@ -47,9 +47,11 @@ def test_the_patches_stay_small():
     # Each hide/disable hook costs ~550 bytes, mostly diff headers, so the cap allows a few more of
     # those; it exists to catch a return to whole-file patches, not to count one-line hooks. Raised
     # from 20,000 on 2026-09-30, explicitly and only by what was needed, for the product-name hooks
-    # in 0001 (slash-command descriptions, the Full Access warning, `exec`'s reply label); the
-    # Night Shift patch will need another explicit raise.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 22_000
+    # in 0001 (slash-command descriptions, the Full Access warning, `exec`'s reply label). Raised to
+    # 25,000 on 2026-10-01 for 0017's cave-mode hooks (~3 KB: `/cavemode` in five places, and the
+    # extension's registration in the app server and in `debug prompt-input`); the series was 21,807
+    # bytes before it. The Night Shift patch will need another explicit raise.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 25_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

@@ -32,6 +32,7 @@ use toml_edit::Table;
 use toml_edit::value;
 
 pub mod app;
+pub mod cave;
 pub mod code_index;
 pub mod help;
 pub mod home;
@@ -207,6 +208,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // The code index: its session process starts here, outside the sandbox, and its prompt block
     // joins the others (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2).
     extra_instructions.push_str(&code_index::start_and_prompt_block());
+    cave::prune_session_files();
     configure_codex_home(&codex_home, &host, &model, &extra_instructions)?;
     Ok(with_local_model_args(args, &model.id))
 }

@@ -16,6 +16,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+codex-extension-api = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 flate2 = { workspace = true }

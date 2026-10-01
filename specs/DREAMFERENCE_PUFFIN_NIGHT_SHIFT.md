@@ -60,16 +60,16 @@ You queue coding tasks during the day with `/night add …`, from inside a `puff
 
 The Codex source is never edited ([PUFFIN_CODEX §1](./DREAMFERENCE_PUFFIN_CODEX.md)), so `/night` is one more hook patch, and all the logic lives in the launcher crate.
 
-**Patch `0017-night-slash-command`**, modelled on `0011-usage-token-stats`, adds to `codex-rs/tui`:
+**Patch `0018-night-slash-command`**, modelled on `0011-usage-token-stats`, adds to `codex-rs/tui`:
 - the variant `SlashCommand::Night` (strum's kebab-case gives `night`), placed after `Goal` so it sits near the long-running-task commands in the popup;
 - its description, "queue a task for the overnight run";
 - membership in `supports_inline_args()` and `available_during_task()`;
 - one arm in `dispatch_command` and one in `dispatch_command_with_args`. Both call `puffin_launcher::night::command(&args, &cwd)`, which returns the lines to print, and add them with `add_plain_history_lines`, as `/usage` does.
 
-**Budget.** The patch series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands at 21,807 bytes since the product-name hooks in `0001`. That leaves 193 bytes, which `0017` will not fit: it raises the cap explicitly, as the name hooks did.
+**Budget.** The patch series is capped at 25,000 bytes (`test_the_patches_stay_small`) and stands at 24,800 bytes since `0017-cave-mode` (2026-10-01). That leaves 200 bytes, which `0018` will not fit: it raises the cap explicitly, as the name hooks and cave mode did.
 - Adding a variant needs an arm in every exhaustive `match` over `SlashCommand`. Across the three files that is about six places, judging by where `Goal` appears.
 - Where `_ =>` defaults already exist, rely on them.
-- If `0017` cannot fit, raise the cap in the same commit and say why. Do not trim the other patches.
+- If `0018` cannot fit, raise the cap in the same commit and say why. Do not trim the other patches.
 
 **Launcher module `puffin-rs/src/night.rs`:**
 - argument parsing;
@@ -269,7 +269,7 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
   - leaves the working tree, `main` and `origin` untouched.
 - **Safety:** vLLM stays up through the night, and earlyoom logs no kill.
 - **Stalls:** a scripted announce-only reply is caught and nudged, then marked `stalled` if it never acts.
-- **Patch size:** `0017` fits the patch budget (§3), or the budget change is explicit.
+- **Patch size:** `0018` fits the patch budget (§3), or the budget change is explicit.
 
 ---
 

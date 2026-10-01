@@ -1,6 +1,6 @@
 # Puffin Cave Mode — `/cavemode`
 
-**Status:** proposed. Nothing in this spec is implemented yet. The measurements in §1 were taken for it on 2026-09-30 and 2026-10-01.
+**Status:** implemented (Phase 1) on 2026-10-01: `puffin-rs/src/cave.rs`, the level texts in `puffin-rs/cave/`, patch `0017-cave-mode`, `DreamferenceConfig.puffin_cave_mode`, and the tests of §8. The three Phase 1 checks ran against the live model (§10). The measurements in §1 were taken for it on 2026-09-30 and 2026-10-01; the §9 proposals that change a level's text are not in, because each needs a Phase 0 re-run first.
 **Goal:** `puffin` answers tersely by default, so the model spends its slowest tokens (prose, 25.5 tok/s) and the user's reading time only on what the user needs. `/cavemode` switches the level at any moment, mid-turn included.
 **Builds on:**
 - Codex's World State sections and its extension registry: a `ContextContributor` can add a section that reaches the model's history only when its value changes, as the `git-attribution` extension does (`codex-rs/ext/git-attribution/src/world_state.rs`);
@@ -8,7 +8,7 @@
 - the configuration chain the launcher already reads for `vllm_host` and `puffin_gmail` (a `DREAMFERENCE_*` variable, then the TOML file, then the default);
 - the benchmark in `scripts/cave_mode_bench/`, which produced §1.1 and is re-run when the default model changes.
 
-**Needs one hook patch** of about 2.3 KB (§5.5), which raises the patch-size cap explicitly.
+**Needs one hook patch**, `0017-cave-mode` (2,993 bytes, §5.5), which raises the patch-size cap explicitly.
 
 ---
 
@@ -226,10 +226,10 @@ An invalid value at any tier is skipped, and `/cavemode` names it and where it w
 
 ### 5.4 The slash command
 
-One more hook patch in `codex-patches/` (the next free number: `0017` unless `/night` lands first), modelled on `0011-usage-token-stats`:
+One more hook patch in `codex-patches/`, `0017-cave-mode`, modelled on `0011-usage-token-stats`:
 
 - `codex-rs/tui/src/slash_command.rs`: the variant `Cavemode` (strum's kebab-case gives `cavemode`), placed after `Model`, since both set how the model answers; its description, "set how terse Puffin's answers are"; membership in `supports_inline_args()` and `available_during_task()` (true).
-- `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: one arm in `dispatch_command` and one in `dispatch_command_with_args`, both calling `puffin_launcher::cave::command(thread_id, args)`, which returns the lines to print, added with `add_plain_history_lines` as `/usage` does; and `QueueDrain::Continue` in `queued_command_drain_result`, which is exhaustive.
+- `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: one arm in `dispatch_command` (no arguments) and one in `dispatch_command_with_args`, both calling `puffin_launcher::cave::command(self.thread_id, args)` (generic over the id's `Display`, so each arm is one line), which returns the lines to print, added with `add_plain_history_lines` as `/usage` does; and `QueueDrain::Continue` in `queued_command_drain_result`, which is exhaustive.
 - `codex-rs/app-server/Cargo.toml` and `src/extensions.rs`: the `puffin-launcher` path dependency and the `install` line (§5.2). `puffin-launcher` gains `codex-extension-api` from the workspace.
 - `codex-rs/cli/src/main.rs`: the `install` line in the `debug prompt-input` registry. The CLI already depends on the launcher (patch `0002`).
 
@@ -237,7 +237,7 @@ Everything else (parsing, the tiers, the files, the texts, the printed lines) li
 
 ### 5.5 Budget
 
-The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands at 21,807. These hooks are nine hunks in five files, about 2.3 KB with diff headers, so the patch raises the cap to 24,000 in the same commit, explicitly and only by what it needs, as the product-name hooks did on 2026-09-30. If `/night` lands first, its own raise comes first and this one is added on top.
+The series was capped at 22,000 bytes (`test_the_patches_stay_small`) and stood at 21,807. These hooks are ten hunks in five files: 2,993 bytes with diff headers, not the 2.3 KB first estimated, so the series is now 24,800 bytes over 15 patches and the cap goes to 25,000 in the same commit, explicitly and only by what it needs, as the product-name hooks did on 2026-09-30. `/night` needs its own raise on top.
 
 ---
 
@@ -273,12 +273,12 @@ The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands 
 
 ## 8. Tests
 
-- **Launcher unit tests** (`puffin-rs/src/cave.rs`, run with the other launcher tests in the export directory): level parsing, case-insensitive, unknown names rejected with the usage line; the resolution order of §5.3, each tier shadowing the next; `command()`'s output for every form; the section's render table: absent + non-`off` → full text; absent + `off` → nothing; same level, same turn → nothing; same level, new turn → reminder; any switch → the new full text; switch to `off` → the off text; the retained matcher accepting the current level's full text only (not its reminder, not another level's text); each text under 450 tokens and each reminder under 60 (estimated as characters / 4).
+- **Launcher unit tests** (`puffin-rs/src/cave.rs`, run with the other launcher tests in the export directory): level parsing, case-insensitive, unknown names rejected with the usage line; the resolution order of §5.3, each tier shadowing the next; `command()`'s output for every form; the section's render table: absent + non-`off` → full text; absent + `off` → nothing; same level, same turn → nothing; same level, new turn → reminder; any switch → the new full text; switch to `off` → the off text; the retained matcher accepting the current level's full text only (not its reminder, not another level's text); each text under 500 estimated tokens and each reminder under 60 (characters / 4, which overestimates: full's 1,836 bytes are 459 by the estimate and 432 tokens by the tokenizer).
 - **Configuration** (`tests/`): `DreamferenceConfig.puffin_cave_mode` through all four tiers; an invalid value rejected; `save_config()` omitting the default; `DEFAULT_PUFFIN_CAVE_MODE` equal to the default in `puffin-rs/src/cave.rs` (read from the source, as other cross-language constants are).
 - **Patch size:** `test_the_patches_stay_small` with the raised cap and a comment saying why.
 - **Prompt check** (needs the model server only for `/v1/models`; skipped without it): `puffin debug prompt-input "hi"` contains exactly one `<cave_mode>` developer fragment, the default level's full text; with `DREAMFERENCE_PUFFIN_CAVE_MODE=off`, none.
 - **Live, two turns** (`puffin exec`, then `exec resume --last`): the rollout holds the full text before turn 1 and the reminder before the model's first message of turn 2, and nothing between tool calls of one turn. Then `/compact` and one more turn: the full text is in the history again.
-- **Live slash-command suite** (`tests/test_puffin_slash_commands.py` enumerates slash commands from the source, so a visible `/cavemode` must get a case): `/cavemode` lists the levels; `/cavemode full`, then a question, and the rollout holds full's text after ultra's; `/cavemode off` adds the off text and no reminder follows; `/cavemode loud` prints the usage line and changes nothing.
+- **Live slash-command suite** (`tests/test_puffin_slash_commands.py` enumerates slash commands from the *submodule's* unpatched source, so a command a patch adds is not listed there and cannot get a case without failing its stale-case check; the checks below were run with the same pty harness from a script instead, §10): `/cavemode` lists the levels; `/cavemode full`, then a question, and the rollout holds full's text after ultra's; `/cavemode off` adds the off text and no reminder follows; `/cavemode loud` prints the usage line and changes nothing.
 - **The benchmark** (`scripts/cave_mode_bench`) is not part of the suite; it drives the real model for about an hour. Phase 0 says when to run it.
 
 ---
@@ -295,6 +295,34 @@ The series is capped at 22,000 bytes (`test_the_patches_stay_small`) and stands 
 - **Open: should a fork or side conversation inherit the parent's level?** The extension sees only the new thread's id; inheriting needs the parent's, which the fork request carries. Deferred until someone asks.
 
 ---
+
+## 10. Implementation notes (2026-10-01)
+
+**What was built** is §5 as written, with these details settled in code:
+
+- **`off` carries no retained-fragment matcher.** On the history path (`render_history_diff`) the *current* section's matcher decides whether a persisted snapshot still counts; a matcher on `off` would find no `off` text, report the section absent, and swallow the message that cancels the previous level.
+- **`Unknown` is treated like `Absent`**: a level's full text is sent, `off` sends nothing. Nothing registers a legacy matcher, so the harness never reports `Unknown` for this section today.
+- **Session files** are named by thread id and refused unless the id is alphanumeric with dashes, so nothing typed can escape `$CODEX_HOME/cave_mode/`. Files older than 30 days are deleted at launch.
+- **`/cavemode default <level>`** writes `puffin_cave_mode` with `toml_edit` to the file the launcher already reads (`DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`, then `~/.config/dreamference/config.toml`, created if absent) and also sets the current session.
+- **Before the first message** there may be no thread yet; `/cavemode <level>` then says so and points at `/cavemode default`.
+- **The texts are files**, `puffin-rs/cave/*.txt`, byte-for-byte `scripts/cave_mode_bench/levels/` (a Python test compares them), included with `include_str!`; the markers are stripped at run time because the harness adds them back.
+- **The older `cave_mode` setting** (`puffin-admin run --cave`, which writes a fixed prompt into Cline's `.clinerules`) is unrelated and unchanged.
+
+**Checked against the live model** (Qwen3.8-27B on SGLang), with the built binary:
+
+| Check | Result |
+|---|---|
+| `puffin debug prompt-input "hi"` | One `<cave_mode>` item: ultra's full text, byte-identical to the measured file, as its own content item of the initial developer message. With `DREAMFERENCE_PUFFIN_CAVE_MODE=off`: none. With `lite`: lite's text |
+| `puffin exec`, then `exec resume --last` | Turn 1: the full text in the initial context, then two tool calls with nothing between them. Turn 2: one developer message, ultra's reminder, recorded before the user's message, so the model reads it before writing anything in that turn |
+| TUI, `/cavemode` | The listing, `ultra (default)`, the marker on the level in force; `/cavemode loud` prints the usage line and changes nothing |
+| TUI, `/cavemode full`, two turns | full's full text before the first turn after the switch, full's reminder before the second |
+| TUI, `/cavemode off`, one turn | the off text once, and no reminder in the following turn |
+| TUI, `/cavemode ultra`, a turn, `/compact`, a turn | ultra's full text after the switch; after the compaction the history held no cave text, and the next turn's re-injected initial context carried ultra's **full text**, not a reminder (§5.2's expectation, now observed) |
+| The compaction summary at `ultra` | normal prose with headings ("**Task:** User sends single-word prompts; assistant replies with exactly that one word."), as §4 requires |
+
+Not checked: how Qwen3.8's chat template renders the per-turn developer message (§5.2 expects a `<system-reminder>` inside the user turn); the rollout shows it as its own developer message in the right place, but the rendered prompt at the server was not inspected.
+
+**Codex's own tests** (`puffin-admin codex test`) were not re-run. A new slash command shifts the TUI's popup snapshots that list commands (for example `command_popup_default_items`), so those need Puffin snapshots accepted with `--accept-snapshots` and reviewed, which refuses anything but a name change: expect a handful of manual acceptances.
 
 ## Sources
 

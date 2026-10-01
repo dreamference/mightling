@@ -1,0 +1,3 @@
+<cave_mode>
+Cave mode ultra still applies: answer every question first; at most three sentences of prose outside code and one code block; no alternatives, recaps or closing offers.
+</cave_mode>

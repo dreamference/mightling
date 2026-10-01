@@ -40,6 +40,11 @@ DEFAULT_USE_TENSORIZER: Final[bool] = False
 # Whether the puffin agent's prompt advertises `puffin-admin gmail` when an account is connected.
 # Read by the Rust launcher too (DREAMFERENCE_PUFFIN_GMAIL, then `puffin_gmail` in the TOML file).
 DEFAULT_PUFFIN_GMAIL: Final[bool] = True
+# How tersely the puffin agent answers (`/cavemode`, specs/DREAMFERENCE_PUFFIN_CAVE_MODE.md). Read by
+# the Rust launcher too (DREAMFERENCE_PUFFIN_CAVE_MODE, then `puffin_cave_mode` in the TOML file);
+# a test keeps this default equal to DEFAULT_PUFFIN_CAVE_MODE in puffin-rs/src/cave.rs.
+DEFAULT_PUFFIN_CAVE_MODE: Final[str] = "ultra"
+PUFFIN_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -74,6 +79,7 @@ class DreamferenceConfig:
         use_tensorizer: Optional[bool] = None,
         guided_decoding_backend: Optional[str] = None,
         puffin_gmail: Optional[bool] = None,
+        puffin_cave_mode: Optional[str] = None,
     ):
         """
         Initializes DreamferenceConfig by loading file defaults and overriding with environment variables and parameters.
@@ -260,6 +266,14 @@ class DreamferenceConfig:
         else:
             self.puffin_gmail = bool(self.file_data.get("puffin_gmail", DEFAULT_PUFFIN_GMAIL))
 
+        # The same tiers the launcher reads, first valid value wins; an invalid one is skipped there
+        # too, so a typo in one tier falls through rather than switching cave mode off.
+        self.puffin_cave_mode: str = DEFAULT_PUFFIN_CAVE_MODE
+        for candidate in (puffin_cave_mode, os.getenv("DREAMFERENCE_PUFFIN_CAVE_MODE"), self.file_data.get("puffin_cave_mode")):
+            if isinstance(candidate, str) and candidate.strip().lower() in PUFFIN_CAVE_MODE_LEVELS:
+                self.puffin_cave_mode = candidate.strip().lower()
+                break
+
     @property
     def model(self) -> str:
         """
@@ -348,6 +362,7 @@ class DreamferenceConfig:
         if self.guided_decoding_backend != DEFAULT_GUIDED_DECODING_BACKEND: data["guided_decoding_backend"] = self.guided_decoding_backend
         if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
         if self.puffin_gmail != DEFAULT_PUFFIN_GMAIL: data["puffin_gmail"] = self.puffin_gmail
+        if self.puffin_cave_mode != DEFAULT_PUFFIN_CAVE_MODE: data["puffin_cave_mode"] = self.puffin_cave_mode
 
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

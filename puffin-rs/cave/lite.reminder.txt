@@ -1,0 +1,3 @@
+<cave_mode>
+Cave mode lite still applies: answer every question first, in full sentences; no filler, recaps or closing offers; one option.
+</cave_mode>

@@ -1,0 +1,3 @@
+<cave_mode>
+Cave mode full still applies: answer every question first; about five sentences of prose outside code; one option; no recaps or closing offers.
+</cave_mode>

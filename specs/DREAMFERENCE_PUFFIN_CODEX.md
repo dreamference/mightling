@@ -1,6 +1,6 @@
 # Puffin — Changes Made to Codex
 
-**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0016` bring it to 14 patches and 21,807 bytes (2026-09-30: `0010` also hides `/pets`, `0015` drops Codex's own startup tips and promotions, and `0001` renames the last Codex names found on screen — the slash-command descriptions, the Full Access warning in `/permissions`, and `puffin exec`'s reply label; 2026-10-01: the composer placeholder of the frame drawn while `puffin` starts up, found by Codex's own TUI tests), touching 25 upstream files, under the 22,000-byte limit `test_the_patches_stay_small` enforces. The limit was 20,000 until those names; it is raised explicitly, and only by what a hook needs. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`. The agent's web commands, `puffin-search` and `puffin-fetch`, are Rust binaries from the standalone crate `puffin-web-rs/` since 2026-09-30 (§4.1).
+**Status:** implemented. The patch series was cut down from about 406 KB to about 9 KB; the later patches `0005`–`0017` bring it to 15 patches and 24,800 bytes (2026-10-01: `0017` adds `/cavemode` and registers cave mode's World State section; 2026-09-30: `0010` also hides `/pets`, `0015` drops Codex's own startup tips and promotions, and `0001` renames the last Codex names found on screen — the slash-command descriptions, the Full Access warning in `/permissions`, and `puffin exec`'s reply label; 2026-10-01: the composer placeholder of the frame drawn while `puffin` starts up, found by Codex's own TUI tests), touching 25 upstream files, under the 22,000-byte limit `test_the_patches_stay_small` enforces. The limit was 20,000 until those names; it is raised explicitly, and only by what a hook needs. Everything larger than a one-line hook or a renamed string lives in `puffin-rs/`. The agent's web commands, `puffin-search` and `puffin-fetch`, are Rust binaries from the standalone crate `puffin-web-rs/` since 2026-09-30 (§4.1).
 **Supersedes:** `DREAMFERENCE_CODEX.md`, which describes the older setup where an upstream `codex` on PATH was launched from Python.
 **Upstream:** [openai/codex](https://github.com/openai/codex), release `rust-v0.158.0`.
 
@@ -81,7 +81,7 @@ Only changes that cannot be made from outside are patches, and each is a one-lin
 
 The call sits in `cli_main`. That is after `arg0` dispatch, so the `codex-linux-sandbox`, `apply_patch` and `codex-execve-wrapper` aliases never reach it, and before Codex parses its command line.
 
-### `0005`–`0016` (switches: hide, reroute, replace, and closing network channels)
+### `0005`–`0017` (switches: hide, reroute, replace, closing network channels, and cave mode)
 
 Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand that must not run is *also* refused by the launcher (§4, step 1). A hidden slash command (`is_visible() == false`) is gone from the popup, and typing it is not recognised either, because the command lookup only matches visible commands. In every case the code behind the command stays compiled.
 
@@ -94,6 +94,7 @@ Hiding a subcommand only removes it from `--help`, so each hidden CLI subcommand
 | `0009-remove-feedback` | `tui/src/slash_command.rs`, `tui/src/chatwidget/turn_runtime.rs` | `/feedback`, which uploads session logs to OpenAI, is not visible. The interrupted-turn hint no longer says "Hit `/feedback`…". |
 | `0010-hide-voice` | `tui/src/slash_command.rs` | `/voice`, OpenAI's realtime voice API, is not visible. It is kept for a future local voice. |
 | `0011-usage-token-stats` | `tui/Cargo.toml`, `tui/src/bottom_pane/slash_commands.rs`, `tui/src/chatwidget/slash_dispatch.rs`, `tui/src/slash_command.rs` | `/usage` is always listed, and shows this session's token statistics from `puffin_launcher::usage::report()`, fed by the counters `/status` already uses, instead of ChatGPT plan limits. It drops upstream's `/usage daily\|weekly\|cumulative` form. The TUI crate gains a path dependency on the launcher. |
+| `0017-cave-mode` | `tui/src/slash_command.rs`, `tui/src/chatwidget/slash_dispatch.rs`, `app-server/Cargo.toml`, `app-server/src/extensions.rs`, `cli/src/main.rs` | Adds `/cavemode` (after `/model`, inline arguments, available during a task), whose two dispatch arms print `puffin_launcher::cave::command()`; and registers `puffin_launcher::cave::install` beside `codex_git_attribution::install` in the app server's extension registry (the TUI, `exec` and app-server clients) and in the one `debug prompt-input` builds. The app server gains a path dependency on the launcher. See [PUFFIN_CAVE_MODE](./DREAMFERENCE_PUFFIN_CAVE_MODE.md). |
 | `0012-hide-auto-review` | `tui/src/slash_command.rs` | `/approve` (`SlashCommand::AutoReview`) is not visible. It defaults to OpenAI's `codex-auto-review` model, which the local catalog lacks. |
 | `0013-disable-usage-analytics` | `analytics/src/client.rs` | The analytics client is constructed disabled, whatever `[analytics]` or the login say. It posted usage events to `chatgpt.com/backend-api/codex/analytics-events/events` whenever a ChatGPT login was present. |
 | `0014-puffin-home` | `cli/src/main.rs` | First statement of `main()`: `puffin_launcher::home::use_puffin_home()` sets `CODEX_HOME` to `~/.puffin` (unless already set), before `arg0` reads `.env` from the home folder. First run copies an allow-list from `~/.codex`, never `auth.json`. |
@@ -153,6 +154,7 @@ The hook then parses the result with `help::parse` (`help.rs`), not `MultitoolCl
 | --- | --- | --- |
 | `update.rs` | `puffin update` (patch `0008`) | Asks the GitHub API for the latest *published* release of `dgxcoder/dgxcoder`; drafts and pre-releases are not offered. The repo is private, so it authenticates with `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`. It compares the release with `PUFFIN_VERSION`; a source build has none and always installs. It downloads the gzipped `puffin` and `codex-code-mode-host` and the `sha256sums` file, and the gzipped `puffin-search` and `puffin-fetch` when the release carries them (older releases do not; the installed ones are then kept), verifies every archive before replacing any, swaps them in next to the running executable, and links the web commands into `~/.local/bin`. |
 | `usage.rs` | `/usage` (patch `0011`) | Formats the session's input tokens (cached / new), output tokens (plus reasoning tokens), total, and the last request's share of the context window, or "No tokens used yet in this session." |
+| `cave.rs` | `/cavemode` and every model request (patch `0017`) | Cave mode: the four levels and their texts (`puffin-rs/cave/`, byte-for-byte the benchmark's), the level's resolution (this session's file `$CODEX_HOME/cave_mode/<thread-id>`, `DREAMFERENCE_PUFFIN_CAVE_MODE`, `puffin_cave_mode` in the TOML file, then `ultra`), the `/cavemode` command, and the World State section that sends a level's full text once, a one-line reminder at each later turn, and the full text again after a switch or a compaction. |
 | `app.rs` | `puffin app` (step 2) | Opens `puffin-app`. |
 | `help.rs` | every parse | Rebrands the help tree (above). |
 
@@ -165,7 +167,8 @@ The crate's unit tests cover:
 - TOML scoping and preservation of the user's settings;
 - the prompt's identity, web section and Gmail block;
 - host resolution;
-- the help rebrand, the update decision and the `/usage` report.
+- the help rebrand, the update decision and the `/usage` report;
+- cave mode's levels, tiers, `/cavemode` forms and World State render table.
 
 Run them in the **export** directory, never in `codex/`: `cargo test --release -p puffin-launcher`. `tests/test_puffin_slash_commands.py` drives every slash command against the installed binary on a pseudo-terminal. It skips its live cases when no model server answers.
 
