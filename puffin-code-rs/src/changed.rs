@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::manifest::{mtime_ns, sha256_file, FileStamp};
-use crate::paths::{git_z, Repo};
+use crate::paths::{git, git_z, Repo};
 
 /// How a changed set was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,15 +71,53 @@ impl<'a> GitView<'a> {
             .collect()
     }
 
-    /// Adds what an included submodule contributes to a set of superproject paths. Where the set
-    /// names the submodule itself (its commit moved, or its checkout is dirty) or a submodule it
-    /// is nested in, every file of it becomes a candidate: each is then confirmed against the
-    /// layer's hashes, so this over-asks and never under-reports.
-    fn expand_submodules(&self, paths: &mut BTreeSet<String>) {
+    /// The files of an included submodule that differ between the commit its parent recorded at
+    /// `since` and what is checked out now, or None when that cannot be told (the old commit is
+    /// not in the submodule's clone, or the submodule is nested and `since` names a commit of the
+    /// superproject, whose parent's commit at that point is not known here).
+    fn submodule_diff(&self, submodule: &str, since: &str) -> Option<Vec<String>> {
+        let parent = self.included.iter().filter(|p| submodule.starts_with(&format!("{p}/"))).max_by_key(|p| p.len());
+        let (parent_dir, rel) = match parent {
+            Some(parent) => (self.repo.root.join(parent), &submodule[parent.len() + 1..]),
+            None => (self.repo.root.clone(), submodule),
+        };
+        if parent.is_some() && since != "HEAD" {
+            return None;
+        }
+        // `160000 commit <sha>\t<path>`
+        let tree = git(&parent_dir, &["ls-tree", since, "--", rel]).ok()?;
+        let dir = self.repo.root.join(submodule);
+        let head = git(&dir, &["rev-parse", "HEAD"]).ok()?;
+        let Some(old) = tree.split_whitespace().nth(2) else {
+            // Not a submodule at that commit: everything in it is new since.
+            return Some(self.submodule_files(submodule));
+        };
+        if head.trim() == old {
+            return Some(Vec::new());
+        }
+        let files = git_z(&dir, &["diff", "--name-only", "-z", "--no-renames", old, "HEAD", "--"]).ok()?;
+        Some(files.into_iter().map(|file| format!("{submodule}/{file}")).collect())
+    }
+
+    /// Replaces each included submodule's own entry in a set of superproject paths (a directory,
+    /// which names no file) with the files that changed inside it since `since`. Where that
+    /// cannot be told, every file of the submodule becomes a candidate: each is then confirmed
+    /// against the layer's hashes, so this over-asks and never under-reports.
+    fn expand_submodules(&self, paths: &mut BTreeSet<String>, since: &str) {
+        let mut unchanged: Vec<&String> = Vec::new();
         for submodule in &self.included {
-            let moved = paths.iter().any(|path| path == submodule || submodule.starts_with(&format!("{path}/")));
-            if moved {
-                paths.extend(self.submodule_files(submodule));
+            let nested_in_unchanged = unchanged.iter().any(|p| submodule.starts_with(&format!("{p}/")));
+            // Under a parent that has not moved, a nested submodule's recorded commit has not
+            // either: it is compared with what its parent records now.
+            let changed = self.submodule_diff(submodule, if nested_in_unchanged { "HEAD" } else { since });
+            match changed {
+                Some(files) => {
+                    if files.is_empty() {
+                        unchanged.push(submodule);
+                    }
+                    paths.extend(files);
+                }
+                None => paths.extend(self.submodule_files(submodule)),
             }
         }
         for submodule in &self.included {
@@ -93,9 +131,10 @@ impl<'a> GitView<'a> {
             let mut paths = BTreeSet::new();
             if self.repo.is_git {
                 paths.extend(status_paths(&self.repo.root));
-                self.expand_submodules(&mut paths);
-                // The superproject can be told to ignore a submodule's dirt (`ignore = dirty`), so
-                // each included submodule is asked itself as well.
+                // A checkout moved off the commit its parent records, and each submodule's own
+                // dirt: the superproject reports both as one entry, or (with `ignore = dirty`)
+                // not at all, so each included submodule is asked itself.
+                self.expand_submodules(&mut paths, "HEAD");
                 for submodule in &self.included {
                     paths.extend(status_paths(&self.repo.root.join(submodule)).into_iter().map(|path| format!("{submodule}/{path}")));
                 }
@@ -115,7 +154,7 @@ impl<'a> GitView<'a> {
             let paths = if self.repo.is_git {
                 git_z(&self.repo.root, &["diff", "--name-only", "-z", "--no-renames", commit, "HEAD", "--"]).ok().map(|v| {
                     let mut paths: BTreeSet<String> = v.into_iter().collect();
-                    self.expand_submodules(&mut paths);
+                    self.expand_submodules(&mut paths, commit);
                     paths
                 })
             } else {

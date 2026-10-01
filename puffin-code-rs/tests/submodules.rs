@@ -304,15 +304,28 @@ fn an_included_submodules_files_are_seen_by_git_and_by_freshness() {
     assert!(status.contains("ours/tools/helper.py") && status.contains("ours/tools/new.py"), "{status:?}");
     assert!(!status.contains("ours"), "the submodule's own entry is a directory, not a file: {status:?}");
 
-    // A commit inside it, recorded by the superproject, moves the gitlink: every file of it is a
-    // candidate (each is then confirmed against the layer's hashes).
+    // Only those: the files the edit did not touch are not candidates.
+    assert!(!status.contains("ours/notes.txt"), "{status:?}");
+
+    // A commit inside it that the superproject has not recorded yet: the checkout has moved off
+    // the recorded commit, and the files that differ are found.
     git(&f.repo.root.join("ours"), &["add", "-A"]);
     git(&f.repo.root.join("ours"), &["commit", "-qm", "more"]);
+    let status = view().status().clone();
+    assert!(status.contains("ours/tools/helper.py") && status.contains("ours/tools/new.py") && !status.contains("ours/notes.txt"), "{status:?}");
+
+    // Recorded by the superproject, the same files are what changed since the snapshot's commit.
     git(&f.repo.root, &["add", "ours"]);
     git(&f.repo.root, &["commit", "-qm", "bump ours"]);
+    assert!(view().status().is_empty(), "{:?}", view().status());
     let diff = view().diff(&snapshot).unwrap().clone();
-    assert!(diff.contains("ours/tools/helper.py") && diff.contains("ours/tools/new.py") && diff.contains("ours/notes.txt"), "{diff:?}");
-    assert!(!diff.contains("ours"), "{diff:?}");
+    assert!(diff.contains("ours/tools/helper.py") && diff.contains("ours/tools/new.py"), "{diff:?}");
+    assert!(!diff.contains("ours") && !diff.contains("ours/notes.txt"), "{diff:?}");
+
+    // A snapshot from before the submodule existed: every file of it is new since.
+    let before = git(&f.repo.root, &["rev-list", "--max-parents=0", "HEAD"]);
+    let diff = view().diff(&before).unwrap().clone();
+    assert!(diff.contains("ours/notes.txt") && diff.contains("ours/tools/helper.py"), "{diff:?}");
 
     // Without the submodule included, git reports only its entry, which names no file.
     let plain = GitView::with_included(&f.repo, Vec::new()).diff(&snapshot).unwrap().clone();
