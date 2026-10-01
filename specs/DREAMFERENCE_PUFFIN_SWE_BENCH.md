@@ -1,6 +1,6 @@
 # Puffin on SWE-bench — `puffin-admin swe-bench`
 
-**Status:** proposed. Nothing in this spec is implemented yet; §9 lists what was checked on this machine on 2026-10-01 and what is still assumed.
+**Status:** Phase 1 implemented on 2026-10-01 in `dreamference/swe_bench/`, with `puffin-admin swe-bench {setup,smoke,run,eval,report,status,clean}`. §1–§11 are the design as specified; **§12 records what was built, what Phase 0 measured, and where the build departs from the design**, and wins where the two disagree. Not built: local image builds (impossible on arm64 as upstream ships them), per-repository image cycling for a full run, the mini-SWE-agent baseline column.
 **Target:** the `puffin` terminal agent and the model it is served by, measured on the GB10 itself.
 **Command:** `puffin-admin swe-bench {setup,smoke,run,eval,report,status,clean}`. It lives in `puffin-admin`, not in the `puffin` binary (§2 says why).
 **Builds on:**
@@ -310,7 +310,7 @@ So the number supports "configuration A resolves more of these instances than co
 | `puffin` in a container | The installed binary, mounted read-only into `python:3-slim` on that network with a fresh `CODEX_HOME` (which must exist beforehand) and `DREAMFERENCE_VLLM_HOST` set to the gateway, completed a turn against the served model. With `-s workspace-write` every shell command failed (no bubblewrap in the container) and nothing was written; with `--dangerously-bypass-approvals-and-sandbox` the command ran and the file was created. With `stdin` from `/dev/null`, `exec` still printed "Reading additional input from stdin..." and went on. |
 | Upstream arm64 work | Pull request 521 (arm64 support across the harness's build and evaluation) was closed unmerged on 2026-08-12, when v5 moved dataset-specific attributes into the task repository. |
 
-**Not checked:**
+**Not checked when the spec was written** (§12.1 answers the first six; wall time and the resolved rate are in §12.5):
 
 - How many Verified instances build with `--task-repo` on this machine, and how many of those pass their gold patch.
 - Whether the community images agree with local builds, and how their tag names map to instance ids (`sympy-sympy-22005` against `sympy__sympy-22005`).
@@ -340,6 +340,75 @@ So the number supports "configuration A resolves more of these instances than co
 4. **Which dataset should be the default once Phase 0 is done.** Verified is the common reference and is known to be contaminated; a held-out or newer set would mean more and compare with less.
 5. **Should a run be queueable through `/night`,** so the timer starts it in the window, or is `--until` enough?
 6. **Reasoning effort and cave mode for the benchmark:** as configured (the agent as shipped), or pinned per run so results do not move when a default changes? The manifest records them either way.
+
+---
+
+## 12. As built (2026-10-01)
+
+### 12.1 What Phase 0 found, and what it changed
+
+| Finding | Consequence |
+|---|---|
+| **The task repository cannot build arm64 images.** Every `tasks/<id>/Dockerfile` starts `FROM --platform=linux/amd64` and installs `Miniconda3-…-Linux-x86_64.sh` with x86 conda builds pinned. | §5.3's "local build" source does not exist on this machine. `--task-repo` is not used; the only source is the community repository, and the manifest says so. The clone of `swe-bench-tasks` is not needed and `setup` does not make one. |
+| **400 of the 500 Verified instances have a community arm64 image**, tagged with the instance id with `__` written `-`. Missing: matplotlib 33 of 34, scikit-learn 25 of 32, xarray 22 of 22, django 9, astropy 6, sympy 3, pytest 1, sphinx 1. Docker Hub's web API stops anonymous paging at 1,000 tags, so the list is read from the registry's own `tags/list`. | The denominator can be at most 400 before validation. |
+| **The harness takes a local `.jsonl` as its dataset** and uses whatever image the row's `image` column names, pulling only if it is absent. | The dataset is downloaded once (`datasets/SWE-bench_Verified.jsonl`, revision `78f471bf655a`), and each harness call gets a file with `image` rewritten to the arm64 image. No fake `x86_64` tags, no patch to the harness, and `run` and `eval` need no network once the images are here. |
+| **The harness never runs an empty patch**: it files it under "empty patches" without starting a container. | §5.3's "an empty patch must not resolve" would test nothing. Validation uses a **no-op patch** (one new unrelated file) instead: gold must resolve and the no-op must not. Empty predictions are recorded as unresolved by the runner and never handed to the harness. |
+| **An image that exists is not an instance that works.** Of 30 instances tried, 28 validated; `sphinx-doc__sphinx-8721` and `sphinx-doc__sphinx-8056` fail their own gold patch in the community image (8721: `No module named 'roman'`). | Confirms the rule of §5.3. The smoke set uses `sphinx-doc__sphinx-9230`. |
+| **`HEAD` is not `base_commit`** in these images: one commit named "SWE-bench" sits on top, with the same tree. | The runner checks tree equality (recorded as `base_tree_equal`), not the hash, and collects the patch against **the tree the agent started from** (the checked-out commit plus whatever the image build left untracked), which is what the harness's container also has. |
+| **The object store already lacks the fix** in the image inspected (`git log --all -S` for the fixed line found nothing; scrubbing removed 16 objects of 211,142, all old tags). `.git` belongs to root. | The scrub of §5.1 step 2 still runs, as **root** (`docker exec -u 0`), because a repack as the agent's user cannot replace root's pack files; `.git` is then made writable again. It took under a second. |
+| **The installed `puffin` does not start in an instance image**: it needs glibc 2.38/2.39, the images are Ubuntu 22.04 with 2.35. | `setup` builds a **relocated runtime** (`~/.cache/dreamference/swe-bench/runtime`): copies of `puffin` and `codex-code-mode-host` whose ELF interpreter and rpath point at copies of the host's loader, `libc`, `libm` and `libgcc_s`, mounted read-only at `/opt/puffin`. Only those two binaries use the copied libraries; the repository's Python uses the image's. The runtime is stamped with the hash of the binaries it was copied from, rebuilt when `codex build` replaces them, and the hash is in the manifest; a run refuses to resume with a different one. `puffin-code` is not in the runtime (it needs bubblewrap), so the agent in a container works **without the code index**. |
+| **Which user:** `/testbed` is mode 0777 and the image has a `nonroot` user with uid 1000. | The agent and every collecting command run as the **host's uid**, so logs and scratch files belong to the user. Git's ownership check is answered with `GIT_CONFIG_COUNT/KEY_0/VALUE_0` (`safe.directory=/testbed`) in the container's environment, which writes nothing. |
+| **The image's default `PATH` puts conda's base environment first**; `conda activate testbed` happens only in the grading script. | The container's `PATH` starts with `/opt/miniconda3/envs/testbed/bin`, or the agent's `python -m pytest` fails on imports. |
+| **The harness sets no memory limit** on its containers, and they belong to dockerd's cgroup, so §6.2's systemd scope would not contain them. | While the harness runs, a thread puts `docker update --memory` (`eval_memory`, default 4G) on each `sweb.eval.*.<run id>` container as it appears. Measured peaks on ten containers: 28–160 MiB. |
+| **Disk:** an image is about 0.9 GB to pull (33–38 s each here) and **2.1–2.4 GB unpacked**, with little shared between repositories: 32 images took about 70 GB. | 400 images would need roughly 900 GB; 344 GB were free. The whole set does not fit at once (§12.3). |
+
+### 12.2 Where the code is
+
+| Piece | Path |
+|---|---|
+| Subcommands, `setup`, `smoke`, `status`, `clean` | `dreamference/swe_bench/swe_bench_command.py` |
+| Settings (`[swe_bench]`), directories, pins, the smoke set | `dreamference/swe_bench/swe_bench_settings.py` |
+| Every `docker` call | `dreamference/swe_bench/swe_bench_docker.py` |
+| The relocated `puffin` | `dreamference/swe_bench/swe_bench_runtime.py` |
+| The upstream harness: virtualenv, dataset snapshot, `swebench eval`, its reports | `dreamference/swe_bench/swe_bench_harness.py` |
+| Image names, the validated list | `dreamference/swe_bench/swe_bench_images.py` |
+| One instance: container, scrub, agent, nudges, patch | `dreamference/swe_bench/swe_bench_instance_run.py` |
+| A run's files | `dreamference/swe_bench/swe_bench_run_store.py` |
+| Admission, scheduling, manifest, resume | `dreamference/swe_bench/swe_bench_runner.py` |
+| Validation and grading | `dreamference/swe_bench/swe_bench_evaluator.py` |
+| Report and `--against` | `dreamference/swe_bench/swe_bench_report.py` |
+| The shared lock now names its holder | `NightShiftQueue.runner_lock(holder=…)`, `runner_holder()`; `_refuse_during_night_run` prints it |
+
+`[swe_bench]` in `dreamference.toml`: `max_parallel` 3, `task_timeout` 45m, `task_memory` 8G, `task_cpus` 4, `nudges` 2, `idle_minutes` 10, `task_context` 49152, `eval_workers` 4, `eval_memory` 4G, `eval_timeout` 30m, `disk_reserve` 100G.
+
+### 12.3 Departures from the design
+
+- **Admission is imported, not moved.** §5.5 asked for the shared pieces to move to a neutral module. `SweBenchRunner` calls `NightShiftRunner.admit` and `NightShiftRunner.start_blocker` and takes `NightShiftQueue.runner_lock`: one implementation, no copy, no new module. `start_blocker` reads a running task's systemd scope; an instance run has none (`current_unit` is `None`), so each running container is assumed to grow to its full `task_memory`, which is the conservative reading and needs no container probe. With 28 GiB available and 8G caps, that admits **two** containers at once although the KV pool allows three; the measured agent container peaked at 113 MiB, so the cap is far too generous and is left for a run with more data to retune.
+- **`/airgapped on` cannot be used.** §5.2 planned to set it once it existed. As built, `puffin` refuses to start at `on` together with `--dangerously-bypass-approvals-and-sandbox` ("nothing would keep them off the network"), and inside a container the bypass flag is the only way to run. The run sets `DREAMFERENCE_PUFFIN_AIRGAPPED=off` explicitly: the internal Docker network is the enforcement, the web binaries are not mounted, and the task prompt says there is no network. The system prompt still names the web commands. Open for the airgapped module: a way to say "the network is absent by other means".
+- **Validation happens when a run starts, for the instances it selected**, and the manifest's instance list and exclusions are then fixed. An instance that could not be validated because the disk reserve was reached is excluded from that run. `setup --validate` does the same ahead of time.
+- **Per-repository image cycling is not built.** `run --eval --remove-images` removes a repository's images after grading it, but validation still pulls every selected image first. A run over all 400 instances therefore needs the instances validated repository by repository with `clean --images` in between, and does not fit as one command today. Runs of a few dozen instances do.
+- **A timeout still submits what was changed.** §5.1 lists `timeout` among the states without saying what is predicted. The container is stopped, started again, and the partial patch collected; the status stays `timeout`.
+- **An interrupted run (Ctrl-C or SIGTERM) writes no prediction for the instances it cut off**; their state is `interrupted` and they run again on resume. `--until` only stops new starts.
+- **The grading number rises on a changed grader**, as §6.1 says, not on a changed prediction, as one line of §7.2 said: predictions never change within a run.
+- **Cave mode is passed in explicitly.** The container has no `dreamference.toml`, so the level configured on the host is resolved by the runner, set as `DREAMFERENCE_PUFFIN_CAVE_MODE`, and recorded.
+- **`--against` (Phase 2) is built**: per-instance differences, a 95% Wald interval for paired proportions and the exact McNemar p-value; "No measurable difference." when the interval contains zero. The mini-SWE-agent baseline column is not built.
+- **`swe-bench eval` checks memory, not idleness:** `eval_workers × eval_memory` plus the 8 GiB reserve must be available.
+- **Every agent log starts with a line that is not JSON** (`Reading additional input from stdin...`, printed by `puffin exec`); readers skip it.
+
+### 12.4 Tests
+
+`tests/test_swe_bench.py`, 41 tests. A stand-in plays `docker`: a container is a scratch git repository on the host, and the scripts the runner executes in a container (scrub, record the starting tree, detect a change, collect the patch) run for real against it with bash and git. Another stand-in plays the harness and writes the per-instance reports the real one writes. Covered: the prompt and everything handed to the container contain none of the answer-bearing fields; the container's limits, network, user and environment; refs removed before the agent starts, as root; a change, an error, an empty answer, a stall, a nudge that works, a timeout with its partial patch; binary files left out and named; the collected patch applying to a fresh checkout, with files the image left untracked kept out of it; resume, interruption, a torn predictions line, a resume under another model; exclusion and its counts; the no-op rule; validation not repeated; an unpullable image not recorded as rejected; grading only the ungraded, never an empty patch, a new grading for a new harness, an instance without a verdict staying ungraded; the smoke gate, the lock and its holder's name, the disk reserve, Night Shift's admission, `--until`; the manifest, the report, `--against`, the statistics; `smoke` passing and failing; the runtime's library list; selection; settings; the command line; `status` and `clean`.
+
+### 12.5 Measured runs
+
+All on 2026-10-01, on the GB10 with the default model resident (Qwen3.8-27B NVFP4 on SGLang, KV pool 156,907 tokens), cave mode `ultra`.
+
+- **`setup`:** harness virtualenv, dataset snapshot (500 rows), tag list (400 images), runtime. Seconds once the virtualenv exists; the project's `.venv` is untouched.
+- **`setup --validate` on 29 instances** (a 25-instance sample plus the smoke set): 898 s, most of it 24 image pulls; 28 validated, `sphinx-doc__sphinx-8056` rejected (its gold patch does not resolve in the community image). Grading the five smoke instances twice takes about 90 s once the images are here.
+- **`smoke`:** passed in 3 min 35 s with a one-minute idle wait. The five resolve with their gold patch and none with the no-op; the agent fixed `sympy__sympy-13480` in 43 s (one-line fix, graded resolved); the agent container peaked at 113 MiB.
+- **The sample.** `~/.cache/dreamference/swe-bench/sample-25.txt`: the 25 Verified instances with an arm64 image whose `sha256(instance_id)` is smallest, so it is fixed and not chosen by difficulty. One astropy, thirteen django, one pytest, one scikit-learn, three sphinx (one excluded), six sympy.
+
+The 25-instance run, its interruption and resume, and the run-to-run spread are recorded below as they complete.
 
 ---
 

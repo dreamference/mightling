@@ -271,6 +271,78 @@ Work through the queue now, until the window ends.
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing; their requests still pause the run) |
 
+### `puffin-admin swe-bench`
+
+Run puffin over SWE-bench instances on this machine and grade the patches.
+
+#### `puffin-admin swe-bench setup`
+
+Install the harness, download the dataset, build the puffin runtime for the instance images.
+
+| Option | Description |
+|---|---|
+| `--dataset` | verified (default), lite, full, or a HuggingFace id. |
+| `--validate` | Also check which instances grade correctly here (pulls their images) |
+| `--instances` | With --validate: comma-separated instance ids. |
+| `--limit` | With --validate: only the first N instances, sorted by id. |
+| `--force` | With --validate: check again instances that already have a result. |
+
+#### `puffin-admin swe-bench smoke`
+
+Prove the whole pipeline on five instances; run refuses until this has passed.
+
+| Option | Description |
+|---|---|
+| `--idle-minutes` | Minutes the model must have been idle first (default 10) |
+| `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing) |
+
+#### `puffin-admin swe-bench run`
+
+The agent phase: one puffin exec per instance, producing predictions.jsonl.
+
+| Option | Description |
+|---|---|
+| `--dataset` | verified (default), lite, full, or a HuggingFace id. |
+| `--instances` | Comma-separated instance ids. |
+| `--subset` | A file of instance ids, one per line. |
+| `--limit` | Only the first N selected instances, sorted by id. |
+| `--name` | The run's name; an existing run of that name is resumed. |
+| `--eval` | Grade the predictions when the agent phase ends. |
+| `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
+| `--until` | HH:MM after which no new instance starts. |
+| `--idle-minutes` | Minutes the model must have been idle first (default 10) |
+| `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing) |
+
+#### `puffin-admin swe-bench eval`
+
+The grading phase: the upstream harness applies each patch and runs the tests.
+
+| Option | Description |
+|---|---|
+| `run` | The run (default: the latest) |
+
+#### `puffin-admin swe-bench report`
+
+Print the resolved rate and what it was measured with.
+
+| Option | Description |
+|---|---|
+| `run` | The run (default: the latest) |
+| `--against` | Compare with this run, instance by instance. |
+
+#### `puffin-admin swe-bench status`
+
+Runs, their progress, images and disk.
+
+#### `puffin-admin swe-bench clean`
+
+Remove a run's containers and scratch; with --images, the instance images.
+
+| Option | Description |
+|---|---|
+| `run` | The run (default: every run's containers) |
+| `--images` | Also remove the instance images. |
+
 ### `puffin-admin audit`
 
 Check what a puffin session does on the network.

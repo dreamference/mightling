@@ -227,7 +227,7 @@ It ends with the review commands (`git diff <base>..night/<id>`, `git worktree l
 2. **The model server is never at risk.**
    - It is never loaded, restarted or stopped by the runner.
    - Every task runs under a memory cap, and admission requires headroom.
-   - While the runner holds its lock, `puffin-admin index`, `codex build` and `server start` refuse to run, with a message naming the night run. This is the rule that today's earlyoom kill of vLLM (an index run beside the server) made explicit.
+   - While the runner holds its lock, `puffin-admin index`, `codex build` and `server start` refuse to run, with a message naming the night run. Since 2026-10-01 the lock file records who holds it (`NightShiftQueue.runner_lock(holder=…)`), because a SWE-bench run takes the same lock ([PUFFIN_SWE_BENCH §5.5](./DREAMFERENCE_PUFFIN_SWE_BENCH.md)), and the refusal names that holder. This is the rule that today's earlyoom kill of vLLM (an index run beside the server) made explicit.
 3. **Interactive use wins** (§5.5).
 4. **Network.** The night run uses the same channels as an interactive session. Once `/airgapped` exists, a night run follows the configured level, and `[night] airgapped` may set a stricter one ([PUFFIN_AIRGAPPED §7](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)); this replaces the earlier plan to put night runs in the egress airlock by default.
 

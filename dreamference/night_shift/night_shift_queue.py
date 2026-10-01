@@ -145,27 +145,53 @@ class NightShiftQueue:
 
     @classmethod
     @contextmanager
-    def runner_lock(cls, night_dir: Path) -> Iterator[bool]:
+    def runner_lock(cls, night_dir: Path, holder: str = "a Night Shift run") -> Iterator[bool]:
         """
-        Holds `runner.lock` for a night run, without waiting.
+        Holds `runner.lock` for a run, without waiting. A night run and a SWE-bench run take the
+        same lock, so the two never work the model server at once.
 
         Args:
             night_dir: The queue directory.
+            holder: What holds the lock, written into the file so a refusal can name it.
 
         Yields:
             bool: True if this process holds the lock, False if another run does.
         """
         night_dir.mkdir(parents=True, exist_ok=True)
-        with open(night_dir / "runner.lock", "w") as handle:
+        # Opened for appending: truncating here would erase the name of a run that holds it.
+        with open(night_dir / "runner.lock", "a") as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 yield False
                 return
             try:
+                handle.truncate(0)
+                handle.write(holder + "\n")
+                handle.flush()
                 yield True
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
+
+    @classmethod
+    def runner_holder(cls, night_dir: Optional[Path] = None) -> Optional[str]:
+        """
+        Names what holds `runner.lock` right now.
+
+        Args:
+            night_dir: The queue directory; defaults to `night_dir()`.
+
+        Returns:
+            Optional[str]: The holder as it named itself ("a Night Shift run", "a SWE-bench
+            run"), or None when nothing holds the lock.
+        """
+        directory = night_dir or cls.night_dir()
+        if not cls.runner_active(directory):
+            return None
+        try:
+            return (directory / "runner.lock").read_text().strip() or "a run"
+        except OSError:
+            return "a run"
 
     @classmethod
     def runner_active(cls, night_dir: Optional[Path] = None) -> bool:

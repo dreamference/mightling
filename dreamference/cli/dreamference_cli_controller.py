@@ -561,17 +561,19 @@ class DreamferenceCLIController:
     @classmethod
     def _refuse_during_night_run(cls, what: str) -> None:
         """
-        Stops `puffin-admin <what>` while a Night Shift run holds its lock: a build, an index run
-        or a model load beside the night's sessions is what put the model server at risk before
-        (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §6.2).
+        Stops `puffin-admin <what>` while a Night Shift run or a SWE-bench run holds the runner
+        lock: a build, an index run or a model load beside its sessions is what put the model
+        server at risk before (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §6.2).
 
         Args:
             what: The command, for the message.
         """
         from dreamference.night_shift import NightShiftQueue
-        if NightShiftQueue.runner_active():
-            print(f"❌ A Night Shift run is in progress, so `puffin-admin {what}` waits: "
-                  "see `puffin-admin night status`.")
+        holder = NightShiftQueue.runner_holder()
+        if holder:
+            where = "swe-bench status" if "SWE-bench" in holder else "night status"
+            print(f"❌ {holder[0].upper()}{holder[1:]} is in progress, so `puffin-admin {what}` waits: "
+                  f"see `puffin-admin {where}`.")
             sys.exit(1)
 
     @classmethod
@@ -959,6 +961,10 @@ class DreamferenceCLIController:
         night_run_parser.add_argument("--minutes", type=float, default=None, help="Run for this many minutes instead")
         night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open puffin sessions to close (for testing; their requests still pause the run)")
+
+        # Command: puffin-admin swe-bench (run puffin over SWE-bench instances and grade the patches)
+        from dreamference.swe_bench.swe_bench_command import SweBenchCommand
+        SweBenchCommand.add_parser(subparsers)
 
         # Command: puffin-admin audit (what does puffin do on the network?)
         audit_parser = subparsers.add_parser("audit", help="Check what a puffin session does on the network")
@@ -2134,6 +2140,10 @@ class DreamferenceCLIController:
                 sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json))
             print("usage: puffin-admin audit {egress}")
             sys.exit(2)
+
+        elif args.command == "swe-bench":
+            from dreamference.swe_bench.swe_bench_command import SweBenchCommand
+            sys.exit(SweBenchCommand.dispatch(args))
 
         elif args.command == "night":
             from dreamference.night_shift import NightShiftRunner, NightShiftScheduler, NightShiftSettings
