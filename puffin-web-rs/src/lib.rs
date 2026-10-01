@@ -14,11 +14,44 @@
 //! the same errors, including the one that names every failed search engine. Where this differs it
 //! says so at the function.
 
+pub mod airgapped;
 pub mod fetch;
 pub mod html_text;
 pub mod search;
 
 use std::time::Duration;
+
+use airgapped::Level;
+
+/// Printed, with nothing sent, when the session's level is `on`.
+pub const AIRGAPPED_ON_MESSAGE: &str = "Web access is off in this session (/airgapped on). Only the user can change that, with /airgapped.";
+
+/// Printed, with nothing sent, when the sandbox this command runs in has no network and the level
+/// is not `on`: naming `/airgapped on` here would name a setting nobody chose.
+pub const NO_NETWORK_SANDBOX_MESSAGE: &str = "This command has no network: the sandbox it runs in does not allow it. Web access needs the workspace-write sandbox (puffin exec -s workspace-write).";
+
+/// The session's air-gap level, as the launcher and the sandbox resolve it
+/// (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §6.2).
+pub fn level() -> Level {
+    airgapped::resolve_for_command().level
+}
+
+/// Why a web command must send nothing, if it must: the level is `on`, or Codex started this
+/// command without a network (`CODEX_SANDBOX_NETWORK_DISABLED`). No restart hint goes with it:
+/// nothing is broken.
+pub fn refusal(level: Level, sandbox_network_disabled: bool) -> Option<&'static str> {
+    match (level, sandbox_network_disabled) {
+        (Level::On, _) => Some(AIRGAPPED_ON_MESSAGE),
+        (_, true) => Some(NO_NETWORK_SANDBOX_MESSAGE),
+        _ => None,
+    }
+}
+
+/// [`refusal`] for this process's environment.
+pub fn refusal_now() -> Option<&'static str> {
+    let disabled = std::env::var_os(airgapped::SANDBOX_NETWORK_DISABLED_ENV_VAR).is_some_and(|value| !value.is_empty());
+    refusal(level(), disabled)
+}
 
 /// Sent on every request. Some sites serve a stub or a challenge page to unknown agents, and the
 /// point of a fetch is to return what a person would see.
@@ -154,6 +187,17 @@ mod tests {
             "https://[::1]:8080/x",
             &[proxy, ("no_proxy", "::1")]
         ));
+    }
+
+    #[test]
+    fn a_web_command_refuses_at_on_and_in_a_sandbox_without_network() {
+        assert_eq!(refusal(Level::On, false), Some(AIRGAPPED_ON_MESSAGE));
+        assert_eq!(refusal(Level::On, true), Some(AIRGAPPED_ON_MESSAGE));
+        assert_eq!(refusal(Level::Off, true), Some(NO_NETWORK_SANDBOX_MESSAGE));
+        assert_eq!(refusal(Level::DuckDuckGo, true), Some(NO_NETWORK_SANDBOX_MESSAGE));
+        assert_eq!(refusal(Level::Off, false), None);
+        assert_eq!(refusal(Level::DuckDuckGo, false), None);
+        assert!(!NO_NETWORK_SANDBOX_MESSAGE.contains("airgapped"));
     }
 
     #[test]

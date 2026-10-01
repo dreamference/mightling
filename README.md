@@ -40,7 +40,7 @@ served on your own machine. Your code, your prompts and your conversations stay 
 
 **A fork that edits almost nothing.** Codex lives in [`codex/`](codex) as a submodule pinned to the
 `rust-v0.158.0` release, and it is never modified. At build time Puffin exports that source, adds
-its launcher crate ([`puffin-rs/`](puffin-rs)) and applies **16 patches totalling 27 KB** from
+its launcher crate ([`puffin-rs/`](puffin-rs)) and applies **17 patches totalling 31 KB** from
 [`codex-patches/`](codex-patches), touching 20 of Codex's files. Most patches are a line or two: a
 hook that calls Puffin's own code, or a switch that turns a cloud feature off. Moving to a new Codex
 release is a submodule bump plus whichever hunks stop applying.

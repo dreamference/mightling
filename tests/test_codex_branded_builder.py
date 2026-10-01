@@ -52,8 +52,10 @@ def test_the_patches_stay_small():
     # extension's registration in the app server and in `debug prompt-input`); the series was 21,807
     # bytes before it. Raised to 27,500 on 2026-10-01 for 0018's `/night` hooks (2,133 bytes: the
     # variant, its description, two capability lists and three dispatch arms); the series was
-    # 24,800 bytes before it and is 26,933 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 27_500
+    # 24,800 bytes before it and is 26,933 after. Raised to 31,500 on 2026-10-01 for 0019's
+    # `/airgapped` hooks (4,242 bytes: the slash command in seven places, two World State
+    # registrations, and the sandbox helper's dependency and three-line hook); 31,175 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 31_500
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

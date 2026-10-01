@@ -31,6 +31,7 @@ use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::value;
 
+pub mod airgapped;
 pub mod app;
 pub mod cave;
 pub mod code_index;
@@ -108,7 +109,7 @@ Use them whenever the answer depends on something you cannot know from training 
 in front of you: today's weather or tides, current events, release versions, live documentation,
 anything dated. Search first, then `puffin-fetch` a promising URL when the snippets are not enough.
 
-Do not say you cannot browse the web. You can, through these commands.
+Do not say you cannot browse the web. You can, through these commands, unless a later message says web access is off for this session.
 
 Do not use `curl` or `wget` for this. They are frequently blocked by the sandbox and return nothing,
 which looks like the site being down rather than the command being unavailable.
@@ -194,8 +195,19 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(night::run_cli(&user_args[index + 1..]));
     }
+    // `airgapped` shows or sets the configured air-gap level (airgapped.rs), as `/airgapped` does
+    // inside a session.
+    if let Some(index) = subcommand
+        && user_args[index] == "airgapped"
+    {
+        std::process::exit(airgapped::run_cli(&user_args[index + 1..]));
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
+    }
+    // At a configured `on`, Full Access contradicts the level: there is no sandbox to enforce it.
+    if let Some(reason) = airgapped::full_access_conflict(&user_args, airgapped::resolve(None).level) {
+        bail!("{reason}");
     }
 
     // The interactive TUI (no subcommand, or a prompt) says once what a night run finished.
@@ -226,6 +238,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // joins the others (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2).
     extra_instructions.push_str(&code_index::start_and_prompt_block());
     cave::prune_session_files();
+    airgapped::prune_session_files();
     configure_codex_home(&codex_home, &host, &model, &extra_instructions)?;
     Ok(with_local_model_args(args, &model.id))
 }

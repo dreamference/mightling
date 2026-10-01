@@ -1,0 +1,73 @@
+diff --git a/codex-rs/app-server/src/extensions.rs b/codex-rs/app-server/src/extensions.rs
+index c1c205d..7f99585 100644
+--- a/codex-rs/app-server/src/extensions.rs
++++ b/codex-rs/app-server/src/extensions.rs
+@@ -96,2 +96,3 @@ pub(crate) fn thread_extensions(
+     puffin_launcher::cave::install(&mut builder);
++    puffin_launcher::airgapped::install(&mut builder);
+     codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index 1ef016e..ac8d572 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -2052,2 +2052,3 @@ async fn run_debug_prompt_input_command(
+     puffin_launcher::cave::install(&mut extensions);
++    puffin_launcher::airgapped::install(&mut extensions);
+     codex_skills_extension::install(&mut extensions, |config: &Config| {
+diff --git a/codex-rs/linux-sandbox/Cargo.toml b/codex-rs/linux-sandbox/Cargo.toml
+index 17b3fa1..8993fa1 100644
+--- a/codex-rs/linux-sandbox/Cargo.toml
++++ b/codex-rs/linux-sandbox/Cargo.toml
+@@ -21,2 +21,3 @@ clap = { workspace = true, features = ["derive"] }
+ codex-install-context = { workspace = true }
++puffin-airgapped = { path = "../puffin/airgapped" }
+ codex-network-proxy = { workspace = true }
+diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandbox/src/linux_run_main.rs
+index 8ef5165..6917a7e 100644
+--- a/codex-rs/linux-sandbox/src/linux_run_main.rs
++++ b/codex-rs/linux-sandbox/src/linux_run_main.rs
+@@ -394,4 +394,7 @@ fn resolve_permission_profile(
+ ) -> Result<EffectivePermissions, ResolvePermissionProfileError> {
+-    let permission_profile =
++    let mut permission_profile =
+         permission_profile.ok_or(ResolvePermissionProfileError::MissingConfiguration)?;
++    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut permission_profile && puffin_airgapped::sealed_for_command() {
++        *network = NetworkSandboxPolicy::Restricted;
++    }
+     let (file_system_sandbox_policy, network_sandbox_policy) =
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+index 59f8446..df73ce4 100644
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -540,2 +540,3 @@ impl ChatWidget {
+             SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::command(self.thread_id, "").into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Ide => {
+@@ -784,2 +785,3 @@ impl ChatWidget {
+             SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::command(self.thread_id, trimmed).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
+@@ -1211,2 +1213,3 @@ impl ChatWidget {
+             | SlashCommand::Night
++            | SlashCommand::Airgapped
+             | SlashCommand::DebugConfig
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+index 119e1d3..fe3fc69 100644
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -18,2 +18,3 @@ pub enum SlashCommand {
+     Permissions,
++    Airgapped,
+     Keymap,
+@@ -141,2 +142,3 @@ impl SlashCommand {
+             SlashCommand::Night => "queue a task for the overnight run",
++            SlashCommand::Airgapped => "set how much of the internet this session may use",
+             SlashCommand::Agents => "open the agent command center",
+@@ -180,2 +182,3 @@ impl SlashCommand {
+                 | SlashCommand::Night
++                | SlashCommand::Airgapped
+                 | SlashCommand::Voice
+@@ -291,2 +294,3 @@ impl SlashCommand {
+             | SlashCommand::Night
++            | SlashCommand::Airgapped
+             | SlashCommand::Voice

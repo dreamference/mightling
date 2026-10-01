@@ -44,6 +44,12 @@ DEFAULT_PUFFIN_GMAIL: Final[bool] = True
 # a test keeps this default equal to DEFAULT_PUFFIN_CAVE_MODE in puffin-rs/src/cave.rs.
 DEFAULT_PUFFIN_CAVE_MODE: Final[str] = "ultra"
 PUFFIN_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
+# How much of the internet a puffin session may use (`/airgapped`,
+# specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md): everything, DuckDuckGo-only search, or nothing. The Rust
+# side (puffin-rs/airgapped) resolves it for the agent's commands; a test keeps this default equal
+# to its DEFAULT_PUFFIN_AIRGAPPED. Listed loosest first.
+DEFAULT_PUFFIN_AIRGAPPED: Final[str] = "off"
+PUFFIN_AIRGAPPED_LEVELS: Final[tuple] = ("off", "duckduckgo", "on")
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -78,6 +84,7 @@ class DreamferenceConfig:
         guided_decoding_backend: Optional[str] = None,
         puffin_gmail: Optional[bool] = None,
         puffin_cave_mode: Optional[str] = None,
+        puffin_airgapped: Optional[str] = None,
     ):
         """
         Initializes DreamferenceConfig by loading file defaults and overriding with environment variables and parameters.
@@ -262,6 +269,16 @@ class DreamferenceConfig:
                 self.puffin_cave_mode = candidate.strip().lower()
                 break
 
+        # The air-gap level, through the same tiers; an invalid value is skipped. This reads the one
+        # configuration file this object resolved: the launcher also reads the user-level file and
+        # takes the stricter of the two, because the agent can write the repository's.
+        self.puffin_airgapped: str = DEFAULT_PUFFIN_AIRGAPPED
+        for candidate in (puffin_airgapped, os.getenv("DREAMFERENCE_PUFFIN_AIRGAPPED"), self.file_data.get("puffin_airgapped")):
+            level = self.parse_airgapped_level(candidate)
+            if level is not None:
+                self.puffin_airgapped = level
+                break
+
     @property
     def model(self) -> str:
         """
@@ -312,6 +329,28 @@ class DreamferenceConfig:
         self._diffusion_model = value
         self._diffusion_model_pinned = True
 
+    @classmethod
+    def parse_airgapped_level(cls, value: Any) -> Optional[str]:
+        """
+        Reads an air-gap level as the launcher does: a level name in any case, or `ddg`.
+
+        A YAML file turns a bare `on` or `off` into a boolean, so those are accepted too.
+
+        Args:
+            value: What a tier holds.
+
+        Returns:
+            Optional[str]: `off`, `duckduckgo` or `on`; None for anything else.
+        """
+        if isinstance(value, bool):
+            return "on" if value else "off"
+        if not isinstance(value, str):
+            return None
+        name = value.strip().lower()
+        if name == "ddg":
+            return "duckduckgo"
+        return name if name in PUFFIN_AIRGAPPED_LEVELS else None
+
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
         Saves current active configuration parameters to YAML or JSON config file.
@@ -350,6 +389,7 @@ class DreamferenceConfig:
         if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
         if self.puffin_gmail != DEFAULT_PUFFIN_GMAIL: data["puffin_gmail"] = self.puffin_gmail
         if self.puffin_cave_mode != DEFAULT_PUFFIN_CAVE_MODE: data["puffin_cave_mode"] = self.puffin_cave_mode
+        if self.puffin_airgapped != DEFAULT_PUFFIN_AIRGAPPED: data["puffin_airgapped"] = self.puffin_airgapped
 
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

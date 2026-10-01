@@ -1,6 +1,6 @@
 # Puffin Airgapped — `/airgapped`
 
-**Status:** proposed. Nothing in this spec is implemented yet. §9 lists what was checked on this machine on 2026-10-01 and what was only read from the code.
+**Status:** Phase 1 partly implemented on 2026-10-01: the three levels, `/airgapped` and `puffin airgapped`, the sandbox enforcement of `on`, the web commands, and the configuration field. §14 records what was built, where it departs from the design below (the enforcement hook is in the sandbox helper, not in core), what ran live, and what is not built. The rest of this document is the design as specified; §9 lists what was checked before the build.
 **Goal:** one command that says how much of a `puffin` session may reach the internet, with three levels: everything (the default), search through DuckDuckGo only, and nothing at all.
 **Target:** the `puffin` terminal agent. The web chat is not covered (§8).
 **Builds on:**
@@ -9,7 +9,7 @@
 - the pattern `/cavemode` set for a per-session level: a file keyed by the session, configuration tiers, a World State section ([CAVE_MODE §3, §5](./DREAMFERENCE_PUFFIN_CAVE_MODE.md));
 - the airlock of [PUFFIN_EGRESS §4](./DREAMFERENCE_PUFFIN_EGRESS.md), which becomes the second layer of this spec's strictest level (§5.4).
 
-**Needs one hook patch**, `0019-airgapped` (§6.4), which raises the patch-size cap explicitly.
+**One hook patch**, `0019-airgapped` (§6.4, as built in §14), which raised the patch-size cap explicitly.
 
 ---
 
@@ -303,3 +303,57 @@ Stated in the command's own output (§2), so nobody takes `on` for more than it 
 - **Should `duckduckgo` also switch Gmail off?** §4 keeps it on.
 - **Fetch at `duckduckgo`.** A fetched page's site sees this machine's address and the URL. A user who wants search results without any direct visit has no level for that today; a fourth level between `duckduckgo` and `on` (search only, no fetch) is easy to add if asked for.
 - **The model server on another machine.** At `on` the prompts still go to `vllm_host`. If that host is not on this machine, `/airgapped` should say so in its status; whether `on` should refuse a non-loopback `vllm_host` is undecided.
+
+---
+
+## 14. As built (2026-10-01)
+
+### 14.1 Departures from the design
+
+- **The enforcement hook is in the sandbox helper, not in core.** §5.1's premise was wrong: a command's network policy is not read in one place. `network_sandbox_policy()` has twelve call sites in `codex-core`, three of which take it from a permission profile directly (`exec.rs`, `sandboxing/mod.rs`, `tools/orchestrator.rs`), and `to_legacy_sandbox_policy` reads the profile's field without it. Every sandboxed command on Linux does pass through one function, `resolve_permission_profile` in `codex-rs/linux-sandbox` (the helper `puffin` re-executes itself as, for the outer bubblewrap stage and the inner seccomp stage alike). Patch `0019` adds three lines there: when `puffin_airgapped::sealed_for_command()` is true, the profile's network is `Restricted`, so the helper builds `bwrap --unshare-net` and installs the network seccomp filter whatever the session's policy says.
+- **The helper finds the session by itself.** It runs in the command's own environment (`spawn_child_async` clears the environment and sets the command's), which carries `CODEX_THREAD_ID`, `CODEX_SESSION_ID` and `CODEX_HOME`. So the question is asked per command, in the process that builds the sandbox, with no channel from the TUI: a switch mid-turn, `puffin exec`, a resumed session and another process's app server are all the same case. The model cannot change that environment: it belongs to the helper, which Codex starts, not to the shell inside it.
+- **The level file is keyed by thread id** (`$CODEX_HOME/airgapped/<thread-id>`), because that is the only id the TUI's hook and the World State input carry. The resolver looks under `CODEX_THREAD_ID` first and `CODEX_SESSION_ID` second, which is how a subagent with no file of its own takes its parent's level (§2); a test of the web commands covers that order. Whether the root session's id equals the root thread's id on every path was checked only for `puffin exec` (§14.3).
+- **A leaf crate, as §5.1 allowed for, but for the helper.** `puffin-rs/airgapped/` (`puffin-airgapped`) holds the levels and the resolution with no dependency beyond the standard library: `linux-sandbox` must not depend on the launcher. The launcher depends on it too. `puffin_airgapped` is read from TOML by a line scan (a top-level `puffin_airgapped = "<level>"` before the first table), which keeps a TOML parser out of the helper; `/airgapped default` writes it with `toml_edit`.
+- **The web commands carry a copy, not a module of their own.** `puffin-web-rs/src/airgapped.rs` is byte-for-byte `puffin-rs/airgapped/src/lib.rs` (`tests/test_airgapped.py` compares them), since the web crate is built outside the Codex workspace and its build stamp covers only its own folder.
+- **`CODEX_SANDBOX_NETWORK_DISABLED` is not set by the hook.** Core sets it from the session's policy before the helper runs, so at `on` under `workspace-write` a command does not see it. The web commands do not need it there: they resolve the level themselves and refuse first. It remains the second signal for a read-only sandbox (§6.2).
+- **What the model is told about the sandbox is unchanged at `on`:** core still describes the session's own policy. The `on` fragment (§3) is what tells it.
+- **`/airgapped` sits after `/permissions` in the popup;** in the membership lists it is beside `/night`.
+- **The patch is 4,242 bytes, not 3.3 KB:** seven hunks for the slash command, two `install` lines, and the helper's dependency and hook. The series is 17 patches and 31,175 bytes; the cap went from 27,500 to 31,500 in the same commit.
+
+### 14.2 What is built
+
+| Piece | Path |
+|---|---|
+| Levels, tiers, strictest-of-two-files, `sealed_for_command()` | `puffin-rs/airgapped/src/lib.rs` |
+| `/airgapped`, `puffin airgapped`, status, `default`, World State fragments, Full Access refusal, 30-day prune | `puffin-rs/src/airgapped.rs`, `puffin-rs/src/lib.rs` |
+| Slash command, section registration, helper hook | `codex-patches/0019-airgapped.patch` |
+| `puffin-search` and `puffin-fetch` following the level; `--json` gains `airgapped` and `engines` | `puffin-web-rs/src/{airgapped,lib,search}.rs`, `src/bin/` |
+| `DreamferenceConfig.puffin_airgapped` | `dreamference/config/dreamference_config.py` |
+| The one clause in `WEB_ACCESS_INSTRUCTIONS` | `puffin-rs/src/lib.rs` |
+
+### 14.3 Run live
+
+All on 2026-10-01, with the rebuilt `puffin` (17 patches) against the default model (Qwen3.8-27B on SGLang), in a throwaway repository, `puffin exec -s workspace-write` unless said otherwise. Each command line was given to the model to run verbatim, and its output read from the `--json` events, not from the model's account of it.
+
+- **`off`:** `curl https://example.com` answers 200, `/proc/net/dev` lists the host's interfaces, the model server on `127.0.0.1:8000` answers 200, `puffin-search` returns results (`"airgapped": "off"`, each result with its `engines` list), and the session contains no `<airgapped>` fragment.
+- **`on` from the environment** (`DREAMFERENCE_PUFFIN_AIRGAPPED=on`): `curl https://example.com` exits 6, and `puffin-search` prints the level's message with no hint.
+- **`on` from the session file, on a resumed session.** A session run at `off`, then its file written as `/airgapped on` writes it, then `puffin exec resume <id>`: `/proc/net/dev` lists `lo` only; `curl https://1.1.1.1` and `curl http://127.0.0.1:8000/v1/models` both exit 7; `puffin-fetch` prints the level's message. The rollout holds the `on` fragment once. `puffin` itself still reached the model server, as §1 says it does.
+- **The agent cannot loosen it.** From inside that session, `echo off > $CODEX_HOME/airgapped/$CODEX_THREAD_ID` fails with "Read-only file system", and the next `curl` still exits 7. (The same command also wrote `puffin_airgapped = "off"` into `./dreamference.toml`, but that proves nothing: the session's file said `on` and is read first. The strictest-of-two-files rule is covered by the resolver's unit test and by the web commands' test with `HOME` swapped, not live through the sandbox helper.)
+- **A repository file tightens.** With only `./dreamference.toml` saying `on`, `puffin airgapped` names that file as the source and a command's `curl` exits 7.
+- **Ids.** `CODEX_THREAD_ID` and `CODEX_SESSION_ID` are equal in a root `puffin exec` session, and `CODEX_SANDBOX_NETWORK_DISABLED` is unset under `workspace-write` at both levels.
+- **Full Access at `on`:** `DREAMFERENCE_PUFFIN_AIRGAPPED=on puffin exec -s danger-full-access …` is refused before anything starts, naming both ways out.
+- **In the TUI** (a real session in tmux, `-s workspace-write`): `/airg` shows `/airgapped  set how much of the internet this session may use`; `/airgapped on` typed before the first message is accepted and printed its two lines; the next turn's `curl https://1.1.1.1` printed `ip=000rc=7`; asked for Lisbon's weather, the model answered that it could not check in this session and that anything it gave would be from memory, and ran no command; `/airgapped` showed `on` in force with the `Enforced:` and `NOT ENFORCED for:` lines.
+- **Found and fixed: the message that lifts the restriction.** After `/airgapped off` the fragment was delivered, and the model still refused to run `curl`, quoting the `on` message. The first wording ("the earlier restriction on web access no longer applies") was too weak against the `on` text still in its history; the fragment now says the user lifted it and names the commands that work again. Retested in a fresh session after the rebuild: `on`, `curl` printed `ip=000rc=7`; `/airgapped off`; asked to run it again, the model ran it and got `ip=301rc=0`.
+- **`duckduckgo`:** not shown live. DuckDuckGo answered SearXNG with a CAPTCHA at the time, so `puffin-search` printed `DuckDuckGo did not answer (duckduckgo: CAPTCHA). This session searches through DuckDuckGo only (/airgapped duckduckgo).` with no hint: the risk §4 names, on the first try. SearXNG's `unresponsive_engines` named `duckduckgo` alone, which fits only that engine having been asked. That the request names the engine and no category is covered by the stand-in-server test; that results then carry only `duckduckgo` is still unverified.
+- **Not run live:** a subagent in an `on` session, `/airgapped default` (it writes the user's real configuration file; unit-tested), a switch to `on` while a turn is running, and the strace of §11.
+
+### 14.4 Not built
+
+- **Night Shift's test wrapper** (§7): the runner's own test run is still unsandboxed, so at `on` a night task's tests have the network.
+- **`WebTools`** in `puffin-admin mcp` (§7) does not read the level.
+- **`puffin update` is not refused** at `on`, and **the Gmail check at start is not skipped** (§5.2): a session that starts at `on` still gets the Gmail section in its prompt, and the `on` fragment says Gmail is unavailable.
+- **`$CODEX_HOME` under a writable root** (§5.3) is not detected: `puffin` started in the home directory at `on` lets a command rewrite its own level file.
+- **A session switched to Full Access through `/permissions`** shows no warning; only the launch-time refusal exists. The status at `on` lists the uncovered cases as fixed text, not as a check of the current session.
+- **The Python side reads one configuration file,** not the stricter of two; nothing in Python acts on the level yet.
+- **The airlock** (§5.4, Phase 2), the 50-query DuckDuckGo measurement (Phase 0), and the strace of an `on` session (§11).
+- **Codex's own TUI snapshots** that list the slash-command popup change again with `/airgapped` in it.

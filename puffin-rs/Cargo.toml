@@ -21,6 +21,7 @@ codex-extension-api = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 flate2 = { workspace = true }
+puffin-airgapped = { path = "airgapped" }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 semver = { workspace = true }

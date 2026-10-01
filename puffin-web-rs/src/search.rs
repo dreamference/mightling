@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::agent;
+use crate::airgapped::Level;
 
 /// Self-hosted SearXNG, published on loopback only. `DREAMFERENCE_SEARXNG_URL` overrides it.
 pub const DEFAULT_SEARXNG_URL: &str = "http://127.0.0.1:8888";
@@ -33,11 +34,16 @@ pub struct SearchResult {
     pub url: String,
     pub snippet: String,
     pub engine: String,
+    /// Every engine SearXNG reports for the result; `engine` is only the first of them, which
+    /// cannot show that no other engine contributed.
+    pub engines: Vec<String>,
 }
 
 /// A successful search.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct SearchPayload {
+    /// The session's air-gap level the search ran at (`off` or `duckduckgo`).
+    pub airgapped: String,
     pub query: String,
     pub result_count: usize,
     /// SearXNG's direct answers (calculators, definitions, conversions). Strings in older SearXNG,
@@ -67,7 +73,17 @@ pub fn searxng_url() -> String {
 /// answered, with the `search.formats` hint for 403 (its answer to a JSON request when the format
 /// is off), rather than as "unreachable" with the start command, which sent people to start an
 /// instance that was running.
-pub fn search(base_url: &str, query: &str, max_results: i64) -> Result<SearchPayload, SearchError> {
+///
+/// At `duckduckgo` the request names that engine and **no category**: SearXNG adds a named
+/// category's engines to the ones in `engines`, so with both it asked all five general engines.
+/// At `on` nothing is sent; the binary refuses before calling this, and so does this function.
+pub fn search(base_url: &str, query: &str, max_results: i64, level: Level) -> Result<SearchPayload, SearchError> {
+    if level == Level::On {
+        return Err(SearchError {
+            error: crate::AIRGAPPED_ON_MESSAGE.to_string(),
+            hint: None,
+        });
+    }
     if query.trim().is_empty() {
         return Err(SearchError {
             error: "empty query".to_string(),
@@ -75,11 +91,18 @@ pub fn search(base_url: &str, query: &str, max_results: i64) -> Result<SearchPay
         });
     }
     let endpoint = format!("{}/search", base_url.trim_end_matches('/'));
+    let (selector, selected) = match level {
+        Level::DuckDuckGo => ("engines", "duckduckgo"),
+        _ => ("categories", "general"),
+    };
+    // At `duckduckgo` no hint sends the model off to repair a container: one engine not answering
+    // is that level working as chosen.
+    let hint = |hint: String| (level == Level::Off).then_some(hint);
     let response = agent(None)
         .get(&endpoint)
         .query("q", query)
         .query("format", "json")
-        .query("categories", "general")
+        .query(selector, selected)
         .query("language", "en")
         .set("Accept", "application/json")
         .call();
@@ -91,17 +114,17 @@ pub fn search(base_url: &str, query: &str, max_results: i64) -> Result<SearchPay
                     "SearXNG at {base_url} answered HTTP {status} {}",
                     response.status_text()
                 ),
-                hint: Some(if status == 403 {
-                    JSON_FORMAT_HINT.to_string()
+                hint: if status == 403 {
+                    Some(JSON_FORMAT_HINT.to_string())
                 } else {
-                    RESTART_HINT.to_string()
-                }),
+                    hint(RESTART_HINT.to_string())
+                },
             });
         }
         Err(error) => {
             return Err(SearchError {
                 error: format!("SearXNG at {base_url} is unreachable: {error}"),
-                hint: Some(format!("Start it with: {SEARXNG_START_HINT}")),
+                hint: hint(format!("Start it with: {SEARXNG_START_HINT}")),
             });
         }
     };
@@ -113,7 +136,7 @@ pub fn search(base_url: &str, query: &str, max_results: i64) -> Result<SearchPay
             error: format!("SearXNG at {base_url} did not return JSON"),
             hint: Some(JSON_FORMAT_HINT.to_string()),
         })?;
-    from_searxng(query, &payload, max_results)
+    from_searxng(query, &payload, max_results, level)
 }
 
 /// Turns SearXNG's JSON into a payload, or into the error for a search every engine failed.
@@ -121,6 +144,7 @@ pub fn from_searxng(
     query: &str,
     payload: &Value,
     max_results: i64,
+    level: Level,
 ) -> Result<SearchPayload, SearchError> {
     let limit = max_results.max(1) as usize;
     let text = |item: &Value, key: &str| item[key].as_str().unwrap_or_default().to_string();
@@ -134,6 +158,12 @@ pub fn from_searxng(
             url: text(item, "url"),
             snippet: text(item, "content"),
             engine: text(item, "engine"),
+            engines: item["engines"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|engine| engine.as_str().map(str::to_string))
+                .collect(),
         })
         .collect();
     let answers: Vec<Value> = payload["answers"].as_array().cloned().unwrap_or_default();
@@ -157,6 +187,15 @@ pub fn from_searxng(
                 _ => engine.to_string(),
             })
             .collect();
+        if level == Level::DuckDuckGo {
+            return Err(SearchError {
+                error: format!(
+                    "DuckDuckGo did not answer ({}). This session searches through DuckDuckGo only (/airgapped duckduckgo).",
+                    reasons.join("; ")
+                ),
+                hint: None,
+            });
+        }
         return Err(SearchError {
             error: format!(
                 "SearXNG could not reach any search engine: {}",
@@ -166,6 +205,7 @@ pub fn from_searxng(
         });
     }
     Ok(SearchPayload {
+        airgapped: level.name().to_string(),
         query: query.to_string(),
         result_count: results.len(),
         answers: answers.into_iter().take(3).collect(),
@@ -221,7 +261,7 @@ mod tests {
             json!([]),
             json!([]),
         );
-        let found = from_searxng("q", &payload, 2).unwrap();
+        let found = from_searxng("q", &payload, 2, Level::Off).unwrap();
         assert_eq!(found.result_count, 2);
         assert_eq!(
             found.results[0],
@@ -229,11 +269,12 @@ mod tests {
                 title: "A".into(),
                 url: "https://a".into(),
                 snippet: "about a".into(),
-                engine: "wikipedia".into()
+                engine: "wikipedia".into(),
+                engines: vec![]
             }
         );
-        assert_eq!(from_searxng("q", &payload, 0).unwrap().result_count, 1);
-        assert_eq!(from_searxng("q", &payload, -5).unwrap().result_count, 1);
+        assert_eq!(from_searxng("q", &payload, 0, Level::Off).unwrap().result_count, 1);
+        assert_eq!(from_searxng("q", &payload, -5, Level::Off).unwrap().result_count, 1);
     }
 
     #[test]
@@ -246,12 +287,43 @@ mod tests {
                 ["duckduckgo", "CAPTCHA"]
             ]),
         );
-        let error = from_searxng("q", &payload, 5).unwrap_err();
+        let error = from_searxng("q", &payload, 5, Level::Off).unwrap_err();
         assert_eq!(
             error.error,
             "SearXNG could not reach any search engine: brave: Suspended: too many requests; duckduckgo: CAPTCHA"
         );
         assert_eq!(error.hint.as_deref(), Some(RESTART_HINT));
+    }
+
+    #[test]
+    fn at_duckduckgo_a_silent_engine_is_named_without_a_restart_hint() {
+        let payload = searxng(json!([]), json!([]), json!([["duckduckgo", "CAPTCHA"]]));
+        let error = from_searxng("q", &payload, 5, Level::DuckDuckGo).unwrap_err();
+        assert_eq!(
+            error.error,
+            "DuckDuckGo did not answer (duckduckgo: CAPTCHA). This session searches through DuckDuckGo only (/airgapped duckduckgo)."
+        );
+        assert_eq!(error.hint, None);
+    }
+
+    #[test]
+    fn at_on_nothing_is_sent() {
+        // Port 9 would answer "unreachable" if a request were made.
+        let error = search("http://127.0.0.1:9", "q", 5, Level::On).unwrap_err();
+        assert_eq!(error.error, crate::AIRGAPPED_ON_MESSAGE);
+        assert_eq!(error.hint, None);
+    }
+
+    #[test]
+    fn every_engine_of_a_result_is_kept() {
+        let payload = searxng(
+            json!([{"title": "A", "url": "https://a", "engine": "duckduckgo", "engines": ["duckduckgo", "brave"]}]),
+            json!([]),
+            json!([]),
+        );
+        let found = from_searxng("q", &payload, 5, Level::DuckDuckGo).unwrap();
+        assert_eq!(found.results[0].engines, vec!["duckduckgo".to_string(), "brave".to_string()]);
+        assert_eq!(found.airgapped, "duckduckgo");
     }
 
     #[test]
@@ -261,12 +333,12 @@ mod tests {
             json!([]),
             json!([["brave", "CAPTCHA"]]),
         );
-        assert_eq!(from_searxng("q", &payload, 5).unwrap().result_count, 1);
+        assert_eq!(from_searxng("q", &payload, 5, Level::Off).unwrap().result_count, 1);
     }
 
     #[test]
     fn nothing_found_with_every_engine_answering_is_an_empty_result() {
-        let found = from_searxng("q", &searxng(json!([]), json!([]), json!([])), 5).unwrap();
+        let found = from_searxng("q", &searxng(json!([]), json!([]), json!([])), 5, Level::Off).unwrap();
         assert_eq!(found.result_count, 0);
     }
 
@@ -277,10 +349,10 @@ mod tests {
             json!(["42"]),
             json!([]),
         );
-        let printed = serde_json::to_string(&from_searxng("q", &payload, 5).unwrap()).unwrap();
+        let printed = serde_json::to_string(&from_searxng("q", &payload, 5, Level::Off).unwrap()).unwrap();
         assert_eq!(
             printed,
-            r#"{"query":"q","result_count":1,"answers":["42"],"results":[{"title":"A","url":"https://a","snippet":"s","engine":"e"}]}"#
+            r#"{"airgapped":"off","query":"q","result_count":1,"answers":["42"],"results":[{"title":"A","url":"https://a","snippet":"s","engine":"e","engines":[]}]}"#
         );
     }
 
@@ -294,7 +366,7 @@ mod tests {
             json!(["42", {"answer": "forty-two", "url": "https://calc"}]),
             json!([]),
         );
-        let text = render_text(&from_searxng("q", &payload, 5).unwrap());
+        let text = render_text(&from_searxng("q", &payload, 5, Level::Off).unwrap());
         let expected = format!(
             "ANSWER: 42\n\nANSWER: forty-two\n\n1. A\n   https://a\n   {}\n2. B\n   https://b\n",
             "x".repeat(200)
@@ -305,12 +377,12 @@ mod tests {
     #[test]
     fn at_most_three_answers() {
         let payload = searxng(json!([]), json!(["1", "2", "3", "4"]), json!([]));
-        assert_eq!(from_searxng("q", &payload, 5).unwrap().answers.len(), 3);
+        assert_eq!(from_searxng("q", &payload, 5, Level::Off).unwrap().answers.len(), 3);
     }
 
     #[test]
     fn an_empty_query_is_refused_before_any_request() {
-        let error = search("http://127.0.0.1:9", "   ", 5).unwrap_err();
+        let error = search("http://127.0.0.1:9", "   ", 5, Level::Off).unwrap_err();
         assert_eq!(error.error, "empty query");
     }
 }

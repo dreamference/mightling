@@ -23,6 +23,10 @@ struct Args {
 
 fn main() -> ExitCode {
     let args = Args::parse();
+    if let Some(message) = puffin_web::refusal_now() {
+        println!("❌ {message}");
+        return ExitCode::FAILURE;
+    }
     match fetch::fetch(&args.url, args.max_chars) {
         Ok(page) => {
             if args.json {

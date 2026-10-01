@@ -71,6 +71,19 @@ fn run(binary: &str, args: &[&str], env: &[(&str, &str)]) -> Output {
     ] {
         command.env_remove(name);
     }
+    // The air-gap level comes from the environment and from files under HOME: a test must not
+    // inherit the level of the session or the machine that runs it.
+    for name in [
+        "DREAMFERENCE_PUFFIN_AIRGAPPED",
+        "DREAMFERENCE_CONFIG_PATH",
+        "CODEX_SANDBOX_NETWORK_DISABLED",
+        "CODEX_THREAD_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_HOME",
+    ] {
+        command.env_remove(name);
+    }
+    command.env("HOME", std::env::temp_dir().join("puffin-web-tests-no-home"));
     for (name, value) in env {
         command.env(name, value);
     }
@@ -113,6 +126,129 @@ fn search_asks_searxng_for_json_and_prints_results() {
         ),
         "{request}"
     );
+}
+
+#[test]
+fn at_duckduckgo_search_names_the_engine_and_no_category() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let output = search(
+        &["lisbon", "--json"],
+        &[
+            ("DREAMFERENCE_SEARXNG_URL", &server.base),
+            ("DREAMFERENCE_PUFFIN_AIRGAPPED", "ddg"),
+        ],
+    );
+    assert!(output.status.success());
+    let request = &server.requests()[0];
+    assert!(
+        request.starts_with("GET /search?q=lisbon&format=json&engines=duckduckgo&language=en "),
+        "{request}"
+    );
+    assert!(!request.contains("categories"));
+    let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(printed["airgapped"], "duckduckgo");
+}
+
+#[test]
+fn at_duckduckgo_no_hint_says_to_restart_or_start_anything() {
+    let body = r#"{"results": [], "answers": [], "unresponsive_engines": [["duckduckgo", "CAPTCHA"]]}"#;
+    let server =
+        Server::start(move |_| response("200 OK", "application/json", body.as_bytes(), ""));
+    let level = ("DREAMFERENCE_PUFFIN_AIRGAPPED", "duckduckgo");
+    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), level]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stdout(&output),
+        "❌ DuckDuckGo did not answer (duckduckgo: CAPTCHA). This session searches through DuckDuckGo only (/airgapped duckduckgo).\n"
+    );
+    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.1:9"), level]);
+    assert!(!stdout(&output).contains("💡"), "{}", stdout(&output));
+}
+
+#[test]
+fn at_on_neither_command_sends_anything() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let level = ("DREAMFERENCE_PUFFIN_AIRGAPPED", "on");
+    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), level]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stdout(&output),
+        "❌ Web access is off in this session (/airgapped on). Only the user can change that, with /airgapped.\n"
+    );
+    let output = search(&["q", "--json"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), level]);
+    let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(printed["airgapped"], "on");
+    let output = fetch(&[&format!("{}/page", server.base)], &[level]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout(&output).contains("/airgapped on"));
+    assert!(server.requests().is_empty(), "{:?}", server.requests());
+}
+
+#[test]
+fn the_session_file_decides_and_the_user_level_file_is_not_loosened_by_the_repository() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let root = std::env::temp_dir().join(format!("puffin-web-level-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let codex_home = root.join("puffin-home");
+    std::fs::create_dir_all(codex_home.join("airgapped")).unwrap();
+    std::fs::write(codex_home.join("airgapped/thread-1"), "on\n").unwrap();
+    let home = codex_home.to_string_lossy().into_owned();
+    // The session's file says `on`: nothing is sent.
+    let output = search(
+        &["q"],
+        &[("DREAMFERENCE_SEARXNG_URL", &server.base), ("CODEX_HOME", &home), ("CODEX_THREAD_ID", "thread-1")],
+    );
+    assert!(stdout(&output).contains("/airgapped on"));
+    // A subagent has no file of its own and takes the root session's.
+    let output = search(
+        &["q"],
+        &[
+            ("DREAMFERENCE_SEARXNG_URL", &server.base),
+            ("CODEX_HOME", &home),
+            ("CODEX_THREAD_ID", "thread-2"),
+            ("CODEX_SESSION_ID", "thread-1"),
+        ],
+    );
+    assert!(stdout(&output).contains("/airgapped on"));
+    // Another session is not affected.
+    let output = search(
+        &["q"],
+        &[("DREAMFERENCE_SEARXNG_URL", &server.base), ("CODEX_HOME", &home), ("CODEX_THREAD_ID", "thread-3")],
+    );
+    assert!(output.status.success());
+    // A user-level `on` stands whatever the repository's file says.
+    let user = root.join("user-home");
+    std::fs::create_dir_all(user.join(".config/dreamference")).unwrap();
+    std::fs::write(user.join(".config/dreamference/config.toml"), "puffin_airgapped = \"on\"\n").unwrap();
+    let repository = root.join("dreamference.toml");
+    std::fs::write(&repository, "puffin_airgapped = \"off\"\n").unwrap();
+    let output = search(
+        &["q"],
+        &[
+            ("DREAMFERENCE_SEARXNG_URL", &server.base),
+            ("HOME", &user.to_string_lossy()),
+            ("DREAMFERENCE_CONFIG_PATH", &repository.to_string_lossy()),
+        ],
+    );
+    assert!(stdout(&output).contains("/airgapped on"));
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn a_sandbox_without_network_is_named_as_the_sandbox_not_as_the_level() {
+    let server =
+        Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
+    let sandbox = ("CODEX_SANDBOX_NETWORK_DISABLED", "1");
+    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), sandbox]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout(&output).contains("the sandbox it runs in does not allow it"));
+    assert!(!stdout(&output).contains("airgapped") && !stdout(&output).contains("💡"));
+    let output = fetch(&[&format!("{}/page", server.base)], &[sandbox]);
+    assert!(stdout(&output).contains("the sandbox it runs in does not allow it"));
+    assert!(server.requests().is_empty());
 }
 
 #[test]

@@ -29,10 +29,23 @@ struct Args {
 
 fn main() -> ExitCode {
     let args = Args::parse();
+    let level = puffin_web::level();
+    if let Some(message) = puffin_web::refusal_now() {
+        // Nothing is sent, and no hint: nothing is broken. `--json` says the level, so a script
+        // can tell a refused search from an empty one.
+        if args.json {
+            let refused = serde_json::json!({"airgapped": level.name(), "error": message});
+            println!("{}", serde_json::to_string_pretty(&refused).unwrap_or_default());
+        } else {
+            println!("❌ {message}");
+        }
+        return ExitCode::FAILURE;
+    }
     match search::search(
         &search::searxng_url(),
         &args.query.join(" "),
         args.max_results,
+        level,
     ) {
         Ok(payload) => {
             if args.json {
