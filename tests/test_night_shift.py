@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from dreamference.night_shift import (
-    NightShiftHost, NightShiftQueue, NightShiftReport, NightShiftRunner, NightShiftScheduler,
+    NightShiftHost, NightShiftIndex, NightShiftQueue, NightShiftReport, NightShiftRunner, NightShiftScheduler,
     NightShiftSettings, NightShiftTaskRun,
 )
 from dreamference.night_shift.night_shift_task_run import NUDGE
@@ -427,6 +427,103 @@ def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, 
     assert f"## {setup['repo']}" in report and report.count("— done") == 3
     assert "Up to 2 task(s) at once" in report
     assert git(setup["repo"], "status", "--porcelain").stdout == ""
+
+
+class FakeIndex(NightShiftIndex):
+    """Records what would have been indexed; nothing in the suite runs `puffin-code`."""
+    binary = "/opt/puffin-code"
+    outcome = "3 ok"
+    calls = []
+
+    @classmethod
+    def executable(cls):
+        return cls.binary
+
+    @classmethod
+    def refresh(cls, binary, repo, timeout_s):
+        # The first task has not started: its branch does not exist yet.
+        branches = git(repo, "branch", "--list", "night/*").stdout.split()
+        cls.calls.append((binary, str(repo), timeout_s, len(branches)))
+        return cls.outcome
+
+
+@pytest.fixture
+def fake_index(monkeypatch):
+    monkeypatch.setattr(FakeIndex, "calls", [])
+    monkeypatch.setattr(FakeIndex, "binary", "/opt/puffin-code")
+    monkeypatch.setattr(NightShiftRunner, "index", FakeIndex)
+    return FakeIndex
+
+
+def test_each_repository_is_indexed_once_before_its_tasks_start(setup, fake_host, fake_index, monkeypatch):
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    for index in range(2):
+        queue(setup["night"], setup["repo"], task_text=f"Task {index}", task_id=f"20261001-0100-b{index}0")
+    assert NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+                                vllm_host="http://x", settings=NightShiftSettings({"index_timeout": "5m"})) == 0
+    assert [(call[0], call[1], call[3]) for call in fake_index.calls] == [("/opt/puffin-code", str(setup["repo"]), 0)]
+    assert fake_index.calls[0][2] == 300
+    report = next((setup["night"] / "reports").glob("*.md")).read_text()
+    assert f"Code index of {setup['repo']}: 3 ok." in report
+    assert [task["status"] for task in NightShiftQueue.tasks(setup["night"])] == ["done", "done"]
+
+
+def test_the_index_refresh_can_be_switched_off_and_needs_puffin_code(setup, fake_host, fake_index, monkeypatch):
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    queue(setup["night"], setup["repo"])
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+                         vllm_host="http://x", settings=NightShiftSettings({"index": False}))
+    assert fake_index.calls == []
+    # Not installed: nothing runs, and nothing is said.
+    queue(setup["night"], setup["repo"], task_id="20261001-0100-c00")
+    fake_index.binary = None
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+                         vllm_host="http://x", settings=NightShiftSettings({}))
+    assert fake_index.calls == []
+    # A refused admission indexes nothing either: the run never started.
+    queue(setup["night"], setup["repo"], task_id="20261001-0100-d00")
+    fake_index.binary = "/opt/puffin-code"
+    FakeHost.model = None
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+                         vllm_host="http://x", settings=NightShiftSettings({}))
+    assert fake_index.calls == []
+
+
+def test_the_index_refresh_takes_at_most_half_of_what_is_left(fake_host, fake_index, tmp_path):
+    notes = []
+    tasks = [{"repo": str(tmp_path)}, {"repo": str(tmp_path)}, {"repo": str(tmp_path / "gone")}]
+    end = datetime.now().astimezone() + timedelta(minutes=10)
+    NightShiftRunner.refresh_indexes(tasks, NightShiftSettings({}), end, notes)
+    assert len(fake_index.calls) == 1 and 290 <= fake_index.calls[0][2] <= 300
+    # With under two minutes left, the tasks get them all.
+    notes.clear()
+    NightShiftRunner.refresh_indexes(tasks[:1], NightShiftSettings({}), datetime.now().astimezone() + timedelta(seconds=90), notes)
+    assert len(fake_index.calls) == 1 and "the window is nearly over" in notes[0]
+
+
+def test_index_output_is_condensed_for_the_report():
+    output = (
+        "skipped: scip-go for svc: runs on demand (`puffin-code index`)\n"
+        "puffin-index-0a1b2c3d4e-codebase-memory: ok\n"
+        "puffin-index-0a1b2c3d4e-scip-python-dreamference: ok\n"
+        "puffin-index-0a1b2c3d4e-rust-analyzer-puffin-code-rs: deferred: memory\n"
+    )
+    assert NightShiftIndex.summarise(output) == "2 ok, 1 deferred (rust-analyzer-puffin-code-rs deferred: memory)"
+    assert NightShiftIndex.summarise("skipped: codebase-memory-mcp is not installed\n") == "nothing to index"
+
+
+def test_the_installed_puffin_code_is_the_only_one_used(tmp_path, monkeypatch):
+    monkeypatch.setattr("dreamference.night_shift.night_shift_index.INSTALL_DIR", str(tmp_path))
+    assert NightShiftIndex.executable() is None
+    (tmp_path / "bin").mkdir()
+    binary = tmp_path / "bin" / "puffin-code"
+    binary.write_text("#!/bin/sh\necho \"puffin-index-x-codebase-memory: ok\"\n")
+    binary.chmod(0o755)
+    assert NightShiftIndex.executable() == str(binary)
+    # A real run of the stand-in: foreground, in the repository, its output condensed.
+    assert NightShiftIndex.refresh(str(binary), tmp_path, 30) == "1 ok"
+    binary.write_text("#!/bin/sh\necho boom\nexit 4\n")
+    assert NightShiftIndex.refresh(str(binary), tmp_path, 30) == "not refreshed (exit 4): boom"
 
 
 def test_a_refused_admission_keeps_the_queue_and_says_why(setup, fake_host):

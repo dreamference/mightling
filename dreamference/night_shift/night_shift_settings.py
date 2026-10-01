@@ -21,6 +21,7 @@ DEFAULT_TEST_TIMEOUT: Final[str] = "20m"
 DEFAULT_TASK_MEMORY: Final[str] = "8G"
 DEFAULT_NUDGES: Final[int] = 2
 DEFAULT_IDLE_MINUTES: Final[int] = 10
+DEFAULT_INDEX_TIMEOUT: Final[str] = "20m"
 
 # Tokens of KV cache budgeted per concurrent task. The spec's first formula divided the KV pool by
 # the full context length, which on the default model (SGLang, 144,870 pool tokens, 262,144-token
@@ -49,6 +50,9 @@ class NightShiftSettings:
         self.test: Optional[str] = table.get("test")
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
         self.idle_minutes: float = float(table.get("idle_minutes", DEFAULT_IDLE_MINUTES))
+        # Refresh each repository's code index before its tasks start (code-index spec §6.3).
+        self.index: bool = bool(table.get("index", True))
+        self.index_timeout_s: int = self.parse_duration(table.get("index_timeout", DEFAULT_INDEX_TIMEOUT))
 
     @classmethod
     def read_table(cls, path: Optional[Path] = None) -> Dict[str, Any]:

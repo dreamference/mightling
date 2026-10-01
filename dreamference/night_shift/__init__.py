@@ -4,6 +4,7 @@ leave a branch and a morning report (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md).
 """
 
 from dreamference.night_shift.night_shift_host import NightShiftHost
+from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_report import NightShiftReport
 from dreamference.night_shift.night_shift_runner import NightShiftRunner
@@ -13,6 +14,7 @@ from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
 
 __all__ = [
     "NightShiftHost",
+    "NightShiftIndex",
     "NightShiftQueue",
     "NightShiftReport",
     "NightShiftRunner",

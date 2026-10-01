@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
+from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE_STATUSES
 from dreamference.night_shift.night_shift_report import NightShiftReport
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
@@ -34,6 +35,7 @@ class NightShiftRunner:
     # Seams the tests replace: the clock's sleep, and the probes of the host.
     sleep = staticmethod(time.sleep)
     host = NightShiftHost
+    index = NightShiftIndex
     ignore_sessions: bool = False
 
     @classmethod
@@ -97,6 +99,7 @@ class NightShiftRunner:
             notes.append(f"Up to {parallel} task(s) at once (max_parallel {settings.max_parallel}, "
                          f"KV pool {int(metrics.get('kv_pool', 0))} tokens, "
                          f"{settings.task_context} budgeted per task).")
+            cls.refresh_indexes(pending, settings, end, notes)
             cls.schedule(night_dir, pending, settings, puffin_bin, vllm_host, end, parallel, notes)
             final = [NightShiftQueue.read(night_dir, task["id"]) or task for task in pending]
             path = cls._write_report(night_dir, started, final, notes)
@@ -157,6 +160,40 @@ class NightShiftRunner:
             if datetime.now().astimezone() >= end:
                 return f"the model was in use until the window closed ({idle_minutes:g} idle minutes needed)"
             cls.sleep(min(IDLE_POLL_S, max(1.0, idle_minutes * 60)))
+
+    @classmethod
+    def refresh_indexes(cls, pending: List[Dict[str, Any]], settings: NightShiftSettings,
+                        end: datetime, notes: List[str]) -> None:
+        """
+        Refreshes the code index of every repository with queued tasks, one at a time, before any
+        task starts, so each begins with a fresh index (code-index spec §6.3). `puffin-code` admits
+        and sandboxes its own runs; a refresh that does not finish leaves the index as it was,
+        which the router's answers already account for.
+
+        Args:
+            pending: The night's tasks.
+            settings: Night Shift settings (`index`, `index_timeout`).
+            end: When the window closes.
+            notes: The morning report's notes, appended to.
+        """
+        if not settings.index:
+            return
+        binary = cls.index.executable()
+        if binary is None:
+            return
+        repos: List[str] = []
+        for task in pending:
+            if task.get("repo") and task["repo"] not in repos:
+                repos.append(task["repo"])
+        for repo in repos:
+            # Never more than half of what is left of the window: the tasks are what it is for.
+            budget = min(settings.index_timeout_s, (end.timestamp() - time.time()) / 2)
+            if budget < 60:
+                notes.append(f"Code index of {repo}: not refreshed, the window is nearly over.")
+                continue
+            if not Path(repo).is_dir():
+                continue
+            notes.append(f"Code index of {repo}: {cls.index.refresh(binary, Path(repo), budget)}.")
 
     @classmethod
     def schedule(cls, night_dir: Path, pending: List[Dict[str, Any]], settings: NightShiftSettings,
