@@ -1,0 +1,485 @@
+# Puffin Node — splitting Puffin into a client and `puffin-node`
+
+**Status:** proposed. Nothing in this spec is implemented yet. §2 lists what was checked on this machine on 2026-10-01 and what is still assumed.
+**Target:** the GB10 (DGX Spark) as the server, and Ubuntu, macOS and Windows machines on the same local network as clients.
+**Builds on:**
+- the launcher in `puffin-rs/` and its `vllm_host()` tiers ([PUFFIN_CODEX](./DREAMFERENCE_PUFFIN_CODEX.md));
+- the web commands in `puffin-web-rs/` and the code index in `puffin-code-rs/` ([PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md));
+- the web UI and its desktop window ([ONYX](./DREAMFERENCE_ONYX.md));
+- the model server and its host-safety layer ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
+- the trusted-LAN decision of 2026-09-30 ([README](./README.md), "Accepted by design");
+- `/airgapped` and the egress audit ([PUFFIN_AIRGAPPED](./DREAMFERENCE_PUFFIN_AIRGAPPED.md), [PUFFIN_EGRESS](./DREAMFERENCE_PUFFIN_EGRESS.md)).
+
+**Decisions made here, stated first because each could be read the other way:**
+
+1. **`puffin-node` names a role, not a renamed command.** It is the server half of the product: the model server and its sidecars on a GB10, the service advertised on the network (`_puffin-node._tcp`), and the install profile. The node's command line stays `puffin-admin`, which gains a `node` group. Renaming the console script would break every install and the prompt's `puffin-admin gmail` line. If a `puffin-node` executable is wanted as well, it is an alias (§14, question 1).
+2. **The client is Rust binaries only: no Python, no Docker.** `puffin`, `codex-code-mode-host`, `puffin-code`, `puffin-search`, `puffin-fetch` and `puffin-app`. Everything Python stays on the node.
+3. **No new always-on daemon for the split.** The node's existing Avahi daemon advertises it, and clients talk to the services' own ports. A front-door reverse proxy was considered and rejected (§5.4). The one new process, a control agent for managing a node from another machine, exists only in the several-node phase and only where its owner switches it on (§12.4).
+4. **No authentication and no TLS**, as the trusted-LAN decision says. Using a node (inference, search, the web UI) is open as soon as the node is advertised. Controlling one (loading or stopping its model from another machine) is a different class of act and has its own switch, off by default (§12.4).
+5. **A GB10 gets both halves; every other machine gets the client only** (§9).
+6. **One node first.** Several nodes are a later phase (§12) and do not delay the split.
+7. **Nodes have no roles.** Every node installs identically; there is no "primary" or "secondary" setting and no question at install time. The machine a person runs `puffin-admin node …` on is the one doing the managing (§12.4).
+
+---
+
+## 1. Goals and non-goals
+
+**Goals**
+- A person installs Puffin on a laptop, types `puffin`, and is talking to the model on the GB10 in the next room, with no address typed and no file edited.
+- The same for `puffin-app` (the desktop window on the web UI) and for web search.
+- The client runs on Ubuntu, macOS and Windows.
+- On the GB10 itself nothing changes for the user: client and node are both installed and the client uses the local node.
+
+**Non-goals**
+- Access from outside the local network. Discovery is link-local by construction and nothing here crosses a router.
+- Accounts, API keys, per-user quotas or TLS.
+- A node on anything but a GB10. A Linux machine with another GPU gets the client only in this version.
+- Night Shift, SWE-bench or the egress audit run from a remote client (§10).
+
+---
+
+## 2. What was checked, and what was not
+
+Checked on this GB10 (`gx10-1a2b`, Wi-Fi address `192.168.50.105`) on 2026-10-01:
+
+| Question | Result |
+|---|---|
+| Is an mDNS responder already running on the node? | Yes: `avahi-daemon` 0.8 is active and enabled; `/etc/avahi/services/` holds only `ssh.service`. |
+| Does the service type work? | `avahi-publish -s puffin-spec-probe _puffin-node._tcp 8000 proto=1 version=1.2.0 node=… web=3000 search=8888`, run as an ordinary user, was browsed back with `avahi-browse -rtp`: it resolved to `gx10-1a2b.local`, `192.168.50.105`, port 8000, with all five TXT records. |
+| Which interfaces does Avahi advertise on? | All of them: the Wi-Fi interface, loopback, both Docker bridges and every container veth. mDNS is per link, so LAN clients see only the Wi-Fi record. |
+| Is the model server already reachable from the LAN? | Yes: `http://192.168.50.105:8000/v1/models` answers 200 (it binds `0.0.0.0:8000`, accepted by design). |
+| What else listens beyond loopback? | Nothing of Puffin's. The web UI (3000, 80), SearXNG (8888), Gmail (8767), image search (8768), speech-to-text (8100) and the diffusion sidecar (8001) are all on `127.0.0.1`. |
+| Does the web UI accept a non-localhost `Host`? | Yes: `/app` answers 200 for `Host: 192.168.50.105:3000` and `Host: gx10-1a2b.local:3000` as for `localhost:3000`. |
+| Do the model containers come back after a reboot with nobody logged in? | Their restart policy is `unless-stopped` (model server, SearXNG, nginx). The user's systemd lingering is **off**, so a user unit would not run before login. |
+| Can Codex be built for the client platforms? | Upstream's release workflows build `aarch64`/`x86_64` for `apple-darwin` and `unknown-linux-musl`, and `x86_64`/`aarch64-pc-windows-msvc` in a separate Windows workflow. The pinned V8 manifests (`third_party/v8/rusty_v8_150_4_0_release_manifests.sha256`) list pointer-compression-and-sandbox builds for all of them plus `linux-gnu`. Read from the submodule; **never built here**. |
+| Do the index tools exist for the client platforms? | codebase-memory-mcp v0.11.0 ships `darwin-amd64`, `darwin-arm64`, `linux-amd64` and `linux-arm64`; a Windows asset was seen only for its UI build. The scip CLI v0.10.0 ships `darwin` and `linux`, both architectures, and **no Windows build**. |
+
+Read on the web, not tested here:
+- **A page served from `http://<LAN address>` is not a secure context**, so `navigator.mediaDevices` is undefined and the microphone button cannot work; `http://localhost` is exempt (MDN).
+- **macOS 15 and later gate local-network access per application.** A bundled app must declare `NSLocalNetworkUsageDescription` and `NSBonjourServices` or its multicast and unicast LAN traffic fails silently with no prompt (Apple TN3179, as reported by several projects).
+- **`mdns-sd`** is a pure-Rust mDNS/DNS-SD implementation for Linux, macOS and Windows with no async runtime.
+
+Not checked, and so the first work of Phase 1 (§13):
+- any build of `puffin`, `puffin-code` or `puffin-app` on macOS or Windows;
+- whether Avahi publishes a file in `/etc/avahi/services/` that the node's user, not root, owns (§5.2);
+- whether a command-line `puffin` started from Terminal on macOS inherits Terminal's local-network grant;
+- `mdns-sd` browsing beside Avahi, Bonjour and Windows' own resolver;
+- SearXNG answering JSON to a non-loopback client (its bot limiter may treat LAN addresses differently);
+- the web UI's streaming and voice traffic through a loopback proxy.
+
+---
+
+## 3. The two halves
+
+| Component | Today | Client | Node |
+|---|---|---|---|
+| `puffin` (terminal agent) and `codex-code-mode-host` | Rust, linux-arm64 | ✔ | ✔ (a GB10 has both halves) |
+| `puffin-search`, `puffin-fetch` | Rust | ✔ | ✔ |
+| `puffin-code` (code index) and its pinned tools | Rust, tools installed by `puffin-admin code setup` | ✔, tools installed by `puffin-code setup` (§8.3) | ✔ |
+| `puffin-app` (desktop window) | Tauri, Linux | ✔ | ✔ |
+| Model server (SGLang or vLLM), diffusion sidecar | Docker | | ✔ |
+| SearXNG, speech-to-text, image search, Gmail service | Docker sidecars | | ✔ |
+| Web UI (Onyx Lite stack) | Docker | | ✔ |
+| `puffin-admin` (Python): `server`, `model`, `puffin`, `night`, `swe-bench`, `audit`, `mcp`, … | Python package | | ✔ |
+| Host safety, PSI watchdog | Python | | ✔ |
+
+**Where the user's code lives.** On the client. The agent's shell commands, its sandbox, the git repository and the code index all run on the client machine; only prompts and completions cross the network. That is why indexing is a client component and why Night Shift is not (§10).
+
+**Web access is split.** `puffin-search` asks the node's SearXNG, so search queries leave for the internet from the node. `puffin-fetch` fetches pages itself, from the client. `/airgapped` levels are resolved on the client, as now.
+
+---
+
+## 4. What leaves loopback on the node
+
+A node that is not advertised keeps today's binds. `puffin-admin node enable` (§5.2) is what changes them, and `node disable` puts them back.
+
+| Service | Bind today | After `node enable` | Who needs it |
+|---|---|---|---|
+| Model server, 8000 | `0.0.0.0` | unchanged | `puffin` on every client |
+| Web UI (nginx), 3000 | `127.0.0.1` | `0.0.0.0` | `puffin-app`, and a plain browser, on clients |
+| Web UI (nginx), 80 | `127.0.0.1` | unchanged | nobody remote |
+| SearXNG, 8888 | `127.0.0.1` | `0.0.0.0` | `puffin-search` on clients |
+| Gmail service, 8767 | `127.0.0.1` | unchanged | node only (§10) |
+| Diffusion sidecar, 8001 | `127.0.0.1` | unchanged | node only |
+| Speech-to-text 8100, image search 8768 | `127.0.0.1` | unchanged | the web UI's own containers |
+
+**This reverses two fixes of 2026-09-29**, deliberately:
+- nginx had been published on every interface, which put the web UI's default admin account on the LAN; `configure()` bound it to loopback.
+- SearXNG was loopback-only.
+
+Under the trusted-LAN decision both become "accepted by design" on an advertised node. When this is implemented the two rows move to that table in [README](./README.md) with the date and this reason; they are not silently reopened. Mechanically: `HOST_PORT=0.0.0.0:3000` in the web UI's `.env` (the variable `bind_to_loopback()` already writes) and the SearXNG sidecar's publish address, both keyed on one config value, `node_advertise`.
+
+**What that exposes, stated plainly** (§11 has the rest):
+- **The web UI has one account**, `admin@dreamference.dev` with a published default password. Every person on the LAN who opens it shares one chat history and the admin panel.
+- **The web UI's Gmail tool reads the node owner's mail.** Anyone on the LAN using the web UI can ask it to search that mail. `puffin-admin node enable --no-web` leaves the web UI on loopback for an owner who wants remote `puffin` but not a shared web UI (question 2).
+
+---
+
+## 5. Discovery
+
+### 5.1 The service
+
+- **Type:** `_puffin-node._tcp` (the name is 11 characters; DNS-SD allows 15).
+- **Instance name:** the host name (`gx10-1a2b`).
+- **Port (SRV):** the model server's, 8000.
+- **TXT records:**
+
+| Key | Example | Meaning |
+|---|---|---|
+| `proto` | `1` | Version of this contract. A client refuses a node whose `proto` is higher than it knows. |
+| `node` | `7c1e…` | The node's stable id, a UUID written once to `~/.config/dreamference/node-id`. It, not the address or the name, is what a client remembers. |
+| `version` | `1.3.0` | Puffin's version on the node, for the skew notice (§6.5). |
+| `web` | `3000` | Port of the web UI; absent when it is not shared. |
+| `search` | `8888` | Port of SearXNG; absent when it is not shared. |
+| `main` | `1` | Present when the node is assigned the configured main model (the one a coding client wants), as opposed to a fallback, a fast-tools model or speech. Used only to choose between several nodes (§12.3). |
+| `control` | `8002` | Port of the node's control agent; absent unless the owner switched remote control on (§12.4). |
+
+Nothing that changes from minute to minute is advertised. Which model is actually loaded, its context length and whether it is still loading are asked of the model server itself (`/v1/models`), which the launcher already does.
+
+### 5.2 The node side: a static Avahi service file
+
+`puffin-admin node enable` writes `/etc/avahi/services/puffin-node.service` (Avahi watches that directory and publishes the file without a restart), sets `node_advertise`, and re-publishes the web UI and SearXNG on every interface. `node disable` removes the file and restores the loopback binds. `node status` prints the file's records, the binds, and what a browse of the local network returns.
+
+- **Why a file and not a process.** A file needs no running publisher, so the node is advertised after a reboot with nobody logged in, like the model containers. A user unit holding the registration would need lingering, which is off here (§2).
+- **Why Avahi and not a responder of our own.** The node already runs one. A second responder on the same host competes for port 5353 and for the host name.
+- **It needs root once**, to create the file under `/etc/avahi` and hand its ownership to the node's user. The command is printed before it runs and `sudo` prompts on the terminal, the rule `puffin-admin desktop install` set. Where `sudo` cannot prompt, the file's content and destination are printed instead.
+- **Later changes need no root.** The file holds the model port, the version and the `main` and `control` records. `server start` and an update rewrite it when one of them changed, as the user who owns it. That Avahi publishes a service file not owned by root is assumed, and is a Phase 0 check; if it does not, those commands say that `node enable` must be run again instead.
+- **Interfaces.** Avahi advertises on the Docker bridges too (§2). That is harmless and is left alone: changing `allow-interfaces` would edit a system file other software reads.
+
+### 5.3 The client side: `mdns-sd`
+
+One code path on all three systems: the pure-Rust `mdns-sd` crate browses `_puffin-node._tcp.local.` for up to 2 s and stops at the first answer when it is looking for one remembered node.
+
+- **Connect to the resolved address, never the `.local` name.** The browse answer carries the addresses. Resolving `gx10-1a2b.local` through the operating system depends on `nss-mdns` on Linux and is unreliable on Windows.
+- **IPv4 first**, then IPv6 with its scope id; link-local IPv6 without a scope is dropped.
+- **Only the launcher and `puffin-app` browse.** `puffin-search` and `puffin-code` read the file the launcher wrote (§6.2), so they need no multicast and work inside Codex's sandbox.
+- **The alternative, the system's own DNS-SD** (Bonjour on macOS, the Win32 API, Avahi over D-Bus), is three code paths. It is kept in reserve for the case Phase 1 finds `mdns-sd` blocked where the native API is not, which is plausible on macOS (§8.2).
+
+### 5.4 Rejected: a front-door proxy
+
+A `puffin-node` daemon that advertises itself, serves a descriptor and reverse-proxies every service on one port would keep the sidecars on loopback and give one place for version and state. It was not chosen because it puts a new always-on process in the path of every token, needs supervising and restarting like the model server, and buys nothing the TXT records and the services' own ports do not already give. If per-client accounting or access rules are ever wanted, that is the place they would go.
+
+---
+
+## 6. Connecting
+
+### 6.1 Order of resolution
+
+`vllm_host()` in the launcher gains tiers. The first that yields a host wins:
+
+1. `DREAMFERENCE_VLLM_HOST`.
+2. `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml` or `~/.config/dreamference/config.toml`.
+3. **This machine is a node** (`~/.config/dreamference/node-id` exists): `http://localhost:8000`, with no discovery at all. A GB10 never browses for itself.
+4. **The remembered node** (`$CODEX_HOME/node.json`): its last address is tried with a 1 s connect; if that fails, a browse looks for the same `node` id, which is what survives a DHCP address change.
+5. **A browse.** One node found: it is used and remembered, with one line saying so. Several: §6.3. None: §6.4.
+
+Tiers 1 and 2 are today's behaviour and still mean "I know where the server is". On the GB10 the checked-in `dreamference.toml` already names `localhost:8000`, so tier 2 answers there and nothing changes.
+
+### 6.2 `node.json`
+
+`$CODEX_HOME/node.json` (`~/.puffin/node.json`), written whole and atomically by the launcher:
+
+```json
+{ "node": "7c1e…", "name": "gx10-1a2b", "address": "192.168.50.105",
+  "model_port": 8000, "web_port": 3000, "search_port": 8888,
+  "version": "1.3.0", "last_seen": "2026-10-01T22:10:04+01:00" }
+```
+
+- A small std-only crate, `puffin-rs/node-locator/`, reads it and returns the endpoints. The launcher, `puffin-search`, `puffin-code` and `puffin-app` share it, the way `/airgapped`'s resolver is shared, with the same byte-identical-copy test for the web crate.
+- `puffin-search` uses `http://<address>:<search_port>` when `DREAMFERENCE_SEARXNG_URL` is unset, the machine is not a node and the file exists; otherwise today's `127.0.0.1:8888`.
+- **The cache is also the fallback for blocked multicast.** Where a browse silently returns nothing (a guest Wi-Fi with client isolation, macOS without the local-network grant), a node used once, or set by hand, keeps working by address.
+
+### 6.3 `puffin node`
+
+A launcher subcommand, intercepted in `prepare_args` the way `night` is, so it costs no patch:
+
+| Command | Does |
+|---|---|
+| `puffin node` or `puffin node list` | Browses and lists every node: name, address, served model and context (asked of each), version, and which one is in use |
+| `puffin node use <name\|address>` | Remembers that node. An address works with no mDNS at all |
+| `puffin node forget` | Deletes `node.json`; the next start browses again |
+
+There is no `/node` slash command: the patch series stands at 31,175 of 31,500 bytes.
+
+**Several nodes and none remembered:** an interactive `puffin` lists them and asks which; `puffin exec` and other non-interactive commands refuse with the list and the `puffin node use` line. The client does not guess.
+
+**The remembered node is gone and another is present:** the same rule. Prompts and source code go to whichever node is chosen, so a new one is never adopted silently.
+
+### 6.4 Messages, not a ten-minute wait
+
+Today the launcher prints dots for up to 600 s when the server does not answer. With discovery there are three distinct cases, each with its own text:
+
+| Case | What the client says |
+|---|---|
+| No node found, none remembered | `No Puffin node found on this network.` then: start one on a GB10 (`puffin-admin server start`, `puffin-admin node enable`), or `puffin node use <address>` |
+| Node found, model port refuses | `Node gx10-1a2b found, but its model server is not running. On the node: puffin-admin server start` and no wait |
+| Node found, port open, no model listed yet | `Node gx10-1a2b: model loading` and today's dotted wait |
+
+### 6.5 Version skew
+
+- `proto` higher than the client knows: refuse, and name `puffin update`.
+- `version` differs: one line, at most once a day, naming both versions. Nothing is blocked; the model API is the contract and it does not move with Puffin's version.
+
+### 6.6 What the launcher writes
+
+Unchanged in kind: the catalog and `config.toml` in `$CODEX_HOME`, with the provider's base URL now the node's address. `check_for_update_on_startup = false` and the `chatgpt_base_url` blackhole stay. The Gmail prompt block is added only when this machine is a node (§10).
+
+---
+
+## 7. `puffin-app` on a client
+
+Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/src-tauri/tauri.conf.json` and `ONYX_WEB_URL` in `puffin-rs/src/app.rs`.
+
+**Chosen design: a loopback forwarder inside the app.** On a machine that is not a node, `puffin-app` resolves the node (§6.1, with its own browse), binds `127.0.0.1:3000` and forwards every request, streamed response and WebSocket upgrade to `<address>:<web_port>`. The window keeps loading `http://localhost:3000/app`.
+
+- **The origin stays `localhost`**, which is a secure context, so the microphone works; a window on `http://192.168.50.105:3000` would have no `navigator.mediaDevices` (§2).
+- **Nothing about the web UI changes**: cookies, the Google sign-in redirect and every patch `configure` applies see the address they see today.
+- **If port 3000 is taken** on the client, the app uses 33000 and says so in its title bar once; the saved session is per origin, so the port must not change from run to run.
+- **On a node** the app does what it does now and starts no forwarder.
+- **No node:** the app shows §6.4's first message in its own window, in place of a connection error.
+
+**Signing in.** The web UI asks for its account. With no session, the app posts the default credentials to `/api/auth/login` once; if the node's owner changed the password, the normal login page appears. This keeps "no authentication required" true for the default install without removing the owner's ability to set a password.
+
+**Rejected:**
+- **HTTPS with a self-signed certificate on the node:** a trust prompt, or a certificate to distribute, on three operating systems.
+- **Marking the origin as secure by a browser flag:** exists only in Chromium, and the app's engines are WebKitGTK, WKWebView and WebView2.
+
+**A plain browser** on a client can open `http://<node>:3000` and use everything except the microphone.
+
+---
+
+## 8. The client on three systems
+
+### 8.1 Builds
+
+| Target | Agent and web commands | `puffin-code` | `puffin-app` |
+|---|---|---|---|
+| `aarch64-unknown-linux-gnu` | today | today | `.deb`, AppImage (today) |
+| `x86_64-unknown-linux-gnu` | new | new | `.deb`, AppImage |
+| `aarch64-apple-darwin` | new | new | `.dmg` |
+| `x86_64-apple-darwin` | new, if Intel Macs are wanted (question 5) | new | `.dmg` |
+| `x86_64-pc-windows-msvc` | new | universal layer only, if at all (§8.3) | `.msi` |
+
+- **The builder runs on each platform's CI runner.** `CodexBrandedBuilder` is Python and uses `git archive`, `git apply` and Cargo, none of them Linux-only; `fetch_rusty_v8()` already names the asset by target. Python is needed to *build* the client, never to run it.
+- **Windows ships more than one executable.** Upstream's Windows workflow builds `codex-windows-sandbox-setup`, `codex-windows-sandbox-service` and `codex-command-runner` beside `codex`; the Windows package carries them next to `puffin.exe`.
+- **Known Linux assumptions to remove:** `puffin update` returns early unless `target_os = "linux"`; `puffin app` finds the window through a `.desktop` entry; the launcher crate vendors OpenSSL for every target.
+- **`$CODEX_HOME`** is `~/.puffin` everywhere (`%USERPROFILE%\.puffin` on Windows).
+
+### 8.2 What each system changes
+
+| | Ubuntu | macOS | Windows |
+|---|---|---|---|
+| Command sandbox | bubblewrap, as on the node | Seatbelt (Codex's own) | Codex's Windows sandbox |
+| `/airgapped on` enforced by the kernel | yes (patch `0019` hooks the Linux sandbox helper) | **no: cooperative only** | **no: cooperative only** |
+| Discovery | `mdns-sd` | `mdns-sd`; local-network permission applies (below) | `mdns-sd`; Windows Firewall may ask once for UDP 5353 |
+| Installer | `.deb` / script | script, `.dmg` for the app | PowerShell script, `.msi` for the app |
+
+- **`/airgapped` off Linux.** The `on` level's guarantee comes from three lines in `linux-sandbox`. On macOS and Windows the level still switches off `puffin-search` and `puffin-fetch` and still tells the model, but a command can reach the network. `/airgapped` must print that on those systems, as it already prints its other holes. Extending the hook to Seatbelt and the Windows sandbox is that spec's work, and costs patch bytes.
+- **macOS local-network permission.** `puffin-app`'s bundle declares `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_puffin-node._tcp`), or the browse and the forwarder both fail silently. For `puffin` in a terminal the grant belongs to the terminal application; whether that covers multicast from a child process is unverified. If it does not, macOS falls back to the system's own DNS-SD (§5.3) or to `puffin node use <address>`.
+- **Unsigned binaries.** A script that downloads with `curl` sets no quarantine flag, so the command-line tools run unsigned. A `.dmg` or `.msi` opened from a browser meets Gatekeeper or SmartScreen; signing needs an Apple Developer ID and a Windows code-signing certificate (question 4).
+
+### 8.3 Indexing on a client
+
+`puffin-code` answers queries the same way everywhere: it reads SQLite files. What differs is running the indexers.
+
+- **Installing the tools.** `puffin-admin code setup` is Python. `puffin-code setup` does the same in Rust: the pinned codebase-memory-mcp and scip CLI for the platform, checked against their published checksums, plus the npm indexers when Node is present. `puffin-admin code setup` on a node calls it.
+- **Linux clients:** as on the node, every indexer in a `systemd-run` scope inside bubblewrap. Without a systemd user bus (a container, WSL) a request is queued and nothing starts, which is today's behaviour.
+- **macOS and Windows have neither `systemd-run` nor bubblewrap.** In this version:
+  - indexers that only read source run unsandboxed: codebase-memory, scip-python, scip-typescript, scip-go;
+  - indexers that execute the project's build (rust-analyzer, scip-java, scip-dotnet) **do not run**, and `puffin-code status` names them as skipped and why. The reason for their sandbox, a hostile build script, does not go away on a laptop.
+- **Windows:** the scip CLI has no Windows build, so there is no exact layer; the universal layer depends on a Windows build of codebase-memory-mcp, which was not confirmed (§2). Until it is, `puffin-code` on Windows answers by text search only and says so.
+- **The memory budget changes meaning.** On a node it protects the model server. On a client with no model server it is a plain cap (a quarter of RAM), and the freeze-while-the-model-is-busy rule does not apply.
+- **`puffin-code session`** is started by the launcher and uses the systemd user bus; off Linux it runs the static indexers as ordinary child processes at low priority.
+
+---
+
+## 9. Installing
+
+One entry point per system, and the machine decides the role:
+
+| Machine | Installs | How it is decided |
+|---|---|---|
+| GB10 (DGX Spark) | node **and** client, then `puffin-admin node enable` | the existing GB10 detection in `dreamference/hardware/` (the check `scripts/install_gb10.sh` and `server start` already rely on) |
+| Any other Linux, macOS, Windows | client only | everything else |
+
+- **`install.sh`** (Linux and macOS) and **`install.ps1`** (Windows) download the release assets for the machine's target, verify them against the release's checksum file and place them in `~/.local/share/dreamference/puffin/bin` (or the platform's equivalent) with links on `PATH`. This is the path `puffin update` already implements for linux-arm64; `asset_names()` grows `puffin-code`, and the release workflow grows the matrix of §8.1.
+- **On a GB10** the script then does today's node install (the Python package, `puffin-admin`, the model) and runs `node enable`, which is where `sudo` is asked for, once and visibly.
+- **`--role client|node|both`** overrides the detection, for a GB10 that should only be a client of another, and for tests.
+- **A node without the client is not offered.** The node's own tools (`night run`, `swe-bench`, `audit egress`) run `puffin`.
+- **Updating.** `puffin update` on a client updates the client. On a node it updates the client binaries as now; the Python half is updated as it is today.
+
+---
+
+## 10. What works from a remote client
+
+| Feature | Remote client | Why, when not |
+|---|---|---|
+| `puffin`, `puffin exec`, resume, `/cavemode`, `/usage` | yes | |
+| `puffin-search` | yes, through the node's SearXNG | |
+| `puffin-fetch` | yes, from the client | |
+| `puffin-code` | yes, with the per-system limits of §8.3 | |
+| `puffin-app`, including voice | yes | forwarder (§7) |
+| `/airgapped` | yes; `on` is kernel-enforced on Linux only | §8.2 |
+| Gmail in `puffin` (`puffin-admin gmail`) | **no** | The command is Python, and the service's shared secret is a file on the node. The launcher adds the Gmail block to the prompt only on a node; a remote client never sees a command it cannot run |
+| `/night` and Night Shift | **no** | The queue is on the machine where `/night add` ran, and the runner is `puffin-admin` on the node. On a client `/night` answers that Night Shift runs on the node, in place of queueing tasks nothing will run |
+| `puffin-admin` anything (`server`, `model`, `swe-bench`, `audit egress`, `mcp`) | **no** | Node only. Managing a node is done from a node (§12.4) |
+| Cline, Continue, OpenHands | by hand | `puffin node list` prints the model URL to paste into them |
+
+These are scoped out, not designed around. The one that will be asked for first is Night Shift for a repository on a laptop; it needs the runner on the client and an admission answer from the node, and belongs in that spec.
+
+**Several clients share one node's cache.** The model server's KV pool holds about 157K tokens for all sessions together, while each session is told the context is 262K ([PUFFIN_COMPACTION](./DREAMFERENCE_PUFFIN_COMPACTION.md)). With one user that gap was theoretical. Lowering the compaction limit to follow the pool, which that spec proposes, should land before more than one person uses a node.
+
+---
+
+## 11. Threat model
+
+Stated so the trade is visible, not to reopen it:
+
+- **Anyone on the local network can use the node**: send prompts to the model, search through its SearXNG, and (unless `--no-web`) use the web UI with its one account, its chat history and its Gmail tool.
+- **Nothing is encrypted.** Prompts, source code in them and completions cross the LAN in clear text.
+- **mDNS can be spoofed.** A device on the LAN that advertises `_puffin-node._tcp` would be offered as a node, and a client that chose it would send it prompts and code. The guard is the rule of §6.3: a node is remembered by id, and a different one is never adopted without the user choosing it. That is protection against accidents, not against an attacker on the LAN, who by the trusted-LAN assumption is not there.
+- **Nothing new reaches the internet.** Discovery is multicast on the local link. The egress audit's allow-list, which today is loopback ports, gains the remembered node's address and three ports; a DNS query or any other address still fails the audit. On a client the audit itself does not run (it uses `strace` and `puffin-admin`).
+- **A node that should not be shared is not advertised.** Without `node enable` every bind stays as it is today.
+
+---
+
+## 12. Several nodes (Phase 2)
+
+A second DGX Spark beside the first, managed from either. Nothing in §3–§9 depends on this section.
+
+### 12.1 What NVIDIA documents
+
+- **The hardware link.** Each Spark has two QSFP ports on a ConnectX-7 NIC; NVIDIA's "Connect Two Sparks" playbook links two units with one QSFP cable for a direct 200GbE connection, configures the interfaces with netplan and sets up passwordless SSH between the nodes (read from the playbook's summary page; its step-by-step text was not retrieved).
+- **Splitting a model** across the pair is done, in NVIDIA's and the community's guides, with vLLM on a Ray backend, the weights partitioned by tensor or pipeline parallelism and activations exchanged over the QSFP link on every forward pass.
+- **Measured by others** (StorageReview, two Sparks, GPT-OSS-120B, batch 128): 555 tok/s with pipeline parallelism against 252 with tensor parallelism, and the order reversed on an 8B model. Those are batched-throughput figures; they say nothing about one interactive stream.
+
+### 12.2 Two topologies, and which comes first
+
+| | (a) Independent nodes | (b) One model split across both |
+|---|---|---|
+| What each Spark runs | a whole model, by its own recipe | half of one model |
+| Good for | throughput (a replica: more Night Shift and SWE-bench tasks at once); a second model (the 122B fallback, a fast-tools model, embeddings, speech) | a model that does not fit in 128 GB |
+| Engine | whatever the recipe names, including SGLang with DFlash2 | vLLM with Ray; none of Puffin's recipes is written for it |
+| If one Spark fails | the other keeps serving | the model is down |
+| Host safety | each node's own checks and watchdog, unchanged | a load pins memory on both hosts at once, and a watchdog trip on either must stop both halves |
+| Network needed | the ordinary LAN | the QSFP link |
+
+**(a) is supported first, and is the only one this spec designs.** Every model in the matrix fits on one GB10, the default model runs on an engine that has no split mode here, and (a) reuses everything that exists. **(b) is recorded as not planned:** it becomes worth a spec of its own only for a model that needs more than 128 GB, and it would need a Ray-based recipe, a joint pre-flight and a joint kill path that do not exist.
+
+The QSFP link is still useful under (a): copying a model's files from one Spark's cache to the other at 200GbE in place of a second download. `puffin-admin node sync-model <name> <model>` over that link is an optional extra, not a dependency.
+
+### 12.3 Discovery and choice with more than one node
+
+- **Every node is installed the same way and advertises itself** exactly as in §5. A browse returns all of them. No node knows about the others, and none is told it is first or second.
+- **A client still uses one node per session.** `puffin node list` shows each node's model, context and current load (`/v1/models` and `/metrics`, which are already open). `puffin node use` pins one; `PUFFIN_NODE=<name>` picks for one command.
+- **Unprompted choice**, with nothing remembered and several nodes: the one advertising `main=1` is used and remembered. Only when none, or more than one, is marked does §6.3's "list and ask" apply. Two Sparks with the main model on one and something else on the other therefore need no decision from anyone.
+- **A session stays on its node.** The server's prefix cache is per node (a new session reuses about 11K cached prompt tokens, measured 2026-10-01), so moving a session between replicas throws that away. There is no load balancer; spreading is done by whatever starts many sessions.
+- **Night Shift and SWE-bench** are where a replica pays: the runner computes parallelism per node from that node's KV pool and gives each task a node. That is a change to those runners, listed here and specified there.
+
+### 12.4 Managing one node from another
+
+**There is no primary.** "The primary" is whichever machine a person is sitting at when they type `puffin-admin node …`. It discovers the nodes by the same browse a client uses and sends commands to the one named. A role stored at install time was rejected: the question means nothing with one Spark, can be answered wrongly, has to be redone when machines are swapped, and creates states (two primaries, none) that then need handling.
+
+`puffin-admin node`, run on any node:
+
+| Command | Does |
+|---|---|
+| `node list` | every node on the network: name, assigned and loaded model, load, memory, whether it accepts control |
+| `node status <name>` | that node's `puffin-admin status` |
+| `node set <name> --model <key>` | assigns a model to that node and starts it there |
+| `node stop <name>` / `node start <name>` | stops, or starts again, the model server there |
+| `node control on\|off` | on **this** node: whether it accepts the three commands above from other machines |
+
+- **Status needs no control channel.** Model, load and KV pool come from each node's open model port.
+- **Each node keeps its own assignment.** `node set` stores the model key in that node's own config (the existing `model` key), so the node comes back with it after a reboot without the other machine being up. Nothing on the commanding machine has to be remembered, so there is no shared state to fall out of step.
+- **Every load is executed by the node that carries it.** The command carries a model key and nothing else; the node runs its own `puffin-admin server start`, with its own `check_host_safety()`, its own memory pre-flight and its own PSI watchdog. Nothing sent from outside can skip them. A refusal comes back as that node's own message.
+- **Only keys of the node's own model matrix are accepted**, never a repository name.
+
+**What "trusted LAN, no authentication" means for control.** Inference open to the LAN means anyone on it can *use* the node. Control open to the LAN means anyone on it can stop the model under someone's session, start a load (the one operation that can freeze a unified-memory host, which is why host safety exists), or make a node download tens of gigabytes. That is a different class from sending a prompt, so it gets its own switch.
+
+**Chosen: a per-node switch, off until the owner turns it on, and then open to the LAN.**
+- `puffin-admin node control on`, typed once on the node being offered, starts a small control agent there (a user service, port 8002, advertised in the `control` TXT record) with exactly three operations: status, set-model-and-start, stop. It is the only new process in this spec, it runs only where switched on, and it is never in the path of a token.
+- With it on, no key, password or pairing is needed: any machine on the LAN can run `node set` against it. That is the trusted-LAN decision applied to control, by a deliberate act at the node's own keyboard.
+- With it off, which is the state of a single-Spark install, the node can be changed only from its own shell, as today.
+- The agent needs lingering to run before anyone logs in; `node control on` says so, as `night enable` does.
+
+**The stricter alternative is SSH**, the commanding machine running `ssh <node> puffin-admin …`. NVIDIA's two-Spark setup already establishes passwordless SSH between the units, it adds no listening service, and it authenticates control by key. It costs a key exchange the user has to do. It stays available without any code of Puffin's, and the spec does not build on it because the stated aim is the least setup; question 3 asks whether that trade is right.
+
+**If topology (b) is ever built**, the same no-roles rule applies: the Ray head is the node the launch is typed on, chosen at each launch, not stored.
+
+### 12.5 Alternatives considered
+
+- **A container orchestrator (Docker Swarm, k3s, Nomad).** They decide where containers run and move them when a machine fails. A model server that pins most of a host's memory, takes minutes to load and must pass that host's safety checks is not something to reschedule automatically, and with two machines there is nothing to schedule. They also bring a control plane, join tokens and their own networking: more to set up than the whole of this spec.
+- **exo.** Worth citing for what it gets right: devices find each other on the local network with no configuration and no designated leader, which is the experience this spec copies for discovery. Its purpose is topology (b), partitioning one model across unlike devices with its own inference engines, which is not what Puffin's recipes run on.
+- **GPUStack.** The closest existing product: a server that workers register with, which then places models on them behind one OpenAI-compatible endpoint, with vLLM among its backends. It has what this spec deliberately leaves out: a stored server/worker role, registration tokens, a scheduler and a gateway in the request path. It would replace Puffin's launch recipes and host-safety layer, not sit beside them.
+- **What is used instead:** mDNS for finding nodes, each node's existing ports for using it, and a three-operation agent for managing it.
+
+Neither exo nor GPUStack was installed or measured here; the descriptions are from their documentation.
+
+---
+
+## 13. Phases
+
+| Phase | Work | Done when |
+|---|---|---|
+| 0 | The unverified items of §2: build the client on macOS and Windows; `mdns-sd` beside each system's resolver; the macOS local-network grant for a terminal tool; SearXNG from a LAN address; the web UI through a forwarder | each has a measured answer recorded here |
+| 1 | `node enable/disable/status`, the service file, the binds; the resolution tiers, `node.json`, `puffin node`, the messages; `puffin-search` on the locator; **Linux clients** (x86_64 and arm64) | a second Linux machine runs `puffin` and `puffin-search` against this GB10 with nothing configured |
+| 2 | `puffin-app`'s forwarder and auto sign-in; the installers and role detection; the release matrix | `puffin-app` on a second machine shows the web UI, microphone included |
+| 3 | macOS client, then Windows client; `puffin-code setup` and the per-system indexing rules | each system passes §15's client checks |
+| 4 | Several nodes (§12): the `main` record and the choice rule, `node list/status/set/start/stop`, `node control`, runner changes in Night Shift and SWE-bench | a second Spark serves a model that was assigned from the first |
+
+---
+
+## 14. Open questions
+
+1. **Should a `puffin-node` executable exist**, as an alias for `puffin-admin` on a node, or is the name only the role and the advertised service?
+2. **Is the web UI meant to be shared with the whole LAN by default?** It has one account and can search the node owner's mail. The alternative default is `node enable --no-web`, with `puffin-app` on other machines switched on deliberately.
+3. **Control between nodes.** The spec chooses a per-node switch that, once on, lets any LAN machine set or stop that node's model with no key (§12.4). The alternative is SSH, which costs a key exchange and authenticates. Is the simpler one right?
+4. **Signing.** Without an Apple Developer ID and a Windows code-signing certificate, `puffin-app` installers show a warning on first open. Buy them, or document the warning?
+5. **Which client targets matter?** Intel Macs and Windows on ARM each add a build and a test machine.
+6. **Windows natively, or WSL?** Native costs the items of §8 (sandbox executables, no exact code index). Under WSL the Linux client runs unchanged, but mDNS does not cross WSL's default NAT, so discovery would be `puffin node use <address>`.
+7. **Gmail from a remote client.** Out of scope here. Wanted at all, given that it would let every LAN client read one person's mail?
+8. **Should a non-GB10 Linux machine with a capable GPU be allowed as a node** behind `--role node`? Host safety and every recipe are written for the GB10.
+
+---
+
+## 15. Tests
+
+Offline, with no network and no real Avahi:
+- **Launcher:** each resolution tier in order, with a stand-in browser; a node machine never browses; the remembered node is found again by id at a new address; several nodes and none remembered refuses in `exec`; a different node is never adopted silently; each message of §6.4; `proto` too new is refused; `puffin node list/use/forget`; `node.json` written whole.
+- **Locator crate:** the web crate's copy is byte-identical; `puffin-search` picks the node's SearXNG only when the machine is not a node and no override is set.
+- **`puffin-admin node`:** the service file's exact text for a given port, id, version, `main` and `control`; `enable` and `disable` change the two binds and nothing else, with `sudo` and `docker` mocked (the suite must not write `/etc` or touch a running container); staleness is reported by `server start --port` and by an update.
+- **`puffin-app`:** the forwarder passes a streamed response and a WebSocket upgrade from a stand-in server; no forwarder on a node.
+- **Night Shift on a client:** `/night add` refuses with the node message.
+
+Live, on two machines:
+- a second Linux machine with nothing configured runs `puffin exec`, `puffin-search` and `puffin-app` against this GB10; the node's address is changed and the client finds it again;
+- the node's model server stopped, then loading: the client prints the matching message of §6.4;
+- `puffin-admin audit egress` on the node still passes with `node enable` on;
+- per client system: the build runs, discovery works, the microphone works in `puffin-app`, and `/airgapped on` prints the right statement for that system.
+
+---
+
+## 16. Changes to other specs when this is built
+
+- [README](./README.md): the header line "Deployment Model: single-node, air-gapped"; the two rows of §4 move to "Accepted by design".
+- [ARCHITECTURE](./DREAMFERENCE_ARCHITECTURE.md): the two halves of §3.
+- [SETUP](./DREAMFERENCE_SETUP.md): the installers and roles of §9.
+- [ONYX](./DREAMFERENCE_ONYX.md): `bind_to_loopback()` becomes conditional on `node_advertise`; the SearXNG publish address.
+- [PUFFIN_CODEX](./DREAMFERENCE_PUFFIN_CODEX.md): the resolution tiers, `puffin node`, the build targets.
+- [PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md): `puffin-code setup` and the per-system rules of §8.3.
+- [PUFFIN_AIRGAPPED](./DREAMFERENCE_PUFFIN_AIRGAPPED.md): the statement for macOS and Windows; [PUFFIN_EGRESS](./DREAMFERENCE_PUFFIN_EGRESS.md): the allow-list entry for the node.
+- [PUFFIN_NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) and [PUFFIN_SWE_BENCH](./DREAMFERENCE_PUFFIN_SWE_BENCH.md): the client refusal, and per-node parallelism in Phase 4.
+
+---
+
+## Sources
+
+- [mdns-sd on crates.io](https://crates.io/crates/mdns-sd)
+- [MDN: `MediaDevices.getUserMedia()` and secure contexts](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)
+- [Apple Developer Forums: local network access on macOS 15](https://developer.apple.com/forums/thread/769037)
+- [NVIDIA: Connect Two Sparks](https://build.nvidia.com/spark/connect-two-sparks)
+- [StorageReview: NVIDIA DGX Spark cluster review](https://www.storagereview.com/review/nvidia-dgx-spark-cluster-review-distributed-inference-on-dell-gigabyte-and-hp)
+- [Two-node DGX Spark vLLM and Ray deployment (community)](https://github.com/makiisthenes/dgx-spark-multinode-vllm-ray)
+- [exo](https://github.com/exo-explore/exo)
+- [GPUStack](https://github.com/gpustack/gpustack)

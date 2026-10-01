@@ -2,7 +2,7 @@
 
 > - **Version:** 1.2.0 (`dreamference.__version__`)
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified memory)
-> - **Deployment Model:** single-node, air-gapped
+> - **Deployment Model:** single-node, air-gapped (a client/node split over the local network is proposed in [PUFFIN_NODE](./DREAMFERENCE_PUFFIN_NODE.md))
 > - **License:** AGPL-3.0-or-later
 > - **Specs last reconciled with the code:** 2026-09-28; the descriptive specs were re-checked against the parser, the model registry and the source tree on 2026-10-01
 
@@ -18,6 +18,7 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
+| [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Proposed:* splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; several nodes as a later phase |
 | [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the nine packages |
 | [DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md) | Source layout, class inventory, import conventions, the default model's full launch command |
 | [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md) | Requirements, installation, helper scripts, troubleshooting |
