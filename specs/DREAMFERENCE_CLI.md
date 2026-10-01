@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0 (`setup.py`)
 > **Subject:** Command Suite, Subcommands, Configuration, Environment Variables
-> **Checked against the code:** 2026-09-29 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`)
+> **Checked against the code:** 2026-10-01 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`: every subcommand and option below was compared with the parser)
 
 ---
 
@@ -31,10 +31,10 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 **Commands:**
 
 - **Setup:** `init`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}`, `clear {model-cache,tensorize-cache}`
-- **Agents:** `run`, `codex {build,start,stop}`
+- **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`
 - **Web UI and desktop:** `puffin {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
-- **Agent tools:** `gmail {search,read,status}`; search and fetch are commands of their own, `puffin-search` and `puffin-fetch` (§4.16)
+- **Agent tools:** `gmail {search,read,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `puffin-search` and `puffin-fetch` (§4.16), and so is the code index, `puffin-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
 
 ---
@@ -78,11 +78,12 @@ These options come before the subcommand (`puffin-admin --agent cline run "…"`
 | **`benchmark_server`** | `vllm bench serve` on the Sonnet dataset | `[--port] [--model] [--dataset-path] [--num-prompts 8] [--max-concurrency 1]` |
 | **`codex build`** | Build `puffin` from the `codex/` submodule and `codex-patches/` | `[--force]` |
 | **`codex start` / `stop`** | Start / stop the Codex app-server daemon using `puffin` | — |
+| **`codex test`** | Run Codex's own test suite on Puffin's patched tree, except the tests in `codex-tests/puffin-skips.toml` | `[-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]` |
+| **`code setup`** | Install the pinned tools the code index (`puffin-code`) runs | — |
+| **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`; see §4.21 |
 | **`puffin …`** (`onyx …`) | Onyx Lite web UI lifecycle | see §4.19 |
 | **`desktop …`** | Tauri desktop window (`puffin-app`) | `install`, `run`, `build`, `status` |
 | **`searxng start`** | Start the SearXNG container on `127.0.0.1:8888`, on the network `dreamference-sidecars`; replaces one made on Docker's default bridge ([DOCKER §6](./DREAMFERENCE_DOCKER.md)) | — |
-| **`search`** | Web search through the local SearXNG | `QUERY… [-n 5] [--json]` |
-| **`fetch`** | Fetch a URL as readable text | `URL [--max-chars 8000]` |
 | **`gmail …`** | Read-only Gmail search and read | `search QUERY [-n 10] [--json]`, `read ID [--max-chars 8000] [--json]`, `status [--json]` |
 
 A top-level `clear-tensorize-cache` subcommand is the older spelling of `clear tensorize-cache` and does the same (until 2026-09-29 it parsed and did nothing).
@@ -144,7 +145,7 @@ puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent �
 2. **vLLM & Agent Status:**
    - vLLM health and served models;
    - active agent runner (default CODEX), configured model, tensorize status, draft model;
-   - sandbox, HF token presence;
+   - HF token presence;
    - prefix caching / chunked prefill, multi-step scheduling, KV cache dtype (`from model recipe` unless overridden), tool-call parser;
    - install state of each agent (Cline, Continue, OpenHands, Codex);
    - the Puffin config path.
@@ -158,7 +159,7 @@ puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent �
 puffin-admin index [--dir PATH] [--force]
 ```
 
-Indexes the workspace, the current directory unless `--dir` is given, with Python `ast` symbols, FTS5, TF-IDF and `nomic-embed-text-v1.5` embeddings. It writes `.dreamference/context_index.json` and `.dreamference/context.db` (SQLite with FTS5 and sqlite-vec). See `DREAMFERENCE_CONTEXT.md`.
+Indexes the workspace, the current directory unless `--dir` is given, with Python `ast` symbols, FTS5, TF-IDF and `nomic-embed-text-v1.5` embeddings. It writes `.dreamference/context_index.json` and `.dreamference/context.db` (SQLite: FTS5, and the embeddings as plain float32 blobs; sqlite-vec is not used). It refuses to run while a Night Shift run holds its lock. See `DREAMFERENCE_CONTEXT.md`.
 
 ---
 
@@ -173,7 +174,7 @@ puffin-admin server start [--model MODEL] [--port 8000] [--quantization Q] [--dr
 ```
 
 **Behaviour:**
-1. Runs the host-safety pre-flight (`check_host_safety`).
+1. Refuses while a Night Shift run holds its lock (§4.21), then runs the host-safety pre-flight (`check_host_safety`).
 2. Starts the diffusion sidecar `dreamference-diffusion-<diffusion-port>` **first**, unless `--no-diffusion`, so that vLLM's free-memory check accounts for it.
 3. Starts vLLM in Docker, under the PSI memory-pressure watchdog. It streams logs and memory until the health check passes, then exits, leaving the server running.
 
@@ -192,6 +193,8 @@ docker run --ipc=host --network host --restart unless-stopped --name dreamferenc
   -e VLLM_DEBUG_LOG_API_SERVER_RESPONSE=1 -e VLLM_DEBUG_LOG_API_SERVER_REQUEST=1 \
   --entrypoint vllm <image> serve <hf_repo> [vllm flags]
 ```
+
+The line above is the vLLM form. A model whose recipe names `engine: sglang` (the default model does) gets the same `docker run` prefix and mounts, and `SGLangLaunchBuilder` builds what follows the image (`DREAMFERENCE_INFERENCE.md`).
 
 The container's memory limit is derived from the model's `gpu_memory_utilization` plus headroom, capped below total memory by a host reserve. `--memory-swap` equals `--memory`, so the container cannot swap.
 
@@ -226,7 +229,7 @@ puffin-admin server logs [--port 8000]
 ### 4.9. `puffin-admin benchmark_server`
 
 ```bash
-puffin-admin benchmark_server [--port 8000] [--model qwen3.5-122b-a10b-hybrid-dflash] [--dataset-path P] [--num-prompts 8] [--max-concurrency 1]
+puffin-admin benchmark_server [--port 8000] [--model qwen3.8-27b-nvfp4-dflash2] [--dataset-path P] [--num-prompts 8] [--max-concurrency 1]
 ```
 
 Runs vLLM's serving benchmark inside the running container, on the Sonnet dataset. The dataset is embedded in `sonnet_dataset.py` and staged at `/tmp/dreamference-sonnet.txt`. When `--dataset-path` is unset, the known in-image locations are probed first.
@@ -270,7 +273,7 @@ It prints two tables:
    - the API key, which is optional and set only by `server start --api-key`;
    - the `Authorization: Bearer <key>` header format.
 
-Clients address the model by its full HF repo id (e.g. `Intel/Qwen3.5-122B-A10B-int4-AutoRound`).
+Clients address the model by its full HF repo id (e.g. `RadixArk/Qwen3.8-27B-NVFP4`, the default model's).
 
 ---
 
@@ -306,10 +309,12 @@ puffin-admin model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 puffin-admin codex build [--force]
 puffin-admin codex start
 puffin-admin codex stop
+puffin-admin codex test [-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]
 ```
 
-- **`build`:** builds `puffin` and `codex-code-mode-host` with `CodexBrandedBuilder` and links `~/.local/bin/puffin`. It skips the build when the recorded build key is current, unless `--force`. See `DREAMFERENCE_PUFFIN_CODEX.md`.
+- **`build`:** builds `puffin` and `codex-code-mode-host` with `CodexBrandedBuilder`, the web commands (`puffin-search`, `puffin-fetch`) and `puffin-code`, and links them into `~/.local/bin`. It refuses while a Night Shift run holds its lock. It skips the build when the recorded build key is current, unless `--force`. See `DREAMFERENCE_PUFFIN_CODEX.md`.
 - **`start` / `stop`:** run `puffin app-server daemon start|stop`, building `puffin` first if it is missing. The parser's help text calls this the "Codex comic server"; that is a typo in the help, and the command drives the app-server daemon.
+- **`test`:** runs Codex's own tests with `cargo-nextest` on the patched export, inside a memory-capped scope (`--memory-max`). `-E`/`--filter` takes a nextest filterset; `--accept-snapshots` rewrites the selected TUI snapshots and keeps those that differ from upstream's by the name alone. See `DREAMFERENCE_PUFFIN_CODEX.md`.
 
 ---
 
@@ -320,7 +325,7 @@ These are the commands the `puffin` agent is told to use in its prompt.
 ```bash
 puffin-search "QUERY" [-n 5] [--json]                # local SearXNG
 puffin-fetch URL [--max-chars 8000] [--json]         # readable text of one page
-puffin-admin gmail search "GMAIL QUERY" [-n 10] [--json]
+puffin-admin gmail search "GMAIL QUERY" [-n|--max-results 10] [--json]   # at most 20
 puffin-admin gmail read MESSAGE_ID [--max-chars 8000] [--json]
 puffin-admin gmail status [--json]
 ```
@@ -350,7 +355,7 @@ puffin-admin puffin start [--no-wait]
 puffin-admin puffin configure [--email E] [--password P] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]
 puffin-admin puffin google-auth [--client-id ID] [--client-secret S]
 puffin-admin puffin gmail                 # (re-)register the Gmail tool; accounts are connected in the UI
-puffin-admin puffin status | logs [-f] | stop | uninstall
+puffin-admin puffin status | logs [-f|--follow] | stop | uninstall
 ```
 
 This manages the Onyx Lite deployment (web chat UI) in front of the same vLLM model. `configure`:
@@ -363,6 +368,28 @@ Each piece has its own opt-out. See `DREAMFERENCE_ONYX.md`.
 ### 4.20. `puffin-admin desktop`
 
 `install`, `run`, `build`, `status` for the Tauri desktop window (binary `puffin-app`). `puffin app` opens the same window. See `CLAUDE.md` ("The desktop app is a window, not a second frontend").
+
+### 4.21. `puffin-admin night`
+
+```bash
+puffin-admin night enable [--window HH:MM-HH:MM]     # default: [night] window, 01:00-07:00
+puffin-admin night disable
+puffin-admin night status
+puffin-admin night run [--until HH:MM] [--minutes N] [--idle-minutes N] [--ignore-open-sessions]
+```
+
+Night Shift (`dreamference/night_shift/`, `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`). Tasks are queued from `puffin` with `/night add` (or `puffin night add …` from a shell); these commands run them.
+
+- **`enable` / `disable`:** install or remove the systemd user timer `puffin-night.timer` that starts `night run` at the window's start.
+- **`status`:** the timer, the window and the queue of every repository.
+- **`run`:** works through the queue now, until the window ends (`--until`, or `--minutes` from now). It waits for the model server to have been idle for `--idle-minutes` (default 10). `--ignore-open-sessions` skips the wait for open `puffin` sessions; it is for testing.
+
+While a night run holds its lock, `server start`, `codex build` and `index` refuse to run.
+
+### 4.22. `puffin-admin code setup`, `puffin-admin searxng start`
+
+- **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+) the optional indexers need. The index itself is the Rust binary `puffin-code`, built and linked by `codex build`. See `DREAMFERENCE_PUFFIN_CODE_INDEX.md`.
+- **`searxng start`:** creates the SearXNG container on the project network `dreamference-sidecars`, published on `127.0.0.1:8888` only. A container found on Docker's default bridge is replaced. See `DREAMFERENCE_DOCKER.md` §6.
 
 ---
 
@@ -385,10 +412,9 @@ The file is TOML:
 
 ```toml
 vllm_host = "http://localhost:8000"
-model = "qwen3.5-122b-a10b-hybrid-dflash"
+model = "qwen3.8-27b-nvfp4-dflash2"
 diffusion_model = "tiny-a2d-coder-0.5b-diffusion"
 agent_runner = "codex"
-sandbox = "none"
 num_speculative_tokens = 8
 enable_prefix_caching = true
 enable_chunked_prefill = true
@@ -396,7 +422,13 @@ num_scheduler_steps = 8
 attention_backend = "auto"
 # kv_cache_dtype unset = use the model recipe's value
 puffin_gmail = true
+puffin_cave_mode = "ultra"
+
+[night]                      # Night Shift, read by `puffin-admin night` (NightShiftSettings)
+window = "01:00-07:00"
 ```
+
+A `sandbox = …` line left in an older file is ignored: the option was removed on 2026-10-01.
 
 `save_config()` deliberately writes only values that differ from the defaults, so a round trip does not fossilise defaults into the TOML.
 
@@ -408,13 +440,16 @@ puffin_gmail = true
 | :--- | :--- | :--- |
 | `DREAMFERENCE_CONFIG_PATH` | (resolver order, §5) | Config file path |
 | `DREAMFERENCE_VLLM_HOST` | `http://localhost:8000` | vLLM endpoint. Also read by `puffin`'s launcher. |
-| `DREAMFERENCE_MODEL` | `qwen3.5-122b-a10b-hybrid-dflash` | Main model alias |
+| `DREAMFERENCE_MODEL` | `qwen3.8-27b-nvfp4-dflash2` | Main model alias |
 | `DREAMFERENCE_DIFFUSION_MODEL` | `tiny-a2d-coder-0.5b-diffusion` | Diffusion sidecar model |
 | `DREAMFERENCE_DRAFT_MODEL` | (unset) | Draft model alias |
 | `DREAMFERENCE_SPECULATIVE_TOKENS` | `8` | Speculative token count |
 | `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | `codex` | Agent runner (`codex`, `cline`, `continue`, `openhands`) |
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_PUFFIN_GMAIL` | `true` | Add the Gmail section to `puffin`'s prompt when an account is connected |
+| `DREAMFERENCE_PUFFIN_CAVE_MODE` | `ultra` | Cave-mode level for new `puffin` sessions (`off`, `lite`, `full`, `ultra`); also the config key `puffin_cave_mode` |
+| `DREAMFERENCE_SEARXNG_URL` | `http://127.0.0.1:8888` | SearXNG instance used by `puffin-search` and the MCP server's `web_search` |
+| `CODEX_HOME` | `~/.puffin` | `puffin`'s home folder: sessions, config, the Night Shift queue (`night/`) |
 | `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN` | (unset) | HuggingFace token |
 | `HF_HOME` | `~/.cache/huggingface` | HF cache root (the hub cache is `$HF_HOME/hub`) |
 

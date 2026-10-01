@@ -4,7 +4,7 @@
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified memory)
 > - **Deployment Model:** single-node, air-gapped
 > - **License:** AGPL-3.0-or-later
-> - **Specs last reconciled with the code:** 2026-09-28
+> - **Specs last reconciled with the code:** 2026-09-28; the descriptive specs were re-checked against the parser, the model registry and the source tree on 2026-10-01
 
 This directory holds the specification, split into focused documents. This page is the index.
 
@@ -18,7 +18,7 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
-| [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the eight packages |
+| [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the nine packages |
 | [DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md) | Source layout, class inventory, import conventions, the default model's full launch command |
 | [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md) | Requirements, installation, helper scripts, troubleshooting |
 | [DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md) | `puffin-admin` command reference, configuration tiers, environment variables |
@@ -27,8 +27,8 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
-| [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md) | The model matrix (six entries), the default model, GB10 detection |
-| [DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md) | vLLM launch engine, recipes and precedence, speculative decoding, host safety |
+| [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md) | The model matrix (eight entries), the default model (Qwen3.8-27B on SGLang), GB10 detection |
+| [DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md) | The launch engines (vLLM, and SGLang for the default model), recipes and precedence, speculative decoding, host safety |
 | [DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md) | Images (project default and pinned DFlash images), caches, tensorization, containers |
 | [DREAMFERENCE_PREFIX_CACHE.md](./DREAMFERENCE_PREFIX_CACHE.md) | Prefix caching on the hybrid GDN + DFlash stack: findings and runtime patches |
 
