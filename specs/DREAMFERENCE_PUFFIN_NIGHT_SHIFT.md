@@ -248,6 +248,8 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `test` | *(detected)* | Default test command for the repository. |
 | `task_context` | `49152` | Tokens of KV cache budgeted per concurrent task (§11.1). |
 | `idle_minutes` | `10` | How long the model must have been idle before a night starts (§5.2). |
+| `index` | `true` | Refresh each repository's code index before its tasks start (§11.1). |
+| `index_timeout` | `20m` | The most one repository's refresh may take; never more than half of what is left of the window. |
 
 ---
 
@@ -307,6 +309,7 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 - **Every `puffin exec` gets `stdin` from `/dev/null`.** Without it, exec prints "Reading additional input from stdin..." and, under a service with no terminal, waits.
 - **Each task's processes run under `choom -n 500`** inside the scope, so that if memory runs out anyway earlyoom picks them before the model server.
 - **`puffin-admin night run --ignore-open-sessions`** skips the TUI check (requests from open sessions still pause the run). It exists for testing beside an open session; the timer never passes it.
+- **The code index is refreshed before the tasks start** ([CODE_INDEX §6.3](./DREAMFERENCE_PUFFIN_CODE_INDEX.md)). After admission and before the first task, the runner calls `puffin-code index --exact --wait` once per repository with queued tasks, so tasks begin with a fresh index and the executing indexers (Rust, Java, .NET, in a trusted repository) run when nobody is waiting. `puffin-code` admits and sandboxes its own runs. The outcome is a note of the morning report (`Code index of <repo>: 7 ok, 1 deferred (…)`). A refresh that passes `index_timeout` is stopped, and with it **every** scope of `puffin-index.slice`: admission refuses to start a night while an index scope is live, so whatever is in the slice then is the night's own. Without an installed `puffin-code` nothing runs and nothing is said.
 - **A night task's `puffin exec` also starts `puffin-code session`.** It maps the worktree onto the main checkout's index (code-index spec §4.1), and that index's session lock lets one session process own the repository, so parallel tasks do not each start an index run.
 
 ### 11.2 Where the code is
@@ -322,12 +325,13 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | Admission and scheduling | `dreamference/night_shift/night_shift_runner.py` |
 | Morning report | `dreamference/night_shift/night_shift_report.py` |
 | Timer | `dreamference/night_shift/night_shift_scheduler.py` |
+| Code index refresh before the tasks | `dreamference/night_shift/night_shift_index.py` |
 | Refusals during a night run | `DreamferenceCLIController._refuse_during_night_run` (`index`, `codex build`, `server start`) |
 
 ### 11.3 Tests
 
 - **Launcher** (`cargo test -p puffin-launcher` in the export): parsing of every `/night` form and of `puffin night …`; add, list, show and drop round trip, drop by id suffix, drop of a running task; uncommitted-change warning; refusal outside a repository; a linked worktree's tasks belong to the main checkout; 200 ids without a collision; the report section and the newest report; the startup line announced once; the window from the timer, then the config.
-- **Runner** (`tests/test_night_shift.py`, a scripted stand-in for `puffin`): a change committed on `night/<id>` with the user's checkout untouched; a failing test recorded; an announce-only reply nudged twice and then `stalled`; a nudge that works; `no-change`; an exec error; an interrupted task keeping its worktree and resuming its session the next time; cancellation before a start and while running; a vanished base; test detection in its order; metrics under both engines' names; parallelism never 0; TUI command lines; each admission check on its own; the idle wait counted from the last change; the window closing while waiting; round-robin; an outside request or session blocking a start; memory blocking a start; a whole night of three tasks with its report; a refused admission keeping the queue; a second runner refused; `codex build` refused while a night run holds the lock; the queue format shared with the launcher; the timer units; the report's rows.
+- **Runner** (`tests/test_night_shift.py`, a scripted stand-in for `puffin`): a change committed on `night/<id>` with the user's checkout untouched; a failing test recorded; an announce-only reply nudged twice and then `stalled`; a nudge that works; `no-change`; an exec error; an interrupted task keeping its worktree and resuming its session the next time; cancellation before a start and while running; a vanished base; test detection in its order; metrics under both engines' names; parallelism never 0; TUI command lines; each admission check on its own; the idle wait counted from the last change; the window closing while waiting; round-robin; an outside request or session blocking a start; memory blocking a start; a whole night of three tasks with its report; a refused admission keeping the queue; the index refresh (once per repository, before the first task; off; not installed; half the remaining window); a second runner refused; `codex build` refused while a night run holds the lock; the queue format shared with the launcher; the timer units; the report's rows.
 - **Not covered by the slash suite.** `tests/test_puffin_slash_commands.py` enumerates the slash commands of unpatched Codex, so a command a patch adds is invisible to it, as `/cavemode` was. `/night` was checked in the TUI itself instead, driven through tmux (§11.4).
 - **Codex's own TUI snapshots** that list the slash-command popup change again with `/night` in it, as they did with `/cavemode`; they need new snapshots reviewed by hand.
 

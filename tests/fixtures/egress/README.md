@@ -2,7 +2,7 @@
 
 - `exec_pass.strace`: a real trace, recorded on 2026-10-01 from
   `strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256 -o … puffin exec --skip-git-repo-check "Reply with exactly: pong"`
-  with the 16-patch build (Codex `rust-v0.158.0`), in a throwaway repository and `CODEX_HOME`.
+  with the 16-patch build of Codex `rust-v0.158.0` that was installed at the time, in a throwaway repository and `CODEX_HOME`.
   Only the home and scratch paths were rewritten.
 - `exec_leaks.strace`: the same trace with **synthetic** lines appended for the channels patches
   `0013` and `0015` closed (Statsig metrics at `ab.chatgpt.com`, the featured-plugins call to

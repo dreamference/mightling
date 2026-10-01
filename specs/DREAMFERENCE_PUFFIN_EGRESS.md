@@ -1,6 +1,6 @@
 # Puffin Egress — audit and airlock
 
-**Status:** proposed. Nothing in this spec is implemented yet. The mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2), but not built.
+**Status:** Phase 1 (the audit, exec sessions) implemented on 2026-10-01: `dreamference/audit/`, `puffin-admin audit egress`; §10 records what was built and where it differs. Phase 2 (the airlock) is not built; its mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2).
 **Superseded in part (2026-10-01):** the airlock's switch is now the `on` level of `/airgapped` ([PUFFIN_AIRGAPPED §5.4](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)), not `puffin --airlock`. The mechanism (§4.1, §4.2), the ledger (§4.4) and the audit (§3) stand; the surface (§2), the allowlist (§4.3) and §5 are read through that spec, which allows only the model server at `on`.
 **Target:** the `puffin` terminal agent. `puffin-admin` runs the audit.
 **Builds on:**
@@ -50,7 +50,7 @@ This spec adds no slash command of its own. (When it was written the patch budge
 
 This productises the 2026-09-29 procedure.
 1. **Setup.** A throwaway git repository with one committed file, and a throwaway `CODEX_HOME`, so that no login, history or config of the user's influences the result, and none is touched.
-2. **Exec session.** `strace -f -qq -e trace=connect,sendto,sendmsg,execve -s 256` around `puffin exec --skip-git-repo-check "<prompt>"`, with the default prompt `Reply with exactly: pong`.
+2. **Exec session.** `strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256` (as built: `sendmmsg` is how glibc sends a lookup's queries, and without it a DNS query leaves a connect to the resolver and no name, §10) around `puffin exec --skip-git-repo-check "<prompt>"`, with the default prompt `Reply with exactly: pong`.
 3. **TUI session** (`--tui`). The same trace around the interactive TUI, driven on a pseudo-terminal: accept the trust prompt, send the prompt, wait for the reply, quit. The TUI-only announcement fetch was found this way and is invisible to `exec`.
 4. **Destinations.** Every `sin_addr`/`sin6_addr` and port from `connect`, `sendto` and `sendmsg`, counted.
 5. **DNS.** Every name in UDP payloads to port 53.
@@ -187,3 +187,46 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 
 - **`puffin app`.** The desktop app launches its own process tree. Should the airlock also cover it, or is it only for the terminal agent?
 - **MCP servers.** A user-configured MCP server that needs the network fails inside the airlock. Should the allowlist accept per-server exceptions (by port), or should such servers be run outside and reached over a unix socket?
+
+---
+
+## 10. As built (2026-10-01): Phase 1, exec sessions
+
+### 10.1 What exists
+
+`puffin-admin audit egress [--prompt "…"] [--json]`, in `dreamference/audit/`:
+
+| Piece | Path |
+|---|---|
+| The trace's content (destinations, resolvers, names, unix sockets, processes, networked git) | `egress_trace.py` |
+| Reading strace's output | `strace_parser.py` |
+| The verdict and its exit code (0 pass, 1 unexpected destination, 2 trace failed) | `egress_verdict.py` |
+| The session, the judgement, the report, the JSON result | `egress_audit.py` |
+
+**Run on this machine, twice, both a pass.** At 21:34 on the 16-patch build of `rust-v0.158.0` installed at 19:10, and at 21:44 on the 17-patch build that the `/airgapped` work installed at 21:41 (the kept record, `~/.puffin/audit/20261001-214436.json`, `build_matches_checkout: true`). Each time one `puffin exec "Reply with exactly: pong"` in a throwaway repository with a throwaway `CODEX_HOME` connected to `127.0.0.1:8000` (twice) and `127.0.0.1:8767` (once), sent no DNS query, opened no unix socket but glibc's absent `nscd` one, and ran no networked git command; 2.7 s. A second run whose prompt made the agent run `curl https://example.com` also passed, correctly: Codex's read-only sandbox refuses the `socket` call (`socket(AF_INET6, SOCK_DGRAM, …) = -1 EPERM` in a trace taken with `socket` added), so `curl` never reaches a `connect` or a lookup and exits 6.
+
+### 10.2 Where it differs from §2 and §3
+
+- **`sendmmsg` is traced** (§3.1 listed `connect`, `sendto`, `sendmsg`). On this machine a lookup is a `connect` to `127.0.0.53:53` followed by one `sendmmsg` carrying the A and the AAAA query.
+- **Port 53 is a resolver, not a destination.** A connect to `127.0.0.53:53` is loopback, and a query sent there still leaves the machine through systemd-resolved. So resolvers are listed apart, every name asked is a failure, and a query whose name could not be read (strace cuts payloads at 256 bytes) fails too, naming the resolver.
+- **A connect counts whatever it returned**: `EINPROGRESS` is the normal result of a non-blocking connect, and a refused or unreachable one was still an attempt.
+- **`127.0.0.1:9` is a failure with its own wording.** It is where the launcher points `chatgpt_base_url`; a connect there is a ChatGPT-backend call that no patch closes and that failed only because of the redirect.
+- **`git ls-remote --get-url` is not networked** (it prints a URL after applying `insteadOf`; `puffin-code` uses it for the submodule policy). git's subcommand is the first word that is neither an option nor an option's value, so a directory named `fetch` or a `--grep pull` is not a finding. `push` is counted as networked beside §3.1's list.
+- **A failed `execve` is not a process**: it is the shell walking `PATH`. An `execve` interrupted in the trace (`<unfinished ...>`) is counted when its `resumed` line reports success.
+- **The code index is off for the traced session** (`code_index_enabled = false` in a throwaway config named by `DREAMFERENCE_CONFIG_PATH`). Its indexers run detached, in their own network-less sandbox, and outlive the session; they are not what this trace can show.
+- **The JSON result also says whether the audited binary was built from the checkout as it is** (`build_matches_checkout`): the patch hashes are the checkout's.
+- **The session is stopped with its whole process group** after 300 s, so a session that never answers (no model server) ends as "trace failed" and leaves nothing running.
+
+### 10.3 Tests (`tests/test_egress_audit.py`, 14)
+
+- The recorded trace of the passing session (`tests/fixtures/egress/exec_pass.strace`, 347 lines, 22 of them unfinished or resumed).
+- The same trace with the channels of `0013` and `0015` written back in (`exec_leaks.strace`): the verdict fails and names `ab.chatgpt.com`, `chatgpt.com`, `raw.githubusercontent.com`, the `git ls-remote` of `openai/plugins`, each address, and the `127.0.0.1:9` redirect. **These lines are written by hand in strace's format**: the traces of 2026-09-29 were in a scratch folder that has since been deleted, so §7's "the 2026-09-29 traces" could not be used.
+- A real recording of `curl https://example.com` (`curl_example.strace`): the name, the resolver and the four addresses are read from what glibc and the kernel actually printed.
+- A session with no reply, and an empty trace, are "trace failed"; a local port off the allowlist fails; the escapes and the DNS decoder; git commands that reach nothing; the report; the audit run end to end with a stand-in for strace (throwaway repository and home, both removed afterwards; the JSON written to the real `CODEX_HOME`); missing strace or `puffin`.
+
+### 10.4 Not built
+
+- **`--tui`** (§3.1 step 3): the pseudo-terminal session that found the announcement fetch. Until it exists, a TUI-only channel is invisible to the audit, as it was to `exec` in September.
+- **The audit after `puffin-admin codex build`** (§2): it would put a model request into every build. The command is there to run by hand after a Codex bump.
+- **§8's acceptance on a build without `0015`**: needs a second build of `puffin`; the failing case is covered by the fixture only.
+- **Phase 2**, the airlock and its ledger (§4): its switch is now the `on` level of `/airgapped`.
