@@ -61,6 +61,8 @@ On this GB10, with the default model (Qwen3.8-27B on SGLang) resident and idle, 
 | Finding those files | `git diff --name-only <snapshot> HEAD` plus `git status --porcelain`: **39 ms**; a whole-word search for the name over the 19 changed files still present: 3 ms, and it finds both missing files; the same search over all 4,900 Rust files of Codex: 21 ms (warm page cache) | measured |
 | git inside Codex's sandbox | `git diff --name-only` and `git status --porcelain` run under `puffin sandbox`; `.git` is read-only there (`touch .git/x` fails), so the router passes `--no-optional-locks` and never refreshes git's index | measured |
 | One limit for all index runs | a scope started with `systemd-run --user --scope --slice=puffin-index.slice` lands in `…/user@1000.service/puffin.slice/puffin-index.slice/`; `systemctl --user set-property --runtime <slice> MemoryMax=… CPUQuota=400%` takes effect at once (`memory.max` and `cpu.max` of the slice read back the new values), systemd 255. `choom -n 1000 -- <cmd>` raises `oom_score_adj` without privileges | measured (with a throwaway slice) |
+| This repository's submodules, as §4.3's tests see them | `fano`: URL `github.com/dgxcoder/fano`, same namespace as the superproject's `origin` (`github.com/dgxcoder/dgxcoder`); **212 of its 216 commits** authored by `dgxcoder@dreamference.ai`, the superproject's only author (the other 4 by an address the superproject has never used); 252 tracked files (151 PDF, 63 TeX, 5 Python). `codex`: URL `github.com/dgxcoder/codex`, **also the same namespace**; a shallow clone (`shallow = true`) of 1 commit, detached at upstream's tag `rust-v0.158.0`, authored by `imac@openai.com`; 8,670 tracked files | measured |
+| Cost of §4.3's tests, offline | resolving a submodule URL through `insteadOf` (`git ls-remote --get-url`): 3 ms, no network; the superproject's author set (1,000 commits) plus 200 commits of each submodule: 13 ms for both submodules | measured |
 | `defn_enclosing_ranges` in the store | maps a reference to its innermost enclosing definition (line 2007 of the CLI controller → `DreamferenceCLIController#run_cli()`), 0-based lines | measured |
 | The indexing sandbox, probed with a crate whose `build.rs` reports what it can reach | with `$CARGO_HOME` bound read-write (the first draft's command): it can open `~/.cargo/bin/cargo` for writing and create files in `$CARGO_HOME`, and it sees `~/.ssh`, `~/.puffin/config.toml` and `~/.config/dreamference`. With the home directory a tmpfs and `$RUSTUP_HOME`, `$CARGO_HOME` and the source bound read-only: none of those, and `cargo check --offline` (0.4 s, one registry dependency) and `rust-analyzer scip` (1.95.0, 3.1 s, build script run, `.scip` written to the scratch directory) both still succeed | measured |
 | SGLang's idle gauges | `sglang:num_running_reqs`, `sglang:num_queue_reqs` (0 when idle), on `/metrics` of the served model | measured |
@@ -71,7 +73,7 @@ Consequences for the design, each carried into the sections below:
 
 1. **No per-query CLI.** At 6.6 s a call, the CLI cannot serve queries. The router reads codebase-memory's database directly (§7.5), with a fallback ladder.
 2. **Exact layer by language, not by trust alone.** Static indexers (scip-python, scip-typescript) run for every repository; executing ones (rust-analyzer, scip-java, scip-dotnet) need trust and admission.
-3. **Submodules are excluded by default** (97% of this repository's universal index was the `codex/` submodule), and indexed deliberately when wanted.
+3. **A submodule is indexed only if it is your own code or you ask for it** (§4.3). 97% of this repository's universal index was the `codex/` submodule, a fork of a third-party project that sits under the same GitHub organisation, so ownership is decided by namespace *and* authorship, not by the URL alone.
 4. **Admission from measured numbers:** the Codex exact index needs more than 21 GiB and runs only when the machine can spare it.
 5. **The query store is the `scip` CLI's own SQLite export**, pinned and fingerprinted, with our converter as the fallback.
 6. **A snapshot cannot say what it is missing.** A file that gained a reference after the snapshot is in no row, so checking the rows' files cannot find it. Every query therefore computes the files changed since each layer's snapshot and searches them for the name (§7.3).
@@ -140,8 +142,8 @@ Rejected, with the reason:
   - **The agent's own edits are the normal case, not the exception.** Between two launches the graph sees nothing the session wrote, and a file the agent created is in neither layer. §7.3's changed set is what covers that gap; the re-index only turns its `heuristic` rows back into `exact` ones.
   - codebase-memory's watcher stays off (`watcher_enabled = false`, `auto_watch = false`) unless `puffin_code_watch = true`.
 - **Scope, written by the session process:**
-  - **Submodules are excluded.** The session process keeps a managed block in `<repo>/.cbmignore` listing every submodule path (`git submodule status`), and adds `.cbmignore` to `.git/info/exclude`, so the file never shows up in `git status`. `puffin-code index --include-submodules` indexes them deliberately.
-  - **Ignore rules inside submodules.** codebase-memory applies the superproject's `.gitignore` inside a submodule, which git does not. When submodules are included, the router reports every excluded subtree from `index_coverage` in `puffin-code status`, so the gap is visible rather than silent.
+  - **Submodules follow §4.3.** The session process keeps a managed block in `<repo>/.cbmignore` listing every submodule §4.3 excludes, rewritten from the policy before every run, and adds `.cbmignore` to `.git/info/exclude`, so the file never shows up in `git status`.
+  - **Ignore rules inside submodules.** codebase-memory applies the superproject's `.gitignore` inside a submodule, which git does not. When a submodule is included, the router reports every excluded subtree from `index_coverage` in `puffin-code status`, so the gap is visible rather than silent.
   - **Tracked files an ignore rule matches are skipped** (this repository's `config/` rule drops the tracked `dreamference/config/`). The router lists them from `index_coverage` (`not_indexed_dir`/`not_indexed_file`) and answers queries touching them with `rg`-backed `heuristic` rows.
 - **Git worktrees share the main worktree's index.** A worktree (`git rev-parse --git-common-dir` differs from `--git-dir`) is not indexed as a project of its own, which would cost a full database per worktree (Night Shift and fan-out create many). The router maps its paths onto the main worktree's project, and files whose hash differs are stale by §7.3, which is the safe direction.
 - **Data:**
@@ -167,6 +169,79 @@ The router is not compiled into `puffin`. It is a separate program, installed an
 - **Install and `PATH`:** the binary goes to `~/.local/share/dreamference/puffin/bin/puffin-code` with `~/.local/bin/puffin-code` linked to it, by the same builder step that links `puffin`, `puffin-admin` and `puffin-search`. The link is not optional: the prompt tells the model to run `puffin-code`, and a command missing from its shell's `PATH` ends in exit 127, as `puffin-admin` did before it was linked.
 - **Versions move together.** `puffin-code` pins the schema fingerprints of the two stores (§7.5) and the checksums of the pinned tools (§5), so it is built, released and updated with them: `puffin-admin codex build` builds it as a second, independent Cargo run, the release workflow attaches it, and `puffin update` installs it with `puffin`. `puffin-code --version` prints its own version and the pinned tool versions.
 - **Configuration:** it reads the same files the launcher does (`DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`, `~/.config/dreamference/config.toml`) for the model server's address and the `code_index_*` / `puffin_code_*` keys, and `$CODEX_HOME/config.toml` for project trust (§9.1). `CODEX_HOME` resolves as in `puffin-rs/src/home.rs`: `~/.puffin` unless set, never upstream's `~/.codex`. It needs no running model server and no `puffin`.
+
+### 4.3 Submodules: your code, or what you ask for
+
+A submodule is indexed only when it belongs to the same organisation as the repository that contains it, or when the user asks for that submodule by name. Everything else is left out, and every answer says so.
+
+**"Belongs to the same organisation" is two tests, because the URL alone is not enough.** In this repository both submodules live under `github.com/dgxcoder/`, but only one is ours (§2): `fano` is written by the superproject's own author, while `codex` is a fork of OpenAI's Codex, pinned at an upstream tag and authored upstream. A rule on the URL alone would index the 8,670-file submodule this spec was written to leave out.
+
+- **Namespace.** The submodule's host and owner equal the superproject's.
+  - **The submodule's URL** is the effective one: `git config submodule.<name>.url` (what `git submodule init` wrote, including the user's own override), else `.gitmodules`. It is expanded through `git ls-remote --get-url`, which applies `url.<base>.insteadOf` and makes no network request (3 ms, §2).
+  - **The superproject's URL** is that of the current branch's remote (`branch.<branch>.remote`), else `origin`, else the only remote.
+  - **Host and owner** are parsed from `https://`, `ssh://`, `git://` and scp-like `user@host:path` forms: the host lowercased without user information or port, and the owner the first path segment, lowercased. That is the GitHub user or organisation, the top-level GitLab group, the Bitbucket workspace and the Azure DevOps organisation.
+  - **A relative URL** (`./x`, `../x`) passes by construction: it is resolved against the superproject's own remote.
+  - **Unavailable** when either side has no remote, or the URL is a local path or `file://`. Then authorship alone decides, and trust is never inherited (below).
+  - **Credentials never leave the parser.** A URL carrying user information (`https://user:token@host/…`) is printed, logged and recorded only as `host/owner/repo`.
+- **Authorship.** Most of the submodule's own recent history is written by the people who write the superproject.
+  - **Our authors:** the author and committer addresses of the superproject's last 1,000 commits, plus `git config user.email`, without GitHub's web-flow committer `noreply@github.com`. A personal `…@users.noreply.github.com` address counts as itself. **Our domains:** the domains of those addresses, less public mail providers (`gmail.com`, `outlook.com`, `hotmail.com`, `yahoo.com`, `icloud.com`, `proton.me`, `protonmail.com`, `users.noreply.github.com`, and the like).
+  - **The submodule's commits:** up to 200 non-merge commits reachable from its checked-out `HEAD` (`git log -200 --no-merges --format=%ae`). Author addresses only: a committer is often a bot or a web merge. A shallow clone is decided by the commits it has.
+  - **The test passes** when more than half of those commits have an author address among our authors or in our domains.
+  - **Corroborating, never deciding:** `shallow = true` in `.gitmodules`, and a `HEAD` detached at a tag. `puffin-code submodules` prints them beside the verdict, because they are what a reader recognises as "vendored".
+- **The decision**, for each submodule that is checked out:
+
+| Namespace | Authorship | Decision | Reason shown |
+|---|---|---|---|
+| same | passes | **indexed** | `yours` |
+| same | fails | not indexed | `third-party` (a fork or a vendored copy under your namespace) |
+| different | either | not indexed | `other organisation` |
+| unavailable | passes | **indexed** | `yours (by authorship)` |
+| unavailable | fails, or no commits readable | not indexed | `third-party` / `unknown` |
+
+  - **A fork stays third-party until the user says otherwise.** A fork carrying a few of our commits on top of upstream's history fails the majority test over 200 commits. That is intended: the cost and the noise of indexing someone else's project are the same whoever forked it.
+  - **This repository**, as a check that the tests are calibrated: `fano` is indexed (same namespace, 212 of 216 commits ours), and `codex` is not (same namespace, 0 of 1 commits ours, shallow, detached at `rust-v0.158.0`). `fano` was excluded before this section; `codex` stays excluded.
+- **Size guard for automatic inclusion.** A submodule that passes both tests but has more than `code_index_submodule_max_files` tracked files (default 5,000) is not indexed automatically (reason `too large`, with the count). The policy above names the conditions under which a submodule *may* be indexed, not ones that oblige it to be. At this repository's measured rate (7,096 files: ~45 s, 665 MB of graph, §2), 5,000 files are about half a minute and half a gigabyte on every first run; above that, the user decides. Admission (§6.4) still applies to whatever is included.
+- **Not checked out** (`-` in `git submodule status`): nothing is on disk, so nothing is indexed (reason `not checked out`), whatever the policy says.
+- **Nested submodules** (`git submodule status --recursive`) are considered only when their parent is indexed, and are tested against the top-level superproject's namespace and authors, never their parent's: a third-party library's own submodules are not ours because the library's authors wrote them.
+
+**The user decides, outside the workspace.**
+
+- **The commands:**
+
+| Command | Effect |
+|---|---|
+| `puffin-code submodules` | Lists every submodule with its decision, its reason and the evidence: namespaces compared, `n of m commits yours`, file count, `shallow`, the tag `HEAD` is detached at. |
+| `puffin-code submodules include <path>` | Indexes that submodule from now on, whatever the tests say (reason `included by you`). The size guard does not apply. |
+| `puffin-code submodules exclude <path>` | Never indexes it (reason `excluded by you`), even if it is yours. |
+| `puffin-code submodules auto <path>` | Removes either override; the tests decide again. |
+
+  `<path>` is the submodule's path or name; an unknown one is an error that lists the known ones. A change requests a re-index (§4), which adds or drops the submodule's files.
+- **Where the choice is kept:** `$CODEX_HOME/puffin-code.toml`, keyed by the canonical path of the main worktree (so linked worktrees and Night Shift's share it, as they share the index, §4.1):
+  ```toml
+  [projects."/home/user/mightling".submodules]
+  codex = "exclude"
+  vendor/shared-lib = "include"
+  ```
+  A file of its own, not Codex's `config.toml`, whose schema Puffin does not own.
+- **Why not inside the repository.** The same rule as trust (§9.1): `<repo>/dreamference.toml`, `.dreamference/` and `.cbmignore` are in the workspace, so a clone can ship them and the agent can write them from inside the `workspace-write` sandbox. Choosing what is indexed is the user's decision, so it is read only from `$CODEX_HOME`, which is outside the workspace and read-only in the sandbox. The managed `.cbmignore` block is output, rewritten from the policy before every run; editing it changes nothing for longer than one run.
+- **The agent cannot change it.** Run inside Codex's sandbox, `include`, `exclude` and `auto` fail to write and say so: *"what is indexed is your decision: run `puffin-code submodules include codex` in your own shell"*. Listing works everywhere. The request file (§4) stays fixed words only, and `puffin-code mcp` reads the policy but has no tool that writes it.
+- **Precedence:** `exclude` beats `include`, which beats the tests.
+- **`--include-submodules` is removed.** It lasted one run: the session process rewrote `.cbmignore` from the flag's default at every launch (`index/mod.rs`, `write_cbmignore`). Passing it is an error that names `puffin-code submodules include`.
+
+**What an included submodule gets.**
+
+- **The universal layer:** its files are indexed with the rest. codebase-memory applies the superproject's ignore rules inside it (§2, §13), so `puffin-code status` reports what that drops.
+- **The static exact layers** (scip-python, scip-typescript, scip-clang with a compilation database, scip-go offline), detected in the submodule's root and its immediate subdirectories as for the superproject (§6.1), run read-only on the submodule's checkout in the sandbox of §9.1. Paths carry the submodule's path as their prefix (§6.2).
+- **The executing exact layers** (rust-analyzer, scip-java, scip-dotnet) need two things:
+  - **trust:** **including is not trusting.** A submodule inherits the superproject's Codex trust only when it passes both tests with the namespace test actually available, because commit authorship is not authentication: anyone can write any address into a commit, but only the organisation can publish under its namespace. An included third-party submodule, or one decided by authorship alone, needs its own entry in Codex's trust table (`[projects."<repo>/<path>"]`);
+  - **the scratch copy of §6.2**, because a build tool must never write into a submodule's checkout. It is not built yet (§14.3), so today no executing indexer runs on any submodule, and `puffin-code submodules` says so beside each one that would qualify.
+
+**Telling the agent.**
+
+- **Every answer** carries one line when any submodule is not indexed: `submodules not indexed: codex/ (third-party)`, at most three names and `+N more`. It is the same principle as `changed since snapshot` (§7.2): a definition that lives in a left-out submodule is reported as not found, and this line is what tells the model why.
+- **The prompt block** (§8) has the same line, inside its 250-token budget, with the instruction to use `rg` there.
+
+**Cost and freshness.** The tests are recomputed whenever they are needed (by the session process before every run, and by the router for each answer's line), never cached: a cache would live in the workspace, where the agent could edit it. They cost 16 ms here (§2), well inside §10's 200 ms bound. A submodule whose `HEAD` moves is re-tested at the next run, so a bump that replaces our code with upstream's flips it to `third-party` without anyone asking.
 
 ## 5. Distribution
 
@@ -264,7 +339,8 @@ So:
 | `impl <trait-or-interface>` | SCIP `relationships` (`is_implementation`), else the graph's `IMPLEMENTS`/`OVERRIDE` edges | Changed files are searched for the trait's name (§7.3). |
 | `impact <symbol-or-diff>` | SCIP references, transitive to depth N via enclosing definitions; the graph's edges for stale files | Answers "what breaks". Text hits in changed files count at depth 1 and are not followed further; the header says so. |
 | `status` | both | Layers present, freshness, languages covered, excluded subtrees, disk use, last index time, deferred runs and why. |
-| `index [--exact] [--include-submodules]` | both | Re-index. `--exact` also schedules executing indexers. |
+| `index [--exact]` | both | Re-index. `--exact` also schedules executing indexers. |
+| `submodules [include\|exclude\|auto <path>]` | §4.3 | Which submodules are indexed and why; the three verbs write the user's choice outside the workspace, and fail inside the sandbox. |
 
 ### 7.2 Output
 
@@ -281,11 +357,12 @@ heuristic (text) codex-rs/core/src/session.rs:412
 unresolved 1 call through `dyn ConfigSource` in codex-rs/core/src/lib.rs:2204
 ```
 
-The source and commit are stated once in the header. `--json` gives the same data for tools. Four lines are mandatory, because they are what tell the agent it has to verify:
+The source and commit are stated once in the header. `--json` gives the same data for tools. Five lines are mandatory, because they are what tell the agent it has to verify:
 - **`changed since snapshot`**, on every answer, with the number of files changed since the older of the two snapshots and whether they were searched. `0 files` is the only state in which an all-`exact` answer is complete.
 - **`unresolved`**, whenever either layer reports calls it could not resolve.
 - **`not indexed`**, listing touched paths outside a layer's coverage (§4.1).
 - **`not checked`**, whenever the changed set was too large to search (§7.3). It names the count and says the answer may be missing references from those files.
+- **`submodules not indexed`**, whenever a submodule is left out (§4.3), with its reason.
 
 **Every answer is bounded by construction.** The served model's context is 262,144 tokens, so the bound is no longer about fitting the window. It is about cost: every token of tool output is re-read on later turns, and a cold prefill runs at ~1,700 tokens/s (~1,000 at 116K tokens), so a 5,000-token answer costs about 3 s on every later turn the prefix cache misses, and dilutes the model's attention.
 
@@ -374,7 +451,8 @@ Three rules follow.
 - **Trust gate for executing indexers** (rust-analyzer, scip-java, scip-dotnet):
   - they run only for repositories the user has marked trusted through Codex's own per-project trust (`[projects."<path>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, which the TUI already asks about);
   - **nothing inside the repository can grant trust.** A file there can be shipped in a clone and written by the agent from inside the `workspace-write` sandbox, so a `trusted` key in `<repo>/.dreamference/` or in a repository's `dreamference.toml` is ignored. `$CODEX_HOME` is outside the workspace and read-only in the sandbox;
-  - untrusted repositories get the universal layer plus the static exact layers, and `puffin-code status` says so in one line.
+  - untrusted repositories get the universal layer plus the static exact layers, and `puffin-code status` says so in one line;
+  - **a submodule is trusted only on its own terms** (§4.3): it inherits the superproject's trust when it passes both ownership tests with a namespace to compare, and otherwise needs its own entry. Choosing to index it is not trusting it.
 - **Sandbox, for every indexer.** Each runs as `systemd-run … -- bwrap …`, with the network removed, the home directory hidden, and nothing writable except a scratch directory of its own. For rust-analyzer (§2's measurements were taken with an earlier, looser form of this command; the differences are the binds, which cost nothing):
   ```
   systemd-run --user --scope --unit="puffin-index-$REPO_ID" \
@@ -482,6 +560,18 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **Sandbox sides (§4):** `puffin-code refs` run under Codex's `read-only` sandbox answers from both stores and writes nothing; under `workspace-write` a stale answer appends exactly one request line, and the session process coalesces ten such lines into one run.
 - **scip-python's environment:** a fixture repository whose `.venv/bin/python3` and `sitecustomize.py` write marker files is indexed without either marker appearing.
 - **Prompt:** the `# Code navigation` block is full when the index is ready, reduced while building, absent without a repository, and under 250 tokens.
+- **Submodules (§4.3)**, on fixture repositories built in the test's temporary directory with local bare remotes and fixed author addresses:
+  - same namespace and our authors: indexed (`yours`); same namespace and a foreign author: not indexed (`third-party`); another owner: not indexed (`other organisation`), even with our authors; a relative URL with our authors: indexed;
+  - a shallow single-commit submodule is decided by that commit; a fork with 3 of our commits on 50 upstream ones is `third-party`;
+  - no remote on either side: authorship decides, and an executing indexer never inherits trust from it;
+  - URL forms: `https://`, `ssh://` with a port, scp-like, upper-case owner, an `insteadOf` rewrite, and `https://user:token@host/…`, whose token appears nowhere in the output, the logs or the manifest;
+  - an automatically qualifying submodule above `code_index_submodule_max_files` is `too large`; an explicit `include` overrides it;
+  - an uninitialised submodule is `not checked out`; a nested submodule of an excluded parent is never examined;
+  - `include` and `exclude` in each direction, `exclude` winning over `include`, and `auto` restoring the tests; the choice survives the next launch, which rewrites `.cbmignore` from it (the clobber of the old flag, as a regression test);
+  - under Codex's `read-only` and `workspace-write` sandboxes, `include` fails with the message of §4.3 and writes nothing; a `.cbmignore` or `dreamference.toml` edited inside the repository changes nothing after the next run;
+  - codebase-memory's incremental run both **adds** a newly included submodule's files and **drops** a newly excluded one's (§14.1 measured the drop, not the add);
+  - every answer carries the `submodules not indexed` line while one is left out, and the prompt block names it;
+  - **this repository**, read-only: `fano` is `yours` and `codex` is `third-party` (skipped where the submodules are not checked out).
 - **The separate binary (§4.2):**
   - with `puffin-code` absent from the install directory, `puffin` launches, starts nothing and adds no block (launcher test, in the export);
   - the builder links `~/.local/bin/puffin-code` beside the other three commands, and refreshes the link when the binary is current (Python test, as for `puffin-admin`);
@@ -513,6 +603,8 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **Search by meaning** is off by default until measured (§4); upstream issues #1155 and #1462 suggest it is weak.
 - **codebase-memory's call-edge gaps** are upstream issues (#1153 method calls through instances, #1271 polymorphic Python calls, #1277 cross-file receiver inference, #1354 TypeScript cross-file methods). A release that fixes them changes §2's recall figures, not this design: the exact layer stays the authority where it exists.
 - **Its application of the superproject's `.gitignore` inside submodules** is a bug to report upstream; the design works around it (§4.1).
+- **The ownership tests (§4.3) are evidence, not proof.** A majority-of-authors rule misjudges a repository whose authors use addresses the superproject never has (a new colleague on a personal address): it is then `third-party` until the user includes it, which is the cheap direction. It cannot be fooled into granting trust, which needs the namespace. The list of public mail domains is a judgement, not a standard.
+- **The 5,000-file guard** is scaled from one repository's measurement (§2), not measured on a submodule of that size.
 - **`expt-convert`'s schema** may change: that is why it is pinned and fingerprinted, with our converter as the fallback (§7.5).
 - **SCIP freshness for rust-analyzer is whole-workspace.** It has no crate-scoped mode (its `scip` flags are `--output`, `--config-path` and `--exclude-vendored-libraries`), so the exact Rust layer after a small edit is a full re-run.
 - **Partitioning** may not lower the peak, because the dependency closure of the crates that matter is most of the workspace (§6.4).
@@ -560,7 +652,8 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 
 - `impact` (§7.1); the prompt block does not name it.
 - The fallback converter and the CLI fallback ladder (§4, §7.5): an unknown schema is reported, naming `puffin-code index` or `puffin update`, and the other layer answers.
-- The scratch-copy exact index of a submodule (§6.2); `--include-submodules` changes only `.cbmignore`.
+- The scratch-copy exact index of a submodule (§6.2); `--include-submodules` changes only `.cbmignore`, and only until the next launch rewrites it.
+- The submodule policy of §4.3 (designed 2026-10-01): today every submodule is excluded. It replaces `--include-submodules`.
 - scip-typescript, scip-clang, scip-java, scip-go and scip-dotnet (§6.1); search by meaning (§4).
 - Night Shift scheduling (§6.3) and `puffin-admin mcp` re-pointed at the router (§8).
 
