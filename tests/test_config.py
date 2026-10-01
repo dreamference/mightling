@@ -20,15 +20,6 @@ def test_load_custom_config_file(tmp_path):
     assert config_override.model == "starcoder2-15b"
     assert config_override.draft_model == "qwen2.5-coder-1.5b"
 
-def test_sandbox_config(tmp_path):
-    cfg_file = tmp_path / "sandbox_config.yaml"
-    cfg_file.write_text("sandbox: apptainer\n")
-    config = DreamferenceConfig(config_file=str(cfg_file))
-    assert config.sandbox == "apptainer"
-
-    config_cli = DreamferenceConfig(config_file=str(cfg_file), sandbox="podman")
-    assert config_cli.sandbox == "podman"
-
 def test_hf_token_config(tmp_path):
     cfg_file = tmp_path / "hf_config.yaml"
     cfg_file.write_text("hf_token: hf_test_token_12345\n")
@@ -87,7 +78,7 @@ def test_model_from_config_file_is_preserved_on_resave(tmp_path):
     cfg_file.write_text("model: starcoder2-15b\n")
 
     config = DreamferenceConfig(config_file=str(cfg_file))
-    config.sandbox = "podman"
+    config.agent_runner = "cline"
     config.save_config()
     assert "starcoder2-15b" in cfg_file.read_text()
 

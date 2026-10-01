@@ -92,7 +92,7 @@ Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
 
 ### 3.4. `runner/`: agents
 
-Six runner/installer pairs plus `sandbox_manager.py`. For Codex, the default, `codex_branded_builder.py` builds `puffin` from the submodule, patches and launcher. See `DREAMFERENCE_AGENTS.md` and `DREAMFERENCE_PUFFIN_CODEX.md`.
+Five runner/installer pairs plus `vllm_readiness_waiter.py`. For Codex, the default, `codex_branded_builder.py` builds `puffin` from the submodule, patches and launcher. See `DREAMFERENCE_AGENTS.md` and `DREAMFERENCE_PUFFIN_CODEX.md`.
 
 ### 3.5. `chat/`: the Puffin web UI and desktop
 

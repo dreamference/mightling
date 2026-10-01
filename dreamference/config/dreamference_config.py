@@ -19,7 +19,6 @@ DEFAULT_VLLM_HOST: Final[str] = "http://localhost:8000"
 DEFAULT_MODEL: Final[str] = DEFAULT_MODEL_ALIAS
 DEFAULT_DIFFUSION_MODEL: Final[str] = DEFAULT_DIFFUSION_MODEL_ALIAS
 DEFAULT_SPECULATIVE_TOKENS: Final[int] = 8
-DEFAULT_SANDBOX: Final[str] = "none"
 DEFAULT_AGENT_RUNNER: Final[str] = "codex"
 DEFAULT_PREFIX_CACHING: Final[bool] = True
 DEFAULT_CHUNKED_PREFILL: Final[bool] = True
@@ -67,7 +66,6 @@ class DreamferenceConfig:
         diffusion_model: Optional[str] = None,
         draft_model: Optional[str] = None,
         num_speculative_tokens: Optional[int] = None,
-        sandbox: Optional[str] = None,
         agent_runner: Optional[str] = None,
         hf_token: Optional[str] = None,
         enable_prefix_caching: Optional[bool] = None,
@@ -160,16 +158,6 @@ class DreamferenceConfig:
             self.num_speculative_tokens = int(
                 self.file_data.get("num_speculative_tokens", DEFAULT_SPECULATIVE_TOKENS)
             )
-
-        # 5. Container sandbox engine ('none', 'apptainer', 'podman', 'docker')
-        self.sandbox: str = (
-            sandbox
-            if sandbox is not None
-            else os.getenv(
-                "DREAMFERENCE_SANDBOX",
-                str(self.file_data.get("sandbox", DEFAULT_SANDBOX))
-            )
-        ).lower()
 
         # 6. Agent runner ('codex' [default], 'cline', 'continue' or 'openhands')
         self.agent_runner: str = (
@@ -351,7 +339,6 @@ class DreamferenceConfig:
             data["diffusion_model"] = self.diffusion_model
         if self.draft_model is not None: data["draft_model"] = self.draft_model
         if self.num_speculative_tokens != DEFAULT_SPECULATIVE_TOKENS: data["num_speculative_tokens"] = self.num_speculative_tokens
-        if self.sandbox != DEFAULT_SANDBOX: data["sandbox"] = self.sandbox
         if self.hf_token is not None: data["hf_token"] = self.hf_token
         if self.enable_prefix_caching != DEFAULT_PREFIX_CACHING: data["enable_prefix_caching"] = self.enable_prefix_caching
         if self.enable_chunked_prefill != DEFAULT_CHUNKED_PREFILL: data["enable_chunked_prefill"] = self.enable_chunked_prefill

@@ -33,7 +33,7 @@ The runner is chosen by `--agent`, then `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUN
 
 **Waiting for vLLM** (§6): the three non-Codex runners call `VLLMReadinessWaiter.wait_for_vllm()`. Codex doesn't: the `puffin` launcher waits for the server itself.
 
-**`--sandbox` is inert.** `SandboxManager` builds apptainer/podman/docker prefixes, but no runner applies them; Codex has its own sandbox (`-s/--sandbox` policy).
+**No container sandbox of Dreamference's own.** `puffin-admin`'s `--sandbox` option and `SandboxManager` (apptainer/podman/docker prefixes) were removed on 2026-10-01: Goose applied the prefixes and Aider read the setting, and once both were gone nothing used them. Codex has its own sandbox (`puffin -s/--sandbox` policy), which is unrelated.
 
 ---
 

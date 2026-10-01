@@ -1,16 +1,10 @@
 import os
 from dreamference.config import DreamferenceConfig
 from dreamference.runner import (
-    SandboxManager, ClineRunner, ClineInstaller,
+    ClineRunner, ClineInstaller,
     ContinueRunner, ContinueInstaller,
     OpenHandsRunner, OpenHandsInstaller
 )
-
-def test_runner_sandbox_prefix_none():
-    assert SandboxManager.get_prefix("none", os.getcwd()) == []
-
-def test_runner_sandbox_prefix_docker():
-    assert isinstance(SandboxManager.get_prefix("docker", os.getcwd()), list)
 
 def test_cline_runner_clinerules_creation(tmp_path):
     orig_cwd = os.getcwd()

@@ -617,8 +617,6 @@ class DreamferenceCLIController:
         agent_table.add_row("Tensorize Format Status", tensorize_str)
         if config.draft_model:
             agent_table.add_row("Speculative Draft Model", f"{config.draft_model} ({config.num_speculative_tokens} tokens)")
-        sandbox_str = f"[bold green]{config.sandbox.upper()} (Rootless Isolated)[/bold green]" if config.sandbox != "none" else "[yellow]Disabled (Native Host)[/yellow]"
-        agent_table.add_row("Container Sandbox", sandbox_str)
         hf_token_str = f"[green]Configured ({config.hf_token[:4]}...{config.hf_token[-4:]})[/green]" if config.hf_token else "[yellow]Not Configured (Anonymous Hub Access)[/yellow]"
         agent_table.add_row("HuggingFace Auth Token", hf_token_str)
         agent_table.add_row("Prefix Caching / Chunked", "[bold green]Enabled (Blackwell GB10 Optimized)[/bold green]")
@@ -761,7 +759,6 @@ class DreamferenceCLIController:
         agent_choices = ["codex", "cline", "continue", "openhands"]
 
         parser.add_argument("--config", default=None, help="Path to custom Puffin config file (.toml, .yaml or .json)")
-        parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox isolation engine")
         parser.add_argument("--agent", choices=agent_choices, default=None, help="Select primary AI agent runner (default: codex)")
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
         subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
@@ -771,7 +768,6 @@ class DreamferenceCLIController:
         init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
         init_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
-        init_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
@@ -780,7 +776,6 @@ class DreamferenceCLIController:
         run_parser.add_argument("prompt", type=str, help="Task prompt for AI agent")
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         run_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model name")
-        run_parser.add_argument("--sandbox", choices=["none", "apptainer", "podman", "docker"], default=None, help="Rootless container sandbox engine")
         run_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         run_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
@@ -1112,7 +1107,6 @@ class DreamferenceCLIController:
         diffusion_model = getattr(args, "diffusion_model", None)
         draft_model = getattr(args, "draft_model", None)
         num_speculative_tokens = getattr(args, "num_speculative_tokens", None)
-        sandbox = getattr(args, "sandbox", None)
         agent_runner = getattr(args, "agent", None)
         hf_token = getattr(args, "hf_token", None)
         num_scheduler_steps = getattr(args, "num_scheduler_steps", None)
@@ -1130,7 +1124,6 @@ class DreamferenceCLIController:
             diffusion_model=diffusion_model,
             draft_model=draft_model,
             num_speculative_tokens=num_speculative_tokens,
-            sandbox=sandbox,
             agent_runner=agent_runner,
             hf_token=hf_token,
             num_scheduler_steps=num_scheduler_steps,
@@ -1861,7 +1854,6 @@ class DreamferenceCLIController:
             console.print(f"   [cyan]Target Model:[/cyan]    {config.model}")
             if config.draft_model:
                 console.print(f"   [cyan]Draft Model:[/cyan]     {config.draft_model} ({config.num_speculative_tokens} tokens)")
-            console.print(f"   [cyan]Sandbox Isolation:[/cyan]{config.sandbox.upper() if config.sandbox != 'none' else 'Disabled (Native Host)'}")
             console.print(f"   [cyan]HF Auth Token:[/cyan]    {'Configured' if config.hf_token else 'Not Configured'}")
             console.print(f"   [cyan]Target Host:[/cyan]     {config.vllm_host}")
             console.print(f"   [cyan]Indexed Files:[/cyan]   {summary['total_indexed_files']} ({summary['total_ast_symbols']} AST symbols)")

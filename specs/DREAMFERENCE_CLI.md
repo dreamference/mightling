@@ -46,7 +46,6 @@ These options come before the subcommand (`puffin-admin --agent cline run "…"`
 | Flag | Type | Description |
 | :--- | :--- | :--- |
 | `--config PATH` | Path | Custom Puffin config file |
-| `--sandbox {none,apptainer,podman,docker}` | Choice | Rootless container sandbox engine |
 | `--agent {codex,cline,continue,openhands}` | Choice | Agent runner (default `codex`) |
 | `--hf-token TOKEN` | String | HuggingFace token (else `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN`) |
 
@@ -58,8 +57,8 @@ These options come before the subcommand (`puffin-admin --agent cline run "…"`
 
 | Subcommand | Description | Key Args |
 | :--- | :--- | :--- |
-| **`init`** | Download weights, write the config, force a workspace re-index | `[--model] [--vllm-host] [--draft-model] [--sandbox] [--agent] [--hf-token]` |
-| **`run`** | Run one task with the selected agent | `PROMPT [--model] [--draft-model] [--sandbox] [--agent] [--hf-token] [--debug] [--cave]` |
+| **`init`** | Download weights, write the config, force a workspace re-index | `[--model] [--vllm-host] [--draft-model] [--agent] [--hf-token]` |
+| **`run`** | Run one task with the selected agent | `PROMPT [--model] [--draft-model] [--agent] [--hf-token] [--debug] [--cave]` |
 | **`status`** | Hardware, vLLM and agent, and context-index panels | — |
 | **`index`** | AST + FTS5 + TF-IDF + embedding workspace index | `[--dir PATH] [--force]` |
 | **`mcp`** | stdio MCP server for JetBrains / VS Code | — |
@@ -94,7 +93,7 @@ A top-level `clear-tensorize-cache` subcommand is the older spelling of `clear t
 ### 4.1. `puffin-admin init`
 
 ```bash
-puffin-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--sandbox …] [--agent …] [--hf-token …]
+puffin-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--agent …] [--hf-token …]
 ```
 
 **Behaviour:**
@@ -121,7 +120,7 @@ puffin-admin diffusion-model set MODEL
 ### 4.3. `puffin-admin run`
 
 ```bash
-puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--sandbox …] [--hf-token …] [--debug] [--cave]
+puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--hf-token …] [--debug] [--cave]
 ```
 
 **Behaviour:** dispatches on `config.agent_runner` to one of `CodexRunner` (also for any unrecognised value), `ClineRunner`, `ContinueRunner` or `OpenHandsRunner`, then calls `run_session(prompt=…, debug=…)`.
@@ -370,7 +369,7 @@ Each piece has its own opt-out. See `DREAMFERENCE_ONYX.md`.
 
 Every field resolves in `DreamferenceConfig.__init__`, highest priority first:
 
-1. **Constructor arguments**: the CLI passes `--model`, `--agent`, `--sandbox`, … through them.
+1. **Constructor arguments**: the CLI passes `--model`, `--agent`, … through them.
 2. **Environment variables**: `DREAMFERENCE_*`, `HF_TOKEN`.
 3. **Config file**, resolved by `ConfigPathResolver`, first match wins:
    1. `--config`;
@@ -412,7 +411,6 @@ puffin_gmail = true
 | `DREAMFERENCE_DIFFUSION_MODEL` | `tiny-a2d-coder-0.5b-diffusion` | Diffusion sidecar model |
 | `DREAMFERENCE_DRAFT_MODEL` | (unset) | Draft model alias |
 | `DREAMFERENCE_SPECULATIVE_TOKENS` | `8` | Speculative token count |
-| `DREAMFERENCE_SANDBOX` | `none` | Sandbox engine |
 | `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | `codex` | Agent runner (`codex`, `cline`, `continue`, `openhands`) |
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_PUFFIN_GMAIL` | `true` | Add the Gmail section to `puffin`'s prompt when an account is connected |

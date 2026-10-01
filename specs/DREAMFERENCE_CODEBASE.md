@@ -86,8 +86,7 @@ dreamference/
 │   ├── cline_runner.py / cline_installer.py
 │   ├── continue_runner.py / continue_installer.py
 │   ├── openhands_runner.py / openhands_installer.py
-│   ├── vllm_readiness_waiter.py                 # VLLMReadinessWaiter (wait_for_vllm)
-│   └── sandbox_manager.py                       # SandboxManager (no runner applies it)
+│   └── vllm_readiness_waiter.py                 # VLLMReadinessWaiter (wait_for_vllm)
 ├── chat/
 │   ├── onyx_runner.py / onyx_installer.py       # OnyxRunner / OnyxInstaller
 │   ├── onyx_ui_overrides.py                     # OnyxUIOverrides (appended CSS)
@@ -144,7 +143,7 @@ desktop/src-tauri/                              # Tauri shell (binary puffin-app
 
 ### 3.4. `runner/`
 
-Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessWaiter` (the non-Codex runners' wait for the server), `SandboxManager` (which no runner applies) and `CodexBrandedBuilder`. See `DREAMFERENCE_AGENTS.md`.
+Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessWaiter` (the non-Codex runners' wait for the server) and `CodexBrandedBuilder`. See `DREAMFERENCE_AGENTS.md`.
 
 ### 3.5. `chat/`
 
