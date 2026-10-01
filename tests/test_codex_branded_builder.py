@@ -50,8 +50,10 @@ def test_the_patches_stay_small():
     # in 0001 (slash-command descriptions, the Full Access warning, `exec`'s reply label). Raised to
     # 25,000 on 2026-10-01 for 0017's cave-mode hooks (~3 KB: `/cavemode` in five places, and the
     # extension's registration in the app server and in `debug prompt-input`); the series was 21,807
-    # bytes before it. The Night Shift patch will need another explicit raise.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 25_000
+    # bytes before it. Raised to 27,500 on 2026-10-01 for 0018's `/night` hooks (2,133 bytes: the
+    # variant, its description, two capability lists and three dispatch arms); the series was
+    # 24,800 bytes before it and is 26,933 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 27_500
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

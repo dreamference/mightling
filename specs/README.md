@@ -42,9 +42,11 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_CODEX.md](./DREAMFERENCE_CODEX.md) | Superseded Codex page; what `CodexRunner`/`CodexInstaller` still do |
 | [DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md) | The context engine (`puffin-admin index`, MCP `workspace_search_code`), with known gaps |
 | [DREAMFERENCE_PUFFIN_CODE_INDEX.md](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) | *Implemented (§14):* code index for `puffin`, the separate `puffin-code` binary (codebase-memory-mcp + SCIP) |
-| [DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) | *Proposed:* `/night`, an overnight task queue worked in git worktrees on the GB10 |
+| [DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) | `/night`, an overnight task queue worked in git worktrees on the GB10 (implemented 2026-10-01; §11 records what was built) |
 | [DREAMFERENCE_SELF_SPEEDING.md](./DREAMFERENCE_SELF_SPEEDING.md) | *Proposed:* retraining the speculative drafter on your own sessions (`puffin-admin drafter`) |
 | [DREAMFERENCE_PUFFIN_EGRESS.md](./DREAMFERENCE_PUFFIN_EGRESS.md) | *Proposed:* `puffin-admin audit egress` and `puffin --airlock` |
+| [DREAMFERENCE_PUFFIN_COMPACTION.md](./DREAMFERENCE_PUFFIN_COMPACTION.md) | *Proposed:* when `puffin` compacts: a limit tied to the KV pool, a per-task limit for Night Shift, and why the diffusion model is not used for it |
+| [DREAMFERENCE_PUFFIN_AIRGAPPED.md](./DREAMFERENCE_PUFFIN_AIRGAPPED.md) | *Proposed:* `/airgapped`, three levels of internet access for a `puffin` session: everything, DuckDuckGo-only search, none |
 | [DREAMFERENCE_PUFFIN_FAST_TOOLS.md](./DREAMFERENCE_PUFFIN_FAST_TOOLS.md) | *Proposed:* `puffin fast`, a diffusion model (DiffusionGemma 26B A4B) for long routine output |
 | [DREAMFERENCE_PUFFIN_CAVE_MODE.md](./DREAMFERENCE_PUFFIN_CAVE_MODE.md) | *Implemented (Phase 1):* `/cavemode`, terse answers by default (`ultra`), measured on this machine |
 

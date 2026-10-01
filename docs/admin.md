@@ -240,6 +240,37 @@ Install the pinned tools of puffin-code's code index.
 
 Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin.
 
+### `puffin-admin night`
+
+Run the Night Shift queue overnight (tasks are queued with /night add).
+
+#### `puffin-admin night enable`
+
+Install the systemd user timer that runs the queue every night.
+
+| Option | Description |
+|---|---|
+| `--window` | HH:MM-HH:MM (default: [night] window, 01:00-07:00) |
+
+#### `puffin-admin night disable`
+
+Remove the Night Shift timer.
+
+#### `puffin-admin night status`
+
+Show the timer, the window and the queue of every repository.
+
+#### `puffin-admin night run`
+
+Work through the queue now, until the window ends.
+
+| Option | Description |
+|---|---|
+| `--until` | HH:MM to stop at (default: the end of the window) |
+| `--minutes` | Run for this many minutes instead. |
+| `--idle-minutes` | Minutes the model must have been idle first (default 10) |
+| `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing; their requests still pause the run) |
+
 ### `puffin-admin benchmark_server`
 
 Run vLLM serve benchmark using Sonnet dataset.

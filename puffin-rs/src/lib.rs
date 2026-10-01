@@ -36,6 +36,7 @@ pub mod cave;
 pub mod code_index;
 pub mod help;
 pub mod home;
+pub mod night;
 
 pub mod update;
 pub mod usage;
@@ -187,8 +188,24 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(app::open(&user_args[index + 1..]).await);
     }
+    // `night` is Night Shift's queue (night.rs): `/night` from a shell, for scripts and cron.
+    if let Some(index) = subcommand
+        && user_args[index] == "night"
+    {
+        std::process::exit(night::run_cli(&user_args[index + 1..]));
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
+    }
+
+    // The interactive TUI (no subcommand, or a prompt) says once what a night run finished.
+    let interactive = subcommand.is_none_or(|index| command.find_subcommand(&user_args[index]).is_none());
+    if interactive
+        && let Some(dir) = night::night_dir()
+        && let Ok(cwd) = std::env::current_dir()
+        && let Some(line) = night::startup_line(&dir, &cwd)
+    {
+        eprintln!("{line}");
     }
 
     let host = vllm_host();
@@ -362,7 +379,7 @@ fn vllm_host_from_toml(text: &str) -> Option<String> {
 }
 
 /// `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`.
-fn config_file() -> Option<PathBuf> {
+pub(crate) fn config_file() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("DREAMFERENCE_CONFIG_PATH")
         && !path.is_empty()
     {

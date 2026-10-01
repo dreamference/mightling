@@ -559,6 +559,22 @@ class DreamferenceCLIController:
         return facts
 
     @classmethod
+    def _refuse_during_night_run(cls, what: str) -> None:
+        """
+        Stops `puffin-admin <what>` while a Night Shift run holds its lock: a build, an index run
+        or a model load beside the night's sessions is what put the model server at risk before
+        (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §6.2).
+
+        Args:
+            what: The command, for the message.
+        """
+        from dreamference.night_shift import NightShiftQueue
+        if NightShiftQueue.runner_active():
+            print(f"❌ A Night Shift run is in progress, so `puffin-admin {what}` waits: "
+                  "see `puffin-admin night status`.")
+            sys.exit(1)
+
+    @classmethod
     def handle_status(cls) -> None:
         """
         Executes `puffin-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
@@ -930,6 +946,19 @@ class DreamferenceCLIController:
         code_subparsers.add_parser(
             "setup", help="Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin"
         )
+
+        # Command: puffin-admin night (Night Shift: run queued tasks overnight)
+        night_parser = subparsers.add_parser("night", help="Run the Night Shift queue overnight (tasks are queued with /night add)")
+        night_subparsers = night_parser.add_subparsers(dest="night_command")
+        night_enable_parser = night_subparsers.add_parser("enable", help="Install the systemd user timer that runs the queue every night")
+        night_enable_parser.add_argument("--window", default=None, help="HH:MM-HH:MM (default: [night] window, 01:00-07:00)")
+        night_subparsers.add_parser("disable", help="Remove the Night Shift timer")
+        night_subparsers.add_parser("status", help="Show the timer, the window and the queue of every repository")
+        night_run_parser = night_subparsers.add_parser("run", help="Work through the queue now, until the window ends")
+        night_run_parser.add_argument("--until", default=None, help="HH:MM to stop at (default: the end of the window)")
+        night_run_parser.add_argument("--minutes", type=float, default=None, help="Run for this many minutes instead")
+        night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
+        night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open puffin sessions to close (for testing; their requests still pause the run)")
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
@@ -1916,6 +1945,7 @@ class DreamferenceCLIController:
 
 
             if args.server_command == "start":
+                cls._refuse_during_night_run("server start")
                 cls.display_header()
                 # An explicit --model wins; otherwise the configured main model serves, so
                 # `main-model set` and `server start` can never disagree again.
@@ -2083,6 +2113,22 @@ class DreamferenceCLIController:
                 except KeyboardInterrupt:
                     print("\nStopped tailing logs.")
 
+        elif args.command == "night":
+            from dreamference.night_shift import NightShiftRunner, NightShiftScheduler, NightShiftSettings
+            if args.night_command == "enable":
+                sys.exit(0 if NightShiftScheduler.enable(args.window or NightShiftSettings().window) else 1)
+            if args.night_command == "disable":
+                sys.exit(0 if NightShiftScheduler.disable() else 1)
+            if args.night_command == "status":
+                print(NightShiftScheduler.status())
+                sys.exit(0)
+            if args.night_command == "run":
+                sys.exit(NightShiftRunner.run(until=args.until, minutes=args.minutes,
+                                              idle_minutes=args.idle_minutes,
+                                              ignore_sessions=args.ignore_open_sessions))
+            print("usage: puffin-admin night {enable,disable,status,run}")
+            sys.exit(2)
+
         elif args.command == "code":
             from dreamference.cli.code_index_setup import CodeIndexSetup
             if args.code_command == "setup":
@@ -2094,6 +2140,7 @@ class DreamferenceCLIController:
             import subprocess
             from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
             if args.codex_command == "build":
+                cls._refuse_during_night_run("codex build")
                 sys.exit(0 if CodexBrandedBuilder.build(force=args.force) else 1)
             if args.codex_command == "test":
                 from dreamference.runner.codex_test_runner import CodexTestRunner
@@ -2174,6 +2221,7 @@ class DreamferenceCLIController:
                 print("\n⏹️  Benchmark cancelled.")
 
         elif args.command == "index":
+            cls._refuse_during_night_run("index")
             cls.display_header()
             target_dir = args.dir or os.getcwd()
             from dreamference.context_engine import ContextEngine

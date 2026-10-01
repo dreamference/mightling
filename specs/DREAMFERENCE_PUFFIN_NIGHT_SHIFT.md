@@ -1,6 +1,6 @@
 # Puffin Night Shift — `/night`
 
-**Status:** proposed. Nothing in this spec is implemented yet.
+**Status:** implemented on 2026-10-01: the launcher module `puffin-rs/src/night.rs`, patch `0018-night-slash-command`, and the runner package `dreamference/night_shift/` with `puffin-admin night {enable,disable,status,run}`. Where the build departs from the design below, §11 says how and why; the measured runs are in §11.4.
 **Target:** the `puffin` terminal agent, and the GB10 it runs on overnight.
 **Builds on:**
 - the launcher in `puffin-rs/`;
@@ -8,7 +8,7 @@
 - `puffin exec` and its `resume`;
 - git worktrees;
 - `VLLMServerManager.check_host_safety()` ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
-- the admission-control pattern in [PUFFIN_CODE_INDEX §5.5](./DREAMFERENCE_PUFFIN_CODE_INDEX.md);
+- the admission-control pattern in [PUFFIN_CODE_INDEX §6.4](./DREAMFERENCE_PUFFIN_CODE_INDEX.md);
 - the nudge-on-stall loop in `tests/test_puffin_slash_commands.py`.
 
 ---
@@ -44,7 +44,7 @@ You queue coding tasks during the day with `/night add …`, from inside a `puff
 | `/night add --test "<cmd>" <task>` | As above, with the command that decides pass or fail. Without it, the command is detected (§5.4). |
 | `/night` or `/night list` | Lists this repository's queue: id, status, age, first line of the task. The last line is the next window. |
 | `/night show <id>` | The full task, its status history, and for finished tasks the branch, diff stat, test result and stall notes. |
-| `/night drop <id>` | Cancels a queued task. A running task is marked `cancel-requested` and stopped at its next check (§5.3). |
+| `/night drop <id>` | Cancels a queued or interrupted task. A running task is marked `cancel-requested` and stopped at its next check (§5.3). A unique suffix of the id is enough (`/night drop a3f`). |
 | `/night report` | The latest morning report (§5.6) for this repository. |
 
 **Rules:**
@@ -64,19 +64,24 @@ The Codex source is never edited ([PUFFIN_CODEX §1](./DREAMFERENCE_PUFFIN_CODEX
 - the variant `SlashCommand::Night` (strum's kebab-case gives `night`), placed after `Goal` so it sits near the long-running-task commands in the popup;
 - its description, "queue a task for the overnight run";
 - membership in `supports_inline_args()` and `available_during_task()`;
-- one arm in `dispatch_command` and one in `dispatch_command_with_args`. Both call `puffin_launcher::night::command(&args, &cwd)`, which returns the lines to print, and add them with `add_plain_history_lines`, as `/usage` does.
+- one arm in `dispatch_command` and one in `dispatch_command_with_args`. Both call `puffin_launcher::night::command(args, &self.config.cwd)`, which returns the lines to print, and add them with `add_plain_history_lines`, as `/usage` and `/cavemode` do;
+- membership in `queued_command_drain_result`'s list of commands that run at once when queued.
 
-**Budget.** The patch series is capped at 25,000 bytes (`test_the_patches_stay_small`) and stands at 24,800 bytes since `0017-cave-mode` (2026-10-01). That leaves 200 bytes, which `0018` will not fit: it raises the cap explicitly, as the name hooks and cave mode did.
+`tui` already depends on the launcher crate (patch `0011`), so `0018` needs no manifest change.
+
+**Budget.** The patch series was capped at 25,000 bytes (`test_the_patches_stay_small`) and stood at 24,800 bytes after `0017-cave-mode`. `0018` is 2,133 bytes (seven hunks in two files), so the series is 26,933 bytes and the cap was raised to 27,500 in the same commit, explicitly, as the name hooks and cave mode did.
 - Adding a variant needs an arm in every exhaustive `match` over `SlashCommand`. Across the three files that is about six places, judging by where `Goal` appears.
 - Where `_ =>` defaults already exist, rely on them.
 - If `0018` cannot fit, raise the cap in the same commit and say why. Do not trim the other patches.
 
 **Launcher module `puffin-rs/src/night.rs`:**
-- argument parsing;
+- argument parsing, for the TUI line and for `puffin night …`;
 - queue reads and writes (§4);
-- `git rev-parse` for the repository root and `HEAD`;
-- test-command detection;
-- report formatting.
+- `git rev-parse` for the repository root and `HEAD` (a linked worktree's root is its main checkout, so a task queued from one is listed with the others);
+- printing the latest report's section for this repository;
+- the startup line.
+
+Test-command detection is not here: it needs the worktree at the task's base, which exists only when the task runs, so the runner does it once (§11.1).
 
 It has no network code and no knowledge of vLLM. Its unit tests run with the other launcher tests in the export directory.
 
@@ -92,10 +97,12 @@ It has no network code and no knowledge of vLLM. Its unit tests run with the oth
 ```
 ~/.puffin/night/
   tasks/<id>.json        one task; written atomically (write + rename)
+  tasks/<id>.lock        flock held for every read-modify-write, by the launcher and the runner alike
   worktrees/<id>/        the task's git worktree while it exists
   logs/<id>.jsonl        `puffin exec --json` events of every attempt
   reports/<date>.md      the morning report
   runner.lock            flock held by the runner for the whole night
+  seen.json              when each repository's results were last announced at startup
 ```
 
 **Task record:**
@@ -127,6 +134,7 @@ It has no network code and no knowledge of vLLM. Its unit tests run with the oth
 | `stalled` | Still no action after the nudges (§5.3). |
 | `failed` | An error prevented the run. |
 | `interrupted` | Cut off by the end of the window; kept for the next night. |
+| `cancel-requested` | Dropped while running; the runner stops it at its next step and writes `cancelled`. A runner status never overwrites it. |
 | `cancelled` | Dropped. |
 
 **Ordering:** tasks run first in, first out within a repository. Across repositories they round-robin, so one long list cannot starve another.
@@ -185,7 +193,7 @@ The runner takes `runner.lock` and then checks, in order, stopping with a reason
 The first match wins, and the report says which one was chosen:
 1. the task's `--test`;
 2. `night.test` in the repository's `dreamference.toml`;
-3. `pyproject.toml` or `pytest.ini` with a `tests/` directory: `python -m pytest -q`, using the repository's `.venv/bin/python` if present;
+3. `pyproject.toml`, `pytest.ini` or `setup.py` (this repository has only the last) with a `tests/` directory: `python -m pytest -q`, using the repository's `.venv/bin/python` if present;
 4. `Cargo.toml`: `cargo test`;
 5. `package.json` with a `test` script: `npm test`;
 6. otherwise none, and the report says the result is untested.
@@ -215,12 +223,13 @@ It ends with the review commands (`git diff <base>..night/<id>`, `git worktree l
    - Nothing touches the user's checkout: the agent's sandbox allows writes only inside its worktree and `/tmp`.
    - The runner's own git commands name the worktree explicitly.
    - Nothing is merged, pushed or rebased.
+   - **One exception, as built:** the runner's own test run is not sandboxed. It executes the task's test command, and with it code the agent wrote, with the user's rights, inside the task's memory-capped scope only (§11.4).
 2. **The model server is never at risk.**
    - It is never loaded, restarted or stopped by the runner.
    - Every task runs under a memory cap, and admission requires headroom.
    - While the runner holds its lock, `puffin-admin index`, `codex build` and `server start` refuse to run, with a message naming the night run. This is the rule that today's earlyoom kill of vLLM (an index run beside the server) made explicit.
 3. **Interactive use wins** (§5.5).
-4. **Network.** The night run uses the same channels as an interactive session. Once the egress airlock exists ([PUFFIN_EGRESS](./DREAMFERENCE_PUFFIN_EGRESS.md)), night runs use it by default.
+4. **Network.** The night run uses the same channels as an interactive session. Once `/airgapped` exists, a night run follows the configured level, and `[night] airgapped` may set a stricter one ([PUFFIN_AIRGAPPED §7](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)); this replaces the earlier plan to put night runs in the egress airlock by default.
 
 ---
 
@@ -237,6 +246,8 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `task_memory` | `8G` | `MemoryMax` of each task's scope. |
 | `nudges` | `2` | Nudges before `stalled`. |
 | `test` | *(detected)* | Default test command for the repository. |
+| `task_context` | `49152` | Tokens of KV cache budgeted per concurrent task (§11.1). |
+| `idle_minutes` | `10` | How long the model must have been idle before a night starts (§5.2). |
 
 ---
 
@@ -278,3 +289,57 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 - **Waiting on vLLM:** should admission wait, rather than skip, when vLLM is down at window start? For now it skips and reports.
 - **Tasks needing input:** Codex's own `/goal` mode already frames long-running work. Should a night task be a goal, so that a question the agent would ask is recorded in the report instead of ending the turn? That needs measuring against the stall check.
 - **Drafter tuning:** it needs vLLM stopped ([SELF_SPEEDING §5](./DREAMFERENCE_SELF_SPEEDING.md)), so the two cannot overlap. The proposal is that tuning takes the tail of the window, only after the night queue is empty.
+
+---
+
+## 11. As built (2026-10-01)
+
+### 11.1 Departures from the design, each for a measured reason
+
+- **Parallelism uses a per-task budget, not the full context.** §5.2's formula, `floor(KV pool / max_model_len)`, gives **0** on the default model: SGLang's pool is 144,870 tokens (`sglang:max_total_num_tokens`) and the served context is 262,144, so not even one full context fits. A Codex task's context grows with its turns but rarely nears the window, and SGLang shares the common prompt prefix between streams, so each task is budgeted `task_context` tokens (default 49,152): `N = max(1, min(max_parallel, floor(pool / task_context)))`, which was **2** with the 144,870-token pool and **3** after the server's restart on 2026-10-01 gave it 156,907. The pool is read under both engines' names: `sglang:max_total_num_tokens`, or `num_gpu_blocks × block_size` from `vllm:cache_config_info`.
+- **Idle is a counter, not a gauge.** "No running request for 10 minutes" cannot be read from a gauge sampled once. The runner samples `/metrics` every 30 s and requires the running and queued gauges (`sglang:num_running_reqs` + `sglang:num_queue_reqs`, or `vllm:num_requests_running` + `vllm:num_requests_waiting`) to be zero **and** the prompt-token counter (`sglang:prompt_tokens_total` / `vllm:prompt_tokens_total`) unchanged for `idle_minutes`. If the window closes first, the night is skipped and the report says so.
+- **"An outside request" is defined.** Once night tasks are running, requests are expected. An outside request is one beyond the night's own: the engine's running plus queued requests exceed the number of night tasks currently waiting on the model. A `puffin` TUI is found by process: the installed binary, `argv[0]` `puffin` or `codex` (not Codex's sandbox re-executions), no non-interactive subcommand, and not carrying `PUFFIN_NIGHT_RUN=1`, which the runner sets on every process it starts.
+- **Memory is admitted per task, not once.** Before each start: `MemAvailable` minus what the running tasks may still grow into (`task_memory` minus each scope's `MemoryCurrent`) must be at least the 8 GiB reserve plus one more `task_memory`. The night-wide check of §5.2 still runs first.
+- **Test detection lives in the runner only**, in the worktree at the task's base, so there is one implementation; `/night add` says the command is detected when the task runs, and the report and `/night show` print the command and where it came from. A worktree has no `.venv` of its own, so the main checkout's is used for pytest.
+- **The model id recorded at `add`** comes from `$CODEX_HOME/model_catalog.json` (`models[0].slug`), which the launcher writes at every start: the launcher module has no network code.
+- **The window shown by `/night list`** is the installed timer's (`night enable` writes it on a `# Night Shift window:` line of the timer unit), falling back to `[night] window` with a note that Night Shift is not enabled.
+- **The timer's service names everything absolutely.** A user service has neither `~/.local/bin` nor the virtualenv on its PATH: `ExecStart` is this environment's `puffin-admin`, `PATH` adds `~/.local/bin` (for `puffin-search`/`puffin-fetch`) and `~/.cargo/bin`, and the runner runs the installed `puffin` by path. `night enable` warns when lingering is off, because a user timer stops at logout.
+- **Every `puffin exec` gets `stdin` from `/dev/null`.** Without it, exec prints "Reading additional input from stdin..." and, under a service with no terminal, waits.
+- **Each task's processes run under `choom -n 500`** inside the scope, so that if memory runs out anyway earlyoom picks them before the model server.
+- **`puffin-admin night run --ignore-open-sessions`** skips the TUI check (requests from open sessions still pause the run). It exists for testing beside an open session; the timer never passes it.
+- **A night task's `puffin exec` also starts `puffin-code session`.** It maps the worktree onto the main checkout's index (code-index spec §4.1), and that index's session lock lets one session process own the repository, so parallel tasks do not each start an index run.
+
+### 11.2 Where the code is
+
+| Piece | Path |
+|---|---|
+| `/night`, `puffin night …`, startup line | `puffin-rs/src/night.rs` |
+| TUI hooks | `codex-patches/0018-night-slash-command.patch` |
+| Queue (shared format, per-task locks, `runner.lock`) | `dreamference/night_shift/night_shift_queue.py` |
+| Settings (`[night]`) | `dreamference/night_shift/night_shift_settings.py` |
+| Host probes (model server, memory, sessions, heavy jobs) | `dreamference/night_shift/night_shift_host.py` |
+| One task (worktree, exec, nudges, tests, commit) | `dreamference/night_shift/night_shift_task_run.py` |
+| Admission and scheduling | `dreamference/night_shift/night_shift_runner.py` |
+| Morning report | `dreamference/night_shift/night_shift_report.py` |
+| Timer | `dreamference/night_shift/night_shift_scheduler.py` |
+| Refusals during a night run | `DreamferenceCLIController._refuse_during_night_run` (`index`, `codex build`, `server start`) |
+
+### 11.3 Tests
+
+- **Launcher** (`cargo test -p puffin-launcher` in the export): parsing of every `/night` form and of `puffin night …`; add, list, show and drop round trip, drop by id suffix, drop of a running task; uncommitted-change warning; refusal outside a repository; a linked worktree's tasks belong to the main checkout; 200 ids without a collision; the report section and the newest report; the startup line announced once; the window from the timer, then the config.
+- **Runner** (`tests/test_night_shift.py`, a scripted stand-in for `puffin`): a change committed on `night/<id>` with the user's checkout untouched; a failing test recorded; an announce-only reply nudged twice and then `stalled`; a nudge that works; `no-change`; an exec error; an interrupted task keeping its worktree and resuming its session the next time; cancellation before a start and while running; a vanished base; test detection in its order; metrics under both engines' names; parallelism never 0; TUI command lines; each admission check on its own; the idle wait counted from the last change; the window closing while waiting; round-robin; an outside request or session blocking a start; memory blocking a start; a whole night of three tasks with its report; a refused admission keeping the queue; a second runner refused; `codex build` refused while a night run holds the lock; the queue format shared with the launcher; the timer units; the report's rows.
+- **Not covered by the slash suite.** `tests/test_puffin_slash_commands.py` enumerates the slash commands of unpatched Codex, so a command a patch adds is invisible to it, as `/cavemode` was. `/night` was checked in the TUI itself instead, driven through tmux (§11.4).
+- **Codex's own TUI snapshots** that list the slash-command popup change again with `/night` in it, as they did with `/cavemode`; they need new snapshots reviewed by hand.
+
+### 11.4 Measured runs
+
+One task, run for real on 2026-10-01 against the default model (Qwen3.8-27B on SGLang), with the rebuilt `puffin` (16 patches):
+
+- **Queued from a shell.** In a throwaway repository (`calc.py` whose `add` subtracts, one failing test), `puffin night add "The test tests/test_calc.py::test_add fails. Find the bug in calc.py and fix it."` printed the id, the branch and the not-enabled note; `puffin night list` showed it `queued`; an unknown verb printed the usage line and exited 2.
+- **Run.** `puffin-admin night run --minutes 20 --idle-minutes 1`: admission passed (model answering, host-safety checks, memory, no heavy job, one idle minute), parallelism 3. The task took 7 s: `running` at 18:42:36, `done` at 18:42:43, no nudge. The whole command took 1 min 15 s, one minute of it the idle wait.
+- **Result.** Branch `night/20261001-1841-4fc`, one commit by the repository's own git identity, `return a - b` → `return a + b`; detected test command `python3 -m pytest -q`, passed (2 tests). The checkout stayed on `master` at its commit, the worktree was removed, and `puffin night show`, `puffin night report` and the report file agreed.
+- **Found and fixed.** The commit also carried `__pycache__/*.pyc`, which the test run had written in a repository with no `.gitignore`. The runner now stages the agent's changes *before* its own test run and commits what was staged; a test covers it. This removes only what the runner's test run writes: the agent is told to run the test command too, and what its own commands leave in a repository without a `.gitignore` is still committed with its changes.
+- **Not run live:** a stall and its nudges, an interrupted task resumed on a second night, two tasks in parallel, and the installed timer firing at 01:00. The runner tests cover the first three with the scripted stand-in.
+- **In the TUI** (a real `puffin` session in tmux, same repository): `/nig` shows `/night  queue a task for the overnight run` in the popup; `/night list`, `/night add --test "python3 -m pytest -q" …`, `/night show 4fc` (id suffix) and `/night report` each print at once, with no model turn; the quoted `--test` command is recorded verbatim.
+- **Open.** The runner's own test run is not sandboxed: it executes the task's test command, and so code the agent wrote, with the user's full rights (inside the memory-capped scope only). The agent's own commands run in Codex's workspace-write sandbox.
+

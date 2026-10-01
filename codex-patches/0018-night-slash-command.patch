@@ -1,0 +1,36 @@
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+index fce548a..59f8446 100644
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -539,2 +539,3 @@ impl ChatWidget {
+             SlashCommand::Cavemode => self.add_plain_history_lines(puffin_launcher::cave::command(self.thread_id, "").into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Ide => {
+@@ -782,2 +783,3 @@ impl ChatWidget {
+             SlashCommand::Cavemode => self.add_plain_history_lines(puffin_launcher::cave::command(self.thread_id, trimmed).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
+@@ -1208,2 +1210,3 @@ impl ChatWidget {
+             | SlashCommand::Cavemode
++            | SlashCommand::Night
+             | SlashCommand::DebugConfig
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+index 2652f76..119e1d3 100644
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -44,2 +44,3 @@ pub enum SlashCommand {
+     Goal,
++    Night,
+     Agents,
+@@ -139,2 +140,3 @@ impl SlashCommand {
+             SlashCommand::Goal => "set or view the goal for a long-running task",
++            SlashCommand::Night => "queue a task for the overnight run",
+             SlashCommand::Agents => "open the agent command center",
+@@ -177,2 +179,3 @@ impl SlashCommand {
+                 | SlashCommand::Goal
++                | SlashCommand::Night
+                 | SlashCommand::Voice
+@@ -287,2 +290,3 @@ impl SlashCommand {
+             | SlashCommand::Goal
++            | SlashCommand::Night
+             | SlashCommand::Voice
