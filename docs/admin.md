@@ -223,6 +223,18 @@ Start puffin's app-server daemon in the background.
 
 Stop puffin's app-server daemon.
 
+#### `puffin-admin codex test`
+
+Run Codex's own tests on puffin's patched tree, except those in codex-tests/puffin-skips.toml.
+
+| Option | Description |
+|---|---|
+| `-E`, `--filter` | nextest filterset to narrow the run to. |
+| `--test-threads` | Tests run at once (default 8) |
+| `--jobs` | Parallel compile jobs (default 6) |
+| `--memory-max` | Memory the run may use (default 24G) |
+| `--accept-snapshots` | Rewrite the selected TUI snapshots and keep those that differ from upstream's by the name alone. |
+
 ### `puffin-admin code`
 
 Install the pinned tools of puffin-code's code index.

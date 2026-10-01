@@ -1,0 +1,65 @@
+---
+source: tui/src/startup_draft_tests.rs
+expression: "snapshots.join(\"\\n---\\n\")"
+---
+empty (48 columns):
+
+  >_ Puffin (v<VERSION>)
+     loading
+
+  Pull up a prompt.
+
+
+› Ask Puffin to do anything
+
+  ? for shortcuts
+---
+resuming (48 columns):
+
+  >_ Puffin (v<VERSION>)
+     loading
+
+  Pull up a prompt.
+  Resuming session…
+
+› Ask Puffin to do anything
+
+  ? for shortcuts
+---
+forking (48 columns):
+
+  >_ Puffin (v<VERSION>)
+     loading
+
+  Pull up a prompt.
+  Forking session…
+
+› draft while loading
+
+
+---
+multiline (48 columns):
+
+  >_ Puffin (v<VERSION>)
+     loading
+
+  Pull up a prompt.
+
+
+› first startup line
+  second startup line
+
+
+---
+narrow (18 columns):
+
+  >_ Puffin (v0.0…
+     loading
+
+  Pull up a promp…
+
+
+› first startup
+  line
+  second startup
+  line

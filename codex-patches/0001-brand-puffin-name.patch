@@ -125,3 +125,12 @@ diff --git a/codex-rs/tui/src/chatwidget/permissions_menu.rs b/codex-rs/tui/src/
 -            "Use with caution: Codex can edit files outside this workspace and access the internet without approval"
 +            "Use with caution: Puffin can edit files outside this workspace and access the internet without approval"
          }
+diff --git a/codex-rs/tui/src/startup_draft.rs b/codex-rs/tui/src/startup_draft.rs
+index dd6cda8..72c430d 100644
+--- a/codex-rs/tui/src/startup_draft.rs
++++ b/codex-rs/tui/src/startup_draft.rs
+@@ -531,3 +531,3 @@ fn startup_draft_bottom_pane(
+             enhanced_keys_supported,
+-            placeholder_text: "Ask Codex to do anything".to_string(),
++            placeholder_text: "Ask Puffin to do anything".to_string(),
+             disable_paste_burst: false,

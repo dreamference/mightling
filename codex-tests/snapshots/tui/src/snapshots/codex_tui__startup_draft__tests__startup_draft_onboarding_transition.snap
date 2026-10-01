@@ -1,0 +1,17 @@
+---
+source: tui/src/startup_draft_tests.rs
+expression: frames
+---
+before onboarding: hidden (0x0 viewport)
+---
+after onboarding:
+
+  >_ Puffin (v<VERSION>)
+     loading
+
+  Pull up a prompt.
+
+
+› Ask Puffin to do anything
+
+  ? for shortcuts

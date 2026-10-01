@@ -279,3 +279,7 @@ def test_the_remaining_codex_names_on_screen_say_puffin(tmp_path):
     assert "Puffin can edit files outside this workspace" in permissions
     exec_output = (rs / "exec" / "src" / "event_processor_with_human_output.rs").read_text()
     assert '"codex".style' not in exec_output and exec_output.count('"puffin".style') == 2
+    # The frame drawn while puffin starts up has its own composer, built outside the one patch
+    # 0001 renames; found on 2026-10-01 by Codex's own PTY test, which waits for that placeholder.
+    startup = (rs / "tui" / "src" / "startup_draft.rs").read_text()
+    assert '"Ask Codex to do anything"' not in startup and '"Ask Puffin to do anything"' in startup

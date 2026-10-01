@@ -230,3 +230,25 @@ Run them in the **export** directory, never in `codex/`: `cargo test --release -
    - the header reads `>_ Puffin`;
    - asked its name, the model answers Puffin;
    - `git -C codex status --porcelain` prints nothing.
+   - `puffin-admin codex test` passes (§7). After a bump, run it with `--accept-snapshots` first: it rewrites the TUI snapshots the new release changed, keeps those that differ from upstream's by the name alone, and prints the rest for a person to look at.
+
+## 7. Codex's own tests (`puffin-admin codex test`)
+
+`CodexTestRunner` (`runner/codex_test_runner.py`) runs Codex's ~20,000 Rust tests on the tree `puffin` is built from: the pinned commit, exported with `git archive`, the launcher copied in, the patch series applied. It works in its own export and target directory (`test-src/`, `test-target/` in the builder's cache), never in `codex/` and never in the product build's directories.
+
+**How it runs.** The pinned `cargo-nextest` (checksum-verified, as upstream's CI uses), upstream's `ci-test` profile without debug info, `lld` from the pinned toolchain, eight tests at a time, all inside a `systemd-run --user --scope` with a 24 GiB cap and `choom -n 1000`, so the model server outlives any failure. A full run is about an hour on GB10 beside the model server.
+
+**Things that are load-bearing, each found by a failing run:**
+- **Debug info is off.** With it, each of the ~280 test binaries is about 1 GB: 88 GB per tree. On 2026-10-01 two such trees filled the disk. A run now refuses to start without about 40 GiB free.
+- **The workspace is put back at version 0.0.0.** Upstream's tests are written against `main`, where every crate is 0.0.0; the release tag says 0.158.0, and ~30 snapshots fail on that alone.
+- **The temporary directory is private, short, outside any repository, and 11 random characters long.** Private and short because tests bind Unix sockets under it (108-byte limit, no group-writable directory); outside a repository because the skills tests treat an ancestor's `.git` as a project root; and the length because a pet-image test base64-encodes a path ending in `frame.png` and asserts the output lacks `cG5n`, which the path's own encoding contains whenever `png` falls on a multiple of three bytes.
+- **Project markers in `/tmp`.** A test run left an empty `/tmp/.git` (and `.agents`) behind on 2026-10-01, which made `/tmp` a project root and failed a skills test in every later run. The runner warns about them before a run and after it.
+- **The launcher steps aside** under `PUFFIN_UPSTREAM_TESTS`, and `DREAMFERENCE_VLLM_HOST` points at a closed port, so no test reaches the model server.
+- **Not isolated from the internet.** Several app-server tests let Codex's model-list refresh reach the real `https://chatgpt.com/backend-api/codex/models` with a test token (answered 401). It is upstream test behaviour, not Puffin's, but it means a test run is not air-gapped. Running the suite in a network namespace with only loopback would close it; that is not done yet.
+
+**The skip list, `codex-tests/puffin-skips.toml`.** A test is listed only when it checks something Puffin does differently on purpose, or cannot pass on this machine for a reason outside Puffin. Every entry carries its reason, and the reasons were checked, not assumed: each patch-caused group passes when its patch is left out of the tree, and each machine-caused group fails the same way on unmodified Codex. The groups: analytics off (patch 0013), the closed network channels (0015), the ChatGPT-account features removed or replaced (`login`, `logout`, `cloud`, `/usage`, `/feedback`, `/pets`, `update`, `doctor`'s network checks), three CLI tests that expect `Usage: codex`, and machine-specific failures (the TLS fallback, the remote exec-server's snapshots, the V8 build).
+
+**Renaming is not skipped.** Patch 0001 changes "OpenAI Codex" and "Ask Codex to do anything" on screen, which ~130 TUI tests check. Those tests also guard layout, wrapping and every popup, so instead of losing them the test export gets Puffin's expectations before it is built, and neither reaches the product build:
+- `codex-tests/snapshots/` holds Puffin's versions of upstream `.snap` files, by path under `codex-rs/`, copied over the originals. A file whose original no longer exists stops the run.
+- `codex-tests/patches/` holds test-only diffs (applied after the product patches) for expectations written in Rust: inline snapshots, `contains` checks and the PTY tests' waits. A test asserts they touch only test files.
+- `--accept-snapshots` regenerates `codex-tests/snapshots/`: insta rewrites the snapshots the selected tests produce, and a rewritten snapshot is copied in only if it reduces to upstream's once both names become one token and whitespace and box rules are dropped (the shorter name leaves padding behind). Anything else is printed and not accepted. In an ordinary run insta is told never to write snapshots, so a layout change fails.

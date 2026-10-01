@@ -914,6 +914,17 @@ class DreamferenceCLIController:
         codex_build_parser.add_argument("--force", action="store_true", help="Rebuild even if the installed build is current")
         codex_subparsers.add_parser("start", help="Start puffin's app-server daemon in the background")
         codex_subparsers.add_parser("stop", help="Stop puffin's app-server daemon")
+        codex_test_parser = codex_subparsers.add_parser(
+            "test", help="Run Codex's own tests on puffin's patched tree, except those in codex-tests/puffin-skips.toml"
+        )
+        codex_test_parser.add_argument("-E", "--filter", default=None, help="nextest filterset to narrow the run to")
+        codex_test_parser.add_argument("--test-threads", type=int, default=8, help="Tests run at once (default 8)")
+        codex_test_parser.add_argument("--jobs", type=int, default=6, help="Parallel compile jobs (default 6)")
+        codex_test_parser.add_argument("--memory-max", default="24G", help="Memory the run may use (default 24G)")
+        codex_test_parser.add_argument(
+            "--accept-snapshots", action="store_true",
+            help="Rewrite the selected TUI snapshots and keep those that differ from upstream's by the name alone",
+        )
 
         # Command: puffin-admin code -- the code index's tools. `puffin-code` itself is a Rust
         # binary built beside `puffin` (`codex build`); what it runs to index (codebase-memory, the
@@ -2092,6 +2103,11 @@ class DreamferenceCLIController:
             from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
             if args.codex_command == "build":
                 sys.exit(0 if CodexBrandedBuilder.build(force=args.force) else 1)
+            if args.codex_command == "test":
+                from dreamference.runner.codex_test_runner import CodexTestRunner
+                sys.exit(CodexTestRunner.run(user_filter=args.filter, test_threads=args.test_threads,
+                                             jobs=args.jobs, memory_max=args.memory_max,
+                                             accept_snapshots=args.accept_snapshots))
             # The branded build only -- never an upstream `codex` from PATH.
             if not CodexInstaller.install_if_missing():
                 sys.exit(1)
