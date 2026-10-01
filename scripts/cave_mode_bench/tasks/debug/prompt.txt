@@ -1,0 +1,15 @@
+Why does this fail, and how do I fix it?
+
+```python
+prices = {"apple": 0, "pear": 3, "fig": 0}
+for name in prices:
+    if prices[name] == 0:
+        del prices[name]
+```
+
+```
+Traceback (most recent call last):
+  File "clean.py", line 2, in <module>
+    for name in prices:
+RuntimeError: dictionary changed size during iteration
+```

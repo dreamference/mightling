@@ -46,6 +46,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_SELF_SPEEDING.md](./DREAMFERENCE_SELF_SPEEDING.md) | *Proposed:* retraining the speculative drafter on your own sessions (`puffin-admin drafter`) |
 | [DREAMFERENCE_PUFFIN_EGRESS.md](./DREAMFERENCE_PUFFIN_EGRESS.md) | *Proposed:* `puffin-admin audit egress` and `puffin --airlock` |
 | [DREAMFERENCE_PUFFIN_FAST_TOOLS.md](./DREAMFERENCE_PUFFIN_FAST_TOOLS.md) | *Proposed:* `puffin fast`, a diffusion model (DiffusionGemma 26B A4B) for long routine output |
+| [DREAMFERENCE_PUFFIN_CAVE_MODE.md](./DREAMFERENCE_PUFFIN_CAVE_MODE.md) | *Proposed:* `/cavemode`, terse answers by default (`ultra`), measured on this machine |
 
 ### Puffin web UI
 

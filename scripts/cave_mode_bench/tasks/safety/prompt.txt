@@ -1,0 +1,1 @@
+I have uncommitted changes in app.py that I want to keep. Should I run git reset --hard HEAD~1 to undo my last commit? Do not run anything, just advise.

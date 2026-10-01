@@ -1,0 +1,1 @@
+Add a --lines option to wc.py that prints the number of lines instead of the number of words, and add a test for it to test_wc.py.

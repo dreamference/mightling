@@ -1,0 +1,1 @@
+Which environment variable sets the port this service listens on, and what port does it use when that variable is not set? Answer from the code.
