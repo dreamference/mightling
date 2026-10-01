@@ -1,8 +1,9 @@
 # Puffin Compaction — at night, at idle, and what the diffusion model can do
 
-**Status:** proposed. Nothing in this spec is implemented yet; §1 and §3 are measurements and a literature review made on 2026-10-01.
+**Status:** proposed. Nothing in this spec is implemented yet; §1 and §3 are measurements and a literature review made on 2026-10-01. §7–§10 were added the same day for a second question, the compaction **prompt and algorithm**: §7 is read from the pinned Codex source, §9 is measured, §8 is literature, §10 is proposed.
 **Question asked:** can Puffin's compaction be improved by running it at night, and continuously with the diffusion model beside the main one?
 **Short answer:** compaction is not slow or poor on this machine; it is **switched off in effect**. The useful changes are two configuration values and one Night Shift task, none needs a Codex patch, and the current diffusion sidecar has no part in any of them.
+**Short answer on the prompt and algorithm (§7–§10):** Codex's stock prompt already writes a good summary with this model, except for the trail of files; a structured prompt fixed the trail and lost the code, a trade and not a gain. What compaction loses is not prose but the **tool history**: every tool call and output is dropped, and the summary alone decides which paths survive. The fix that measured best is not a model at all: a rule-built ledger (files touched, failed commands, last test result) re-injected by a hook after each compaction. At night the useful job is an audit of the day's compactions; the diffusion sidecar failed the three new roles it was tried in.
 **Builds on:**
 - Codex's own compaction (`codex-rs/core/src/compact.rs`), unmodified;
 - the launcher's model catalog (`puffin-rs/src/lib.rs`, `auto_compact_token_limit`);
@@ -92,7 +93,7 @@ Codex has `model_post_turn_compact_threshold_percent` (default 0, off): when a t
 - **The current diffusion sidecar in any compaction role.** §1: 14 of 50 identifiers kept, and invented text. Summaries and prunings another model must act on are exactly what it cannot do.
 - **Per-turn pruning or masking of old tool output**, by any model: §2.
 - **Pre-compacting resumable sessions overnight.** It would save one ~30 s re-prefill per resume, the cache does not survive a server restart anyway, and no recorded session is large enough to need it.
-- **A custom compaction prompt** now. `compact_prompt` is a config key (no patch), so it is cheap later, but nothing measured says the default is the problem.
+- **A custom compaction prompt** now. `compact_prompt` is a config key (no patch), so it is cheap later, but nothing measured says the default is the problem. (§9.1 has since measured it on one session: still not the problem; §10.2 keeps a candidate on file.)
 
 ### 4.6 When the diffusion slot holds a capable model
 
@@ -118,6 +119,169 @@ Each needs the §5 identifier-survival test passed first.
 
 ## 6. Constraints
 
-- **Patch budget:** 567 bytes remain after `0018` (27,500 − 26,933). Nothing here uses any.
+- **Patch budget:** 567 bytes remain after `0018` (27,500 − 26,933). Nothing here uses any; §7's one finding that would need a patch (the summary prefix) does not fit in it.
 - **Compaction summaries are normal prose at every cave level** (Cave Mode §4, verified there).
 - **The prefix cache is the thing being protected:** every proposal here appends or rewrites rarely.
+
+---
+
+## 7. How Codex compacts today (read from `rust-v0.158.0`, checked against a live run)
+
+Puffin's provider has no remote compaction (a provider gets `RemoteCompactionSupport::V2` only if it is named `OpenAI`, is an Azure Responses endpoint, or is Bedrock; the launcher's is named `openai-custom`), and the `token_budget` feature is off, so every compaction takes the **local** path in `core/src/compact.rs`. The `compacted` items in this machine's rollouts confirm it: each begins with the local path's summary prefix.
+
+1. **The request.** The session's base instructions, then the **whole history as it stands**, then the compaction prompt as one more user message. The prefix is the one the last turn used, so the request is cache-hot: its cost is the summary's output, not a re-read. (This corrects the emphasis of §2: the re-read after a compaction is small, because the new history is short.)
+2. **The prompt** (`prompts/templates/compact/prompt.md`, 426 bytes): "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task", then four bullets (progress and decisions; context, constraints and preferences; what remains; critical data and references) and "Be concise, structured". It names no sections, never says "verbatim", and never mentions files, commands or errors.
+3. **What replaces the history** (`build_compacted_history`, and a recorded `replacement_history` shows the same order): the initial context (developer instructions, the environment block), then the **user's messages verbatim**, in their original order, then one user-role item holding a fixed prefix and the summary. The user messages are capped at 20,000 tokens (`COMPACT_USER_MESSAGE_MAX_TOKENS`), filled from the newest backwards, so it is the oldest that are cut.
+4. **What is dropped: everything else.** Every assistant message, every tool call and every tool output. There is no "keep the last K turns" tail and no placeholder for old output: after a compaction the model's only record of what it ran and read is the summary's prose.
+5. **Compaction is implicitly incremental.** The previous summary is a user-role item in the history, so the next compaction reads it and the model folds it into the new one. Nothing tells it to preserve what the old summary held.
+6. **The summary prefix says something false here** (`summary_prefix.md`): "You also have access to the state of the tools that were used by that language model." On the local path the tool history is gone. It is a compiled-in constant; changing it is a ~1 KB patch (the old and new line), more than the 567 bytes left under the cap. Recorded as a finding, not proposed.
+7. **If the request overflows**, the oldest history item is removed and the request retried; other errors retry with backoff.
+
+**What can change it without a patch:**
+
+| Lever | What it does |
+|---|---|
+| `compact_prompt` (config or `-c`), `experimental_compact_prompt_file` | Replaces the prompt of step 2 |
+| `model_auto_compact_token_limit`, `…_scope`, `model_post_turn_compact_threshold_percent` | When (§4) |
+| `PreCompact` / `PostCompact` hooks | Run a command around each compaction; they receive the session's `transcript_path`; they can stop the turn but inject nothing |
+| `SessionStart` hook with matcher `compact` | Queued by every compaction (`session/mod.rs`, `SessionStartSource::Compact`); its `additionalContext` is recorded as a developer message **after** the summary, before the next model request. This is the one place a program can add to the compacted history (§9.2) |
+| `features.token_budget` (under development, off) | A different algorithm: no summary at all, a fresh context window with the world state, and a `new_context` tool the model calls itself. Not tried |
+
+Hooks run only when trusted: a hook's hash must be recorded as trusted in Codex's config layers (where it is written was not traced), or the run must pass `--dangerously-bypass-hook-trust`. An untrusted hook is skipped with nothing in `exec`'s output (§9.2).
+
+---
+
+## 8. What is published on prompts and algorithms
+
+Read on 2026-10-01 from abstracts, vendor posts and one pull request; figures are theirs, not re-run here.
+
+| Source | Finding | Bearing here |
+|---|---|---|
+| Factory, *Evaluating Context Compression* | Scores summaries with probe questions asked after compaction (recall, artifact, continuation, decision). Its own "anchored iterative" summary (fixed sections: session intent, file modifications, decisions, next steps; only the newly dropped span is summarised and merged) scores 3.70/5 against 3.44 (Anthropic's SDK) and 3.35 (OpenAI's compact endpoint). **Every method is worst at the artifact trail: 2.19–2.45/5** | Which files were touched is the thing model-written summaries lose, whatever the prompt. That is a job for a list, not for prose |
+| *Lost in Compaction* (arXiv 2608.11242) | Compactors keep on average **17%** of the standing instructions a user gave earlier in a session; a separate extractor running beside the compactor restores over 90% without changing it | Codex already does the cheap half: user messages are kept verbatim (§7.3). The pattern, a rule or extractor beside the summariser, is §10.1 |
+| Claude Code's compaction prompt (as published by third parties) | Nine required sections (request and intent, concepts, files and code sections, errors and fixes, problem solving, all user messages, pending tasks, current work, next step), an analysis pass before the summary, "file names, full code snippets, function signatures", and verbatim quotes of the latest request "to ensure there's no drift" | The model for a structured prompt. Its "all user messages" section is redundant in Codex (§7.3) |
+| hermes-agent PR #2323 | Four changes shipped together: a section template; iterative update ("PRESERVE existing info, ADD new progress"); replacing old tool output with a placeholder **before** summarising, "30%+" saved with no model call; a ~20K-token verbatim tail instead of a fixed number of turns | The tail and the pre-pass are algorithm changes Codex's local path cannot express without a patch |
+| TRACE (arXiv 2608.06503) | Judges one compaction at a time by continuing the task from both sides of it ("boundary-local evaluation"), not by end-to-end score | The right shape for a night-time audit (§10.3): each recorded compaction is a test case |
+| *Detect, Remask, Repair* (arXiv 2606.12807) | A masked diffusion LM updates a summary by masking only the spans new context made false and regenerating those | The one published diffusion role that fits compaction: repairing an incremental summary instead of rewriting it. It needs a capable masked LM |
+| Template infilling for diffusion LMs (arXiv 2510.13870) | Fix the output's structure as a template and let the diffusion model fill the gaps: +9.4% over prefix prompting | Tried here as form filling (§9.3): the current sidecar fails it |
+| Sleep-time work (Letta; Auto-Dreamer, arXiv 2605.20616) | Consolidation is distinct from compaction: it runs offline over many sessions and rewrites a store, where compaction must produce one text under a deadline | §4.4 already proposes the consolidation job. Night is not for compacting transcripts |
+
+---
+
+## 9. Measured on 2026-10-01
+
+Scripts and outputs are in the session scratchpad (not kept). All against the default model (Qwen3.8-27B on SGLang) and the Tiny-A2D sidecar.
+
+### 9.1 The stock prompt against a structured one, on one real coding session
+
+**No recorded session was usable.** The largest rollouts under `~/.puffin/sessions` are web lookups and compaction probes; none is long coding work. So one was made: `puffin exec` in a scratch repository (a cut-down copy of this one) with a scratch `CODEX_HOME`, asked to add a dry-run mode to Night Shift with two tests. It ran 37 commands and peaked at 54,399 prompt tokens. The session was cut just after its first test run (31 commands in; one test passing, one failing), flattened into chat messages (tool output capped at 12,000 characters each, 33K prompt tokens) and sent to `/v1/chat/completions` twice, once ending with Codex's `prompt.md` and once with the candidate of §10.2. This is not byte-for-byte Codex's request; both prompts saw the same input.
+
+| | Stock prompt | Structured candidate |
+|---|---|---|
+| Summary size | 4,587 chars | 4,692 chars |
+| Output tokens (of which reasoning) | 2,235 (876) | 2,302 (912) |
+| Wall time | 83 s | 59 s |
+| The two files changed, named | 2/2 | 2/2 |
+| The two tests added, named | 2/2 | 2/2 |
+| Path strings the commands acted on (14 strings, about 12 files: some appear both bare and with their directory) | **4** | **13** |
+| The failing assertion's text | no (explains the cause instead) | yes, quoted |
+| The code that was added | quoted in full | described in one sentence |
+| Symbols of the modules read (`round_robin`, `detect_test_command`, …) | explained, with line numbers | fewer |
+| Commands that failed with a non-zero exit (2, both incidental) | 0 | 0 |
+| Paths not in the input | 0 | 0 |
+| Correct next step (fix the test's repository grouping, re-run) | yes | yes |
+
+Reading: **the stock prompt is strong on understanding and code, and weak on the artifact trail.** With this model it already produces sections, quotes the code and states the next step, but it named 4 of the 14 paths. The structured prompt fixes the trail (13) and quotes the error, and pays for it with the code and the account of the modules read: a trade, neither a superset of the other. That is the case for §10.1, which gets 14 of 14 without giving up what the stock prompt does well. One session, one run each: the timing difference is noise, and nothing here says which summary the next turn works better from.
+
+### 9.2 A rule-built ledger, and whether a hook can deliver it
+
+**The ledger.** From the same cut session, by regular expressions over the tool calls and outputs, no model: the files the commands acted on, each command that exited non-zero with its code, and the last test-result line. 588 characters, built in milliseconds.
+
+| | Paths acted on | Failed commands | Last test result |
+|---|---|---|---|
+| Stock summary | 4/14 | 0/2 | in prose |
+| Stock summary + ledger | **14/14** | **2/2** | verbatim |
+
+**Delivery.** A `SessionStart` hook with matcher `compact`, in a scratch `CODEX_HOME`, printing `additionalContext`; `puffin exec` with `model_auto_compact_token_limit=14000` on a three-command task:
+
+- Without trust the hook did not run and nothing in `exec`'s output said so (the scratch home's logs were not checked). With `--dangerously-bypass-hook-trust`, `PreCompact` and `SessionStart` both ran and received `transcript_path`.
+- The hook's text was recorded as a developer message 55 ms after the `compacted` item and before the next model request.
+- **In that same turn the model did not use it:** told to end its answer with the ledger code "if you have been given one", it answered "No ledger code given". **On the next turn, asked directly, it quoted the message.** So the text is in context; one trial says it may be overlooked mid-turn. Wording and placement are open (§10.1).
+- The compaction itself took 24 s at a 14K context.
+
+**A side finding on limits.** The first attempt used a limit of 9,000 and compacted **42 times** in a three-command task; at 14,000 it compacted once. With §1's probe at 6,000 this puts the floor for this prompt and tool set between 9K and 14K: below it, the fixed prefix leaves no room and every step compacts.
+
+### 9.3 The diffusion sidecar in roles §1 did not cover
+
+Input: `git log --stat` of this repository. A regular expression finds its 8 paths (in the first 700 characters) or 34 (in 3,000) in microseconds.
+
+| Role | Result |
+|---|---|
+| Extraction ("list every file path, one per line, copied exactly"), 700 chars | Copied the input back with its `| 36+` columns: 0 clean path lines of 8, 2.6 s |
+| The same, 1,500 and 3,000 chars | **Empty answer** both times. Cause not investigated: it may be the sidecar's handling of long prompts rather than the model |
+| Verification ("does the exact path `X` appear in the text? yes or no"), 8 present and 8 altered paths | "yes" to all 16: 8/16, chance |
+| Form filling (three labelled blanks to fill from the text) | Echoed the text; no blank filled |
+
+**Verdict: no role.** It does not extract, verify or fill a form, and a regular expression does the extraction exactly and for free. This is a statement about Tiny-A2D 0.5B, not about diffusion: §8's two diffusion papers need a model that can follow an instruction.
+
+---
+
+## 10. Proposals for the prompt and the algorithm
+
+### 10.1 Do, after one more measurement: a ledger re-injected after every compaction
+
+A small program, shipped with Puffin and registered as a `SessionStart` hook with matcher `compact`. It reads the rollout at `transcript_path`, and prints as `additionalContext`, by rule:
+- files the session's commands wrote or read, changed files first;
+- every command that exited non-zero, with its code, since the previous compaction (both failures in §9.2's session were incidental, so this list can be noise: whether to keep it is part of the test below);
+- the last test-result line, verbatim;
+- a first line saying what it is: "Ledger built from the tool history by rule; the tool history itself is no longer in context."
+
+Why this and not a better prompt: §9.1 and Factory's probes agree that the artifact trail is what summaries lose, and §9.2 shows a rule keeps all of it for ~150 tokens. It is CliffCompaction's rule-based layer added beside Codex's model summary, and *Lost in Compaction*'s "extractor beside the compactor". It appends after the summary, so it costs no cached prefix. No patch.
+
+Open before it ships:
+1. **Does the model use it?** §9.2's one trial says not reliably in the same turn. Test wording and whether the ledger should instead be handed to the summariser (a `PreCompact` hook cannot inject, so that would mean writing the ledger into the worktree and naming the file in `compact_prompt`).
+2. **Trust.** Night Shift can pass `--dangerously-bypass-hook-trust` for a hook Puffin itself installs. For interactive sessions the launcher would have to record the hook's hash as trusted, in the user's config: a decision for the user, since it makes Puffin run a program at every compaction.
+3. **The functional test**, which decides: the §5 Phase 0 task at one limit, with and without the ledger, counting commands re-run after each compaction (§1 saw 13 commands where 3 were needed).
+
+### 10.2 Keep on file, do not ship yet: a structured prompt
+
+The candidate measured in §9.1: sections **Task, Files, Commands, Verified, Decisions, Next steps**, a first paragraph telling the summariser what the reader will and will not see ("the user's messages and this summary and nothing else: no tool calls, no tool output"), and one rule: "Copy paths, commands, identifiers, numbers and error text exactly as they appeared. Never paraphrase or shorten a path. Leave a section empty rather than guess." It would ship as a file named by `experimental_compact_prompt_file`, no patch.
+
+Not shipped because §9.1 shows a trade, not a gain. Two changes worth making to it before a second measurement:
+- keep the stock prompt's strength: add "quote the code you added or changed" to **Files**;
+- drop the user's request from **Task** (Codex keeps user messages verbatim, §7.3) and say so, which frees the space.
+
+If §10.1 ships, the prompt's **Files** and **Commands** sections become redundant and the stock prompt may be the better half of the pair. Measure the pair, not the prompt alone.
+
+### 10.3 Night: audit the day's compactions (new), and replay candidates
+
+Not compaction at night, which has nothing to work on (§4.5), but **measurement at night**, when the model is idle and tokens are free:
+
+- **Audit.** For every `compacted` item in the day's rollouts, compare the identifiers in the items it replaced with the summary: paths acted on, failed commands, test results. Report the losses per session in the Night Shift morning report. No model call. It answers, on real sessions rather than on §9.1's one made-up task, whether summaries lose what matters.
+- **Replay.** For the same compactions, re-run the summary with the candidate prompt (§10.2) and score both the same way, as §9.1 did by hand. One request per compaction, cache-cold, so it belongs in the window. Two weeks of this is the evidence §10.2 needs, following TRACE's point that a compaction is best judged at its own boundary.
+- **Precondition:** there must be compactions to audit. Today there are none in real sessions (§1); this starts to produce data only after §4.1 or §4.2 lowers a limit.
+
+### 10.4 Continuous: nothing that touches the context
+
+"Continuously" has two meanings, and only one survives §2:
+- **Continuously rewriting or pruning the history** (per-turn masking, a small model shortening each tool result in place): rejected in §4.5, and §9.3 removes the only candidate model.
+- **Continuously maintaining state outside the context, used only at a compaction:** this is what §10.1 is. The rollout file is that state, written by Codex as it goes; the ledger is derived from it at the moment it is needed. A `PostToolUse` hook keeping a running ledger file would give the same result with more moving parts, so it is not proposed.
+- **Compacting at the turn's end** (§4.3) remains the one "continuous" timing change worth trying, and §9.2's 24 s is its cost per compaction.
+
+### 10.5 The diffusion model
+
+No role for Tiny-A2D (§9.3, §1). If the slot gets a capable model, §4.6's two roles (summarising a long tool result before it enters history, then writing the compaction summary) come first, because they need only instruction-following. The two below need a *masked* model specifically and come after them, each gated by §5's identifier-survival test:
+1. **Repairing the previous summary** instead of rewriting it (Detect, Remask, Repair): mask the spans the new turns made false, regenerate those. It fits Codex's implicitly incremental summaries (§7.5), but needs the summary to be written outside Codex's own compaction request, so it needs the Fast Tools router or a patch.
+2. **Filling the ledger's free-text fields** (a one-line "why" per changed file) by template infilling. The paths and codes stay rule-built.
+
+### 10.6 Not proposed
+
+- **A patch to `summary_prefix.md`** (§7.6): true but unmeasured, and over budget.
+- **A verbatim tail of recent turns** (hermes, CliffCompaction): the local path cannot keep assistant or tool items without a patch to `build_compacted_history`.
+- **`features.token_budget`**: an unfinished upstream feature; revisit at the next Codex bump.
+- **Model-written probes as the score** (Factory's method): the identifier counts of §9 are cheaper and not judged by the model under test; probes are worth adding only if the counts and task success disagree.
+
+### 10.7 Where the ideas came from
+
+Asked for ideas before the measurements, the advisor proposed: scoring the **stock prompt** with the identifier test rather than only compressors, and doing it against the chat endpoint from a rollout instead of resuming a real session; the **hook-delivered rule-built ledger** (§10.1); the **night-time audit** (§10.3); testing the sidecar as an **extractor and verifier** against a regular expression (§9.3); and recording the 20,000-token verbatim user messages and the false summary prefix (§7.3, §7.6). The structured candidate's sections follow its suggestion and Claude Code's published prompt. Found while measuring, not proposed by anyone: that no recorded session was usable, that an untrusted hook is skipped silently, that the model overlooked the injected ledger in the same turn, and the 9K–14K floor.
+
