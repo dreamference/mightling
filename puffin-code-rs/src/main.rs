@@ -56,6 +56,19 @@ enum Command {
     Callees { name: String, #[command(flatten)] page: PageArgs },
     /// Implementations of a trait, interface or method.
     Impl { name: String, #[command(flatten)] page: PageArgs },
+    /// What breaks if a definition changes: its references, then theirs, to a depth.
+    Impact {
+        /// The definition; omit it with --diff.
+        name: Option<String>,
+        /// Start from every definition a diff touches: against HEAD, or the revision or range given.
+        #[arg(long, num_args = 0..=1, default_missing_value = "HEAD")]
+        diff: Option<String>,
+        /// Levels to follow (default 3, at most 6).
+        #[arg(long)]
+        depth: Option<usize>,
+        #[command(flatten)]
+        page: PageArgs,
+    },
     /// One definition's source.
     Show { name: String },
     /// The definitions of a file.
@@ -228,6 +241,15 @@ fn compute(context: &Context, command: &Command) -> anyhow::Result<Computed> {
         Command::Callers { name, page } => (context.callers(name)?, None, page.clone()),
         Command::Callees { name, page } => (context.callees(name)?, None, page.clone()),
         Command::Impl { name, page } => (context.implementations(name)?, None, page.clone()),
+        Command::Impact { name, diff, depth, page } => {
+            let depth = depth.unwrap_or(puffin_code::router::IMPACT_DEPTH);
+            let answer = match (name, diff) {
+                (Some(name), None) => context.impact(name, depth)?,
+                (None, Some(rev)) => context.impact_of_diff(rev, depth)?,
+                _ => anyhow::bail!("`puffin-code impact` takes a name or --diff, not both and not neither"),
+            };
+            (answer, None, page.clone())
+        }
         Command::Outline { file, page } => (context.outline(file)?, None, page.clone()),
         Command::Search { words, page } => (context.search(&words.join(" "))?, None, page.clone()),
         Command::Show { name } => {

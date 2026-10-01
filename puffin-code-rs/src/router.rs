@@ -673,6 +673,120 @@ impl Context {
         Ok(answer)
     }
 
+    /// `impact <symbol>`: what breaks if the definition changes. Its references, then the
+    /// references of each definition that encloses one, to `depth` levels (§7.1).
+    ///
+    /// A text hit in a changed file is listed at the level it was found and never followed: the
+    /// text search cannot say which definition it belongs to. A row is as trustworthy as the
+    /// weakest link of the chain that led to it.
+    pub fn impact(&self, query: &str, depth: usize) -> Result<Answer> {
+        let mut answer = self.refs(query)?;
+        answer.op = "impact".to_string();
+        if !answer.candidates.is_empty() {
+            return Ok(answer);
+        }
+        let mut probe = Answer::default();
+        let Some(root) = self.resolve_one(query, &mut probe)? else { return Ok(answer) };
+        let first = std::mem::take(&mut answer.rows);
+        let mut walk = ImpactWalk::new(depth.clamp(1, IMPACT_MAX_DEPTH));
+        walk.seen_definitions.insert((root.path.clone(), root.line));
+        self.impact_level(&mut walk, first, 1, Tag::Exact);
+        self.impact_follow(&mut walk, &mut answer)?;
+        walk.finish(&mut answer);
+        Ok(answer)
+    }
+
+    /// `impact --diff [<rev>]`: the same walk from every definition a diff touches.
+    pub fn impact_of_diff(&self, rev: &str, depth: usize) -> Result<Answer> {
+        let mut answer = self.new_answer("impact", &format!("--diff {rev}"));
+        self.note_missing_layers(&mut answer);
+        if !self.repo.is_git {
+            bail!("`impact --diff` needs a git repository");
+        }
+        let diff = crate::paths::git(&self.repo.root, &["diff", "-U0", "--no-renames", "--no-ext-diff", rev, "--"])?;
+        let mut touched: Vec<Candidate> = Vec::new();
+        for (path, start, end) in diff_ranges(&diff) {
+            // The definition enclosing the hunk, and every definition that begins inside it.
+            let mut lines = vec![start];
+            if let Some(graph) = &self.graph {
+                lines.extend(graph.outline(&path)?.into_iter().map(|n| n.start_line).filter(|l| *l > start && *l <= end));
+            }
+            for line in lines {
+                for candidate in self.resolve_location(&path, line)? {
+                    if !touched.iter().any(|c| c.path == candidate.path && c.line == candidate.line) {
+                        touched.push(candidate);
+                    }
+                }
+            }
+        }
+        if touched.is_empty() {
+            answer.notes.push(format!("the diff against {rev} touches no definition the index knows"));
+            return Ok(answer);
+        }
+        let shown: Vec<String> = touched.iter().take(IMPACT_DIFF_DEFINITIONS).map(|c| c.display.clone()).collect();
+        let more = touched.len().saturating_sub(shown.len());
+        answer.query = format!("--diff {rev}  ({} changed definitions: {}{})", touched.len(), shown.join(", "), if more > 0 { format!(" +{more} more, not followed") } else { String::new() });
+        let mut walk = ImpactWalk::new(depth.clamp(1, IMPACT_MAX_DEPTH));
+        for candidate in &touched {
+            walk.seen_definitions.insert((candidate.path.clone(), candidate.line));
+        }
+        let mut stores: BTreeSet<usize> = BTreeSet::new();
+        for candidate in touched.iter().take(IMPACT_DIFF_DEFINITIONS) {
+            stores.extend(candidate.scip.iter().map(|(i, _, _)| *i));
+            let refs = self.refs(&format!("{}:{}", candidate.path, candidate.line))?;
+            walk.absorb(&mut answer, &refs);
+            self.impact_level(&mut walk, refs.rows, 1, Tag::Exact);
+        }
+        self.set_sources(&mut answer, &stores);
+        self.impact_follow(&mut walk, &mut answer)?;
+        walk.finish(&mut answer);
+        // The changed lines belong to changed files: where the snapshot is behind them, the
+        // definitions were located by the old line numbers.
+        answer.notes.push("the diff's files changed since the snapshots: definitions were located by the index's line numbers, which may have moved".to_string());
+        self.request_reindex(&mut answer);
+        Ok(answer)
+    }
+
+    /// Records one level's rows and queues the definitions that enclose them.
+    fn impact_level(&self, walk: &mut ImpactWalk, rows: Vec<Row>, level: usize, via: Tag) {
+        for row in rows {
+            if row.detail == "definition" || !walk.seen_rows.insert((row.path.clone(), row.line)) {
+                continue;
+            }
+            // The chain is as good as its weakest link.
+            let tag = row.tag.unwrap_or(Tag::Heuristic).max(via);
+            let followable = row.tag != Some(Tag::Text) && row.detail != "import";
+            let caller = if followable { self.resolve_location(&row.path, row.line).ok().and_then(|mut c| c.pop()) } else { None };
+            let detail = match (&caller, row.tag) {
+                (Some(caller), _) => format!("depth {level}: in {}", caller.display),
+                (None, Some(Tag::Text)) => format!("depth {level}: {} (not followed)", row.detail),
+                (None, _) if row.detail == "import" => format!("depth {level}: import"),
+                (None, _) => format!("depth {level}: at module level"),
+            };
+            walk.rows.push(Row { tag: Some(tag), path: row.path, line: row.line, detail });
+            if let Some(caller) = caller {
+                if level < walk.depth && walk.seen_definitions.insert((caller.path.clone(), caller.line)) {
+                    walk.queue.push_back((caller.path, caller.line, tag, level + 1));
+                }
+            }
+        }
+    }
+
+    /// Follows the queued definitions, breadth first, within the walk's budget.
+    fn impact_follow(&self, walk: &mut ImpactWalk, answer: &mut Answer) -> Result<()> {
+        while let Some((path, line, via, level)) = walk.queue.pop_front() {
+            if walk.followed >= IMPACT_MAX_DEFINITIONS {
+                walk.cut = walk.queue.len() + 1;
+                break;
+            }
+            walk.followed += 1;
+            let refs = self.refs(&format!("{path}:{line}"))?;
+            walk.absorb(answer, &refs);
+            self.impact_level(walk, refs.rows, level, via);
+        }
+        Ok(())
+    }
+
     /// `callees <symbol>`: what the definition's body refers to.
     pub fn callees(&self, query: &str) -> Result<Answer> {
         let mut answer = self.new_answer("callees", query);
@@ -942,6 +1056,99 @@ impl Context {
     }
 }
 
+/// Levels `impact` follows by default, and at most.
+pub const IMPACT_DEPTH: usize = 3;
+const IMPACT_MAX_DEPTH: usize = 6;
+/// Definitions one `impact` follows before it stops and says so.
+const IMPACT_MAX_DEFINITIONS: usize = 200;
+/// Changed definitions `impact --diff` starts from.
+const IMPACT_DIFF_DEFINITIONS: usize = 25;
+
+/// The state of one `impact` walk.
+struct ImpactWalk {
+    depth: usize,
+    rows: Vec<Row>,
+    seen_rows: BTreeSet<(String, u32)>,
+    seen_definitions: BTreeSet<(String, u32)>,
+    /// `(path, line of the definition, weakest tag so far, level of its references)`.
+    queue: std::collections::VecDeque<(String, u32, Tag, usize)>,
+    followed: usize,
+    /// Definitions left unfollowed when the budget ran out.
+    cut: usize,
+}
+
+impl ImpactWalk {
+    fn new(depth: usize) -> ImpactWalk {
+        ImpactWalk {
+            depth,
+            rows: Vec::new(),
+            seen_rows: BTreeSet::new(),
+            seen_definitions: BTreeSet::new(),
+            queue: Default::default(),
+            followed: 0,
+            cut: 0,
+        }
+    }
+
+    /// Carries a level's caveats onto the answer: what it could not resolve, what it dropped, and
+    /// whether its changed files could be searched.
+    fn absorb(&self, answer: &mut Answer, level: &Answer) {
+        for unresolved in &level.unresolved {
+            if !answer.unresolved.contains(unresolved) {
+                answer.unresolved.push(unresolved.clone());
+            }
+        }
+        for not_indexed in &level.not_indexed {
+            if !answer.not_indexed.contains(not_indexed) {
+                answer.not_indexed.push(not_indexed.clone());
+            }
+        }
+        answer.deleted_dropped += level.deleted_dropped;
+        if answer.not_checked.is_none() {
+            answer.not_checked = level.not_checked.clone();
+        }
+        if answer.changed_searched != Some(false) {
+            answer.changed_searched = level.changed_searched.or(answer.changed_searched);
+        }
+    }
+
+    fn finish(self, answer: &mut Answer) {
+        // Rows keep the order they were found in: nearest first.
+        answer.rows = self.rows;
+        answer.sources.push(format!(
+            "impact = references of the definition, then of each definition enclosing one, to depth {}; text hits and imports are not followed",
+            self.depth
+        ));
+        if self.cut > 0 {
+            answer.notes.push(format!(
+                "stopped after {IMPACT_MAX_DEFINITIONS} definitions: {} more were not followed, so deeper rows are missing",
+                self.cut
+            ));
+        }
+    }
+}
+
+/// The new-side line ranges of a unified diff with no context: `(path, first line, last line)`.
+/// A pure deletion names the line it was removed after.
+fn diff_ranges(diff: &str) -> Vec<(String, u32, u32)> {
+    let mut out = Vec::new();
+    let mut path: Option<String> = None;
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("+++ ") {
+            path = rest.strip_prefix("b/").map(str::to_string);
+        } else if line.starts_with("@@") {
+            let Some(path) = &path else { continue };
+            let Some(new_side) = line.split_whitespace().find(|part| part.starts_with('+')) else { continue };
+            let mut numbers = new_side[1..].split(',');
+            let Some(start) = numbers.next().and_then(|n| n.parse::<u32>().ok()) else { continue };
+            let count = numbers.next().and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
+            let start = start.max(1);
+            out.push((path.clone(), start, start + count.saturating_sub(1)));
+        }
+    }
+    out
+}
+
 /// Keeps one row per `(path, line)`, the most trusted, ordered exact → heuristic → text.
 fn dedup(mut rows: Vec<Row>) -> Vec<Row> {
     rows.sort_by(|a, b| (&a.path, a.line, a.tag).cmp(&(&b.path, b.line, b.tag)));
@@ -996,6 +1203,18 @@ fn defines_on_line(repo: &Repo, path: &str, line: u32, name: &str) -> bool {
         let word = before.rsplit(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or("");
         KEYWORDS.contains(&word) || before.ends_with("async def") || before.ends_with(':') && before.contains("let")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diff_ranges;
+
+    #[test]
+    fn diff_hunks_give_new_side_ranges() {
+        let diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -3 +3,2 @@ def f():\n+x\n+y\n@@ -10,2 +11,0 @@\n-gone\n-gone\n\
+                    diff --git a/old.py b/old.py\n--- a/old.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-x\n";
+        assert_eq!(diff_ranges(diff), vec![("a.py".to_string(), 3, 4), ("a.py".to_string(), 11, 11)]);
+    }
 }
 
 /// Groups rows by file (for §7.2's per-file summary).

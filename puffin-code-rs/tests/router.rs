@@ -460,3 +460,62 @@ fn a_typescript_edit_is_searched_by_text() {
     assert!(out.contains("heuristic (text) tsgeom/src/main.ts:8"), "{out}");
     assert!(out.contains("exact tsgeom/src/report.ts:6"), "{out}");
 }
+
+#[test]
+fn impact_follows_callers_of_callers() {
+    let f = fixture();
+    let (code, out) = f.run(&["impact", "make_circle"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.starts_with("impact shapes.geometry.make_circle"), "{out}");
+    assert!(out.contains("to depth 3; text hits and imports are not followed"), "{out}");
+    // Its own references: two calls, and the imports that a rename would break (scip-python
+    // records an import as a read, so it shows as a module-level reference).
+    assert!(out.contains("exact shapes/report.py:7  depth 1: in shapes.report.summary"), "{out}");
+    assert!(out.contains("exact shapes/cli.py:9  depth 1: in shapes.cli.main"), "{out}");
+    assert!(out.contains("exact shapes/cli.py:3  depth 1: at module level"), "{out}");
+    // The caller's caller: `main` calls `summary`, which calls `make_circle`.
+    assert!(out.contains("exact shapes/cli.py:8  depth 2: in shapes.cli.main"), "{out}");
+    // The definition itself is not its own impact, and nearest rows come first.
+    assert!(!out.contains("exact shapes/geometry.py:26"), "{out}");
+    let at = |needle: &str| out.find(needle).unwrap();
+    assert!(at("depth 1: in shapes.report.summary") < at("depth 2: in shapes.cli.main"), "{out}");
+    assert!(out.contains("changed since snapshot: 0 files"), "{out}");
+
+    // One level is `refs` without the definition.
+    let (_, shallow) = f.run(&["impact", "make_circle", "--depth", "1"]);
+    assert!(!shallow.contains("depth 2"), "{shallow}");
+    assert!(shallow.contains("to depth 1;"), "{shallow}");
+}
+
+#[test]
+fn impact_lists_a_text_hit_and_does_not_follow_it() {
+    let f = fixture();
+    // A new caller, and a caller of that caller, both written since the snapshot.
+    f.write("shapes/extra.py", "from shapes.geometry import make_circle\n\n\ndef fresh():\n    return make_circle(5.0)\n\n\ndef outer():\n    return fresh()\n");
+    let (_, out) = f.run(&["impact", "make_circle"]);
+    assert!(out.contains("heuristic (text) shapes/extra.py:5  depth 1: changed since snapshot (not followed)"), "{out}");
+    // `outer` calls `fresh`, but nothing says the text hit belongs to `fresh`: it is not followed.
+    assert!(!out.contains("shapes/extra.py:9"), "{out}");
+    assert!(out.contains("changed since snapshot: 1 files, all searched"), "{out}");
+}
+
+#[test]
+fn impact_of_a_diff_starts_from_every_definition_it_touches() {
+    let f = fixture();
+    let text = std::fs::read_to_string(f.repo.root.join("shapes/geometry.py")).unwrap();
+    f.write("shapes/geometry.py", &text.replace("    return Circle(radius)", "    return Circle(float(radius))"));
+    let (code, out) = f.run(&["impact", "--diff"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("1 changed definitions: shapes.geometry.make_circle"), "{out}");
+    assert!(out.contains("shapes/report.py:7  depth 1: in shapes.report.summary"), "{out}");
+    assert!(out.contains("shapes/cli.py:8  depth 2: in shapes.cli.main"), "{out}");
+    assert!(out.contains("located by the index's line numbers"), "{out}");
+    // A name and --diff together, or neither, is a usage error.
+    assert_ne!(f.run(&["impact"]).0, 0);
+    assert_ne!(f.run(&["impact", "make_circle", "--diff"]).0, 0);
+    // A diff that touches no definition says so.
+    f.write("shapes/geometry.py", &text);
+    f.write("README.md", "notes\n");
+    let (_, out) = f.run(&["impact", "--diff"]);
+    assert!(out.contains("touches no definition"), "{out}");
+}

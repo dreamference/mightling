@@ -9,6 +9,7 @@ pub const READY: &str = "# Code navigation
 
 `puffin-code` answers questions about this repository's code from an index, in milliseconds:
 - `puffin-code def <name>` / `refs <name>` / `callers <name>` / `callees <name>` / `impl <trait>`
+- `puffin-code impact <name>` (or `--diff`): what breaks, callers of callers
 - `puffin-code show <name>` prints one definition; `outline <file>`; `search <words>`
 Names may be qualified (`Circle.area`, `config::load`) or given as `path:line`.
 Rows are tagged `exact` (compiler index), `heuristic` (approximate) or `heuristic (text)` (a text match in a changed file); `unresolved`, `not indexed` and `not checked` lines name what the index could not see.

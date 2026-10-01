@@ -101,7 +101,8 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
     // the files with the most results first, so a later page never repeats or skips a row.
     let rank: std::collections::HashMap<&str, usize> = files.iter().enumerate().map(|(i, (p, _))| (p.as_str(), i)).collect();
     let mut rows: Vec<_> = answer.rows.iter().collect();
-    if cut {
+    // `impact` keeps the order its rows were found in: nearest first.
+    if cut && answer.op != "impact" {
         rows.sort_by_key(|r| (r.tag, rank.get(r.path.as_str()).copied().unwrap_or(usize::MAX), r.line));
     }
     if cut && page.offset == 0 {
