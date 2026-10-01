@@ -18,7 +18,7 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
-| [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Proposed:* splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; several nodes as a later phase |
+| [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Proposed:* splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; then several nodes with no stored roles, and jobs sent to another node over SSH |
 | [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the nine packages |
 | [DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md) | Source layout, class inventory, import conventions, the default model's full launch command |
 | [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md) | Requirements, installation, helper scripts, troubleshooting |
@@ -48,7 +48,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_PUFFIN_EGRESS.md](./DREAMFERENCE_PUFFIN_EGRESS.md) | `puffin-admin audit egress` (implemented 2026-10-01 for `exec` sessions, §10); *proposed:* the airlock, now the `on` level of `/airgapped` |
 | [DREAMFERENCE_PUFFIN_COMPACTION.md](./DREAMFERENCE_PUFFIN_COMPACTION.md) | *Proposed:* when `puffin` compacts: a limit tied to the KV pool, a per-task limit for Night Shift, what a compaction keeps and drops, a rule-built ledger re-injected after it, and why the diffusion model is not used for it |
 | [DREAMFERENCE_PUFFIN_AIRGAPPED.md](./DREAMFERENCE_PUFFIN_AIRGAPPED.md) | *Partly implemented (2026-10-01, §14):* `/airgapped`, three levels of internet access for a `puffin` session: everything, DuckDuckGo-only search, none |
-| [DREAMFERENCE_PUFFIN_SWE_BENCH.md](./DREAMFERENCE_PUFFIN_SWE_BENCH.md) | *Proposed:* `puffin-admin swe-bench`, running `puffin` over SWE-bench on the GB10 (arm64 images, no network for the agent) for A/B comparisons, not leaderboard scores |
+| [DREAMFERENCE_PUFFIN_SWE_BENCH.md](./DREAMFERENCE_PUFFIN_SWE_BENCH.md) | `puffin-admin swe-bench`, running `puffin` over SWE-bench on the GB10 (arm64 images, no network for the agent) for A/B comparisons, not a leaderboard score (Phase 1 implemented 2026-10-01; §12 records what was built) |
 | [DREAMFERENCE_PUFFIN_FAST_TOOLS.md](./DREAMFERENCE_PUFFIN_FAST_TOOLS.md) | *Proposed:* `puffin fast`, a diffusion model (DiffusionGemma 26B A4B) for long routine output |
 | [DREAMFERENCE_PUFFIN_CAVE_MODE.md](./DREAMFERENCE_PUFFIN_CAVE_MODE.md) | *Implemented (Phase 1):* `/cavemode`, terse answers by default (`ultra`), measured on this machine |
 
