@@ -455,6 +455,7 @@ Sending work to a node: a script, or an agent task of Night Shift's kind. It com
 
 - `puffin-admin node add <node>` finds the node by the browse of §5, creates a key used for nothing else (`~/.ssh/puffin-node_ed25519`), and installs its public half on the node. That one step needs the node's password, typed once at `ssh-copy-id`'s own prompt; there is no way to authorise a key without authenticating once.
 - **The key is restricted on the node** to one forced command, `puffin-admin node serve-job`, with no terminal, no port forwarding and no agent forwarding. It can push to the job repositories and ask for jobs; it cannot open a shell. That is what makes the caps of §13.4 mandatory: a raw `ssh <node> python train.py` with this key is refused.
+- **How git gets through a forced command.** `sshd` ignores the command the client asked for and runs `serve-job`, passing the request in `SSH_ORIGINAL_COMMAND`. `serve-job` runs `git-receive-pack` or `git-upload-pack` itself when the request is one of those two for a path under the job repositories, handles its own job operations, and refuses everything else. This is the pattern gitolite uses.
 - **The node's host key is pinned to its `node` id** at `node add`, so a different machine answering at the same address later is refused, not trusted.
 - `puffin-admin node remove <node>` deletes the key on both sides.
 - **Once this exists, control (§12.4) can ride it.** A paired node could accept `node set` and `node stop` through the same restricted key, which would make the open control agent unnecessary between paired Sparks. Whether to keep the agent at all is decided when Part 3 is built (question 3).
@@ -476,7 +477,8 @@ puffin-admin node fetch <job>            # bring the result branch into this rep
 /night add --on spark-2 Fix the flaky test in tests/test_sync.py
 ```
 
-- **`node run`** pushes `HEAD`, runs the command in a fresh worktree of it on the node, streams the output, and at the end commits whatever the job changed on `job/<id>` and fetches that branch. With no change there is no branch, only the log and the exit code.
+- **`node run`** pushes `HEAD`, runs the command in a fresh worktree of it on the node, streams the output, and at the end commits what `git status` shows on `job/<id>` and fetches that branch. With no change there is no branch, only the log and the exit code.
+- **Large outputs are not committed.** What is committed is what git would track, Night Shift's rule, with the same caveat for a repository whose `.gitignore` misses something. A script that writes checkpoints or other artifacts names `--out <path>`; that folder is kept under the job's directory on the node and brought back by `node fetch` as files, never as a commit.
 - **`/night add --on <node>`** records the node with the task. At night the local runner hands that task to the named node, whose own runner works it with its own `puffin exec` against **its own** model server over loopback, so two Sparks work one queue at once without sharing a model. The result branch `night/<id>` is fetched back and the morning report lists the task with the node it ran on. The flag is parsed in `puffin-rs/src/night.rs`; it needs no patch.
 - **Uncommitted changes are not sent**, and the command says so, as `/night add` does.
 - **Files that are not in git do not travel**: datasets, model weights, a local `.env`. A job that needs them names a path that exists on the node (§13.6).
@@ -496,7 +498,10 @@ puffin-admin node fetch <job>            # bring the result branch into this rep
 Night Shift's known gap is that the runner's own test run executes agent-written code with the user's full rights ([PUFFIN_NIGHT_SHIFT §6](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md)). On one's own machine that equals running the tests oneself in the morning. On another node it would hand code written by a model, or sent from another machine, the node owner's home folder: model caches, the Gmail service's secret, SSH keys.
 
 - **Every remote job runs inside bubblewrap on the node**, the profile `puffin-code` already uses for indexers: the system read-only, the home folder an empty tmpfs, the job's worktree and its environment directory (§13.6) bound in, and a scratch `/tmp`. This covers plain scripts, the agent's session (in addition to Codex's own sandbox) and the runner's test command.
-- **The `/airgapped` level travels with the job.** The job record carries the sender's level, and the node applies the stricter of that and its own. At `on` the sandbox has no network; at `off` it has the node's.
+- **Each job has its own `CODEX_HOME`**, `~/.puffin/jobs/<id>/home`, bound read-write into every `puffin exec` of that job and nothing else of the home folder. Night Shift's nudges and resumed tasks call `puffin exec resume <session>`, and the session files have to be there on the second call; a fresh tmpfs each time would lose them, and the node owner's real `~/.puffin` (their sessions, their `node.json`) must not be what the job's agent sees. The launcher rewrites the catalog and config on every start, so nothing is missing from a new one.
+- **The `/airgapped` level travels with the job.** The job record carries the sender's level, the node applies the stricter of that and its own, and the result is written as the level file in the job's `CODEX_HOME`. What it means differs by kind of job:
+  - **A plain script, or the runner's test command:** at `on` the sandbox has no network at all.
+  - **An agent task keeps the host's network namespace**, because `puffin exec` has to reach the node's model server on loopback, which a sandbox with its own network namespace cannot. The agent's commands are confined as on any node: Codex's own sandbox runs each of them, and patch `0019` removes the network there at `on`.
 - **`--gpu` adds the GPU's device nodes** to the sandbox. Whether CUDA works inside that profile is unverified.
 - **The same wrapper would close the gap for local Night Shift**, which is that spec's change to make, not this one's.
 
@@ -512,6 +517,7 @@ A worktree on another machine has no virtualenv, and Night Shift's fallback (the
 ### 13.7 When the sender disconnects
 
 - **A job is a unit on the node, not a child of the SSH connection.** `node run` streaming its output is a view; closing the laptop lid, or losing the network, does not stop the job.
+- **That holds only with lingering on.** Jobs are user units, and with lingering off the user's service manager stops when their last session ends, taking a job started over SSH with it. Lingering is off on this machine (§2). `node add` checks `loginctl show-user <user> -p Linger` on the node and, if it is off, says to run `loginctl enable-linger` there: the same dependency `night enable` and the control agent (§12.4) already name.
 - **Output is kept on the node** (`~/.puffin/jobs/<id>/`), and `node logs` reads it again or continues from where the stream stopped.
 - **The result waits there** as a branch in the node's copy of the repository until `node fetch`, or for a night task until the sender's runner next looks. If the sender is off in the morning, the report line appears when it next starts.
 - **Only `node cancel`, the time limit, the memory cap or the node's watchdog stop a job.**
@@ -526,7 +532,8 @@ A worktree on another machine has no virtualenv, and Night Shift's fallback (the
 | The tools are present | `git`, `bwrap` and `ssh-copy-id` are installed |
 | A cgroup memory cap bounds GPU memory | **No** (3.84 GiB charged against 53.8 GB held), which is why §13.4 treats GPU jobs separately |
 | Everything between two machines | **Not run.** There is one Spark here. Push, remote worktree, fetch, the restricted key, a job surviving a dropped connection and two nodes working one queue are designed from Night Shift's single-machine behaviour and are the first things to test when a second node exists |
-| CUDA inside the bubblewrap profile; a restricted key carrying `git push` | Assumed |
+| Lingering, which jobs need to outlive the sender's connection | **Off** on this machine (`Linger=no`) |
+| CUDA inside the bubblewrap profile; a restricted key carrying `git push`; Codex's own bubblewrap sandbox nested inside the job's | Assumed |
 
 ---
 
@@ -566,7 +573,7 @@ Offline, with no network and no real Avahi:
 - **`puffin-admin node`:** the service file's exact text for a given port, id, version, `main` and `control`; `enable` and `disable` change the two binds and nothing else, with `sudo` and `docker` mocked (the suite must not write `/etc` or touch a running container); staleness is reported by `server start --port` and by an update.
 - **`puffin-app`:** the forwarder passes a streamed response and a WebSocket upgrade from a stand-in server; no forwarder on a node.
 - **Night Shift on a client:** `/night add` refuses with the node message.
-- **Remote jobs (Part 3), with `ssh` and `git` replaced by stand-ins:** a job cannot be composed without a memory cap and a time limit; the `authorized_keys` line written by `node add` carries the forced command and the no-terminal, no-forwarding options; `serve-job` refuses anything that is not one of its operations; the sandbox argument list has no read-write bind outside the worktree and scratch; the stricter of two `/airgapped` levels is applied; a CPU-only job's environment hides the GPU; the setup result is reused for unchanged lock files; a job record survives its stream being closed.
+- **Remote jobs (Part 3), with `ssh` and `git` replaced by stand-ins:** a job cannot be composed without a memory cap and a time limit; the `authorized_keys` line written by `node add` carries the forced command and the no-terminal, no-forwarding options; `serve-job` refuses anything that is not one of its operations; the sandbox argument list has no read-write bind outside the worktree, the job's own `CODEX_HOME` and scratch; an agent job keeps the network namespace and a script job at `on` does not; `node add` reports lingering that is off; the stricter of two `/airgapped` levels is applied; a CPU-only job's environment hides the GPU; the setup result is reused for unchanged lock files; a job record survives its stream being closed.
 
 Live, on two machines:
 - a second Linux machine with nothing configured runs `puffin exec`, `puffin-search` and `puffin-app` against this GB10; the node's address is changed and the client finds it again;
