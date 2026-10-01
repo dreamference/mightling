@@ -80,6 +80,7 @@ These options come before the subcommand (`puffin-admin --agent cline run "…"`
 | **`codex start` / `stop`** | Start / stop the Codex app-server daemon using `puffin` | — |
 | **`puffin …`** (`onyx …`) | Onyx Lite web UI lifecycle | see §4.19 |
 | **`desktop …`** | Tauri desktop window (`puffin-app`) | `install`, `run`, `build`, `status` |
+| **`searxng start`** | Start the SearXNG container on `127.0.0.1:8888`, on the network `dreamference-sidecars`; replaces one made on Docker's default bridge ([DOCKER §6](./DREAMFERENCE_DOCKER.md)) | — |
 | **`search`** | Web search through the local SearXNG | `QUERY… [-n 5] [--json]` |
 | **`fetch`** | Fetch a URL as readable text | `URL [--max-chars 8000]` |
 | **`gmail …`** | Read-only Gmail search and read | `search QUERY [-n 10] [--json]`, `read ID [--max-chars 8000] [--json]`, `status [--json]` |

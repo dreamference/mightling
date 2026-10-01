@@ -32,6 +32,8 @@ from dreamference.chat.onyx_ui_labels import OnyxUILabels
 from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides
 from dreamference.chat.onyx_ui_scripts import OnyxUIScripts
 from dreamference.chat.onyx_installer import OnyxInstaller
+from dreamference.chat.searxng_sidecar import SEARXNG_CONTAINER_NAME, SearxngSidecar
+from dreamference.chat.sidecar_network import SidecarNetwork
 from dreamference.vllm_server import VLLMServerManager
 
 # Onyx's web UI, as published by the stock lite deployment.
@@ -59,11 +61,6 @@ ONYX_PLACEHOLDER_API_KEY: Final[str] = "dreamference-local"
 # `.test` and `.invalid` all fail. No mail is ever sent to it.
 DEFAULT_ONYX_EMAIL: Final[str] = "admin@dreamference.dev"
 DEFAULT_ONYX_PASSWORD: Final[str] = "dreamference"
-
-# The name Onyx's containers resolve SearXNG by once it joins their network. SearXNG publishes
-# only on 127.0.0.1, so the bridge gateway that reaches vLLM does not reach it -- attaching the
-# container to Onyx's network is what makes it addressable, and exposes no new host port.
-SEARXNG_CONTAINER_NAME: Final[str] = "dreamference-searxng"
 
 # Google sign-in, alongside the password form rather than instead of it.
 #
@@ -659,14 +656,24 @@ class OnyxRunner:
 
     def _start_stt_server(self) -> bool:
         """
-        Starts the Whisper sidecar if it is not already running and joins Onyx's network.
+        Starts the Whisper sidecar if it is not already running, on Onyx's network.
 
         The container restarts with the host and keeps its model in a named volume, so the
-        ~500 MB download happens once rather than on every boot.
+        ~500 MB download happens once rather than on every boot. It is *created* on Onyx's
+        network, as the Gmail sidecar is, not joined to it afterwards: a container created on
+        Docker's default bridge keeps a copy of the host's DNS servers taken at start, and after
+        the reboot of 2026-10-01 that copy was empty (`sidecar_network.py`). One found on the
+        default bridge is replaced; the named volume keeps its model.
 
         Returns:
             bool: True if the server is running and reachable from Onyx.
         """
+        network = self._onyx_network()
+        if network and SidecarNetwork.created_on_default_bridge(STT_CONTAINER_NAME):
+            print("🔁 Recreating the speech-to-text server off Docker's default bridge...")
+            subprocess.run(["docker", "rm", "-f", STT_CONTAINER_NAME],
+                           capture_output=True, timeout=60, check=False)
+
         running = subprocess.run(
             ["docker", "ps", "--filter", f"name={STT_CONTAINER_NAME}", "--format", "{{.Names}}"],
             capture_output=True, text=True, timeout=30, check=False,
@@ -677,6 +684,7 @@ class OnyxRunner:
             result = subprocess.run(
                 ["docker", "run", "-d", "--name", STT_CONTAINER_NAME,
                  "--restart", "unless-stopped",
+                 *(["--network", network] if network else []),
                  "-p", f"127.0.0.1:{STT_HOST_PORT}:8000",
                  "-v", f"{STT_CONTAINER_NAME}-cache:/home/ubuntu/.cache/huggingface",
                  STT_IMAGE],
@@ -688,8 +696,8 @@ class OnyxRunner:
             subprocess.run(["docker", "start", STT_CONTAINER_NAME],
                            capture_output=True, timeout=60, check=False)
 
-        network = self._onyx_network()
         if network:
+            # A no-op for a container created there; it covers one made before Onyx was running.
             subprocess.run(["docker", "network", "connect", network, STT_CONTAINER_NAME],
                            capture_output=True, timeout=30, check=False)
 
@@ -1590,11 +1598,18 @@ class OnyxRunner:
         gateway; joining Onyx's network makes it addressable by container name without opening
         any new port on the host.
 
+        A container still on Docker's default bridge (started by hand from the old `docker run`
+        hint) is first recreated on the sidecar network: joining Onyx's network does not change
+        how a container resolves names, and on the default bridge that is a copy of the host's
+        DNS servers which was empty after the reboot of 2026-10-01 (`sidecar_network.py`).
+
         Returns:
             bool: True if SearXNG is on Onyx's network once this returns.
         """
         network = self._onyx_network()
         if not network:
+            return False
+        if SidecarNetwork.created_on_default_bridge(SEARXNG_CONTAINER_NAME) and not SearxngSidecar.start():
             return False
         result = subprocess.run(
             ["docker", "network", "connect", network, SEARXNG_CONTAINER_NAME],

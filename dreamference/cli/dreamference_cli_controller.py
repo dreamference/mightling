@@ -1086,6 +1086,11 @@ class DreamferenceCLIController:
         gmail_status_parser = gmail_subparsers.add_parser("status", help="Show which accounts are connected")
         gmail_status_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
 
+        # Command: puffin-admin searxng (the search container behind puffin-search and the web UI)
+        searxng_parser = subparsers.add_parser("searxng", help="Manage the local SearXNG search container")
+        searxng_subparsers = searxng_parser.add_subparsers(dest="searxng_command")
+        searxng_subparsers.add_parser("start", help="Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge)")
+
         # Command: puffin-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -1102,6 +1107,7 @@ class DreamferenceCLIController:
             "puffin": (onyx_parser, "onyx_command"),
             "onyx": (onyx_parser, "onyx_command"),
             "desktop": (desktop_parser, "desktop_command"),
+            "searxng": (searxng_parser, "searxng_command"),
         }
         return parser
 
@@ -2231,6 +2237,17 @@ class DreamferenceCLIController:
             console.print(f"[bold green]✅ Workspace Indexed![/bold green]")
             console.print(f"   Files Indexed: {summary['total_indexed_files']}")
             console.print(f"   AST Symbols:   {summary['total_ast_symbols']}")
+
+        elif args.command == "searxng":
+            if args.searxng_command == "start":
+                from dreamference.chat.searxng_sidecar import SEARXNG_HOST_PORT, SearxngSidecar
+                if not SearxngSidecar.start():
+                    print("❌ SearXNG did not start.")
+                    sys.exit(1)
+                print(f"✅ SearXNG is running on http://127.0.0.1:{SEARXNG_HOST_PORT}")
+                sys.exit(0)
+            print("usage: puffin-admin searxng {start}")
+            sys.exit(2)
 
         elif args.command == "web":
             cls.display_header()

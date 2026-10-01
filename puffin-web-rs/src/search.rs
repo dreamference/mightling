@@ -14,9 +14,10 @@ use crate::agent;
 pub const DEFAULT_SEARXNG_URL: &str = "http://127.0.0.1:8888";
 
 /// Printed when the instance cannot be reached: the fix is one command, and the alternative is an
-/// agent that quietly believes the web does not exist.
-pub const SEARXNG_START_HINT: &str = "docker run -d --name dreamference-searxng --restart unless-stopped \
-     -p 127.0.0.1:8888:8080 -v ~/.config/searxng:/etc/searxng docker.io/searxng/searxng:latest";
+/// agent that quietly believes the web does not exist. It names the command, not a `docker run`
+/// line: a container started by hand lands on Docker's default bridge, whose DNS servers are a
+/// copy taken at start, and after a reboot on 2026-10-01 that copy was empty.
+pub const SEARXNG_START_HINT: &str = "puffin-admin searxng start";
 
 /// SearXNG answers HTML, or refuses with 403, unless `json` is among its `search.formats`.
 pub const JSON_FORMAT_HINT: &str =

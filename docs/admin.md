@@ -400,6 +400,14 @@ Show which accounts are connected.
 |---|---|
 | `--json` | Emit raw JSON. |
 
+### `puffin-admin searxng`
+
+Manage the local SearXNG search container.
+
+#### `puffin-admin searxng start`
+
+Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge).
+
 ### `puffin-admin web`
 
 Launch Web Canvas UI interactive pair-programming pane.

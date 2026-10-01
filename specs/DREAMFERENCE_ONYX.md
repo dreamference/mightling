@@ -178,7 +178,7 @@ Onyx shows no microphone button until a speech-to-text provider exists, and vLLM
 - **`dreamference-stt` sidecar:**
   - image `ghcr.io/speaches-ai/speaches:latest-cpu`, running on **CPU** (ctranslate2's CUDA doesn't cover SM121, and dictation-length audio takes about 5 s);
   - model `Systran/faster-whisper-small`, cached in the volume `dreamference-stt-cache`;
-  - published on `127.0.0.1:8100` and joined to Onyx's network as `http://dreamference-stt:8000/v1`.
+  - published on `127.0.0.1:8100` and created on Onyx's network, where it is `http://dreamference-stt:8000/v1`. One created on the default bridge (before 2026-10-01) is replaced by the next `configure`; the volume keeps its model ([DOCKER §6](./DREAMFERENCE_DOCKER.md)).
 - **SSRF patch:** Onyx exempts only Azure voice endpoints from its private-address block (`allow_private_network = provider_type.lower() == "azure"`), whatever the SSRF setting. `_allow_local_voice_endpoint()` rewrites that line in `/app/onyx/server/manage/voice/api.py` to `in ("azure", "openai")`, then **restarts the API server**: this is imported Python, unlike the frontend patches.
 - **Registration:** the voice provider `dreamference-whisper`, type `openai`, pointing at the sidecar.
 
@@ -191,9 +191,9 @@ Onyx shows no microphone button until a speech-to-text provider exists, and vLLM
 Onyx has first-class SearXNG support (`WebSearchProviderType.SEARXNG`, no API key). `configure` registers the provider `dreamference-searxng` with `searxng_base_url = http://dreamference-searxng:8080`. Onyx's own base prompt already teaches search-then-open.
 
 - **Container:**
-  - `configure` does **not** start SearXNG. The `dreamference-searxng` container is started separately; `web_tools.py`'s error message carries the command: `docker run -d --name dreamference-searxng --restart unless-stopped -p 127.0.0.1:8888:8080 -v ~/.config/searxng:/etc/searxng docker.io/searxng/searxng:latest`.
+  - `configure` does **not** start SearXNG. `puffin-admin searxng start` does (`SearxngSidecar`), and the error messages of `puffin-search` and `web_tools.py` name that command. It creates the container on the network `dreamference-sidecars`, never Docker's default bridge, whose DNS is a copy taken at container start ([DOCKER §6](./DREAMFERENCE_DOCKER.md)).
   - It publishes only on loopback, **port 8888** on the host.
-  - `_attach_searxng()` joins it to Onyx's network, because the bridge gateway that reaches vLLM doesn't reach it.
+  - `_attach_searxng()` joins it to Onyx's network, because the bridge gateway that reaches vLLM doesn't reach it. A container still on the default bridge is recreated on `dreamference-sidecars` first.
 - **Why a provider, not a prompt:**
   - The only global prompt hook, `user_preferences`, is capped at 500 characters.
   - Reaching SearXNG through the LLM-driven `open_url` tool would require SSRF protection set to `disabled`. The admin-configured provider's client does no SSRF validation, so the secure `validate_all` default stays untouched.

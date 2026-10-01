@@ -186,7 +186,7 @@ fn search_names_the_command_that_starts_an_unreachable_searxng() {
         printed.starts_with("❌ SearXNG at http://127.0.0.1:9 is unreachable"),
         "{printed}"
     );
-    assert!(printed.contains("💡 Start it with: docker run -d --name dreamference-searxng"));
+    assert!(printed.contains("💡 Start it with: puffin-admin searxng start"));
 }
 
 #[test]

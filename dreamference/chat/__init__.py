@@ -10,7 +10,8 @@ The package holds the deployment lifecycle (`onyx_installer`, `onyx_runner`), th
 patch Dreamference applies to a running Onyx -- replaced brand assets (`onyx_brand_assets`),
 substituted and appended stylesheets (`onyx_ui_fonts`, `onyx_ui_overrides`), and rewritten strings
 in the compiled bundle (`onyx_ui_labels`) -- and the desktop shell that offers the same deployment
-in a window of its own (`desktop_installer`, `desktop_runner`).
+in a window of its own (`desktop_installer`, `desktop_runner`). `searxng_sidecar` and
+`sidecar_network` start the search container the web UI, `puffin-search` and the MCP server share.
 """
 
 from dreamference.chat.desktop_installer import DesktopInstaller
@@ -25,6 +26,8 @@ from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
 from dreamference.chat.onyx_ui_labels import OnyxUILabels
 from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides
 from dreamference.chat.onyx_ui_scripts import OnyxUIScripts
+from dreamference.chat.searxng_sidecar import SearxngSidecar
+from dreamference.chat.sidecar_network import SidecarNetwork
 
 __all__ = [
     "DesktopInstaller",
@@ -39,4 +42,6 @@ __all__ = [
     "OnyxUILabels",
     "OnyxUIOverrides",
     "OnyxUIScripts",
+    "SearxngSidecar",
+    "SidecarNetwork",
 ]

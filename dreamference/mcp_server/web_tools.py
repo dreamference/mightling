@@ -42,10 +42,9 @@ USER_AGENT: Final[str] = (
 SEARXNG_URL: Final[str] = os.getenv("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.1:8888")
 # Printed when the instance cannot be reached, because the fix is a single command and the
 # alternative is an agent that quietly believes the web does not exist.
-SEARXNG_START_HINT: Final[str] = (
-    "docker run -d --name dreamference-searxng --restart unless-stopped -p 127.0.0.1:8888:8080 "
-    "-v ~/.config/searxng:/etc/searxng docker.io/searxng/searxng:latest"
-)
+# The command, not a `docker run` line: a container started by hand lands on Docker's default
+# bridge, whose DNS is a copy taken at start (dreamference/chat/sidecar_network.py).
+SEARXNG_START_HINT: Final[str] = "puffin-admin searxng start"
 REQUEST_TIMEOUT_S: Final[float] = 25.0
 # Hard ceiling on what a single fetch will pull down, before any text extraction. A model cannot
 # use more than this anyway, and without it one link to a large binary stalls the whole session.
