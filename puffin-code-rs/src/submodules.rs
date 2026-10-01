@@ -337,26 +337,45 @@ pub fn set_choice(repo: &Repo, submodule: &Submodule, choice: Option<Choice>) ->
     write().with_context(|| format!("writing {}", file.display()))
 }
 
-/// One line of `git submodule status --recursive`: whether it is checked out, and its path.
-fn parse_status_line(line: &str) -> Option<(bool, String)> {
-    let state = line.chars().next()?;
-    let rest = line.get(1..)?;
-    let (_sha, rest) = rest.split_once(' ')?;
-    // A checked-out submodule is followed by ` (<describe>)`.
-    let path = match rest.rfind(" (") {
-        Some(at) if rest.ends_with(')') => &rest[..at],
-        _ => rest,
-    };
-    Some((state != '-', path.to_string()))
+/// The submodules `dir`'s `.gitmodules` declares: `(name, path relative to dir)`.
+///
+/// Read from the file, not from `git submodule status`, which starts a git process per submodule
+/// and costs 30 ms here on its own: this runs on every query.
+fn declared(dir: &Path) -> Vec<(String, String)> {
+    if !dir.join(".gitmodules").is_file() {
+        return Vec::new();
+    }
+    let Ok(listing) = git(dir, &["config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"]) else { return Vec::new() };
+    listing
+        .lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once(' ')?;
+            let name = key.strip_prefix("submodule.")?.strip_suffix(".path")?;
+            Some((name.to_string(), value.trim_end_matches('/').to_string()))
+        })
+        .collect()
 }
 
-/// The submodule's name in `dir`'s `.gitmodules`, for a path relative to `dir`.
-fn name_of(dir: &Path, rel: &str) -> Option<String> {
-    let listing = git(dir, &["config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"]).ok()?;
-    listing.lines().find_map(|line| {
-        let (key, value) = line.split_once(' ')?;
-        (value == rel).then(|| key.strip_prefix("submodule.")?.strip_suffix(".path").map(str::to_string)).flatten()
-    })
+/// Every submodule under `root`, nested ones included: `(name, path relative to root, the
+/// directory of the repository that declares it, checked out)`, in path order. A submodule is
+/// checked out when its directory has a `.git` (git writes a file there that points at the
+/// superproject's `modules/`).
+fn list(root: &Path) -> Vec<(String, String, PathBuf, bool)> {
+    let mut out = Vec::new();
+    let mut pending: Vec<(PathBuf, String)> = vec![(root.to_path_buf(), String::new())];
+    while let Some((dir, prefix)) = pending.pop() {
+        for (name, rel) in declared(&dir) {
+            let path = format!("{prefix}{rel}");
+            let checkout = root.join(&path);
+            let checked_out = checkout.join(".git").exists();
+            if checked_out {
+                pending.push((checkout, format!("{path}/")));
+            }
+            out.push((name, path, dir.clone(), checked_out));
+        }
+    }
+    out.sort_by(|a, b| a.1.cmp(&b.1));
+    out
 }
 
 /// Whether the settings' `code_index_submodule_max_files` may be honoured: only from a file
@@ -380,26 +399,19 @@ pub fn evaluate(repo: &Repo, settings: &Settings) -> Vec<Submodule> {
 
 /// [`evaluate`] with the size guard and the user's choices given.
 pub fn evaluate_with(repo: &Repo, max_files: usize, choices: &[(String, Choice)]) -> Vec<Submodule> {
-    if !repo.is_git || !repo.root.join(".gitmodules").is_file() {
+    if !repo.is_git {
         return Vec::new();
     }
-    let Ok(status) = git(&repo.root, &["submodule", "status", "--recursive"]) else { return Vec::new() };
-    let mut listed: Vec<(bool, String)> = status.lines().filter_map(parse_status_line).collect();
-    listed.sort_by(|a, b| a.1.cmp(&b.1));
+    let listed = list(&repo.root);
     if listed.is_empty() {
         return Vec::new();
     }
     let our_remote = superproject_remote(&repo.root);
     let authors = Authors::of(&repo.root);
     let mut out: Vec<Submodule> = Vec::new();
-    for (checked_out, path) in listed {
+    for (name, path, parent_dir, checked_out) in listed {
         // The declaring repository: the superproject, or the submodule this one is nested in.
         let parent = out.iter().filter(|s| path.starts_with(&format!("{}/", s.path))).max_by_key(|s| s.path.len()).cloned();
-        let (parent_dir, rel) = match &parent {
-            Some(p) => (repo.root.join(&p.path), path[p.path.len() + 1..].to_string()),
-            None => (repo.root.clone(), path.clone()),
-        };
-        let name = name_of(&parent_dir, &rel).unwrap_or_else(|| rel.clone());
         let dir = repo.root.join(&path);
         let mut submodule = Submodule {
             path: path.clone(),
@@ -629,13 +641,6 @@ mod tests {
         assert_eq!(decide(Unavailable, 3, 4), (true, Reason::YoursByAuthorship));
         assert_eq!(decide(Unavailable, 0, 4), (false, Reason::ThirdParty));
         assert_eq!(decide(Unavailable, 0, 0), (false, Reason::Unknown));
-    }
-
-    #[test]
-    fn status_lines() {
-        assert_eq!(parse_status_line(" 064c6b8c codex (rust-v0.158.0)"), Some((true, "codex".into())));
-        assert_eq!(parse_status_line("-064c6b8c vendor/lib"), Some((false, "vendor/lib".into())));
-        assert_eq!(parse_status_line("+064c6b8c my dir/sub (heads/main)"), Some((true, "my dir/sub".into())));
     }
 
     fn sub(path: &str, indexed: bool, reason: Reason) -> Submodule {

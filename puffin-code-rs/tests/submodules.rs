@@ -167,6 +167,24 @@ fn a_nested_submodule_is_examined_only_when_its_parent_is_indexed() {
 }
 
 #[test]
+fn a_submodule_that_is_not_checked_out_is_not_indexed_whatever_the_policy_says() {
+    let f = with_submodules();
+    git(&f.repo.root, &["add", "-A"]);
+    git(&f.repo.root, &["commit", "-qm", "add submodules"]);
+    // A fresh clone without `--recurse-submodules`: the submodules are declared, and empty.
+    let clone = f.dir.path().join("clone");
+    git(f.dir.path(), &["clone", "-q", &f.repo.root.to_string_lossy(), "clone"]);
+    git(&clone, &["remote", "set-url", "origin", "https://example.com/acme/super.git"]);
+    let repo = Repo { root: clone.clone(), main_root: clone, is_git: true };
+    let all = submodules::evaluate_with(&repo, 5000, &[("ours".to_string(), Choice::Include)]);
+    assert_eq!(all.len(), 2);
+    for submodule in &all {
+        assert_eq!((submodule.indexed, submodule.reason.clone()), (false, Reason::NotCheckedOut), "{}", submodule.path);
+    }
+    assert_eq!(submodules::not_indexed_line(&all).as_deref(), Some("ours/ (not checked out), vendored/ (not checked out)"));
+}
+
+#[test]
 fn the_user_decides_and_the_choice_lives_outside_the_workspace() {
     let f = with_submodules();
     let (code, out) = f.run(&["submodules"]);
