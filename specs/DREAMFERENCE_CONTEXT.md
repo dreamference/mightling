@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** AST Extraction, Hybrid Search, SQLite/FTS5 Indexing, Testing
-> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`)
+> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`); §6's test table against `tests/` on 2026-10-01
 
 ---
 
@@ -120,7 +120,7 @@ These are recorded here because the spec used to promise otherwise.
 
 ## 6. Tests Architecture
 
-- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-09-30: 364 passed and 63 skipped in about 30 s. The skips are the live slash-command tests, which need a running vLLM.
+- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-10-01: 521 tests; without a model server 63 are skipped and the rest take about 25 s. The skips are the live slash-command tests, which need a running model server; with one, the full run takes about 13 minutes.
 - **Style:** `tmp_path` isolation, and no external services except in tests that detect them and skip.
 
 | Test File | Scope |
@@ -130,7 +130,7 @@ These are recorded here because the spec used to promise otherwise.
 | `test_hardware.py` | GB10 detection, model matrix, downloads |
 | `test_vllm_server.py` | Launch command and recipe layering, host safety, compile-cache reset |
 | `test_diffusion_server.py` | Diffusion sidecar |
-| `test_runner.py` | Agent runners, sandbox logic, the Codex hand-off |
+| `test_runner.py` | Agent runners, the Codex hand-off |
 | `test_codex_branded_builder.py` | `puffin` build: patches apply, submodule untouched, build key, size limit |
 | `test_puffin_slash_commands.py` | Every `puffin` slash command and subcommand on a pseudo-terminal (live cases skip without vLLM) |
 | `test_cli_entry_points.py` | `puffin-admin` entry point, no Python `puffin`, strict parsing |
@@ -140,13 +140,22 @@ These are recorded here because the spec used to promise otherwise.
 | `test_gmail_client.py` | `puffin-admin gmail` client |
 | `test_image_search_service.py` | Image search sidecar |
 | `test_desktop.py` | Desktop window (`puffin-app`) install and launch |
+| `test_codex_test_runner.py` | `puffin-admin codex test`: Codex's own tests on the patched export, the skip list |
+| `test_puffin_privacy.py` | No usage analytics or OpenAI channels from `puffin` |
+| `test_web_commands.py` | `puffin-search` and `puffin-fetch` are Rust binaries, not console scripts |
+| `test_cave_mode.py` | Cave mode's Python side: the setting, and the level texts matching the benchmark's |
+| `test_code_index.py` | `puffin-admin code setup`, and `server start` stopping index runs before a load |
+| `test_night_shift.py` | Night Shift's runner, with a scripted stand-in for `puffin` |
+| `test_sidecar_network.py` | Sidecars are created on a user-defined network, never Docker's default bridge |
+| `test_cache_clearing.py` | `puffin-admin clear` removes weights only |
+| `test_admin_reference.py` | `docs/admin.md` is generated from the CLI and in step with it |
 
-The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p puffin-launcher` (`DREAMFERENCE_PUFFIN_CODEX.md`).
+The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p puffin-launcher` (`DREAMFERENCE_PUFFIN_CODEX.md`); `puffin-web-rs/` and `puffin-code-rs/` are tested with `cargo test --locked` in their own directories.
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_PUFFIN_CODE_INDEX.md](./DREAMFERENCE_PUFFIN_CODE_INDEX.md):** proposed code index for `puffin`
+- **[DREAMFERENCE_PUFFIN_CODE_INDEX.md](./DREAMFERENCE_PUFFIN_CODE_INDEX.md):** the code index for `puffin` (`puffin-code`, implemented 2026-10-01)
 - **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent integration
 - **[DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md):** source layout
