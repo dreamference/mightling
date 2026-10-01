@@ -171,8 +171,14 @@ class MCPServer:
         elif tool_name == "workspace_search_code":
             query: str = str(args.get("query", ""))
             top_k: int = int(args.get("top_k", 5))
-            # Offload blocking indexing and search to background thread pool
+            # The code index router answers when it is installed and this workspace is indexed
+            # (milliseconds, no model); otherwise the context engine does, as before. Both block,
+            # so both run in the thread pool.
             def _do_search() -> List[Dict[str, Any]]:
+                from dreamference.mcp_server.code_index_search import CodeIndexSearch
+                indexed = CodeIndexSearch.search(query, top_k=top_k)
+                if indexed is not None:
+                    return indexed
                 self.context_engine.index_workspace()
                 return self.context_engine.search_code(query, top_k=top_k)
             return await asyncio.to_thread(_do_search)

@@ -86,3 +86,55 @@ def test_web_search_reports_engines_that_all_failed_rather_than_no_results():
     with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response):
         outcome = WebTools.search("python asyncio")
     assert outcome["result_count"] == 1 and "error" not in outcome
+
+
+def _fake_puffin_code(tmp_path, monkeypatch, script: str):
+    """Installs a stand-in `puffin-code` where CodeIndexSearch looks for the real one."""
+    from dreamference.mcp_server import code_index_search
+
+    install = tmp_path / "install"
+    (install / "bin").mkdir(parents=True)
+    binary = install / "bin" / "puffin-code"
+    binary.write_text("#!/bin/sh\n" + script)
+    binary.chmod(0o755)
+    monkeypatch.setattr(code_index_search, "INSTALL_DIR", str(install))
+    return binary
+
+
+def test_code_search_is_answered_by_the_code_index_when_the_workspace_has_one(tmp_path, monkeypatch):
+    # The router's rows, not the context engine: no workspace walk and no embedding model.
+    answer = {"op": "search", "rows": [
+        {"tag": None, "path": "pkg/a.py", "line": 15, "detail": "class pkg.a.Loader"},
+        {"tag": None, "path": "pkg/a.py", "line": 40, "detail": "method pkg.a.Loader.load"},
+        {"tag": None, "path": "pkg/b.py", "line": 3, "detail": "function pkg.b.helper"},
+    ]}
+    calls = tmp_path / "calls"
+    _fake_puffin_code(tmp_path, monkeypatch, f"echo \"$@\" >> {calls}\ncat <<'JSON'\n{json.dumps(answer)}\nJSON\n")
+    server = MCPServer()
+    monkeypatch.setattr(MCPServer, "context_engine", property(lambda self: (_ for _ in ()).throw(AssertionError("engine built"))))
+    result = server.execute_tool("workspace_search_code", {"query": "loader load", "top_k": 2})
+    assert result == [
+        {"rel_path": "pkg/a.py", "line": 15, "kind": "class", "symbol": "pkg.a.Loader", "source": "puffin-code"},
+        {"rel_path": "pkg/a.py", "line": 40, "kind": "method", "symbol": "pkg.a.Loader.load", "source": "puffin-code"},
+    ]
+    # The words are separate arguments: no shell, and nothing the query says is interpreted.
+    assert calls.read_text().strip() == "search loader load --json"
+
+
+def test_code_search_falls_back_to_the_context_engine(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    from dreamference.mcp_server import CodeIndexSearch
+
+    engine = MagicMock()
+    engine.search_code.return_value = [{"rel_path": "x.py", "score": 1.0}]
+    monkeypatch.setattr(MCPServer, "context_engine", property(lambda self: engine))
+    # Not installed.
+    monkeypatch.setattr("dreamference.mcp_server.code_index_search.INSTALL_DIR", str(tmp_path / "nowhere"))
+    assert CodeIndexSearch.executable() is None
+    assert MCPServer().execute_tool("workspace_search_code", {"query": "x"}) == [{"rel_path": "x.py", "score": 1.0}]
+    # Installed, but this workspace has no index (exit 3), or the call fails, or prints no JSON.
+    for script in ("echo 'no code index for this repository yet'\nexit 3\n", "exit 1\n", "echo not json\n"):
+        _fake_puffin_code(tmp_path / script[:6].strip().replace(" ", "_"), monkeypatch, script)
+        assert CodeIndexSearch.search("x") is None
+        assert MCPServer().execute_tool("workspace_search_code", {"query": "x"}) == [{"rel_path": "x.py", "score": 1.0}]
+    assert engine.index_workspace.call_count == 4

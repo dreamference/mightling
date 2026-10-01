@@ -99,7 +99,9 @@ class MCPToolRegistry:
             },
             {
                 "name": "workspace_search_code",
-                "description": "Performs local AST & vector semantic code search in the workspace.",
+                "description": "Searches the workspace's code: definitions whose name or body match the words, "
+                               "from the puffin-code index when the workspace has one, else a local AST and "
+                               "vector search.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
