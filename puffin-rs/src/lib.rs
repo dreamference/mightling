@@ -547,6 +547,8 @@ pub fn configure_codex_home(
         serde_json::to_string_pretty(&model_catalog(model, extra_instructions))?.as_bytes(),
     )?;
 
+    // A writable root of the sandbox (see `updated_config`) has to exist to be mounted.
+    let _ = std::fs::create_dir_all(codex_home.join("skills"));
     let config_path = codex_home.join("config.toml");
     let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     let updated = updated_config(&existing, &catalog_path, host)?;
@@ -613,6 +615,18 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
     // the prompt fail with "Temporary failure in name resolution".
     let sandbox = table(doc.as_table_mut(), "sandbox_workspace_write");
     set_if_absent(sandbox, "network_access", true);
+    // The built-in `skill-installer` downloads a skill from github.com/openai/skills into
+    // `$CODEX_HOME/skills`, which the sandbox mounts read-only: `puffin exec` then cannot install
+    // one at all, and the TUI needs an approval for each. Only when absent, so
+    // `writable_roots = []` in the file switches this off. Skills are instructions later sessions
+    // read, so this lets a session change what the next one is told.
+    if !sandbox.contains_key("writable_roots")
+        && let Some(home) = catalog_path.parent()
+    {
+        let mut roots = toml_edit::Array::new();
+        roots.push(home.join("skills").to_string_lossy().into_owned());
+        sandbox.insert("writable_roots", value(roots));
+    }
 
     Ok(doc.to_string())
 }
@@ -908,6 +922,26 @@ mod tests {
         );
         let tui = parsed.get("tui").and_then(toml::Value::as_table);
         assert!(tui.is_some_and(|tui| !tui.contains_key("pet") && tui.contains_key("theme")));
+    }
+
+    #[test]
+    fn the_sandbox_may_write_the_skills_folder_unless_the_user_says_otherwise() {
+        let roots = |existing: &str| {
+            let text = updated_config(existing, Path::new("/h/c.json"), "http://x:8000")
+                .unwrap_or_default();
+            let parsed: toml::Table = toml::from_str(&text).unwrap_or_default();
+            parsed["sandbox_workspace_write"]
+                .get("writable_roots")
+                .and_then(toml::Value::as_array)
+                .map(|roots| roots.iter().filter_map(toml::Value::as_str).map(str::to_string).collect::<Vec<_>>())
+        };
+        assert_eq!(roots(""), Some(vec!["/h/skills".to_string()]));
+        // The user's own list, an empty one included, is left alone.
+        assert_eq!(roots("[sandbox_workspace_write]\nwritable_roots = []\n"), Some(vec![]));
+        assert_eq!(
+            roots("[sandbox_workspace_write]\nwritable_roots = [\"/data\"]\n"),
+            Some(vec!["/data".to_string()])
+        );
     }
 
     #[test]
