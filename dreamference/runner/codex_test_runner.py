@@ -553,6 +553,9 @@ class CodexTestRunner:
             "cargo", "nextest", "run", "--cargo-profile", CARGO_PROFILE, "--no-fail-fast",
             "--test-threads", str(test_threads), "--status-level", "fail",
             "--final-status-level", "fail",
+            # A filter (`-E 'package(codex-tui)'`) can leave one of the run's commands with no
+            # test at all, which nextest otherwise reports as a failure (exit 4).
+            "--no-tests", "pass",
         ]
         if filterset:
             nextest += ["-E", filterset]

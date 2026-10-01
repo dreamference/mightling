@@ -273,3 +273,12 @@ def test_the_temporary_directory_keeps_png_off_a_base64_boundary():
         assert "cG5n" not in encoded
     finally:
         os.rmdir(path)
+
+
+def test_a_command_the_filter_leaves_empty_does_not_fail_the_run():
+    skips = {"package": [], "target": [{"package": "codex-code-mode-host", "test": "stdio", "reason": "r"}],
+             "test": []}
+    with patch.object(CodexTestRunner, "test_targets", return_value=["stdio", "other"]):
+        commands = CodexTestRunner.commands(skips, "/ws", {}, "package(codex-tui)", 8)
+    for command in commands[1:]:
+        assert command[command.index("--no-tests") + 1] == "pass"
