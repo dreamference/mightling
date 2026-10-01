@@ -109,7 +109,9 @@ pub fn parse(symbol: &str) -> Option<SymbolName> {
                 continue;
             }
             Kind::TypeParameter | Kind::Parameter => {}
-            Kind::Namespace => segments.extend(descriptor.name.split('.').filter(|s| !s.is_empty()).map(str::to_string)),
+            // Module paths split into their parts: `shapes.geometry` (scip-python),
+            // `shapes.ts` (scip-typescript's file namespaces), `example.com/m/geom` (scip-go).
+            Kind::Namespace => segments.extend(descriptor.name.split(['.', '/']).filter(|s| !s.is_empty()).map(str::to_string)),
             _ => segments.push(descriptor.name.clone()),
         }
         index += 1;
@@ -248,6 +250,35 @@ mod tests {
     fn parameters_and_locals_are_not_targets() {
         assert!(parse("scip-python python shapes 7f5b `shapes.geometry`/Circle#area().(self)").is_none());
         assert!(parse("local 12").is_none());
+    }
+
+    #[test]
+    fn typescript_file_namespaces() {
+        // Recorded from scip-typescript 0.4.0 on tests/fixtures/code_index/src/tsgeom.
+        let s = parse("scip-typescript npm tsgeom 0.1.0 src/`shapes.ts`/Circle#area().").unwrap();
+        assert_eq!(s.segments, ["src", "shapes", "ts", "Circle", "area"]);
+        assert!(s.matches(&query_segments("Circle.area")));
+        assert!(s.matches(&query_segments("shapes.Circle.area")));
+        assert!(!s.matches(&query_segments("Square.area")));
+        let f = parse("scip-typescript npm tsgeom 0.1.0 src/`shapes.ts`/makeCircle().").unwrap();
+        assert!(f.matches(&query_segments("makeCircle")));
+    }
+
+    #[test]
+    fn go_java_dotnet_and_clang_shapes() {
+        // Go: the package path is one backticked namespace with dots and slashes in it.
+        let go = parse("scip-go gomod example.com/geom 0f3a7c1 `example.com/geom/shapes`/Circle#Area().").unwrap();
+        assert_eq!(go.segments, ["example", "com", "geom", "shapes", "Circle", "Area"]);
+        assert!(go.matches(&query_segments("shapes.Circle.Area")));
+        // Java (semanticdb): packages as plain namespaces, overloads as a disambiguator.
+        let java = parse("semanticdb maven maven/com.example/geom 1.0 com/example/geom/Circle#area(+1).").unwrap();
+        assert_eq!(java.segments, ["com", "example", "geom", "Circle", "area"]);
+        assert!(java.matches(&query_segments("Circle.area")));
+        // .NET and clang leave package and version as `.`.
+        let cs = parse("scip-dotnet nuget . . Geom/Circle#Area().").unwrap();
+        assert!(cs.matches(&query_segments("Geom.Circle.Area")));
+        let cpp = parse("cxx . . $ geom/Circle#area(49f6e7a06ebc5aa8).").unwrap();
+        assert!(cpp.matches(&query_segments("Circle::area")));
     }
 
     #[test]

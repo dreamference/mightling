@@ -428,3 +428,35 @@ fn a_stale_index_of_another_language_does_not_widen_the_answer() {
     let (_, status) = f.run(&["status"]);
     assert!(status.contains("rust-analyzer:geom: ok") && status.contains("1 files changed since"), "{status}");
 }
+
+#[test]
+fn typescript_answers_are_exact() {
+    // tsgeom is indexed by scip-typescript 0.4.0, with the configuration puffin-code infers for a
+    // package.json without a tsconfig (recorded by scripts/record-fixtures.sh).
+    let f = fixture();
+    let (_, out) = f.run(&["refs", "makeDisk"]);
+    assert!(out.contains("changed since snapshot: 0 files\n"), "{out}");
+    for row in ["tsgeom/src/main.ts:3", "tsgeom/src/main.ts:7", "tsgeom/src/report.ts:3", "tsgeom/src/report.ts:6", "tsgeom/src/shapes.ts:23"] {
+        assert!(out.contains(&format!("exact {row}")), "{row}: {out}");
+    }
+    assert_eq!(rows(&out, "exact").len(), 5, "{out}");
+    // A method called through an instance and through a call's result.
+    let (_, out) = f.run(&["callers", "Disk.surface"]);
+    assert!(out.contains("exact tsgeom/src/report.ts:8"), "{out}");
+    assert!(out.contains("exact tsgeom/src/main.ts:7"), "{out}");
+    // An interface's implementations, from scip-typescript's relationships.
+    let (_, out) = f.run(&["impl", "Figure"]);
+    assert!(out.contains("exact tsgeom/src/shapes.ts:7") && out.contains("exact tsgeom/src/shapes.ts:15"), "{out}");
+    let (_, out) = f.run(&["def", "describe"]);
+    assert!(out.contains("exact tsgeom/src/report.ts:5"), "{out}");
+}
+
+#[test]
+fn a_typescript_edit_is_searched_by_text() {
+    let f = fixture();
+    f.append("tsgeom/src/main.ts", "console.log(makeDisk(4).surface());\n");
+    let (_, out) = f.run(&["refs", "makeDisk"]);
+    assert!(out.contains("changed since snapshot: 1 files, all searched"), "{out}");
+    assert!(out.contains("heuristic (text) tsgeom/src/main.ts:8"), "{out}");
+    assert!(out.contains("exact tsgeom/src/report.ts:6"), "{out}");
+}

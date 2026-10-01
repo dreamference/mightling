@@ -151,6 +151,10 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
             // Nothing is fetched on an indexer's behalf (§9.1): a missing dependency is the
             // accepted outcome, recorded as such rather than retried.
             _ if is_offline_failure(&log_text) => "offline".to_string(),
+            // GOTOOLCHAIN=local refuses to download the Go a go.mod asks for.
+            _ if log_text.contains("requires go >=") && log_text.contains("GOTOOLCHAIN=local") => {
+                "go.mod needs a newer Go than the one recorded (upgrade Go, then `puffin-admin code setup`)".to_string()
+            }
             _ if log_text.contains("registry/cache") && log_text.contains("Read-only file system") => {
                 "dependencies not unpacked (run `cargo fetch` in the crate once)".to_string()
             }
@@ -223,7 +227,24 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
 
 /// Whether a run's log says it needed the network.
 pub fn is_offline_failure(log: &str) -> bool {
-    ["--offline", "failed to download", "network", "Could not resolve host", "ENOTFOUND", "offline mode"]
+    [
+        "--offline",
+        "failed to download",
+        "network",
+        "Could not resolve host",
+        "ENOTFOUND",
+        "Temporary failure in name resolution",
+        "Name or service not known",
+        "offline mode",
+        // Go with GOPROXY=off.
+        "module lookup disabled by GOPROXY=off",
+        // Gradle's wrapper and Maven or Gradle reaching for a repository.
+        "UnknownHostException",
+        "Could not install Gradle distribution",
+        // NuGet: a package that is not in the local folder, or a feed it cannot reach.
+        "NU1101",
+        "NU1301",
+    ]
         .iter()
         .any(|needle| log.contains(needle))
 }
@@ -438,5 +459,18 @@ mod offline_tests {
         let log = "error: failed to get `serde` as a dependency of package `x`\n\nCaused by:\n  failed to download from registry\n  attempting to make an HTTP request, but --offline was specified";
         assert!(super::is_offline_failure(log));
         assert!(!super::is_offline_failure("error[E0308]: mismatched types"));
+    }
+
+    #[test]
+    fn the_language_toolchains_offline_messages() {
+        for log in [
+            "go: github.com/google/uuid@v1.6.0: module lookup disabled by GOPROXY=off",
+            "[ERROR] Cannot access central (https://repo.maven.apache.org/maven2) in offline mode",
+            "Could not resolve all files: No cached version of org.slf4j:slf4j-api:2.0.9 available for offline mode.",
+            "Exception in thread \"main\" java.net.UnknownHostException: services.gradle.org",
+            "error NU1101: Unable to find package Newtonsoft.Json. No packages exist with this id in source(s): local",
+        ] {
+            assert!(super::is_offline_failure(log), "{log}");
+        }
     }
 }

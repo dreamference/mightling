@@ -1,5 +1,6 @@
-//! Indexing: the universal layer (codebase-memory), the static exact layers (scip-python) and the
-//! executing ones (rust-analyzer), each admitted against one host-wide budget and run in a
+//! Indexing: the universal layer (codebase-memory), the static exact layers (scip-python,
+//! scip-typescript, scip-go, scip-clang) and the executing ones (rust-analyzer, scip-java,
+//! scip-dotnet), each admitted against one host-wide budget and run in a
 //! network-less bwrap sandbox inside `puffin-index.slice` (spec §6, §9).
 //!
 //! Only a process outside Codex's sandbox can index: inside it there is no systemd bus. There,
@@ -33,7 +34,8 @@ pub fn request_or_run(repo: &Repo, settings: &Settings, exact: bool, include_sub
         return Ok(());
     }
     write_cbmignore(repo, include_submodules)?;
-    let (plan, skipped) = plan::build(repo, settings, exact);
+    // Typed by the user: the on-demand indexers (scip-clang, scip-go) run too.
+    let (plan, skipped) = plan::build_with(repo, settings, exact, true);
     for why in &skipped {
         println!("skipped: {why}");
     }

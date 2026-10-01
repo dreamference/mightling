@@ -66,8 +66,13 @@ On this GB10, with the default model (Qwen3.8-27B on SGLang) resident and idle, 
 | `defn_enclosing_ranges` in the store | maps a reference to its innermost enclosing definition (line 2007 of the CLI controller → `DreamferenceCLIController#run_cli()`), 0-based lines | measured |
 | The indexing sandbox, probed with a crate whose `build.rs` reports what it can reach | with `$CARGO_HOME` bound read-write (the first draft's command): it can open `~/.cargo/bin/cargo` for writing and create files in `$CARGO_HOME`, and it sees `~/.ssh`, `~/.puffin/config.toml` and `~/.config/dreamference`. With the home directory a tmpfs and `$RUSTUP_HOME`, `$CARGO_HOME` and the source bound read-only: none of those, and `cargo check --offline` (0.4 s, one registry dependency) and `rust-analyzer scip` (1.95.0, 3.1 s, build script run, `.scip` written to the scratch directory) both still succeed | measured |
 | SGLang's idle gauges | `sglang:num_running_reqs`, `sglang:num_queue_reqs` (0 when idle), on `/metrics` of the served model | measured |
+| scip-typescript 0.4.0 (npm), run as §6.1 says, 2026-10-01 | Codex's generated protocol schema (732 `.ts` files, a `package.json` and no tsconfig, so the inferred configuration): **~2 s, peak 271 MiB**; Codex's TypeScript SDK (24 files, its own tsconfig): ~2 s, 181 MiB; `refs AbsolutePathBuf` gives 101 exact rows in 48 files, the same 48 files `rg -lw` finds, in 40 ms. It starts child processes only for `--pnpm-workspaces`/`--yarn-workspaces` (`pnpm`, `yarn`), which Puffin never passes; `--infer-tsconfig` writes `tsconfig.json` **into the project**, so Puffin writes its inferred configuration into scratch instead | measured |
+| scip-go 0.2.7 (`scip-go-linux-arm64.tar.gz`, sha256 checked against the release's `.sha256`), on Go 1.27.1 for linux-arm64 in a scratch directory (this machine has no Go) | a three-package fixture module: indexed in the sandbox with `GOPROXY=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0`, **peak 21 MiB**, the module untouched; `refs`, `callers` and `impl` exact. With a `require` of a module in no cache it still succeeds, leaving that dependency unresolved, and reaches for no network; a `go.mod` saying `go 1.99` fails with `go.mod requires go >= 1.99 (running go 1.27.1; GOTOOLCHAIN=local)` instead of downloading that toolchain | measured |
+| scip-java 0.13.1 (`scip-java-v0.13.1`, one 82 MB file, sha256 checked against the release's) | a shell launcher with 74 jars embedded: it loads with no network and an empty home directory, so nothing is fetched at index time. Its classes are Java 17 bytecode (class file version 61): this machine's only Java, an OpenJDK 8 runtime without `javac`, fails with `UnsupportedClassVersionError`. No JDK 17 here, so no index run | measured (launcher); index run not possible here |
+| scip-dotnet 0.2.14 (`scip-dotnet.0.2.14.nupkg` from nuget.org; its SHA-512 equals the catalog's `packageHash`) | framework-dependent builds for net6.0–net10.0 with the `any` runtime identifier: nothing architecture-specific, so arm64 is not the obstacle. It needs a .NET SDK, which this machine does not have, so no index run | verified (package); index run not possible here |
+| scip-clang 0.4.0 | release assets `scip-clang-x86_64-linux`, `scip-clang-dev-x86_64-linux` and `scip-clang-arm64-darwin` only: **no linux-arm64 build** | verified |
 | Licences | codebase-memory-mcp MIT; scip CLI, scip-typescript, scip-clang, scip-java, scip-go, scip-dotnet Apache-2.0; scip-python MIT (Pyright's); all maintained (pushed within the last month) | verified |
-| Decode rate while indexing, frozen/unfrozen scopes, scip-typescript cost, codebase-memory's search by meaning quality | — | **unmeasured** (§10) |
+| Decode rate while indexing, frozen/unfrozen scopes, codebase-memory's search by meaning quality; scip-java and scip-dotnet index runs | — | **unmeasured** (§10, §13) |
 
 Consequences for the design, each carried into the sections below:
 
@@ -88,8 +93,11 @@ Consequences for the design, each carried into the sections below:
 | `scip` Rust crate | 0.10.0 | Apache-2.0 | Decodes the occurrence blobs of the store in `puffin-code`. |
 | `rust-analyzer scip` | from the pinned toolchain (1.95.0) | MIT/Apache-2.0 | Exact Rust layer. Executes build scripts and proc-macros (§9.1). |
 | scip-python | 0.6.6 (npm `@sourcegraph/scip-python`) | MIT | Exact Python layer. Static (Pyright). |
-| scip-typescript | pinned at setup | Apache-2.0 | Exact TypeScript/JavaScript layer. Static. |
-| scip-clang, scip-java, scip-go, scip-dotnet | pinned at setup | Apache-2.0 | Exact layers for C/C++, JVM, Go and .NET (§6.1). |
+| scip-typescript | 0.4.0 (npm `@sourcegraph/scip-typescript`, beside scip-python in the same lockfile) | Apache-2.0 | Exact TypeScript/JavaScript layer. Static. Runs on the recorded Node.js. |
+| scip-go | 0.2.7, `scip-go-linux-arm64.tar.gz`, sha256 `6b93476c7578c5aeb5acacb41f8234c20130168271adea0db8d8ae63d1355acb` | Apache-2.0 | Exact Go layer. Static, offline by environment (§6.1). Runs on a Go toolchain recorded at setup. |
+| scip-java | 0.13.1, `scip-java-v0.13.1` (self-contained launcher), sha256 `a694cae143c32c5b6226362fb4bd268a8d13d3cd9b482819b3b0029a9a97b8fe` | Apache-2.0 | Exact JVM layer for Gradle and Maven projects. Executes the build (§9.1). Needs a JDK 17 or newer, recorded at setup. |
+| scip-dotnet | 0.2.14, `scip-dotnet.0.2.14.nupkg` from nuget.org, sha256 `e2d183fe39b9a56cb8bb2ed2d8b96828fb5434c6db084002bf8a5c6009391b52` | Apache-2.0 | Exact .NET layer (C#, Visual Basic). Executes MSBuild (§9.1). Needs a .NET SDK 8 or newer, recorded at setup. |
+| scip-clang | not pinned: upstream ships no linux-arm64 build (§2) | Apache-2.0 | Exact C/C++ layer where a binary exists; on Puffin's platform C and C++ stay on the universal layer, and `puffin-code status` says why. |
 
 Rejected, with the reason:
 - jCodeMunch: its licence forbids renaming, modified redistribution and commercial use.
@@ -256,7 +264,9 @@ A submodule is indexed only when it belongs to the same organisation as the repo
 - **SCIP indexers:**
   - `rust-analyzer` comes from rustup, the toolchain the Codex build already pins.
   - scip-python and scip-typescript are npm packages; `puffin-admin code setup` installs them into `~/.local/share/dreamference/puffin/indexers/`, pinned by version and by the lockfile's `integrity` hashes. They need Node.js; a machine without it keeps the universal layer for those languages and says so in `puffin-code status`.
-  - The rest are fetched by `puffin-admin code setup` when their language is present, pinned by version and checksum.
+  - **scip-go, scip-java and scip-dotnet need a toolchain** that Puffin does not install. `puffin-admin code setup` looks once for Go (`go env GOROOT`), a JDK 17 or newer (`$JAVA_HOME`, else `javac` on `PATH`; a runtime without `javac` does not count), and a .NET SDK 8 or newer (`dotnet --list-sdks`), and records each as a link under the indexers directory (`go`, `java`, `dotnet`), the way it records `node`. A toolchain no longer found loses its link. `puffin-code` reads only those links, never `PATH`.
+  - Each of the three is installed only beside its recorded toolchain, from the archive pinned in `code-index.sha256`: scip-go's tarball; scip-java's launcher, installed as downloaded (a pin whose member is `-`); scip-dotnet's NuGet package, from which the newest `tools/net<N>.0/any/` the SDK runs is unpacked into `indexers/scip-dotnet/`. No `dotnet tool install`, which would fetch the package again. Without the toolchain, setup says so and skips it: that language stays on the universal layer, and `puffin-code status` names what to install.
+  - scip-clang is not installed: there is no linux-arm64 build (§2).
   - Nothing is ever fetched at index or query time.
 
 ## 6. The SCIP layer
@@ -268,12 +278,22 @@ Detection is by project files at the repository root and in immediate subdirecto
 | Found | Indexer | Executes project code? | Runs |
 |---|---|---|---|
 | `pyproject.toml` / `setup.py` / `requirements.txt` / `*.py` package | scip-python | **no, when run as below**; by default it runs `pip3` and `python3` from `PATH`, i.e. the repository's venv (§2) | **every repository**, automatically |
-| `tsconfig.json` / `jsconfig.json` / `package.json` | scip-typescript | **no** | **every repository**, automatically |
-| `compile_commands.json` | scip-clang | no, given the compdb | every repository, on demand |
+| `tsconfig.json` / `jsconfig.json`, or a `package.json` beside tracked `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` sources | scip-typescript | **no** | **every repository**, automatically |
+| `compile_commands.json`, in the directory or its `build/` | scip-clang | no, given the compdb | every repository, on demand |
 | `go.mod` | scip-go | no code, but `go list` would download | every repository, on demand, offline enforced |
 | `Cargo.toml` (workspace or crate) | rust-analyzer | **yes**: build scripts and proc-macros, always (§2) | trusted repositories, under admission (§6.4) |
-| `build.gradle*` / `pom.xml` / `build.sbt` | scip-java | **yes**: the build | trusted repositories, under admission |
-| `*.sln` / `*.csproj` | scip-dotnet | treat as **yes** | trusted repositories, under admission |
+| `build.gradle(.kts)` / `settings.gradle(.kts)` / `pom.xml` | scip-java | **yes**: the build | trusted repositories, under admission |
+| `*.sln` / `*.slnx`, else `*.csproj` / `*.vbproj` | scip-dotnet | treat as **yes** | trusted repositories, under admission |
+
+**A root project covers its subdirectories,** except for Go: when the repository root is itself a TypeScript (tsconfig or jsconfig), JVM or .NET project, its subdirectories are part of it and are not roots of their own. Go modules are separate whatever their nesting, so every `go.mod` at the root or one level down is a root. `build.sbt` is not detected: `scip-java index` drives only Gradle and Maven.
+
+**"On demand"** means on a `puffin-code index` the user types, or alongside an exact run (`--exact`); never at launch. A repository with a `go.mod` does not pay for `go list` at every `puffin` start.
+
+**How each new indexer runs** (in the sandbox of §9.1, with the convert step of §7.5 after it):
+- **scip-typescript:** `node --max-old-space-size=<¾ of the cap> main.js index <project> --cwd <root> --no-progress-bar`. The project is the root's own tsconfig or jsconfig; without one, a configuration Puffin writes into scratch (`allowJs`, the root's files, `node_modules` excluded), because the tool's own `--infer-tsconfig` writes into the tree. The whole repository is readable, since a tsconfig may extend one above its root. Node's heap stays under the cgroup's cap, so a project too large fails in Node with a message instead of being killed.
+- **scip-go:** `scip-go index --module-root . --repository-remote local --module-version <HEAD>` in the module (both values given, so scip-go never runs git for its defaults), with `GOPROXY=off`, `GOSUMDB=off`, `GOFLAGS=-mod=readonly`, `GOTOOLCHAIN=local` (without it a `go.mod` naming a newer Go downloads that toolchain), `GOWORK=off`, `GOTELEMETRY=off`, `CGO_ENABLED=0` (cgo would run the C compiler over the module's C files), `GOCACHE` and `GOPATH` in scratch, and the user's module cache (`$GOMODCACHE`, else `~/go/pkg/mod`) bound read-only.
+- **scip-clang:** `scip-clang --compdb-path=<compdb> --jobs=4` from the root, where a binary exists.
+- **scip-java and scip-dotnet** build the project, and both build tools write their output into it, so each runs on a **copy of the root's tracked files in scratch** (`git ls-files` piped through `tar`; outside git, everything but the usual build and dependency directories). The checkout itself stays read-only. Their caches and offline flags are in §9.1.
 
 **scip-python is only static when Puffin controls its environment.** It is run with `--environment <file>` (the package list Puffin writes, empty for an untrusted repository), a `PATH` holding only Puffin's own Node.js and the system `/usr/bin`, and `PYTHONSAFEPATH=1` and `PYTHONNOUSERSITE=1`, so the one Python it still starts (to read `sys.path`) is the system interpreter and cannot import a `sitecustomize.py` from the repository. Measured: no `pip3`, no repository interpreter, identical references. The same `PATH` rule applies to scip-typescript's `node`.
 
@@ -475,7 +495,11 @@ Three rules follow.
   - **Nothing outside `$SCRATCH` is writable, `$CARGO_HOME` included.** The first draft bound `$CARGO_HOME` read-write, on the belief that Cargo needs its lock file there. It does not: Cargo skips the lock on a read-only file system (measured, §2). And the write access was an escape: a build script could replace `~/.cargo/bin/cargo` or add a `rustc-wrapper` to `~/.cargo/config.toml`, and that code would run unsandboxed the next time anyone ran Cargo, for example in `puffin-admin codex build`, which builds `puffin` itself. It also runs with no one asking: the exact index starts in the background at launch. Codex's own sandbox never gives the agent's builds that access.
   - **The home directory is an empty tmpfs**, with only the toolchain, Cargo's registry and the source bound back, read-only. A build script has no reason to read `~/.ssh`, `$CODEX_HOME` or the mail service's credentials, and with them hidden it cannot copy them into an output the agent (which has the network) can later read. Binds are given after the tmpfs they sit under, or bwrap hides them again; that includes a source or scratch directory under `/tmp`.
   - **The output is not written into the repository by the indexer.** It writes `$SCRATCH/out/`, empty at the start of each run. The supervisor, outside the sandbox, checks that the file decodes as SCIP and then moves it to `<repo>/.dreamference/scip/` and writes the manifest. With `.dreamference/scip` bound writable, as in the first draft, a build script could overwrite `index.db`, `manifest.json` or another indexer's `.scip`, and the router would serve its content tagged `exact`; a run killed half-way would also leave a truncated `.scip` in place of the last good one.
-  - **Other executing indexers follow the same shape:** their caches are bound read-only (`~/.m2` and `~/.gradle` for scip-java, `~/.nuget/packages` for scip-dotnet) and their writable state is redirected into `$SCRATCH` (`GRADLE_USER_HOME` is a scratch directory whose read-only cache is supplied through `GRADLE_RO_DEP_CACHE`; `DOTNET_CLI_HOME`, `NUGET_HTTP_CACHE_PATH`). An indexer that cannot work without writing to its real cache fails and is recorded; it is not given the cache.
+  - **Other executing indexers follow the same shape,** on the scratch copy of §6.1: their caches are bound read-only and their writable state is redirected into `$SCRATCH`.
+    - **Maven** (scip-java): `--batch-mode --offline -DskipTests -Dmaven.repo.local=$SCRATCH/m2 -Dmaven.repo.local.tail=~/.m2/repository clean verify`; the tail is a read-only chained repository (Maven 3.9 and newer).
+    - **Gradle** (scip-java): `GRADLE_USER_HOME=$SCRATCH/gradle-home`, the user's `~/.gradle/caches` supplied read-only through `GRADLE_RO_DEP_CACHE`, `org.gradle.daemon=false`. The wrapper's distributions under `~/.gradle/wrapper/dists` are not in that cache (§13).
+    - **.NET** (scip-dotnet): `NUGET_PACKAGES=$SCRATCH/nuget-packages`, `DOTNET_CLI_HOME` in scratch, and a `nuget.config` written into scratch whose only source is the user's `~/.nuget/packages`, read-only: no network feed is configured, so restore can only use what is on disk. Telemetry, the first-run experience, node reuse and the MSBuild server are off.
+    - An indexer that cannot work with this fails and is recorded (§6.1), never given a writable cache.
   - **A dependency Cargo has downloaded but not yet unpacked** (`registry/cache` without `registry/src`) cannot be unpacked into a read-only `$CARGO_HOME`. The run fails with `failed: dependencies not unpacked` and `puffin-code status` names the remedy: one `cargo fetch` or build by the user.
   - `/usr/bin/bwrap` is already installed; it is Codex's own sandbox.
   - The CPU limits are on the slice, not the scope (§6.4), so they bound all runs together. The measurements of §2 were taken with them on a single scope, which is the same limit for one run. systemd places `puffin-index.slice` under `puffin.slice`, from its name.
@@ -483,7 +507,7 @@ Three rules follow.
   - The session process creates the bound directories beforehand, because bwrap cannot bind a path that does not exist.
   - `$SRC` is read-only. A run that needs to rewrite the lockfile fails and is recorded; the remedy is a scratch copy, as for `codex/` (§6.2).
 - **Offline is enforced, not assumed.**
-  - Environment: `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly`, `GOPROXY=off`, `npm_config_offline=true`.
+  - Environment: `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly`, `GOPROXY=off`, `GOSUMDB=off`, `GOTOOLCHAIN=local`, `npm_config_offline=true`, Maven's `--offline`, and a NuGet configuration with no network source.
   - Nothing ever runs `npm install`, `pip install` or a dependency download on the indexer's behalf.
   - An indexer that needs something not on disk fails with `status: "failed: offline"`. That is the accepted outcome, not a retry.
 - **Air-gapped, stated precisely:** no network access is *permitted* to any indexer at index time, and none is used at query time. The only downloads happen at install (`puffin-admin code setup`, `puffin update`), each pinned by checksum. codebase-memory's own traffic was checked with strace: none (§2).
@@ -602,7 +626,13 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **The unconstrained peak of the Codex exact index** is unknown: ≥ 21.5 GiB, cap-bounded (§2). One run with the model server stopped and a 40 GiB cap settles it.
 - **The decode-rate cost of indexing beside the model**, frozen and unfrozen, is unmeasured.
 - **Does freezing a scope mid-analysis leave rust-analyzer healthy?** A cgroup freeze is `SIGSTOP`-like, so it should, but it is untested.
-- **scip-typescript's cost and correctness here** are unmeasured; this repository has little TypeScript beyond the desktop app.
+- **scip-java and scip-dotnet have never run here:** this machine has no JDK 17 or .NET SDK (§2). Their commands, environment and sandbox are tested as argument lists (no writable bind outside scratch, offline flags, the scratch copy), and an untrusted repository's build is shown never to start; whether Maven's read-only tail, Gradle's read-only dependency cache and the local-only NuGet source satisfy real projects offline is unmeasured.
+- **A Gradle project built through its wrapper** needs the wrapper's distribution, which lives in `~/.gradle/wrapper/dists`, outside `GRADLE_RO_DEP_CACHE`. With `GRADLE_USER_HOME` in scratch it is not found and cannot be downloaded, so such a run is expected to fail as `offline` until that is designed (a read-only bind would not do: the wrapper takes a lock file beside the distribution).
+- **scip-go with a populated module cache** is unmeasured: the fixture has no dependency in any cache. Whether `go list` reads a read-only `GOMODCACHE` without trying to write its lock files is the open point.
+- **scip-typescript's `--infer-tsconfig` is never passed:** it writes `tsconfig.json` into the project (§2), which the read-only tree refuses and which would be a write into the user's checkout anyway. Puffin writes the same configuration into scratch (§6.1); a project relying on the flag gets the same files indexed.
+- **scip-clang on linux-arm64** needs a build from source (a Bazel project) or an upstream release; neither is planned.
+- **A `package.json` at the root over sources everywhere** makes the root a TypeScript root as well as any subdirectory with a tsconfig: the overlapping files are indexed twice, in two stores, and de-duplicated by `(path, line)` at query time. Correct, but twice the work for those files.
+- **The `stat` fallback of §7.3 counts files the graph never covers as changed.** With the snapshot's commit lost, a tracked file codebase-memory does not index (it skips `tsconfig.json`, for one) has no stamp, so it is counted as new. That over-reports, the safe direction, and only in the fallback.
 - **Search by meaning** is off by default until measured (§4); upstream issues #1155 and #1462 suggest it is weak.
 - **codebase-memory's call-edge gaps** are upstream issues (#1153 method calls through instances, #1271 polymorphic Python calls, #1277 cross-file receiver inference, #1354 TypeScript cross-file methods). A release that fixes them changes §2's recall figures, not this design: the exact layer stays the authority where it exists.
 - **Its application of the superproject's `.gitignore` inside submodules** is a bug to report upstream; the design works around it (§4.1).
@@ -612,7 +642,6 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **SCIP freshness for rust-analyzer is whole-workspace.** It has no crate-scoped mode (its `scip` flags are `--output`, `--config-path` and `--exclude-vendored-libraries`), so the exact Rust layer after a small edit is a full re-run.
 - **Partitioning** may not lower the peak, because the dependency closure of the crates that matter is most of the workspace (§6.4).
 - **The tightened sandbox is measured on a probe crate, not on Codex.** A full `rust-analyzer scip` of the Codex workspace with the home directory hidden and `$CARGO_HOME` read-only has not been run; a proc-macro or build script that expects something else under the home directory would fail there, and would be recorded as a failed run.
-- **scip-java and scip-dotnet under read-only caches** are unmeasured; the redirections named in §9.1 are from the tools' documentation.
 - **Connecting to an existing Unix socket from inside the sandbox** (the runtime directory is read-only there) is untested; the design does not rely on it (§4).
 - **The changed-set search matches names, not symbols.** It cannot see a reference through an alias or a name built at run time, and it reports same-named symbols as `heuristic (text)`. How often an alias hides a new reference in practice is unmeasured; the re-index the query requests closes the gap within one run.
 - **`expt-convert` rejects indexes a real indexer writes** (definitions without `SymbolInformation`); `scip-repair` (§14.2) covers the one case seen. Another rejection would leave that root on the universal layer, recorded as `failed`.
@@ -620,7 +649,7 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 
 ## 14. Implementation (2026-10-01)
 
-`puffin-code` is built from `puffin-code-rs/` (its own lockfile, toolchain 1.95.0), installed and linked by `puffin-admin codex build`, and started by the launcher (`puffin-rs/src/code_index.rs`). `puffin-admin code setup` installs the pinned tools. 58 Rust tests (`cargo test --locked` in `puffin-code-rs/`) and 9 Python tests (`tests/test_code_index.py`, plus the builder's) cover it.
+`puffin-code` is built from `puffin-code-rs/` (its own lockfile, toolchain 1.95.0), installed and linked by `puffin-admin codex build`, and started by the launcher (`puffin-rs/src/code_index.rs`). `puffin-admin code setup` installs the pinned tools. 73 Rust tests (`cargo test --locked` in `puffin-code-rs/`) and 13 Python tests (`tests/test_code_index.py`, plus the builder's) cover it. The language indexers of §6.1 beyond Python and Rust were added the same day (§14.1, §14.2).
 
 ### 14.1 Measured on this repository
 
@@ -630,6 +659,8 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 | Query latency, 20 runs each, warm, this repository | `refs ModelDownloader` p50 0.09 s, p95 0.11 s; `callers VLLMServerManager.check_health` p95 0.12 s; `def resolve_model_hf_repo` p95 0.12 s (§10's bound is 0.2 s) |
 | The §2 replay | `refs ModelDownloader` now lists `diffusion_server_manager.py` and `sglang_launch_builder.py`: as `heuristic (text)` rows against the morning's snapshot, as `exact` rows once re-indexed; `tests/` callers are exact through the tests store |
 | A hostile `build.rs` in the rust-analyzer sandbox | could not create a file in `$CARGO_HOME`, open `$CARGO_HOME/bin/cargo` for writing, read a marker in `$HOME`, or overwrite the store; the index was still written (test, run for real) |
+| scip-typescript through `puffin-code index --wait` | the `tsgeom` fixture: ok, peak 179–183 MiB with codebase-memory beside it; `refs makeDisk` 5 exact rows, `callers Disk.surface` and `impl Figure` exact. Codex's protocol schema and SDK copied into a scratch repository: 271 and 181 MiB, about 2 s each, 14.4 s for the whole `index --wait` including codebase-memory |
+| scip-go through `puffin-code index --wait` | the `gogeom` fixture on a scratch Go 1.27.1: ok, peak 21 MiB, 12.2 s for the whole run including codebase-memory; `refs MakeDisk` 3 exact rows, `callers Disk.Surface` 2, `impl Figure` 2. Nothing was written into the module or the home directory |
 
 ### 14.2 Where the code differs from the text above
 
@@ -646,6 +677,9 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - **Only a killed run records its cap as its peak** (§6.4): a run that failed otherwise kept a cap-sized "peak" whose need exceeded its ceiling, and was never admitted again.
 - **The sandbox also hides `/run`, `/var/tmp` and `/dev/shm`** (§9.1): the Docker socket and the user's systemd bus are there, and a Unix socket on a read-only bind is still connectable. codebase-memory's own cache directory is its one writable bind outside scratch.
 - **Detection** (§6.1): every top-level directory holding tracked `.py` files is a scip-python root (not only packages; untracked directories are the user's); a crate that inherits from a workspace elsewhere is not a root.
+- **Language indexers** (§6.1, added 2026-10-01): detection, the commands and the sandboxes are as §6.1 and §9.1 now describe. Each `Target` carries an `on_demand` flag (scip-go, scip-clang) and a project file (the compdb, the solution or project). One function, `Tools::unavailable`, says why an indexer cannot run (no scip CLI, no Node.js, no recorded toolchain, no arm64 build), and both the plan's skipped list and `puffin-code status` use it: status prints `exact: <indexer> for <root>: <why>` for every detected language without a store.
+- **Module paths split on `/` as well as `.`** (§7.4): scip-go's package namespace (`` `example.com/m/shapes` ``) and scip-typescript's file namespaces (`` src/`shapes.ts` ``) become segments, so `shapes.Circle.Area` and `Disk.surface` resolve.
+- **Failure classes** (§6.4's records): Go's `module lookup disabled by GOPROXY=off`, Maven's and Gradle's offline-mode errors, resolver failures and NuGet's NU1101/NU1301 read as `offline`; a `go.mod` asking for a newer Go than the recorded one reads as such.
 - **Tools** are resolved from Puffin's install directories only; scip-python runs on the `node` recorded at setup.
 - **Executing indexes refresh rarely by design** (§6.3): a session re-runs them only past `code_index_stale_commits` or on `puffin-code index --exact`, so after an ordinary session this repository's Rust stores were about ten commits behind. Their answers stay complete through the text search; `puffin-code index --exact` refreshes them.
 - **State on disk**: this repository's `.dreamference/scip/` held about 30 MB of stores and logs, and codebase-memory keeps one database per indexed repository in its cache, including throwaway ones. `puffin-code forget` removes a repository's; nothing prunes the cache yet.
@@ -657,7 +691,8 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 - The fallback converter and the CLI fallback ladder (§4, §7.5): an unknown schema is reported, naming `puffin-code index` or `puffin update`, and the other layer answers.
 - The scratch-copy exact index of a submodule (§6.2); `--include-submodules` changes only `.cbmignore`, and only until the next launch rewrites it.
 - The submodule policy of §4.3 (designed 2026-10-01): today every submodule is excluded. It replaces `--include-submodules`.
-- scip-typescript, scip-clang, scip-java, scip-go and scip-dotnet (§6.1); search by meaning (§4).
+- A run of scip-java or scip-dotnet on this machine (no JDK 17 or .NET SDK, §2), and scip-clang on linux-arm64 (no build); search by meaning (§4).
+- Detection inside an included submodule (§4.3): `plan::detect` covers the superproject's root and its immediate subdirectories only.
 - Night Shift scheduling (§6.3) and `puffin-admin mcp` re-pointed at the router (§8).
 
 ### 14.4 §12, covered and not
@@ -672,7 +707,11 @@ If the router shows that the graph's edges are wrong in concentrated places, the
 | Hostile build script, no writable bind outside scratch, tmpfs before binds | covered |
 | Killed at the memory cap | not testable without a real scope (§12's own rule); evidence: the 8 GB kill of 2026-09-28 and the capped runs of 2026-09-30 (§2) |
 | `failed: offline` | log classification covered; no fixture run |
-| Untrusted repository gets no executing index, whatever it ships | covered |
+| Untrusted repository gets no executing index, whatever it ships | covered, for rust-analyzer, scip-java and scip-dotnet (a Gradle and an MSBuild marker never written) |
+| Language detection and root rules; every new run's sandbox writes only to scratch; Go offline environment; TypeScript's inferred configuration in scratch; JVM and .NET on a scratch copy | covered (unit tests on the argument lists) |
+| scip-typescript writes nothing into the tree and runs no package script | covered, run for real |
+| scip-go offline: an uncached dependency, a `go 1.99` line refused | covered, run for real when scip-go and Go are installed (or named by `PUFFIN_CODE_TEST_SCIP_GO` and `PUFFIN_CODE_TEST_GOROOT`); skipped otherwise |
+| TypeScript answers through the router (refs, callers, impl, def, an edit since the snapshot) | covered, against the recorded `tsgeom` store |
 | scip-python's environment | covered, run for real |
 | Session: lock, parent exit, junk requests, no systemd bus | covered |
 | Admission: floor, headroom of live scopes, racing admissions, one executing run, slice limits, `choom` | covered with a fake host |

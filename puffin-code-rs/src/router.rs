@@ -880,6 +880,23 @@ impl Context {
         for error in &self.store_errors {
             lines.push(format!("exact: unreadable: {error}"));
         }
+        // The languages the repository has that no exact index covers yet, and why.
+        let tools = crate::index::plan::Tools::find();
+        let trusted = crate::config::is_trusted(&self.repo.main_root);
+        for target in crate::index::plan::detect(&self.repo) {
+            let key = crate::index::store::key(target.indexer, &target.root);
+            if manifest.runs.contains_key(&key) {
+                continue;
+            }
+            let why = match tools.unavailable(target.indexer) {
+                Some(why) => why,
+                None if target.kind == crate::index::host::Kind::Executing && !trusted => continue, // the untrusted line below says it
+                None if target.kind == crate::index::host::Kind::Executing => "not built yet (`puffin-code index --exact`)".to_string(),
+                None if target.on_demand => "not built yet; runs on demand (`puffin-code index`)".to_string(),
+                None => "not built yet (`puffin-code index`)".to_string(),
+            };
+            lines.push(format!("exact: {} for {}: {why}", target.indexer, crate::index::plan::display_root(&target.root)));
+        }
         let submodules = self.repo.submodules();
         let dirs: Vec<&String> = self
             .not_indexed_dirs

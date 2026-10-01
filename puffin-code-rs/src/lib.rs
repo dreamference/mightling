@@ -33,4 +33,8 @@ pub const PINNED_TOOLS: &[(&str, &str)] = &[
     ("scip", "0.10.0"),
     ("scip-python", "0.6.6"),
     ("rust-analyzer", "1.95.0"),
+    ("scip-typescript", "0.4.0"),
+    ("scip-go", "0.2.7"),
+    ("scip-java", "0.13.1"),
+    ("scip-dotnet", "0.2.14"),
 ];

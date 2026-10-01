@@ -62,7 +62,7 @@ pub fn fixture() -> Fixture {
         .query_row("SELECT name FROM projects WHERE name NOT LIKE '%::%'", [], |r| r.get::<_, String>(0))
         .unwrap();
     let commit = git(&root, &["rev-parse", "HEAD"]);
-    for (indexer, root_dir, name) in [("scip-python", "shapes", "shapes"), ("rust-analyzer", "geom", "geom")] {
+    for (indexer, root_dir, name) in [("scip-python", "shapes", "shapes"), ("rust-analyzer", "geom", "geom"), ("scip-typescript", "tsgeom", "tsgeom")] {
         let work = dir.path().join(format!("{name}.db"));
         std::fs::copy(stores.join(format!("{name}.db")), &work).unwrap();
         let prefix = format!("{root_dir}/");

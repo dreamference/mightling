@@ -126,7 +126,7 @@ fn the_sandbox_holds_against_a_hostile_build_script() {
     std::fs::write(root.join(".dreamference/scip/index.db"), "the last good store").unwrap();
     std::fs::write(env.home.join("marker"), "secret").unwrap();
     let repo = git_repo(&root);
-    let target = plan::Target { kind: puffin_code::index::host::Kind::Executing, indexer: "rust-analyzer", root: "hostile".into() };
+    let target = plan::Target::new(puffin_code::index::host::Kind::Executing, "rust-analyzer", "hostile");
     let mut run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
     run.spec.env.push(("PROBE_HOME".into(), env.home.to_string_lossy().into()));
     run.spec.env.push(("PROBE_REPO".into(), root.to_string_lossy().into()));
@@ -184,12 +184,126 @@ fn scip_python_runs_nothing_from_the_repository() {
     }
     std::fs::write(root.join("sitecustomize.py"), format!("open('{}', 'w').close()\n", marker.display())).unwrap();
     let repo = git_repo(&root);
-    let target = plan::Target { kind: puffin_code::index::host::Kind::Static, indexer: "scip-python", root: "pkg".into() };
+    let target = plan::Target::new(puffin_code::index::host::Kind::Static, "scip-python", "pkg");
     let run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
     let output = run_sandboxed(&run.spec);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(run.converted.as_ref().unwrap().is_file());
     assert!(!marker.exists(), "something from the repository ran");
+}
+
+#[test]
+fn scip_typescript_writes_nothing_into_the_tree_and_runs_nothing_from_it() {
+    let _env = env();
+    let tools = plan::Tools::find();
+    let (Some(_), Some(_)) = (tools.scip_typescript.as_ref(), tools.scip.as_ref()) else {
+        eprintln!("skipped: scip-typescript or scip not installed");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    let marker = dir.path().join("ran");
+    std::fs::create_dir_all(root.join("web/lib")).unwrap();
+    // A JavaScript project with no tsconfig, whose package scripts would leave a marker if run.
+    let touch = format!("touch {}", marker.display());
+    std::fs::write(
+        root.join("web/package.json"),
+        format!("{{\"name\":\"web\",\"version\":\"1.0.0\",\"scripts\":{{\"prepare\":\"{touch}\",\"postinstall\":\"{touch}\"}}}}"),
+    )
+    .unwrap();
+    std::fs::write(root.join("web/lib/math.js"), "function add(a, b) { return a + b; }\nmodule.exports = { add };\n").unwrap();
+    std::fs::write(root.join("web/index.js"), "const { add } = require('./lib/math');\nconsole.log(add(1, 2));\n").unwrap();
+    let repo = git_repo(&root);
+    let targets = plan::detect(&repo);
+    let target = targets.iter().find(|t| t.indexer == "scip-typescript").expect("detected").clone();
+    let run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
+    let output = run_sandboxed(&run.spec);
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(run.converted.as_ref().unwrap().is_file());
+    // The inferred configuration went to scratch: the tree is exactly as committed.
+    assert!(common::git(&root, &["status", "--porcelain", "--untracked-files=all"]).is_empty(), "the tree was written to");
+    assert!(!marker.exists(), "a package script ran");
+}
+
+/// scip-go and a Go toolchain, from the install or, for a run on a machine without Go installed,
+/// from `PUFFIN_CODE_TEST_SCIP_GO` and `PUFFIN_CODE_TEST_GOROOT` (paths outside the home directory,
+/// which the sandbox hides).
+fn go_tools() -> Option<plan::Tools> {
+    let tools = plan::Tools::find();
+    let from_env = std::env::var_os("PUFFIN_CODE_TEST_SCIP_GO").map(PathBuf::from).zip(std::env::var_os("PUFFIN_CODE_TEST_GOROOT").map(PathBuf::from));
+    let scip_go = tools.scip_go.clone().or(from_env)?;
+    tools.scip.as_ref()?;
+    Some(plan::Tools { scip_go: Some(scip_go), ..tools })
+}
+
+#[test]
+fn scip_go_indexes_offline_and_refuses_a_toolchain_download() {
+    let _env = env();
+    let Some(tools) = go_tools() else {
+        eprintln!("skipped: scip-go or a Go toolchain not installed");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    copy_dir(&common::fixture_dir().join("langs/gogeom"), &root);
+    // A dependency that is in no module cache: indexing still succeeds, offline, without it.
+    std::fs::write(root.join("go.mod"), "module example.com/gogeom\n\ngo 1.22\n\nrequire github.com/google/uuid v1.6.0\n").unwrap();
+    std::fs::write(root.join("shapes/id.go"), "package shapes\n\nimport \"github.com/google/uuid\"\n\nvar ID = uuid.New()\n").unwrap();
+    let repo = git_repo(&root);
+    let target = plan::detect(&repo).into_iter().find(|t| t.indexer == "scip-go").expect("detected");
+    assert!(target.on_demand);
+    let run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
+    let output = run_sandboxed(&run.spec);
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(run.converted.as_ref().unwrap().is_file());
+    assert!(common::git(&root, &["status", "--porcelain", "--untracked-files=all"]).is_empty(), "the module was written to");
+    // A go.mod naming a newer Go fails here instead of downloading that toolchain.
+    std::fs::write(root.join("go.mod"), "module example.com/gogeom\n\ngo 1.99\n").unwrap();
+    std::fs::remove_file(root.join("shapes/id.go")).unwrap();
+    let output = run_sandboxed(&run.spec);
+    assert!(!output.status.success());
+    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(text.contains("GOTOOLCHAIN=local"), "{text}");
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn an_untrusted_repository_never_builds_java_or_dotnet() {
+    let env = env();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    let marker = dir.path().join("built");
+    // Each build would leave the marker: Gradle at configuration time, MSBuild before the build.
+    std::fs::create_dir_all(root.join("jvm")).unwrap();
+    std::fs::write(root.join("jvm/build.gradle"), format!("new File('{}').text = 'gradle'\n", marker.display())).unwrap();
+    std::fs::create_dir_all(root.join("net")).unwrap();
+    std::fs::write(
+        root.join("net/App.csproj"),
+        format!("<Project Sdk=\"Microsoft.NET.Sdk\"><Target Name=\"Mark\" BeforeTargets=\"Restore;Build\"><Touch Files=\"{}\" AlwaysCreate=\"true\" /></Target></Project>\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::write(root.join("dreamference.toml"), "trusted = true\n").unwrap();
+    let repo = git_repo(&root);
+    assert!(!puffin_code::config::is_trusted_in(&env.home.join(".puffin"), &root));
+    let detected: Vec<&str> = plan::detect(&repo).iter().map(|t| t.indexer).collect();
+    assert!(detected.contains(&"scip-java") && detected.contains(&"scip-dotnet"), "{detected:?}");
+    let (plan, skipped) = plan::build_with(&repo, &puffin_code::config::Settings::default(), true, true);
+    assert!(plan.runs.iter().all(|r| r.indexer != "scip-java" && r.indexer != "scip-dotnet"), "{:?}", plan.runs.iter().map(|r| &r.indexer).collect::<Vec<_>>());
+    for indexer in ["scip-java", "scip-dotnet"] {
+        assert!(skipped.iter().any(|s| s.starts_with(indexer) && s.contains("not trusted")), "{skipped:?}");
+    }
+    assert!(!marker.exists());
 }
 
 #[test]

@@ -238,7 +238,7 @@ Install the pinned tools of puffin-code's code index.
 
 #### `puffin-admin code setup`
 
-Install codebase-memory-mcp, the scip CLI and scip-python, each checked against its pin.
+Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin.
 
 ### `puffin-admin benchmark_server`
 

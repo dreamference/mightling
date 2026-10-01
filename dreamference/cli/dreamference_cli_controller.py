@@ -928,7 +928,7 @@ class DreamferenceCLIController:
         code_parser = subparsers.add_parser("code", help="Install the pinned tools of puffin-code's code index")
         code_subparsers = code_parser.add_subparsers(dest="code_command", help="Code index commands")
         code_subparsers.add_parser(
-            "setup", help="Install codebase-memory-mcp, the scip CLI and scip-python, each checked against its pin"
+            "setup", help="Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin"
         )
 
         # Command: dreamference benchmark_server

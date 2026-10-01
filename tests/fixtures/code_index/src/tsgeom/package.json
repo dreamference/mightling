@@ -1,0 +1,6 @@
+{
+  "name": "tsgeom",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A tiny TypeScript package with known references, recorded by puffin-code's tests."
+}

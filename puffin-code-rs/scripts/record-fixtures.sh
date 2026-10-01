@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Regenerates the recorded stores under tests/fixtures/code_index/stores/ from the fixture sources,
-# with the real tools: codebase-memory-mcp for the graph, scip-python and rust-analyzer for SCIP, and
-# the scip CLI's expt-convert for the query stores. The router's tests read only the recorded
+# with the real tools: codebase-memory-mcp for the graph, scip-python, rust-analyzer and
+# scip-typescript for SCIP, and the scip CLI's expt-convert for the query stores. The router's tests read only the recorded
 # stores, so they need none of these tools; run this after bumping one of them.
 #
-# Usage: record-fixtures.sh <scip-python> <scip CLI> [rust-analyzer] [codebase-memory-mcp]
+# Usage: record-fixtures.sh <scip-python> <scip CLI> [rust-analyzer] [codebase-memory-mcp] [scip-typescript main.js]
 set -euo pipefail
 SCIP_PYTHON=${1:?scip-python path}
 SCIP=${2:?scip CLI path}
 RUST_ANALYZER=${3:-$(ls -d "$HOME"/.rustup/toolchains/1.95.0-*/bin/rust-analyzer | head -1)}
 CBM=${4:-$(command -v codebase-memory-mcp)}
+SCIP_TYPESCRIPT=${5:-$(dirname "$(dirname "$SCIP_PYTHON")")/scip-typescript/dist/src/main.js}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
 FIXTURE="$HERE/tests/fixtures/code_index"
 WORK=$(mktemp -d /tmp/pcfix.XXXXXX)
@@ -38,9 +39,17 @@ echo '[]' > "$WORK/env.json"
   "$SCIP_PYTHON" index --quiet --project-name shapes --target-only shapes \
   --environment "$WORK/env.json" --output "$WORK/shapes.scip")
 "$RUST_ANALYZER" scip "$WORK/repo/geom" --output "$WORK/geom.scip" > /dev/null 2>&1
+# scip-typescript runs nothing from the project (spec §6.1). The fixture has a package.json and no
+# tsconfig, so it gets the configuration puffin-code infers outside the tree (and codebase-memory,
+# which does not index tsconfig.json, covers every file of it).
+printf '{"compilerOptions":{"allowJs":true,"checkJs":false,"noEmit":true},"include":["%s/**/*"],"exclude":["%s/**/node_modules"]}' \
+  "$WORK/repo/tsgeom" "$WORK/repo/tsgeom" > "$WORK/tsconfig.json"
+env -i HOME="$WORK" PATH="$(dirname "$(command -v node)"):/usr/bin:/bin" \
+  node "$SCIP_TYPESCRIPT" index "$WORK/tsconfig.json" --cwd "$WORK/repo/tsgeom" --no-progress-bar \
+  --output "$WORK/tsgeom.scip" > /dev/null
 # The .scip files are kept too: expt-convert does not store relationships, so puffin-code's own
 # post-processing reads them from the .scip (and its tests do the same on these copies).
-for name in shapes geom; do
+for name in shapes geom tsgeom; do
   rm -f "$FIXTURE/stores/$name.db"
   "$SCIP" expt-convert "$WORK/$name.scip" --output "$FIXTURE/stores/$name.db" > /dev/null
   cp "$WORK/$name.scip" "$FIXTURE/stores/$name.scip"

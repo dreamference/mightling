@@ -4,3 +4,10 @@
 # <sha256>  <tool>  <version>  <url>  <member of the archive to install>
 c0e46c87cf37e35f1ac0bd9cc7e1d8b0ca4ef40034e1008805d709fa52a4e38a  codebase-memory-mcp  0.11.0  https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.11.0/codebase-memory-mcp-linux-arm64.tar.gz  codebase-memory-mcp
 6ab677dc2c4bf2955975d0530766152e45daaa988f9404068d8adecacd0bb24c  scip  0.10.0  https://github.com/scip-code/scip/releases/download/v0.10.0/scip-linux-arm64.tar.gz  scip
+# The indexers that need a toolchain of their own: installed only when `puffin-admin code setup`
+# finds and records that toolchain (Go; a JDK 17 or newer; a .NET SDK 8 or newer). A member of `-`
+# is the downloaded file itself; scip-dotnet is a NuGet package whose tools/ folder is installed.
+# scip-clang is not here: upstream ships no linux-arm64 build.
+6b93476c7578c5aeb5acacb41f8234c20130168271adea0db8d8ae63d1355acb  scip-go  0.2.7  https://github.com/sourcegraph/scip-go/releases/download/v0.2.7/scip-go-linux-arm64.tar.gz  scip-go
+a694cae143c32c5b6226362fb4bd268a8d13d3cd9b482819b3b0029a9a97b8fe  scip-java  0.13.1  https://github.com/sourcegraph/scip-java/releases/download/v0.13.1/scip-java-v0.13.1  -
+e2d183fe39b9a56cb8bb2ed2d8b96828fb5434c6db084002bf8a5c6009391b52  scip-dotnet  0.2.14  https://api.nuget.org/v3-flatcontainer/scip-dotnet/0.2.14/scip-dotnet.0.2.14.nupkg  tools/
