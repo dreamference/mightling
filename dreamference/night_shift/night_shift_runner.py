@@ -9,6 +9,7 @@ the window closes.
 """
 
 import os
+import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -227,10 +228,26 @@ class NightShiftRunner:
                     active.append((thread, run))
                     paused_for = None
                     continue
-                if reason != paused_for:
+                # Compared without its numbers: the memory reason carries a free-memory figure that
+                # changes on every poll, and noting each one put the same wait in the report eight
+                # times a minute (live run, 2026-10-02).
+                if cls.reason_kind(reason) != paused_for:
                     notes.append(f"{datetime.now():%H:%M}: waiting to start the next task: {reason}.")
-                    paused_for = reason
+                    paused_for = cls.reason_kind(reason)
             cls.sleep(POLL_S)
+
+    @classmethod
+    def reason_kind(cls, reason: str) -> str:
+        """
+        A start blocker's reason with its figures removed, so one wait is noted once.
+
+        Args:
+            reason: What `start_blocker` returned.
+
+        Returns:
+            str: The reason with every number replaced by `#`.
+        """
+        return re.sub(r"\d+(?:\.\d+)?", "#", reason)
 
     @classmethod
     def start_blocker(cls, vllm_host: str, puffin_bin: str, active: List[tuple],

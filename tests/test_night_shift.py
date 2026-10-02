@@ -565,6 +565,27 @@ def test_an_outside_request_or_session_blocks_the_next_start(fake_host):
     assert "GiB is free" in NightShiftRunner.start_blocker("http://x", "p", [], settings)
 
 
+def test_one_wait_is_noted_once_whatever_its_figures(fake_host, monkeypatch):
+    # Live run, 2026-10-02: the memory reason's free-memory figure changed on every poll, and the
+    # report carried "waiting to start the next task" eight times in one minute.
+    reasons = iter(["11.6 GiB is free after the running tasks' allowance; one more needs 16",
+                    "11.8 GiB is free after the running tasks' allowance; one more needs 16",
+                    "a puffin session is open",
+                    "11.7 GiB is free after the running tasks' allowance; one more needs 16"])
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
+    monkeypatch.setattr(NightShiftRunner, "sleep", staticmethod(lambda seconds: clock.update(now=clock["now"] + seconds)))
+    monkeypatch.setattr(NightShiftRunner, "start_blocker", classmethod(
+        lambda cls, *args: next(reasons, "11.9 GiB is free after the running tasks' allowance; one more needs 16")))
+    notes = []
+    end = datetime.fromtimestamp(1000.0 + 4 * 5 + 1).astimezone()
+    NightShiftRunner.schedule(Path("/nonexistent"), [{"id": "t", "repo": "r"}], NightShiftSettings({}),
+                              "puffin", "http://x", end, 1, notes)
+    waits = [note for note in notes if "waiting to start" in note]
+    assert len(waits) == 3, waits
+    assert "11.6 GiB" in waits[0] and "session is open" in waits[1] and "11.7 GiB" in waits[2]
+
+
 def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, monkeypatch):
     monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
     for index in range(3):
