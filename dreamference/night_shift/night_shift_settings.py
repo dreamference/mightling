@@ -51,6 +51,9 @@ class NightShiftSettings:
         # The runner's test run executes agent-written code; `false` runs it with the user's rights
         # (for a test command that must reach Docker or write outside the worktree).
         self.test_sandbox: bool = bool(table.get("test_sandbox", True))
+        # A stricter `/airgapped` level for night runs alone (airgapped spec §7), as written; the
+        # runner takes the stricter of this and the configured level, so a looser one is ignored.
+        self.airgapped: Any = table.get("airgapped")
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
         # Where a task's session compacts (compaction spec §4.1). Without it a task may grow to the
         # model's whole window, and the `task_context` the parallelism is computed from is a wish;

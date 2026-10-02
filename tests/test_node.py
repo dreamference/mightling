@@ -821,3 +821,70 @@ def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_
     assert NodeJobSender.run("spark-2", ["true"], cwd=str(tmp_path)) == 1
     assert "git repository at a commit" in capsys.readouterr().out
     assert NodeJobSender.logs("20261002-1200-abc") == 1 and NodeJobSender.fetch("../x") == 1
+
+
+# -- puffin-app's one-time sign-in (§7) -------------------------------------------------------------
+
+SIGN_IN_HARNESS = r"""
+const script = require("fs").readFileSync(process.argv[2], "utf8")
+  .replace("__PUFFIN_EMAIL__", "admin@dreamference.dev").replace("__PUFFIN_PASSWORD__", "dreamference");
+const scenario = JSON.parse(process.argv[3]);
+const store = {};
+const calls = [];
+let navigated = null;
+global.window = {
+  sessionStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } },
+  location: { replace: (url) => { navigated = url; } },
+};
+global.fetch = (url, options) => {
+  calls.push({ url, method: (options && options.method) || "GET", body: options && options.body });
+  if (url === "/api/me") return Promise.resolve({ status: scenario.me, ok: scenario.me === 200 });
+  return Promise.resolve({ status: scenario.login, ok: scenario.login < 300 });
+};
+(async () => {
+  for (let i = 0; i < scenario.loads; i++) { eval(script); await new Promise((r) => setTimeout(r, 20)); }
+  console.log(JSON.stringify({ calls, navigated }));
+})();
+"""
+
+
+def run_sign_in(tmp_path, **scenario):
+    import shutil
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    from pathlib import Path
+    harness = tmp_path / "harness.js"
+    harness.write_text(SIGN_IN_HARNESS)
+    script = Path(__file__).resolve().parent.parent / "desktop" / "src-tauri" / "src" / "auto_sign_in.js"
+    result = subprocess.run(["node", str(harness), str(script), json.dumps(scenario)],
+                            capture_output=True, text=True, timeout=60, check=True)
+    return json.loads(result.stdout)
+
+
+def test_the_window_signs_in_with_the_default_account_once(tmp_path):
+    # No session: one login with the default account, then the app.
+    out = run_sign_in(tmp_path, me=403, login=204, loads=1)
+    assert [call["url"] for call in out["calls"]] == ["/api/me", "/api/auth/login"]
+    assert out["calls"][1]["method"] == "POST"
+    assert out["calls"][1]["body"] == "username=admin%40dreamference.dev&password=dreamference"
+    assert out["navigated"] == "/app"
+
+
+def test_a_changed_password_gets_the_login_page_and_no_second_attempt(tmp_path):
+    out = run_sign_in(tmp_path, me=403, login=400, loads=3)
+    assert [call["url"] for call in out["calls"]].count("/api/auth/login") == 1    # tried once per window
+    assert out["navigated"] is None
+
+
+def test_a_signed_in_window_is_left_alone(tmp_path):
+    out = run_sign_in(tmp_path, me=200, login=204, loads=2)
+    assert [call["url"] for call in out["calls"]] == ["/api/me", "/api/me"]
+    assert out["navigated"] is None
+
+
+def test_the_window_uses_the_account_configure_creates():
+    from pathlib import Path
+    from dreamference.chat.onyx_runner import DEFAULT_ONYX_EMAIL, DEFAULT_ONYX_PASSWORD
+    main = (Path(__file__).resolve().parent.parent / "desktop" / "src-tauri" / "src" / "main.rs").read_text()
+    assert f'const DEFAULT_EMAIL: &str = "{DEFAULT_ONYX_EMAIL}";' in main
+    assert f'const DEFAULT_PASSWORD: &str = "{DEFAULT_ONYX_PASSWORD}";' in main

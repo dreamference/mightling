@@ -36,6 +36,19 @@ mod node_locator;
 ///   applies: every rule in `onyx_ui_overrides.py` is scoped `html:not(.dark)` on purpose, so dark
 ///   mode is plain Onyx. Pinning the webview to a light GTK theme is what makes the window show
 ///   Puffin rather than the stock UI. It does not touch the rest of the desktop session.
+/// The web UI's default account, as `puffin-admin puffin configure` creates it
+/// (`DEFAULT_ONYX_EMAIL` and `DEFAULT_ONYX_PASSWORD` in `dreamference/chat/onyx_runner.py`; a test
+/// holds the two in step). Used once per window to sign in when there is no session.
+const DEFAULT_EMAIL: &str = "admin@dreamference.dev";
+const DEFAULT_PASSWORD: &str = "dreamference";
+
+/// The sign-in script, with the account filled in.
+fn auto_sign_in_script() -> String {
+    include_str!("auto_sign_in.js")
+        .replace("__PUFFIN_EMAIL__", DEFAULT_EMAIL)
+        .replace("__PUFFIN_PASSWORD__", DEFAULT_PASSWORD)
+}
+
 const WEBVIEW_ENV: [(&str, &str); 2] = [
     ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
     ("GTK_THEME", "Adwaita:light"),
@@ -70,7 +83,14 @@ fn main() {
         }
     }
 
+    let sign_in = auto_sign_in_script();
     tauri::Builder::default()
+        // After each page load: sign in with the default account if the window has no session.
+        .on_page_load(move |webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                let _ = webview.eval(sign_in.as_str());
+            }
+        })
         .run(context)
         .expect("failed to start the Puffin window");
 }

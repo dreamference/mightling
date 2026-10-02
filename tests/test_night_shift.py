@@ -225,6 +225,18 @@ def test_the_agent_cannot_loosen_the_level_for_its_own_tests(setup, monkeypatch)
     assert again._fix_level() == "on"
 
 
+def test_night_airgapped_tightens_the_level_and_never_loosens_it(setup, monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    record = queue(setup["night"], setup["repo"])
+    level = lambda table: NightShiftTaskRun(setup["night"], record, NightShiftSettings(table), setup["puffin"],
+                                            time.time() + 60)._fix_level()
+    assert level({}) == "off"
+    assert level({"airgapped": "on"}) == "on"
+    assert level({"airgapped": "nonsense"}) == "off"
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "on")
+    assert level({"airgapped": "off"}) == "on"
+
+
 def test_the_main_checkouts_untracked_level_reaches_its_night_tasks(setup, monkeypatch):
     # dreamference.toml is usually untracked, so the worktree has no copy of it.
     monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
