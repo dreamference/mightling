@@ -351,6 +351,44 @@ class DreamferenceConfig:
             return "duckduckgo"
         return name if name in PUFFIN_AIRGAPPED_LEVELS else None
 
+    @classmethod
+    def resolve_airgapped_level(cls, cwd: Optional[Path] = None) -> str:
+        """
+        Resolves the configured air-gap level the way the Rust side does for a command with no
+        session (`puffin-rs/airgapped`, tiers 2 to 4): `DREAMFERENCE_PUFFIN_AIRGAPPED`, then the
+        **stricter** of the two configuration files, then the default.
+
+        The two files are the one `DREAMFERENCE_CONFIG_PATH` names (or `<cwd>/dreamference.toml`)
+        and the user-level `~/.config/dreamference/config.toml`. The stricter wins because an agent
+        can write the repository's file: it may tighten the user's level, never loosen it. An
+        instance's `puffin_airgapped` reads one file only, so anything that *acts* on the level
+        (the MCP server's web tools) asks here.
+
+        Args:
+            cwd: The directory whose `dreamference.toml` counts; defaults to the current one.
+
+        Returns:
+            str: `off`, `duckduckgo` or `on`.
+        """
+        level = cls.parse_airgapped_level(os.getenv("DREAMFERENCE_PUFFIN_AIRGAPPED"))
+        if level is not None:
+            return level
+        custom = os.getenv("DREAMFERENCE_CONFIG_PATH")
+        files = [Path(custom)] if custom else [Path(cwd or Path.cwd()) / "dreamference.toml"]
+        user_level = Path.home() / ".config" / "dreamference" / "config.toml"
+        if user_level not in files:
+            files.append(user_level)
+        strictest: Optional[str] = None
+        for path in files:
+            if not path.is_file():
+                continue
+            level = cls.parse_airgapped_level(
+                ConfigFileStorageManager.load_config_dict(path).get("puffin_airgapped"))
+            if level is not None and (strictest is None or PUFFIN_AIRGAPPED_LEVELS.index(level)
+                                      > PUFFIN_AIRGAPPED_LEVELS.index(strictest)):
+                strictest = level
+        return strictest or DEFAULT_PUFFIN_AIRGAPPED
+
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
         Saves current active configuration parameters to YAML or JSON config file.

@@ -76,3 +76,108 @@ def test_only_on_is_described_as_having_no_network():
     duckduckgo = re.search(r'pub const DUCKDUCKGO_TEXT: &str = "([^"]+)";', text).group(1)
     assert "no network" not in duckduckgo and "air-gapped" not in duckduckgo
     assert "a preference, not a barrier" in text
+
+
+# -- the resolver for whatever acts on the level in Python (spec §7) -------------------------------
+
+def _two_files(tmp_path, monkeypatch, repo_text, user_text):
+    """A working directory and a home, each with (or without) a configuration file."""
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH", raising=False)
+    home, cwd = tmp_path / "home", tmp_path / "repo"
+    (home / ".config" / "dreamference").mkdir(parents=True)
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    if repo_text is not None:
+        (cwd / "dreamference.toml").write_text(repo_text)
+    if user_text is not None:
+        (home / ".config" / "dreamference" / "config.toml").write_text(user_text)
+    return cwd
+
+
+def test_between_the_two_files_the_stricter_wins_as_on_the_rust_side(tmp_path, monkeypatch):
+    # The cases of `between_the_two_files_the_strictest_wins` in puffin-rs/airgapped/src/lib.rs.
+    resolve = DreamferenceConfig.resolve_airgapped_level
+    # A repository file the agent can write does not loosen the user's level.
+    cwd = _two_files(tmp_path / "a", monkeypatch, 'puffin_airgapped = "off"\n', 'puffin_airgapped = "on"\n')
+    assert resolve(cwd) == "on"
+    # It may tighten it.
+    cwd = _two_files(tmp_path / "b", monkeypatch, 'puffin_airgapped = "on"\n', 'puffin_airgapped = "ddg"\n')
+    assert resolve(cwd) == "on"
+    # A file without the key does not count, and neither does a missing file.
+    cwd = _two_files(tmp_path / "c", monkeypatch, 'model = "x"\n', 'puffin_airgapped = "duckduckgo"\n')
+    assert resolve(cwd) == "duckduckgo"
+    cwd = _two_files(tmp_path / "d", monkeypatch, None, None)
+    assert resolve(cwd) == "off"
+
+
+def test_the_environment_decides_before_the_files_and_an_invalid_value_falls_through(tmp_path, monkeypatch):
+    cwd = _two_files(tmp_path, monkeypatch, 'puffin_airgapped = "on"\n', 'puffin_airgapped = "on"\n')
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "off")
+    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "off"
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "sealed")
+    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "on"
+
+
+def test_a_named_config_file_replaces_the_working_directorys(tmp_path, monkeypatch):
+    cwd = _two_files(tmp_path, monkeypatch, 'puffin_airgapped = "on"\n', None)
+    named = tmp_path / "named.toml"
+    named.write_text('puffin_airgapped = "duckduckgo"\n')
+    monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(named))
+    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "duckduckgo"
+
+
+# -- the MCP server's web tools follow the level ---------------------------------------------------
+
+def test_at_on_the_mcp_web_tools_send_nothing(monkeypatch):
+    from unittest.mock import patch
+    from dreamference.mcp_server.web_tools import AIRGAPPED_ON_MESSAGE, WebTools
+
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "on")
+    with patch("dreamference.mcp_server.web_tools.requests.get") as get:
+        found = WebTools.search("python asyncio")
+        page = WebTools.fetch("https://example.com")
+    get.assert_not_called()
+    assert found == {"query": "python asyncio", "airgapped": "on", "error": AIRGAPPED_ON_MESSAGE}
+    assert page == {"url": "https://example.com", "airgapped": "on", "error": AIRGAPPED_ON_MESSAGE}
+    # An IDE has no slash command: the message names the setting, not `/airgapped`.
+    assert "/airgapped" not in AIRGAPPED_ON_MESSAGE and "puffin_airgapped = on" in AIRGAPPED_ON_MESSAGE
+
+
+def test_at_duckduckgo_the_mcp_search_names_that_engine_and_no_category(monkeypatch):
+    from unittest.mock import MagicMock, patch
+    from dreamference.mcp_server.web_tools import WebTools
+
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "duckduckgo")
+    response = MagicMock()
+    response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "duckduckgo"}]}
+    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+        assert WebTools.search("python asyncio")["result_count"] == 1
+    params = get.call_args.kwargs["params"]
+    # With `categories` beside `engines`, SearXNG asked all five general engines (measured).
+    assert params["engines"] == "duckduckgo" and "categories" not in params
+
+    # DuckDuckGo not answering is the level working as chosen: no hint to restart a container.
+    response.json.return_value = {"results": [], "answers": [], "unresponsive_engines": [["duckduckgo", "CAPTCHA"]]}
+    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response):
+        outcome = WebTools.search("python asyncio")
+    assert outcome["error"].startswith("DuckDuckGo did not answer (duckduckgo: CAPTCHA).")
+    assert "hint" not in outcome and outcome["airgapped"] == "duckduckgo"
+    # Fetching is not restricted at this level.
+    page = MagicMock(headers={"Content-Type": "text/plain"}, encoding="utf-8", url="https://example.com", status_code=200)
+    page.iter_content.return_value = [b"hello"]
+    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=page):
+        assert WebTools.fetch("https://example.com")["text"] == "hello"
+
+
+def test_at_off_the_mcp_search_asks_the_category_as_before(monkeypatch):
+    from unittest.mock import MagicMock, patch
+    from dreamference.mcp_server.web_tools import WebTools
+
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "off")
+    response = MagicMock()
+    response.json.return_value = {"results": []}
+    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
+        WebTools.search("python asyncio")
+    params = get.call_args.kwargs["params"]
+    assert params["categories"] == "general" and "engines" not in params

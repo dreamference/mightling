@@ -22,6 +22,10 @@ would send queries somewhere the operator did not choose.
 Fetching needs no service at all: `requests` plus `bs4`, both already required. The whole capability
 stays inspectable and removable — delete the two entries from MCPToolRegistry and the agent is
 offline again.
+
+Both tools follow the air-gap level (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §7), resolved on every
+call the way `puffin-search` and `puffin-fetch` resolve it for a command with no session: at `on`
+nothing is sent, at `duckduckgo` the search names that one engine, at `off` nothing changes.
 """
 
 import os
@@ -54,6 +58,12 @@ DEFAULT_MAX_CHARS: Final[int] = 20_000
 MAX_CHARS_CEILING: Final[int] = 100_000
 # Everything that carries no prose. Dropped before text extraction so the result reads like the
 # page rather than like its source.
+# Returned, with nothing sent, when the configured air-gap level is `on`. The web commands' text
+# names `/airgapped`, a slash command an IDE's MCP client does not have, so this names the setting.
+AIRGAPPED_ON_MESSAGE: Final[str] = (
+    "Web access is off on this machine (puffin_airgapped = on). Only the user can change that, "
+    "with `puffin airgapped default off` or DREAMFERENCE_PUFFIN_AIRGAPPED."
+)
 _NON_CONTENT_TAGS: Final[tuple] = (
     "script", "style", "noscript", "svg", "canvas", "template", "iframe", "form",
 )
@@ -66,6 +76,19 @@ class WebTools:
     A classmethod namespace, like the other stateless helpers in this codebase: there is nothing
     worth keeping between calls, and a shared session would only hide which request went where.
     """
+
+    @classmethod
+    def airgapped_level(cls) -> str:
+        """
+        The air-gap level in force for this server: there is no session here, so it is the
+        configured one (environment, then the stricter of the two configuration files).
+
+        Returns:
+            str: `off`, `duckduckgo` or `on`.
+        """
+        from dreamference.config import DreamferenceConfig
+
+        return DreamferenceConfig.resolve_airgapped_level()
 
     @classmethod
     def _require_http_url(cls, url: str) -> str:
@@ -159,8 +182,11 @@ class WebTools:
         Returns:
             Dict[str, Any]: {'url', 'final_url', 'status', 'title', 'text', 'truncated'} on
                 success, or {'error': ...} on failure. Errors are returned rather than raised so
-                the agent sees what went wrong and can try a different source.
+                the agent sees what went wrong and can try a different source. At air-gap level
+                `on` the error is AIRGAPPED_ON_MESSAGE and no request is made.
         """
+        if cls.airgapped_level() == "on":
+            return {"url": url, "airgapped": "on", "error": AIRGAPPED_ON_MESSAGE}
         try:
             cls._require_http_url(url)
             response = cls._download(url)
@@ -212,24 +238,31 @@ class WebTools:
         Args:
             query (str): Search terms.
             max_results (int): Maximum results to return.
-            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'.
+            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'. Not sent
+                at air-gap level `duckduckgo`: SearXNG adds a named category's engines to the ones
+                in `engines`, so with both it asked all five general engines.
             language (str): Result language code.
 
         Returns:
             Dict[str, Any]: {'query', 'result_count', 'results': [{'title', 'url', 'snippet',
-                'engine'}]}, or {'error': ...} naming the endpoint and how to start it.
+                'engine'}]}, or {'error': ...} naming the endpoint and how to start it. At
+                air-gap level `on` the error is AIRGAPPED_ON_MESSAGE and nothing is sent.
         """
+        level = cls.airgapped_level()
+        if level == "on":
+            return {"query": query, "airgapped": "on", "error": AIRGAPPED_ON_MESSAGE}
         if not query.strip():
             return {"query": query, "error": "empty query"}
 
         endpoint = f"{SEARXNG_URL.rstrip('/')}/search"
+        selector = {"engines": "duckduckgo"} if level == "duckduckgo" else {"categories": categories}
         try:
             response = requests.get(
                 endpoint,
                 params={
                     "q": query,
                     "format": "json",
-                    "categories": categories,
+                    **selector,
                     "language": language,
                 },
                 headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -268,10 +301,19 @@ class WebTools:
             # Every engine failed, which is not the same as the web having nothing to say. This
             # used to come back as zero results: a SearXNG container whose DNS had gone stale
             # answered every query that way, and the agent concluded the topic had no coverage.
+            reasons = "; ".join(f"{name}: {reason}" for name, reason in failed)
+            if level == "duckduckgo":
+                # No hint to repair a container: one engine not answering is the level working as
+                # chosen, and there is no other engine to fall back to.
+                return {
+                    "query": query,
+                    "airgapped": level,
+                    "error": f"DuckDuckGo did not answer ({reasons}). Search is set to DuckDuckGo "
+                             "only (puffin_airgapped = duckduckgo).",
+                }
             return {
                 "query": query,
-                "error": "SearXNG could not reach any search engine: "
-                         + "; ".join(f"{name}: {reason}" for name, reason in failed),
+                "error": f"SearXNG could not reach any search engine: {reasons}",
                 "hint": "If this machine is online, restart the container: docker restart dreamference-searxng",
             }
         return {
