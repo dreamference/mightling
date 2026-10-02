@@ -37,8 +37,9 @@ pub const POOL_SHARE_PERCENT: u64 = 60;
 /// Codex's config key for the compaction limit; a `-c` of it overrides the model catalog.
 pub const LIMIT_KEY: &str = "model_auto_compact_token_limit";
 
-/// Whether the ledger hook is registered when nothing says otherwise.
-pub const LEDGER_DEFAULT: bool = false;
+/// Whether the ledger hook is registered when nothing says otherwise. On since 2026-10-02: Phase 0
+/// (specs/DREAMFERENCE_PUFFIN_COMPACTION.md §11.2) found it halved compactions and commands.
+pub const LEDGER_DEFAULT: bool = true;
 
 /// Seconds Codex waits for the hook. It reads one file and runs `git status`.
 const HOOK_TIMEOUT_SEC: i64 = 10;

@@ -43,7 +43,7 @@ DEFAULT_PUFFIN_GMAIL: Final[bool] = True
 # after each compaction (specs/DREAMFERENCE_PUFFIN_COMPACTION.md §10.1). Read by the Rust launcher
 # (DREAMFERENCE_PUFFIN_COMPACTION_LEDGER, then `puffin_compaction_ledger` in the TOML file); a test
 # keeps this default equal to LEDGER_DEFAULT in puffin-rs/src/compaction.rs.
-DEFAULT_PUFFIN_COMPACTION_LEDGER: Final[bool] = False
+DEFAULT_PUFFIN_COMPACTION_LEDGER: Final[bool] = True
 # How tersely the puffin agent answers (`/cavemode`, specs/DREAMFERENCE_PUFFIN_CAVE_MODE.md). Read by
 # the Rust launcher too (DREAMFERENCE_PUFFIN_CAVE_MODE, then `puffin_cave_mode` in the TOML file);
 # a test keeps this default equal to DEFAULT_PUFFIN_CAVE_MODE in puffin-rs/src/cave.rs.
