@@ -10,6 +10,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# Finds the Puffin node on the local network when this machine is not one (src/discover.rs).
+mdns-sd = { version = "0.21.4", default-features = false }
 
 [profile.release]
 opt-level = "s"

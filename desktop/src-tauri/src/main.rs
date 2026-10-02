@@ -3,7 +3,17 @@
 // The window points straight at the Onyx deployment on this machine, so there is no bundled
 // frontend to keep in step with the browser UI -- the desktop app and the browser render the same
 // server, and every patch `puffin-admin onyx configure` applies shows up in both.
+//
+// On a machine that is not the Puffin node the deployment is the node's. The window still loads
+// `http://localhost:3000/app`: `forwarder.rs` binds that port and passes it through to the node
+// `discover.rs` found, which keeps the page a secure context (the microphone) and leaves every
+// cookie, redirect and patch seeing the address it sees on the node.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod discover;
+mod forwarder;
+#[allow(dead_code)] // A byte-identical copy of puffin-rs/node-locator; not all of it is used here.
+mod node_locator;
 
 /// Environment the WebKitGTK webview needs, applied before Tauri starts it.
 ///
@@ -40,7 +50,27 @@ fn main() {
         }
     }
 
+    #[allow(unused_mut)]
+    let mut context = tauri::generate_context!();
+    // Not a node: bring the node's web UI to loopback before the window asks for it.
+    if let Some(upstream) = discover::upstream() {
+        match forwarder::start(upstream) {
+            Ok(forwarder::PREFERRED_PORT) => {}
+            // Port 3000 is taken on this machine: the window has to be told the other port. The
+            // saved session is per origin, so this one keeps its own sign-in.
+            Ok(port) => {
+                for window in &mut context.config_mut().app.windows {
+                    if let Ok(url) = format!("http://localhost:{port}/app").parse() {
+                        window.url = tauri::WebviewUrl::External(url);
+                    }
+                    window.title = format!("Puffin (port {port}: 3000 is in use on this machine)");
+                }
+            }
+            Err(error) => eprintln!("puffin-app: could not bind a loopback port for the node's web UI: {error}"),
+        }
+    }
+
     tauri::Builder::default()
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("failed to start the Puffin window");
 }

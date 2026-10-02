@@ -293,6 +293,8 @@ def test_the_web_crates_locator_is_a_byte_identical_copy():
     repo = Path(__file__).resolve().parent.parent
     leaf = repo / "puffin-rs" / "node-locator" / "src" / "lib.rs"
     assert (repo / "puffin-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
+    # puffin-app is a third build of its own (Tauri), with a third copy.
+    assert (repo / "desktop" / "src-tauri" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
     # ...and it agrees with the node about the service type and the contract's version.
     from dreamference.node import PROTO, SERVICE_TYPE
     text = leaf.read_text()

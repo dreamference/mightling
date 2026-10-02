@@ -43,9 +43,11 @@ pub async fn open(args: &[String]) -> i32 {
         eprintln!("💡 Build and register it with: puffin-admin desktop build");
         return 1;
     };
-    if !onyx_is_up(ONYX_WEB_URL).await {
-        // Checked first: a window opened against a stopped server shows a bare connection error
-        // with no hint of what to start.
+    // On a node, checked first: a window opened against a stopped server shows a bare connection
+    // error with no hint of what to start. On a client the web UI is the node's: `puffin-app`
+    // finds it and forwards this address to it, and says in its own window when it cannot
+    // (specs/DREAMFERENCE_PUFFIN_NODE.md §7), so there is nothing on this machine to check.
+    if puffin_node_locator::is_node() && !onyx_is_up(ONYX_WEB_URL).await {
         eprintln!("❌ Puffin is not answering at {ONYX_WEB_URL}.");
         eprintln!("💡 Start it first: puffin-admin puffin start");
         return 1;

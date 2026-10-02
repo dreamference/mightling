@@ -1840,6 +1840,10 @@ class DreamferenceCLIController:
 
         elif args.command == "desktop":
             from dreamference.chat import DesktopRunner
+            # `puffin-admin` exists only on a node: the window built here then shows this
+            # machine's web UI and never looks for another node's.
+            from dreamference.node import NodeIdentity
+            NodeIdentity.ensure()
 
             if args.desktop_command == "install":
                 sys.exit(DesktopRunner.install())
