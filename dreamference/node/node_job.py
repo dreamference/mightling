@@ -292,7 +292,8 @@ class NodeJob:
         cls.write(record)
         (cls.job_dir(record["id"]) / "output.log").touch()
         if cls.USE_UNIT:
-            started = subprocess.run(cls.unit_command(record, admin), capture_output=True, text=True, check=False)
+            started = subprocess.run(cls.unit_command(record, admin), capture_output=True, text=True,
+                                     env=cls.user_bus_environment(), check=False)
             if started.returncode != 0:
                 record.update(status="failed", note=f"could not start the job's unit: {started.stderr.strip()[-200:]}")
                 cls.write(record)
@@ -313,6 +314,9 @@ class NodeJob:
         """
         from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
         from dreamference.night_shift.night_shift_queue import NightShiftQueue
+        blocked = cls.sandbox_blocker()
+        if blocked:
+            return blocked
         if NightShiftQueue.runner_active():
             return "a night run or a benchmark run is in progress on this node"
         heavy = NightShiftHost.heavy_jobs()
@@ -324,6 +328,53 @@ class NodeJob:
             return (f"this node has {available / GIB:.1f} GiB of memory available; the job's "
                     f"{record['memory']} cap needs {needed / GIB:.0f} with the reserve")
         return None
+
+    @classmethod
+    def sandbox_blocker(cls) -> Optional[str]:
+        """
+        Whether this node can sandbox a job at all. A job that cannot be sandboxed is refused,
+        never run without: it is code from another machine.
+
+        On Ubuntu 24.04 AppArmor lets only programs with a profile create a user namespace
+        (`kernel.apparmor_restrict_unprivileged_userns`), and bubblewrap has none by default, so
+        a process started by sshd or by the user's service manager cannot use it (measured on
+        the GB10, 2026-10-02: "setting up uid map: Permission denied").
+
+        Returns:
+            Optional[str]: The reason, with what to do on the node, or None when bubblewrap works
+            in the context a job's unit runs in.
+        """
+        probe = ["bwrap", "--die-with-parent", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev",
+                 "--proc", "/proc", "true"]
+        if cls.USE_UNIT:
+            # Asked of a unit like the job's own: that is the context that has to be able to.
+            probe = ["systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe", "--", *probe]
+        try:
+            result = subprocess.run(probe, capture_output=True, text=True, timeout=30,
+                                    env=cls.user_bus_environment(), check=False)
+        except (OSError, subprocess.SubprocessError) as error:
+            return f"this node cannot sandbox a job: {error}"
+        if result.returncode == 0:
+            return None
+        detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["bubblewrap failed"]
+        return ("this node cannot sandbox a job, so it will not run one (" + detail[0] + "). On Ubuntu this is "
+                "AppArmor allowing user namespaces only to programs with a profile; on the node, as root, "
+                "give /usr/bin/bwrap a profile with `userns,` (the apparmor-profiles package has "
+                "bwrap-userns-restrict), then try again")
+
+    @classmethod
+    def user_bus_environment(cls) -> Dict[str, str]:
+        """
+        Returns:
+            Dict[str, str]: The environment in which `systemd-run --user` and `systemctl --user`
+            find the user's service manager. A forced command reached without a PAM session has
+            no `XDG_RUNTIME_DIR`; the directory is the same for every session of the user.
+        """
+        environment = dict(os.environ)
+        runtime = f"/run/user/{os.getuid()}"
+        if not environment.get("XDG_RUNTIME_DIR") and os.path.isdir(runtime):
+            environment["XDG_RUNTIME_DIR"] = runtime
+        return environment
 
     # -- running it (inside the unit) ------------------------------------------------------------
 
@@ -527,7 +578,7 @@ class NodeJob:
             bool: True while the job's unit is starting or running.
         """
         result = subprocess.run(["systemctl", "--user", "is-active", f"{cls.unit_name(job_id)}.service"],
-                                capture_output=True, text=True, check=False)
+                                capture_output=True, text=True, env=cls.user_bus_environment(), check=False)
         return result.stdout.strip() in ("active", "activating")
 
     @classmethod
@@ -548,5 +599,5 @@ class NodeJob:
         cls.write(record)
         if cls.USE_UNIT:
             subprocess.run(["systemctl", "--user", "stop", f"{cls.unit_name(job_id)}.service"],
-                           capture_output=True, text=True, check=False)
+                           capture_output=True, text=True, env=cls.user_bus_environment(), check=False)
         return True

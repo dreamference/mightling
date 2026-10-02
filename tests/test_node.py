@@ -579,6 +579,15 @@ def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypat
 
 # -- Part 3: jobs on another node (§13) ------------------------------------------------------------
 
+def _real_sandbox_blocker():
+    from dreamference.node import NodeJob
+    return NodeJob.__dict__["sandbox_blocker"]
+
+
+# The job fixture replaces the probe; the test of the probe itself puts it back.
+REAL_SANDBOX_BLOCKER = _real_sandbox_blocker()
+
+
 def job_request(**changes):
     request = {"id": "20261002-1200-abc", "repo": "calc-0123456789", "commit": "a" * 40,
                "command": ["python3", "train.py"], "memory": "8G", "time": "90m"}
@@ -669,6 +678,7 @@ def job_node(tmp_path, monkeypatch):
     from dreamference.night_shift import NightShiftHost
     from dreamference.node import NodeJob
     monkeypatch.setattr(NodeJob, "USE_UNIT", False)
+    monkeypatch.setattr(NodeJob, "sandbox_blocker", classmethod(lambda cls: None))
     monkeypatch.setattr(NodeJob, "sandbox_command", classmethod(lambda cls, tree, command, network, job_id: list(command)))
     monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: []))
     monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 64 * 1024 ** 3))
@@ -742,6 +752,20 @@ def test_the_working_node_decides_whether_it_can_take_the_job(job_node, monkeypa
     with pytest.raises(ValueError, match="night run"):
         NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
     assert NodeJob.records() == []                                       # a refused job leaves nothing behind
+
+
+def test_a_node_that_cannot_sandbox_refuses_the_job_and_never_runs_it_without(job_node, monkeypatch):
+    from dreamference.node import NodeJob
+    # The GB10's own failure, 2026-10-02: AppArmor denies bubblewrap's user namespace outside a
+    # profiled program, so a job's unit could not have sandboxed anything.
+    failed = subprocess.CompletedProcess([], 1, "", "bwrap: setting up uid map: Permission denied\n")
+    monkeypatch.setattr(NodeJob, "sandbox_blocker", REAL_SANDBOX_BLOCKER)
+    monkeypatch.setattr(subprocess, "run", lambda argv, **_: failed if argv[0] in ("bwrap", "systemd-run") else subprocess.CompletedProcess(argv, 0, "", ""))
+    reason = NodeJob.sandbox_blocker()
+    assert "cannot sandbox a job" in reason and "setting up uid map: Permission denied" in reason and "userns" in reason
+    monkeypatch.setattr(NodeJob, "sandbox_blocker", classmethod(lambda cls: reason))
+    record = NodeJob.validate(job_request(commit=job_node["commit"]))
+    assert NodeJob.admission_blocker(record) == reason
 
 
 def test_a_job_stopped_by_its_limits_is_settled_and_a_cancel_is_kept(job_node, monkeypatch):
