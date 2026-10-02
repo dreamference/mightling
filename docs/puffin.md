@@ -106,6 +106,28 @@ run on the node), and anything `puffin-admin` does. The desktop window, `puffin-
 node's web UI on a client. This is new and has been tested on one machine only; see
 `specs/DREAMFERENCE_PUFFIN_NODE.md` §18 for what was measured.
 
+### A second GB10
+
+Every GB10 is installed the same way and announces itself the same way; none is "primary". The one
+you are sitting at manages the others, with `puffin-admin`:
+
+| Command | What it does |
+|---|---|
+| `puffin-admin node list` | Every node on the network, the model each serves and its load |
+| `puffin-admin node add <node>` | Pair with a node, once. It asks for that node's password one time and sets up a key that can only ask it for Puffin operations |
+| `puffin-admin node status <node>` | That node's `puffin-admin status` |
+| `puffin-admin node set <node> --model <key>` | Give that node a model and start it there; the node runs its own safety checks |
+| `puffin-admin node start <node>` / `stop <node>` | Start or stop its model server |
+| `puffin-admin node run <node> -- <command>` | Run a command there, in the current repository at its last commit. Its changes come back as a branch, `job/<id>` |
+| `puffin-admin node jobs`, `logs <job>`, `cancel <job>`, `fetch <job>` | Follow, stop and collect jobs |
+| `puffin-admin node remove <node>` | Undo the pairing |
+
+Using a node (asking its model, searching) needs no pairing. Changing one, or running something
+on it, always does. A job runs with a memory cap and a time limit (8 GB and 90 minutes unless you
+say otherwise), cannot use the GPU, and sees nothing of the other node's home folder. Uncommitted
+changes are not sent. All of this was built and tested on a single GB10 playing both sides; it has
+not yet run between two machines.
+
 ## Debugging
 
 Codex's logging applies. Set `RUST_LOG` (for example `RUST_LOG=codex_mcp=trace puffin`). The
