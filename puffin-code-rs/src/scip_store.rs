@@ -522,6 +522,12 @@ fn symbol_relationships(info: &[u8], out: &mut Vec<(String, Relationship)>) -> R
 /// the first with "has definition occurrence, but no SymbolInformation", leaving the root without
 /// an exact layer. The repair keeps every other byte of the index as it was. Returns the repaired
 /// index and how many entries were added.
+///
+/// A document with no path gets the path `.`: scip-python pointed at a single file
+/// (`--target-only setup.py`, how a Python file at a repository's root is indexed) makes the file
+/// itself the project root and leaves its document's `relative_path` empty, which `expt-convert`
+/// refuses ("relative path must not be empty"). `.` is that file relative to itself, and
+/// [`join_normalized`] maps it, under the run's prefix `setup.py/`, back to `setup.py`.
 pub fn repair_missing_symbol_information(index: &[u8]) -> Result<(Vec<u8>, usize)> {
     let mut out = Vec::with_capacity(index.len() + 1024);
     let mut added = 0;
@@ -543,8 +549,15 @@ fn repair_document(document: &[u8]) -> Result<(Vec<u8>, usize)> {
     let mut out = Vec::with_capacity(document.len() + 64);
     let mut defined: Vec<String> = Vec::new();
     let mut described: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut has_path = false;
     let mut reader = Wire::new(document);
     while let Some((field, value, raw)) = reader.next_raw()? {
+        if let (1, Value::Bytes(path)) = (field, &value) {
+            if path.is_empty() {
+                continue; // an explicit empty path: replaced below
+            }
+            has_path = true;
+        }
         out.extend_from_slice(raw);
         match (field, value) {
             (2, Value::Bytes(occurrence)) => {
@@ -563,6 +576,9 @@ fn repair_document(document: &[u8]) -> Result<(Vec<u8>, usize)> {
             }
             _ => {}
         }
+    }
+    if !has_path {
+        put_len_field(&mut out, 1, b".");
     }
     let mut added = 0;
     for symbol in defined {
@@ -673,5 +689,50 @@ mod tests {
         assert_eq!(super::join_normalized("tests/", "../dreamference/a.py"), "dreamference/a.py");
         assert_eq!(super::join_normalized("tests/", "test_a.py"), "tests/test_a.py");
         assert_eq!(super::join_normalized("", "./src/lib.rs"), "src/lib.rs");
+        // A single-file root: the file itself, and what it imports from beside it.
+        assert_eq!(super::join_normalized("fano/main.py/", "."), "fano/main.py");
+        assert_eq!(super::join_normalized("fano/main.py/", "../make_figures.py"), "fano/make_figures.py");
+    }
+
+    /// The `relative_path` fields of an index's documents, in order.
+    fn document_paths(index: &[u8]) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut reader = super::Wire::new(index);
+        while let Some((field, value)) = reader.next().unwrap() {
+            if let (2, super::Value::Bytes(document)) = (field, value) {
+                let mut path = None;
+                let mut r = super::Wire::new(document);
+                while let Some((f, v)) = r.next().unwrap() {
+                    if let (1, super::Value::Bytes(p)) = (f, v) {
+                        path = Some(String::from_utf8_lossy(p).into_owned());
+                    }
+                }
+                out.push(path.unwrap_or_else(|| "<none>".into()));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_document_without_a_path_is_the_file_itself() {
+        let mut index = Vec::new();
+        // No path at all (what scip-python writes for `--target-only <file>`), an explicit empty
+        // one, and a document that has its path.
+        let mut language_only = Vec::new();
+        super::put_len_field(&mut language_only, 4, b"python");
+        super::put_len_field(&mut index, 2, &language_only);
+        let mut empty = Vec::new();
+        super::put_len_field(&mut empty, 1, b"");
+        super::put_len_field(&mut index, 2, &empty);
+        let mut named = Vec::new();
+        super::put_len_field(&mut named, 1, b"../pkg/__init__.py");
+        super::put_len_field(&mut index, 2, &named);
+        let (fixed, added) = super::repair_missing_symbol_information(&index).unwrap();
+        assert_eq!(added, 0);
+        assert_eq!(document_paths(&fixed), [".", ".", "../pkg/__init__.py"]);
+        // An index that needs nothing is returned byte for byte.
+        let mut whole = Vec::new();
+        super::put_len_field(&mut whole, 2, &named);
+        assert_eq!(super::repair_missing_symbol_information(&whole).unwrap().0, whole);
     }
 }

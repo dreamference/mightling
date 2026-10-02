@@ -180,8 +180,55 @@ fn first_with_extension(dir: &Path, extensions: &[&str]) -> Option<String> {
     names.into_iter().next()
 }
 
+/// How many Python files at a root get an exact index of their own. Each is a scip-python run
+/// (`--target-only <file>`), so a root full of loose scripts must not become a hundred runs.
+pub const ROOT_PYTHON_FILES: usize = 12;
+
+/// The Python files directly at the repository's root, which no directory root covers: the ones
+/// indexed, largest first (they hold the most definitions), and how many more there are past
+/// [`ROOT_PYTHON_FILES`]. Tracked files in a git repository, as for the directory roots.
+pub fn root_python_files(repo: &Repo) -> (Vec<String>, usize) {
+    let tracked = if repo.is_git { crate::paths::git_z(&repo.root, &["ls-files", "-z"]).unwrap_or_default() } else { Vec::new() };
+    root_python_files_of(repo, &tracked)
+}
+
+fn root_python_files_of(repo: &Repo, tracked: &[String]) -> (Vec<String>, usize) {
+    let is_python = |name: &str| name.ends_with(".py") || name.ends_with(".pyi");
+    let mut files: Vec<(u64, String)> = if repo.is_git {
+        tracked.iter().filter(|f| !f.contains('/') && is_python(f)).cloned().map(|f| (0, f)).collect()
+    } else {
+        std::fs::read_dir(&repo.root)
+            .map(|entries| entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| is_python(n) && !n.starts_with('.')).map(|n| (0, n)).collect())
+            .unwrap_or_default()
+    };
+    // A file git lists but the checkout lacks (deleted, not yet committed) is not a root.
+    files.retain_mut(|(size, name)| match std::fs::metadata(repo.root.join(name.as_str())) {
+        Ok(meta) if meta.is_file() => {
+            *size = meta.len();
+            true
+        }
+        _ => false,
+    });
+    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let more = files.len().saturating_sub(ROOT_PYTHON_FILES);
+    files.truncate(ROOT_PYTHON_FILES);
+    (files.into_iter().map(|(_, name)| name).collect(), more)
+}
+
+/// The line that says some root-level Python files have no exact index, or None when all do.
+pub fn root_python_note(more: usize, root: &str) -> Option<String> {
+    (more > 0).then(|| {
+        format!(
+            "scip-python for {more} more Python file{} at the root of {}: only the {ROOT_PYTHON_FILES} largest get an index of their own",
+            if more == 1 { "" } else { "s" },
+            display_root(root)
+        )
+    })
+}
+
 /// Detects the exact-layer indexers by project files at the root and in immediate
-/// subdirectories (§6.1). Submodules are left out, and so are crates that inherit their manifest
+/// subdirectories (§6.1). A Python file at the root itself is a root of its own (it is in no
+/// directory, and indexing `.` would index every directory a second time). Submodules are left out, and so are crates that inherit their manifest
 /// from a workspace elsewhere (they index only from that workspace). Where the root is itself a
 /// TypeScript, Java or .NET project, its subdirectories are part of it and are not roots of their
 /// own; Go modules are separate whatever their nesting, so every `go.mod` is a root.
@@ -231,6 +278,11 @@ pub fn detect(repo: &Repo) -> Vec<Target> {
         if sub && is_python {
             out.push(Target::new(Kind::Static, "scip-python", dir));
         }
+        if !sub {
+            for file in root_python_files_of(repo, &tracked).0 {
+                out.push(Target::new(Kind::Static, "scip-python", &file));
+            }
+        }
         if let Ok(manifest) = std::fs::read_to_string(path.join("Cargo.toml")) {
             let member_elsewhere = manifest.contains(".workspace = true") && !manifest.contains("[workspace]");
             if !member_elsewhere && (manifest.contains("[package]") || manifest.contains("[workspace]")) {
@@ -278,6 +330,7 @@ pub fn detect_in_submodules(repo: &Repo, decisions: &[crate::submodules::Submodu
     for submodule in decisions.iter().filter(|s| s.indexed) {
         let dir = repo.root.join(&submodule.path);
         let inside = Repo { root: dir.clone(), main_root: dir, is_git: true };
+        skipped.extend(root_python_note(root_python_files(&inside).1, &submodule.path));
         for target in detect(&inside) {
             let root = if target.root.is_empty() { submodule.path.clone() } else { format!("{}/{}", submodule.path, target.root) };
             if target.kind == Kind::Executing {
@@ -684,6 +737,7 @@ pub fn build_with(repo: &Repo, settings: &Settings, exact: bool, on_demand: bool
         None => skipped.push("codebase-memory-mcp is not installed (`puffin-admin code setup`)".to_string()),
     }
     let trusted = crate::config::is_trusted(&repo.main_root);
+    skipped.extend(root_python_note(root_python_files(repo).1, ""));
     let (in_submodules, skipped_in_submodules) = detect_in_submodules(repo, &crate::submodules::evaluate(repo, settings));
     skipped.extend(skipped_in_submodules);
     for target in detect(repo).into_iter().chain(in_submodules) {
@@ -808,6 +862,48 @@ mod tests {
             let executing = matches!(indexer, "scip-java" | "scip-dotnet");
             assert_eq!(kind == Kind::Executing, executing, "{indexer}");
         }
+    }
+
+    #[test]
+    fn a_python_file_at_the_root_is_a_root_of_its_own() {
+        let (_dir, repo) = make_repo(&[
+            ("setup.py", "from pkg import f\n"),
+            ("big.py", "def a():\n    return 1\n\n\ndef b():\n    return a()\n"),
+            ("stubs.pyi", "def a() -> int: ...\n"),
+            ("notes.txt", "x"),
+            ("pkg/__init__.py", "def f():\n    return 1\n"),
+            ("pkg/deep/mod.py", "X = 1\n"),
+        ]);
+        // Untracked: the user's scratch file, not the project's.
+        std::fs::write(repo.root.join("scratch.py"), "Y = 2\n").unwrap();
+        let python: Vec<String> = detect(&repo).into_iter().filter(|t| t.indexer == "scip-python").map(|t| t.root).collect();
+        // The directory root, then the files, largest first.
+        assert_eq!(python, ["big.py", "stubs.pyi", "setup.py", "pkg"]);
+        assert_eq!(root_python_files(&repo), (vec!["big.py".to_string(), "stubs.pyi".to_string(), "setup.py".to_string()], 0));
+        // The run names the file, and its documents map back to it and to what it imports.
+        std::env::set_var("PUFFIN_CODE_SCRATCH_DIR", _dir.path().join("scratch"));
+        let tools = Tools { scip_python: Some((_dir.path().join("node/bin/node"), _dir.path().join("indexers/index.js"))), ..fake_tools(_dir.path()) };
+        let run = run_for(&repo, &tools, Target::new(Kind::Static, "scip-python", "setup.py"));
+        assert!(run.spec.argv[2].contains("--target-only 'setup.py'"), "{}", run.spec.argv[2]);
+        assert_eq!(run.path_prefix, "setup.py/");
+        assert_eq!(crate::scip_store::join_normalized(&run.path_prefix, ""), "setup.py");
+        assert_eq!(crate::scip_store::join_normalized(&run.path_prefix, "../pkg/__init__.py"), "pkg/__init__.py");
+        assert_eq!(super::super::store::slug("scip-python", "setup.py"), "scip-python-setup.py");
+    }
+
+    #[test]
+    fn only_the_largest_root_files_are_indexed_and_the_rest_are_named() {
+        let files: Vec<(String, String)> = (0..ROOT_PYTHON_FILES + 3).map(|i| (format!("s{i:02}.py"), "x = 1\n".repeat(i + 1))).collect();
+        let borrowed: Vec<(&str, &str)> = files.iter().map(|(n, c)| (n.as_str(), c.as_str())).collect();
+        let (_dir, repo) = make_repo(&borrowed);
+        let (kept, more) = root_python_files(&repo);
+        assert_eq!((kept.len(), more), (ROOT_PYTHON_FILES, 3));
+        assert_eq!(kept[0], format!("s{:02}.py", ROOT_PYTHON_FILES + 2));
+        assert!(!kept.contains(&"s00.py".to_string()));
+        assert_eq!(detect(&repo).iter().filter(|t| t.indexer == "scip-python").count(), ROOT_PYTHON_FILES);
+        let note = root_python_note(more, "").unwrap();
+        assert!(note.contains("3 more Python files at the root of the repository"), "{note}");
+        assert_eq!(root_python_note(0, ""), None);
     }
 
     #[test]

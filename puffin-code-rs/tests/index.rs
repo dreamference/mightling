@@ -192,6 +192,61 @@ fn scip_python_runs_nothing_from_the_repository() {
     assert!(!marker.exists(), "something from the repository ran");
 }
 
+/// Installs a finished run's store as the supervisor does, and opens it.
+fn install_and_open(repo: &Repo, run: &plan::Run) -> puffin_code::scip_store::ScipStore {
+    let entry = puffin_code::manifest::RunEntry {
+        indexer: run.indexer.clone(),
+        root: run.root.clone(),
+        path_prefix: run.path_prefix.clone(),
+        version: run.version.clone(),
+        commit: repo.head(),
+        ..Default::default()
+    };
+    let entry = puffin_code::index::store::install(repo, entry, run.converted.as_ref().unwrap(), run.scip_output.as_ref().unwrap()).unwrap();
+    puffin_code::scip_store::ScipStore::open(&repo.scip_dir().join(&entry.store), entry).unwrap()
+}
+
+#[test]
+fn a_python_file_at_the_root_gets_an_exact_index_of_its_own() {
+    let _env = env();
+    let tools = plan::Tools::find();
+    let (Some(_), Some(_)) = (tools.scip_python.as_ref(), tools.scip.as_ref()) else {
+        eprintln!("skipped: scip-python or scip not installed");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(root.join("pkg")).unwrap();
+    std::fs::write(root.join("pkg/__init__.py"), "def area(r):\n    return 3 * r * r\n").unwrap();
+    std::fs::write(root.join("helpers.py"), "def twice(x):\n    return 2 * x\n").unwrap();
+    std::fs::write(root.join("main.py"), "from pkg import area\nfrom helpers import twice\n\n\ndef report(r):\n    return twice(area(r))\n\n\nprint(report(2))\n").unwrap();
+    let repo = git_repo(&root);
+    let targets = plan::detect(&repo);
+    let target = targets.iter().find(|t| t.indexer == "scip-python" && t.root == "main.py").expect("the root file is a root").clone();
+    let run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
+    let output = run_sandboxed(&run.spec);
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    let store = install_and_open(&repo, &run);
+    // The file is a document under its own name, not under the directory roots' or `.`.
+    assert!(store.covers("main.py"), "{:?}", store.documents());
+    assert!(!store.documents().iter().any(|d| d.starts_with("main.py/") || d.is_empty()), "{:?}", store.documents());
+    let report = store.definitions_named(&["report".to_string()]).unwrap();
+    assert_eq!(report.iter().map(|d| (d.path.as_str(), d.line)).collect::<Vec<_>>(), [("main.py", 5)]);
+    // Its uses of what it imports, from a package and from another root file, are exact
+    // references in this store.
+    for (name, line) in [("area", 6), ("twice", 6)] {
+        let used: Vec<(String, u32)> = store
+            .occurrences_within("main.py", (5, 6))
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.symbol.contains(&format!("/{name}().")))
+            .map(|o| (o.path, o.line))
+            .collect();
+        assert_eq!(used, [("main.py".to_string(), line)], "{name}");
+    }
+    assert!(common::git(&root, &["status", "--porcelain", "--untracked-files=all"]).lines().all(|l| l.contains(".dreamference/")), "the tree was written to");
+}
+
 #[test]
 fn scip_typescript_writes_nothing_into_the_tree_and_runs_nothing_from_it() {
     let _env = env();
