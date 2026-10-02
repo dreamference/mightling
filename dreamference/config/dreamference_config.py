@@ -362,10 +362,12 @@ class DreamferenceConfig:
             Path: Written config file path.
         """
         out_path = target_path or self.config_file_path
-        data: Dict[str, Any] = {
-            "vllm_host": self.vllm_host,
-            "agent_runner": self.agent_runner,
-        }
+        data: Dict[str, Any] = {}
+        # Until 2026-10-02 these two were written whatever their value, the only fields that broke
+        # the rule the rest of this method follows: a default written to the file stops following
+        # the default, so a later change of DEFAULT_VLLM_HOST would have skipped every saved config.
+        if self.vllm_host != DEFAULT_VLLM_HOST: data["vllm_host"] = self.vllm_host
+        if self.agent_runner != DEFAULT_AGENT_RUNNER: data["agent_runner"] = self.agent_runner
         # Written whenever the model was chosen, not merely whenever it differs from the default.
         # The two came apart the moment DEFAULT_MODEL changed: a workspace pinned to what was then
         # the default had written no `model` key at all, so it silently followed the default to a

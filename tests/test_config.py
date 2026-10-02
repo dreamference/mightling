@@ -150,3 +150,26 @@ def test_saving_keeps_tables_other_readers_own(tmp_path):
     ConfigFileStorageManager.save_config_dict(path, {"agent_runner": "cline"})
     saved = ConfigFileStorageManager.load_config_dict(path)
     assert saved == {"agent_runner": "cline", "night": {"window": "02:00-05:00"}}
+
+
+def test_a_default_host_and_agent_are_not_fossilised_into_the_config(tmp_path):
+    # These two were written whatever their value until 2026-10-02, the one exception to "only
+    # what differs from the defaults": a saved config stopped following DEFAULT_VLLM_HOST.
+    import dreamference.config.dreamference_config as cfg_mod
+    from dreamference.config.config_file_storage_manager import ConfigFileStorageManager
+
+    for name in ("defaults.toml", "defaults.yaml", "defaults.json"):
+        cfg_file = tmp_path / name
+        DreamferenceConfig(config_file=str(cfg_file)).save_config()
+        assert ConfigFileStorageManager.load_config_dict(cfg_file) == {}, name
+        reloaded = DreamferenceConfig(config_file=str(cfg_file))
+        assert reloaded.vllm_host == cfg_mod.DEFAULT_VLLM_HOST
+        assert reloaded.agent_runner == cfg_mod.DEFAULT_AGENT_RUNNER
+
+    cfg_file = tmp_path / "chosen.toml"
+    config = DreamferenceConfig(config_file=str(cfg_file))
+    config.vllm_host = "http://spark-2.local:8000"
+    config.agent_runner = "cline"
+    config.save_config()
+    assert ConfigFileStorageManager.load_config_dict(cfg_file) == {
+        "vllm_host": "http://spark-2.local:8000", "agent_runner": "cline"}
