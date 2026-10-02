@@ -936,3 +936,40 @@ def test_the_installer_makes_a_gb10_a_node_and_offers_it_to_the_network():
     # Never without a terminal: the command opens the machine to the LAN and asks for a password.
     assert '[ -t 0 ]' in script[enable - 200:enable] or "/dev/tty" in script[enable - 200:enable]
     assert subprocess.run(["bash", "-n", str(Path(__file__).resolve().parent.parent / "install.sh")]).returncode == 0
+
+
+def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
+    # The committed file once had the job commands after the catch-all usage exit; the working
+    # tree, which the tests ran, did not. Each command is now reached through `main()`.
+    from dreamference.cli import main
+    from dreamference.node import NodeJob, NodeJobSender, NodePairing, NodeRemote, NodeServe
+    reached = []
+    note = lambda name, code=0: (lambda *args, **kwargs: reached.append(name) or code)
+    monkeypatch.setattr(NodeRemote, "list_lines", classmethod(lambda cls: reached.append("list") or ["x"]))
+    monkeypatch.setattr(NodeRemote, "status", classmethod(note("status")))
+    monkeypatch.setattr(NodeRemote, "set_model", classmethod(note("set")))
+    monkeypatch.setattr(NodeRemote, "start", classmethod(note("start")))
+    monkeypatch.setattr(NodeRemote, "stop", classmethod(note("stop")))
+    monkeypatch.setattr(NodePairing, "add", classmethod(note("add", True)))
+    monkeypatch.setattr(NodePairing, "remove", classmethod(note("remove", True)))
+    monkeypatch.setattr(NodeJobSender, "run", classmethod(lambda cls, name, command, **kw: reached.append(("run", command, kw["memory"])) or 0))
+    monkeypatch.setattr(NodeJobSender, "jobs", classmethod(note("jobs")))
+    monkeypatch.setattr(NodeJobSender, "logs", classmethod(note("logs")))
+    monkeypatch.setattr(NodeJobSender, "cancel", classmethod(note("cancel")))
+    monkeypatch.setattr(NodeJobSender, "fetch", classmethod(note("fetch")))
+    monkeypatch.setattr(NodeJob, "execute", classmethod(note("job-exec")))
+    monkeypatch.setattr(NodeServe, "serve", classmethod(lambda cls, request, key_tag=None: reached.append(("serve-job", request, key_tag)) or 0))
+    monkeypatch.setenv("SSH_ORIGINAL_COMMAND", "info")
+    job = "20261002-1200-abc"
+    for argv in (["list"], ["status", "spark-2"], ["set", "spark-2", "--model", "m"], ["start", "spark-2"],
+                 ["stop", "spark-2"], ["add", "spark-2"], ["remove", "spark-2"],
+                 ["run", "spark-2", "--memory", "4G", "--", "python3", "x.py", "--epochs", "3"],
+                 ["jobs"], ["logs", job], ["cancel", job], ["fetch", job], ["job-exec", job],
+                 ["serve-job", "--key", "abc"]):
+        monkeypatch.setattr("sys.argv", ["puffin-admin", "node", *argv])
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+        assert exit_info.value.code == 0, argv
+    assert reached == ["list", "status", "set", "start", "stop", "add", "remove",
+                       ("run", ["python3", "x.py", "--epochs", "3"], "4G"),
+                       "jobs", "logs", "cancel", "fetch", "job-exec", ("serve-job", "info", "abc")]
