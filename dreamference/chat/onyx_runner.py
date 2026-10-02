@@ -945,20 +945,42 @@ class OnyxRunner:
 
     def bind_to_loopback(self) -> bool:
         """
-        Publishes the web UI on 127.0.0.1 only, instead of on every network interface.
+        Publishes the web UI on 127.0.0.1 only, instead of on every network interface, unless
+        this node is advertised and shares it (`puffin-admin node enable`), in which case port
+        3000 is published to the local network and port 80 stays on loopback.
 
         Does nothing when already in place, since applying it recreates the nginx container and
         `configure()` calls this on every run.
 
         Returns:
-            bool: True if the web UI is bound to loopback afterwards.
+            bool: True if the web UI is bound as configured afterwards.
         """
-        if self._env_already_set(ONYX_LOOPBACK_ENV):
+        values = self.web_bind_env()
+        if self._env_already_set(values):
             return True
-        if not self._write_env_values(ONYX_LOOPBACK_ENV):
+        if not self._write_env_values(values):
             return False
-        print("🔒 Restricting the web UI to this machine (127.0.0.1)...")
+        if values == ONYX_LOOPBACK_ENV:
+            print("🔒 Restricting the web UI to this machine (127.0.0.1)...")
+        else:
+            print("📡 Publishing the web UI to the local network (port 3000): this node is advertised "
+                  "(`puffin-admin node enable`).")
         return self._recreate_service("nginx", wait_healthy=False)
+
+    @classmethod
+    def web_bind_env(cls) -> dict:
+        """
+        The web UI's two published ports, as Onyx's `.env` takes them.
+
+        Port 3000 is published on every interface only on a node that is advertised and shares
+        its web UI (specs/DREAMFERENCE_PUFFIN_NODE.md §4); port 80 never leaves loopback.
+
+        Returns:
+            dict: `HOST_PORT_80` and `HOST_PORT`.
+        """
+        from dreamference.node.node_settings import NodeSettings
+        return {"HOST_PORT_80": ONYX_LOOPBACK_ENV["HOST_PORT_80"],
+                "HOST_PORT": f"{NodeSettings.web_bind_address()}:3000"}
 
     @classmethod
     def _env_already_set(cls, values: dict) -> bool:

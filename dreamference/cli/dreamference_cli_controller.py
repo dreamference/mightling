@@ -974,6 +974,14 @@ class DreamferenceCLIController:
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
 
+        # Command: puffin-admin node (offer this machine to the local network as a Puffin node)
+        node_parser = subparsers.add_parser("node", help="Advertise this machine on the local network so clients find it with no address typed")
+        node_subparsers = node_parser.add_subparsers(dest="node_command")
+        node_enable_parser = node_subparsers.add_parser("enable", help="Advertise the node and publish the web UI and web search to the local network")
+        node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get puffin and web search only")
+        node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
+        node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns")
+
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
         bench_parser.add_argument("--port", type=int, default=8000, help="Port of the server to benchmark")
@@ -1971,6 +1979,9 @@ class DreamferenceCLIController:
                 # `main-model set` and `server start` can never disagree again.
                 args.model = args.model or config.model
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
+                # A machine that loads a model is a node; an advertised one says `loading`.
+                from dreamference.node import NodeAdvertiser
+                NodeAdvertiser.on_server_starting(args.model, args.port)
 
                 # The diffusion sidecar starts *before* the vLLM launch on purpose: vLLM's
                 # pre-flight reads current free memory, so a sidecar already resident is
@@ -2043,6 +2054,7 @@ class DreamferenceCLIController:
                 
                     # Server is ready
                     if monitor.server_ready:
+                        NodeAdvertiser.on_server_ready()
                         # One discarded request first: a fresh engine serves its first batch at
                         # about two-thirds speed, and that should not be the user's request.
                         print("🔥 Warming up with one throwaway request...")
@@ -2103,6 +2115,9 @@ class DreamferenceCLIController:
                                 print(f"🌫️  Diffusion sidecar at {diffusion_mgr.host}/v1 — "
                                       f"still loading in background (state: {state})")
 
+                    else:
+                        NodeAdvertiser.on_server_stopped()
+
                     # Do not block: exit after health check passes (server keeps running)
                     
                 except KeyboardInterrupt:
@@ -2119,11 +2134,15 @@ class DreamferenceCLIController:
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.stop_server(port=args.port)
+                from dreamference.node import NodeAdvertiser
+                NodeAdvertiser.on_server_stopped()
                 DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").stop_server(port=args.diffusion_port)
             elif args.server_command == "remove":
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.remove_server(port=args.port)
+                from dreamference.node import NodeAdvertiser
+                NodeAdvertiser.on_server_stopped()
                 DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").remove_server(port=args.diffusion_port)
             elif args.server_command == "logs":
                 cls.display_header()
@@ -2144,6 +2163,18 @@ class DreamferenceCLIController:
         elif args.command == "swe-bench":
             from dreamference.swe_bench.swe_bench_command import SweBenchCommand
             sys.exit(SweBenchCommand.dispatch(args))
+
+        elif args.command == "node":
+            from dreamference.node import NodeAdvertiser
+            if args.node_command == "enable":
+                sys.exit(0 if NodeAdvertiser.enable(no_web=args.no_web) else 1)
+            if args.node_command == "disable":
+                sys.exit(0 if NodeAdvertiser.disable() else 1)
+            if args.node_command == "status":
+                print(NodeAdvertiser.status())
+                sys.exit(0)
+            print("usage: puffin-admin node {enable,disable,status}")
+            sys.exit(2)
 
         elif args.command == "night":
             from dreamference.night_shift import NightShiftRunner, NightShiftScheduler, NightShiftSettings
@@ -2173,6 +2204,10 @@ class DreamferenceCLIController:
             from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
             if args.codex_command == "build":
                 cls._refuse_during_night_run("codex build")
+                # Only a node has Python, so building here marks the machine as one: the launcher
+                # then uses the local model server and never browses for another.
+                from dreamference.node import NodeIdentity
+                NodeIdentity.ensure()
                 sys.exit(0 if CodexBrandedBuilder.build(force=args.force) else 1)
             if args.codex_command == "test":
                 from dreamference.runner.codex_test_runner import CodexTestRunner

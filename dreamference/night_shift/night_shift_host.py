@@ -25,7 +25,7 @@ NIGHT_RUN_ENV: Final[str] = "PUFFIN_NIGHT_RUN"
 # prompt, `resume`, `fork`) is the TUI.
 NON_INTERACTIVE: Final[frozenset] = frozenset({
     "exec", "e", "app-server", "mcp-server", "mcp", "sandbox", "apply", "a", "completion",
-    "debug", "features", "doctor", "night", "airgapped", "update", "app", "help", "review", "--version", "-V",
+    "debug", "features", "doctor", "night", "node", "airgapped", "update", "app", "help", "review", "--version", "-V",
     "--help", "-h",
 })
 

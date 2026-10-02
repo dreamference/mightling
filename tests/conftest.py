@@ -78,6 +78,19 @@ def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_node_advert(tmp_path_factory, monkeypatch):
+    # `server start` and `server stop` rewrite the node's Avahi service file when one exists
+    # (specs/DREAMFERENCE_PUFFIN_NODE.md §5.2). It lives under /etc, which the home isolation
+    # below does not reach: without this, a server test on an advertised node would change what
+    # the real node tells the network. sudo is never run from a test either.
+    from dreamference.node import NodeAdvertiser, NodeServiceFile
+
+    scratch = tmp_path_factory.mktemp("avahi") / "puffin-node.service"
+    monkeypatch.setattr(NodeServiceFile, "service_path", scratch)
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose: False))
+
+
+@pytest.fixture(autouse=True)
 def _refuse_real_docker(monkeypatch):
     # A test that reached OnyxRunner._start_gmail_service ran `docker rm -f dreamference-gmail` and
     # `docker run` for real, replacing the live Gmail sidecar with one mounting a pytest temp

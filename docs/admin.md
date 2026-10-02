@@ -357,6 +357,26 @@ Trace one real puffin session and list every network destination and process, wi
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
 | `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
 
+### `puffin-admin node`
+
+Advertise this machine on the local network so clients find it with no address typed.
+
+#### `puffin-admin node enable`
+
+Advertise the node and publish the web UI and web search to the local network.
+
+| Option | Description |
+|---|---|
+| `--no-web` | Keep the web UI on this machine; clients get puffin and web search only. |
+
+#### `puffin-admin node disable`
+
+Stop advertising and put the web UI and web search back on this machine only.
+
+#### `puffin-admin node status`
+
+Show the node id, what is advertised and published, and what a browse of the network returns.
+
 ### `puffin-admin benchmark_server`
 
 Run vLLM serve benchmark using Sonnet dataset.

@@ -40,12 +40,15 @@ class SearxngSidecar:
         Builds the `docker run` command.
 
         Returns:
-            List[str]: The argv. The port is published on loopback only, and the container is
-            created on the sidecar network so its name lookups follow the host's resolver.
+            List[str]: The argv. The port is published on loopback only, unless this node is
+            advertised (`puffin-admin node enable`), when `puffin-search` on other machines needs
+            it; the container is created on the sidecar network so its name lookups follow the
+            host's resolver.
         """
+        from dreamference.node.node_settings import NodeSettings
         return ["docker", "run", "-d", "--name", SEARXNG_CONTAINER_NAME,
                 "--restart", "unless-stopped", "--network", SIDECAR_NETWORK,
-                "-p", f"127.0.0.1:{SEARXNG_HOST_PORT}:8080",
+                "-p", f"{NodeSettings.search_bind_address()}:{SEARXNG_HOST_PORT}:8080",
                 "-v", f"{cls.config_dir()}:/etc/searxng",
                 SEARXNG_IMAGE]
 
@@ -68,19 +71,40 @@ class SearxngSidecar:
         return [name for name in result.stdout.split() if name not in ("bridge", SIDECAR_NETWORK)]
 
     @classmethod
+    def published_address(cls) -> str:
+        """
+        Returns:
+            str: The host address the existing container publishes its port on (`127.0.0.1`,
+            `0.0.0.0`), or "" when there is no container or no published port.
+        """
+        result = subprocess.run(
+            ["docker", "inspect", SEARXNG_CONTAINER_NAME, "--format",
+             '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}} {{end}}{{end}}'],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if result.returncode != 0:
+            return ""
+        addresses = result.stdout.split()
+        return addresses[0] if addresses else ""
+
+    @classmethod
     def start(cls) -> bool:
         """
-        Makes SearXNG run on the sidecar network.
+        Makes SearXNG run on the sidecar network, published where the node's settings say.
 
-        A container already created on a user-defined network is only started. One created on the
-        default bridge is removed and created again, and rejoins the other networks it was on; it
-        holds no state outside the mounted configuration folder.
+        A container already created on a user-defined network and published on the right address
+        is only started. One created on the default bridge, or published on the other address
+        (the node was enabled or disabled since), is removed and created again, and rejoins the
+        other networks it was on; it holds no state outside the mounted configuration folder.
 
         Returns:
             bool: True if the container is running once this returns.
         """
+        from dreamference.node.node_settings import NodeSettings
         mode = SidecarNetwork.network_mode(SEARXNG_CONTAINER_NAME)
-        if mode and not SidecarNetwork.created_on_default_bridge(SEARXNG_CONTAINER_NAME):
+        on_bridge = bool(mode) and SidecarNetwork.created_on_default_bridge(SEARXNG_CONTAINER_NAME)
+        published = cls.published_address() if mode and not on_bridge else ""
+        if mode and not on_bridge and published in ("", NodeSettings.search_bind_address()):
             started = subprocess.run(["docker", "start", SEARXNG_CONTAINER_NAME],
                                      capture_output=True, text=True, timeout=60, check=False)
             return started.returncode == 0
@@ -89,8 +113,11 @@ class SearxngSidecar:
             print(f"⚠️  Could not create the Docker network {SIDECAR_NETWORK}.")
             return False
         rejoin = cls.extra_networks() if mode else []
-        if mode:
+        if mode and on_bridge:
             print("🔁 Recreating SearXNG off Docker's default bridge, whose DNS is a copy taken at start...")
+        elif mode:
+            print(f"🔁 Recreating SearXNG to publish it on {NodeSettings.search_bind_address()}...")
+        if mode:
             subprocess.run(["docker", "rm", "-f", SEARXNG_CONTAINER_NAME],
                            capture_output=True, text=True, timeout=60, check=False)
         os.makedirs(cls.config_dir(), exist_ok=True)
