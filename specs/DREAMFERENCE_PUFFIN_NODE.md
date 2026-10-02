@@ -550,16 +550,28 @@ A worktree on another machine has no virtualenv, and Night Shift's fallback (the
 
 ---
 
-## 15. Open questions
+## 15. Decided, and still open
+
+### 15.1 Decided by the user on 2026-10-02
+
+These settle the corresponding questions below; where an earlier section says otherwise, this list wins and the section is to be brought into line when the part is built.
+
+- **The web UI is shared with the whole LAN by default** (question 2). `puffin-admin node enable` publishes it; `--no-web` remains for a node whose owner does not want that. The spec's warning stands and is printed at `node enable`: the UI has one account and can search the node owner's mail.
+- **Control between nodes uses the SSH pairing, not an open switch** (question 3). §12.4's per-node switch that lets any LAN machine set or stop a node's model is dropped. Managing a node from another (`puffin-admin node set|stop|status <node>`) goes over the pairing of §13.2, so pairing (`puffin-admin node add`) moves forward from Part 3 into Part 2. Inference stays open on the trusted LAN; only control needs the key.
+- **Installers are not signed** (question 4). The first-open warning on macOS and Windows is documented with the steps to get past it; no certificates are bought.
+- **Windows is supported through WSL** (question 6), not natively. The Linux client runs unchanged; because mDNS does not cross WSL's default NAT, discovery there is `puffin node use <address>`, and the install guide says so. The native-Windows items of §8 are not built.
+- **GPU jobs beside a resident model are not allowed, for now** (question 8). No override is built; a GPU job needs the node's model server stopped.
+
+### 15.2 Still open
 
 1. **Should a `puffin-node` executable exist**, as an alias for `puffin-admin` on a node, or is the name only the role and the advertised service?
-2. **Is the web UI meant to be shared with the whole LAN by default?** It has one account and can search the node owner's mail. The alternative default is `node enable --no-web`, with `puffin-app` on other machines switched on deliberately.
-3. **Control between nodes.** Part 2 chooses a per-node switch that, once on, lets any LAN machine set or stop that node's model with no key (§12.4). Part 3 introduces an SSH pairing for jobs (§13.2) that could carry control as well. Keep the open switch for its simplicity, or drop it once pairing exists?
-4. **Signing.** Without an Apple Developer ID and a Windows code-signing certificate, `puffin-app` installers show a warning on first open. Buy them, or document the warning?
+2. *(Decided, §15.1.)* **Is the web UI meant to be shared with the whole LAN by default?** It has one account and can search the node owner's mail. The alternative default is `node enable --no-web`, with `puffin-app` on other machines switched on deliberately.
+3. *(Decided, §15.1.)* **Control between nodes.** Part 2 chooses a per-node switch that, once on, lets any LAN machine set or stop that node's model with no key (§12.4). Part 3 introduces an SSH pairing for jobs (§13.2) that could carry control as well. Keep the open switch for its simplicity, or drop it once pairing exists?
+4. *(Decided, §15.1.)* **Signing.** Without an Apple Developer ID and a Windows code-signing certificate, `puffin-app` installers show a warning on first open. Buy them, or document the warning?
 5. **Which client targets matter?** Intel Macs and Windows on ARM each add a build and a test machine.
-6. **Windows natively, or WSL?** Native costs the items of §8 (sandbox executables, no exact code index). Under WSL the Linux client runs unchanged, but mDNS does not cross WSL's default NAT, so discovery would be `puffin node use <address>`.
+6. *(Decided, §15.1.)* **Windows natively, or WSL?** Native costs the items of §8 (sandbox executables, no exact code index). Under WSL the Linux client runs unchanged, but mDNS does not cross WSL's default NAT, so discovery would be `puffin node use <address>`.
 7. **Gmail from a remote client.** Out of scope here. Wanted at all, given that it would let every LAN client read one person's mail?
-8. **GPU jobs beside a resident model** (§13.4). The default refuses them unless the node's model server is stopped. Is there a case, such as a small fine-tune beside the 27B, worth an override?
+8. *(Decided, §15.1.)* **GPU jobs beside a resident model** (§13.4). The default refuses them unless the node's model server is stopped. Is there a case, such as a small fine-tune beside the 27B, worth an override?
 9. **Sending jobs from a laptop** (§13.3). Wanted soon enough to put the sender in the Rust launcher in Part 3, or after it?
 10. **Should a non-GB10 Linux machine with a capable GPU be allowed as a node** behind `--role node`? Host safety and every recipe are written for the GB10.
 
