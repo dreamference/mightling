@@ -65,6 +65,10 @@ pub struct Tools {
     pub scip_go: Option<(PathBuf, PathBuf)>,
     /// `(scip-java launcher, JAVA_HOME)`: a JDK 17 or newer recorded at setup.
     pub scip_java: Option<(PathBuf, PathBuf)>,
+    /// The homes of Maven and Gradle recorded at setup, when they are installed: scip-java runs
+    /// `mvn` or `gradle`, and an installation under the home directory (sdkman, a tarball) is
+    /// neither on the sandbox's `PATH` nor visible in it unless it is bound.
+    pub java_build_tools: Vec<PathBuf>,
     /// `(DOTNET_ROOT, scip-dotnet.dll)`: the .NET SDK recorded at setup and the tool it runs.
     pub scip_dotnet: Option<(PathBuf, PathBuf)>,
 }
@@ -104,6 +108,7 @@ impl Tools {
         };
         let scip_go = existing(bin.join("scip-go")).zip(toolchain_dir("go", "bin/go"));
         let scip_java = existing(bin.join("scip-java")).zip(toolchain_dir("java", "bin/javac"));
+        let java_build_tools = [toolchain_dir("maven", "bin/mvn"), toolchain_dir("gradle", "bin/gradle")].into_iter().flatten().collect();
         let scip_dotnet = toolchain_dir("dotnet", "dotnet").zip(existing(indexers.join("scip-dotnet/scip-dotnet.dll")));
         Tools {
             codebase_memory: existing(bin.join("codebase-memory-mcp")),
@@ -114,6 +119,7 @@ impl Tools {
             scip_clang: existing(bin.join("scip-clang")),
             scip_go,
             scip_java,
+            java_build_tools,
             scip_dotnet,
         }
     }
@@ -154,11 +160,14 @@ pub struct Target {
     /// A project file the indexer is pointed at, relative to the root: the compilation database
     /// for scip-clang, the solution or project for scip-dotnet. Empty otherwise.
     pub file: String,
+    /// The included submodule the root is in (its path, §4.3); empty in the superproject. An
+    /// executing indexer there runs on the submodule's own trust, and on a scratch copy of it.
+    pub submodule: String,
 }
 
 impl Target {
     pub fn new(kind: Kind, indexer: &'static str, root: &str) -> Target {
-        Target { kind, indexer, root: root.to_string(), on_demand: false, file: String::new() }
+        Target { kind, indexer, root: root.to_string(), on_demand: false, file: String::new(), submodule: String::new() }
     }
 }
 
@@ -318,29 +327,62 @@ pub fn detect(repo: &Repo) -> Vec<Target> {
 }
 
 /// The targets inside the submodules §4.3 includes, with each root carrying the submodule's path
-/// as its prefix, and what was left out and why.
+/// as its prefix, and notes on what was left out.
 ///
 /// A submodule is treated as the superproject is: its root and its immediate subdirectories.
-/// Only the static indexers run there. The executing ones (rust-analyzer, scip-java,
-/// scip-dotnet) build the project, and a build tool must never write into a submodule's
-/// checkout; they need a scratch copy of it, which is not built yet.
+/// The executing indexers (rust-analyzer, scip-java, scip-dotnet) are detected like the others;
+/// whether they run is the submodule's own trust ([`untrusted_reason`]), and they run on a scratch
+/// copy, because a build tool must never write into a submodule's checkout (§6.2).
 pub fn detect_in_submodules(repo: &Repo, decisions: &[crate::submodules::Submodule]) -> (Vec<Target>, Vec<String>) {
     let mut targets = Vec::new();
-    let mut skipped = Vec::new();
+    let mut notes = Vec::new();
     for submodule in decisions.iter().filter(|s| s.indexed) {
         let dir = repo.root.join(&submodule.path);
         let inside = Repo { root: dir.clone(), main_root: dir, is_git: true };
-        skipped.extend(root_python_note(root_python_files(&inside).1, &submodule.path));
+        notes.extend(root_python_note(root_python_files(&inside).1, &submodule.path));
         for target in detect(&inside) {
             let root = if target.root.is_empty() { submodule.path.clone() } else { format!("{}/{}", submodule.path, target.root) };
-            if target.kind == Kind::Executing {
-                skipped.push(format!("{} for {root}: not run in a submodule yet (it needs a scratch copy of the checkout)", target.indexer));
-            } else {
-                targets.push(Target { root, ..target });
-            }
+            targets.push(Target { root, submodule: submodule.path.clone(), ..target });
         }
     }
-    (targets, skipped)
+    (targets, notes)
+}
+
+/// Why an executing indexer may not run for a target, or None when it may (§9.1, §4.3).
+///
+/// In the superproject it is the repository's own trust. **Including a submodule is not trusting
+/// it:** a submodule inherits the superproject's trust only when it passed both ownership tests
+/// with a namespace to compare (`inherits_trust`), and otherwise needs its own entry in Codex's
+/// trust table, `[projects."<repository>/<path>"]` in `$CODEX_HOME/config.toml`.
+pub fn untrusted_reason(repo: &Repo, superproject_trusted: bool, decisions: &[crate::submodules::Submodule], target: &Target) -> Option<String> {
+    untrusted_reason_in(&paths::codex_home(), repo, superproject_trusted, decisions, target)
+}
+
+/// [`untrusted_reason`] against a given `$CODEX_HOME`.
+pub fn untrusted_reason_in(
+    codex_home: &Path,
+    repo: &Repo,
+    superproject_trusted: bool,
+    decisions: &[crate::submodules::Submodule],
+    target: &Target,
+) -> Option<String> {
+    if target.submodule.is_empty() {
+        return (!superproject_trusted).then(|| "the repository is not trusted".to_string());
+    }
+    let dir = repo.main_root.join(&target.submodule);
+    if crate::config::is_trusted_in(codex_home, &dir) {
+        return None;
+    }
+    match decisions.iter().find(|s| s.path == target.submodule) {
+        Some(submodule) if submodule.inherits_trust && superproject_trusted => None,
+        Some(submodule) if submodule.inherits_trust => Some("the repository is not trusted (the submodule would inherit its trust)".to_string()),
+        _ => Some(format!(
+            "the submodule {} is not trusted: including is not trusting, and it does not inherit this repository's trust (trust {} in puffin, or add `[projects.\"{}\"] trust_level = \"trusted\"` to $CODEX_HOME/config.toml)",
+            target.submodule,
+            dir.display(),
+            dir.display()
+        )),
+    }
 }
 
 /// A short, stable id for a repository, for unit and directory names.
@@ -470,10 +512,27 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
         "rust-analyzer" => {
             let (ra, rustup_home, toolchain_bin) = tools.rust_analyzer.clone()?;
             let cargo_home = std::env::var_os("CARGO_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".cargo"));
+            // In the superproject the workspace is indexed where it is, read-only. In a submodule
+            // it is indexed from a copy of the submodule's tracked files in scratch (§6.2): a
+            // build script may write beside its manifest and Cargo may rewrite `Cargo.lock`, and
+            // nothing may write into a submodule's checkout. The whole submodule is copied, not
+            // only the crate, so a `path = "../sibling"` dependency inside it still resolves;
+            // rust-analyzer's paths are relative to the workspace it is given, so the run's
+            // prefix maps them back.
+            let (src, copy_step, sources) = if target.submodule.is_empty() {
+                (root_dir.clone(), String::new(), vec![root_dir.clone()])
+            } else {
+                let submodule_dir = repo.root.join(&target.submodule);
+                let copy = scratch.join("src");
+                let within = root_dir.strip_prefix(&submodule_dir).unwrap_or(Path::new("")).to_path_buf();
+                let mut sources = vec![repo.root.clone()];
+                sources.extend(git_dirs(&submodule_dir));
+                (copy.join(within), format!("{} && ", copy_sources(repo, &submodule_dir, &copy)), sources)
+            };
             let command = format!(
-                "{ra} scip {src} --output {out} {convert}",
+                "{copy_step}{ra} scip {src} --output {out} {convert}",
                 ra = sh_quote(&ra.to_string_lossy()),
-                src = sh_quote(&root_dir.to_string_lossy()),
+                src = sh_quote(&src.to_string_lossy()),
                 out = sh_quote(&raw_file.to_string_lossy()),
             );
             let mut env = base_env(&home, &format!("{}:/usr/bin:/bin", toolchain_bin.to_string_lossy()));
@@ -485,7 +544,8 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
                 ("CARGO_TARGET_DIR".into(), scratch.join("target").to_string_lossy().into_owned()),
                 ("CARGO_BUILD_JOBS".into(), "4".into()),
             ]);
-            let read_only = vec![rustup_home, cargo_home, root_dir.clone(), scip.parent().unwrap().to_path_buf(), this.parent().unwrap().to_path_buf()];
+            let mut read_only = vec![rustup_home, cargo_home, scip.parent().unwrap().to_path_buf(), this.parent().unwrap().to_path_buf()];
+            read_only.extend(sources);
             (command, env, read_only, "1.95.0", settings.memory_ceiling_mb << 20)
         }
         "scip-typescript" => {
@@ -599,24 +659,48 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
             } else {
                 String::new()
             };
+            // Wrappers (`gradlew`, `mvnw`): see WRAPPER_DIST.
+            let gradle_dists = home.join(".gradle/wrapper/dists");
+            let maven_dists = home.join(".m2/wrapper/dists");
+            let wrappers = format!(
+                "{{ {WRAPPER_DIST}; wrapper_dist gradle/wrapper/gradle-wrapper.properties {user_gradle} {run_gradle} gradlew gradle; \
+                 wrapper_dist .mvn/wrapper/maven-wrapper.properties {user_maven} {run_maven} mvnw mvn; }}",
+                user_gradle = sh_quote(&gradle_dists.to_string_lossy()),
+                run_gradle = sh_quote(&scratch.join("gradle-home/wrapper/dists").to_string_lossy()),
+                user_maven = sh_quote(&maven_dists.to_string_lossy()),
+                run_maven = sh_quote(&scratch.join("maven-home/wrapper/dists").to_string_lossy()),
+            );
             let command = format!(
-                "{copy_sources} && cd {copy} && {launcher} index --output {out}{build_args} {convert}",
+                "{copy_sources} && cd {copy} && {wrappers} && {launcher} index --output {out}{build_args} {convert}",
                 copy_sources = copy_sources(repo, &root_dir, &copy),
                 copy = sh_quote(&copy.to_string_lossy()),
                 launcher = sh_quote(&launcher.to_string_lossy()),
                 out = sh_quote(&raw_file.to_string_lossy()),
             );
-            let mut env = base_env(&home, &format!("{}:/usr/bin:/bin", java_home.join("bin").to_string_lossy()));
+            // The recorded Maven and Gradle first, then the system's.
+            let mut path: Vec<String> = vec![java_home.join("bin").to_string_lossy().into_owned()];
+            path.extend(tools.java_build_tools.iter().map(|tool| tool.join("bin").to_string_lossy().into_owned()));
+            path.extend(["/usr/bin".to_string(), "/bin".to_string()]);
+            let mut env = base_env(&home, &path.join(":"));
             env.extend([
                 ("JAVA_HOME".into(), java_home.to_string_lossy().into_owned()),
                 ("GRADLE_USER_HOME".into(), scratch.join("gradle-home").to_string_lossy().into_owned()),
                 ("GRADLE_OPTS".into(), "-Dorg.gradle.daemon=false".into()),
+                // Where `mvnw` keeps the Maven it runs.
+                ("MAVEN_USER_HOME".into(), scratch.join("maven-home").to_string_lossy().into_owned()),
+                // The launcher unpacks its own jars into a cache before anything runs. Left at its
+                // default it is `~/.cache/coursier` of the account's home (the JVM reads the
+                // password database, not `$HOME`): 86 MB unpacked again on every run where that
+                // is the sandbox's tmpfs, and a failed run where it is not.
+                ("COURSIER_CACHE".into(), scratch.join("coursier").to_string_lossy().into_owned()),
             ]);
             if gradle_caches.is_dir() {
                 env.push(("GRADLE_RO_DEP_CACHE".into(), gradle_caches.to_string_lossy().into_owned()));
             }
             let mut read_only = vec![repo.root.clone(), java_home, launcher.parent().unwrap().to_path_buf(), scip.parent().unwrap().to_path_buf(), this.parent().unwrap().to_path_buf()];
-            read_only.extend([m2, gradle_caches].into_iter().filter(|p| p.is_dir()));
+            read_only.extend(tools.java_build_tools.iter().cloned());
+            read_only.extend([m2, gradle_caches, gradle_dists, maven_dists].into_iter().filter(|p| p.is_dir()));
+            read_only.extend(git_dirs(&root_dir));
             (command, env, read_only, indexer_version("scip-java"), settings.memory_ceiling_mb << 20)
         }
         "scip-dotnet" => {
@@ -628,8 +712,16 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
             let nuget_config = scratch.join("nuget.config");
             let sources = if packages.is_dir() { format!("<add key=\"local\" value=\"{}\" />", xml_escape(&packages.to_string_lossy())) } else { String::new() };
             let config = format!("<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><packageSources><clear />{sources}</packageSources></configuration>");
+            // The restore is run here, not by scip-dotnet. Its own is `dotnet restore
+            // /p:EnableWindowsTargeting=true`, which asks NuGet for the Windows desktop reference
+            // pack on every project; offline that fails (NU1100) for a plain console project too,
+            // and scip-dotnet goes on to write an index without the project's packages and exits
+            // 0 (measured 2026-10-02). So: a plain restore first, the Windows-targeting one only
+            // if that fails, and the indexer only after a restore that succeeded.
             let command = format!(
-                "{copy_sources} && printf '%s' {config} > {nuget_config} && cd {copy} && {dotnet} {dll} index {file} --working-directory {copy} --output {out} --nuget-config-path {nuget_config} {convert}",
+                "{copy_sources} && printf '%s' {config} > {nuget_config} && cd {copy} \
+                 && ( {dotnet} restore {file} --configfile {nuget_config} || {dotnet} restore {file} /p:EnableWindowsTargeting=true --configfile {nuget_config} ) \
+                 && {dotnet} {dll} index {file} --working-directory {copy} --output {out} --skip-dotnet-restore --exclude '**/obj/**' --exclude '**/bin/**' {convert}",
                 copy_sources = copy_sources(repo, &root_dir, &copy),
                 config = sh_quote(&config),
                 nuget_config = sh_quote(&nuget_config.to_string_lossy()),
@@ -653,6 +745,7 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
             ]);
             let mut read_only = vec![repo.root.clone(), dotnet_root, dll.parent().unwrap().to_path_buf(), scip.parent().unwrap().to_path_buf(), this.parent().unwrap().to_path_buf()];
             read_only.extend(Some(packages).filter(|p| p.is_dir()));
+            read_only.extend(git_dirs(&root_dir));
             (command, env, read_only, indexer_version("scip-dotnet"), settings.memory_ceiling_mb << 20)
         }
         _ => return None,
@@ -682,6 +775,21 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
     })
 }
 
+/// A build-tool wrapper offline (`gradlew`, `mvnw`), as a shell function: called with the wrapper's
+/// properties file, the user's distributions directory, the run's own, the wrapper script and the
+/// installed tool's name.
+///
+/// A wrapper runs the Gradle or Maven its properties file names, downloading it first. With the
+/// distribution already in the user's home (they have built the project), it is copied once into
+/// the run's own tool home, markers included, and the wrapper finds it installed; the user's
+/// directory stays read-only, because the wrapper writes lock files beside what it uses. (The
+/// copy is marked `.copied` when it is whole: a wrapper that failed to download leaves the same
+/// directory behind, with a `.part` in it.) Without
+/// it, and with the tool itself installed, the wrapper script is removed from the scratch copy
+/// and scip-java falls back on that tool. With neither, the wrapper tries its download and the
+/// run is recorded `failed: offline`.
+const WRAPPER_DIST: &str = r#"wrapper_dist() { name=$(sed -n 's#^distributionUrl=.*/\([^/]*\)\.zip[[:space:]]*$#\1#p' "$1" 2>/dev/null | head -n 1); [ -n "$name" ] || return 0; for n in "$name" "${name%-bin}"; do if [ -d "$2/$n" ]; then [ -f "$3/$n/.copied" ] || { rm -rf "$3/$n" && mkdir -p "$3" && cp -a "$2/$n" "$3/$n" && : > "$3/$n/.copied"; }; return 0; fi; done; if command -v "$5" >/dev/null 2>&1; then rm -f "$4"; fi; return 0; }"#;
+
 /// The shell step that copies a root's sources into `copy` for an indexer that builds the project
 /// and so writes into it: the files git tracks (no build output, no secrets the user left
 /// untracked), or, outside git, everything but the usual build and dependency directories.
@@ -693,6 +801,17 @@ fn copy_sources(repo: &Repo, root_dir: &Path, copy: &Path) -> String {
         format!("tar -C {root} --exclude=./target --exclude=./build --exclude=./bin --exclude=./obj --exclude=./node_modules --exclude=./.gradle -cf - .")
     };
     format!("rm -rf {copy} && mkdir -p {copy} && {list} | tar -C {copy} -xf -")
+}
+
+/// The git directories `git -C <dir> ls-files` reads, for the copy step's sandbox: a submodule's
+/// lives in its superproject's `.git/modules`, and a linked worktree's in the main checkout's
+/// `.git`, either of which may be outside the directories the run binds. Read-only, like the rest.
+fn git_dirs(dir: &Path) -> Vec<PathBuf> {
+    let Ok(out) = paths::git(dir, &["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]) else { return Vec::new() };
+    let mut dirs: Vec<PathBuf> = out.lines().map(|l| PathBuf::from(l.trim())).filter(|p| p.is_absolute() && p.is_dir()).collect();
+    dirs.sort();
+    dirs.dedup();
+    dirs
 }
 
 /// The user's Go module cache, when there is one: `$GOMODCACHE`, else `$GOPATH/pkg/mod`, else
@@ -738,14 +857,18 @@ pub fn build_with(repo: &Repo, settings: &Settings, exact: bool, on_demand: bool
     }
     let trusted = crate::config::is_trusted(&repo.main_root);
     skipped.extend(root_python_note(root_python_files(repo).1, ""));
-    let (in_submodules, skipped_in_submodules) = detect_in_submodules(repo, &crate::submodules::evaluate(repo, settings));
-    skipped.extend(skipped_in_submodules);
+    let decisions = crate::submodules::evaluate(repo, settings);
+    let (in_submodules, notes) = detect_in_submodules(repo, &decisions);
+    skipped.extend(notes);
     for target in detect(repo).into_iter().chain(in_submodules) {
-        if target.kind == Kind::Executing && !(exact && trusted) {
-            if !trusted {
-                skipped.push(format!("{} for {}: the repository is not trusted", target.indexer, display_root(&target.root)));
+        if target.kind == Kind::Executing {
+            let untrusted = untrusted_reason(repo, trusted, &decisions, &target);
+            if let Some(why) = &untrusted {
+                skipped.push(format!("{} for {}: {why}", target.indexer, display_root(&target.root)));
             }
-            continue;
+            if untrusted.is_some() || !exact {
+                continue;
+            }
         }
         if target.on_demand && !on_demand {
             skipped.push(format!("{} for {}: runs on demand (`puffin-code index`)", target.indexer, display_root(&target.root)));
@@ -944,6 +1067,7 @@ mod tests {
             scip_clang: Some(p("bin/scip-clang")),
             scip_go: Some((p("bin/scip-go"), p("go"))),
             scip_java: Some((p("bin/scip-java"), p("jdk"))),
+            java_build_tools: vec![p("maven")],
             scip_dotnet: Some((p("dotnet"), p("indexers/scip-dotnet/scip-dotnet.dll"))),
         }
     }
@@ -1025,15 +1149,50 @@ mod tests {
         assert!(script.contains(&format!("cd {}", sh_quote(&java.spec.scratch.join("src").to_string_lossy()))), "{script}");
         assert!(script.contains("--offline") && script.contains("maven.repo.local.tail"), "{script}");
         assert_eq!(env_of(&java, "JAVA_HOME"), Some(dir.path().join("jdk").to_string_lossy().as_ref()));
-        assert!(Path::new(env_of(&java, "GRADLE_USER_HOME").unwrap()).starts_with(&java.spec.scratch));
+        // Every home a build tool or the launcher writes to is in scratch.
+        for key in ["GRADLE_USER_HOME", "MAVEN_USER_HOME", "COURSIER_CACHE"] {
+            assert!(Path::new(env_of(&java, key).unwrap()).starts_with(&java.spec.scratch), "{key}");
+        }
+        // The recorded Maven is on PATH and readable, after the JDK and before the system's.
+        let maven = dir.path().join("maven");
+        assert_eq!(env_of(&java, "PATH"), Some(format!("{}:{}:/usr/bin:/bin", dir.path().join("jdk/bin").display(), maven.join("bin").display()).as_str()));
+        assert!(java.spec.read_only.contains(&maven));
+        // A wrapper is given its distribution from the user's home, copied into the run's own.
+        assert!(script.contains("wrapper_dist gradle/wrapper/gradle-wrapper.properties") && script.contains("wrapper_dist .mvn/wrapper/maven-wrapper.properties"), "{script}");
+        assert!(script.contains(&sh_quote(&java.spec.scratch.join("gradle-home/wrapper/dists").to_string_lossy())), "{script}");
         let dotnet = run_for(&repo, &tools, Target { file: "App.csproj".into(), ..Target::new(Kind::Executing, "scip-dotnet", "net") });
         let script = &dotnet.spec.argv[2];
-        assert!(script.contains("--nuget-config-path") && script.contains("<clear />"), "{script}");
+        // Restored here, from a configuration with no feed, before an indexer told not to restore.
+        assert!(script.contains("--configfile") && script.contains("<clear />") && script.contains("--skip-dotnet-restore"), "{script}");
         assert!(script.contains(&sh_quote(&dotnet.spec.scratch.join("src/App.csproj").to_string_lossy())), "{script}");
         for key in ["NUGET_PACKAGES", "DOTNET_CLI_HOME"] {
             assert!(Path::new(env_of(&dotnet, key).unwrap()).starts_with(&dotnet.spec.scratch), "{key}");
         }
         assert_eq!(env_of(&dotnet, "DOTNET_CLI_TELEMETRY_OPTOUT"), Some("1"));
+    }
+
+    #[test]
+    fn rust_in_a_submodule_is_indexed_from_a_copy_and_in_the_superproject_in_place() {
+        let (dir, repo) = make_repo(&[("own/Cargo.toml", "[package]\nname = \"own\"\n"), ("vendor/geo/Cargo.toml", "[package]\nname = \"geo\"\n")]);
+        std::env::set_var("PUFFIN_CODE_SCRATCH_DIR", dir.path().join("scratch"));
+        let tools = Tools { rust_analyzer: Some((dir.path().join("rust/bin/rust-analyzer"), dir.path().join("rustup"), dir.path().join("rust/bin"))), ..fake_tools(dir.path()) };
+        // In the superproject: the crate itself, read-only, and nothing copied.
+        let own = run_for(&repo, &tools, Target::new(Kind::Executing, "rust-analyzer", "own"));
+        assert!(own.spec.argv[2].contains(&format!("scip {}", sh_quote(&repo.root.join("own").to_string_lossy()))), "{}", own.spec.argv[2]);
+        assert!(!own.spec.argv[2].contains("ls-files"), "{}", own.spec.argv[2]);
+        assert!(own.spec.read_only.contains(&repo.root.join("own")) && !own.spec.read_only.contains(&repo.root));
+        // In a submodule: the whole submodule copied into scratch, and the crate indexed there.
+        let target = Target { submodule: "vendor".into(), ..Target::new(Kind::Executing, "rust-analyzer", "vendor/geo") };
+        let inside = run_for(&repo, &tools, target);
+        let script = &inside.spec.argv[2];
+        let copy = inside.spec.scratch.join("src");
+        assert!(script.contains(&format!("git -C {} ls-files -z", sh_quote(&repo.root.join("vendor").to_string_lossy()))), "{script}");
+        assert!(script.contains(&format!("scip {}", sh_quote(&copy.join("geo").to_string_lossy()))), "{script}");
+        assert!(!script.contains(&format!("scip {}", sh_quote(&repo.root.join("vendor/geo").to_string_lossy()))), "the checkout itself: {script}");
+        assert_eq!(inside.path_prefix, "vendor/geo/");
+        let args = sandbox::bwrap_args(&inside.spec);
+        assert!(sandbox::unexpected_writable(&args, &inside.spec).is_empty(), "{args:?}");
+        assert!(Path::new(env_of(&inside, "CARGO_TARGET_DIR").unwrap()).starts_with(&inside.spec.scratch));
     }
 
     #[test]

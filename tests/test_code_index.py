@@ -168,6 +168,29 @@ def test_toolchains_are_found_once_and_only_when_new_enough(tmp_path, monkeypatc
     assert not os.path.lexists(tmp_path / "indexers" / "java")
 
 
+def test_maven_and_gradle_are_recorded_by_their_homes(tmp_path, monkeypatch):
+    # scip-java runs `mvn` or `gradle`. One installed under the home directory is neither on the
+    # indexing sandbox's PATH nor visible in it, so setup records where it really lives.
+    maven = tmp_path / "sdk" / "maven-3.9.9"
+    (maven / "bin").mkdir(parents=True)
+    (maven / "bin" / "mvn").write_text("")
+    links = tmp_path / "links"
+    links.mkdir()
+    os.symlink(maven / "bin" / "mvn", links / "mvn")
+    # A `gradle` that is a lone script, with no home around it, is not recorded.
+    (links / "gradle").write_text("")
+    which = {"mvn": str(links / "mvn"), "gradle": str(links / "gradle")}
+    monkeypatch.setattr(code_setup.shutil, "which", lambda name: which.get(name))
+    monkeypatch.delenv("JAVA_HOME", raising=False)
+    assert CodeIndexSetup.find_toolchains() == {"maven": str(maven)}
+
+    monkeypatch.setattr(code_setup, "INDEXERS_DIR", str(tmp_path / "indexers"))
+    CodeIndexSetup.record_toolchains({"maven": str(maven)})
+    assert os.readlink(tmp_path / "indexers" / "maven") == str(maven)
+    CodeIndexSetup.record_toolchains({})
+    assert not os.path.lexists(tmp_path / "indexers" / "maven")
+
+
 def test_indexers_without_their_toolchain_are_skipped_not_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(code_setup, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(code_setup, "INDEXERS_DIR", str(tmp_path / "indexers"))

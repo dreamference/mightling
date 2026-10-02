@@ -546,7 +546,7 @@ pub fn listing(repo: &Repo, decisions: &[Submodule]) -> Vec<String> {
         let decision = if submodule.indexed { "indexed" } else { "not indexed" };
         lines.push(format!("{}  {decision} ({})  {}", submodule.path, submodule.reason.label(), submodule.evidence()));
         if submodule.indexed {
-            // The executing indexers need a scratch copy of the submodule, which is not built.
+            // The executing indexers run on a scratch copy of the submodule, on its own trust.
             let sub_repo = Repo { root: repo.root.join(&submodule.path), main_root: repo.root.join(&submodule.path), is_git: true };
             let executing: BTreeSet<&str> = crate::index::plan::detect(&sub_repo)
                 .iter()
@@ -554,9 +554,21 @@ pub fn listing(repo: &Repo, decisions: &[Submodule]) -> Vec<String> {
                 .map(|t| t.indexer)
                 .collect();
             if !executing.is_empty() {
-                let trust = if submodule.inherits_trust { "it would inherit this repository's trust" } else { "it would need its own trust entry" };
+                // Including is not trusting: the indexers that build the project say on whose
+                // trust they would run.
+                let dir = repo.main_root.join(&submodule.path);
+                let superproject = crate::config::is_trusted(&repo.main_root);
+                let trust = if crate::config::is_trusted(&dir) {
+                    "trusted by its own entry".to_string()
+                } else if submodule.inherits_trust && superproject {
+                    "it inherits this repository's trust".to_string()
+                } else if submodule.inherits_trust {
+                    "it would inherit this repository's trust, which is not given".to_string()
+                } else {
+                    format!("not run: it needs its own trust entry (`[projects.\"{}\"] trust_level = \"trusted\"` in $CODEX_HOME/config.toml)", dir.display())
+                };
                 lines.push(format!(
-                    "  {}: not run in a submodule yet (it needs a scratch copy of the checkout); {trust}",
+                    "  {}: on a scratch copy of the submodule, with `puffin-code index --exact`; {trust}",
                     executing.into_iter().collect::<Vec<_>>().join(", ")
                 ));
             }

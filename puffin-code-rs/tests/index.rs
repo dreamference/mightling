@@ -248,6 +248,62 @@ fn a_python_file_at_the_root_gets_an_exact_index_of_its_own() {
 }
 
 #[test]
+fn rust_in_a_submodule_is_indexed_from_a_scratch_copy_and_the_checkout_is_untouched() {
+    let _env = env();
+    let tools = plan::Tools::find();
+    let (Some(_), Some(_)) = (tools.rust_analyzer.as_ref(), tools.scip.as_ref()) else {
+        eprintln!("skipped: rust-analyzer or scip not installed");
+        return;
+    };
+    if !available(Path::new("/usr/bin/bwrap")) {
+        eprintln!("skipped: no bwrap");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    // The library: two crates, one depending on the other by path, and a build script that
+    // generates a file beside its manifest, as code generators do.
+    let lib = dir.path().join("origin-lib");
+    std::fs::create_dir_all(lib.join("geo/src")).unwrap();
+    std::fs::create_dir_all(lib.join("util/src")).unwrap();
+    std::fs::write(lib.join("util/Cargo.toml"), "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
+    std::fs::write(lib.join("util/src/lib.rs"), "pub fn square(x: f64) -> f64 { x * x }\n").unwrap();
+std::fs::write(lib.join("geo/Cargo.toml"), "[package]\nname = \"geo\"\nversion = \"0.1.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\nutil = { path = \"../util\" }\n").unwrap();
+    std::fs::write(
+        lib.join("geo/build.rs"),
+        "fn main() {\n    let dir = std::env::var(\"CARGO_MANIFEST_DIR\").unwrap();\n    std::fs::write(format!(\"{dir}/generated.txt\"), \"generated\").unwrap();\n}\n",
+    )
+    .unwrap();
+    std::fs::write(lib.join("geo/src/lib.rs"), "pub fn area(r: f64) -> f64 {\n    3.0 * util::square(r)\n}\n").unwrap();
+    git_repo(&lib);
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("README.md"), "super\n").unwrap();
+    let repo = git_repo(&root);
+    common::git(&root, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", &lib.to_string_lossy(), "vendor"]);
+    common::git(&root, &["commit", "-qm", "add the submodule"]);
+    let decisions = puffin_code::submodules::evaluate_with(&repo, 5000, &[("vendor".to_string(), puffin_code::submodules::Choice::Include)]);
+    let (targets, _) = plan::detect_in_submodules(&repo, &decisions);
+    let target = targets.iter().find(|t| t.indexer == "rust-analyzer" && t.root == "vendor/geo").expect("the crate is detected").clone();
+    assert_eq!(target.submodule, "vendor");
+    let run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
+    let output = run_sandboxed(&run.spec);
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    // The build wrote beside its manifest, in the copy; the submodule's checkout is exactly as
+    // committed.
+    assert!(run.spec.scratch.join("src/geo/generated.txt").is_file(), "the workspace was not the copy");
+    assert!(!root.join("vendor/geo/generated.txt").exists());
+    assert!(common::git(&root.join("vendor"), &["status", "--porcelain", "--untracked-files=all"]).is_empty(), "the submodule was written to");
+    // The store's paths are the checkout's, and the path dependency inside the submodule resolved.
+    let store = install_and_open(&repo, &run);
+    assert!(store.covers("vendor/geo/src/lib.rs"), "{:?}", store.documents());
+    let area = store.definitions_named(&["area".to_string()]).unwrap();
+    assert_eq!(area.iter().map(|d| (d.path.as_str(), d.line)).collect::<Vec<_>>(), [("vendor/geo/src/lib.rs", 1)]);
+    let uses: Vec<String> = store.occurrences_within("vendor/geo/src/lib.rs", (1, 3)).unwrap().into_iter().filter(|o| o.symbol.contains("square")).map(|o| o.symbol).collect();
+    assert_eq!(uses.len(), 1, "{uses:?}");
+    assert!(uses[0].contains("util"), "{uses:?}");
+}
+
+#[test]
 fn scip_typescript_writes_nothing_into_the_tree_and_runs_nothing_from_it() {
     let _env = env();
     let tools = plan::Tools::find();
@@ -319,6 +375,88 @@ fn scip_go_indexes_offline_and_refuses_a_toolchain_download() {
     assert!(!output.status.success());
     let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     assert!(text.contains("GOTOOLCHAIN=local"), "{text}");
+}
+
+/// A fixture project as the directory `name` of a fresh repository.
+fn language_repo(dir: &Path, fixture: &str, name: &str) -> (PathBuf, Repo) {
+    let root = dir.join("repo");
+    copy_dir(&common::fixture_dir().join("langs").join(fixture), &root.join(name));
+    let repo = git_repo(&root);
+    (root, repo)
+}
+
+/// scip-java, a JDK and Gradle, and scip-dotnet with its SDK, come from the install; on a machine
+/// that has none (this one), from an install made elsewhere and named by `PUFFIN_CODE_TOOLS_DIR`
+/// and `PUFFIN_CODE_INDEXERS_DIR` (outside the home directory, which the sandbox hides). The two
+/// tests below are skipped without them.
+#[test]
+fn scip_java_builds_a_gradle_project_offline_in_a_copy() {
+    let _env = env();
+    let tools = plan::Tools::find();
+    let gradle = tools.java_build_tools.iter().any(|home| home.join("bin/gradle").is_file()) || Path::new("/usr/bin/gradle").is_file();
+    if tools.scip_java.is_none() || tools.scip.is_none() || !gradle {
+        eprintln!("skipped: scip-java, a JDK 17 or Gradle not installed");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (root, repo) = language_repo(dir.path(), "javageom", "jvm");
+    let target = plan::detect(&repo).into_iter().find(|t| t.indexer == "scip-java").expect("detected");
+    assert_eq!((target.root.as_str(), target.kind), ("jvm", puffin_code::index::host::Kind::Executing));
+    let run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
+    let output = run_sandboxed(&run.spec);
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    // Gradle built the copy: no build/ or .gradle/ in the project.
+    assert!(run.spec.scratch.join("src/build").is_dir(), "the build did not run in the copy");
+    assert!(common::git(&root, &["status", "--porcelain", "--untracked-files=all"]).is_empty(), "the project was written to");
+    let store = install_and_open(&repo, &run);
+    assert!(store.covers("jvm/src/main/java/geom/Disk.java"), "{:?}", store.documents());
+    let make = store.definitions_named(&["makeDisk".to_string()]).unwrap();
+    assert_eq!(make.iter().map(|d| (d.path.as_str(), d.line)).collect::<Vec<_>>(), [("jvm/src/main/java/geom/Disk.java", 12)]);
+    let uses: Vec<(String, u32)> =
+        store.occurrences_of(make[0].symbol_id, &make[0].symbol).unwrap().into_iter().filter(|o| o.roles & 1 == 0).map(|o| (o.path, o.line)).collect();
+    assert_eq!(uses, [("jvm/src/main/java/geom/Report.java".to_string(), 8)]);
+}
+
+#[test]
+fn scip_dotnet_restores_and_indexes_offline_in_a_copy() {
+    let _env = env();
+    let tools = plan::Tools::find();
+    if tools.scip_dotnet.is_none() || tools.scip.is_none() {
+        eprintln!("skipped: scip-dotnet or a .NET SDK not installed");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (root, repo) = language_repo(dir.path(), "dotnetgeom", "net");
+    let target = plan::detect(&repo).into_iter().find(|t| t.indexer == "scip-dotnet").expect("detected");
+    assert_eq!((target.root.as_str(), target.file.as_str()), ("net", "Geom.csproj"));
+    let run = plan::exact_run(&repo, &puffin_code::config::Settings::default(), &tools, &target, 0).unwrap();
+    let output = run_sandboxed(&run.spec);
+    let log = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{log}");
+    // The restore succeeded with no feed: a failed one would leave an index without the
+    // project's packages, and scip-dotnet would still exit 0.
+    assert!(log.contains("Restored ") && !log.contains("error NU"), "{log}");
+    // obj/ and bin/ are in the copy only, and are not documents.
+    assert!(common::git(&root, &["status", "--porcelain", "--untracked-files=all"]).is_empty(), "the project was written to");
+    let store = install_and_open(&repo, &run);
+    assert_eq!(store.documents().into_iter().collect::<Vec<_>>(), ["net/Program.cs", "net/Shapes.cs"]);
+    let make = store.definitions_named(&["MakeDisk".to_string()]).unwrap();
+    assert_eq!(make.iter().map(|d| (d.path.as_str(), d.line)).collect::<Vec<_>>(), [("net/Shapes.cs", 37)]);
+    let uses: Vec<(String, u32)> =
+        store.occurrences_of(make[0].symbol_id, &make[0].symbol).unwrap().into_iter().filter(|o| o.roles & 1 == 0).map(|o| (o.path, o.line)).collect();
+    assert_eq!(uses, [("net/Program.cs".to_string(), 7)]);
+    // A package that is on no disk is the accepted failure, and no index is written for it.
+    std::fs::write(
+        root.join("net/Geom.csproj"),
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include=\"Not.On.This.Disk\" Version=\"1.0.0\" /></ItemGroup></Project>\n",
+    )
+    .unwrap();
+    common::git(&root, &["commit", "-qam", "a package nobody has"]);
+    let output = run_sandboxed(&run.spec);
+    let log = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(!output.status.success(), "{log}");
+    assert!(puffin_code::index::supervisor::is_offline_failure(&log), "{log}");
+    assert!(!run.converted.as_ref().unwrap().is_file(), "an index was written without the project's packages");
 }
 
 fn copy_dir(from: &Path, to: &Path) {

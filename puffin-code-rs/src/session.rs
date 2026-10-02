@@ -70,14 +70,19 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
     }
 }
 
-/// Whether the executing indexers are due: a trusted repository whose exact Rust index is missing
-/// or more than `code_index_stale_commits` behind HEAD (spec §6.3).
+/// Whether the executing indexers are due: a trusted repository, or a trusted submodule of it
+/// (§4.3), whose exact index is missing or more than `code_index_stale_commits` behind HEAD
+/// (spec §6.3).
 fn wants_exact(repo: &Repo, settings: &Settings) -> bool {
-    if !crate::config::is_trusted(&repo.main_root) {
+    let trusted = crate::config::is_trusted(&repo.main_root);
+    let decisions = crate::submodules::evaluate(repo, settings);
+    // Nothing to weigh in the common case: an untrusted repository without submodules.
+    if !trusted && decisions.iter().all(|s| !s.indexed) {
         return false;
     }
     let manifest = crate::manifest::Manifest::load(&repo.scip_dir());
-    plan::detect(repo).iter().filter(|t| t.kind == index::host::Kind::Executing).any(|target| {
+    let targets: Vec<plan::Target> = plan::detect(repo).into_iter().chain(plan::detect_in_submodules(repo, &decisions).0).collect();
+    targets.iter().filter(|t| t.kind == index::host::Kind::Executing && plan::untrusted_reason(repo, trusted, &decisions, t).is_none()).any(|target| {
         match manifest.runs.get(&index::store::key(target.indexer, &target.root)).and_then(|e| e.commit.clone()) {
             None => true,
             Some(commit) => crate::paths::git(&repo.root, &["rev-list", "--count", &format!("{commit}..HEAD")])

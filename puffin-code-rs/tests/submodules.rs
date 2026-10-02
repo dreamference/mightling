@@ -350,15 +350,15 @@ fn an_included_submodules_files_are_seen_by_git_and_by_freshness() {
     assert!(plain.contains("ours") && !plain.iter().any(|p| p.starts_with("ours/")), "{plain:?}");
 }
 
-#[test]
-fn static_indexers_are_detected_inside_an_included_submodule_and_executing_ones_are_not_run() {
+/// The fixture as `acme/super` with the submodule `mixed`: Python, TypeScript and a Rust crate.
+fn with_a_mixed_submodule(author: &str, url: Option<&str>) -> Fixture {
     let f = fixture();
     let root = f.repo.root.clone();
     git(&root, &["remote", "add", "origin", "https://example.com/acme/super.git"]);
     let lib = library(
         f.dir.path(),
         "mixed",
-        "t@localhost",
+        author,
         &[
             ("pytools/a.py", "def a():\n    return 1\n"),
             ("web/tsconfig.json", "{}"),
@@ -368,23 +368,89 @@ fn static_indexers_are_detected_inside_an_included_submodule_and_executing_ones_
         ],
         2,
     );
-    add_submodule(&root, &lib, "mixed", Some("https://example.com/acme/mixed.git"));
+    add_submodule(&root, &lib, "mixed", url);
+    f
+}
+
+/// Writes `$CODEX_HOME/config.toml` of the fixture's home, trusting `paths`.
+fn trust(f: &Fixture, paths: &[&Path]) -> PathBuf {
+    let codex_home = f.home.join(".puffin");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    let text: String = paths.iter().map(|p| format!("[projects.\"{}\"]\ntrust_level = \"trusted\"\n\n", p.display())).collect();
+    std::fs::write(codex_home.join("config.toml"), text).unwrap();
+    codex_home
+}
+
+#[test]
+fn every_indexer_is_detected_inside_an_included_submodule() {
+    let f = with_a_mixed_submodule("t@localhost", Some("https://example.com/acme/mixed.git"));
     let all = decisions(&f.repo);
     assert!(all[0].indexed);
-    let (targets, skipped) = plan::detect_in_submodules(&f.repo, &all);
+    let (targets, notes) = plan::detect_in_submodules(&f.repo, &all);
     let mut found: Vec<(&str, &str, bool)> = targets.iter().map(|t| (t.indexer, t.root.as_str(), t.kind == Kind::Static)).collect();
     found.sort();
-    assert_eq!(found, [("scip-python", "mixed/pytools", true), ("scip-typescript", "mixed/web", true)]);
-    assert_eq!(skipped.len(), 1, "{skipped:?}");
-    assert!(skipped[0].starts_with("rust-analyzer for mixed/crate: not run in a submodule yet"), "{skipped:?}");
+    assert_eq!(found, [("rust-analyzer", "mixed/crate", false), ("scip-python", "mixed/pytools", true), ("scip-typescript", "mixed/web", true)]);
+    assert!(targets.iter().all(|t| t.submodule == "mixed"), "{targets:?}");
+    assert!(notes.is_empty(), "{notes:?}");
     // The superproject's own detection still leaves submodule directories alone.
-    assert!(plan::detect(&f.repo).iter().all(|t| !t.root.starts_with("mixed")));
+    assert!(plan::detect(&f.repo).iter().all(|t| !t.root.starts_with("mixed") && t.submodule.is_empty()));
     // A submodule that is left out contributes nothing.
     let none = submodules::evaluate_with(&f.repo, 5000, &[("mixed".to_string(), Choice::Exclude)]);
     assert_eq!(plan::detect_in_submodules(&f.repo, &none), (Vec::new(), Vec::new()));
-    // `puffin-code submodules` says so beside the one that would qualify.
+}
+
+#[test]
+fn an_executing_indexer_runs_in_a_submodule_only_on_the_submodules_own_trust() {
+    // Yours, with a namespace to compare: it inherits the superproject's trust, and only that.
+    let f = with_a_mixed_submodule("t@localhost", Some("https://example.com/acme/mixed.git"));
+    let all = decisions(&f.repo);
+    let (targets, _) = plan::detect_in_submodules(&f.repo, &all);
+    let rust = targets.iter().find(|t| t.indexer == "rust-analyzer").unwrap();
+    let nowhere = f.dir.path().join("no-codex-home");
+    assert_eq!(plan::untrusted_reason_in(&nowhere, &f.repo, true, &all, rust), None);
+    let why = plan::untrusted_reason_in(&nowhere, &f.repo, false, &all, rust).unwrap();
+    assert!(why.contains("the repository is not trusted"), "{why}");
     let (_, out) = f.run(&["submodules"]);
-    assert!(out.contains("rust-analyzer: not run in a submodule yet") && out.contains("it would inherit this repository's trust"), "{out}");
+    assert!(out.contains("rust-analyzer: on a scratch copy of the submodule") && out.contains("it would inherit this repository's trust, which is not given"), "{out}");
+    trust(&f, &[&f.repo.root]);
+    let (_, out) = f.run(&["submodules"]);
+    assert!(out.contains("it inherits this repository's trust"), "{out}");
+    let (_, out) = f.run(&["status"]);
+    assert!(out.contains("exact: rust-analyzer for mixed/crate: "), "{out}");
+    assert!(!out.contains("mixed/crate: the submodule"), "{out}");
+
+    // Included by the user, written by someone else: including is not trusting.
+    let f = with_a_mixed_submodule("dev@upstream.example", Some("https://example.com/acme/mixed.git"));
+    let all = submodules::evaluate_with(&f.repo, 5000, &[("mixed".to_string(), Choice::Include)]);
+    assert!(all[0].indexed && !all[0].inherits_trust, "{:?}", all[0]);
+    let (targets, _) = plan::detect_in_submodules(&f.repo, &all);
+    let rust = targets.iter().find(|t| t.indexer == "rust-analyzer").unwrap();
+    let codex_home = trust(&f, &[&f.repo.root]);
+    let why = plan::untrusted_reason_in(&codex_home, &f.repo, true, &all, rust).expect("the superproject's trust is not the submodule's");
+    assert!(why.contains("the submodule mixed is not trusted") && why.contains(&format!("[projects.\"{}\"]", f.repo.root.join("mixed").display())), "{why}");
+    // The static indexers are not gated: they run nothing from the submodule.
+    let python = targets.iter().find(|t| t.indexer == "scip-python").unwrap();
+    assert_eq!(python.kind, Kind::Static);
+    // Its own entry in Codex's trust table is what lets the build run.
+    let codex_home = trust(&f, &[&f.repo.root, &f.repo.root.join("mixed")]);
+    assert_eq!(plan::untrusted_reason_in(&codex_home, &f.repo, true, &all, rust), None);
+    // And an entry for the submodule alone is enough: it is trusted on its own terms.
+    let codex_home = trust(&f, &[&f.repo.root.join("mixed")]);
+    assert_eq!(plan::untrusted_reason_in(&codex_home, &f.repo, false, &all, rust), None);
+}
+
+#[test]
+fn a_submodule_decided_by_authorship_alone_never_inherits_trust() {
+    // No remote on the superproject's side to compare: yours by authorship, indexed, not trusted.
+    let f = fixture();
+    let lib = library(f.dir.path(), "mine", "t@localhost", &[("crate/Cargo.toml", "[package]\nname = \"c\"\nversion = \"0.1.0\"\n"), ("crate/src/lib.rs", "pub fn c() {}\n")], 2);
+    add_submodule(&f.repo.root, &lib, "mine", None);
+    let all = decisions(&f.repo);
+    assert_eq!((all[0].indexed, all[0].reason.clone(), all[0].inherits_trust), (true, Reason::YoursByAuthorship, false));
+    let (targets, _) = plan::detect_in_submodules(&f.repo, &all);
+    let nowhere = f.dir.path().join("no-codex-home");
+    let why = plan::untrusted_reason_in(&nowhere, &f.repo, true, &all, &targets[0]).unwrap();
+    assert!(why.contains("the submodule mine is not trusted"), "{why}");
 }
 
 #[test]

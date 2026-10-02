@@ -148,6 +148,8 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
         let log_text = std::fs::read_to_string(&log).unwrap_or_default();
         let why = match status.code() {
             Some(137) | None => "killed (memory cap reached?)".to_string(),
+            // scip-java runs the project's build tool: the wrapper's, or the installed one.
+            _ if missing_build_tool(&log_text).is_some() => missing_build_tool(&log_text).unwrap_or_default(),
             // Nothing is fetched on an indexer's behalf (§9.1): a missing dependency is the
             // accepted outcome, recorded as such rather than retried.
             _ if is_offline_failure(&log_text) => "offline".to_string(),
@@ -225,10 +227,21 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
     Ok(Outcome::Ok)
 }
 
+/// The build tool scip-java could not start, as a reason with its remedy: the project has no
+/// wrapper whose distribution is on disk, and the tool itself is not installed.
+pub fn missing_build_tool(log: &str) -> Option<String> {
+    [("mvn", "Maven"), ("gradle", "Gradle")].iter().find(|(program, _)| log.contains(&format!("Cannot run program \"{program}\""))).map(|(program, name)| {
+        format!("{name} is not installed, and the project has no wrapper with its distribution on disk (install {name} so `{program}` is on PATH, then `puffin-admin code setup`)")
+    })
+}
+
 /// Whether a run's log says it needed the network.
 pub fn is_offline_failure(log: &str) -> bool {
     [
-        "--offline",
+        // Cargo: "attempting to make an HTTP request, but --offline was specified". Not the bare
+        // flag: the Maven command line scip-java echoes carries `--offline` on every run, and a
+        // compile error there is not a missing dependency.
+        "--offline was specified",
         "failed to download",
         "network",
         "Could not resolve host",
@@ -241,8 +254,10 @@ pub fn is_offline_failure(log: &str) -> bool {
         // Gradle's wrapper and Maven or Gradle reaching for a repository.
         "UnknownHostException",
         "Could not install Gradle distribution",
-        // NuGet: a package that is not in the local folder, or a feed it cannot reach.
+        // NuGet: a package or a version that is not in the local folder, or a feed it cannot reach.
+        "NU1100",
         "NU1101",
+        "NU1102",
         "NU1301",
     ]
         .iter()
@@ -462,6 +477,22 @@ mod offline_tests {
     }
 
     #[test]
+    fn a_maven_build_that_fails_for_another_reason_is_not_offline() {
+        let log = "$ mvn -Dmaven.compiler.fork=true --batch-mode --offline -DskipTests clean verify\n[ERROR] COMPILATION ERROR : \n[ERROR] /src/A.java:[3,5] cannot find symbol\n[INFO] BUILD FAILURE";
+        assert!(!super::is_offline_failure(log));
+        assert_eq!(super::missing_build_tool(log), None);
+    }
+
+    #[test]
+    fn a_missing_build_tool_is_named_with_its_remedy() {
+        let log = "$ mvn --batch-mode --offline clean verify\nException in thread \"main\" java.io.IOException: Cannot run program \"mvn\" (in directory \"/s/src\"): Exec failed, error: 2 (No such file or directory)";
+        let why = super::missing_build_tool(log).unwrap();
+        assert!(why.starts_with("Maven is not installed") && why.contains("puffin-admin code setup"), "{why}");
+        let log = "Exception in thread \"main\" java.io.IOException: Cannot run program \"gradle\" (in directory \"/s/src\")";
+        assert!(super::missing_build_tool(log).unwrap().starts_with("Gradle is not installed"));
+    }
+
+    #[test]
     fn the_language_toolchains_offline_messages() {
         for log in [
             "go: github.com/google/uuid@v1.6.0: module lookup disabled by GOPROXY=off",
@@ -469,6 +500,9 @@ mod offline_tests {
             "Could not resolve all files: No cached version of org.slf4j:slf4j-api:2.0.9 available for offline mode.",
             "Exception in thread \"main\" java.net.UnknownHostException: services.gradle.org",
             "error NU1101: Unable to find package Newtonsoft.Json. No packages exist with this id in source(s): local",
+            "error NU1100: Unable to resolve 'Microsoft.WindowsDesktop.App.Ref (= 8.0.31)' for 'net8.0'.",
+            "[ERROR] Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.apache.maven.plugins:maven-clean-plugin:jar:3.2.0 has not been downloaded from it before.",
+            "> Could not GET 'https://repo.maven.apache.org/maven2/org/apache/commons/commons-lang3/3.14.0/commons-lang3-3.14.0.pom'.\n   > repo.maven.apache.org: Temporary failure in name resolution",
         ] {
             assert!(super::is_offline_failure(log), "{log}");
         }

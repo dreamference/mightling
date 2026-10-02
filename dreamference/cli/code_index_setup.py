@@ -12,7 +12,8 @@ fingerprints belong to exactly these versions.
 scip-go, scip-java and scip-dotnet also need a toolchain of their own (Go, a JDK 17 or newer, a
 .NET SDK 8 or newer). Setup looks for each once, records what it found as a link under the
 indexers directory, and installs the indexer only beside a recorded toolchain; `puffin-code
-status` names what is missing. scip-clang has no linux-arm64 build upstream and is not installed.
+status` names what is missing. Maven and Gradle, which scip-java drives, are recorded the same way
+when they are installed. scip-clang has no linux-arm64 build upstream and is not installed.
 
 Nothing is downloaded at index or query time: this is the only step that uses the network.
 """
@@ -39,6 +40,11 @@ TOOLCHAIN_OF: Final[Dict[str, str]] = {"scip-go": "go", "scip-java": "java", "sc
 TOOLCHAIN_NAMES: Final[Dict[str, str]] = {"go": "Go toolchain", "java": "JDK 17 or newer", "dotnet": ".NET SDK 8 or newer"}
 # The oldest toolchain each indexer supports: scip-java's classes are Java 17 bytecode (class file
 # version 61), and scip-dotnet ships builds for .NET 6 to 10 but is supported on 8 and newer.
+# The build tools scip-java drives, each recorded as a link of its name when installed. Optional:
+# a project's wrapper (`mvnw`, `gradlew`) with its distribution on disk serves as well, and a
+# system package is already on the sandbox's PATH. An installation under the home directory
+# (sdkman, a tarball) is neither on that PATH nor visible in the sandbox unless it is recorded.
+BUILD_TOOLS: Final[Dict[str, str]] = {"maven": "mvn", "gradle": "gradle"}
 MIN_JAVA: Final[int] = 17
 MIN_DOTNET: Final[int] = 8
 DOTNET_TOOL_DIR: Final[str] = "scip-dotnet"
@@ -261,10 +267,12 @@ class CodeIndexSetup:
         """
         Finds the toolchains the language indexers need, once, at setup: Go (its GOROOT), a JDK
         17 or newer (its JAVA_HOME, which must have `javac`: a runtime alone cannot build), and a
-        .NET SDK 8 or newer (the directory holding `dotnet`).
+        .NET SDK 8 or newer (the directory holding `dotnet`). Maven and Gradle are recorded
+        beside the JDK when they are installed (their homes, which hold `bin/mvn`, `bin/gradle`).
 
         Returns:
-            Dict[str, str]: Link name (`go`, `java`, `dotnet`) to the directory found.
+            Dict[str, str]: Link name (`go`, `java`, `dotnet`, `maven`, `gradle`) to the directory
+            found.
         """
         found: Dict[str, str] = {}
         go = shutil.which("go")
@@ -279,6 +287,13 @@ class CodeIndexSetup:
             match = re.search(r"javac (\d+)", cls._version_of([javac, "-version"]) or "")
             if match and int(match.group(1)) >= MIN_JAVA:
                 found["java"] = home
+        for name, executable in BUILD_TOOLS.items():
+            path = shutil.which(executable)
+            if path:
+                # `/usr/bin/mvn` is a chain of links to the real `<home>/bin/mvn`.
+                tool_home = os.path.dirname(os.path.dirname(os.path.realpath(path)))
+                if os.path.isfile(os.path.join(tool_home, "bin", executable)):
+                    found[name] = tool_home
         dotnet = shutil.which("dotnet")
         if dotnet:
             major = cls.dotnet_major(dotnet)
@@ -296,7 +311,7 @@ class CodeIndexSetup:
             found (Dict[str, str]): From `find_toolchains`.
         """
         os.makedirs(INDEXERS_DIR, exist_ok=True)
-        for name in set(TOOLCHAIN_OF.values()):
+        for name in sorted(set(TOOLCHAIN_OF.values()) | set(BUILD_TOOLS)):
             link = os.path.join(INDEXERS_DIR, name)
             if name in found:
                 staging = f"{link}.new"
