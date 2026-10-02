@@ -375,7 +375,70 @@ Stop advertising and put the web UI and web search back on this machine only.
 
 #### `puffin-admin node status`
 
-Show the node id, what is advertised and published, and what a browse of the network returns.
+Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status.
+
+| Option | Description |
+|---|---|
+| `name` | A paired node: show its `puffin-admin status` instead. |
+
+#### `puffin-admin node list`
+
+List every node on the local network: its model, its load, and whether it is paired.
+
+#### `puffin-admin node add`
+
+Pair with another node over SSH, once, so it can be managed from here.
+
+| Option | Description |
+|---|---|
+| `name` | The node's name, address or id, as `node list` shows it. |
+| `--user` | The account on that node (default: this user's name) |
+| `--ssh-port` | That node's SSH port (default 22) |
+
+#### `puffin-admin node remove`
+
+Unpair a node: remove the key on both sides.
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+
+#### `puffin-admin node set`
+
+Assign a model to a paired node and start it there.
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+| `--model` | A key of that node's model matrix. |
+
+#### `puffin-admin node start`
+
+Start a paired node's model server.
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+
+#### `puffin-admin node stop`
+
+Stop a paired node's model server.
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+
+#### `puffin-admin node authorize`
+
+(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only.
+
+#### `puffin-admin node serve-job`
+
+(Run by sshd as a paired key's forced command) carry out one node operation.
+
+| Option | Description |
+|---|---|
+| `--key` | The connecting key's tag. |
 
 ### `puffin-admin benchmark_server`
 

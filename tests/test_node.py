@@ -396,3 +396,181 @@ def test_a_start_that_fails_does_not_leave_the_node_saying_loading(monkeypatch):
     with pytest.raises(SystemExit):
         controller.main()
     assert NodeServiceFile.read()["state"] == "stopped"
+
+
+# -- Part 2: pairing, and managing a node from another (§12.4, §13.2, §15.1) ------------------------
+
+PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyBodyForTestsOnly0000000000000000000 owner@laptop"
+
+
+def test_the_authorised_line_forces_one_command_and_forbids_the_rest():
+    from dreamference.node import NodePairing
+    line = NodePairing.authorized_line(PUBLIC_KEY, "/home/u/.local/bin/puffin-admin node serve-job --key abc")
+    assert line.startswith('command="/home/u/.local/bin/puffin-admin node serve-job --key abc",')
+    for restriction in ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding", "no-user-rc"):
+        assert restriction in line.split(" ssh-ed25519 ")[0]
+    assert line.endswith(" puffin-node")                       # the sender's own comment is not kept
+    assert "owner@laptop" not in line
+    for bad in ("", "not a key", PUBLIC_KEY + "\nssh-ed25519 AAAA second", "rm -rf /"):
+        with pytest.raises(ValueError):
+            NodePairing.authorized_line(bad, "/x node serve-job")
+    with pytest.raises(ValueError):
+        NodePairing.authorized_line(PUBLIC_KEY, 'x" ,no-such')
+
+
+def test_authorising_adds_one_restricted_line_and_unpairing_removes_only_it(capsys):
+    from dreamference.node import NodeServe
+    path = NodeServe.authorized_keys()
+    path.parent.mkdir(parents=True)
+    path.write_text("ssh-rsa AAAAB3own the-users-own-key\n")
+    assert NodeServe.authorize(PUBLIC_KEY) is True
+    assert NodeServe.authorize(PUBLIC_KEY) is True             # pairing twice does not add twice
+    lines = path.read_text().splitlines()
+    assert len(lines) == 2 and lines[0] == "ssh-rsa AAAAB3own the-users-own-key"
+    tag = NodeServe.key_tag(PUBLIC_KEY)
+    assert f"node serve-job --key {tag}\"" in lines[1] and "no-pty" in lines[1]
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    assert NodeIdentity.read() is not None                     # a machine that accepts pairing is a node
+    assert NodeServe.authorize("garbage") is False
+    assert NodeServe.unauthorize("0" * 16) is False
+    assert NodeServe.unauthorize("not-a-tag") is False
+    assert NodeServe.unauthorize(tag) is True
+    assert path.read_text() == "ssh-rsa AAAAB3own the-users-own-key\n"
+
+
+def test_serve_job_refuses_everything_that_is_not_an_operation(monkeypatch, capsys):
+    from dreamference.node import NodeServe
+    ran = []
+    monkeypatch.setattr(NodeServe, "run_admin", classmethod(lambda cls, arguments: ran.append(arguments) or 0))
+    for request in (None, "", "bash", "bash -i", "python train.py", "git push", "scp -t /etc",
+                    "status; rm -rf ~", "status extra", "set-model", "set-model a b", "start now",
+                    "info --all", "'unterminated"):
+        assert NodeServe.serve(request) == 2, request
+    assert ran == []
+    assert "may only ask for Puffin node operations" in capsys.readouterr().err
+
+
+def test_serve_job_runs_this_nodes_own_puffin_admin(monkeypatch, capsys):
+    from dreamference.node import NodeServe
+    ran = []
+    monkeypatch.setattr(NodeServe, "run_admin", classmethod(lambda cls, arguments: ran.append(arguments) or 0))
+    monkeypatch.setattr(NodeServe, "linger", classmethod(lambda cls: False))
+    assert NodeServe.serve("status") == 0 and NodeServe.serve("start") == 0 and NodeServe.serve("stop") == 0
+    assert ran == [["status"], ["server", "start"], ["server", "stop"]]
+    node_id = NodeIdentity.ensure()
+    capsys.readouterr()
+    assert NodeServe.serve("info") == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["node"] == node_id and info["linger"] is False and info["version"]
+
+
+def test_only_a_key_of_the_nodes_own_matrix_is_loaded(monkeypatch, capsys):
+    from dreamference.node import NodeServe
+    ran = []
+    monkeypatch.setattr(NodeServe, "run_admin", classmethod(lambda cls, arguments: ran.append(arguments) or 0))
+    for bad in ("RadixArk/Qwen3.8-27B-NVFP4", "../etc/passwd", "--model", "no-such-model", "QWEN", "a b"):
+        assert NodeServe.serve(f"set-model {bad}") == 2, bad
+    assert NodeServe.serve("set-model tiny-a2d-coder-0.5b-diffusion") == 2      # not a main model
+    assert ran == []
+    assert NodeServe.serve("set-model qwen3.8-27b-nvfp4-dflash2") == 0
+    # The node's own commands, in order: its config keeps the assignment, then its own start,
+    # with its own host-safety checks.
+    assert ran == [["main-model", "set", "qwen3.8-27b-nvfp4-dflash2"], ["server", "stop"], ["server", "start"]]
+    ran.clear()
+    monkeypatch.setattr(NodeServe, "run_admin", classmethod(lambda cls, arguments: ran.append(arguments) or 3))
+    assert NodeServe.serve("set-model qwen3.8-27b-nvfp4-dflash2") == 3          # a refusal comes back as it is
+    assert len(ran) == 1
+
+
+def paired_record(node_id="2222-bbbb", address="192.168.50.106"):
+    from dreamference.node import NodePairing
+    record = {"node": node_id, "name": "spark-2", "address": address, "user": "owner", "ssh_port": 22}
+    NodePairing._save(record)
+    return record
+
+
+def test_every_connection_uses_the_pairing_key_and_the_pinned_host_key(monkeypatch):
+    from dreamference.node import NodePairing
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    record = paired_record()
+    command = NodePairing.ssh_command(record, "status")
+    assert command[0] == "ssh" and command[-2:] == ["owner@192.168.50.106", "status"]
+    options = " ".join(command)
+    assert f"-i {NodePairing.key_path()}" in options and "IdentitiesOnly=yes" in options
+    assert "BatchMode=yes" in options                           # never a password prompt mid-command
+    assert "StrictHostKeyChecking=yes" in options and "HostKeyAlias=puffin-node-2222-bbbb" in options
+    assert f"UserKnownHostsFile={NodePairing.known_hosts()}" in options
+    assert "accept-new" in " ".join(NodePairing.ssh_options(record, accept_new=True))
+    for name in ("spark-2", "SPARK-2", "192.168.50.106", "2222-bbbb", "2222"):
+        assert NodePairing.find(name)["node"] == "2222-bbbb", name
+    assert NodePairing.find("spark-9") is None and NodePairing.find("222") is None
+
+
+def test_a_paired_node_is_followed_to_its_new_address(monkeypatch):
+    from dreamference.node import NodePairing
+    paired_record()
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.200", "port": "8000"}]))
+    assert NodePairing.find("spark-2")["address"] == "192.168.50.200"
+    assert NodePairing.paired()[0]["address"] == "192.168.50.200"
+
+
+def test_managing_a_node_needs_the_pairing_and_sends_one_operation(monkeypatch, capsys):
+    from dreamference.node import NodePairing, NodeRemote
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    assert NodeRemote.status("spark-2") == 1
+    assert "puffin-admin node add spark-2" in capsys.readouterr().out
+    paired_record()
+    sent = []
+
+    def run(cls, record, request, capture=True, input_text=None):
+        sent.append((record["name"], request, capture))
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(NodePairing, "run", classmethod(run))
+    assert NodeRemote.set_model("spark-2", "qwen3.5-122b-a10b-hybrid-dflash") == 0
+    assert NodeRemote.stop("spark-2") == 0 and NodeRemote.start("spark-2") == 0 and NodeRemote.status("spark-2") == 0
+    assert sent == [("spark-2", "set-model qwen3.5-122b-a10b-hybrid-dflash", False), ("spark-2", "stop", False),
+                    ("spark-2", "start", False), ("spark-2", "status", False)]
+
+
+def test_pairing_checks_that_the_machine_that_answered_is_the_advertised_node(monkeypatch, capsys):
+    from dreamference.node import NodePairing
+    advert = {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000"}
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [advert]))
+    sent = []
+    monkeypatch.setattr(NodePairing, "authorize_on_node",
+                        classmethod(lambda cls, record, public_key: sent.append(public_key) or True))
+    answers = {"info": json.dumps({"node": "2222-bbbb", "linger": False})}
+    monkeypatch.setattr(NodePairing, "run", classmethod(
+        lambda cls, record, request, capture=True, input_text=None: subprocess.CompletedProcess([], 0, answers[request], "")))
+    assert NodePairing.add("spark-2", user="owner") is True
+    assert sent[0].startswith("ssh-ed25519 ") and NodePairing.key_path().is_file()
+    assert oct(NodePairing.key_path().stat().st_mode & 0o777) == "0o600"
+    assert NodePairing.paired()[0]["node"] == "2222-bbbb"
+    assert "loginctl enable-linger" in capsys.readouterr().out     # a job would die with its sender
+    # Another machine answering at that address: refused, and nothing is left paired.
+    answers["info"] = json.dumps({"node": "9999-other"})
+    assert NodePairing.add("spark-2", user="owner") is False
+    assert NodePairing.paired() == []
+    assert NodePairing.add("spark-9") is False                     # not on the network
+
+
+def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypatch):
+    from dreamference.night_shift import NightShiftHost
+    from dreamference.node import NodeRemote
+    mine = NodeIdentity.ensure()
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-1", "node": mine, "address": "192.168.50.105", "port": "8000", "main": "1", "version": "1.3.0", "state": "ready"},
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000", "version": "1.3.0", "state": "stopped"}]))
+    monkeypatch.setattr(NightShiftHost, "served_model", classmethod(
+        lambda cls, host, timeout=3.0: ("RadixArk/Qwen3.8-27B-NVFP4", 262144) if "105" in host else None))
+    monkeypatch.setattr(NightShiftHost, "metrics", classmethod(
+        lambda cls, host, timeout=3.0: {"running": 2.0, "served": 1.0, "kv_pool": 156907.0}))
+    lines = NodeRemote.list_lines()
+    assert lines[0] == ("spark-1  http://192.168.50.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens), "
+                        "2 request(s) running, KV pool 156907 tokens  Puffin 1.3.0  (this machine)")
+    assert lines[1] == ("spark-2  http://192.168.50.106:8000/v1  model server stopped  Puffin 1.3.0  "
+                        "(not paired: `puffin-admin node add spark-2` to manage it; not a coding model)")
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    assert "No Puffin node answers" in NodeRemote.list_lines()[0]

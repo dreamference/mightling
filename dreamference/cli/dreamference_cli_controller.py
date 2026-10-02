@@ -980,7 +980,26 @@ class DreamferenceCLIController:
         node_enable_parser = node_subparsers.add_parser("enable", help="Advertise the node and publish the web UI and web search to the local network")
         node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get puffin and web search only")
         node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
-        node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns")
+        node_status_parser = node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status")
+        node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `puffin-admin status` instead")
+        node_subparsers.add_parser("list", help="List every node on the local network: its model, its load, and whether it is paired")
+        node_add_parser = node_subparsers.add_parser("add", help="Pair with another node over SSH, once, so it can be managed from here")
+        node_add_parser.add_argument("name", help="The node's name, address or id, as `node list` shows it")
+        node_add_parser.add_argument("--user", default=None, help="The account on that node (default: this user's name)")
+        node_add_parser.add_argument("--ssh-port", type=int, default=22, help="That node's SSH port (default 22)")
+        node_remove_parser = node_subparsers.add_parser("remove", help="Unpair a node: remove the key on both sides")
+        node_remove_parser.add_argument("name", help="The paired node")
+        node_set_parser = node_subparsers.add_parser("set", help="Assign a model to a paired node and start it there")
+        node_set_parser.add_argument("name", help="The paired node")
+        node_set_parser.add_argument("--model", required=True, help="A key of that node's model matrix")
+        node_start_parser = node_subparsers.add_parser("start", help="Start a paired node's model server")
+        node_start_parser.add_argument("name", help="The paired node")
+        node_stop_parser = node_subparsers.add_parser("stop", help="Stop a paired node's model server")
+        node_stop_parser.add_argument("name", help="The paired node")
+        # The two commands the other side of a pairing runs; not for typing.
+        node_subparsers.add_parser("authorize", help="(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only")
+        node_serve_parser = node_subparsers.add_parser("serve-job", help="(Run by sshd as a paired key's forced command) carry out one node operation")
+        node_serve_parser.add_argument("--key", default=None, help="The connecting key's tag")
 
         # Command: dreamference benchmark_server
         bench_parser = subparsers.add_parser("benchmark_server", help="Run vLLM serve benchmark using Sonnet dataset")
@@ -2176,10 +2195,39 @@ class DreamferenceCLIController:
                 sys.exit(0 if NodeAdvertiser.enable(no_web=args.no_web) else 1)
             if args.node_command == "disable":
                 sys.exit(0 if NodeAdvertiser.disable() else 1)
-            if args.node_command == "status":
+            if args.node_command == "status" and not args.name:
                 print(NodeAdvertiser.status())
                 sys.exit(0)
-            print("usage: puffin-admin node {enable,disable,status}")
+            from dreamference.node import NodePairing, NodeRemote, NodeServe
+            if args.node_command == "status":
+                sys.exit(NodeRemote.status(args.name))
+            if args.node_command == "list":
+                print("\n".join(NodeRemote.list_lines()))
+                sys.exit(0)
+            if args.node_command == "add":
+                sys.exit(0 if NodePairing.add(args.name, user=args.user, ssh_port=args.ssh_port) else 1)
+            if args.node_command == "remove":
+                sys.exit(0 if NodePairing.remove(args.name) else 1)
+            if args.node_command == "set":
+                sys.exit(NodeRemote.set_model(args.name, args.model))
+            if args.node_command == "start":
+                sys.exit(NodeRemote.start(args.name))
+            if args.node_command == "stop":
+                sys.exit(NodeRemote.stop(args.name))
+            if args.node_command == "authorize":
+                sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
+            if args.node_command == "serve-job":
+                sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
+            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop}")
+            sys.exit(2)
+
+        elif args.command == "host":
+            from dreamference.vllm_server import HostSafetySetup
+            if args.host_command == "check":
+                sys.exit(0 if HostSafetySetup.check() else 1)
+            if args.host_command == "setup":
+                sys.exit(0 if HostSafetySetup.setup() else 1)
+            print("usage: puffin-admin host {check,setup}")
             sys.exit(2)
 
         elif args.command == "night":
