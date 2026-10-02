@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Source Code Layout, Module Organization, Package Structure
-> **Checked against the code:** 2026-10-01 (module tree against the source tree; §5 against `build_launch_command()` output)
+> **Checked against the code:** 2026-10-02 (module tree against the tracked source tree, by script: every Python module under `dreamference/` and every Rust source file of the launcher, the web commands and the desktop shell is named below; §5 against `build_launch_command()` output on 2026-10-01)
 
 ---
 
@@ -20,7 +20,7 @@
 
 **Version:** `dreamference.__version__ == "1.2.0"`.
 
-**Architecture:** nine subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `puffin-rs/`, the web commands `puffin-web-rs/`, the code index `puffin-code-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
+**Architecture:** twelve subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `puffin-rs/`, the web commands `puffin-web-rs/`, the code index `puffin-code-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
 
 **Dead shims:** the top-level `dreamference/<name>.py` modules (`cli.py`, `config.py`, `hardware.py`, …) contain `from dreamference.<name>.__init__ import *`. They **never execute**: Python resolves the same-named package directory first. Editing them has no effect.
 
@@ -40,9 +40,12 @@
 | `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, the `puffin` builder, the Codex test runner |
 | `dreamference/chat/` | Onyx Lite (Puffin web UI) lifecycle and patches, Gmail, image search, the SearXNG sidecar and the sidecar network, desktop window |
 | `dreamference/context_engine/` | AST symbols, TF-IDF, FTS5 and dense retrieval |
-| `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, and web tools |
+| `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, web tools, and code search through `puffin-code` |
 | `dreamference/cli/` | `puffin-admin`, deep model inspection, benchmark dataset, code-index tool setup |
 | `dreamference/night_shift/` | Night Shift: the overnight run of the `/night` queue, its timer and report |
+| `dreamference/swe_bench/` | `puffin-admin swe-bench`: `puffin` over SWE-bench instances, graded by the upstream harness |
+| `dreamference/audit/` | `puffin-admin audit egress`: a traced `puffin` session and a verdict on where it connected |
+| `dreamference/node/` | The node half of the client/server split: the advertised service, the node id, what is published to the LAN, and managing other nodes over an SSH pairing |
 
 ---
 
@@ -118,16 +121,45 @@ dreamference/
 │   ├── mcp_server.py                     # MCPServer
 │   ├── mcp_tool_registry.py              # MCPToolRegistry
 │   ├── web_tools.py                      # WebTools (the MCP web_search / web_fetch tools)
+│   ├── code_index_search.py              # CodeIndexSearch (workspace_search_code through puffin-code)
 │   ├── ide_state.py                      # IDEState
 │   └── editor_selection.py               # EditorSelection
-└── night_shift/
-    ├── night_shift_runner.py             # NightShiftRunner (puffin-admin night run: admission, scheduling)
-    ├── night_shift_task_run.py           # NightShiftTaskRun (one task: worktree, puffin exec, tests, commit)
-    ├── night_shift_queue.py              # NightShiftQueue (the files under $CODEX_HOME/night)
-    ├── night_shift_host.py               # NightShiftHost (read-only probes of the server and the host)
-    ├── night_shift_settings.py           # NightShiftSettings (the [night] table)
-    ├── night_shift_report.py             # NightShiftReport (the morning report)
-    └── night_shift_scheduler.py          # NightShiftScheduler (the systemd user timer)
+├── night_shift/
+│   ├── night_shift_runner.py             # NightShiftRunner (puffin-admin night run: admission, scheduling)
+│   ├── night_shift_task_run.py           # NightShiftTaskRun (one task: worktree, puffin exec, tests, commit)
+│   ├── night_shift_queue.py              # NightShiftQueue (the files under $CODEX_HOME/night, the runner lock)
+│   ├── night_shift_host.py               # NightShiftHost (read-only probes of the server and the host)
+│   ├── night_shift_index.py              # NightShiftIndex (refreshes a repository's code index before its tasks)
+│   ├── night_shift_settings.py           # NightShiftSettings (the [night] table)
+│   ├── night_shift_report.py             # NightShiftReport (the morning report)
+│   └── night_shift_scheduler.py          # NightShiftScheduler (the systemd user timer)
+├── swe_bench/
+│   ├── swe_bench_command.py              # SweBenchCommand (puffin-admin swe-bench: parser and dispatch)
+│   ├── swe_bench_settings.py             # SweBenchSettings (the [swe_bench] table, paths, pins)
+│   ├── swe_bench_harness.py              # SweBenchHarness (the upstream harness in its own virtualenv)
+│   ├── swe_bench_images.py               # SweBenchImages (arm64 instance images, the validated list)
+│   ├── swe_bench_runtime.py              # SweBenchRuntime (the relocated puffin that starts in an instance image)
+│   ├── swe_bench_docker.py               # SweBenchDocker (the one place the benchmark runs docker)
+│   ├── swe_bench_runner.py               # SweBenchRunner (swe-bench run: admission, scheduling, resume)
+│   ├── swe_bench_instance_run.py         # SweBenchInstanceRun (one instance: container, puffin exec, prediction)
+│   ├── swe_bench_code_index.py           # SweBenchCodeIndex (--code-index universal: index on the host, mount read-only)
+│   ├── swe_bench_evaluator.py            # SweBenchEvaluator (validation and grading through the harness)
+│   ├── swe_bench_run_store.py            # SweBenchRunStore (one run's files)
+│   └── swe_bench_report.py               # SweBenchReport (a run's report, two runs compared)
+├── audit/
+│   ├── egress_audit.py                   # EgressAudit (puffin-admin audit egress: the traced session)
+│   ├── strace_parser.py                  # StraceParser (reads the strace output)
+│   ├── egress_trace.py                   # EgressTrace (destinations, DNS names, processes)
+│   └── egress_verdict.py                 # EgressVerdict (pass, fail or trace failed, with reasons)
+└── node/
+    ├── node_advertiser.py                # NodeAdvertiser (puffin-admin node enable|disable|status)
+    ├── node_service_file.py              # NodeServiceFile (the Avahi service file, _puffin-node._tcp)
+    ├── node_identity.py                  # NodeIdentity (the node's stable id)
+    ├── node_settings.py                  # NodeSettings (~/.config/dreamference/node-advertise.json)
+    ├── node_browser.py                   # NodeBrowser (what a browse of the network returns)
+    ├── node_remote.py                    # NodeRemote (node list|set|start|stop: managing other nodes from this one)
+    ├── node_pairing.py                   # NodePairing (node add|remove: a key restricted to one forced command)
+    └── node_serve.py                     # NodeServe (node serve-job: the operations a paired key may ask for)
 
 scripts/                                  # at the repository root, not inside the package
 ├── install_gb10.sh                       # full installation
@@ -135,11 +167,13 @@ scripts/                                  # at the repository root, not inside t
 ├── gen_admin_reference.py                # regenerates docs/admin.md from build_parser()
 └── cave_mode_bench/                      # the cave-mode benchmark and its level texts
 
-puffin-rs/src/{lib,help,home,app,update,usage,cave,night,code_index}.rs   # launcher compiled into puffin
-puffin-web-rs/src/{lib,search,fetch,html_text}.rs, src/bin/   # puffin-search, puffin-fetch
-puffin-code-rs/src/                             # puffin-code, the code index (router, SCIP stores, session, MCP)
-codex-patches/00NN-*.patch                      # patch series for the codex/ submodule
-desktop/src-tauri/                              # Tauri shell (binary puffin-app)
+puffin-rs/src/{lib,help,home,app,update,usage,cave,night,code_index,airgapped,node}.rs   # launcher compiled into puffin
+puffin-rs/airgapped/src/lib.rs                  # crate puffin-airgapped: the three levels and their resolution (std only)
+puffin-rs/node-locator/src/lib.rs               # crate puffin-node-locator: where the node is (std only)
+puffin-web-rs/src/{lib,search,fetch,html_text,airgapped,node_locator}.rs, src/bin/   # puffin-search, puffin-fetch
+puffin-code-rs/src/                             # puffin-code, the code index (router, SCIP stores, submodules, session, MCP)
+codex-patches/00NN-*.patch                      # patch series for the codex/ submodule (17 patches, 0001–0019)
+desktop/src-tauri/src/{main,discover,forwarder,node_locator}.rs   # Tauri shell (binary puffin-app)
 ```
 
 ---
@@ -176,9 +210,9 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float3
 `MCPServer` (stdio JSON-RPC) with the tools from `MCPToolRegistry`:
 - `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`;
 - `web_search`, `web_fetch`;
-- `workspace_search_code`.
+- `workspace_search_code`, answered by `CodeIndexSearch` from `puffin-code` when the workspace is indexed, and by the context engine otherwise.
 
-`WebTools` is the MCP server's copy of what `puffin-search` and `puffin-fetch` do; those two are Rust (`puffin-web-rs/`, `DREAMFERENCE_PUFFIN_CODEX.md` §4.1), and the two implementations are kept in step by hand.
+`WebTools` is the MCP server's copy of what `puffin-search` and `puffin-fetch` do, and like them it follows the `/airgapped` level; those two are Rust (`puffin-web-rs/`, `DREAMFERENCE_PUFFIN_CODEX.md` §4.1), and the two implementations are kept in step by hand.
 
 ### 3.8. `cli/`
 
@@ -186,7 +220,19 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float3
 
 ### 3.9. `night_shift/`
 
-`NightShiftRunner.run()` is `puffin-admin night run`: admission, then a scheduling loop that starts one `NightShiftTaskRun` per queued task, each in its own git worktree under a memory-capped systemd scope. `NightShiftQueue` reads and writes the task files the launcher (`puffin-rs/src/night.rs`) creates, under the same per-task locks. See `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`.
+`NightShiftRunner.run()` is `puffin-admin night run`: admission, then a scheduling loop that starts one `NightShiftTaskRun` per queued task, each in its own git worktree under a memory-capped systemd scope. `NightShiftQueue` reads and writes the task files the launcher (`puffin-rs/src/night.rs`) creates, under the same per-task locks, and holds the runner lock, which records who holds it and which `puffin-admin swe-bench` shares. `NightShiftIndex` refreshes each repository's code index before its tasks start. See `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`.
+
+### 3.10. `swe_bench/`
+
+`SweBenchCommand.dispatch()` is `puffin-admin swe-bench`. `SweBenchRunner` runs the agent phase with Night Shift's admission and runner lock: one `SweBenchInstanceRun` per instance, each a `puffin exec` inside that instance's container on an internal Docker network that reaches only the model server, using the relocated `puffin` that `SweBenchRuntime` builds. `SweBenchEvaluator` validates instances and grades predictions through the upstream harness (`SweBenchHarness`); `SweBenchReport` prints a run and compares two. Every docker command goes through `SweBenchDocker`. See `DREAMFERENCE_PUFFIN_SWE_BENCH.md`.
+
+### 3.11. `audit/`
+
+`EgressAudit.run()` is `puffin-admin audit egress`: one real `puffin exec` under `strace`, in a throwaway repository and `CODEX_HOME`. `StraceParser` turns the trace into an `EgressTrace`, and `EgressVerdict` passes it only if the session reached nothing but the model server and the other allowlisted loopback services. See `DREAMFERENCE_PUFFIN_EGRESS.md`.
+
+### 3.12. `node/`
+
+`NodeAdvertiser` is `puffin-admin node enable|disable|status`, and `NodeRemote`, `NodePairing` and `NodeServe` are `node list|add|remove|set|start|stop` (other nodes are listed from their open model port and changed only over an SSH pairing). `NodeAdvertiser` installs the Avahi service file `NodeServiceFile` renders, publishes the web UI and SearXNG beyond loopback, and records both switches in `NodeSettings`. `NodeIdentity` is the id clients remember a node by. The client side is Rust: `puffin-rs/src/node.rs` and the `puffin-node-locator` crate, with byte-identical copies of the locator in `puffin-web-rs/` and `desktop/src-tauri/` (a test compares them, as one does for the `puffin-airgapped` copy in `puffin-web-rs/`). See `DREAMFERENCE_PUFFIN_NODE.md`.
 
 ---
 

@@ -1,10 +1,10 @@
 # Puffin Technical Specification
 
-> - **Version:** 1.2.0 (`dreamference.__version__`)
+> - **Version:** 1.2.0 (`dreamference.__version__`). Release `v1.3.0` was published on 2026-10-02 from commit `5d2254f`; the release workflow stamps the version in its own checkout, so the source still says 1.2.0
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified memory)
-> - **Deployment Model:** single-node, air-gapped by default; a GB10 offered to the local network with `puffin-admin node enable` serves clients that find it over mDNS ([PUFFIN_NODE](./DREAMFERENCE_PUFFIN_NODE.md), Part 1 built in part)
+> - **Deployment Model:** single node, with the model, the code and the sessions on the machine. Not air-gapped by default: web search, page fetch and Gmail use the internet unless `/airgapped on` ([PUFFIN_AIRGAPPED](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)); a GB10 offered to the local network with `puffin-admin node enable` serves clients that find it over mDNS ([PUFFIN_NODE](./DREAMFERENCE_PUFFIN_NODE.md), Part 1 built in part)
 > - **License:** AGPL-3.0-or-later
-> - **Specs last reconciled with the code:** 2026-09-28; the descriptive specs were re-checked against the parser, the model registry and the source tree on 2026-10-01
+> - **Specs last reconciled with the code:** 2026-09-28; the descriptive specs were re-checked against the parser, the model registry and the source tree on 2026-10-01, and CLI, CODEBASE, ARCHITECTURE, CONTEXT and DOCKER again on 2026-10-02 (at `cebd6db`) for `swe-bench`, `audit egress`, `node` and the three packages behind them
 
 This directory holds the specification, split into focused documents. This page is the index.
 
@@ -19,7 +19,7 @@ This directory holds the specification, split into focused documents. This page 
 | Document | What it covers |
 |---|---|
 | [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Part 1 partly implemented (2026-10-02, §18):* splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; then several nodes with no stored roles, and jobs sent to another node over SSH |
-| [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the nine packages |
+| [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the twelve packages |
 | [DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md) | Source layout, class inventory, import conventions, the default model's full launch command |
 | [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md) | Requirements, installation, helper scripts, troubleshooting |
 | [DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md) | `puffin-admin` command reference, configuration tiers, environment variables |

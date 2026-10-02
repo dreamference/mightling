@@ -2,21 +2,23 @@
 
 > - **Version:** 1.2.0 (`dreamference.__version__`, `setup.py`)
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified LPDDR5X)
-> - **Deployment Model:** single-node, air-gapped
+> - **Deployment Model:** single node; the model, the code and the sessions stay on the machine. Web search, page fetch and Gmail reach the internet at the default `/airgapped off`; only `/airgapped on` allows none of them
 > - **License:** AGPL-3.0-or-later
-> - **Checked against the code:** 2026-10-01 (packages, modules, model matrix and containers)
+> - **Checked against the code:** 2026-10-02 (packages and modules against the tracked source tree, by script; model matrix and containers on 2026-10-01)
 
 ---
 
 ## 1. Executive Summary
 
-**Puffin** (by Dreamference) is a local, air-gapped agentic coding platform for a single NVIDIA GB10. It serves open models in Docker (SGLang for the default model, vLLM for the others), and puts three front ends on the same local OpenAI-compatible endpoint:
+**Puffin** (by Dreamference) is a local agentic coding platform for a single NVIDIA GB10: inference runs on the machine and no code or prompt goes to a cloud model. It is not air-gapped by default, because the agent's web search, page fetch and Gmail tools use the internet; `/airgapped on` switches those off and takes the network away from the agent's sandboxed commands, with the holes `DREAMFERENCE_PUFFIN_AIRGAPPED.md` lists (see also `DREAMFERENCE_PUFFIN_EGRESS.md`). It serves open models in Docker (SGLang for the default model, vLLM for the others), and puts three front ends on the same local OpenAI-compatible endpoint:
 
 - **`puffin`:** the terminal coding agent, and the default. It is a Puffin-branded build of OpenAI's Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`puffin-rs/`).
 - **Puffin web UI:** Onyx Lite, deployed and patched by `puffin-admin puffin …`. It is a browser chat with web search, image search, voice and Gmail, and it is also shown as a desktop window by the Tauri shell `puffin-app`.
 - **Other agents:** Cline, Continue and OpenHands, through `puffin-admin run --agent …`.
 
 Everything is administered through **`puffin-admin`**, the Python CLI.
+
+Since 2026-10-02 the GB10 can also be offered to the local network as a **node**: `puffin-admin node enable` advertises it over mDNS, and `puffin`, `puffin-search` and `puffin-app` on another machine find it with no address typed. The split is built in part, and with one GB10 here nothing has run between two machines; `DREAMFERENCE_PUFFIN_NODE.md` §18 says what was built and measured.
 
 ```text
 +------------------------------------------------------------------------------------+
@@ -28,7 +30,7 @@ Everything is administered through **`puffin-admin`**, the Python CLI.
 +-----------------------v--------------------------------v---------------------------+
 |  dreamference/ (Python)                                                            |
 |   config  hardware  vllm_server  runner  chat  context_engine  mcp_server          |
-|   night_shift  cli                                                                 |
+|   night_shift  swe_bench  audit  node  cli                                         |
 |   agent tools: gmail (read-only); puffin-search, puffin-fetch, puffin-code: Rust   |
 +-----------------------+------------------------------------------------------------+
                         | docker run
@@ -75,7 +77,7 @@ Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
 3. config file (`--config`, `DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`/`.json`, `~/.config/dreamference/config.toml`);
 4. module-level `DEFAULT_*` constant.
 
-`save_config()` writes only values that differ from the defaults.
+`save_config()` writes only values that differ from the defaults, and carries over tables already in the file. Those tables belong to other readers: `[night]` (`NightShiftSettings`) and `[swe_bench]` (`SweBenchSettings`) are read from the same file by their own classes, not by `DreamferenceConfig`.
 
 ### 3.2. `hardware/`: models, downloads, telemetry
 
@@ -112,11 +114,11 @@ See `DREAMFERENCE_ONYX.md`, `DREAMFERENCE_PUFFIN_GMAIL.md` and `DREAMFERENCE_IMA
 
 ### 3.6. `context_engine/`: workspace index
 
-Python `ast` symbols (`ast_symbol_extractor.py`), TF-IDF, SQLite FTS5 and `nomic-embed-text-v1.5` embeddings stored as plain float32 blobs in SQLite (`sqlite_context_storage.py`, `embedding_calculator.py`; sqlite-vec is not used), all written to `.dreamference/`. It serves `workspace_search_code` over MCP and the web canvas; `puffin` does not use it. See `DREAMFERENCE_CONTEXT.md`.
+Python `ast` symbols (`ast_symbol_extractor.py`), TF-IDF, SQLite FTS5 and `nomic-embed-text-v1.5` embeddings stored as plain float32 blobs in SQLite (`sqlite_context_storage.py`, `embedding_calculator.py`; sqlite-vec is not used), all written to `.dreamference/`. It serves the web canvas, and `workspace_search_code` over MCP where the workspace has no `puffin-code` index (§3.7); `puffin` does not use it. See `DREAMFERENCE_CONTEXT.md`.
 
 ### 3.7. `mcp_server/`: IDE companion
 
-A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `IDEState`, plus `web_search` / `web_fetch` (`web_tools.py`) and `workspace_search_code`.
+A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `IDEState`, plus `web_search` / `web_fetch` (`web_tools.py`) and `workspace_search_code`, which `code_index_search.py` answers from `puffin-code` when the workspace is indexed and the context engine answers otherwise.
 
 ### 3.8. `cli/`: `puffin-admin`
 
@@ -124,18 +126,30 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 
 ### 3.9. `night_shift/`: the overnight queue
 
-`puffin-admin night {enable,disable,status,run}`: the queue the launcher writes (`night_shift_queue.py`), settings (`night_shift_settings.py`), host probes (`night_shift_host.py`), one task in its own git worktree (`night_shift_task_run.py`), admission and scheduling (`night_shift_runner.py`), the morning report (`night_shift_report.py`) and the systemd user timer (`night_shift_scheduler.py`). See `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`.
+`puffin-admin night {enable,disable,status,run}`: the queue the launcher writes (`night_shift_queue.py`), settings (`night_shift_settings.py`), host probes (`night_shift_host.py`), one task in its own git worktree (`night_shift_task_run.py`), admission and scheduling (`night_shift_runner.py`), the code-index refresh before a repository's tasks (`night_shift_index.py`), the morning report (`night_shift_report.py`) and the systemd user timer (`night_shift_scheduler.py`). See `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`.
 
-### 3.10. Outside the Python package
+### 3.10. `swe_bench/`: SWE-bench on this machine
+
+`puffin-admin swe-bench {setup,smoke,run,eval,report,status,clean}`. The agent phase (`swe_bench_runner.py`, `swe_bench_instance_run.py`) runs one `puffin exec` per instance inside that instance's own container, on an internal Docker network that reaches only the model server, with a relocated copy of `puffin` (`swe_bench_runtime.py`); the upstream harness, in a virtualenv of its own (`swe_bench_harness.py`), validates instances and grades patches (`swe_bench_evaluator.py`). Images are third-party arm64 builds (`swe_bench_images.py`); `--code-index universal` adds `puffin-code` as an arm (`swe_bench_code_index.py`). It shares Night Shift's admission and runner lock. See `DREAMFERENCE_PUFFIN_SWE_BENCH.md`.
+
+### 3.11. `audit/`: what a session does on the network
+
+`puffin-admin audit egress` (`egress_audit.py`) runs one real `puffin exec` under `strace` in a throwaway repository and home, parses the trace (`strace_parser.py`, `egress_trace.py`) and gives a verdict (`egress_verdict.py`). See `DREAMFERENCE_PUFFIN_EGRESS.md`.
+
+### 3.12. `node/`: the GB10 as a node
+
+`puffin-admin node {enable,disable,status,list,add,remove,set,start,stop}`. Advertising is `node_advertiser.py`: the Avahi service file that advertises `_puffin-node._tcp` (`node_service_file.py`), the node's stable id (`node_identity.py`), the two switches for what is published beyond loopback (`node_settings.py`) and a browse of the network as clients see it (`node_browser.py`). Managing another node is `node_remote.py`, over an SSH pairing (`node_pairing.py`) whose key the other node restricts to one forced command (`node_serve.py`). The client side is in the Rust crates (§3.13). See `DREAMFERENCE_PUFFIN_NODE.md`.
+
+### 3.13. Outside the Python package
 
 | Path | What |
 | --- | --- |
 | `codex/` | Submodule: the `dgxcoder/codex` fork, pinned to `rust-v0.158.0`, never edited |
-| `codex-patches/` | Patch series applied to an exported copy at build time |
-| `puffin-rs/` | The launcher crate compiled into `puffin` (also `/usage`, `/cavemode`, `/night`) |
-| `puffin-web-rs/` | `puffin-search` and `puffin-fetch`, the agent's web commands: a standalone crate installed beside `puffin` |
+| `codex-patches/` | Patch series applied to an exported copy at build time (17 patches, `0001`–`0019`) |
+| `puffin-rs/` | The launcher crate compiled into `puffin` (also `/usage`, `/cavemode`, `/night`, `/airgapped`, and `puffin node`), with two leaf crates that use only the standard library: `airgapped/` (the three levels) and `node-locator/` (where the node is) |
+| `puffin-web-rs/` | `puffin-search` and `puffin-fetch`, the agent's web commands: a standalone crate installed beside `puffin`. It carries byte-identical copies of the two leaf crates' sources |
 | `puffin-code-rs/` | `puffin-code`, the code index: a standalone crate installed beside `puffin` |
-| `desktop/` | Tauri project for `puffin-app` |
+| `desktop/` | Tauri project for `puffin-app`; on a machine that is not the node, a loopback forwarder brings the node's web UI to `localhost:3000` |
 | `dreamference/web_canvas.py` | `puffin-admin web` status page |
 | `.github/workflows/release.yml` | Manually triggered release: Python dist, desktop bundles, `puffin` binaries |
 
@@ -152,6 +166,8 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 - [x] Puffin web UI (Onyx Lite) with branding, web and image search, voice, Gmail; desktop window
 - [x] Code index for `puffin` (`puffin-code`: codebase-memory-mcp + SCIP), implemented 2026-10-01; its §14 lists the parts not built (`DREAMFERENCE_PUFFIN_CODE_INDEX.md`)
 - [x] Cave mode (`/cavemode`) and Night Shift (`/night`, `puffin-admin night`), 2026-10-01
+- [x] `/airgapped` (Phase 1, in part), the egress audit for `exec` sessions (`puffin-admin audit egress`) and SWE-bench (`puffin-admin swe-bench`, Phase 1), 2026-10-01
+- [ ] Client/server split (`puffin-admin node`, `puffin node`, the `puffin-app` forwarder, SSH pairing between nodes): built in part, 2026-10-02, and not run between two machines (`DREAMFERENCE_PUFFIN_NODE.md`)
 - [ ] Proposed specs are marked *Proposed* in `specs/README.md`
 
 ---

@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** AST Extraction, Hybrid Search, SQLite/FTS5 Indexing, Testing
-> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`); §6's test table against `tests/` on 2026-10-01
+> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`); §6's test table against `tests/` on 2026-10-02 (all 28 test files are listed)
 
 ---
 
@@ -120,7 +120,7 @@ These are recorded here because the spec used to promise otherwise.
 
 ## 6. Tests Architecture
 
-- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-10-01: 521 tests; without a model server 63 are skipped and the rest take about 25 s. The skips are the live slash-command tests, which need a running model server; with one, the full run takes about 13 minutes.
+- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-10-02 pytest collects 655 tests (at `cebd6db`). On 2026-10-01, at 521, 63 were skipped without a model server and the rest took about 25 s; neither figure was re-measured for 655. The skips are the live slash-command tests, which need a running model server; with one, the full run takes about 13 minutes.
 - **Style:** `tmp_path` isolation, and no external services except in tests that detect them and skip.
 
 | Test File | Scope |
@@ -146,6 +146,10 @@ These are recorded here because the spec used to promise otherwise.
 | `test_cave_mode.py` | Cave mode's Python side: the setting, and the level texts matching the benchmark's |
 | `test_code_index.py` | `puffin-admin code setup`, and `server start` stopping index runs before a load |
 | `test_night_shift.py` | Night Shift's runner, with a scripted stand-in for `puffin` |
+| `test_swe_bench.py` | `puffin-admin swe-bench`, with a stand-in for `docker` and a scripted `puffin exec` |
+| `test_egress_audit.py` | `puffin-admin audit egress`: the strace parser and the verdict, on a recorded trace |
+| `test_airgapped.py` | `/airgapped`: the Python side of the setting, and the default level and the resolver that Python, the launcher and the web commands share |
+| `test_node.py` | The node half of the client/server split: the service file, the node id, the published addresses; nothing writes `/etc` or runs `sudo` |
 | `test_sidecar_network.py` | Sidecars are created on a user-defined network, never Docker's default bridge |
 | `test_cache_clearing.py` | `puffin-admin clear` removes weights only |
 | `test_admin_reference.py` | `docs/admin.md` is generated from the CLI and in step with it |

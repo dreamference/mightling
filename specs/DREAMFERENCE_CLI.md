@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0 (`setup.py`)
 > **Subject:** Command Suite, Subcommands, Configuration, Environment Variables
-> **Checked against the code:** 2026-10-01 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`: every subcommand and option below was compared with the parser)
+> **Checked against the code:** 2026-10-02 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`: a script walked the parser and found every subcommand and every visible `--option` in this document)
 
 ---
 
@@ -22,7 +22,7 @@
 **Entry points** (`setup.py` `console_scripts`):
 
 - `puffin-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
-- `puffin`: **not** a Python entry point. It is the Rust binary built by `puffin-admin codex build`: Codex with Puffin's branding and launcher compiled in, linked at `~/.local/bin/puffin`. It takes Codex's command line. See `DREAMFERENCE_PUFFIN_CODEX.md`.
+- `puffin`: **not** a Python entry point. It is the Rust binary built by `puffin-admin codex build`: Codex with Puffin's branding and launcher compiled in, linked at `~/.local/bin/puffin`. It takes Codex's command line, plus four subcommands the launcher answers itself before Codex parses anything (`puffin app`, `puffin night …`, `puffin airgapped [default <level>]`, `puffin node list|use|forget`) and `puffin update`, a subcommand patch `0008` adds to Codex's own parser. See `DREAMFERENCE_PUFFIN_CODEX.md`.
 
 There is no `chat` subcommand any more (removed 2026-09-28). The interactive agent is `puffin`. The other agents (Cline, Continue, OpenHands) are reachable through `puffin-admin run "…" --agent …`.
 
@@ -32,7 +32,8 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 
 - **Setup:** `init`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}`, `clear {model-cache,tensorize-cache}`
 - **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run}`
-- **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`
+- **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
+- **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,list,add,remove,set,start,stop}`
 - **Web UI and desktop:** `puffin {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
 - **Agent tools:** `gmail {search,read,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `puffin-search` and `puffin-fetch` (§4.16), and so is the code index, `puffin-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
@@ -81,6 +82,10 @@ These options come before the subcommand (`puffin-admin --agent cline run "…"`
 | **`codex test`** | Run Codex's own test suite on Puffin's patched tree, except the tests in `codex-tests/puffin-skips.toml` | `[-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]` |
 | **`code setup`** | Install the pinned tools the code index (`puffin-code`) runs | — |
 | **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`; see §4.21 |
+| **`swe-bench …`** | Run `puffin` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `smoke`, `run`, `eval`, `report`, `status`, `clean`; see §4.23 |
+| **`audit egress`** | Trace one real `puffin` session and list every network destination and process, with a verdict | `[--prompt P] [--json]`; see §4.24 |
+| **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them | `enable [--no-web]`, `disable`, `status [NAME]`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`; see §4.25 |
+| **`host …`** | The host settings a model load is refused without: report them, or apply them with sudo | `check`, `setup`; see §4.26 |
 | **`puffin …`** (`onyx …`) | Onyx Lite web UI lifecycle | see §4.19 |
 | **`desktop …`** | Tauri desktop window (`puffin-app`) | `install`, `run`, `build`, `status` |
 | **`searxng start`** | Start the SearXNG container on `127.0.0.1:8888`, on the network `dreamference-sidecars`; replaces one made on Docker's default bridge ([DOCKER §6](./DREAMFERENCE_DOCKER.md)) | — |
@@ -384,12 +389,84 @@ Night Shift (`dreamference/night_shift/`, `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`).
 - **`status`:** the timer, the window and the queue of every repository.
 - **`run`:** works through the queue now, until the window ends (`--until`, or `--minutes` from now). It waits for the model server to have been idle for `--idle-minutes` (default 10). `--ignore-open-sessions` skips the wait for open `puffin` sessions; it is for testing.
 
-While a night run holds its lock, `server start`, `codex build` and `index` refuse to run.
+While a night run holds its lock, `server start`, `codex build` and `index` refuse to run. A SWE-bench run takes the same lock (§4.23), so the two exclude each other and the refusal names whichever holds it.
 
 ### 4.22. `puffin-admin code setup`, `puffin-admin searxng start`
 
 - **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+) the optional indexers need. The index itself is the Rust binary `puffin-code`, built and linked by `codex build`. See `DREAMFERENCE_PUFFIN_CODE_INDEX.md`.
-- **`searxng start`:** creates the SearXNG container on the project network `dreamference-sidecars`, published on `127.0.0.1:8888` only. A container found on Docker's default bridge is replaced. See `DREAMFERENCE_DOCKER.md` §6.
+- **`searxng start`:** creates the SearXNG container on the project network `dreamference-sidecars`, published on `127.0.0.1:8888` only. A container found on Docker's default bridge is replaced. See `DREAMFERENCE_DOCKER.md` §6. On a node that `node enable` advertised (§4.25) it is published beyond loopback instead.
+
+### 4.23. `puffin-admin swe-bench`
+
+```bash
+puffin-admin swe-bench setup [--dataset verified|lite|full|<HF id>] [--validate [--instances IDS] [--limit N] [--force]]
+puffin-admin swe-bench smoke [--idle-minutes N] [--ignore-open-sessions]
+puffin-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limit N] [--name NAME]
+                           [--eval [--remove-images]] [--code-index off|universal]
+                           [--until HH:MM] [--idle-minutes N] [--ignore-open-sessions]
+puffin-admin swe-bench eval [RUN]
+puffin-admin swe-bench report [RUN] [--against RUN]
+puffin-admin swe-bench status
+puffin-admin swe-bench clean [RUN] [--images]
+```
+
+SWE-bench on this machine (`dreamference/swe_bench/`, `DREAMFERENCE_PUFFIN_SWE_BENCH.md`). `RUN` defaults to the latest run.
+
+- **`setup`:** installs the upstream harness (`swebench` 5.0.2) in a virtualenv of its own, downloads the dataset and builds the relocated copy of `puffin` that starts inside the instance images. `--validate` also checks which instances grade correctly here (the reference patch resolves, a no-op patch does not), which pulls their images.
+- **`smoke`:** proves the whole pipeline on five fixed instances. `run` refuses until a smoke has passed with the installed harness version.
+- **`run`:** the agent phase. One `puffin exec` per instance, each inside that instance's own container on the internal Docker network `puffin-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `puffin-code` (default `off`).
+- **`eval`:** the grading phase: the upstream harness applies each patch and runs the tests. It needs no model.
+- **`report`:** the resolved rate and what it was measured with; `--against` compares two runs instance by instance.
+- **`status`:** runs, their progress, the images present and free disk.
+- **`clean`:** removes a run's containers and scratch (every run's, with no `RUN`); `--images` also removes the instance images.
+
+Files: the harness, dataset, runtime and validation results under `~/.cache/dreamference/swe-bench/`; one directory per run under `~/.local/share/dreamference/swe-bench/runs/`. Settings come from the `[swe_bench]` table (§5.1). `run` and `smoke` use Night Shift's admission (idle model, memory) and its runner lock.
+
+### 4.24. `puffin-admin audit egress`
+
+```bash
+puffin-admin audit egress [--prompt PROMPT] [--json]
+```
+
+Runs one real `puffin exec` session under `strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked of a resolver and every process the session started, with a verdict (`dreamference/audit/`, `DREAMFERENCE_PUFFIN_EGRESS.md`). `--prompt` replaces the default prompt (a one-word reply); `--json` also writes the full result to `$CODEX_HOME/audit/<timestamp>.json`. Exit status: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
+
+### 4.25. `puffin-admin node`
+
+```bash
+puffin-admin node enable [--no-web]
+puffin-admin node disable
+puffin-admin node status [NAME]
+puffin-admin node list
+puffin-admin node add NAME [--user USER] [--ssh-port 22]
+puffin-admin node remove NAME
+puffin-admin node set NAME --model MODEL
+puffin-admin node start NAME | stop NAME
+```
+
+The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_PUFFIN_NODE.md`).
+
+- **`enable`:** installs the Avahi service file that advertises this machine as `_puffin-node._tcp`, publishes the web UI and SearXNG beyond loopback, and records that it did, so a later `puffin configure` or `searxng start` keeps those addresses. `--no-web` keeps the web UI on this machine; clients then get `puffin` and web search only. Root is needed once, for the file under `/etc/avahi`: the command is printed and `sudo` prompts on the terminal. If the file cannot be installed, nothing is published. It prints that anyone on the local network can then use the node, with nothing encrypted or authenticated, and that the web UI's one account (and its Gmail tool) is shared.
+- **`disable`:** stops advertising and puts the web UI and web search back on this machine only.
+- **`status`:** the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status.
+- **`list`:** every node on the local network, with its model, its load and whether it is paired. It needs no pairing: those figures come from each node's open model port.
+- **`add`:** pairs with another node over SSH, once, so it can be managed from here. `NAME` is the node's name, address or id as `list` shows it. It makes a key used for nothing else, and the other node authorises it for one forced command only, with no terminal and no forwarding; the node's host key is pinned to its id.
+- **`remove`:** unpairs: removes the key on both sides.
+- **`set` / `start` / `stop`:** assign a model (a key of that node's model matrix) and start it there, or start or stop a paired node's model server. Each is carried out by that node's own `puffin-admin`, with its own host-safety checks.
+
+Two more subcommands are not typed by a person: `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model and unpair). There is no primary node: the machine `puffin-admin node …` is typed on is the one doing the managing. With one GB10 here, pairing was run against a scratch sshd on loopback, not against a second machine.
+
+The switches are kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory first. On a client the counterpart is `puffin node list|use|forget`, in the launcher.
+
+### 4.26. `puffin-admin host`
+
+```bash
+puffin-admin host check     # what `server start` would refuse over; changes nothing; exit 1 if anything is listed
+puffin-admin host setup     # applies it: each command printed, then run through sudo
+```
+
+`HostSafetySetup` applies what `check_host_safety()` (§4.6) only prints: sysstat, an armed earlyoom, 64 GB of swap, and the two sysctls. The cases it reports instead of acting on, and what was verified, are in [SETUP §3.3](./DREAMFERENCE_SETUP.md). `install.sh` and `scripts/install_gb10.sh` both run `host setup`.
+
+**On a release install** (no checkout; [SETUP §3.2](./DREAMFERENCE_SETUP.md)) `codex build` builds nothing: it reports the installed release binaries and refreshes the links, or says how to install them; `desktop build` and `desktop install` point at the release's `.deb` and AppImage.
 
 ---
 
@@ -423,10 +500,18 @@ attention_backend = "auto"
 # kv_cache_dtype unset = use the model recipe's value
 puffin_gmail = true
 puffin_cave_mode = "ultra"
+puffin_airgapped = "off"     # off | duckduckgo | on
 
 [night]                      # Night Shift, read by `puffin-admin night` (NightShiftSettings)
 window = "01:00-07:00"
+
+[swe_bench]                  # read by `puffin-admin swe-bench` (SweBenchSettings)
+max_parallel = 3
 ```
+
+The tables take these keys, each with a built-in default:
+- **`[night]`:** `window`, `max_parallel`, `task_timeout`, `test_timeout`, `task_memory`, `nudges`, `test`, `task_context`, `idle_minutes`, `index`, `index_timeout`;
+- **`[swe_bench]`:** `max_parallel`, `task_timeout`, `task_memory`, `task_cpus`, `nudges`, `idle_minutes`, `task_context`, `eval_workers`, `eval_memory`, `eval_timeout`, `disk_reserve`.
 
 A `sandbox = …` line left in an older file is ignored: the option was removed on 2026-10-01.
 
@@ -450,10 +535,15 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_PUFFIN_GMAIL` | `true` | Add the Gmail section to `puffin`'s prompt when an account is connected |
 | `DREAMFERENCE_PUFFIN_CAVE_MODE` | `ultra` | Cave-mode level for new `puffin` sessions (`off`, `lite`, `full`, `ultra`); also the config key `puffin_cave_mode` |
+| `DREAMFERENCE_PUFFIN_AIRGAPPED` | `off` | How much of the internet a `puffin` session may use (`off`, `duckduckgo`, `on`); also the config key `puffin_airgapped` |
 | `DREAMFERENCE_SEARXNG_URL` | `http://127.0.0.1:8888` | SearXNG instance used by `puffin-search` and the MCP server's `web_search` |
-| `CODEX_HOME` | `~/.puffin` | `puffin`'s home folder: sessions, config, the Night Shift queue (`night/`) |
+| `CODEX_HOME` | `~/.puffin` | `puffin`'s home folder: sessions, config, skills (`skills/`), the Night Shift queue (`night/`), audit results (`audit/`) |
+| `PUFFIN_NODE` | (unset) | On a client: the node one `puffin` command uses, by name, address or id, instead of the remembered one |
+| `PUFFIN_RELEASE_REPO` | `dgxcoder/dgxcoder` | Where `puffin update` looks for releases, e.g. a fork |
 | `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN` | (unset) | HuggingFace token |
 | `HF_HOME` | `~/.cache/huggingface` | HF cache root (the hub cache is `$HF_HOME/hub`) |
+
+The table lists what a user sets. Left out on purpose are the variables one component sets for another (`PUFFIN_NIGHT_RUN`, `PUFFIN_UPSTREAM_TESTS`, the `PUFFIN_CODE_*` paths the launcher, the indexers and the SWE-bench runner pass along, the `PUFFIN_GMAIL_*`, `PUFFIN_IMAGE_*`, `PUFFIN_SIGLIP_URL` and `PUFFIN_VISION_*` settings of the sidecar containers, `DREAMFERENCE_DIFFUSION_PORT` and `DREAMFERENCE_DIFFUSION_MODEL_ID` inside the diffusion container), the build-time `PUFFIN_VERSION` the release workflow sets, and test seams (`PUFFIN_NIGHT_PUFFIN_BIN`, `PUFFIN_TEST_NODE_ID`). Each is described in the module that reads it.
 
 **Tuning keys** (config file or CLI only, no environment variable):
 - `enable_prefix_caching`;

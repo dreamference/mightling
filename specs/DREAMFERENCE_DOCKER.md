@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0
 > **Subject:** Docker vLLM Architecture, Model Downloads, Tensorization, Cache Management
-> **Checked against the code:** 2026-10-01 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`; the launch line against `build_launch_command()` output)
+> **Checked against the code:** 2026-10-01 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`; the launch line against `build_launch_command()` output); §6 against `chat/`, `node/` and `swe_bench/` on 2026-10-02)
 
 ---
 
@@ -189,6 +189,9 @@ The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAU
 | `dreamference-gmail`, `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `puffin-admin puffin configure` | Sidecars **created on** Onyx's network (not joined afterwards, see below); published on loopback only (gmail 8767, image search 8768, stt 8100) |
 | `dreamference-searxng` | `puffin-admin searxng start` (`SearxngSidecar`) | `127.0.0.1:8888`; created on the project's own network `dreamference-sidecars`; `configure` joins it to Onyx's network, and first recreates one still on the default bridge |
 | `dreamference-openhands` | `puffin-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, UI on **`127.0.0.1:3001`** (`OPENHANDS_HOST_PORT`): not 3000, which is Onyx's, and loopback only because the container mounts the Docker socket (`DREAMFERENCE_AGENTS.md` §5) |
+| `puffin-swe-<run>-<instance>` (one per SWE-bench instance, labelled `puffin.swe-bench.run=<run>`) | `puffin-admin swe-bench run` and `smoke` (`SweBenchInstanceRun`) | The instance's own image (third-party arm64 builds, `greynewell/swe-bench-arm64`); on the **internal** network `puffin-swe-bench` (`docker network create --internal`), which reaches the model server at the network's gateway and nothing else; `--memory` and `--memory-swap` at `[swe_bench] task_memory` (8G), `--cpus` 4, `--pids-limit 4096`; the relocated `puffin` mounted read-only at `/opt/puffin`. Grading containers are the upstream harness's own, capped afterwards at `eval_memory` (4G) with `docker update` |
+
+**What `puffin-admin node enable` changes** (`node/node_settings.py`; `DREAMFERENCE_PUFFIN_NODE.md` §4). On a node that is advertised, SearXNG is published on every interface instead of `127.0.0.1:8888`, and so is the web UI's port 3000 unless the node was enabled with `--no-web`; `searxng start` and `puffin configure` recreate a container that is published on the other address. Port 80 never leaves loopback, and neither do the Gmail, image-search and speech-to-text sidecars. `node disable` puts both back on loopback.
 
 **No sidecar is created on Docker's default bridge.** A container's DNS setup is fixed by the network it is *created* on, and joining another network later does not change it. On the default bridge it is a copy of the host's upstream DNS servers (`/run/systemd/resolve/resolv.conf`) taken at container start; on a user-defined network, lookups go through Docker's resolver to the host's stub resolver (`127.0.0.53`) at lookup time.
 
