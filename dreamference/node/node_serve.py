@@ -28,7 +28,11 @@ from dreamference.node.node_pairing import KEY_COMMENT, NodePairing
 MODEL_KEY: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9._-]{1,80}")
 
 REFUSAL: Final[str] = ("puffin-admin node serve-job: this key may only ask for Puffin node operations "
-                       "(info, status, start, stop, set-model <key>, unpair).")
+                       "(info, status, start, stop, set-model <key>, unpair, and jobs).")
+
+# The two git services a job's push and fetch ask for, and the only path shape they may name.
+GIT_SERVICES: Final[tuple] = ("git-receive-pack", "git-upload-pack")
+GIT_PATH: Final[re.Pattern] = re.compile(r"/?jobs/([A-Za-z0-9][A-Za-z0-9._-]{0,80})\.git")
 
 
 class NodeServe:
@@ -158,6 +162,85 @@ class NodeServe:
             removed = cls.unauthorize(key_tag or "")
             print("unpaired" if removed else "no such key")
             return 0 if removed else 1
+        if operation in GIT_SERVICES and len(arguments) == 1:
+            return cls.git_service(operation, arguments[0])
+        if operation.startswith("job-"):
+            return cls.job_operation(operation, arguments)
+        print(REFUSAL, file=sys.stderr)
+        return 2
+
+    @classmethod
+    def git_service(cls, service: str, path: str) -> int:
+        """
+        Runs git's own server side for a job repository: what a `git push` or `git fetch`
+        through the forced command asks for (the pattern gitolite uses). Any other path is
+        refused, so the key reaches no repository of the node's owner.
+
+        Args:
+            service: `git-receive-pack` or `git-upload-pack`.
+            path: The path the client named, `jobs/<name>.git`.
+
+        Returns:
+            int: Git's exit code; 2 when the path is refused.
+        """
+        from dreamference.node.node_job import NodeJob
+        match = GIT_PATH.fullmatch(path)
+        if not match or ".." in path:
+            print("puffin-admin node serve-job: only a job repository (jobs/<name>.git) can be pushed to or fetched from.",
+                  file=sys.stderr)
+            return 2
+        repo = NodeJob.repo_path(match.group(1))
+        if not repo.is_dir():
+            if service != "git-receive-pack":
+                print("puffin-admin node serve-job: no such job repository.", file=sys.stderr)
+                return 2
+            repo.parent.mkdir(parents=True, exist_ok=True)
+            created = subprocess.run(["git", "init", "--quiet", "--bare", str(repo)], capture_output=True,
+                                     text=True, check=False)
+            if created.returncode != 0:
+                print(f"could not create the job repository: {created.stderr.strip()[-200:]}", file=sys.stderr)
+                return 1
+        return subprocess.run([service, str(repo)], check=False).returncode
+
+    @classmethod
+    def job_operation(cls, operation: str, arguments: List[str]) -> int:
+        """
+        Carries out a job request: submit (and show the output), logs, list, cancel.
+
+        Args:
+            operation: `job-submit`, `job-logs`, `job-list` or `job-cancel`.
+            arguments: Its arguments.
+
+        Returns:
+            int: The job's exit code for submit and logs; 2 for a refused request.
+        """
+        import base64
+        from dreamference.node.node_job import JOB_ID, NodeJob
+        if operation == "job-submit" and len(arguments) == 1:
+            try:
+                request = json.loads(base64.urlsafe_b64decode(arguments[0].encode()))
+                record = NodeJob.submit(request, cls.admin_executable())
+            except (ValueError, TypeError) as error:
+                print(f"❌ The node refused the job: {error}", file=sys.stderr)
+                return 2
+            print(f"🚀 Job {record['id']} started on {socket.gethostname()} "
+                  f"(memory {record['memory']}, time {record['time']}, network "
+                  f"{'off' if record['airgapped'] == 'on' else 'on'}).", flush=True)
+            return NodeJob.follow(record["id"])
+        if operation == "job-list" and not arguments:
+            for record in NodeJob.records():
+                settled = NodeJob.reconcile(record["id"]) or record
+                print(json.dumps({key: settled.get(key) for key in
+                                  ("id", "status", "command", "branch", "submitted", "finished", "exit_code", "note")}))
+            return 0
+        if operation in ("job-logs", "job-cancel") and arguments and JOB_ID.fullmatch(arguments[0]) \
+                and NodeJob.read(arguments[0]) is not None:
+            if operation == "job-cancel" and len(arguments) == 1:
+                cancelled = NodeJob.cancel(arguments[0])
+                print("cancelled" if cancelled else "the job is not running")
+                return 0 if cancelled else 1
+            if operation == "job-logs" and len(arguments) <= 2 and all(a.isdigit() for a in arguments[1:]):
+                return NodeJob.follow(arguments[0], offset=int(arguments[1]) if len(arguments) == 2 else 0)
         print(REFUSAL, file=sys.stderr)
         return 2
 

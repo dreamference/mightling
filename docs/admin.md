@@ -442,6 +442,59 @@ Stop a paired node's model server.
 |---|---|
 | `--key` | The connecting key's tag. |
 
+#### `puffin-admin node run`
+
+Run a command on a paired node, in this repository at HEAD; its changes come back as a branch.
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+| `--memory` | The job's memory cap (default 8G; the node sets the ceiling) |
+| `--time` | The job's time limit (default 90m; the node sets the ceiling) |
+| `--test` | A command that decides pass or fail, run after the job's own. |
+| `--gpu` | Ask for the GPU (nodes refuse this for now) |
+| `job_command` | -- then the command and its arguments. |
+
+#### `puffin-admin node jobs`
+
+List the jobs on a paired node, or on every paired node.
+
+| Option | Description |
+|---|---|
+| `name` | A paired node (default: all) |
+
+#### `puffin-admin node logs`
+
+Show a job's output again, or continue it.
+
+| Option | Description |
+|---|---|
+| `job` | The job id. |
+
+#### `puffin-admin node cancel`
+
+Stop a running job.
+
+| Option | Description |
+|---|---|
+| `job` | The job id. |
+
+#### `puffin-admin node fetch`
+
+Bring a job's result branch into the repository it was sent from.
+
+| Option | Description |
+|---|---|
+| `job` | The job id. |
+
+#### `puffin-admin node job-exec`
+
+(Run inside a job's systemd unit) carry out one job.
+
+| Option | Description |
+|---|---|
+| `job` | The job id. |
+
 ### `puffin-admin benchmark_server`
 
 Run vLLM serve benchmark using Sonnet dataset.

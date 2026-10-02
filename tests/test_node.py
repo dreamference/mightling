@@ -7,6 +7,7 @@ scratch folder and refuses sudo, and the two binds are checked through the comma
 
 import json
 import os
+import re
 import subprocess
 import uuid
 
@@ -574,3 +575,249 @@ def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypat
                         "(not paired: `puffin-admin node add spark-2` to manage it; not a coding model)")
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     assert "No Puffin node answers" in NodeRemote.list_lines()[0]
+
+
+# -- Part 3: jobs on another node (§13) ------------------------------------------------------------
+
+def job_request(**changes):
+    request = {"id": "20261002-1200-abc", "repo": "calc-0123456789", "commit": "a" * 40,
+               "command": ["python3", "train.py"], "memory": "8G", "time": "90m"}
+    request.update(changes)
+    return request
+
+
+def test_a_job_cannot_be_accepted_without_a_memory_cap_and_a_time_limit():
+    from dreamference.node import NodeJob
+    record = NodeJob.validate(job_request())
+    assert (record["memory_bytes"], record["time_s"], record["status"]) == (8 * 1024 ** 3, 5400, "queued")
+    for missing in ("memory", "time"):
+        request = job_request()
+        del request[missing]
+        with pytest.raises(ValueError, match="memory cap and a time limit"):
+            NodeJob.validate(request)
+    for changes in ({"memory": "0"}, {"time": "0m"}, {"memory": "lots"}, {"time": "soon"}):
+        with pytest.raises(ValueError):
+            NodeJob.validate(job_request(**changes))
+
+
+def test_the_node_sets_the_ceilings_and_refuses_what_came_from_outside_malformed():
+    from dreamference.node import NodeJob
+    with pytest.raises(ValueError, match="at most 32G"):
+        NodeJob.validate(job_request(memory="64G"))
+    with pytest.raises(ValueError, match="at most 8h"):
+        NodeJob.validate(job_request(time="24h"))
+    with pytest.raises(ValueError, match="GPU jobs are not allowed"):
+        NodeJob.validate(job_request(gpu=True))
+    for changes in ({"id": "../../x"}, {"id": "20261002-1200-ABC"}, {"repo": "../etc"}, {"repo": "a/b"},
+                    {"repo": ""}, {"commit": "HEAD"}, {"commit": "a" * 39}, {"command": "rm -rf /"},
+                    {"command": []}, {"command": ["ok", 3]}, {"test": ["x"]}):
+        with pytest.raises(ValueError):
+            NodeJob.validate(job_request(**changes))
+    with pytest.raises(ValueError):
+        NodeJob.validate(["not", "an", "object"])
+
+
+def test_the_stricter_of_the_two_airgap_levels_applies(monkeypatch):
+    from dreamference.node import NodeJob
+    assert NodeJob.stricter("off", "on") == "on" and NodeJob.stricter("duckduckgo", "off") == "duckduckgo"
+    assert NodeJob.stricter("off", "off") == "off" and NodeJob.stricter("nonsense", "off") == "on"
+    monkeypatch.setattr(NodeJob, "node_airgap_level", classmethod(lambda cls: "on"))
+    assert NodeJob.validate(job_request(airgapped="off"))["airgapped"] == "on"
+    monkeypatch.setattr(NodeJob, "node_airgap_level", classmethod(lambda cls: "off"))
+    assert NodeJob.validate(job_request(airgapped="on"))["airgapped"] == "on"
+    assert NodeJob.validate(job_request())["airgapped"] == "off"
+
+
+def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(tmp_path):
+    from dreamference.node import NodeJob
+    tree = tmp_path / "jobs" / "20261002-1200-abc" / "tree"
+    argv = NodeJob.sandbox_command(tree, ["python3", "train.py"], network=True, job_id="20261002-1200-abc")
+    assert argv[0] == "bwrap" and argv[-3:] == ["--", "python3", "train.py"]
+    # One read-write bind, and it is the worktree; the system is read-only.
+    binds = [argv[i + 1] for i, word in enumerate(argv) if word == "--bind"]
+    assert binds == [str(tree)]
+    assert argv[argv.index("--ro-bind") + 1:argv.index("--ro-bind") + 3] == ["/", "/"]
+    hidden = [argv[i + 1] for i, word in enumerate(argv) if word == "--tmpfs"]
+    assert os.path.expanduser("~") in hidden and "/run" in hidden and "/tmp" in hidden
+    # bubblewrap hides a bind made under a later tmpfs: every tmpfs comes first.
+    assert max(i for i, word in enumerate(argv) if word == "--tmpfs") < argv.index("--bind")
+    # The environment is built from nothing, and CUDA sees no device.
+    assert "--clearenv" in argv
+    environment = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
+    assert environment["CUDA_VISIBLE_DEVICES"] == "" and environment["PUFFIN_JOB"] == "20261002-1200-abc"
+    assert "SSH_AUTH_SOCK" not in environment
+    # A script at `on` has no network at all; otherwise it keeps it.
+    assert "--unshare-net" not in argv
+    assert "--unshare-net" in NodeJob.sandbox_command(tree, ["true"], network=False, job_id="20261002-1200-abc")
+
+
+def test_a_job_is_a_capped_unit_of_its_own_not_a_child_of_the_connection():
+    from dreamference.node import NodeJob
+    record = NodeJob.validate(job_request(memory="16G", time="2h"))
+    argv = NodeJob.unit_command(record, "/home/u/.local/bin/puffin-admin")
+    assert argv[:2] == ["systemd-run", "--user"] and "--scope" not in argv
+    assert "--unit=puffin-job-20261002-1200-abc" in argv
+    properties = [argv[i + 1] for i, word in enumerate(argv) if word == "-p"]
+    assert f"MemoryMax={16 * 1024 ** 3}" in properties and "MemorySwapMax=0" in properties
+    assert "RuntimeMaxSec=7200" in properties
+    assert argv[-4:] == ["/home/u/.local/bin/puffin-admin", "node", "job-exec", "20261002-1200-abc"]
+
+
+@pytest.fixture
+def job_node(tmp_path, monkeypatch):
+    """This machine as the node: a job repository holding one commit, no unit, no sandbox."""
+    from dreamference.night_shift import NightShiftHost
+    from dreamference.node import NodeJob
+    monkeypatch.setattr(NodeJob, "USE_UNIT", False)
+    monkeypatch.setattr(NodeJob, "sandbox_command", classmethod(lambda cls, tree, command, network, job_id: list(command)))
+    monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: []))
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 64 * 1024 ** 3))
+    source = tmp_path / "source"
+    source.mkdir()
+    run = lambda *args: subprocess.run(["git", "-C", str(source), *args], capture_output=True, text=True, check=True)
+    run("init", "-q")
+    run("config", "user.email", "t@t")
+    run("config", "user.name", "T")
+    (source / "data.txt").write_text("one\n")
+    run("add", "-A")
+    run("commit", "-q", "-m", "init")
+    commit = run("rev-parse", "HEAD").stdout.strip()
+    repo = NodeJob.repo_path("calc-0123456789")
+    repo.parent.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
+    run("push", "-q", str(repo), f"{commit}:refs/jobs/x")
+    return {"commit": commit, "repo": repo}
+
+
+def test_a_job_runs_in_a_worktree_and_its_changes_come_back_as_a_branch(job_node, capsys):
+    from dreamference.node import NodeJob
+    record = NodeJob.submit(job_request(commit=job_node["commit"], command=["bash", "-c", "echo hello; echo two >> data.txt; echo new > out.txt"],
+                                        test="grep -q two data.txt", author={"name": "Owner", "email": "s@example.org"}), "/x/puffin-admin")
+    assert NodeJob.execute(record["id"]) == 0
+    done = NodeJob.read(record["id"])
+    assert (done["status"], done["exit_code"], done["test_exit_code"], done["branch"]) == ("done", 0, 0, "job/20261002-1200-abc")
+    git = lambda *args: subprocess.run(["git", "--git-dir", str(job_node["repo"]), *args], capture_output=True, text=True).stdout
+    assert git("log", "-1", "--format=%an <%ae> %s", "job/20261002-1200-abc").strip() == \
+        "Owner <s@example.org> job: bash -c 'echo hello; echo two >> data.txt; echo new > out.txt'"
+    assert sorted(git("show", "--name-only", "--format=", "job/20261002-1200-abc").split()) == ["data.txt", "out.txt"]
+    assert not (NodeJob.job_dir(record["id"]) / "tree").exists()        # the worktree is gone, the branch stays
+    # The output is kept on the node, and reading it again is only a view.
+    capsys.readouterr()
+    assert NodeJob.follow(record["id"]) == 0
+    assert "hello" in capsys.readouterr().out
+    with pytest.raises(ValueError, match="already exists"):
+        NodeJob.submit(job_request(commit=job_node["commit"]), "/x/puffin-admin")
+
+
+def test_a_failing_job_and_a_job_that_changes_nothing(job_node, capsys):
+    from dreamference.node import NodeJob
+    failing = NodeJob.submit(job_request(id="20261002-1201-aaa", commit=job_node["commit"], command=["bash", "-c", "echo boom; exit 7"]), "/x")
+    assert NodeJob.execute(failing["id"]) == 7
+    record = NodeJob.read(failing["id"])
+    assert (record["status"], record["exit_code"], record["branch"]) == ("failed", 7, None)
+    assert NodeJob.follow(failing["id"]) == 7 and "boom" in capsys.readouterr().out
+    quiet = NodeJob.submit(job_request(id="20261002-1202-bbb", commit=job_node["commit"], command=["true"]), "/x")
+    assert NodeJob.execute(quiet["id"]) == 0
+    assert NodeJob.read(quiet["id"])["branch"] is None                 # no change: only the log and the code
+    test_fails = NodeJob.submit(job_request(id="20261002-1203-ccc", commit=job_node["commit"], command=["true"], test="exit 3"), "/x")
+    assert NodeJob.execute(test_fails["id"]) == 3
+    assert NodeJob.read(test_fails["id"])["status"] == "failed"
+    assert [job["id"][-3:] for job in NodeJob.records()] == ["aaa", "bbb", "ccc"]
+
+
+def test_the_working_node_decides_whether_it_can_take_the_job(job_node, monkeypatch):
+    from dreamference.night_shift import NightShiftHost, NightShiftQueue
+    from dreamference.node import NodeJob
+    with pytest.raises(ValueError, match="was not pushed"):
+        NodeJob.submit(job_request(commit="b" * 40), "/x")
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 10 * 1024 ** 3))
+    with pytest.raises(ValueError, match="10.0 GiB of memory available"):
+        NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 64 * 1024 ** 3))
+    monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: ["a puffin build holds the build lock"]))
+    with pytest.raises(ValueError, match="build lock"):
+        NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
+    monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: []))
+    monkeypatch.setattr(NightShiftQueue, "runner_active", classmethod(lambda cls, night_dir=None: True))
+    with pytest.raises(ValueError, match="night run"):
+        NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
+    assert NodeJob.records() == []                                       # a refused job leaves nothing behind
+
+
+def test_a_job_stopped_by_its_limits_is_settled_and_a_cancel_is_kept(job_node, monkeypatch):
+    from dreamference.node import NodeJob
+    record = NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
+    record["status"] = "running"
+    NodeJob.write(record)
+    monkeypatch.setattr(NodeJob, "USE_UNIT", True)
+    monkeypatch.setattr(NodeJob, "unit_active", classmethod(lambda cls, job_id: False))
+    settled = NodeJob.reconcile(record["id"])
+    assert settled["status"] == "failed" and "time limit (90m)" in settled["note"] and "memory cap (8G)" in settled["note"]
+    monkeypatch.setattr(NodeJob, "USE_UNIT", False)
+    other = NodeJob.submit(job_request(id="20261002-1205-ddd", commit=job_node["commit"]), "/x")
+    assert NodeJob.cancel(other["id"]) is True and NodeJob.cancel(other["id"]) is False
+    assert NodeJob.read(other["id"])["status"] == "cancelled"
+
+
+def test_only_a_job_repository_can_be_pushed_to_or_fetched_from(monkeypatch, capsys):
+    from dreamference.node import NodeJob, NodeServe
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **_: ran.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
+    for path in ("/home/user/mightling", "jobs/../../.ssh.git", "jobs/a/b.git", "jobs/x", "/etc/passwd", "~/.puffin"):
+        assert NodeServe.serve(f"git-receive-pack '{path}'") == 2, path
+        assert NodeServe.serve(f"git-upload-pack '{path}'") == 2, path
+    assert ran == []
+    assert NodeServe.serve("git-upload-pack 'jobs/calc-0123456789.git'") == 2      # nothing was ever pushed
+    assert NodeServe.serve("git-receive-pack '/jobs/calc-0123456789.git'") == 0
+    repo = str(NodeJob.repo_path("calc-0123456789"))
+    assert ran == [["git", "init", "--quiet", "--bare", repo], ["git-receive-pack", repo]]
+
+
+def test_job_requests_through_serve_job(job_node, monkeypatch, capsys):
+    import base64
+    from dreamference.node import NodeJob, NodeServe
+    encode = lambda request: base64.urlsafe_b64encode(json.dumps(request).encode()).decode()
+    assert NodeServe.serve("job-submit not-base64-json") == 2
+    assert NodeServe.serve(f"job-submit {encode(job_request(commit=job_node['commit'], memory='64G'))}") == 2
+    assert "refused the job" in capsys.readouterr().err and NodeJob.records() == []
+    monkeypatch.setattr(NodeJob, "follow", classmethod(lambda cls, job_id, offset=0, poll_s=0.5: NodeJob.execute(job_id)))
+    assert NodeServe.serve(f"job-submit {encode(job_request(commit=job_node['commit'], command=['true']))}") == 0
+    assert "Job 20261002-1200-abc started" in capsys.readouterr().out
+    assert NodeServe.serve("job-list") == 0
+    listed = json.loads(capsys.readouterr().out.strip())
+    assert (listed["id"], listed["status"]) == ("20261002-1200-abc", "done")
+    for request in ("job-logs", "job-logs ../../etc", "job-logs 20261002-1200-zzz", "job-cancel", "job-cancel x; y",
+                    "job-logs 20261002-1200-abc --follow", "job-exec 20261002-1200-abc", "job-list all"):
+        assert NodeServe.serve(request) == 2, request
+    assert NodeServe.serve("job-cancel 20261002-1200-abc") == 1                    # already finished
+
+
+def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(tmp_path, monkeypatch):
+    from dreamference.node import NodeJobSender, NodePairing
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    repo = tmp_path / "My Repo!"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    request = NodeJobSender.compose(str(repo), "a" * 40, ["python3", "x.py"], None, None, None)
+    assert (request["memory"], request["time"]) == ("8G", "90m")               # never sent without them
+    assert re.fullmatch(r"\d{8}-\d{4}-[0-9a-f]{3}", request["id"])
+    assert re.fullmatch(r"My-Repo-[0-9a-f]{10}", request["repo"])
+    assert NodeJobSender.compose(str(repo), "a" * 40, ["x"], "16G", "2h", "pytest -q")["test"] == "pytest -q"
+    record = paired_record()
+    assert NodeJobSender.git_url(record, "calc-0123456789") == "ssh://owner@192.168.50.106:22/jobs/calc-0123456789.git"
+    assert NodeJobSender.git_url(dict(record, address="fd00::6", ssh_port=2222), "r") == "ssh://owner@[fd00::6]:2222/jobs/r.git"
+    ssh = NodeJobSender.git_environment(record)["GIT_SSH_COMMAND"]
+    assert ssh.startswith("ssh -i ") and "HostKeyAlias=puffin-node-2222-bbbb" in ssh and "StrictHostKeyChecking=yes" in ssh
+    assert " -p " not in ssh                                                    # the URL carries the port
+
+
+def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_path, monkeypatch, capsys):
+    from dreamference.node import NodeJobSender
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    assert NodeJobSender.run("spark-2", ["true"], cwd=str(tmp_path)) == 1
+    assert "not a paired node" in capsys.readouterr().out
+    paired_record()
+    assert NodeJobSender.run("spark-2", [], cwd=str(tmp_path)) == 1
+    assert NodeJobSender.run("spark-2", ["true"], cwd=str(tmp_path)) == 1
+    assert "git repository at a commit" in capsys.readouterr().out
+    assert NodeJobSender.logs("20261002-1200-abc") == 1 and NodeJobSender.fetch("../x") == 1

@@ -998,7 +998,24 @@ class DreamferenceCLIController:
         node_start_parser.add_argument("name", help="The paired node")
         node_stop_parser = node_subparsers.add_parser("stop", help="Stop a paired node's model server")
         node_stop_parser.add_argument("name", help="The paired node")
-        # The two commands the other side of a pairing runs; not for typing.
+        node_run_parser = node_subparsers.add_parser("run", help="Run a command on a paired node, in this repository at HEAD; its changes come back as a branch")
+        node_run_parser.add_argument("name", help="The paired node")
+        node_run_parser.add_argument("--memory", default=None, help="The job's memory cap (default 8G; the node sets the ceiling)")
+        node_run_parser.add_argument("--time", default=None, help="The job's time limit (default 90m; the node sets the ceiling)")
+        node_run_parser.add_argument("--test", default=None, help="A command that decides pass or fail, run after the job's own")
+        node_run_parser.add_argument("--gpu", action="store_true", help="Ask for the GPU (nodes refuse this for now)")
+        node_run_parser.add_argument("job_command", nargs=argparse.REMAINDER, help="-- then the command and its arguments")
+        node_jobs_parser = node_subparsers.add_parser("jobs", help="List the jobs on a paired node, or on every paired node")
+        node_jobs_parser.add_argument("name", nargs="?", default=None, help="A paired node (default: all)")
+        node_logs_parser = node_subparsers.add_parser("logs", help="Show a job's output again, or continue it")
+        node_logs_parser.add_argument("job", help="The job id")
+        node_cancel_parser = node_subparsers.add_parser("cancel", help="Stop a running job")
+        node_cancel_parser.add_argument("job", help="The job id")
+        node_fetch_parser = node_subparsers.add_parser("fetch", help="Bring a job's result branch into the repository it was sent from")
+        node_fetch_parser.add_argument("job", help="The job id")
+        # The commands the other side of a pairing runs; not for typing.
+        node_job_exec_parser = node_subparsers.add_parser("job-exec", help="(Run inside a job's systemd unit) carry out one job")
+        node_job_exec_parser.add_argument("job", help="The job id")
         node_subparsers.add_parser("authorize", help="(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only")
         node_serve_parser = node_subparsers.add_parser("serve-job", help="(Run by sshd as a paired key's forced command) carry out one node operation")
         node_serve_parser.add_argument("--key", default=None, help="The connecting key's tag")
@@ -2220,8 +2237,23 @@ class DreamferenceCLIController:
                 sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
             if args.node_command == "serve-job":
                 sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
-            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop}")
+            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop,run,jobs,logs,cancel,fetch}")
             sys.exit(2)
+            if args.node_command in ("run", "jobs", "logs", "cancel", "fetch", "job-exec"):
+                from dreamference.node import NodeJob, NodeJobSender
+                if args.node_command == "run":
+                    job_command = args.job_command[1:] if args.job_command[:1] == ["--"] else args.job_command
+                    sys.exit(NodeJobSender.run(args.name, job_command, memory=args.memory, time_limit=args.time,
+                                               test=args.test, gpu=args.gpu))
+                if args.node_command == "jobs":
+                    sys.exit(NodeJobSender.jobs(args.name))
+                if args.node_command == "logs":
+                    sys.exit(NodeJobSender.logs(args.job))
+                if args.node_command == "cancel":
+                    sys.exit(NodeJobSender.cancel(args.job))
+                if args.node_command == "fetch":
+                    sys.exit(NodeJobSender.fetch(args.job))
+                sys.exit(NodeJob.execute(args.job))
 
         elif args.command == "host":
             from dreamference.vllm_server import HostSafetySetup
