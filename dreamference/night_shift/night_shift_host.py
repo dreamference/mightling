@@ -31,6 +31,15 @@ NON_INTERACTIVE: Final[frozenset] = frozenset({
 
 GIB: Final[int] = 1024 ** 3
 
+# The part of the KV pool a night run divides between its tasks. Codex compacts after the turn that
+# crosses its limit, so a session can overshoot by one turn's tokens; the rest of the pool absorbs
+# that instead of the server retracting a request.
+NIGHT_POOL_SHARE: Final[float] = 0.9
+
+# The launcher's limit for any session, as a percentage of the pool (`POOL_SHARE_PERCENT` in
+# puffin-rs/src/compaction.rs); a lone night task is not given more than an interactive one.
+LAUNCHER_POOL_SHARE_PERCENT: Final[int] = 60
+
 
 class NightShiftHost:
     """Read-only probes of the model server and the host."""
@@ -129,6 +138,35 @@ class NightShiftHost:
         """
         by_pool = int(kv_pool // task_context) if kv_pool else max_parallel
         return max(1, min(max_parallel, by_pool))
+
+    @classmethod
+    def task_budget(cls, max_parallel: int, kv_pool: float, task_context: int,
+                    compact_at: Optional[int]) -> Tuple[int, Optional[int]]:
+        """
+        How many night tasks run at once, and the context each may hold, such that together they
+        fit in the KV pool: `parallel × limit ≤ 90% of the pool`. The limit is enforced by passing
+        it to every `puffin exec` of a task as its compaction limit.
+
+        Args:
+            max_parallel: The configured upper bound.
+            kv_pool: Tokens of KV cache, 0 if unknown.
+            task_context: The smallest budget a task may be given.
+            compact_at: `[night] compact_at`: None for the pool's share, 0 for no limit, or a limit.
+
+        Returns:
+            Tuple[int, Optional[int]]: Tasks at once (at least 1), and each task's compaction limit
+            in tokens (None: no limit is passed and the launcher's own applies).
+        """
+        if not kv_pool:
+            # Nothing to divide: one task at a time cannot overcommit a pool it shares with no one.
+            return 1, compact_at or None
+        usable = int(kv_pool * NIGHT_POOL_SHARE)
+        if compact_at == 0:
+            return max(1, min(max_parallel, usable // task_context)), None
+        if compact_at:
+            return max(1, min(max_parallel, usable // compact_at)), compact_at
+        parallel = max(1, min(max_parallel, usable // task_context))
+        return parallel, min(usable // parallel, int(kv_pool) * LAUNCHER_POOL_SHARE_PERCENT // 100)
 
     @classmethod
     def host_safety_ok(cls) -> bool:

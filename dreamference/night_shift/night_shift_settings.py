@@ -23,13 +23,15 @@ DEFAULT_NUDGES: Final[int] = 2
 DEFAULT_IDLE_MINUTES: Final[int] = 10
 DEFAULT_INDEX_TIMEOUT: Final[str] = "20m"
 
-# Tokens of KV cache budgeted per concurrent task. The spec's first formula divided the KV pool by
-# the full context length, which on the default model (SGLang, 144,870 pool tokens, 262,144-token
-# context) gives zero: one full context does not even fit. A Codex task's context grows with its
-# turns but rarely nears the window, and SGLang shares the common prompt prefix between streams,
-# so tasks are budgeted at this size instead (144,870 / 49,152 = 2 here). Measured on 2026-10-01.
-DEFAULT_TASK_CONTEXT: Final[int] = 49_152
-DEFAULT_COMPACT_AT: Final[int] = 0
+# The smallest KV budget a concurrent task may be given; the run splits the pool evenly between as
+# many tasks as can each get at least this much, and each task's session compacts at its share
+# (`NightShiftHost.task_budget`). The spec's first formula divided the pool by the full context
+# length, which on the default model gives zero. 49,152 was the first per-task figure; enforced as
+# a compaction limit it cost the task (compaction spec §11: at 49,152 the one run did not finish its
+# own tests in an hour, where the same task without a limit passed in 14-18 minutes and peaked at
+# 49,241 and 79,909 tokens of context). 65,536 gives two tasks of 70,608 on today's 156,907-token
+# pool, so the 80K run would compact about once. Raised on 2026-10-02.
+DEFAULT_TASK_CONTEXT: Final[int] = 65_536
 
 
 class NightShiftSettings:
@@ -57,12 +59,12 @@ class NightShiftSettings:
         self.airgapped: Any = table.get("airgapped")
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
         # Where a task's session compacts, passed to every `puffin exec` of the task (compaction
-        # spec §4.1). 0, the default, passes none, and the launcher's own limit (60% of the KV pool)
-        # applies. Making it `task_context` would make the parallelism's budget true, but measured on
-        # 2026-10-02 it cost the task: at 32K no run finished in an hour, at 49,152 the one run
-        # finished the code but not its own tests, where the same task without a limit passed in
-        # 14-18 minutes (compaction spec §11).
-        self.compact_at: int = max(0, int(table.get("compact_at", DEFAULT_COMPACT_AT)))
+        # spec §4.1). Absent (None, the default): the task's share of the KV pool, so the tasks of
+        # a night fit in the pool together. A number: that limit, and only as many tasks at once as
+        # fit at it. 0: no limit, the launcher's own (60% of the pool) applies and the run's
+        # parallelism is no longer backed by anything (the pre-2026-10-02 behaviour).
+        compact_at = table.get("compact_at")
+        self.compact_at: Optional[int] = None if compact_at is None else max(0, int(compact_at))
         self.idle_minutes: float = float(table.get("idle_minutes", DEFAULT_IDLE_MINUTES))
         # Refresh each repository's code index before its tasks start (code-index spec §6.3).
         self.index: bool = bool(table.get("index", True))

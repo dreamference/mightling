@@ -1,14 +1,19 @@
-"""Night Shift's compaction limit (specs/DREAMFERENCE_PUFFIN_COMPACTION.md §4.1).
+"""Night Shift's per-task KV budget and compaction limit (specs/DREAMFERENCE_PUFFIN_COMPACTION.md
+§4.1, specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §11).
 
-The parallelism of a night run is `floor(KV pool / task_context)`; that is only true if a task's
-session compacts at `task_context`. These tests use the scripted stand-in for `puffin` of
+A night run divides 90% of the KV pool between as many tasks as can each get `task_context`, and
+holds each task to its share by passing it to every `puffin exec` as the compaction limit, so the
+tasks together fit in the pool. These tests use the scripted stand-in for `puffin` of
 `test_night_shift.py` and read the command lines it was given.
 """
 
+import re
 import time
+from pathlib import Path
 
-from dreamference.night_shift import NightShiftSettings, NightShiftTaskRun
-from test_night_shift import calls, queue, setup  # noqa: F401 - `setup` is a fixture
+from dreamference.night_shift import NightShiftHost, NightShiftRunner, NightShiftSettings, NightShiftTaskRun
+from dreamference.night_shift.night_shift_host import LAUNCHER_POOL_SHARE_PERCENT, NIGHT_POOL_SHARE
+from test_night_shift import FakeHost, calls, fake_host, queue, setup  # noqa: F401 - fixtures
 
 
 def exec_calls(setup, monkeypatch, table):
@@ -28,12 +33,76 @@ def test_every_exec_of_a_task_carries_a_configured_limit(setup, monkeypatch):
     assert nudge.index("-c") < nudge.index("resume")
 
 
-def test_by_default_no_limit_is_passed_and_the_launchers_applies(setup, monkeypatch):
-    # Measured on 2026-10-02 (compaction spec §11): a limit at task_context cost the task.
-    assert NightShiftSettings({}).compact_at == 0
-    assert NightShiftSettings({"task_context": 65536}).compact_at == 0
+def test_a_task_run_alone_passes_no_limit_unless_given_one(setup, monkeypatch):
+    # The budget comes from the runner, which knows the pool; a task run built without one, and with
+    # no compact_at, leaves the launcher's own limit in place.
+    assert NightShiftSettings({}).compact_at is None
+    assert NightShiftSettings({"compact_at": 0}).compact_at == 0
     assert not any(arg.startswith("model_auto_compact_token_limit")
                    for call in exec_calls(setup, monkeypatch, {}) for arg in call)
+
+
+# -- the budget ------------------------------------------------------------------------------------
+
+def test_the_pool_is_divided_so_the_tasks_fit_in_it_together():
+    # Today's pool on the default model: two tasks of 70,608 tokens, 141,216 of 156,907 in all.
+    assert NightShiftHost.task_budget(3, 156907.0, 65536, None) == (2, 70608)
+    # A smaller pool holds one budget; a lone task gets no more than an interactive session would.
+    assert NightShiftHost.task_budget(3, 144870.0, 65536, None) == (1, 86922)
+    for pool in (40_000.0, 96_000.0, 144_870.0, 156_907.0, 400_000.0, 2_000_000.0):
+        for minimum in (16_384, 49_152, 65_536, 131_072):
+            parallel, limit = NightShiftHost.task_budget(3, pool, minimum, None)
+            assert 1 <= parallel <= 3 and limit
+            assert parallel * limit <= int(pool * NIGHT_POOL_SHARE)
+            assert limit <= pool * LAUNCHER_POOL_SHARE_PERCENT / 100
+            assert parallel == 1 or limit >= minimum
+
+
+def test_compact_at_sets_the_limit_and_the_parallelism_follows_it():
+    assert NightShiftHost.task_budget(3, 156907.0, 65536, 40000) == (3, 40000)
+    assert NightShiftHost.task_budget(3, 156907.0, 65536, 100000) == (1, 100000)
+    # 0 switches the budget off: the parallelism is computed as before and nothing is passed.
+    assert NightShiftHost.task_budget(3, 156907.0, 65536, 0) == (2, None)
+
+
+def test_an_unknown_pool_runs_one_task_at_a_time():
+    assert NightShiftHost.task_budget(3, 0.0, 65536, None) == (1, None)
+    assert NightShiftHost.task_budget(3, 0.0, 65536, 50000) == (1, 50000)
+
+
+def test_the_launchers_pool_share_is_mirrored():
+    source = (Path(__file__).resolve().parent.parent / "puffin-rs" / "src" / "compaction.rs").read_text()
+    match = re.search(r"pub const POOL_SHARE_PERCENT: u64 = (\d+);", source)
+    assert match, "POOL_SHARE_PERCENT not found in puffin-rs/src/compaction.rs"
+    assert int(match.group(1)) == LAUNCHER_POOL_SHARE_PERCENT
+
+
+def test_a_night_run_holds_every_task_to_its_share(setup, fake_host, monkeypatch):
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "stall_then_act")
+    monkeypatch.setattr(FakeHost, "samples", [{"running": 0.0, "served": 1.0, "kv_pool": 156907.0}])
+    for index in range(3):
+        queue(setup["night"], setup["repo"], task_text=f"Task {index}", test="test -f hello.txt",
+              task_id=f"20261002-0100-b{index}0")
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+                                vllm_host="http://x", settings=NightShiftSettings({})) == 0
+    execs = [call for call in calls(setup) if call[:1] == ["exec"]]
+    assert len(execs) == 6  # three tasks, each a first turn and one nudge
+    for call in execs:
+        assert call[call.index("-c") + 1] == "model_auto_compact_token_limit=70608"
+    report = next((setup["night"] / "reports").glob("*.md")).read_text()
+    assert "Up to 2 task(s) at once" in report and "compacts at 70608 tokens" in report
+
+
+def test_compact_at_zero_passes_no_limit_and_says_so(setup, fake_host, monkeypatch):
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.setattr(FakeHost, "samples", [{"running": 0.0, "served": 1.0, "kv_pool": 156907.0}])
+    queue(setup["night"], setup["repo"], test="test -f hello.txt")
+    NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+                         vllm_host="http://x", settings=NightShiftSettings({"compact_at": 0}))
+    execs = [call for call in calls(setup) if call[:1] == ["exec"]]
+    assert execs and not any(arg.startswith("model_auto_compact_token_limit") for call in execs for arg in call)
+    report = next((setup["night"] / "reports").glob("*.md")).read_text()
+    assert "not held to the pool" in report
 
 
 # -- the launcher's settings, mirrored in the Python configuration ---------------------------------

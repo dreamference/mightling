@@ -65,7 +65,8 @@ class NightShiftTaskRun:
     USE_SANDBOX: bool = True
 
     def __init__(self, night_dir: Path, task: Dict[str, Any], settings: NightShiftSettings,
-                 puffin_bin: str, deadline: float, model_host: Optional[str] = None) -> None:
+                 puffin_bin: str, deadline: float, model_host: Optional[str] = None,
+                 context_budget: Optional[int] = None) -> None:
         """
         Args:
             night_dir: The queue directory.
@@ -76,8 +77,12 @@ class NightShiftTaskRun:
             model_host: The model server the night run was admitted against. Named to every
                 `puffin exec`, so the agent talks to that server and the launcher never browses
                 the network for a node from a worktree (specs/DREAMFERENCE_PUFFIN_NODE.md §6.1).
+            context_budget: The task's share of the KV pool (`NightShiftHost.task_budget`), passed to
+                every `puffin exec` as its compaction limit. None falls back to `[night] compact_at`.
         """
         self.model_host = model_host
+        self.context_budget: Optional[int] = context_budget if context_budget is not None \
+            else (settings.compact_at or None)
         self.night_dir = night_dir
         self.task_id: str = task["id"]
         self.repo = Path(task["repo"])
@@ -204,9 +209,10 @@ class NightShiftTaskRun:
         """Runs one `puffin exec` turn; returns `ok`, `error` or `interrupted`."""
         command = [self.puffin_bin, "exec", "--json", "-o", str(self.last_message_path),
                    "-C", str(self.worktree), "-s", "workspace-write", "--skip-git-repo-check"]
-        if self.settings.compact_at > 0:
-            # On the command line it beats the launcher's own, larger limit for interactive sessions.
-            command += ["-c", f"model_auto_compact_token_limit={self.settings.compact_at}"]
+        if self.context_budget:
+            # The task's share of the KV pool. On the command line it beats the launcher's own limit,
+            # which is sized for one interactive session, not for several tasks sharing the pool.
+            command += ["-c", f"model_auto_compact_token_limit={self.context_budget}"]
         command += ["resume", self.session, prompt] if resume and self.session else [prompt]
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0

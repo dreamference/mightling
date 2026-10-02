@@ -601,7 +601,9 @@ def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, 
     assert len(branches) == 3
     report = next((setup["night"] / "reports").glob("*.md")).read_text()
     assert f"## {setup['repo']}" in report and report.count("— done") == 3
-    assert "Up to 2 task(s) at once" in report
+    # 90% of the 144,870-token pool holds one 65,536-token task budget, not two
+    # (test_night_shift_compaction.py has the budget itself).
+    assert "Up to 1 task(s) at once" in report
     assert git(setup["repo"], "status", "--porcelain").stdout == ""
 
 

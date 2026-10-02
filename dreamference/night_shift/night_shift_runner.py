@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
-from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
+from dreamference.night_shift.night_shift_host import GIB, NIGHT_POOL_SHARE, NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE_STATUSES
 from dreamference.night_shift.night_shift_report import NightShiftReport
@@ -95,13 +95,13 @@ class NightShiftRunner:
                 cls._write_report(night_dir, started, pending, notes)
                 return 0
             metrics = cls.host.metrics(vllm_host) or {}
-            parallel = cls.host.parallelism(settings.max_parallel, metrics.get("kv_pool", 0.0),
-                                            settings.task_context)
-            notes.append(f"Up to {parallel} task(s) at once (max_parallel {settings.max_parallel}, "
-                         f"KV pool {int(metrics.get('kv_pool', 0))} tokens, "
-                         f"{settings.task_context} budgeted per task).")
+            kv_pool = metrics.get("kv_pool", 0.0)
+            parallel, budget = cls.host.task_budget(settings.max_parallel, kv_pool,
+                                                    settings.task_context, settings.compact_at)
+            notes.append(cls.budget_note(parallel, budget, kv_pool, settings))
             cls.refresh_indexes(pending, settings, end, notes)
-            cls.schedule(night_dir, pending, settings, puffin_bin, vllm_host, end, parallel, notes)
+            cls.schedule(night_dir, pending, settings, puffin_bin, vllm_host, end, parallel, notes,
+                         context_budget=budget)
             final = [NightShiftQueue.read(night_dir, task["id"]) or task for task in pending]
             path = cls._write_report(night_dir, started, final, notes)
             counts: Dict[str, int] = {}
@@ -197,11 +197,39 @@ class NightShiftRunner:
             notes.append(f"Code index of {repo}: {cls.index.refresh(binary, Path(repo), budget)}.")
 
     @classmethod
+    def budget_note(cls, parallel: int, budget: Optional[int], kv_pool: float,
+                    settings: NightShiftSettings) -> str:
+        """
+        The report's line on how the KV pool was divided.
+
+        Args:
+            parallel: Tasks at once.
+            budget: Each task's compaction limit, or None.
+            kv_pool: Tokens of KV cache, 0 if unknown.
+            settings: Night Shift settings.
+
+        Returns:
+            str: The note.
+        """
+        head = f"Up to {parallel} task(s) at once (max_parallel {settings.max_parallel}"
+        if not kv_pool:
+            tail = f"; the KV pool is unknown, so one at a time{f', compacting at {budget} tokens' if budget else ''})."
+        elif budget is None:
+            tail = (f", KV pool {int(kv_pool)} tokens). compact_at = 0: no per-task limit is passed, so "
+                    f"the tasks together are not held to the pool.")
+        else:
+            source = "compact_at" if settings.compact_at else f"{int(NIGHT_POOL_SHARE * 100)}% of the pool, split {parallel} way(s)"
+            tail = f", KV pool {int(kv_pool)} tokens); each task's session compacts at {budget} tokens ({source})."
+        return head + tail
+
+    @classmethod
     def schedule(cls, night_dir: Path, pending: List[Dict[str, Any]], settings: NightShiftSettings,
-                 puffin_bin: str, vllm_host: str, end: datetime, parallel: int, notes: List[str]) -> None:
+                 puffin_bin: str, vllm_host: str, end: datetime, parallel: int, notes: List[str],
+                 context_budget: Optional[int] = None) -> None:
         """
         Starts tasks while the window is open, the machine is quiet and memory admits one more;
-        at the window's end asks every running task to stop (it is then `interrupted`).
+        at the window's end asks every running task to stop (it is then `interrupted`). Each task
+        compacts at `context_budget`, its share of the KV pool (None: no limit is passed).
         """
         queue = cls.round_robin(pending)
         active: List[tuple] = []
@@ -222,7 +250,8 @@ class NightShiftRunner:
                 if reason is None:
                     task = queue.pop(0)
                     deadline = min(end_ts, time.time() + settings.task_timeout_s)
-                    run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline, model_host=vllm_host)
+                    run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline, model_host=vllm_host,
+                                            context_budget=context_budget)
                     thread = threading.Thread(target=run.run, name=f"night-{task['id']}", daemon=True)
                     thread.start()
                     active.append((thread, run))
