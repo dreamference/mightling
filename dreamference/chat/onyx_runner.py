@@ -956,6 +956,10 @@ class OnyxRunner:
             bool: True if the web UI is bound as configured afterwards.
         """
         values = self.web_bind_env()
+        # The advert says whether the web UI is offered; it follows the bind (a no-op on a node
+        # that is not advertised, and when it already says so).
+        from dreamference.node.node_advertiser import NodeAdvertiser
+        NodeAdvertiser.on_web_ui_bound()
         if self._env_already_set(values):
             return True
         if not self._write_env_values(values):

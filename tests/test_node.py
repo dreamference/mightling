@@ -186,6 +186,22 @@ def test_searxng_is_recreated_when_its_address_no_longer_matches(monkeypatch):
     assert commands[2][:4] == ["docker", "network", "connect", "onyx_default"]
 
 
+def test_the_advert_follows_searxng_and_the_web_ui_started_after_enable(monkeypatch):
+    path = NodeServiceFile.service_path
+    path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0", "ready"))
+    monkeypatch.setattr(NodeAdvertiser, "search_port", classmethod(lambda cls: 8888))
+    NodeAdvertiser.on_searxng_started()               # not advertised: the file is not touched
+    assert "search" not in NodeServiceFile.read()
+    NodeSettings.save(advertise=True)
+    NodeAdvertiser.on_searxng_started()
+    assert NodeServiceFile.read()["search"] == "8888"
+    NodeAdvertiser.on_web_ui_bound()                  # conftest's scratch web UI counts as installed
+    assert NodeServiceFile.read()["web"] == "3000"
+    NodeSettings.save(advertise=True, web=False)
+    NodeAdvertiser.on_web_ui_bound()
+    assert "web" not in NodeServiceFile.read() and NodeServiceFile.read()["search"] == "8888"
+
+
 # -- enable, disable, status -----------------------------------------------------------------------
 
 @pytest.fixture
@@ -205,13 +221,14 @@ def machine(monkeypatch):
     return applied
 
 
-def test_enable_without_root_changes_the_binds_and_prints_the_file(machine, capsys):
+def test_enable_without_root_publishes_nothing_and_prints_the_file(machine, capsys):
     assert NodeAdvertiser.enable() is False           # sudo cannot prompt here: nothing is installed
     out = capsys.readouterr().out
     assert "<type>_puffin-node._tcp</type>" in out and "save the following as" in out
-    assert "one account" in out and "Gmail" in out    # what sharing the web UI means, said at enable
-    assert NodeSettings.load() == {"advertise": True, "web": True}
-    assert "searxng" in machine and "nginx" in machine
+    assert "Nothing was published" in out
+    # A web UI on the LAN that nobody can find would be the worst of both states: no bind moved.
+    assert NodeSettings.load() == {"advertise": False, "web": False}
+    assert machine == []
     assert not NodeServiceFile.service_path.exists()
     assert NodeIdentity.read() is not None
 
@@ -229,6 +246,9 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(ma
 
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(privileged))
     assert NodeAdvertiser.enable() is True
+    out = capsys.readouterr().out
+    assert "one account" in out and "Gmail" in out    # what sharing the web UI means, said at enable
+    assert "searxng" in machine and "nginx" in machine
     assert asked[0][:3] == ["install", "-m", "644"] and asked[0][-1] == str(NodeServiceFile.service_path)
     records = NodeServiceFile.read()
     assert records["node"] == NodeIdentity.read()
@@ -348,3 +368,31 @@ def test_the_other_unattended_callers_name_it_too():
     for path in ("dreamference/audit/egress_audit.py", "dreamference/swe_bench/swe_bench_instance_run.py",
                  "dreamference/runner/codex_runner.py", "dreamference/runner/codex_test_runner.py"):
         assert "DREAMFERENCE_VLLM_HOST" in (repo / path).read_text(), path
+
+
+def test_a_start_that_fails_does_not_leave_the_node_saying_loading(monkeypatch):
+    # The pre-flight exits, docker fails, or the user presses Ctrl-C: none of them passes the
+    # "server is ready" branch, and a client that reads `loading` waits ten minutes.
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.vllm_server import VLLMServerManager
+
+    class Monitor:
+        server_ready = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    def refused(self, **_):
+        assert NodeServiceFile.read()["state"] == "loading"
+        raise SystemExit(1)
+
+    NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0", "ready"))
+    monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
+    monkeypatch.setattr(VLLMServerManager, "start_server", refused)
+    monkeypatch.setattr("sys.argv", ["puffin-admin", "server", "start", "--no-diffusion"])
+    with pytest.raises(SystemExit):
+        controller.main()
+    assert NodeServiceFile.read()["state"] == "stopped"

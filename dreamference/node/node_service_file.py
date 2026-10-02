@@ -11,7 +11,7 @@ enabled is never advertised by a side effect.
 import re
 from html import escape, unescape
 from pathlib import Path
-from typing import Dict, Final, Optional
+from typing import Any, Dict, Final, Optional
 
 SERVICE_TYPE: Final[str] = "_puffin-node._tcp"
 
@@ -19,6 +19,9 @@ SERVICE_TYPE: Final[str] = "_puffin-node._tcp"
 PROTO: Final[int] = 1
 
 STATES: Final[tuple] = ("stopped", "loading", "ready")
+
+# "Leave this record as it is", for the two records whose value can also be "absent" (None).
+KEEP: Final[object] = object()
 
 
 class NodeServiceFile:
@@ -128,7 +131,8 @@ class NodeServiceFile:
 
     @classmethod
     def update(cls, state: Optional[str] = None, port: Optional[int] = None,
-               main: Optional[bool] = None, version: Optional[str] = None) -> Optional[bool]:
+               main: Optional[bool] = None, version: Optional[str] = None,
+               web_port: Any = KEEP, search_port: Any = KEEP) -> Optional[bool]:
         """
         Changes records of the installed file and leaves the others as they are.
 
@@ -137,6 +141,8 @@ class NodeServiceFile:
             port: The model server's port, if it changes.
             main: Whether the node now serves a model a coding client can use, if known.
             version: Puffin's version, if it changes.
+            web_port: The web UI's port, or None to stop advertising it; `KEEP` leaves it.
+            search_port: SearXNG's port, or None to stop advertising it; `KEEP` leaves it.
 
         Returns:
             Optional[bool]: None when the node is not advertised (nothing to do), True when the
@@ -150,8 +156,8 @@ class NodeServiceFile:
             node_id=current["node"],
             version=version or current.get("version", ""),
             state=state or current.get("state", "stopped"),
-            web_port=int(current["web"]) if current.get("web", "").isdigit() else None,
-            search_port=int(current["search"]) if current.get("search", "").isdigit() else None,
+            web_port=(int(current["web"]) if current.get("web", "").isdigit() else None) if web_port is KEEP else web_port,
+            search_port=(int(current["search"]) if current.get("search", "").isdigit() else None) if search_port is KEEP else search_port,
             main=("main" in current) if main is None else main,
         )
         try:

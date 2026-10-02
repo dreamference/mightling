@@ -2119,9 +2119,6 @@ class DreamferenceCLIController:
                                 print(f"🌫️  Diffusion sidecar at {diffusion_mgr.host}/v1 — "
                                       f"still loading in background (state: {state})")
 
-                    else:
-                        NodeAdvertiser.on_server_stopped()
-
                     # Do not block: exit after health check passes (server keeps running)
                     
                 except KeyboardInterrupt:
@@ -2134,6 +2131,11 @@ class DreamferenceCLIController:
                             vllm_mgr.process.kill()
                 finally:
                     monitor.stop()
+                    # Whatever ended the start without a ready server (a refused pre-flight, a
+                    # docker failure, Ctrl-C): an advertised node must not go on saying `loading`,
+                    # or clients wait ten minutes for a model that is not coming.
+                    if not monitor.server_ready:
+                        NodeAdvertiser.on_server_stopped()
             if args.server_command == "stop":
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
@@ -2310,6 +2312,9 @@ class DreamferenceCLIController:
                     print("❌ SearXNG did not start.")
                     sys.exit(1)
                 print(f"✅ SearXNG is running on http://127.0.0.1:{SEARXNG_HOST_PORT}")
+                # An advertised node offers it to clients from now on.
+                from dreamference.node import NodeAdvertiser
+                NodeAdvertiser.on_searxng_started()
                 sys.exit(0)
             print("usage: puffin-admin searxng {start}")
             sys.exit(2)

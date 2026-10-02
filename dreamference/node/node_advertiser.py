@@ -50,31 +50,37 @@ class NodeAdvertiser:
             no_web: Keep the web UI on loopback; clients then get `puffin` and web search only.
 
         Returns:
-            bool: True when the service file is installed. The binds are applied either way.
+            bool: True when the service file is installed and the binds applied; False, with
+            nothing published, when the file could not be installed.
         """
         if not cls.is_gb10():
             print("⚠️  This machine does not look like a GB10 (DGX Spark); a node on anything else is "
                   "untested.")
         node_id = NodeIdentity.ensure()
+        before = NodeSettings.load()
         NodeSettings.save(advertise=True, web=not no_web)
-        print(SHARING_NOTICE)
-        if not no_web:
-            print(WEB_NOTICE)
-
-        web_shared = cls.apply_binds()
         port = cls.model_port()
         text = NodeServiceFile.render(
             port=port, node_id=node_id, version=cls.version(),
             state="ready" if cls.model_answers(port) else "stopped",
-            web_port=WEB_PORT if web_shared else None,
+            web_port=WEB_PORT if cls.web_installed() and not no_web else None,
             search_port=cls.search_port(),
             main=cls.serves_main_model(),
         )
-        installed = cls.install_service_file(text)
-        if installed:
-            print(f"✅ This node is advertised as {socket.gethostname()} (_puffin-node._tcp, port {port}, "
-                  f"id {node_id[:8]}…). Clients find it with no address typed.")
-        return installed
+        # The advertisement first, the binds only once it is in place: a node whose web UI is on
+        # the LAN but which nobody can find is the worst of both states.
+        if not cls.install_service_file(text):
+            NodeSettings.save(advertise=before["advertise"], web=before["web"])
+            print("⚠️  Nothing was published. Run `puffin-admin node enable` from a terminal, where sudo "
+                  "can ask for the password once.")
+            return False
+        print(SHARING_NOTICE)
+        if not no_web:
+            print(WEB_NOTICE)
+        cls.apply_binds()
+        print(f"✅ This node is advertised as {socket.gethostname()} (_puffin-node._tcp, port {port}, "
+              f"id {node_id[:8]}…). Clients find it with no address typed.")
+        return True
 
     @classmethod
     def disable(cls) -> bool:
@@ -165,6 +171,28 @@ class NodeAdvertiser:
         cls._report(NodeServiceFile.update(state="stopped"))
 
     @classmethod
+    def on_searxng_started(cls) -> None:
+        """Called when `puffin-admin searxng start` has SearXNG running: an advertised node offers it."""
+        if NodeSettings.advertised():
+            cls._report(NodeServiceFile.update(search_port=cls.search_port()))
+
+    @classmethod
+    def on_web_ui_bound(cls) -> None:
+        """Called when the web UI's publish address was applied: the advert follows it."""
+        if NodeSettings.advertised():
+            shared = NodeSettings.web_bind_address() != LOOPBACK and cls.web_installed()
+            cls._report(NodeServiceFile.update(web_port=WEB_PORT if shared else None))
+
+    @classmethod
+    def web_installed(cls) -> bool:
+        """
+        Returns:
+            bool: True if the web UI is installed on this machine (its `.env` exists).
+        """
+        from dreamference.chat.onyx_runner import ONYX_ENV_FILE
+        return os.path.isfile(ONYX_ENV_FILE)
+
+    @classmethod
     def _report(cls, outcome: Optional[bool]) -> None:
         if outcome is False:
             print(f"⚠️  Could not update {NodeServiceFile.service_path}; clients may see a stale state. "
@@ -182,11 +210,11 @@ class NodeAdvertiser:
         Returns:
             bool: True when the web UI is installed and published beyond loopback.
         """
-        from dreamference.chat.onyx_runner import ONYX_ENV_FILE, OnyxRunner
+        from dreamference.chat.onyx_runner import OnyxRunner
         from dreamference.chat.searxng_sidecar import SEARXNG_CONTAINER_NAME, SearxngSidecar
         from dreamference.chat.sidecar_network import SidecarNetwork
         web_shared = False
-        if os.path.isfile(ONYX_ENV_FILE):
+        if cls.web_installed():
             OnyxRunner().bind_to_loopback()
             web_shared = NodeSettings.web_bind_address() != LOOPBACK
         if SidecarNetwork.network_mode(SEARXNG_CONTAINER_NAME):
