@@ -912,3 +912,27 @@ def test_the_window_uses_the_account_configure_creates():
     main = (Path(__file__).resolve().parent.parent / "desktop" / "src-tauri" / "src" / "main.rs").read_text()
     assert f'const DEFAULT_EMAIL: &str = "{DEFAULT_ONYX_EMAIL}";' in main
     assert f'const DEFAULT_PASSWORD: &str = "{DEFAULT_ONYX_PASSWORD}";' in main
+
+
+def test_node_id_prints_the_id_and_writes_it_once(monkeypatch, capsys):
+    from dreamference.cli import main
+    for _ in range(2):
+        monkeypatch.setattr("sys.argv", ["puffin-admin", "node", "id"])
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+        assert exit_info.value.code == 0
+    first, second = capsys.readouterr().out.split()
+    assert first == second == NodeIdentity.read()
+
+
+def test_the_installer_makes_a_gb10_a_node_and_offers_it_to_the_network():
+    # §9: a GB10 gets both halves, its node id, and `node enable`; --no-advertise skips the last.
+    from pathlib import Path
+    script = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
+    node_id = script.index('puffin-admin" node id')
+    enable = script.index('puffin-admin" node enable')
+    assert script.index('puffin-admin" host setup') < node_id < enable
+    assert "--no-advertise) ADVERTISE=0" in script
+    # Never without a terminal: the command opens the machine to the LAN and asks for a password.
+    assert '[ -t 0 ]' in script[enable - 200:enable] or "/dev/tty" in script[enable - 200:enable]
+    assert subprocess.run(["bash", "-n", str(Path(__file__).resolve().parent.parent / "install.sh")]).returncode == 0

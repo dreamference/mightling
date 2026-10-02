@@ -990,6 +990,7 @@ class DreamferenceCLIController:
         node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
         node_status_parser = node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status")
         node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `puffin-admin status` instead")
+        node_subparsers.add_parser("id", help="Print this node's id, writing it first if this machine has none yet")
         node_subparsers.add_parser("list", help="List every node on the local network: its model, its load, and whether it is paired")
         node_add_parser = node_subparsers.add_parser("add", help="Pair with another node over SSH, once, so it can be managed from here")
         node_add_parser.add_argument("name", help="The node's name, address or id, as `node list` shows it")
@@ -2222,6 +2223,10 @@ class DreamferenceCLIController:
                 sys.exit(0 if NodeAdvertiser.disable() else 1)
             if args.node_command == "status" and not args.name:
                 print(NodeAdvertiser.status())
+                sys.exit(0)
+            if args.node_command == "id":
+                from dreamference.node import NodeIdentity
+                print(NodeIdentity.ensure())
                 sys.exit(0)
             from dreamference.node import NodePairing, NodeRemote, NodeServe
             if args.node_command == "status":

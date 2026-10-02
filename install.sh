@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs Puffin from a release, with no checkout of the repository and nothing compiled.
 #
-#   ./install.sh [--role client|node] [--version X.Y.Z]
+#   ./install.sh [--role client|node] [--version X.Y.Z] [--no-advertise]
 #
 # What it installs depends on the machine:
 #
@@ -12,6 +12,9 @@
 #   node     the client, plus `puffin-admin` (the Python package, from the release's wheel, in a
 #            virtualenv of its own) and the host settings a model load needs. This is what a GB10
 #            (DGX Spark and its siblings) gets by default; every other machine gets the client.
+#            A node is then offered to the local network (`puffin-admin node enable`), so that
+#            `puffin` on your other computers finds it with no address typed; that asks for
+#            your password once, and says what it opens. --no-advertise skips it.
 #
 # It downloads the same assets, by the same names and with the same checks, as `puffin update`
 # (puffin-rs/src/update.rs), so a machine installed this way is updated by that command.
@@ -31,11 +34,12 @@ VENV_DIR="${PUFFIN_VENV:-$HOME/.local/share/dreamference/venv}"
 LINK_DIR="$HOME/.local/bin"
 ROLE=""
 VERSION=""
+ADVERTISE=1
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -43,6 +47,7 @@ while [ $# -gt 0 ]; do
         --role=*)    ROLE="${1#*=}"; shift ;;
         --version)   VERSION="${2:-}"; shift 2 ;;
         --version=*) VERSION="${1#*=}"; shift ;;
+        --no-advertise) ADVERTISE=0; shift ;;
         -h|--help)   usage; exit 0 ;;
         *)           fail "unknown argument: $1 (see --help)" ;;
     esac
@@ -215,6 +220,23 @@ if [ "$ROLE" = "node" ]; then
     else
         "$VENV_DIR/bin/puffin-admin" host check || true
     fi
+
+    # A machine with the node half is a node: its id is written now, so `puffin` here uses this
+    # machine's own model server and never looks for another one on the network
+    # (specs/DREAMFERENCE_PUFFIN_NODE.md §6.1, §9).
+    "$VENV_DIR/bin/puffin-admin" node id >/dev/null || true
+    # Then it is offered to the local network. That publishes the model, web search and the web
+    # UI to every machine on it, so the command says so and asks for the password itself; with no
+    # terminal to ask on, it is left as a next step.
+    ADVERTISED=0
+    if [ "$ADVERTISE" = 1 ]; then
+        say ""
+        if [ -t 0 ]; then
+            "$VENV_DIR/bin/puffin-admin" node enable && ADVERTISED=1 || true
+        elif (exec < /dev/tty) 2>/dev/null; then
+            "$VENV_DIR/bin/puffin-admin" node enable < /dev/tty && ADVERTISED=1 || true
+        fi
+    fi
 fi
 
 # -- what next -------------------------------------------------------------------------------
@@ -229,6 +251,9 @@ if [ "$ROLE" = "node" ]; then
     say "🎉 Done. Next:"
     say "   puffin-admin server start     # downloads the default model on first use, then serves it"
     say "   puffin                        # the terminal agent"
+    if [ "${ADVERTISED:-0}" != 1 ]; then
+        say "   puffin-admin node enable      # let puffin on your other computers find and use this machine"
+    fi
 else
     say "🎉 Done. \`puffin\` needs a Puffin node to talk to: start one on a GB10, then run \`puffin\`."
 fi

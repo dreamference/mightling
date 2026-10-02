@@ -395,6 +395,10 @@ Show the node id, what is advertised and published, and what a browse of the net
 |---|---|
 | `name` | A paired node: show its `puffin-admin status` instead. |
 
+#### `puffin-admin node id`
+
+Print this node's id, writing it first if this machine has none yet.
+
 #### `puffin-admin node list`
 
 List every node on the local network: its model, its load, and whether it is paired.
