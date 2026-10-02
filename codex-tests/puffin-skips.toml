@@ -41,6 +41,28 @@ filter = """
   (binary_id(codex-tui) & test(=bottom_pane::chat_composer::tests::slash_tab_completion_moves_cursor_to_end))
 """
 
+# app-server-analytics-timeouts: 16 tests
+[[test]]
+reason = """Patch 0013 constructs the analytics client disabled. These tests drive plugin installs, external-agent config imports, client metadata and a guardian review, then wait for the analytics event that action emits; with no event they time out instead of failing. Checked on 2026-10-02 on the 20-patch tree: with 0013 the 16 time out and the other 57 tests of the same four groups pass; on the same tree with 0013 left out of the test export, all 72 pass in 46 s."""
+filter = """
+  (binary_id(codex-app-server::all) & test(=suite::v2::analytics::guardian_review_turns_and_tools_reach_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::client_metadata::turn_start_sends_nested_subagent_lineage_after_cold_thread_resume_v2))
+| (binary_id(codex-app-server::all) & test(=suite::v2::client_metadata::turn_steer_updates_client_metadata_on_follow_up_responses_request_v2))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_completed_tracks_analytics_event))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_reinstalls_plugins_from_known_marketplaces))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_reports_failed_sync_import_in_completion))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_reports_session_config_error_subtype))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_failure_tracks_analytics_event))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_preserves_status_when_remote_bundle_error_body_is_too_large))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_rejects_remote_plugin_disabled_by_admin_before_download))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_rejects_remote_plugin_not_available))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_event))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_when_marketplace_file_cannot_be_read))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_when_remote_detail_fetch_fails))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_when_remote_install_is_rate_limited))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_remote_plugin_analytics_event))
+"""
+
 # tui-usage: 22 tests
 [[test]]
 reason = """Patch 0011 makes /usage this session's token counts. Upstream's /usage is the ChatGPT account's usage menu (analytics, rate-limit resets), fetched from OpenAI's backend; these tests drive that menu or its ChatGPT sign-in requirement."""
