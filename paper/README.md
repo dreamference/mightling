@@ -31,9 +31,9 @@ These are deliberately left open; the draft makes a provisional choice for each.
 
    Resolved since the first draft, and now reported as results: the first-run sign-in screen
    (fixed) and the memory needed by `rust-analyzer scip` on the Codex workspace (measured).
-9. **The title carries a number.** It says "27 KB" because the patch series is 26,933 bytes after
-   `/cavemode` and `/night`; it said "21 KB" before them. Either keep it in step with the series
-   or take the number out of the title.
+9. **The title carries no number** (decided 2026-10-02). It used to quote the patch series' size
+   ("21 KB", then "27 KB"), which went stale each time a patch was added; the size is in the
+   abstract and the evaluation table instead.
 
 ## Plain-text abstract (for the arXiv form, which does not accept LaTeX)
 
