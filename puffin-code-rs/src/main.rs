@@ -99,7 +99,11 @@ enum Command {
     /// Delete this repository's indexes.
     Forget,
     /// Print the `# Code navigation` prompt block for this repository (used by the launcher).
-    PromptBlock,
+    PromptBlock {
+        /// The block that names the `code_*` tools, for a session the launcher gives them to.
+        #[arg(long)]
+        tools: bool,
+    },
     /// Own indexing for one repository while a `puffin` session lives (started by the launcher).
     Session {
         #[arg(long)]
@@ -150,8 +154,8 @@ fn run(command: Command) -> anyhow::Result<ExitCode> {
     let repo = Repo::discover(&cwd)?;
     let settings = Settings::load(&repo.root);
     match command {
-        Command::PromptBlock => {
-            if let Some(block) = puffin_code::prompt::block(&repo) {
+        Command::PromptBlock { tools } => {
+            if let Some(block) = puffin_code::prompt::block(&repo, tools) {
                 println!("{block}");
             }
             Ok(ExitCode::SUCCESS)

@@ -845,6 +845,20 @@ def test_naming_puffin_code_is_not_calling_it(bench):
     assert store.log_stats("x")["commands"] == 4 and store.log_stats("x")["puffin_code_calls"] == 2
 
 
+def test_an_index_question_asked_as_a_tool_counts_as_one(bench):
+    # Since 2026-10-02 the launcher gives the model the index as `code_*` tools; `puffin exec`
+    # reports such a call as an `mcp_tool_call` item, not as a command.
+    store = SweBenchRunStore("tools")
+    store.log_path("x").parent.mkdir(parents=True)
+    tool = lambda server, name: json.dumps({"type": "item.completed", "item": {
+        "type": "mcp_tool_call", "server": server, "tool": name, "arguments": {}}})
+    store.log_path("x").write_text("\n".join([
+        tool("puffin_code", "code_search"), tool("puffin_code", "code_show"),
+        tool("codex", "list_mcp_resources"), tool("other", "decode_refs"),
+        json.dumps({"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}})]) + "\n")
+    assert store.log_stats("x")["commands"] == 5 and store.log_stats("x")["puffin_code_calls"] == 2
+
+
 def test_an_arm_that_never_used_the_index_is_said_to_prove_nothing(bench, monkeypatch):
     run(bench, name="without", instances=["acme__widget-1"])
     run(bench, name="with", instances=["acme__widget-1"], code_index="universal")

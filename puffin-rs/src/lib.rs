@@ -262,7 +262,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     };
     // The code index: its session process starts here, outside the sandbox, and its prompt block
     // joins the others (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2).
-    extra_instructions.push_str(&code_index::start_and_prompt_block());
+    let code_block = code_index::start_and_prompt_block(code_index::tools_enabled(), &code_index::session_dir(&user_args));
+    extra_instructions.push_str(&code_block);
     // Skills other agents installed are linked in, and the glossary of their tool names joins the
     // prompt when one is offered (specs/DREAMFERENCE_PUFFIN_SKILLS.md §3, §5).
     extra_instructions.push_str(skills::start(&codex_home, interactive, model.max_model_len));
@@ -271,6 +272,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     configure_codex_home(&codex_home, &host, &model, &extra_instructions)?;
     // When the session compacts and what it is handed afterwards (compaction.rs).
     let args = compaction::prepare(args, &codex_home, &host, &model).await;
+    // The index as tools, when the block just written names them (code_index.rs).
+    let args = if code_index::named_in(&code_block) == Some(code_index::TOOLS_NAME) {
+        code_index::with_tools(args)
+    } else {
+        args
+    };
     Ok(with_local_model_args(args, &model.id))
 }
 
@@ -572,7 +579,11 @@ pub fn model_catalog(model: &ServedModel, extra_instructions: &str) -> serde_jso
             "truncation_policy": {"mode": "tokens", "limit": context},
             "experimental_supported_tools": [],
             "tool_mode": "code_mode",
-            "base_instructions": base_instructions() + extra_instructions,
+            "base_instructions": code_index::search_habit(
+                &base_instructions(),
+                code_index::named_in(extra_instructions),
+                code_index::rg_installed(),
+            ) + extra_instructions,
         }]
     })
 }

@@ -259,6 +259,24 @@ fn search_outline_show() {
 }
 
 #[test]
+fn search_reaches_into_bodies() {
+    // `max` and `shape` occur only inside `largest`'s body: the graph's full-text table (names
+    // and documentation) finds nothing for them, and before 2026-10-02 neither did `search`.
+    let f = fixture();
+    let (_, out) = f.run(&["search", "max", "shape"]);
+    assert!(out.contains("shapes/report.py:12  function shapes.report.largest  (body: line 13)"), "{out}");
+    // Case does not matter, and a word that is nowhere finds nothing.
+    let (_, out) = f.run(&["search", "MATH.PI"]);
+    assert!(out.contains("method shapes.geometry.Circle.area  (body: line 13)"), "{out}");
+    let (_, out) = f.run(&["search", "zzznowhere"]);
+    assert!(out.contains("(0 results)"), "{out}");
+    // An edit since the snapshot is seen: the files are read as they are now.
+    std::fs::write(f.repo.root.join("shapes/report.py"), "def summary(radius, side):\n    return 'tangerine'\n").unwrap();
+    let (_, out) = f.run(&["search", "tangerine"]);
+    assert!(out.contains("shapes/report.py"), "{out}");
+}
+
+#[test]
 fn no_index_says_so() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q"]);

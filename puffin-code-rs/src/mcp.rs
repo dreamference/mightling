@@ -13,17 +13,39 @@ use crate::paths::Repo;
 use crate::router::Context;
 
 const TOOLS: &[(&str, &str, &str)] = &[
-    ("def", "name", "Where a name is defined. Names may be qualified (Circle.area) or path:line."),
-    ("refs", "name", "Every reference to a definition, tagged exact / heuristic / heuristic (text)."),
-    ("callers", "name", "The definitions that refer to a definition."),
-    ("callees", "name", "What a definition's body refers to."),
+    ("search", "words", "Find code by topic when you do not know its name: the functions, classes and methods whose name, documentation or body match the words. Start here for a bug report or a feature request, before grep."),
+    ("def", "name", "Where a function, class, method or type is defined. Use this instead of grep when you know a code name. Names may be qualified (Circle.area) or path:line."),
+    ("show", "name", "The source of one definition, with line numbers. Use this instead of sed or cat when you know the name."),
+    ("refs", "name", "Every use of a definition, tagged exact / heuristic / heuristic (text). Run it before renaming, deleting or changing a signature."),
+    ("callers", "name", "The functions and methods that call or use a definition."),
+    ("callees", "name", "What a definition's body calls and uses."),
     ("impl", "name", "Implementations of a trait, interface or method."),
     ("impact", "name", "What breaks if a definition changes: its references, then theirs, three levels deep."),
-    ("show", "name", "One definition's source."),
-    ("outline", "file", "The definitions of a file."),
-    ("search", "words", "Definitions whose name or body matches the words."),
+    ("outline", "file", "The definitions in a file with their line ranges. Use it before reading a large file."),
     ("status", "", "Which index layers exist, how fresh they are, and what is excluded."),
 ];
+
+/// The answer to `tools/list`.
+///
+/// Every tool only reads, and says so: Codex runs a tool marked read-only without asking, and
+/// asks for any other, which `puffin exec` (approval policy `never`) turns into a refusal of the
+/// call ("MCP tool call requires approval", measured 2026-10-02).
+fn tools_list() -> Value {
+    json!({ "tools": TOOLS.iter().map(|(name, arg, description)| {
+        let schema = if arg.is_empty() {
+            json!({ "type": "object", "properties": {} })
+        } else {
+            json!({ "type": "object", "properties": {
+                *arg: { "type": "string" },
+                "limit": { "type": "integer" },
+                "offset": { "type": "integer" },
+                "path": { "type": "string" }
+            }, "required": [arg] })
+        };
+        json!({ "name": format!("code_{name}"), "description": description, "inputSchema": schema,
+                "annotations": { "readOnlyHint": true } })
+    }).collect::<Vec<_>>() })
+}
 
 pub fn serve(repo: Repo, settings: Settings) -> Result<()> {
     let stdin = std::io::stdin();
@@ -42,19 +64,7 @@ pub fn serve(repo: Repo, settings: Settings) -> Result<()> {
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "puffin-code", "version": env!("CARGO_PKG_VERSION") }
             })),
-            "tools/list" => Ok(json!({ "tools": TOOLS.iter().map(|(name, arg, description)| {
-                let schema = if arg.is_empty() {
-                    json!({ "type": "object", "properties": {} })
-                } else {
-                    json!({ "type": "object", "properties": {
-                        *arg: { "type": "string" },
-                        "limit": { "type": "integer" },
-                        "offset": { "type": "integer" },
-                        "path": { "type": "string" }
-                    }, "required": [arg] })
-                };
-                json!({ "name": format!("code_{name}"), "description": description, "inputSchema": schema })
-            }).collect::<Vec<_>>() })),
+            "tools/list" => Ok(tools_list()),
             "tools/call" => call(&repo, &settings, &message["params"]).map(|text| json!({ "content": [{ "type": "text", "text": text }] })),
             "ping" => Ok(json!({})),
             _ => Err(anyhow::anyhow!("method not found: {method}")),
@@ -100,4 +110,21 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
     };
     output::narrow(&mut answer, &page)?;
     Ok(output::render(&answer, &page, body.as_deref()))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_tool_is_read_only_and_says_when_to_use_it() {
+        let list = super::tools_list();
+        let tools = list["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), super::TOOLS.len());
+        for tool in tools {
+            assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
+            assert!(tool["name"].as_str().unwrap().starts_with("code_"));
+        }
+        // `search` leads: it is where a task that names no symbol starts.
+        assert_eq!(tools[0]["name"], "code_search");
+        assert!(tools[0]["description"].as_str().unwrap().contains("before grep"));
+    }
 }

@@ -30,6 +30,11 @@ _PREDICTIONS_LOCK: Final[threading.Lock] = threading.Lock()
 PUFFIN_CODE_QUERY: Final[re.Pattern] = re.compile(
     r"\bpuffin-code\s+(def|refs|callers|callees|impl|impact|show|outline|search|status)\b")
 
+# The same questions asked through the tools the launcher gives the model since 2026-10-02
+# (`code_def`, `code_search`, … served by `puffin-code mcp`).
+PUFFIN_CODE_TOOL: Final[re.Pattern] = re.compile(
+    r"^code_(def|refs|callers|callees|impl|impact|show|outline|search|status)$")
+
 
 class SweBenchRunStore:
     """Reads and writes a run directory."""
@@ -150,8 +155,9 @@ class SweBenchRunStore:
 
     def log_stats(self, instance_id: str) -> Dict[str, int]:
         """
-        Counts what the agent did, from `puffin exec`'s events: its commands, how many of them
-        asked `puffin-code` something, and the tokens of every turn.
+        Counts what the agent did, from `puffin exec`'s events: its commands and tool calls, how
+        many of them asked `puffin-code` something (as a shell command or as a `code_*` tool),
+        and the tokens of every turn.
 
         Args:
             instance_id: The instance.
@@ -177,6 +183,11 @@ class SweBenchRunStore:
             if event.get("type") == "item.completed" and item.get("type") == "command_execution":
                 stats["commands"] += 1
                 if PUFFIN_CODE_QUERY.search(str(item.get("command", ""))):
+                    stats["puffin_code_calls"] += 1
+            elif event.get("type") == "item.completed" and item.get("type") == "mcp_tool_call":
+                # A tool call is something the agent did, like a command, and counts as one.
+                stats["commands"] += 1
+                if PUFFIN_CODE_TOOL.match(str(item.get("tool", ""))):
                     stats["puffin_code_calls"] += 1
             elif event.get("type") == "turn.completed":
                 usage = event.get("usage") or {}

@@ -54,8 +54,11 @@ def test_the_patches_stay_small():
     # variant, its description, two capability lists and three dispatch arms); the series was
     # 24,800 bytes before it and is 26,933 after. Raised to 31,500 on 2026-10-01 for 0019's
     # `/airgapped` hooks (4,242 bytes: the slash command in seven places, two World State
-    # registrations, and the sandbox helper's dependency and three-line hook); 31,175 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 31_500
+    # registrations, and the sandbox helper's dependency and three-line hook); 31,175 after. Raised
+    # to 32,500 on 2026-10-02 for 0020's two one-line hooks in core (1,250 bytes: MCP tools sent to
+    # the model as plain functions, and a call mapped back to its server), without which no MCP
+    # tool reaches the local model at all; 32,425 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 32_500
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

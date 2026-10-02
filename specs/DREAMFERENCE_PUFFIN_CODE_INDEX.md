@@ -759,3 +759,58 @@ Not run: `puffin-code submodules include` typed inside Codex's own sandbox (the 
 | Worktrees | covered |
 | Output budget, stable pages, refused stale cursor, answer size | covered |
 | Launcher: no `puffin-code`, no block | covered, in the Codex export (`cargo test -p puffin-launcher`, 33 tests); run live: `puffin exec -s read-only` started `puffin-code session --parent-pid <puffin>`, the catalog carried the `# Code navigation` block, and the model ran `puffin-code refs` inside the read-only sandbox and read its answer |
+
+---
+
+## 15. Getting the index used (2026-10-02)
+
+**The finding.** The index was close to unused: the agent queried it in none of 24 SWE-bench instances that offered it, and a parse of the 146 sessions recorded on this machine found one real query. It was not a wording problem alone. Four causes, in the order they mattered:
+
+1. **No MCP tool ever reached the model.** Codex declares an MCP server's tools as one `{"type": "namespace"}` entry, a tool type of OpenAI's Responses API. SGLang and vLLM render only `{"type": "function"}` entries into the prompt and drop the rest silently. A recorded request showed `mcp__code` declared; the model, asked to call `code_def`, answered that no such tool exists. This holds for **every** MCP server configured in `puffin`, the user's own included.
+2. **Codex's prompt teaches the opposite habit:** "When you search for text or files, you reach first for `rg`". And `rg` is not installed on the GB10 or in the SWE-bench images, so sessions began with a failed command.
+3. **The prompt block said what the index offers, not when to use it.** Its one instruction, "before changing a signature, renaming or deleting, run `puffin-code refs`", never applies to a bug fix.
+4. **`search` could not answer a task phrased as a symptom.** It matched names and documentation only (codebase-memory's full-text table), so the words of a bug report ("wall time", "until") found specs, not code.
+
+### 15.1 What changed
+
+| Change | Where |
+|---|---|
+| The index is offered as tools for the session: the launcher adds `-c mcp_servers.puffin_code.{command,args,env_vars}` (arguments, not `config.toml`, so it is per session and per repository); a `-c mcp_servers.puffin_code…` of the user's wins; `puffin_code_tools = false` or `DREAMFERENCE_PUFFIN_CODE_TOOLS=0` turns it off | `puffin-rs/src/code_index.rs` (`with_tools`, `tools_enabled`) |
+| MCP tools reach the model as plain functions, and a call is mapped back to its server (`code_def`, or `<namespace>__<name>` on a clash) | crate `puffin-rs/tools`, patch `0020-flat-mcp-tools` (two one-line hooks in core, 1,250 bytes; cap raised to 32,500) |
+| Every `code_*` tool carries `readOnlyHint`, so Codex's `auto` approval runs it without asking (without it `puffin exec` refused every call: "MCP tool call requires approval, but approval policy is never"); descriptions say when to use each, `code_search` first | `puffin-code-rs/src/mcp.rs` |
+| The `rg` sentence of Codex's prompt is rewritten to name the index for code and `grep -rn`/`find` when `rg` is absent; a test fails if a Codex bump removes the sentence | `code_index::search_habit` |
+| The prompt block opens with when to use the index (a symptom: `search`; a name: `def`/`show`/`refs`; before a change: `impact`), in a shell variant and a tool variant (`prompt-block --tools`) | `puffin-code-rs/src/prompt.rs` |
+| `search` also reads bodies: a definition holding at least half of the query's words (all, for one or two) is listed, ranked by the rarity of its words and by its best line, tests below code, documentation sections last | `Context::search_bodies` |
+| The launcher asks `puffin-code` about the session's directory (`-C`/`--cd`), not its own: `puffin exec -C <tree>` started elsewhere, as Night Shift and SWE-bench do, got no block and no tools | `code_index::session_dir` |
+| SWE-bench counts a `code_*` tool call as an index query | `swe_bench_run_store.py` |
+
+### 15.2 Measured
+
+Twelve navigation tasks on this repository (find a definition and its callers, plan a parameter change, rename, trace a status flow, fix a symptom-phrased bug) and three text tasks where `grep` is right, one `puffin exec -s workspace-write` each, the launcher bypassed so each arm's prompt is exactly what it says. **Used** = the index was queried at least once; **first** = it was the first search; **text** = text tasks that queried it (should be 0).
+
+| Arm | Used | First | Index / grep calls (nav) | Text |
+|---|---|---|---|---|
+| As shipped before (shell commands, old block) | 6/12 | 5 | 7 / 51 | 0/3 |
+| The same, repeated (14 of 15 tasks finished) | 6/12 | 6 | 9 / 40 | 0/2 |
+| Reworded block (v1) | 9/12 | 9 | 17 / 39 | 0/3 |
+| `rg` sentence rewritten only | 7/12 | 7 | 10 / 46 | 0/3 |
+| Block moved to the top of the prompt | 6/12 | 6 | 10 / 51 | 0/3 |
+| MCP server configured, unflattened (as any `puffin` today) | 6/12 | 6 | 11 / 33 | 0/3 |
+| Reworded block (v2, "first step whenever you need to find code") | 9/12 | 9 | 22 / 31 | 0/3 |
+| v2 as a developer message instead of in the system prompt | 10/12 | 10 | 15 / 45 | 0/3 |
+| Tools flattened, tool block as a developer message | 9/12 | 8 | 29 / 12 | 0/3 |
+| Tools flattened, old block, old `search` | 10/12 | 9 | 30 / 30 | 0/3 |
+| Tools flattened, no block at all | 7/12 | 6 | 17 / 26 | 0/3 |
+| **Tools flattened, tool block, body search (shipped)** | **12/12** | **11** | **43 / 15** | **0/3** |
+
+- **Each arm ran once,** apart from the baseline, whose repeat landed on the same 6/12: that is the noise floor, and moving the block, the `rg` sentence alone and the unflattened MCP server are within it. What clears it is the flattened tools together with the new block and body search.
+- **Wall time and tokens are not comparable across arms.** Other tasks were using the model server throughout (5 to 7 concurrent requests during the tool arms), and 8 of the shipped arm's 12 tasks hit the 420 s harness limit mid-task. Their first steps, which is what the table counts, completed.
+- **The one task where the index did not come first** (n10, a crash on `--until 25:00`) began with a grep for the option's text, which is the right first step for a string; it used the index afterwards.
+- **Body search on its own:** `search wall time` found `NightShiftReport._task_block` (it prints "wall time"), where it found only spec sections before; `search night run until crashes traceback` ranks `NightShiftRunner.run` and `window_end` in its top four. 0.2 s on this repository.
+
+### 15.3 Consequences and limits
+
+- **Every MCP server now reaches the model**, not only `puffin-code`: a user's `[mcp_servers.…]` (here, `jcodemunch`) appears in every session. Its tools need approval under `auto` unless they carry `readOnlyHint`: the TUI asks; `puffin exec` refuses them.
+- **The MCP server runs outside the sandbox**, as Codex starts every MCP server. Queries only read (§4), so this changes no permission, but it is a departure from "queries run inside the sandbox"; at `/airgapped on` it is unaffected, having no network code.
+- **Not measured yet:** SWE-bench with the tools (the run of §12 offered only the shell commands); interactive TUI sessions over days.
+

@@ -28,6 +28,36 @@ use crate::scip_symbol::{self, query_segments};
 use crate::submodules::{self, Submodule};
 use crate::textscan;
 
+/// Definitions `search` adds from body matches, after the graph's own ranking.
+const BODY_ROWS: usize = 30;
+
+/// Whether `search` reads a file's text for body matches: source, not prose or data. Prose is
+/// already in the graph as sections, and data files would bury the code under their matches.
+fn is_code_path(path: &str) -> bool {
+    const SKIP: &[&str] = &["md", "rst", "txt", "json", "lock", "csv", "svg", "html", "xml", "yaml", "yml", "toml", "ipynb", "patch", "tex", "bib"];
+    let extension = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    extension.is_some_and(|e| !SKIP.contains(&e.as_str()))
+}
+
+/// Whether `word` occurs in `text` at the start of a word: `time` matches `time_s` and
+/// `wall_time` (an underscore separates), not `runtime`. Both are lower case.
+fn starts_a_word(text: &str, word: &str) -> bool {
+    let mut from = 0;
+    while let Some(found) = text[from..].find(word) {
+        let start = from + found;
+        if !text[..start].chars().next_back().is_some_and(char::is_alphanumeric) {
+            return true;
+        }
+        from = start + word.len();
+    }
+    false
+}
+
+/// A test file: its bodies mention everything the code does, so they rank below the code.
+fn is_test_path(path: &str) -> bool {
+    path.split('/').any(|part| part == "tests" || part == "test" || part.starts_with("test_") || part.ends_with("_test.go") || part.contains(".test.") || part.contains(".spec."))
+}
+
 /// How far a row can be trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Tag {
@@ -932,10 +962,114 @@ impl Context {
                 detail: format!("{} {}", node.label.to_lowercase(), node.display(&graph.project)),
             });
         }
+        self.search_bodies(graph, text, &mut answer);
         if !self.changed.is_empty() {
             answer.notes.push(format!("{} files changed since the graph's snapshot are ranked as they were then", self.changed.len()));
         }
         Ok(answer)
+    }
+
+    /// Adds the definitions whose *body* holds the words of `text` (in any case), after the code
+    /// rows the graph ranked by name and documentation.
+    ///
+    /// codebase-memory's full-text table does not reach into bodies and wants every word:
+    /// `search wall time` found no code although one method prints "wall time", and a sentence
+    /// from a bug report found nothing at all, so the first thing an agent has, the report's own
+    /// words, led nowhere and it went back to `grep`. Here the files the graph hashed are read as
+    /// they are now (an edit since the snapshot is seen) and each matching line is attributed to
+    /// its innermost definition. A definition must hold at least half of the words (all of them
+    /// for one or two); it is ranked by the rarity of the words it holds, and a line holding all
+    /// of them counts extra. Code comes first in the answer: the graph's code rows, these, then
+    /// its documentation sections. Above the text bounds nothing is read and a note says so.
+    fn search_bodies(&self, graph: &GraphStore, text: &str, answer: &mut Answer) {
+        let mut words: Vec<String> = text.split_whitespace().map(str::to_lowercase).filter(|w| w.len() > 1).collect();
+        words.sort();
+        words.dedup();
+        if words.is_empty() {
+            return;
+        }
+        let Ok(hashes) = graph.file_hashes() else { return };
+        let files: Vec<&String> = hashes.keys().filter(|f| is_code_path(f) && !self.deleted.contains(*f)).collect();
+        let bytes: u64 = files.iter().filter_map(|f| hashes.get(*f)).map(|stamp| stamp.size).sum();
+        if bytes > self.settings.scan_max_bytes {
+            answer.notes.push(format!(
+                "bodies were not searched ({} MiB of code, above the {} MiB bound): rows are name and documentation matches only",
+                bytes >> 20,
+                self.settings.scan_max_bytes >> 20
+            ));
+            return;
+        }
+        let needed = if words.len() <= 2 { words.len() } else { words.len().div_ceil(2) };
+        let listed: BTreeSet<(String, u32)> = answer.rows.iter().map(|r| (r.path.clone(), r.line)).collect();
+        // Files holding each word (its rarity), and per definition: the words it holds and, for
+        // each of its matching lines, the words on that line.
+        let mut in_files = vec![0usize; words.len()];
+        let mut found: Vec<(BTreeSet<usize>, Vec<(u32, Vec<usize>)>, String, u32, String)> = Vec::new();
+        for file in &files {
+            let Ok(raw) = std::fs::read(self.repo.abs(file)) else { continue };
+            let lower = String::from_utf8_lossy(&raw).to_lowercase();
+            let present: Vec<usize> = (0..words.len()).filter(|i| starts_a_word(&lower, &words[*i])).collect();
+            for i in &present {
+                in_files[*i] += 1;
+            }
+            if present.len() < needed {
+                continue;
+            }
+            let outline = graph.outline(file).unwrap_or_default();
+            let mut spans: BTreeMap<Option<usize>, (BTreeSet<usize>, Vec<(u32, Vec<usize>)>)> = BTreeMap::new();
+            for (index, line) in lower.lines().enumerate() {
+                let hits: Vec<usize> = present.iter().copied().filter(|i| starts_a_word(line, &words[*i])).collect();
+                if hits.is_empty() {
+                    continue;
+                }
+                let number = index as u32 + 1;
+                let innermost = outline
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| n.start_line <= number && number <= n.end_line.max(n.start_line))
+                    .min_by_key(|(_, n)| n.end_line.saturating_sub(n.start_line))
+                    .map(|(i, _)| i);
+                let entry = spans.entry(innermost).or_default();
+                entry.0.extend(hits.iter().copied());
+                entry.1.push((number, hits));
+            }
+            for (node, (seen, lines)) in spans {
+                // Outside any definition the words must share a line: a file's top level is not a
+                // unit, and its scattered words say nothing.
+                if seen.len() < needed || (node.is_none() && !lines.iter().any(|(_, hits)| hits.len() >= needed)) {
+                    continue;
+                }
+                let (line, detail) = match node {
+                    Some(i) => (outline[i].start_line, format!("{} {}", outline[i].label.to_lowercase(), outline[i].display(&graph.project))),
+                    None => (lines[0].0, "top level".to_string()),
+                };
+                if listed.contains(&((*file).clone(), line)) {
+                    continue;
+                }
+                found.push((seen, lines, (*file).clone(), line, detail));
+            }
+        }
+        // A word in few files says more than one in many; words that share a line say more than
+        // words scattered over a body, which is what a test file's hundred mentions are.
+        let rarity = |i: usize| (1.0 + files.len() as f64 / in_files[i].max(1) as f64).ln();
+        let mut scored: Vec<(f64, String, u32, String)> = found
+            .into_iter()
+            .map(|(seen, lines, path, line, detail)| {
+                let on_line = |hits: &Vec<usize>| hits.iter().map(|i| rarity(*i)).sum::<f64>();
+                let best = lines.iter().max_by(|a, b| on_line(&a.1).total_cmp(&on_line(&b.1))).map(|l| (l.0, on_line(&l.1))).unwrap_or((line, 0.0));
+                let mut score = 2.0 * best.1 + seen.iter().map(|i| rarity(*i)).sum::<f64>();
+                if is_test_path(&path) {
+                    score *= 0.6;
+                }
+                (score, path, line, format!("{detail}  (body: line {})", best.0))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        let body = scored.into_iter().take(BODY_ROWS).map(|(_, path, line, detail)| Row { tag: None, path, line, detail });
+        let (sections, mut rows): (Vec<Row>, Vec<Row>) = std::mem::take(&mut answer.rows).into_iter().partition(|r| r.detail.starts_with("section "));
+        rows.extend(body);
+        rows.extend(sections);
+        answer.rows = rows;
     }
 
     /// Lines of a graph edge's source: its recorded call-site line, or the whole-word matches of
