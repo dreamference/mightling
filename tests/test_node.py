@@ -321,3 +321,28 @@ def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):
 def test_puffin_node_is_not_an_open_session_to_night_shift():
     from dreamference.night_shift import NightShiftHost
     assert NightShiftHost.is_interactive(["node", "list"]) is False
+
+
+# -- callers that run `puffin` name the model server, so the launcher never browses for a node -----
+
+def test_a_night_task_names_its_model_server_to_puffin(tmp_path, monkeypatch):
+    import time
+    from dreamference.night_shift import NightShiftSettings, NightShiftTaskRun
+    monkeypatch.setattr(NightShiftTaskRun, "USE_SCOPE", False)
+    monkeypatch.delenv("DREAMFERENCE_VLLM_HOST", raising=False)
+    task = {"id": "20261002-0100-abc", "repo": str(tmp_path), "base": "0" * 40, "task": "x"}
+    output = tmp_path / "out.txt"
+    run = NightShiftTaskRun(tmp_path / "night", task, NightShiftSettings({}), "puffin",
+                            deadline=time.time() + 30, model_host="http://localhost:8000")
+    assert run._run_capped(["bash", "-c", "echo host=$DREAMFERENCE_VLLM_HOST"], tmp_path, output, timeout=20) == 0
+    assert output.read_text().strip() == "host=http://localhost:8000"
+
+
+def test_the_other_unattended_callers_name_it_too():
+    # The egress audit counts a DNS query as a failure, and a browse is one on the wire; a
+    # SWE-bench container reaches nothing but the model server. Both must stay on tier 1.
+    from pathlib import Path
+    repo = Path(__file__).resolve().parent.parent
+    for path in ("dreamference/audit/egress_audit.py", "dreamference/swe_bench/swe_bench_instance_run.py",
+                 "dreamference/runner/codex_runner.py", "dreamference/runner/codex_test_runner.py"):
+        assert "DREAMFERENCE_VLLM_HOST" in (repo / path).read_text(), path

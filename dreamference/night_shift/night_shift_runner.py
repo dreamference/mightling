@@ -221,7 +221,7 @@ class NightShiftRunner:
                 if reason is None:
                     task = queue.pop(0)
                     deadline = min(end_ts, time.time() + settings.task_timeout_s)
-                    run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline)
+                    run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline, model_host=vllm_host)
                     thread = threading.Thread(target=run.run, name=f"night-{task['id']}", daemon=True)
                     thread.start()
                     active.append((thread, run))

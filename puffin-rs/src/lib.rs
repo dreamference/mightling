@@ -38,6 +38,7 @@ pub mod code_index;
 pub mod help;
 pub mod home;
 pub mod night;
+pub mod node;
 
 pub mod update;
 pub mod usage;
@@ -69,7 +70,7 @@ pub const UPSTREAM_TESTS_ENV: &str = "PUFFIN_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update",
+    "unarchive", "delete", "sandbox", "update", "node",
 ];
 
 /// Codex subcommands Puffin does not offer, each with the reason it gives. They are refused here,
@@ -202,6 +203,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(airgapped::run_cli(&user_args[index + 1..]));
     }
+    // `node` lists, chooses or forgets the Puffin node this machine uses (node.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "node"
+    {
+        std::process::exit(node::run_cli(&user_args[index + 1..]).await);
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
@@ -220,13 +227,17 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         eprintln!("{line}");
     }
 
-    let host = vllm_host();
+    // Where the model server is: configuration, this machine if it is a node, or a node found on
+    // the network (node.rs; specs/DREAMFERENCE_PUFFIN_NODE.md §6.1).
+    let host = node::resolve_host(interactive).await?;
     let model = wait_for_model(&host).await?;
     let codex_home = codex_utils_home_dir::find_codex_home()
         .context("could not resolve CODEX_HOME")?
         .as_path()
         .to_path_buf();
-    let mut extra_instructions = if puffin_gmail_enabled() {
+    // Gmail only on a node: `puffin-admin gmail` is Python and the service's secret is a file
+    // there, so a client is never told of a command it cannot run (§10).
+    let mut extra_instructions = if puffin_gmail_enabled() && host_is_local(&host) {
         connected_gmail_accounts()
             .await
             .map(|accounts| gmail_access_instructions(&accounts))
@@ -329,17 +340,34 @@ pub fn needs_model(user_args: &[String], subcommand: Option<usize>) -> bool {
 }
 
 /// Resolves the vLLM URL through the same tiers Dreamference's config uses: environment, then the
-/// config file, then the default.
+/// config file, then the default. These are the tiers that mean "I know where the server is";
+/// a command that needs the model goes on to look for a node (`node::resolve_host`).
 pub fn vllm_host() -> String {
+    configured_vllm_host().unwrap_or_else(|| DEFAULT_VLLM_HOST.to_string())
+}
+
+/// `DREAMFERENCE_VLLM_HOST`, then `vllm_host` in a configuration file; `None` when neither is set.
+pub fn configured_vllm_host() -> Option<String> {
     if let Ok(host) = std::env::var("DREAMFERENCE_VLLM_HOST")
         && !host.is_empty()
     {
-        return host;
+        return Some(host);
     }
     config_file()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| vllm_host_from_toml(&text))
-        .unwrap_or_else(|| DEFAULT_VLLM_HOST.to_string())
+}
+
+/// Whether a model server URL names this machine: the Gmail service and the other node-only
+/// pieces are asked for only then.
+pub fn host_is_local(host: &str) -> bool {
+    let rest = host.trim().trim_start_matches("http://").trim_start_matches("https://");
+    let name = if let Some(bracketed) = rest.strip_prefix('[') {
+        bracketed.split(']').next().unwrap_or_default()
+    } else {
+        rest.split(['/', ':']).next().unwrap_or_default()
+    };
+    matches!(name.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0")
 }
 
 /// Whether to advertise Gmail to the model: `DREAMFERENCE_PUFFIN_GMAIL`, then `puffin_gmail` in the
@@ -998,6 +1026,22 @@ mod tests {
             "You are Puffin, a coding agent. As Puffin, you help."
         );
         assert_eq!(rebrand("No identity here."), "No identity here.");
+    }
+
+    #[test]
+    fn only_a_loopback_host_is_this_machine() {
+        for host in ["http://localhost:8000", "http://127.0.0.1:8000/", "http://[::1]:8000", "localhost"] {
+            assert!(host_is_local(host), "{host}");
+        }
+        for host in ["http://192.168.50.105:8000", "http://gx10-1a2b.local:8000", "http://[fd00::2]:8000", ""] {
+            assert!(!host_is_local(host), "{host}");
+        }
+    }
+
+    #[test]
+    fn puffin_node_never_waits_for_a_model() {
+        let args = vec!["node".to_string(), "list".to_string()];
+        assert!(!needs_model(&args, Some(0)));
     }
 
     #[test]

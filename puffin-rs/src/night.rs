@@ -135,6 +135,9 @@ pub fn night_dir() -> Option<PathBuf> {
 
 /// Runs `/night [args]` from the TUI and returns the lines to print.
 pub fn command(args: &str, cwd: &Path) -> Vec<String> {
+    if let Some(refusal) = client_refusal(&Request::from_line(args), runner_present()) {
+        return vec![refusal];
+    }
     match night_dir() {
         Some(dir) => run(&dir, Request::from_line(args), cwd),
         None => vec!["Night Shift: could not resolve CODEX_HOME".to_string()],
@@ -149,11 +152,33 @@ pub fn run_cli(args: &[String]) -> i32 {
     };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let request = Request::from_args(args);
+    if let Some(refusal) = client_refusal(&request, runner_present()) {
+        println!("{refusal}");
+        return 1;
+    }
     let failed = matches!(request, Request::Usage(_));
     for line in run(&dir, request, &cwd) {
         println!("{line}");
     }
     i32::from(failed) * 2
+}
+
+/// Why a task cannot be queued on this machine, if it cannot: the runner is `puffin-admin night
+/// run`, which exists only on a node, so on a client a queued task would wait for a night that
+/// never comes (specs/DREAMFERENCE_PUFFIN_NODE.md §10). Reading the queue is not refused.
+pub fn client_refusal(request: &Request, is_node: bool) -> Option<String> {
+    (!is_node && matches!(request, Request::Add { .. })).then(|| {
+        "Night Shift runs on a Puffin node, and this machine is a client: nothing here would run the task. \
+         Queue it on the node, in a checkout of the repository there."
+            .to_string()
+    })
+}
+
+/// Whether this machine can run a night: it is a node, or the Python half that holds the runner
+/// is installed (a node that has not loaded a model since the split has no node id yet).
+fn runner_present() -> bool {
+    puffin_node_locator::is_node()
+        || puffin_node_locator::home_dir().is_some_and(|home| home.join(".local/bin/puffin-admin").exists())
 }
 
 /// Does what `request` asks, in queue directory `dir`, for the repository containing `cwd`.
@@ -618,6 +643,15 @@ mod tests {
         assert!(matches!(Request::from_line("add --test \"unclosed task"), Request::Usage(_)));
         assert!(matches!(Request::from_line("show"), Request::Usage(_)));
         assert!(matches!(Request::from_line("launch"), Request::Usage(_)));
+    }
+
+    #[test]
+    fn on_a_client_a_task_is_refused_and_the_queue_can_still_be_read() {
+        let add = Request::from_line("add Fix the flaky test");
+        assert!(client_refusal(&add, false).is_some_and(|text| text.contains("runs on a Puffin node")));
+        assert_eq!(client_refusal(&add, true), None);
+        assert_eq!(client_refusal(&Request::List, false), None);
+        assert_eq!(client_refusal(&Request::Report, false), None);
     }
 
     #[test]

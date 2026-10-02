@@ -52,7 +52,7 @@ class NightShiftTaskRun:
     USE_SCOPE: bool = True
 
     def __init__(self, night_dir: Path, task: Dict[str, Any], settings: NightShiftSettings,
-                 puffin_bin: str, deadline: float) -> None:
+                 puffin_bin: str, deadline: float, model_host: Optional[str] = None) -> None:
         """
         Args:
             night_dir: The queue directory.
@@ -60,7 +60,11 @@ class NightShiftTaskRun:
             settings: Night Shift settings.
             puffin_bin: The `puffin` executable.
             deadline: `time.time()` by which the task must stop (task timeout or window end).
+            model_host: The model server the night run was admitted against. Named to every
+                `puffin exec`, so the agent talks to that server and the launcher never browses
+                the network for a node from a worktree (specs/DREAMFERENCE_PUFFIN_NODE.md §6.1).
         """
+        self.model_host = model_host
         self.night_dir = night_dir
         self.task_id: str = task["id"]
         self.repo = Path(task["repo"])
@@ -290,6 +294,8 @@ class NightShiftTaskRun:
                       "-p", "CPUQuota=400%", "--", "choom", "-n", "500", "--"]
         env = dict(os.environ)
         env[NIGHT_RUN_ENV] = "1"
+        if self.model_host:
+            env["DREAMFERENCE_VLLM_HOST"] = self.model_host
         env["GIT_TERMINAL_PROMPT"] = "0"
         limit = self.deadline if timeout is None else min(self.deadline, time.time() + timeout)
         with open(output, "ab" if append else "wb") as sink:
