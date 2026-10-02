@@ -5,6 +5,13 @@
 //! not depend on the launcher. This module is what the user sees: the command, the status, the
 //! `default` writer, and the World State section that tells the model when the level changes.
 //!
+//! It also keeps the **seals**: a session seen at `on` gets a file under the user's runtime directory,
+//! which the command sandbox cannot write, and the leaf crate holds the level at `on` while that
+//! file exists. Without it `puffin` started in the home directory let a command rewrite its own
+//! level file (`~/.puffin` is inside the working directory there). The seal is written by this
+//! process (when the section below sees `on`, and by `/airgapped on`), removed by `/airgapped off`
+//! or `duckduckgo`, and pruned at the next launch once the process that wrote it is gone.
+//!
 //! The level file is keyed by thread id, the only id the TUI's hook and the World State input
 //! carry; the sandbox helper also looks under the root session's id, so a subagent with no file of
 //! its own takes its parent's.
@@ -66,12 +73,77 @@ pub fn resolve(thread_id: Option<&str>) -> Resolved {
     puffin_airgapped::resolve(&[thread_id.unwrap_or_default()])
 }
 
-/// Deletes session files older than thirty days. Called at launch; errors are ignored.
+/// Deletes session files older than thirty days, and the seals of `puffin` processes that have
+/// exited. Called at launch; errors are ignored.
 pub fn prune_session_files() {
-    let Some(dir) = puffin_airgapped::codex_home().map(|home| home.join(puffin_airgapped::SESSION_DIR)) else {
-        return;
-    };
-    prune_older_than(&dir, SESSION_FILE_MAX_AGE, SystemTime::now());
+    if let Some(dir) = puffin_airgapped::codex_home().map(|home| home.join(puffin_airgapped::SESSION_DIR)) {
+        prune_older_than(&dir, SESSION_FILE_MAX_AGE, SystemTime::now());
+    }
+    // Without /proc (not Linux) nothing can be told about a process, and nothing is pruned.
+    if let Some(dir) = puffin_airgapped::seal_dir()
+        && Path::new("/proc/self").exists()
+    {
+        prune_seals(&dir, |pid| Path::new(&format!("/proc/{pid}")).exists());
+    }
+}
+
+/// Removes the seals whose writer is no longer running: "sealed until `puffin` is restarted".
+fn prune_seals(dir: &Path, alive: impl Fn(u32) -> bool) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let writer = std::fs::read_to_string(entry.path()).ok().and_then(|text| text.trim().parse::<u32>().ok());
+        if !writer.is_some_and(&alive) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Holds a session at `on`: writes its seal, naming this process. Returns the seal's path, or None
+/// when there is no place a command cannot write (no runtime directory).
+fn seal(thread_id: &str) -> Option<std::path::PathBuf> {
+    let path = puffin_airgapped::seal_file(thread_id)?;
+    let own = format!("{}\n", std::process::id());
+    if std::fs::read_to_string(&path).is_ok_and(|text| text == own) {
+        return Some(path);
+    }
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    std::fs::write(&path, own).ok()?;
+    Some(path)
+}
+
+/// Lifts the hold. Only `/airgapped off` or `duckduckgo`, typed by the user, calls this.
+fn unseal(thread_id: &str) {
+    if let Some(path) = puffin_airgapped::seal_file(thread_id) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// What `/airgapped` says about whether a command could change the level it runs under: checked
+/// for this session, not fixed text.
+fn guard_lines(level: Level, seal: Option<&Path>, exposed: bool, can_seal: bool) -> Vec<String> {
+    if let Some(seal) = seal {
+        return vec![format!(
+            "Held: commands cannot change this level. It is kept outside the folders they can write ({}); /airgapped off or duckduckgo lifts it.",
+            seal.display()
+        )];
+    }
+    if level == Level::On && exposed && !can_seal {
+        return vec![
+            "NOT ENFORCED against a command rewriting the level: puffin was started in a folder that contains its own settings, and there is no runtime directory to hold the level outside it. Start puffin in a project folder, or set DREAMFERENCE_PUFFIN_AIRGAPPED=on.".to_string(),
+        ];
+    }
+    Vec::new()
+}
+
+/// [`guard_lines`] for a thread, read from the machine.
+fn guard_lines_now(level: Level, thread_id: Option<&str>) -> Vec<String> {
+    let seal = thread_id.and_then(puffin_airgapped::seal_file).filter(|path| path.is_file());
+    guard_lines(
+        level,
+        seal.as_deref(),
+        puffin_airgapped::level_files_exposed(),
+        puffin_airgapped::seal_dir().is_some(),
+    )
 }
 
 fn prune_older_than(dir: &Path, max_age: Duration, now: SystemTime) {
@@ -96,7 +168,11 @@ pub fn command<T: std::fmt::Display>(thread_id: Option<T>, args: &str) -> Vec<St
     let thread_id = thread_id.as_deref();
     let words: Vec<&str> = args.split_whitespace().collect();
     match words.as_slice() {
-        [] => status_lines(&resolve(thread_id), thread_id.is_some()),
+        [] => {
+            let resolved = resolve(thread_id);
+            let guard = guard_lines_now(resolved.level, thread_id);
+            status_lines(&resolved, thread_id.is_some(), &guard)
+        }
         [name] => match Level::parse(name) {
             Some(level) => set_session(thread_id, level),
             None => vec![USAGE.to_string()],
@@ -127,7 +203,7 @@ pub fn run_cli(args: &[String]) -> i32 {
     i32::from(failed) * 2
 }
 
-fn status_lines(resolved: &Resolved, in_session: bool) -> Vec<String> {
+fn status_lines(resolved: &Resolved, in_session: bool, guard: &[String]) -> Vec<String> {
     let mut lines = vec![format!("Airgapped: {} ({})", resolved.level.name(), resolved.source.label())];
     for level in Level::ALL {
         let marker = if level == resolved.level { "   ← in force" } else { "" };
@@ -137,6 +213,7 @@ fn status_lines(resolved: &Resolved, in_session: bool) -> Vec<String> {
         lines.push("Enforced: sandboxed commands run with no network (bwrap --unshare-net).".to_string());
         lines.push("NOT ENFORCED for: Full Access, a command you approve to run outside the sandbox, MCP servers, and puffin's own connection to the model server.".to_string());
     }
+    lines.extend(guard.iter().cloned());
     lines.extend(resolved.invalid.iter().map(|note| format!("Note: {note}.")));
     lines.push("Not covered at any level: the web chat, MCP servers you configured.".to_string());
     lines.push(if in_session {
@@ -151,6 +228,15 @@ fn set_session(thread_id: Option<&str>, level: Level) -> Vec<String> {
     let Some(path) = thread_id.and_then(puffin_airgapped::session_file) else {
         return vec!["No session yet: send a message first, or use /airgapped default <level>.".to_string()];
     };
+    // The user typed this, in a process no command controls: the one place a hold may be lifted.
+    // Sealed before the file is written, lifted before it is, so no command starts in between
+    // under a looser level than the user asked for.
+    let thread = thread_id.unwrap_or_default();
+    if level == Level::On {
+        seal(thread);
+    } else {
+        unseal(thread);
+    }
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
@@ -158,10 +244,25 @@ fn set_session(thread_id: Option<&str>, level: Level) -> Vec<String> {
     if let Err(err) = written {
         return vec![format!("Could not save the level to {}: {err}", path.display())];
     }
+    // With no place for a seal, an exposed level file may tighten but not loosen (leaf crate).
+    let now = resolve(thread_id);
+    if now.level != level {
+        let mut lines = vec![format!(
+            "Airgapped stays at {} ({}): puffin was started in a folder that contains its own settings, so commands could have written this session's level and it is not trusted to loosen.",
+            now.level.name(),
+            now.source.label()
+        )];
+        lines.push(format!(
+            "To change it: puffin airgapped default {0}, or {ENV_VAR}={0}, then restart puffin.",
+            level.name()
+        ));
+        return lines;
+    }
     let mut lines = vec![format!(
         "Airgapped: {} for this session, from the next command the agent starts.",
         level.name()
     )];
+    lines.extend(guard_lines_now(level, thread_id));
     match level {
         Level::On => lines.push(
             "Sandboxed commands now run with no network. Not covered: Full Access, commands you approve to run outside the sandbox, MCP servers.".to_string(),
@@ -277,7 +378,13 @@ impl ContextContributor for Airgapped {
         input: WorldStateContributionInput<'a>,
     ) -> ExtensionFuture<'a, Vec<WorldStateSectionContribution>> {
         Box::pin(async move {
-            let level = resolve(Some(&input.thread_id.to_string())).level;
+            let thread_id = input.thread_id.to_string();
+            let level = resolve(Some(&thread_id)).level;
+            // Before the turn's first command: from here on a command that rewrites the level's
+            // files changes nothing.
+            if level == Level::On {
+                seal(&thread_id);
+            }
             vec![section(level)]
         })
     }
@@ -338,12 +445,13 @@ mod tests {
     #[test]
     fn the_status_names_the_level_its_source_and_what_is_not_enforced() {
         let resolved = Resolved { level: Level::On, source: puffin_airgapped::Source::Environment, invalid: vec![] };
-        let lines = status_lines(&resolved, true);
+        let lines = status_lines(&resolved, true, &[]);
         assert_eq!(lines[0], format!("Airgapped: on ({ENV_VAR})"));
         assert!(lines.iter().any(|line| line.starts_with("  on ") && line.ends_with("← in force")));
         assert!(lines.iter().any(|line| line.starts_with("NOT ENFORCED for: Full Access")));
         let resolved = Resolved { level: Level::Off, source: puffin_airgapped::Source::Default, invalid: vec!["ignored \"x\" from this session".into()] };
-        let lines = status_lines(&resolved, false);
+        let lines = status_lines(&resolved, false, &["Held: x".to_string()]);
+        assert!(lines.iter().any(|line| line == "Held: x"));
         assert_eq!(lines[0], "Airgapped: off (default)");
         assert!(!lines.iter().any(|line| line.contains("ENFORCED")));
         assert!(lines.iter().any(|line| line == "Note: ignored \"x\" from this session."));
@@ -368,6 +476,35 @@ mod tests {
         assert_eq!(full_access_conflict(&args(&["-s", "workspace-write"]), Level::On), None);
         assert_eq!(full_access_conflict(&args(&["-s", "danger-full-access"]), Level::DuckDuckGo), None);
         assert_eq!(full_access_conflict(&args(&["exec", "explain danger-full-access"]), Level::On), None);
+    }
+
+    #[test]
+    fn the_status_says_whether_a_command_could_change_the_level() {
+        let seal = Path::new("/run/user/1000/puffin-airgapped/abc");
+        // Held: said at any exposure, and it names where.
+        let held = guard_lines(Level::On, Some(seal), true, true);
+        assert!(held[0].starts_with("Held: commands cannot change this level") && held[0].contains("/run/user/1000/puffin-airgapped/abc"));
+        // The hole, when nothing can close it: `on`, exposed, and no place for a seal.
+        let open = guard_lines(Level::On, None, true, false);
+        assert!(open[0].starts_with("NOT ENFORCED against a command rewriting the level"));
+        // Nothing to say otherwise: not exposed, or not at `on`, or a seal will be written.
+        assert!(guard_lines(Level::On, None, false, false).is_empty());
+        assert!(guard_lines(Level::On, None, true, true).is_empty());
+        assert!(guard_lines(Level::Off, None, true, false).is_empty());
+    }
+
+    #[test]
+    fn seals_of_processes_that_exited_are_pruned() {
+        let dir = std::env::temp_dir().join(format!("puffin-airgapped-seals-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap_or_default();
+        std::fs::write(dir.join("running"), "100\n").unwrap_or_default();
+        std::fs::write(dir.join("exited"), "200\n").unwrap_or_default();
+        std::fs::write(dir.join("garbage"), "not a pid").unwrap_or_default();
+        prune_seals(&dir, |pid| pid == 100);
+        assert!(dir.join("running").exists());
+        assert!(!dir.join("exited").exists() && !dir.join("garbage").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

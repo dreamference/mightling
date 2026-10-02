@@ -10,6 +10,13 @@
 //!    can be written by the agent, so it may tighten the user-level file's level, never loosen it;
 //! 4. `off`.
 //!
+//! A session seen at `on` is also **held** there by a seal: a file under the user's runtime
+//! directory (`$XDG_RUNTIME_DIR/puffin-airgapped/<id>`), which the command sandbox mounts
+//! read-only. The files of tiers 1 and 3 are not always out of a command's reach: `puffin` started
+//! in the home directory makes `~/.puffin` and `~/.config` writable, so a command could rewrite its
+//! own level. While a seal exists the level is `on` whatever those files say; only `/airgapped`
+//! typed by the user, or a restart of `puffin`, removes it.
+//!
 //! Standard library only: this file is compiled into Codex's sandbox helper, the launcher and the
 //! web commands.
 
@@ -28,6 +35,9 @@ pub const TOML_KEY: &str = "puffin_airgapped";
 
 /// The folder under `$CODEX_HOME` that holds one file per session.
 pub const SESSION_DIR: &str = "airgapped";
+
+/// The folder under the user's runtime directory that holds one seal per session held at `on`.
+pub const SEAL_DIR: &str = "puffin-airgapped";
 
 /// Set by Codex for a command it runs without a network.
 pub const SANDBOX_NETWORK_DISABLED_ENV_VAR: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
@@ -66,6 +76,8 @@ impl Level {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
     Session,
+    /// A seal holds the session at `on`, whatever the files say now.
+    Sealed,
     Environment,
     ConfigFile(PathBuf),
     Default,
@@ -75,6 +87,7 @@ impl Source {
     pub fn label(&self) -> String {
         match self {
             Source::Session => "this session".to_string(),
+            Source::Sealed => "this session, held until /airgapped lifts it or puffin restarts".to_string(),
             Source::Environment => ENV_VAR.to_string(),
             Source::ConfigFile(path) => format!("{TOML_KEY} in {}", path.display()),
             Source::Default => "default".to_string(),
@@ -177,7 +190,119 @@ pub fn config_files(cwd: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Resolves the level for the first of `ids` that has a session file, reading every tier.
+/// The folders a sandboxed command can write under the workspace-write sandbox: the working
+/// directory, `/tmp` and `$TMPDIR`. (Folders the user adds as `writable_roots` are not known here.)
+pub fn writable_roots(cwd: &Path, tmpdir: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = vec![cwd.to_path_buf(), PathBuf::from("/tmp")];
+    if let Some(tmpdir) = tmpdir
+        && !tmpdir.as_os_str().is_empty()
+    {
+        roots.push(tmpdir.to_path_buf());
+    }
+    roots
+}
+
+/// Whether `path` lies in (or is) one of `roots`, comparing real paths where they exist.
+pub fn within(path: &Path, roots: &[PathBuf]) -> bool {
+    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = real(path);
+    roots.iter().any(|root| path.starts_with(real(root)))
+}
+
+/// [`writable_roots`] for this process: its working directory and its `$TMPDIR`.
+fn writable_roots_here() -> Vec<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    writable_roots(&cwd, std::env::var_os("TMPDIR").map(PathBuf::from).as_deref())
+}
+
+/// Whether a sandboxed command started here could rewrite the files the level is read from:
+/// `$CODEX_HOME` (the session's file) or the user-level configuration file lies in a folder
+/// commands can write. True for `puffin` started in the home directory.
+pub fn level_files_exposed() -> bool {
+    let roots = writable_roots_here();
+    codex_home().is_some_and(|home| within(&home, &roots)) || user_config_file().is_some_and(|file| within(&file, &roots))
+}
+
+/// The user's runtime directory: `$XDG_RUNTIME_DIR`, or `/run/user/<uid>` when a shell-environment
+/// policy stripped the variable. systemd creates it per login, owned by the user, and the command
+/// sandbox mounts it read-only (measured 2026-10-02: a sandboxed `touch` there fails with
+/// "Read-only file system", from the home directory too).
+fn runtime_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
+        && dir.is_absolute()
+        && dir.is_dir()
+    {
+        return Some(dir);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let dir = PathBuf::from(format!("/run/user/{}", std::fs::metadata("/proc/self").ok()?.uid()));
+        if dir.is_dir() {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// Where seals are kept, if there is a place for them a sandboxed command cannot write: the
+/// runtime directory, unless it lies in a writable folder itself (`puffin` started in `/`).
+pub fn seal_dir() -> Option<PathBuf> {
+    let dir = runtime_dir()?;
+    (!within(&dir, &writable_roots_here())).then(|| dir.join(SEAL_DIR))
+}
+
+/// A session's seal. Ids are checked as for [`session_file`].
+pub fn seal_file(id: &str) -> Option<PathBuf> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(seal_dir()?.join(id))
+}
+
+/// Whether any of `ids` is held at `on` by a seal.
+pub fn sealed(ids: &[&str]) -> bool {
+    ids.iter().filter_map(|id| seal_file(id)).any(|path| path.is_file())
+}
+
+/// What the files say, corrected for what a command could have done to them. `sealed`: a seal
+/// holds the session at `on`. `exposed`: with no seal and no place to keep one, a session file a
+/// command could have rewritten may tighten the configured level, never loosen it (spec §5.3).
+pub fn resolve_guarded(
+    session: Option<&str>,
+    environment: Option<&str>,
+    configs: &[(PathBuf, String)],
+    sealed: bool,
+    exposed: bool,
+) -> Resolved {
+    let mut resolved = resolve_from(session, environment, configs);
+    if sealed {
+        if resolved.level != Level::On {
+            resolved.invalid.push(format!(
+                "ignored \"{}\" from {}: the session is held at on",
+                resolved.level.name(),
+                resolved.source.label()
+            ));
+        }
+        resolved.level = Level::On;
+        resolved.source = Source::Sealed;
+    } else if exposed && resolved.source == Source::Session {
+        let configured = resolve_from(None, environment, configs);
+        if resolved.level < configured.level {
+            let note = format!(
+                "ignored \"{}\" from this session: commands can write the level file here, so it may not loosen {}",
+                resolved.level.name(),
+                configured.source.label()
+            );
+            resolved = configured;
+            resolved.invalid.push(note);
+        }
+    }
+    resolved
+}
+
+/// Resolves the level for the first of `ids` that has a session file, reading every tier and the
+/// seals.
 pub fn resolve(ids: &[&str]) -> Resolved {
     let session = ids
         .iter()
@@ -189,7 +314,8 @@ pub fn resolve(ids: &[&str]) -> Resolved {
         .into_iter()
         .filter_map(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text)))
         .collect();
-    resolve_from(session.as_deref(), environment.as_deref(), &configs)
+    let exposed = seal_dir().is_none() && level_files_exposed();
+    resolve_guarded(session.as_deref(), environment.as_deref(), &configs, sealed(ids), exposed)
 }
 
 /// Resolves the level for a command the agent runs, from the ids Codex puts in its environment:
@@ -275,5 +401,66 @@ mod tests {
     fn session_ids_that_are_not_ids_are_refused() {
         assert_eq!(session_file("../../etc/passwd"), None);
         assert_eq!(session_file(""), None);
+        assert_eq!(seal_file("../../etc/passwd"), None);
+        assert_eq!(seal_file(""), None);
+        assert!(!sealed(&["", "../x"]));
+    }
+
+    #[test]
+    fn a_seal_holds_the_session_at_on_whatever_the_files_say() {
+        // A command rewrote the session file to `off`, or deleted the key from a config file.
+        let configs = [config("/repo/dreamference.toml", "puffin_airgapped = \"off\"\n")];
+        let resolved = resolve_guarded(Some("off\n"), Some("off"), &configs, true, true);
+        assert_eq!((resolved.level, resolved.source.clone()), (Level::On, Source::Sealed));
+        assert_eq!(resolved.invalid, vec!["ignored \"off\" from this session: the session is held at on".to_string()]);
+        // A seal on a session the files still put at `on` says nothing extra.
+        let resolved = resolve_guarded(Some("on"), None, &[], true, false);
+        assert_eq!((resolved.level, resolved.source, resolved.invalid.len()), (Level::On, Source::Sealed, 0));
+        // Without a seal the files decide, as before.
+        let resolved = resolve_guarded(Some("off"), Some("on"), &[], false, false);
+        assert_eq!((resolved.level, resolved.source), (Level::Off, Source::Session));
+    }
+
+    #[test]
+    fn with_no_place_for_a_seal_an_exposed_session_file_may_only_tighten() {
+        let user_on = [config("/home/u/.config/dreamference/config.toml", "puffin_airgapped = \"on\"\n")];
+        let resolved = resolve_guarded(Some("off"), None, &user_on, false, true);
+        assert_eq!(resolved.level, Level::On);
+        assert_eq!(resolved.source, Source::ConfigFile(user_on[0].0.clone()));
+        assert!(resolved.invalid[0].starts_with("ignored \"off\" from this session: commands can write the level file here"));
+        let resolved = resolve_guarded(Some("duckduckgo"), Some("on"), &[], false, true);
+        assert_eq!((resolved.level, resolved.source), (Level::On, Source::Environment));
+        // Tightening is still the session's to do, and nothing configured means nothing to loosen.
+        let resolved = resolve_guarded(Some("on"), Some("duckduckgo"), &[], false, true);
+        assert_eq!((resolved.level, resolved.source), (Level::On, Source::Session));
+        let resolved = resolve_guarded(Some("off"), None, &[], false, true);
+        assert_eq!((resolved.level, resolved.source, resolved.invalid.len()), (Level::Off, Source::Session, 0));
+    }
+
+    #[test]
+    fn a_path_is_within_a_writable_root_by_its_real_location() {
+        let base = std::env::temp_dir().join(format!("puffin-airgapped-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".puffin")).unwrap_or_default();
+        std::fs::create_dir_all(base.join("elsewhere")).unwrap_or_default();
+        // `puffin` started in the home directory: `~/.puffin` is inside the working directory.
+        let roots = writable_roots(&home, None);
+        assert_eq!(roots, vec![home.clone(), PathBuf::from("/tmp")]);
+        assert!(within(&home.join(".puffin"), &[home.clone()]));
+        assert!(within(&home.join(".config/dreamference/config.toml"), &[home.clone()]));
+        // Started in a project folder: it is not.
+        assert!(!within(&home.join(".puffin"), &[home.join("project")]));
+        assert!(!within(&base.join("elsewhere"), &[home.clone()]));
+        // A name that only shares a prefix is not inside, and a link is followed to where it leads.
+        assert!(!within(&base.join("home2"), &[home.clone()]));
+        #[cfg(unix)]
+        {
+            let _ = std::os::unix::fs::symlink(&home, base.join("link"));
+            assert!(within(&base.join("link").join(".puffin"), &[home.clone()]));
+        }
+        assert_eq!(writable_roots(&home, Some(Path::new("/var/tmp/x"))).len(), 3);
+        assert_eq!(writable_roots(&home, Some(Path::new(""))).len(), 2);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

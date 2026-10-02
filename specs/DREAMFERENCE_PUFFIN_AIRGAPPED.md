@@ -135,7 +135,7 @@ Every command the agent runs goes through Codex's sandbox. Under `workspace-writ
 `/airgapped` reports each of these with its reason (`NOT ENFORCED:` for the ones that leave a way out), and the launcher's start-up line says the same when a session starts at `on`:
 
 - **Full Access.** With `-s danger-full-access` or `--dangerously-bypass-approvals-and-sandbox` there is no sandbox to take the network away. The launcher refuses to start a session at `on` with either: `on` and Full Access contradict each other, and the user must drop one. A session switched to Full Access later through `/permissions` shows the warning.
-- **`$CODEX_HOME` inside a writable root.** The sandbox lets commands write the working directory, `/tmp` and `$TMPDIR`. `puffin` started in the home directory therefore makes `~/.puffin` writable, and a command could rewrite the session's level file. At `on`, when `$CODEX_HOME` lies under any of the three, the level file is not trusted to loosen: the session stays sealed until `puffin` is restarted, `/airgapped off` says so, and the status shows why.
+- **`$CODEX_HOME` inside a writable root.** The sandbox lets commands write the working directory, `/tmp` and `$TMPDIR`. `puffin` started in the home directory therefore makes `~/.puffin` and `~/.config/dreamference` writable, and a command could rewrite the session's level file or the user-level configuration file (measured, §14.5). The level is therefore **held outside those folders**: a session seen at `on` gets a seal, a file under the user's runtime directory (`$XDG_RUNTIME_DIR/puffin-airgapped/<thread-id>`), which the sandbox mounts read-only. While the seal exists the level is `on` whatever the files say. It is written by the `puffin` process (when the World State section sees `on`, before the turn's first command, and by `/airgapped on`), removed by `/airgapped off` or `/airgapped duckduckgo` typed by the user, and pruned at the next launch once the process that wrote it has exited. Where there is no runtime directory, the first design applies as a fallback: an exposed session file may tighten the configured level and not loosen it, and `/airgapped` reports the hole as `NOT ENFORCED`.
 - **A command the user approves to run outside the sandbox** has the network. The `on` fragment tells the model not to ask (§3), and the approval prompt is the user's own decision, but nothing stops it.
 - **MCP servers** the user configured run outside the command sandbox, with the network.
 - **`puffin` itself.** Its known channels to OpenAI and GitHub are closed at their call sites (patches `0013`, `0015`, `0016`), and a traced session reaches only the model server and the Gmail service. A channel a future Codex release adds would not be stopped by the command sandbox.
@@ -166,7 +166,7 @@ Resolved before every command and every model request. First match wins:
 
 - **`/airgapped default <level>` always writes the user-level file,** with `toml_edit`, creating it if needed. If the repository's file or the environment variable would still give a different result, it says which and why.
 - **An invalid value** at any tier is skipped; `/airgapped` names it and where it was.
-- **The Python side** mirrors tiers 2–4: `DreamferenceConfig.puffin_airgapped`, validated against the three names, written by `save_config()` only when it differs from the default.
+- **The Python side** mirrors tiers 2–4. `DreamferenceConfig.puffin_airgapped` is the setting as one configuration file holds it, validated against the three names and written by `save_config()` only when it differs from the default; `DreamferenceConfig.resolve_airgapped_level(cwd)` is the resolver for anything that acts on the level, and takes the stricter of the two files as tier 3 does.
 - **Session files** older than 30 days are deleted by the launcher at start, as cave mode's are.
 
 ### 6.2 How the web commands learn the level
@@ -204,9 +204,9 @@ Modelled on `0017-cave-mode` and `0018-night-slash-command`:
 
 ## 7. Other things that run `puffin`
 
-- **Night Shift.** A night task runs `puffin exec` at the configured level. `[night] airgapped = "<level>"` in the user-level file may set a stricter one for night runs alone; a looser one is ignored. The runner starts the task's test command itself, outside Codex's sandbox, so at `on` it wraps that command in `bwrap --unshare-net` too: tests of code the agent just wrote are the agent's code running. This replaces [NIGHT_SHIFT §6](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md)'s "night runs use the airlock by default": a night at `on` cannot install a missing dependency or read documentation, which is the user's choice to make, not a default.
+- **Night Shift.** A night task runs at the configured level, fixed once per task before the agent starts and exported as `DREAMFERENCE_PUFFIN_AIRGAPPED` to every command of the task, so the agent's edit of the worktree's `dreamference.toml` cannot loosen it for its own tests. `[night] airgapped = "<level>"` in the user-level file may set a stricter one for night runs alone; a looser one is ignored. The runner's own test command goes through the same sandbox helper as the agent's commands (`puffin sandbox`), so at `on` it has no network either: tests of code the agent just wrote are the agent's code running. With `[night] test_sandbox = false` and level `on` the tests are not run, and the report says why. (Built by the Night Shift sandboxing change of 2026-10-02; see [NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md).) This replaces NIGHT_SHIFT §6's "night runs use the airlock by default": a night at `on` cannot install a missing dependency or read documentation, which is the user's choice to make, not a default.
 - **`puffin-admin run`** with Codex as the agent goes through the launcher, so it follows the configured level. The other agents (Cline, Continue, OpenHands) are not covered.
-- **`puffin-admin mcp`.** Its `web_search` and `web_fetch` tools (`WebTools`) follow tiers 2–4 with the same three behaviours and the same messages. There is no session there.
+- **`puffin-admin mcp`.** Its `web_search` and `web_fetch` tools (`WebTools`) follow tiers 2–4, resolved on every call, with the same three behaviours: at `on` nothing is sent, at `duckduckgo` the search names that engine and no category, at `off` nothing changes. There is no session there and no slash command in an IDE, so the `on` message names the setting (`puffin_airgapped = on`) and `puffin airgapped default off`, not `/airgapped`.
 
 ---
 
@@ -324,11 +324,12 @@ Stated in the command's own output (§2), so nobody takes `on` for more than it 
 
 | Piece | Path |
 |---|---|
-| Levels, tiers, strictest-of-two-files, `sealed_for_command()` | `puffin-rs/airgapped/src/lib.rs` |
+| Levels, tiers, strictest-of-two-files, `sealed_for_command()`, the seals and the exposure check | `puffin-rs/airgapped/src/lib.rs` |
 | `/airgapped`, `puffin airgapped`, status, `default`, World State fragments, Full Access refusal, 30-day prune | `puffin-rs/src/airgapped.rs`, `puffin-rs/src/lib.rs` |
 | Slash command, section registration, helper hook | `codex-patches/0019-airgapped.patch` |
 | `puffin-search` and `puffin-fetch` following the level; `--json` gains `airgapped` and `engines` | `puffin-web-rs/src/{airgapped,lib,search}.rs`, `src/bin/` |
-| `DreamferenceConfig.puffin_airgapped` | `dreamference/config/dreamference_config.py` |
+| `DreamferenceConfig.puffin_airgapped`, `resolve_airgapped_level()` | `dreamference/config/dreamference_config.py` |
+| `web_search` and `web_fetch` over MCP following the level | `dreamference/mcp_server/web_tools.py` |
 | The one clause in `WEB_ACCESS_INSTRUCTIONS` | `puffin-rs/src/lib.rs` |
 
 ### 14.3 Run live
@@ -349,11 +350,22 @@ All on 2026-10-01, with the rebuilt `puffin` (17 patches) against the default mo
 
 ### 14.4 Not built
 
-- **Night Shift's test wrapper** (§7): the runner's own test run is still unsandboxed, so at `on` a night task's tests have the network.
-- **`WebTools`** in `puffin-admin mcp` (§7) does not read the level.
 - **`puffin update` is not refused** at `on`, and **the Gmail check at start is not skipped** (§5.2): a session that starts at `on` still gets the Gmail section in its prompt, and the `on` fragment says Gmail is unavailable.
-- **`$CODEX_HOME` under a writable root** (§5.3) is not detected: `puffin` started in the home directory at `on` lets a command rewrite its own level file.
 - **A session switched to Full Access through `/permissions`** shows no warning; only the launch-time refusal exists. The status at `on` lists the uncovered cases as fixed text, not as a check of the current session.
-- **The Python side reads one configuration file,** not the stricter of two; nothing in Python acts on the level yet.
+- **A tampered level takes effect at the next restart.** A seal lasts as long as the `puffin` process that wrote it. If a command rewrote the level's files while the session was held, a later `puffin resume` reads those files and starts at what they say. Keeping seals across restarts would close it, at the price of a session nobody can loosen without the TUI; left as it is.
+- **`writable_roots` the user adds** are not known to the exposure check, which looks at the working directory, `/tmp` and `$TMPDIR`. The seal does not depend on that check, so this only affects what `/airgapped` reports where there is no runtime directory.
+- **The start-up line at `on`** (§5.3) is not printed; `/airgapped` shows the hold and any hole.
 - **The airlock** (§5.4, Phase 2), the 50-query DuckDuckGo measurement (Phase 0), and the strace of an `on` session (§11).
 - **Codex's own TUI snapshots** that list the slash-command popup change again with `/airgapped` in it.
+
+### 14.5 Added on 2026-10-02: the three gaps of "not built"
+
+**`puffin-admin mcp`'s web tools follow the level** (§7). Checked against the live SearXNG with the real `WebTools`, recording each request: at `on`, no request left the process and both tools returned the level's message; at `duckduckgo`, the one search request carried `engines=duckduckgo` and no `categories` (DuckDuckGo answered with a CAPTCHA, so the tool returned "DuckDuckGo did not answer (duckduckgo: CAPTCHA)…" with no hint) and `web_fetch` returned `example.com`; at `off`, the request carried `categories=general` and three results came back.
+
+**The level is held outside the folders a command can write** (§5.3).
+- **The hole, measured.** From the home directory, a command under the workspace-write sandbox created `~/.puffin/airgapped/<file>`, a file in `~/.puffin` and a file in `~/.config/dreamference/`: all three succeeded. So not only the session's file but tier 3's user-level file was the agent's to rewrite, and "the session file may not loosen the configured level" would not have been enough.
+- **The place, measured.** In the same sandbox, from the home directory and from a project folder, `touch /run/user/1000/<file>` failed with "Read-only file system", and `XDG_RUNTIME_DIR` was present in the command's environment. Inside the sandbox `/proc/self` belongs to uid 65534, so the runtime directory is taken from `XDG_RUNTIME_DIR` first and from the uid only as a fallback.
+- **Departure from §5.3's first wording:** `/airgapped off` typed by the user does lift the hold, because the TUI is a process no command controls; "sealed until `puffin` is restarted" applies to everything a command can do.
+- **The resolver run inside the real sandbox; the helper not yet.** The new resolver, compiled into a small probe binary, was run under `puffin sandbox` (workspace-write) from a stand-in home directory with a seal in place. The command rewrote its session's level file to `off` (succeeded), wrote `puffin_airgapped = "off"` into the user-level config file (succeeded) and tried to delete the seal ("Read-only file system"); the resolver still answered `on`, source `Sealed`, `sealed_for_command() = true`, with a note naming the ignored `off`. With the seal removed, as `/airgapped off` does, the same files gave `off`. The launcher's side (writing the seal when the World State section sees `on`, lifting it on `/airgapped off`, pruning seals of exited processes, what the status prints) is unit-tested. The installed `puffin` predates this change, so its sandbox helper still uses the old resolver: a TUI session in the home directory at `on` whose command rewrites its level file, followed by a `curl` that must still fail, is the live check owed after the next `puffin-admin codex build`.
+
+**A night task's tests have no network at `on`** (§7): closed by the Night Shift change that runs the runner's test command through `puffin sandbox` (commit `7f55b56`; the `[night] airgapped` key landed in `4b82073`), measured there (level `off`: internet and model server reachable; `on`: neither). One departure for night tasks only: the runner exports `DREAMFERENCE_PUFFIN_AIRGAPPED` to every command of a task at every level, and the environment outranks the files, so an agent that writes `puffin_airgapped = "on"` into the worktree's `dreamference.toml` mid-task does not tighten its own later commands. The level is fixed at task start; a seal would still tighten it.
