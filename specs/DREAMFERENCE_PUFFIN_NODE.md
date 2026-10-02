@@ -1,6 +1,6 @@
 # Puffin Node — splitting Puffin into a client and `puffin-node`
 
-**Status:** Part 1 is implemented in part, on 2026-10-02: the node side (`puffin-admin node enable|disable|status`), the launcher's resolution tiers and `puffin node`, `puffin-search` on the node's SearXNG, and `puffin-app`'s forwarder. **§18 records what was built, what was measured and what was not;** where it differs from the sections above, §18 and §15.1 win. With one GB10 here, nothing between two machines was run, and nothing was built for macOS or Windows. Parts 2 and 3 are proposed, except the pieces §18 names.
+**Status:** implemented in part on 2026-10-02, on one GB10. Part 1: the node side (`puffin-admin node enable|disable|status`), the launcher's resolution tiers and `puffin node`, `puffin-search` on the node's SearXNG, and `puffin-app`'s forwarder. Part 2: the SSH pairing and `node list|add|remove|status|set|start|stop`. Part 3: script jobs, `node run|jobs|logs|cancel|fetch`. **§18 records what was built, what was measured and what was not;** where it differs from the sections above, §18 and §15.1 win. Nothing between two machines was run, `node enable` itself was not run (it needs root), and nothing was built for macOS or Windows.
 **Target:** the GB10 (DGX Spark) as the server, and Ubuntu, macOS and Windows machines on the same local network as clients.
 **Builds on:**
 - the launcher in `puffin-rs/` and its `vllm_host()` tiers ([PUFFIN_CODEX](./DREAMFERENCE_PUFFIN_CODEX.md));
@@ -668,10 +668,53 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 - **SearXNG answering a LAN client** (its limiter may treat non-loopback addresses differently).
 - **The auto sign-in of §7**, the installers of §9 for macOS and Windows, the release matrix of §8.1, `puffin-code setup` in Rust (§8.3), and every macOS and Windows build. The macOS bundle's two local-network keys are in `desktop/src-tauri/Info.plist`, untested.
 - **Voice through the forwarder**, and the window on port 33000.
-- **Part 2**, beyond the `main` record and the choice rule, which the launcher already applies. **Part 3.**
+- **In Part 2:** per-node parallelism in Night Shift and SWE-bench (§12.3), `node sync-model`, and memory in `node list`. **In Part 3:** agent tasks on another node (`/night add --on <node>`), with the per-job `CODEX_HOME` they need; `--setup` environments, `--out` and `--bind` (§13.3, §13.6); pruning of finished jobs; sending jobs from a client (the sender is Python).
 
 ### 18.5 Tests
 
 - `tests/test_node.py` (Python): the service file's exact text; an update changing one record; a node never enabled never advertised by a side effect; the state through `server start|stop`; a file the user cannot write reported; the node id written once; settings independent of the working directory; the web UI's and SearXNG's publish addresses; SearXNG recreated when its address no longer matches; `enable` without root (binds applied, file printed), with root once (then no root), `disable` with and without root; `status`; the browse output; the three locator copies; the commands; every unattended caller naming its model server.
 - `puffin-rs/src/node.rs` (launcher, in the export): each tier in order; a node never browses; the remembered node found again by id at a new address; the last address only when nothing answers; a different node never adopted silently; several nodes with and without exactly one `main`; the refusal where no question can be asked; `proto` too new; each message of §6.4; names, addresses and id prefixes; `puffin node` parsing, `use`, `forget`, the list; the advert parsed; address choice; one row per node; `node.json` written whole; the version notice once a day. One ignored test runs the real browse.
 - `puffin-rs/node-locator` (8), `puffin-web-rs` (3 new), `desktop/src-tauri` (forwarder 4, discovery 3).
+
+### 18.6 Part 2 as built: pairing, and managing a node from another
+
+| Piece | Where |
+|---|---|
+| `puffin-admin node add <node> [--user] [--ssh-port]`, `node remove` | `dreamference/node/node_pairing.py` |
+| `puffin-admin node list`, `node status <node>`, `node set <node> --model <key>`, `node start|stop <node>` | `node_remote.py` |
+| `puffin-admin node authorize` and `node serve-job` (run on the other node, not typed) | `node_serve.py` |
+
+- **Control is SSH, as decided (§15.1).** No control agent, no port, no `control` record.
+- **The key is authorised by the node, not by `ssh-copy-id`.** `ssh-copy-id` installs a bare key; the pairing needs a line with a forced command. `node add` therefore runs `~/.local/bin/puffin-admin node authorize` on the node over an ordinary SSH login (the one place the node's password is typed) and sends the public key on standard input; the node writes `command="<its puffin-admin> node serve-job --key <tag>",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc <key> puffin-node`.
+- **The tag** is a digest of the key. sshd does not tell a forced command which key connected, so `unpair` removes the line carrying the tag it was started with, and no other.
+- **The host key is pinned to the node id** with `HostKeyAlias=puffin-node-<id>` in a `known_hosts` of its own (`~/.config/dreamference/nodes/known_hosts`): `accept-new` at pairing, `yes` afterwards. A paired node is followed to a new address by a browse for its id.
+- **`node add` also checks the answer.** After authorising, it asks the node for `info` through the new key and refuses the pairing if the node id that comes back is not the advertised one.
+- **`set-model` is the node's own three commands**: `puffin-admin main-model set <key>`, `server stop`, `server start`, run from the node's home folder, so the assignment lands in the node's user-level config. Only a key of the node's own matrix is accepted, and not a diffusion model. A node whose owner keeps a `dreamference.toml` in a repository can therefore have two assignments; the pairing changes the user-level one.
+- **A load started over SSH is a child of the connection.** `server start` leaves the container to Docker and only watches it; if the connection drops, the load continues and the advert stays at `loading` until the next `server start` or `stop` on that node.
+- **`node list` has no memory column.** Model, context, running requests and KV pool come from each node's open model port; free memory is not served there.
+
+**Run live (2026-10-02)**, against an `sshd` started for the test on `127.0.0.1:2222` with its own host key and `authorized_keys` file, so the user's `~/.ssh` was not touched and this GB10 played both sides:
+- `info` returned the node's id, name, version and `linger: false`; `status` returned the node's `puffin-admin status` (2,670 bytes).
+- A shell (`bash -c 'id'`), `cat /etc/passwd`, a `git-upload-pack` for `/tmp`, a path as a model key and an empty request were each refused with exit code 2.
+- A request for a terminal failed (`PTY allocation request failed`), and a local port forward was refused (`administratively prohibited`).
+- With the stored host key replaced, the connection was refused (`Host key verification failed`).
+- **Not verified live:** `unpair` (the test server reads a different `authorized_keys` than the one the command edits), `node add`'s password step, `set`, `start` and `stop` (they would have stopped the model server other tasks were using), and everything between two machines.
+
+### 18.7 Part 3 as built: script jobs on another node
+
+| Piece | Where |
+|---|---|
+| `puffin-admin node run <node> [--memory] [--time] [--test] -- <command>`, `node jobs|logs|cancel|fetch` | `node_job_sender.py` |
+| The job on the node: record, admission, unit, sandbox, commit | `node_job.py`; `puffin-admin node job-exec <id>` inside the unit |
+| git and job requests through the forced command | `NodeServe.git_service`, `NodeServe.job_operation` |
+
+- **What travels.** `node run` pushes `HEAD` to `ssh://<node>/jobs/<name>-<digest>.git` as `refs/jobs/<id>`; `serve-job` runs `git-receive-pack` for that path and refuses any other, creating the bare repository on first push. The request (`job-submit`, base64 JSON) names the commit, the command, the caps, the sender's `/airgapped` level and its git identity.
+- **The node validates everything**: the id and repository name by pattern, the commit as a full hash it already holds, the command as a list, the caps present and under the node's ceilings (32 GiB, 8 h; constants for now, not config), and `--gpu` refused outright (§15.1).
+- **Admission is Night Shift's without the model checks**: no night run or benchmark run holding the lock, no build or index run, and memory available for the reserve (8 GiB) plus the job's cap. An open `puffin` session does not block a script job.
+- **The job is a systemd user service**, `puffin-job-<id>`, started with `MemoryMax`, `MemorySwapMax=0`, `RuntimeMaxSec` and `CPUQuota=800%`; `serve-job` then prints its output file until the job finishes. A job the unit manager stopped (time limit, memory cap) has no chance to write its own result, so reading a job's record first settles one whose unit is gone.
+- **The sandbox** is bubblewrap with the indexers' profile: `/` read-only, tmpfs over `/tmp`, `/run`, `/var/tmp`, `/dev/shm` and the home folder, the worktree the only read-write bind, a cleared environment with `CUDA_VISIBLE_DEVICES` empty, and no network at the level `on`. The runner's git commands (worktree, commit) run outside it, because the worktree's git metadata lives in the job repository under the hidden home folder: a job cannot run `git` on its own tree.
+- **With the network on, a job shares the node's network namespace**, loopback included: it can reach the node's model server and its other loopback services, as any process on the node can.
+- **The result** is committed as the sender's git identity on `job/<id>` in the job repository and fetched into the sender's repository when `node run` ends, or later with `node fetch`. A job that changes nothing leaves only its log and exit code. The test command, if any, runs in the same sandbox after the command succeeds, and its exit code becomes the job's.
+- **Cancel** marks the record and stops the unit; the worktree of a cancelled or killed job is left for a later prune, which is not built.
+
+**Run live (2026-10-02):** the sandbox profile on this GB10, outside a unit. Inside it the home folder held only the path to the worktree, `~/.ssh`, the Hugging Face cache, `~/.config/dreamference` and the Docker socket were absent, `/usr` and `/etc` were read-only, there was no `/dev/nvidia0`, five processes were visible, and the model server answered on loopback with the network on and was unreachable with it off.
