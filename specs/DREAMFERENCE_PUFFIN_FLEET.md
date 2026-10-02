@@ -137,7 +137,7 @@ All read on 2026-10-02. The DGX Spark documentation pages carry "Last updated Se
 4. Let the first-boot update and the reboot finish. Do not power the unit off.
 5. Nothing else. The host name is on the sticker, and `node provision` also finds the unit on its own (§9.1).
 
-**No monitor, keyboard or USB stick is needed**, and several units can be set up at once, each through its own hotspot. Attended time is assumed to be about five minutes per unit; the wall time, dominated by the update, is unknown. Both are the first Phase 0 measurement.
+**No monitor, keyboard or USB stick is needed.** Several units can probably be set up at once, each through its own hotspot with its own SSID. That is assumed, not sourced. Attended time is assumed to be about five minutes per unit; the wall time, dominated by the update, is unknown. Both are the first Phase 0 measurement.
 
 ### 4.2 What cannot be removed on this route, and why
 
@@ -180,7 +180,7 @@ puffin-admin node provision spark-1a2b --model qwen3.5-122b-a10b-hybrid-dflash -
 | `--user <name>` | The account on the new machines. Default: this user's name |
 | `--model <key>` | The model each named node is assigned. Default: this machine's configured model. Only keys of the matrix, as `node set` |
 | `--from this\|release[=X.Y.Z]` | What to install (§7.2). Default: `this` |
-| `--one-password` | Ask once and use the answer for every machine's login and `sudo` (§8.2) |
+| `--one-password` | With several hosts: ask once, not once per machine, and use the answer for every machine's login and `sudo` (§8.2) |
 | `--web` | Also install and configure the web UI there (`puffin-admin puffin start` and `configure`). Off by default |
 | `--no-start` | Leave the model server stopped |
 | `--restart` | Restart a running model server whose image or model has changed. Without it, the summary says a restart is pending |
@@ -205,8 +205,8 @@ NVIDIA recommends Ansible for Spark fleets (§2.2), and it would work. It is not
 
 | Ansible | Here |
 |---|---|
-| Parallel fan-out | Not needed at this scale: the questions are asked for every machine first, then the slow part runs unattended (§9.2) |
-| `--ask-become-pass` | `--one-password` (§8.2) |
+| Parallel fan-out | Only what pays at this scale: the questions are asked for every machine first, installs run side by side, and copies from this machine run one at a time (§9.2) |
+| `--ask-become-pass` | the passwords asked up front, or `--one-password` (§8.2) |
 | Idempotent modules | Puffin's commands already read before they change |
 | A run report | The summary table (§11) |
 
@@ -225,12 +225,12 @@ Each step reads first and does nothing if the machine already satisfies it.
 | # | Step | Channel | Root | Changes on the machine |
 |---|---|---|---|---|
 | 1 | **Connect.** Open the provisioning session (§8.1) and check that it is a GB10: `/etc/dgx-release`, `nvidia-smi` | session | no | nothing |
-| 2 | **Read the state.** A small script, sent over the session, reports: Puffin's version, `host check`, the docker group, lingering, node id, advertised or not, models and images present, free disk | session | no | nothing |
+| 2 | **Read the state.** A plain shell probe, sent over the session (Puffin may not be there yet), reports: Puffin's version if installed; the facts `host check` reads (swap, the two sysctls, earlyoom, sysstat); the docker group; lingering; node id; whether the node is advertised; models and images present; free disk | session | no | nothing |
 | 3 | *(opt-in)* OS update (§10.3) | session | yes | packages, firmware, reboot |
 | 4 | **Install Puffin**, from a bundle copied from this machine (§7.2): `install.sh --from <dir> --role node --no-advertise --no-host-setup` | session | no | `~/.local/share/dreamference/{puffin,venv}`, links in `~/.local/bin` |
 | 5 | **Root half**: `sudo puffin-admin node prepare` (§7.3), in one command so `sudo` asks once | session | yes | §7.3's list |
-| 6 | **Reconnect**, because a group added in step 5 reaches only new logins (§8.1) | session | no | nothing |
-| 7 | **Model and images**, copied from this machine (§7.4) | session | no | `~/.cache/huggingface/hub/models--…`, Docker images |
+| 6 | **User half of advertising**: `puffin-admin node enable --no-web` (or without `--no-web` under `--web`). The Avahi file is now the user's, so this needs no root, as in PUFFIN_NODE §18.2. It writes `node-advertise.json` and moves SearXNG to every interface, which `puffin-search` on clients needs | session | no | `~/.config/dreamference/node-advertise.json`; SearXNG's publish address |
+| 7 | **Model and images** (§7.4): weights and local-tag images copied from this machine, and digest-pinned images pulled by the node itself, here and not inside step 11, so the pull is timed and reported on its own. Docker commands run as `sg docker -c '…'`, because the session's login predates the group that step 5 added | session | no | `~/.cache/huggingface/hub/models--…`, Docker images |
 | 8 | **Assignment**: `puffin-admin main-model set <key>` there | session | no | `~/.config/dreamference/config.toml` |
 | 9 | **Pair**: `node add` through the open session (§7.6) | session | no | one `authorized_keys` line; here, the node record and its pinned host key |
 | 10 | **Close the session.** From here only the pairing key is used | — | — | — |
@@ -241,7 +241,13 @@ Each step reads first and does nothing if the machine already satisfies it.
 
 `install.sh` gains **`--from <dir>`**: install from a directory holding the same asset names and the same `puffin-<target>.sha256sums`, with no network. The checksum checks stay as they are. It also gains `--no-host-setup`, because step 5 does that part. The bundle is built here, once per run, under `~/.cache/dreamference/fleet/bundle-<version>/`:
 
-- **`--from this`** (the default). The binaries installed here (`puffin`, `codex-code-mode-host`, `puffin-search`, `puffin-fetch`, `puffin-code`), gzipped under the release names, plus a wheel of this machine's `dreamference` package (`pip wheel --no-deps` of the checkout, or the installed wheel on a release install), and a `sha256sums` file written for them. The new node then runs the same build as this one, including a source build that was never released. That is the point for a development fleet.
+- **`--from this`** (the default).
+  - **On a machine running from a checkout**, as this one does, the bundle holds:
+    - the binaries installed here (`puffin`, `codex-code-mode-host`, `puffin-search`, `puffin-fetch`, `puffin-code`), gzipped under the release names;
+    - a wheel of the checkout's `dreamference` package (`pip wheel --no-deps`);
+    - a `sha256sums` file written for them.
+    The new node then runs the same build as this one, including a source build that was never released. That is the point for a development fleet.
+  - **On a release install** there is no wheel to copy, since pip does not keep the file. There `this` means `release=<the installed version>`, fetched as below.
 - **`--from release[=X.Y.Z]`**. The release's own assets, downloaded once here with this machine's token (`GH_TOKEN` or `gh`), checked against the release's checksum file, then copied. The token stays on this machine.
 - **Python dependencies.** The wheel's dependencies come to about 5.8 GB, mostly PyTorch. By default the node downloads them from PyPI. With a wheelhouse built here (`pip download` for `aarch64`/cp312, which is the same platform), the node installs with `--no-index` and needs no internet. Whether to make the wheelhouse the default is a Phase 0 measurement of the two times.
 - The installed `puffin-admin` and the binaries on every node are those of one bundle, and the bundle's version is recorded in the node record here (§11).
@@ -312,17 +318,16 @@ A second run on a provisioned node goes through the same table:
 
 - `ssh` with `ControlMaster=auto`, `ControlPath` in a 0700 directory under `$XDG_RUNTIME_DIR`, and `ControlPersist` for the run. The password is typed once per machine at `ssh`'s own prompt, every later command and copy rides the same connection, and the master is closed at the end (or by a signal handler on Ctrl-C).
 - **First contact** uses `StrictHostKeyChecking=accept-new` into a known-hosts file of the provisioning run. The fingerprint is printed so it can be compared with what the machine shows locally, and the same key is then pinned to the node id at pairing (§7.6).
-- **Group changes need a new connection.** Multiplexed sessions are children of a login that has already taken its groups, so after `prepare` adds `docker` the master is closed and reopened (step 6). This is assumed from how `sshd` works; Phase 0 checks it.
+- **A group added during the run.** Multiplexed sessions are children of a login that has already taken its groups, so after `prepare` adds `docker` the session's commands do not have it. Rather than reconnecting (which would mean another password prompt), they run Docker through `sg docker -c '…'`, which needs only the group's entry in `/etc/group`. This machine's journal shows the same pattern on its first day: `usermod` adding the group, then `sg … switched to group 'docker'` sixteen seconds later. That `sg` reaches the Docker socket from a multiplexed session is assumed; Phase 0 checks it.
 - No agent forwarding and no port forwarding.
 
 ### 8.2 `sudo`, and the passwords
 
-- **Default:** step 5 runs as `ssh -t … sudo <venv>/bin/puffin-admin node prepare`, so `sudo` prompts on the remote terminal, once per machine, and the password goes from the keyboard to that machine's `sudo` and nowhere else.
-- **`--one-password`** is for several machines with the same account and password:
-  - `puffin-admin` asks once, with `getpass`.
-  - It answers `ssh`'s password prompt through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4 or later; this machine has 9.6). The askpass helper is `puffin-admin` itself, reading the password from an inherited pipe, never from the environment or argv.
-  - It answers `sudo` with `sudo -S -p ''`, the password written to the remote command's standard input over the encrypted channel.
-  - It is held in memory for the run and nowhere else. A machine that refuses it is asked for its own password; nothing is retried in a loop.
+- **One host named:** the password is typed at `ssh`'s own prompt, and step 5 runs as `ssh -t … sudo <venv>/bin/puffin-admin node prepare`, so `sudo` prompts on the remote terminal. The password goes from the keyboard to that machine and nowhere else. `puffin-admin` never sees it.
+- **Several hosts named:** the `sudo` prompt cannot come before the slow part, because `prepare` needs the virtualenv that step 4 installs, which takes minutes. To keep §9.2's "questions first", `puffin-admin` asks for each machine's password at the start, with `getpass`; with `--one-password` it asks once for all. It then uses that password for both prompts:
+  - for `ssh`'s password prompt, through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4 or later; this machine has 9.6). The askpass helper is `puffin-admin` itself, reading the password from an inherited pipe, never from the environment or argv;
+  - for `sudo`, through `sudo -S -p ''`, the password written to the remote command's standard input over the encrypted channel.
+- Each password is checked when it is asked for, by opening that machine's session at once. It is held in memory for the run and nowhere else. A machine that refuses one is asked again once, then dropped from the run; nothing is retried in a loop.
 - **Not done, and why:**
   - a `NOPASSWD` drop-in (permanent root for whoever holds a key);
   - a full-access key left in `authorized_keys`;
@@ -359,12 +364,12 @@ Nothing is assumed from the name. Step 1 checks `/etc/dgx-release` before anythi
 
 ### 9.2 Questions first, then walk away
 
-With several hosts, every interactive step is done for every machine before any slow step starts:
-1. open every session (a password each, or one with `--one-password`);
-2. run every `prepare` (a `sudo` password each, or none more);
-3. then, unattended: install, copy, pair, start, one machine after another.
+With several hosts, every question is asked before any slow step starts:
+1. a password per machine, or one with `--one-password`, each checked at once by opening that machine's session (§8.2);
+2. the host-key fingerprint of each new machine, printed;
+3. then, unattended: install, root half (with the password already held), advertise, copy, pair, start. The installs run on all machines at once, since each downloads its own Python dependencies or reads its own copy of the bundle; the copies from this machine run one after another (§7.5).
 
-Someone setting up five units types everything in the first minutes and can leave. A machine whose questions fail is dropped from the run and named, and the others go on.
+Someone setting up five units types everything in the first minutes and can leave. A machine whose password fails twice is dropped from the run and named, and the others go on.
 
 ### 9.3 Pairing between new nodes
 
@@ -386,6 +391,8 @@ The `info` operation of `serve-job` (PUFFIN_NODE §18.6) gains read-only fields:
 
 `node list` adds one column, **drift**, naming what differs from this machine. A node on a different DGX OS version is also flagged. Because `info` goes through the pairing key, seeing drift needs no password.
 
+**A source bundle and `puffin update` disagree.** A binary built from a checkout carries no `PUFFIN_VERSION`, so `puffin update` typed on such a node treats it as behind and replaces it with the latest release. That is correct for a single machine and is drift on a fleet. The drift column shows it, and the next `node provision` from the managing machine puts the bundle back. Whether `puffin update` should refuse on a node provisioned from a source bundle is left to that command's spec.
+
 ### 10.2 Updating
 
 `node provision --all` (§7.7). Nothing updates by itself: no timer, no agent. A model server is restarted only with `--restart`, so people working on a node are not interrupted by someone else's update.
@@ -403,7 +410,7 @@ The `info` operation of `serve-job` (PUFFIN_NODE §18.6) gains read-only fields:
 - **A failed step stops that machine at that step.** It never stops the others. Every step is safe to repeat (§7.1), so the fix is to correct the cause and re-run the same command.
 - **Nothing can leave a machine unreachable.** The steps do not touch SSH, the network or the accounts (decision 6). A swap resize already refuses the cases it cannot do safely (SETUP §3.3).
 - **Atomic where it matters.** `install.sh` checks every checksum before placing a file and renames over the old one. `rsync --partial` resumes. A Docker load either completes or leaves no image.
-- **The model server does not start on a host that fails `host check`**, because `server start` refuses by itself. Provisioning reports the refusal, whatever the reason.
+- **The model server does not start on a host that fails the model-load pre-flight** (`check_host_safety()`), because `server start` refuses by itself. Provisioning reports the refusal, whatever the reason. (`host check`'s bubblewrap line is not part of that pre-flight. A node can serve a model while failing it, which is why the summary lists it separately.)
 - **The summary at the end** has one row per machine: host name, address, node id, the bundle version, `host check`, model present, image present, paired, `state`, the verify result, bytes copied and their throughput, and **what is left**, with the exact command for it. The exit code is non-zero if any machine is incomplete.
 - **A log per machine and run** is written to `~/.local/state/dreamference/fleet/<date>-<host>.log` on this machine: each command run there and its output, **never a password**.
 - **The node record** (`~/.config/dreamference/nodes/<id>.json`) gains `provisioned`: bundle version, model key, image id, and date. That is a cache for the summary. Each run reads the machine again and does not trust the record.
@@ -417,6 +424,7 @@ The `info` operation of `serve-job` (PUFFIN_NODE §18.6) gains read-only fields:
 | `install.sh` | `--from <dir>` (assets from a directory, same names and checksums, no network) and `--no-host-setup` |
 | `dreamference/node/node_pairing.py` | `node add <address>` without a browse, the id read over the login; reuse of a given `ControlPath` |
 | `dreamference/node/node_serve.py` | `info` gains the drift fields of §10.1. No new operation that writes |
+| `dreamference/node/node_browser.py` | a browse of `_ssh._tcp` beside `_puffin-node._tcp`, for §9.1 |
 | new `node_provisioner.py`, `node_prepare.py` (one class each) | §7 and §7.3; the CLI controller gains `node provision` and `node prepare` |
 | `HostSafetySetup` | unchanged. If SETUP adopts a bubblewrap fix, `prepare` applies it because it calls `steps()` |
 | `VLLMServerManager.is_image_present()` | after Phase 0 only: also accept a recorded image id (§7.4) |
@@ -440,7 +448,7 @@ The `info` operation of `serve-job` (PUFFIN_NODE §18.6) gains read-only fields:
 1. The wizard: attended time, total time to SSH-ready, and whether the Ethernet cable really skips the Wi-Fi step.
 2. After the wizard: SSH on, password login allowed, user not in `docker`, `Linger=no`, and the host name pattern (is it the MAC's last two bytes?).
 3. `_ssh._tcp` from the new unit seen by a browse **from this machine**.
-4. `ssh -t … sudo …` prompting once; `sudo -S` with `-p ''`; `SSH_ASKPASS_REQUIRE=force` with a helper; a group added by `usermod` invisible to a multiplexed session and visible after reconnecting.
+4. `ssh -t … sudo …` prompting once; `sudo -S` with `-p ''`; `SSH_ASKPASS_REQUIRE=force` with a helper; a group added by `usermod` invisible to a multiplexed session, and `sg docker -c 'docker info'` reaching the socket from it.
 5. Copy throughput over the actual link, for the weights (`rsync`) and for a 40 GB image (`docker save | zstd | docker load`), against the node's own downloads from Hugging Face and Docker Hub.
 6. Whether a loaded digest-pinned image keeps its repository digest under `overlay2` (§7.4).
 7. With a QSFP cable in: does the ConnectX appear (`lspci`, `ibdev2netdev`), and what does a copy reach over it?
@@ -454,7 +462,8 @@ The `info` operation of `serve-job` (PUFFIN_NODE §18.6) gains read-only fields:
 Offline, with `ssh`, `rsync`, `docker` and `sudo` replaced by stand-ins (conftest already fails real `docker` changes; add the same for `ssh` and `rsync`):
 
 - **Passwords:** never present in any spawned process's argv or environment, nor in the log file. The askpass helper reads only from its pipe. A refused password is asked again once, for that machine only.
-- **Session options:** `ControlPath` under a 0700 directory, `accept-new` only at first contact, no forwarding; the master reopened after `prepare` changed groups.
+- **Session options:** `ControlPath` under a 0700 directory, `accept-new` only at first contact, no forwarding. Docker commands after `prepare` are wrapped in `sg docker -c`. With one host, `puffin-admin` never reads a password. With several, every password is asked before the first install starts.
+- **Advertising:** step 6 runs the user-level `node enable`, with `--no-web` unless `--web` is given.
 - **`prepare`:** refuses without root or without `SUDO_USER`. For a matrix of host states, its command list is exactly the missing steps. It never emits a command touching `sshd`, netplan, NetworkManager, users or APT sources.
 - **Idempotency:** a second run against a satisfied stand-in host issues no changing command.
 - **`install.sh --from`:** a checksum mismatch installs nothing, and no network is used. The bundle's checksum file covers every asset it holds.
