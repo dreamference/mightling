@@ -2247,9 +2247,13 @@ class DreamferenceCLIController:
             if args.node_command in ("run", "jobs", "logs", "cancel", "fetch", "job-exec"):
                 from dreamference.node import NodeJob, NodeJobSender
                 if args.node_command == "run":
-                    job_command = args.job_command[1:] if args.job_command[:1] == ["--"] else args.job_command
-                    sys.exit(NodeJobSender.run(args.name, job_command, memory=args.memory, time_limit=args.time,
-                                               test=args.test, gpu=args.gpu))
+                    # argparse hands everything after the node's name to the command, options
+                    # included, so the options written after the name are read here.
+                    options, job_command = NodeJobSender.split_run_arguments(args.job_command)
+                    sys.exit(NodeJobSender.run(args.name, job_command,
+                                               memory=options.memory or args.memory,
+                                               time_limit=options.time or args.time,
+                                               test=options.test or args.test, gpu=options.gpu or args.gpu))
                 if args.node_command == "jobs":
                     sys.exit(NodeJobSender.jobs(args.name))
                 if args.node_command == "logs":

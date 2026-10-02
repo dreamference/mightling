@@ -835,6 +835,19 @@ def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(t
     assert " -p " not in ssh                                                    # the URL carries the port
 
 
+def test_the_jobs_own_options_are_not_read_as_node_runs():
+    from dreamference.node import NodeJobSender
+    split = NodeJobSender.split_run_arguments
+    options, command = split(["--memory", "16G", "--time=2h", "--test", "pytest -q", "--", "python", "train.py", "--epochs", "3", "--memory", "x"])
+    assert (options.memory, options.time, options.test, options.gpu) == ("16G", "2h", "pytest -q", False)
+    assert command == ["python", "train.py", "--epochs", "3", "--memory", "x"]
+    options, command = split(["--gpu", "python", "train.py", "--time", "5"])        # no `--`
+    assert options.gpu is True and options.time is None and command == ["python", "train.py", "--time", "5"]
+    options, command = split(["--", "ls", "-la"])
+    assert options.memory is None and command == ["ls", "-la"]
+    assert split([])[1] == []
+
+
 def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_path, monkeypatch, capsys):
     from dreamference.node import NodeJobSender
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))

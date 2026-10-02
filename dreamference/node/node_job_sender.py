@@ -170,6 +170,42 @@ class NodeJobSender:
         return code
 
     @classmethod
+    def split_run_arguments(cls, words: List[str]) -> Any:
+        """
+        Separates `node run`'s own options from the job's command in what follows the node's
+        name: `--memory 16G --test "pytest -q" -- python train.py --epochs 3`.
+
+        Args:
+            words: Everything after the node's name.
+
+        Returns:
+            Any: `(options, command)`: the options (`memory`, `time`, `test`, `gpu`) and the
+            command's words. With `--`, what follows it is the command verbatim, so the
+            command's own options are never read as this one's; without it, the command starts
+            at the first word that is not one of these options.
+        """
+        import argparse
+        parser = argparse.ArgumentParser(add_help=False, prog="puffin-admin node run")
+        parser.add_argument("--memory", default=None)
+        parser.add_argument("--time", default=None)
+        parser.add_argument("--test", default=None)
+        parser.add_argument("--gpu", action="store_true")
+        if "--" in words:
+            at = words.index("--")
+            options, extra = parser.parse_known_args(words[:at])
+            return options, extra + words[at + 1:]
+        options, command = parser.parse_known_args([])
+        index = 0
+        own = {"--memory": 2, "--time": 2, "--test": 2, "--gpu": 1}
+        while index < len(words):
+            word = words[index].split("=", 1)[0]
+            if word not in own:
+                break
+            index += 1 if "=" in words[index] else own[word]
+        options, _ = parser.parse_known_args(words[:index])
+        return options, words[index:]
+
+    @classmethod
     def jobs(cls, name: Optional[str] = None) -> int:
         """
         Lists jobs on one paired node, or on all of them.
