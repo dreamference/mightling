@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs Puffin on a GB10 from a checkout of this repository: the Python package (which provides
-# `puffin-admin`), the workspace config, and the `puffin` terminal agent built from the pinned
-# Codex fork. Everything is done by `puffin-admin`; this script only runs it in order.
+# `puffin-admin`), the workspace config, the host settings a model load needs, and the `puffin`
+# terminal agent built from the pinned Codex fork. Everything is done by `puffin-admin`; this
+# script only runs it in order. To install from a release without a checkout, use ../install.sh.
 #
 #   ./scripts/install_gb10.sh [MODEL]     MODEL defaults to the registry's default model
 set -euo pipefail
@@ -18,6 +19,10 @@ if [ -n "${1:-}" ]; then
 else
     puffin-admin init
 fi
+
+echo "🛡️  Checking the host settings a model load needs (swap, sysctls, earlyoom, sysstat)..."
+# Applies what `server start` would otherwise refuse over; sudo asks before anything changes.
+puffin-admin host setup || echo "⚠️  Fix the above before 'puffin-admin server start'."
 
 echo "🔨 Building puffin (the terminal agent) from the codex submodule..."
 puffin-admin codex build

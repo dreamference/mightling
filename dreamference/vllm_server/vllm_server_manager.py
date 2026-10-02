@@ -386,6 +386,15 @@ class VLLMServerManager:
             except Exception as e:
                 print(f"❌ Unexpected error building Docker image '{docker_image}': {e}")
 
+        elif not dockerfile_path.is_file():
+            # A release install has the package but not the repository's Dockerfile beside it.
+            print(f"❌ Docker image '{docker_image}' is not present, and it is built from the "
+                  "Dockerfile in Puffin's repository, which a release install does not have.")
+            print("💡 Clone the repository and run `docker build -t "
+                  f"{docker_image} .` there, or use a model whose recipe pulls its image "
+                  "(the default model does).")
+            return False
+
         print(f"⚠️  Docker image '{docker_image}' is missing locally and could not be built.")
         return False
 
@@ -992,7 +1001,8 @@ class VLLMServerManager:
                 f"{'check' if len(problems) == 1 else 'checks'} failed.\n\n"
                 f"{listed}\n\n"
                 f"These guard against the freeze mode this hardware is prone to: unreclaimable\n"
-                f"driver-pinned pages starving the host with no OOM kill to end it.\n"
+                f"driver-pinned pages starving the host with no OOM kill to end it.\n\n"
+                f"💡 `puffin-admin host setup` applies these for you (sudo asks for your password).\n"
             )
             sys.exit(1)
 

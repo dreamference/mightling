@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+# Installs Puffin from a release, with no checkout of the repository and nothing compiled.
+#
+#   ./install.sh [--role client|node] [--version X.Y.Z]
+#
+# What it installs depends on the machine:
+#
+#   client   the `puffin` terminal agent and its commands (`puffin-search`, `puffin-fetch`,
+#            `puffin-code` when the release carries it): prebuilt binaries, downloaded from the
+#            release, checked against its checksum file, placed in
+#            ~/.local/share/dreamference/puffin/bin and linked into ~/.local/bin.
+#   node     the client, plus `puffin-admin` (the Python package, from the release's wheel, in a
+#            virtualenv of its own) and the host settings a model load needs. This is what a GB10
+#            (DGX Spark and its siblings) gets by default; every other machine gets the client.
+#
+# It downloads the same assets, by the same names and with the same checks, as `puffin update`
+# (puffin-rs/src/update.rs), so a machine installed this way is updated by that command.
+#
+# The repository is private at the time of writing, so GitHub wants a token that can read it:
+# GH_TOKEN, GITHUB_TOKEN, or a logged-in `gh`. With a public repository none is needed.
+# PUFFIN_RELEASE_REPO names another repository (a fork), PUFFIN_RELEASE_API another API root (the
+# tests' stand-in server); PUFFIN_INSTALL_DIR and PUFFIN_VENV move the two directories.
+#
+# For a development install from a checkout, use scripts/install_gb10.sh instead.
+set -euo pipefail
+
+REPO="${PUFFIN_RELEASE_REPO:-dgxcoder/dgxcoder}"
+API="${PUFFIN_RELEASE_API:-https://api.github.com}"
+INSTALL_DIR="${PUFFIN_INSTALL_DIR:-$HOME/.local/share/dreamference/puffin}"
+VENV_DIR="${PUFFIN_VENV:-$HOME/.local/share/dreamference/venv}"
+LINK_DIR="$HOME/.local/bin"
+ROLE=""
+VERSION=""
+
+say()  { printf '%s\n' "$*"; }
+fail() { printf '❌ %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --role)      ROLE="${2:-}"; shift 2 ;;
+        --role=*)    ROLE="${1#*=}"; shift ;;
+        --version)   VERSION="${2:-}"; shift 2 ;;
+        --version=*) VERSION="${1#*=}"; shift ;;
+        -h|--help)   usage; exit 0 ;;
+        *)           fail "unknown argument: $1 (see --help)" ;;
+    esac
+done
+
+for tool in curl gzip awk; do
+    command -v "$tool" >/dev/null 2>&1 || fail "$tool is needed and was not found."
+done
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum >/dev/null 2>&1; then
+    sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+    fail "sha256sum (or shasum) is needed to check the downloads and was not found."
+fi
+
+# -- which machine ---------------------------------------------------------------------------
+
+case "$(uname -s)" in
+    Linux)  os="unknown-linux-gnu" ;;
+    Darwin) os="apple-darwin" ;;
+    *)      fail "this script installs on Linux and macOS; on Windows use install.ps1." ;;
+esac
+case "$(uname -m)" in
+    aarch64|arm64) arch="aarch64" ;;
+    x86_64|amd64)  arch="x86_64" ;;
+    *)             fail "unsupported processor: $(uname -m)" ;;
+esac
+TARGET="$arch-$os"
+
+# A GB10 is an arm64 Linux machine whose GPU says so. (Its device tree has no model string, and
+# the DMI product name is the vendor's: "GX10" on an ASUS Ascent, so neither is used.)
+is_gb10() {
+    [ "$TARGET" = "aarch64-unknown-linux-gnu" ] || return 1
+    command -v nvidia-smi >/dev/null 2>&1 || return 1
+    nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | grep -q "GB10"
+}
+
+case "$ROLE" in
+    "")          if is_gb10; then ROLE="node"; else ROLE="client"; fi ;;
+    client)      ;;
+    node|both)   ROLE="node" ;;
+    *)           fail "--role is client or node, not '$ROLE'." ;;
+esac
+if [ "$ROLE" = "node" ] && ! is_gb10; then
+    say "⚠️  This machine is not a GB10. The node's model recipes and host-safety checks are written"
+    say "   for one; installing the node anyway because --role node was given."
+fi
+
+# -- the release -----------------------------------------------------------------------------
+
+TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+if [ -z "$TOKEN" ] && command -v gh >/dev/null 2>&1; then
+    TOKEN="$(gh auth token 2>/dev/null || true)"
+fi
+auth=()
+[ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+if [ -n "$VERSION" ]; then
+    release_url="$API/repos/$REPO/releases/tags/v${VERSION#v}"
+else
+    release_url="$API/repos/$REPO/releases/latest"
+fi
+if ! curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json"; then
+    say "❌ Could not read $release_url" >&2
+    if [ -z "$TOKEN" ]; then
+        say "   The repository is private: set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it," >&2
+        say "   or log in with \`gh auth login\`, and run this again." >&2
+    else
+        say "   Check that the token can read $REPO and that the release exists (drafts are not listed)." >&2
+    fi
+    exit 1
+fi
+
+TAG="$(awk -F'"' '/^  "tag_name":/ {print $4; exit}' "$WORK/release.json")"
+[ -n "$TAG" ] || fail "the release at $release_url has no tag."
+
+# "name<TAB>API url" for every asset. GitHub prints an asset's own "url" before its "name"; the
+# uploader's "url" in between is a user URL and is not taken.
+awk -F'"' '
+    /"url": "[^"]*\/releases\/assets\/[0-9]+"/ { url = $4 }
+    /^      "name":/ && url != "" { print $4 "\t" url; url = "" }
+' "$WORK/release.json" > "$WORK/assets.tsv"
+
+asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
+
+fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
+    local url; url="$(asset_url "$1")"
+    [ -n "$url" ] || return 1
+    curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
+}
+
+say "🐧 Puffin $TAG for $TARGET, role: $ROLE"
+
+SUMS="puffin-$TARGET.sha256sums"
+if ! fetch "$SUMS"; then
+    fail "release $TAG has no binaries for $TARGET (no $SUMS). Published targets: $(awk -F'\t' '/sha256sums/ {sub(/^puffin-/, "", $1); sub(/\.sha256sums$/, "", $1); printf "%s ", $1}' "$WORK/assets.tsv")"
+fi
+
+# Required, then optional: releases before the web commands and the code index were Rust binaries
+# do not carry them, which is how `puffin update` treats them too.
+REQUIRED="puffin codex-code-mode-host"
+OPTIONAL="puffin-search puffin-fetch puffin-code"
+INSTALLED=""
+for name in $REQUIRED $OPTIONAL; do
+    asset="$name-$TARGET.gz"
+    if ! fetch "$asset"; then
+        case " $REQUIRED " in *" $name "*) fail "release $TAG is missing $asset." ;; esac
+        continue
+    fi
+    wanted="$(awk -v file="$asset" '{ f = $2; sub(/^\*/, "", f); if (f == file) { print $1; exit } }' "$WORK/$SUMS")"
+    [ -n "$wanted" ] || fail "$SUMS has no checksum for $asset; nothing was installed."
+    [ "$(sha256 "$WORK/$asset")" = "$wanted" ] \
+        || fail "$asset does not match its checksum in $SUMS; nothing was installed."
+    gzip -dc "$WORK/$asset" > "$WORK/$name"
+    INSTALLED="$INSTALLED $name"
+done
+
+# Everything is checked before anything is placed. Each file is renamed over the old one, so a
+# running session keeps its binary and a new one never sees a half-written file.
+mkdir -p "$INSTALL_DIR/bin" "$LINK_DIR"
+link() {  # link <target> <name>: ~/.local/bin/<name> -> target, never over a real file
+    if [ -e "$LINK_DIR/$2" ] && [ ! -L "$LINK_DIR/$2" ]; then
+        say "⚠️  $LINK_DIR/$2 exists and is not a link; leaving it. Run $1 directly."
+        return
+    fi
+    ln -sfn "$1" "$LINK_DIR/$2"
+}
+for name in $INSTALLED; do
+    install -m 0755 "$WORK/$name" "$INSTALL_DIR/bin/.$name.new"
+    mv -f "$INSTALL_DIR/bin/.$name.new" "$INSTALL_DIR/bin/$name"
+    # Codex looks for its Code Mode host beside its own executable, so that one needs no link.
+    [ "$name" = "codex-code-mode-host" ] || link "$INSTALL_DIR/bin/$name" "$name"
+done
+say "✅ Installed$INSTALLED in $INSTALL_DIR/bin"
+
+# -- the node --------------------------------------------------------------------------------
+
+if [ "$ROLE" = "node" ]; then
+    command -v python3 >/dev/null 2>&1 || fail "the node needs python3 (3.10 or newer) and it was not found."
+    command -v docker >/dev/null 2>&1 \
+        || say "⚠️  docker was not found. The model server runs in Docker; install it before \`puffin-admin server start\`."
+
+    wheel="$(awk -F'\t' '$1 ~ /^dreamference-.*\.whl$/ {print $1; exit}' "$WORK/assets.tsv")"
+    [ -n "$wheel" ] || fail "release $TAG has no Python wheel, so the node cannot be installed from it."
+    fetch "$wheel" || fail "could not download $wheel."
+
+    if [ ! -x "$VENV_DIR/bin/python" ]; then
+        say "🐍 Creating $VENV_DIR ..."
+        python3 -m venv "$VENV_DIR" \
+            || fail "python3 could not create a virtualenv (on Ubuntu: sudo apt install python3-venv)."
+    fi
+    say "📦 Installing puffin-admin and what it depends on (about 6 GB with PyTorch; a few minutes) ..."
+    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
+    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade "$WORK/$wheel"
+    link "$VENV_DIR/bin/puffin-admin" puffin-admin
+    say "✅ Installed puffin-admin $TAG in $VENV_DIR"
+
+    # The settings a model load is refused without. They change the machine outside this home
+    # folder, so the command prints each line before it runs and sudo asks on the terminal; when
+    # this script has no terminal (piped into bash), it reads the keyboard through /dev/tty.
+    say ""
+    if [ -t 0 ]; then
+        "$VENV_DIR/bin/puffin-admin" host setup || true
+    elif (exec < /dev/tty) 2>/dev/null; then
+        "$VENV_DIR/bin/puffin-admin" host setup < /dev/tty || true
+    else
+        "$VENV_DIR/bin/puffin-admin" host check || true
+    fi
+fi
+
+# -- what next -------------------------------------------------------------------------------
+
+case ":$PATH:" in
+    *":$LINK_DIR:"*) ;;
+    *) say ""; say "⚠️  $LINK_DIR is not on your PATH. Add it:  export PATH=\"$LINK_DIR:\$PATH\"" ;;
+esac
+
+say ""
+if [ "$ROLE" = "node" ]; then
+    say "🎉 Done. Next:"
+    say "   puffin-admin server start     # downloads the default model on first use, then serves it"
+    say "   puffin                        # the terminal agent"
+else
+    say "🎉 Done. \`puffin\` needs a Puffin node to talk to: start one on a GB10, then run \`puffin\`."
+fi

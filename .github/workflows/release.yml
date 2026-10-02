@@ -114,6 +114,9 @@ jobs:
         run: |
           pip install build
           python -m build
+          # The installer for a machine with no checkout (README, "Install from a release"): it
+          # downloads this release's other assets, so it travels with them.
+          cp install.sh dist/
       - uses: actions/upload-artifact@v4
         with:
           name: python-dist

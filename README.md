@@ -95,12 +95,30 @@ NVIDIA Container Toolkit, Python 3 and Git. Expect about 70 GB of model weights 
 8–12 minute kernel compile the first time the server loads, and a Rust build of `puffin` that takes
 a few minutes once its dependencies are cached, much longer the first time.
 
+**Install from a release** (no checkout, nothing compiled). [`install.sh`](install.sh) is attached
+to every release from the one after v1.3.0; it downloads that release's prebuilt binaries, checks
+them against the release's checksums, and on a GB10 also installs `puffin-admin` and applies the
+host settings a model load needs (it prints each `sudo` command before running it):
+
+```bash
+export GH_TOKEN=...                  # while the repository is private: a token that can read it
+gh release download -R dgxcoder/dgxcoder -p install.sh && bash install.sh
+puffin-admin server start            # checks the host, downloads and loads the model
+cd ~/my-project && puffin            # start coding
+```
+
+On any other Linux machine the same script installs only the client (`puffin` and its commands).
+Installed this way, `puffin update` moves to a newer release.
+
+**Or from a checkout**, which is what you want for changing Puffin itself:
+
 ```bash
 git clone --recurse-submodules https://github.com/dgxcoder/dgxcoder.git puffin
 cd puffin
 python3 -m venv .venv && .venv/bin/pip install -e .
 export PATH="$PWD/.venv/bin:$PATH"   # add to ~/.bashrc: the agent runs puffin-admin for web search
 
+puffin-admin host setup              # swap, sysctls, earlyoom, sysstat: what a model load needs
 puffin-admin server start            # checks the host, downloads and loads the model
 puffin-admin codex build             # compiles puffin and links it into ~/.local/bin
 cd ~/my-project && puffin            # start coding

@@ -241,6 +241,18 @@ Install the pinned tools of puffin-code's code index.
 
 Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin.
 
+### `puffin-admin host`
+
+Check or apply the host settings a model load needs (swap, sysctls, earlyoom, sysstat).
+
+#### `puffin-admin host check`
+
+Show what `server start` would refuse over, changing nothing.
+
+#### `puffin-admin host setup`
+
+Apply the settings; each command is printed first and sudo asks for your password.
+
 ### `puffin-admin night`
 
 Run the Night Shift queue overnight (tasks are queued with /night add).
@@ -430,18 +442,6 @@ Stop a paired node's model server.
 |---|---|
 | `name` | The paired node. |
 
-#### `puffin-admin node authorize`
-
-(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only.
-
-#### `puffin-admin node serve-job`
-
-(Run by sshd as a paired key's forced command) carry out one node operation.
-
-| Option | Description |
-|---|---|
-| `--key` | The connecting key's tag. |
-
 #### `puffin-admin node run`
 
 Run a command on a paired node, in this repository at HEAD; its changes come back as a branch.
@@ -494,6 +494,18 @@ Bring a job's result branch into the repository it was sent from.
 | Option | Description |
 |---|---|
 | `job` | The job id. |
+
+#### `puffin-admin node authorize`
+
+(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only.
+
+#### `puffin-admin node serve-job`
+
+(Run by sshd as a paired key's forced command) carry out one node operation.
+
+| Option | Description |
+|---|---|
+| `--key` | The connecting key's tag. |
 
 ### `puffin-admin benchmark_server`
 

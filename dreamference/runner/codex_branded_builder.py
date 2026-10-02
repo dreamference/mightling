@@ -21,6 +21,11 @@ crates it touches rather than the several hundred dependencies beneath them.
 The agent's web commands, `puffin-search` and `puffin-fetch`, are built here too, from the
 standalone crate `puffin-web-rs/`: a separate Cargo build with its own lockfile, target directory
 and stamp, installed beside `puffin`, so either can be rebuilt without the other.
+
+All of that needs a checkout. A machine installed from a release (`install.sh`) has the package
+from a wheel and the binaries from the release's assets, with no `codex/`, `codex-patches/` or
+crate directories beside it; `has_source()` tells the two apart, and without source the installed
+binaries count as current, since there is nothing here they could be rebuilt from.
 """
 
 import hashlib
@@ -131,6 +136,37 @@ class CodexBrandedBuilder:
         return os.path.join(INSTALL_DIR, "bin", BRANDED_EXECUTABLE_NAME)
 
     @classmethod
+    def has_source(cls) -> bool:
+        """
+        Tells a checkout from a release install.
+
+        Until 2026-10-02 a release install was treated as a stale build: `puffin-admin run` and
+        `codex build` installed rustup and then died with FileNotFoundError on the missing
+        `puffin-web-rs/` (measured with the v1.3.0 wheel in a scratch home).
+
+        Returns:
+            bool: True if the patch series and the launcher crate are beside the package, i.e.
+            `puffin` can be built here.
+        """
+        return os.path.isdir(CODEX_PATCH_DIR) and os.path.isdir(PUFFIN_CRATE_DIR)
+
+    @classmethod
+    def binaries_installed(cls, names: tuple) -> bool:
+        """
+        Checks that binaries are present in the install directory.
+
+        Args:
+            names (tuple): File names under `bin/`.
+
+        Returns:
+            bool: True if every one is an executable file.
+        """
+        return all(
+            os.path.isfile(path) and os.access(path, os.X_OK)
+            for path in (os.path.join(INSTALL_DIR, "bin", name) for name in names)
+        )
+
+    @classmethod
     def patches(cls) -> List[str]:
         """
         Lists the patch series in the order it is applied.
@@ -222,8 +258,10 @@ class CodexBrandedBuilder:
         Checks that both binaries are installed and were built from the current inputs.
 
         Returns:
-            bool: True if no rebuild is needed.
+            bool: True if no rebuild is needed. Without a checkout, True if they are installed.
         """
+        if not cls.has_source():
+            return cls.binaries_installed((BRANDED_EXECUTABLE_NAME, CODE_MODE_HOST_NAME))
         key = cls.build_key()
         stamp = os.path.join(INSTALL_DIR, BUILD_STAMP_NAME)
         if key is None or not os.path.isfile(stamp):
@@ -399,11 +437,31 @@ class CodexBrandedBuilder:
         Returns:
             bool: True if an up-to-date `puffin` and its web commands are installed afterwards.
         """
+        if not cls.has_source():
+            return cls._release_install_report()
         # First and independently: the web commands and the code index take seconds, and a stale
         # Codex must not keep them from updating, nor they it.
         web_ok = cls.build_web_tools(force=force)
         code_ok = cls.build_code_index(force=force)
         return cls._build_codex(force=force) and web_ok and code_ok
+
+    @classmethod
+    def _release_install_report(cls) -> bool:
+        """
+        What `build()` does where there is nothing to build from: says so, and refreshes the links.
+
+        Returns:
+            bool: True if the release's `puffin` is installed.
+        """
+        if cls.is_current():
+            cls.link_onto_path()
+            print(f"✅ puffin is installed from a release ({cls.executable_path()}); there is no "
+                  "source here to build it from. `puffin update` installs a newer release.")
+            return True
+        print("❌ puffin is not installed, and this is not a checkout, so it cannot be built here.")
+        print("💡 Install the release's binaries with install.sh (see the README), or clone the "
+              "repository and run `puffin-admin codex build` there.")
+        return False
 
     @classmethod
     def _build_codex(cls, force: bool = False) -> bool:
@@ -521,8 +579,11 @@ class CodexBrandedBuilder:
             bin_names (tuple): The binaries it installs.
 
         Returns:
-            bool: True if no rebuild is needed.
+            bool: True if no rebuild is needed. Without the crate's source, True if they are
+            installed.
         """
+        if not os.path.isdir(crate_dir):
+            return cls.binaries_installed(bin_names)
         stamp = os.path.join(INSTALL_DIR, stamp_name)
         if not os.path.isfile(stamp):
             return False

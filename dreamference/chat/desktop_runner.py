@@ -149,6 +149,44 @@ class DesktopRunner:
         return True
 
     @classmethod
+    def has_source(cls) -> bool:
+        """
+        Tells a checkout from a release install, which has the package but no `desktop/` project.
+
+        Returns:
+            bool: True if the Tauri project is beside the package, i.e. the app can be built here.
+        """
+        return os.path.isdir(os.path.join(DESKTOP_PROJECT_DIR, "src-tauri"))
+
+    @classmethod
+    def _no_source(cls) -> int:
+        """
+        Says why the desktop app cannot be built on a machine installed from a release.
+
+        Returns:
+            int: 1.
+        """
+        print("❌ The desktop app is built from the repository's desktop/ project, which a release "
+              "install does not have.")
+        print("💡 Install the app from the release instead: the Puffin .deb or AppImage on the "
+              "release page puts `puffin-app` in your launcher.")
+        return 1
+
+    @classmethod
+    def _run_installed(cls) -> int:
+        """
+        Opens the desktop app a release's `.deb` installed, where there is no project to run.
+
+        Returns:
+            int: The app's exit code, or 1 if it is not installed.
+        """
+        installed = shutil.which("puffin-app")
+        if installed is None:
+            return cls._no_source()
+        print("🚀 Opening the Puffin desktop window...")
+        return subprocess.call([installed], env=cls._environment())
+
+    @classmethod
     def run(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> int:
         """
         Opens the Puffin desktop window, building it first if necessary.
@@ -163,6 +201,8 @@ class DesktopRunner:
             print(f"❌ Puffin is not answering at {web_url}.")
             print("💡 Start it first: puffin-admin puffin start")
             return 1
+        if not cls.has_source():
+            return cls._run_installed()
         if not cls._ensure_toolchain():
             return 1
 
@@ -194,6 +234,8 @@ class DesktopRunner:
         Returns:
             int: 0 on success, non-zero on failure.
         """
+        if not cls.has_source():
+            return cls._no_source()
         if not cls._ensure_toolchain():
             return 1
 
@@ -335,6 +377,8 @@ class DesktopRunner:
         Returns:
             int: 0 if the toolchain is complete afterwards.
         """
+        if not cls.has_source():
+            return cls._no_source()
         if not cls._ensure_toolchain():
             return 1
         if cls.binary_path():

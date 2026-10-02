@@ -950,6 +950,12 @@ class DreamferenceCLIController:
             "setup", help="Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin"
         )
 
+        # Command: puffin-admin host (the settings a model load is refused without)
+        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load needs (swap, sysctls, earlyoom, sysstat)")
+        host_subparsers = host_parser.add_subparsers(dest="host_command")
+        host_subparsers.add_parser("check", help="Show what `server start` would refuse over, changing nothing")
+        host_subparsers.add_parser("setup", help="Apply the settings; each command is printed first and sudo asks for your password")
+
         # Command: puffin-admin night (Night Shift: run queued tasks overnight)
         night_parser = subparsers.add_parser("night", help="Run the Night Shift queue overnight (tasks are queued with /night add)")
         night_subparsers = night_parser.add_subparsers(dest="night_command")
