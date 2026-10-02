@@ -2244,12 +2244,6 @@ class DreamferenceCLIController:
                 sys.exit(NodeRemote.start(args.name))
             if args.node_command == "stop":
                 sys.exit(NodeRemote.stop(args.name))
-            if args.node_command == "authorize":
-                sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
-            if args.node_command == "serve-job":
-                sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
-            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop,run,jobs,logs,cancel,fetch}")
-            sys.exit(2)
             if args.node_command in ("run", "jobs", "logs", "cancel", "fetch", "job-exec"):
                 from dreamference.node import NodeJob, NodeJobSender
                 if args.node_command == "run":
@@ -2265,6 +2259,12 @@ class DreamferenceCLIController:
                 if args.node_command == "fetch":
                     sys.exit(NodeJobSender.fetch(args.job))
                 sys.exit(NodeJob.execute(args.job))
+            if args.node_command == "authorize":
+                sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
+            if args.node_command == "serve-job":
+                sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
+            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop,run,jobs,logs,cancel,fetch}")
+            sys.exit(2)
 
         elif args.command == "host":
             from dreamference.vllm_server import HostSafetySetup
