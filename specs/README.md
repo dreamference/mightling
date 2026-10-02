@@ -2,7 +2,7 @@
 
 > - **Version:** 1.2.0 (`dreamference.__version__`)
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified memory)
-> - **Deployment Model:** single-node, air-gapped (a client/node split over the local network is proposed in [PUFFIN_NODE](./DREAMFERENCE_PUFFIN_NODE.md))
+> - **Deployment Model:** single-node, air-gapped by default; a GB10 offered to the local network with `puffin-admin node enable` serves clients that find it over mDNS ([PUFFIN_NODE](./DREAMFERENCE_PUFFIN_NODE.md), Part 1 built in part)
 > - **License:** AGPL-3.0-or-later
 > - **Specs last reconciled with the code:** 2026-09-28; the descriptive specs were re-checked against the parser, the model registry and the source tree on 2026-10-01
 
@@ -18,7 +18,7 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
-| [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Proposed:* splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; then several nodes with no stored roles, and jobs sent to another node over SSH |
+| [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Part 1 partly implemented (2026-10-02, §18):* splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; then several nodes with no stored roles, and jobs sent to another node over SSH |
 | [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the nine packages |
 | [DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md) | Source layout, class inventory, import conventions, the default model's full launch command |
 | [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md) | Requirements, installation, helper scripts, troubleshooting |
@@ -85,6 +85,8 @@ The reconciliation on 2026-09-28 found these places where the **code** was wrong
 | Where | Behaviour | Why it stays | Spec |
 |---|---|---|---|
 | Model server on `0.0.0.0:8000` | Listens on every interface with no API key, so any machine on the LAN can send it prompts | Puffin assumes the local network is trusted (decided 2026-09-30). The server must answer on the Docker bridge for Onyx and OpenHands, and binding the bridge address alone would break every `localhost:8000` client. On an untrusted network the user blocks the port with a firewall rule (`docs/privacy.md`) | INFERENCE |
+| Web UI on `0.0.0.0:3000`, **on an advertised node only** | After `puffin-admin node enable`, port 3000 is published on every interface: the web UI's one account, its chat history and its Gmail tool are open to the LAN | `puffin-app` and a browser on client machines need it; the user decided on 2026-10-02 that the web UI is shared by default. `node enable --no-web` keeps it on loopback, and a node that is not enabled keeps the loopback bind of 2026-09-29. Port 80 never leaves loopback | [PUFFIN_NODE §4, §15.1](./DREAMFERENCE_PUFFIN_NODE.md) |
+| SearXNG on `0.0.0.0:8888`, **on an advertised node only** | After `node enable`, any machine on the LAN can send searches through the node | `puffin-search` on a client asks the node's SearXNG. Loopback-only otherwise, as fixed on 2026-09-29 | [PUFFIN_NODE §4](./DREAMFERENCE_PUFFIN_NODE.md) |
 
 ### Fixed on 2026-09-30
 

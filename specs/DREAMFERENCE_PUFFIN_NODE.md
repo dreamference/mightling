@@ -1,6 +1,6 @@
 # Puffin Node — splitting Puffin into a client and `puffin-node`
 
-**Status:** proposed. Nothing in this spec is implemented yet. §2 and §13.8 list what was checked on this machine on 2026-10-01 and what is still assumed; with one GB10 here, nothing between two machines was run.
+**Status:** Part 1 is implemented in part, on 2026-10-02: the node side (`puffin-admin node enable|disable|status`), the launcher's resolution tiers and `puffin node`, `puffin-search` on the node's SearXNG, and `puffin-app`'s forwarder. **§18 records what was built, what was measured and what was not;** where it differs from the sections above, §18 and §15.1 win. With one GB10 here, nothing between two machines was run, and nothing was built for macOS or Windows. Parts 2 and 3 are proposed, except the pieces §18 names.
 **Target:** the GB10 (DGX Spark) as the server, and Ubuntu, macOS and Windows machines on the same local network as clients.
 **Builds on:**
 - the launcher in `puffin-rs/` and its `vllm_host()` tiers ([PUFFIN_CODEX](./DREAMFERENCE_PUFFIN_CODEX.md));
@@ -14,8 +14,8 @@
 
 1. **`puffin-node` names a role, not a renamed command.** It is the server half of the product: the model server and its sidecars on a GB10, the service advertised on the network (`_puffin-node._tcp`), and the install profile. The node's command line stays `puffin-admin`, which gains a `node` group. Renaming the console script would break every install and the prompt's `puffin-admin gmail` line. If a `puffin-node` executable is wanted as well, it is an alias (§15, question 1).
 2. **The client is Rust binaries only: no Python, no Docker.** `puffin`, `codex-code-mode-host`, `puffin-code`, `puffin-search`, `puffin-fetch` and `puffin-app`. Everything Python stays on the node.
-3. **No new always-on daemon for the split.** The node's existing Avahi daemon advertises it, and clients talk to the services' own ports. A front-door reverse proxy was considered and rejected (§5.4). The one new process, a control agent for managing a node from another machine, exists only in the several-node phase and only where its owner switches it on (§12.4).
-4. **No authentication and no TLS**, as the trusted-LAN decision says. Using a node (inference, search, the web UI) is open as soon as the node is advertised. Controlling one (loading or stopping its model from another machine) is a different class of act and has its own switch, off by default (§12.4).
+3. **No new always-on daemon for the split.** The node's existing Avahi daemon advertises it, and clients talk to the services' own ports. A front-door reverse proxy was considered and rejected (§5.4). (A control agent for managing a node from another machine was designed in §12.4 and dropped on 2026-10-02: control goes over SSH, §15.1.)
+4. **No authentication and no TLS**, as the trusted-LAN decision says. Using a node (inference, search, the web UI) is open as soon as the node is advertised. Controlling one (loading or stopping its model from another machine) is a different class of act and needs the SSH pairing (§13.2, §15.1).
 5. **A GB10 gets both halves; every other machine gets the client only** (§9).
 6. **Three parts, in order.** Part 1 is the split with one node (§3–§11). Part 2 is several nodes (§12). Part 3 is running jobs on another node (§13). Neither later part delays the first.
 7. **Nodes have no roles.** Every node installs identically; there is no "primary" or "secondary" setting and no question at install time. The machine a person runs `puffin-admin node …` on is the one doing the managing (§12.4).
@@ -133,7 +133,7 @@ Under the trusted-LAN decision both become "accepted by design" on an advertised
 | `search` | `8888` | Port of SearXNG; absent when it is not shared. |
 | `state` | `ready` | `stopped`, `loading` or `ready`. Written by `server start` when it launches the model (`loading`) and when `/v1/models` first answers (`ready`), and by `server stop`. It changes once per launch, not per request. |
 | `main` | `1` | Present when the model assigned to the node is a chat model a coding client can use: any matrix entry that is not a diffusion, speech or embedding model. It is a property of the matrix entry, so nobody sets it. Used only to choose between several nodes (§12.3). |
-| `control` | `8002` | Port of the node's control agent; absent unless the owner switched remote control on (§12.4). |
+| ~~`control`~~ | | Not advertised. The open control agent was dropped on 2026-10-02 (§15.1): control between nodes goes over the SSH pairing, which needs no advertised port. |
 
 Nothing that changes from minute to minute is advertised. Which model is loaded and its context length are asked of the model server itself (`/v1/models`), which the launcher already does. `state` is advertised because the server cannot say it: SGLang opens its port only once the model is loaded, so a refused connection looks the same for a stopped node and a loading one.
 
@@ -144,7 +144,7 @@ Nothing that changes from minute to minute is advertised. Which model is loaded 
 - **Why a file and not a process.** A file needs no running publisher, so the node is advertised after a reboot with nobody logged in, like the model containers. A user unit holding the registration would need lingering, which is off here (§2).
 - **Why Avahi and not a responder of our own.** The node already runs one. A second responder on the same host competes for port 5353 and for the host name.
 - **It needs root once**, to create the file under `/etc/avahi` and hand its ownership to the node's user. The command is printed before it runs and `sudo` prompts on the terminal, the rule `puffin-admin desktop install` set. Where `sudo` cannot prompt, the file's content and destination are printed instead.
-- **Later changes need no root.** The file holds the model port, the version and the `state`, `main` and `control` records. `server start`, `server stop` and an update rewrite it, as the user who owns it. That Avahi publishes a service file not owned by root is assumed, and is a Phase 0 check; if it does not, those commands say that `node enable` must be run again instead.
+- **Later changes need no root.** The file holds the model port, the version and the `state` and `main` records. `server start`, `server stop` and an update rewrite it, as the user who owns it. That Avahi publishes a service file not owned by root is assumed, and is a Phase 0 check; if it does not, those commands say that `node enable` must be run again instead.
 - **Interfaces.** Avahi advertises on the Docker bridges too (§2). That is harmless and is left alone: changing `allow-interfaces` would edit a system file other software reads.
 
 ### 5.3 The client side: `mdns-sd`
@@ -358,7 +358,7 @@ Stated so the trade is visible, not to reopen it:
 - **Anyone on the local network can use the node**: send prompts to the model, search through its SearXNG, and (unless `--no-web`) use the web UI with its one account, its chat history and its Gmail tool.
 - **Nothing is encrypted.** Prompts, source code in them and completions cross the LAN in clear text.
 - **mDNS can be spoofed.** A device on the LAN that advertises `_puffin-node._tcp` would be offered as a node, and a client that chose it would send it prompts and code. The guard is the rule of §6.3: a node is remembered by id, and a different one is never adopted without the user choosing it. That is protection against accidents, not against an attacker on the LAN, who by the trusted-LAN assumption is not there.
-- **Nothing new reaches the internet.** Discovery is multicast on the local link, and a client's traffic goes to the node's LAN address. The egress audit runs only on a node, where `puffin` uses loopback (tier 3), so its allow-list does not change; the check that matters is that it still passes with `node enable` on (§16). If the audit is ever run from a client, the node's address and its three ports join the allow-list.
+- **Nothing new reaches the internet.** Discovery is multicast on the local link, and a client's traffic goes to the node's LAN address. The egress audit runs only on a node and names the model server to `puffin` itself (`DREAMFERENCE_VLLM_HOST`, tier 1), so the launcher never browses during it and its allow-list does not change. That matters: a browse is a multicast DNS query, which the audit would count as a failure. The check that matters is that it still passes with `node enable` on (§16). If the audit is ever run from a client, the node's address and its three ports join the allow-list.
 - **A node that should not be shared is not advertised.** Without `node enable` every bind stays as it is today.
 
 ---
@@ -417,7 +417,7 @@ The QSFP link is still useful under (a): copying a model's files from one Spark'
 
 **What "trusted LAN, no authentication" means for control.** Inference open to the LAN means anyone on it can *use* the node. Control open to the LAN means anyone on it can stop the model under someone's session, start a load (the one operation that can freeze a unified-memory host, which is why host safety exists), or make a node download tens of gigabytes. That is a different class from sending a prompt, so it gets its own switch.
 
-**Chosen: a per-node switch, off until the owner turns it on, and then open to the LAN.**
+**Superseded on 2026-10-02 (§15.1): control uses the SSH pairing of §13.2, and the switch and agent below are not built.** The text is kept for the reasoning. *Originally chosen: a per-node switch, off until the owner turns it on, and then open to the LAN.*
 - `puffin-admin node control on`, typed once on the node being offered, starts a small control agent there (a user service, port 8002, advertised in the `control` TXT record) with exactly three operations: status, set-model-and-start, stop. It is the only new process in this spec, it runs only where switched on, and it is never in the path of a token.
 - With it on, no key, password or pairing is needed: any machine on the LAN can run `node set` against it. That is the trusted-LAN decision applied to control, by a deliberate act at the node's own keyboard.
 - With it off, which is the state of a single-Spark install, the node can be changed only from its own shell, as today.
@@ -618,3 +618,60 @@ Live, on two machines:
 - [Two-node DGX Spark vLLM and Ray deployment (community)](https://github.com/makiisthenes/dgx-spark-multinode-vllm-ray)
 - [exo](https://github.com/exo-explore/exo)
 - [GPUStack](https://github.com/gpustack/gpustack)
+
+---
+
+## 18. As built (2026-10-02)
+
+Built on one GB10 with no second machine, no root and no Mac or Windows machine. Everything below says which of "tested offline", "run live here" or "not run" applies.
+
+### 18.1 What exists
+
+| Piece | Where | State |
+|---|---|---|
+| `puffin-admin node enable [--no-web]`, `disable`, `status` | `dreamference/node/` (`NodeAdvertiser`, `NodeServiceFile`, `NodeSettings`, `NodeIdentity`, `NodeBrowser`) | Tested offline (20 tests). `status` run live. **`enable` was not run on this machine**: it needs root once and it opens the web UI to the LAN, which is the owner's act |
+| The Avahi service file, rewritten by `server start|stop|remove` | `NodeServiceFile`; hooks in the CLI controller | Exact text tested; the three state changes tested |
+| The two binds (§4) | `OnyxRunner.web_bind_env()`, `SearxngSidecar.run_command()` and `start()` | Tested offline; no container was recreated |
+| The locator crate and its copies | `puffin-rs/node-locator/`, `puffin-web-rs/src/node_locator.rs`, `desktop/src-tauri/src/node_locator.rs` | 8 tests; a Python test holds the three byte-identical |
+| The resolution tiers, the messages, `node.json` | `puffin-rs/src/node.rs`, three hunks in `lib.rs` | 25 launcher tests with a stand-in browser. The real browse run live (§18.3) |
+| `puffin node list|use|forget`, `PUFFIN_NODE=<name>` | `node.rs` | Parsing and decisions tested; **not run as a command**: the installed `puffin` predates it (§18.4) |
+| `puffin-search` on the node's SearXNG | `puffin-web-rs/src/search.rs` | 3 new tests in the web crate's 43 |
+| `puffin-app`'s forwarder | `desktop/src-tauri/src/forwarder.rs`, `discover.rs`, `main.rs` | 7 tests; the crate builds; the forwarder run live in front of the real web UI (§18.3) |
+| `/night add` refused on a client; Gmail prompt block only on a node | `puffin-rs/src/night.rs`, `lib.rs` | Tested |
+
+### 18.2 Where the build departs from the design
+
+- **Whether a node is advertised is not a `dreamference.toml` value.** §4 names one config value, `node_advertise`. It is kept in `~/.config/dreamference/node-advertise.json` instead: `dreamference.toml` is resolved from the working directory first, and the address a container publishes on must not depend on the folder `puffin-admin puffin configure` was run from.
+- **A machine becomes a node when it first loads a model, builds `puffin` or builds the window**, not only at `node enable`: `server start`, `codex build` and `desktop build|install` write `~/.config/dreamference/node-id` if it is missing. Otherwise a GB10 that never ran `node enable` would browse for a node on every start (tier 3 is keyed on that file).
+- **A last tier keeps an old install working.** With no node id, nothing remembered and nothing found, the launcher uses `localhost:8000` if a model server answers there, and `puffin-app` uses a web UI answering on `localhost:3000`. This is the GB10 that was installed before the split and has not run any of the three commands above yet. It costs such a machine one 2 s browse per start until then.
+- **`PUFFIN_NODE` ranks above "this machine is a node"**, so a node can use another node for one command.
+- **Loopback and link-local IPv6 addresses are never used from a browse.** §5.3 says IPv6 "with its scope id"; the URL type the launcher uses cannot carry a scope, so a link-local IPv6 answer is dropped and a global or unique-local one is used. Loopback is dropped because a machine that browses is by definition not the node it finds.
+- **A stale advert and a node still loading after a reboot look the same.** The file says `ready` from before the reboot while Docker restarts the model server. The message for `state=ready` with a refusing port therefore says both: the server may have stopped, or may still be loading.
+- **`disable` without root empties the file** instead of removing it (the folder is root's, the file is the user's), and prints the `sudo rm` line. That Avahi publishes nothing from an empty file is assumed.
+- **No `control` record** (§15.1).
+- **`puffin-app` reads `node.json` and never writes it.** It browses for itself, with the launcher's rules, but only the launcher remembers a node. With several nodes and none remembered the window shows a page naming `puffin node use <name>`.
+- **The forwarder is a TCP forwarder, not an HTTP proxy.** It copies bytes, so a streamed response, a WebSocket upgrade and the unchanged `Host` header need no code of their own. With no node, or a node that does not answer, it answers each request with a page that says so and reloads itself every 10 s.
+- **Night Shift names its model server to every task** (`DREAMFERENCE_VLLM_HOST`), as the egress audit, SWE-bench and the Codex test runner already did, so no unattended caller ever reaches the browse.
+- **`puffin-code` needed no change.** Its busy probe asks `vllm_host`, default `localhost:8000`; on a client nothing answers there, which it already treats as "no model server" and does not freeze for.
+
+### 18.3 Measured on this machine
+
+- **`mdns-sd` browses beside Avahi.** With a test advert published through Avahi (`avahi-publish -s … _puffin-node._tcp 8000 proto=1 node=… state=ready main=1`), the launcher's own browse found it in 0.48 s with all records, and in 1.08 s when told which id to stop at. Phase 0's item for Linux is answered.
+- **A browse run on the node itself is answered once per interface**: three browses gave `172.18.0.1`, `172.19.0.1` and `127.0.0.1`, never the Wi-Fi address. §2's assumption that a LAN client receives only the LAN record is what makes "stop at the first answer" safe, and **it was not verified from a second machine**. If a client can receive more than one address for a node, `node.json` would be rewritten, with a "now at" line, on each start.
+- **The forwarder in front of the real web UI**: `/app` (44,756 bytes, the same as direct), `/api/health` and a login `POST` answer through it as they do directly, with `Host: localhost:3000` passed through.
+- **The web UI is not reachable on the LAN address today** (`192.168.50.105:3000` refuses), as it should be on a node that has not been enabled.
+
+### 18.4 Not built, not run
+
+- **No end-to-end client run.** The Phase 1 "done when" (a second machine runs `puffin` with nothing configured) needs a second machine, and even the one-machine stand-in needs a `puffin` binary with the new launcher, which was not built: another task was using the installed binary and memory was short. `puffin-admin codex build` produces it.
+- **`node enable` with root**, the file under `/etc/avahi/services`, Avahi publishing a file the user owns, and the two containers recreated on `0.0.0.0`.
+- **SearXNG answering a LAN client** (its limiter may treat non-loopback addresses differently).
+- **The auto sign-in of §7**, the installers of §9 for macOS and Windows, the release matrix of §8.1, `puffin-code setup` in Rust (§8.3), and every macOS and Windows build. The macOS bundle's two local-network keys are in `desktop/src-tauri/Info.plist`, untested.
+- **Voice through the forwarder**, and the window on port 33000.
+- **Part 2**, beyond the `main` record and the choice rule, which the launcher already applies. **Part 3.**
+
+### 18.5 Tests
+
+- `tests/test_node.py` (Python): the service file's exact text; an update changing one record; a node never enabled never advertised by a side effect; the state through `server start|stop`; a file the user cannot write reported; the node id written once; settings independent of the working directory; the web UI's and SearXNG's publish addresses; SearXNG recreated when its address no longer matches; `enable` without root (binds applied, file printed), with root once (then no root), `disable` with and without root; `status`; the browse output; the three locator copies; the commands; every unattended caller naming its model server.
+- `puffin-rs/src/node.rs` (launcher, in the export): each tier in order; a node never browses; the remembered node found again by id at a new address; the last address only when nothing answers; a different node never adopted silently; several nodes with and without exactly one `main`; the refusal where no question can be asked; `proto` too new; each message of §6.4; names, addresses and id prefixes; `puffin node` parsing, `use`, `forget`, the list; the advert parsed; address choice; one row per node; `node.json` written whole; the version notice once a day. One ignored test runs the real browse.
+- `puffin-rs/node-locator` (8), `puffin-web-rs` (3 new), `desktop/src-tauri` (forwarder 4, discovery 3).
