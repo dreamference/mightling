@@ -44,6 +44,9 @@ const USAGE: &str = "Usage: puffin node [list] | puffin node use <name|address> 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Advert {
     pub node: Node,
+    /// Every usable address the node answered on, best first; `node.address` is the first, or
+    /// the remembered one when the node still answers there.
+    pub addresses: Vec<String>,
     /// The advertised contract version; a higher one than [`locator::PROTO`] is refused.
     pub proto: u32,
     /// `stopped`, `loading` or `ready`; empty when the node does not say.
@@ -55,8 +58,9 @@ pub struct Advert {
 /// Something that can browse the local network for nodes. The real one is [`MdnsBrowser`]; the
 /// tests use a list.
 pub trait Browser {
-    /// Returns the nodes that answered. With `wanted` set it may stop at the first node of that id.
-    fn browse(&self, wanted: Option<&str>) -> Vec<Advert>;
+    /// Returns the nodes that answered. With `wanted` set (the remembered node) it may stop as
+    /// soon as that node answers on its remembered address.
+    fn browse(&self, wanted: Option<&Node>) -> Vec<Advert>;
 }
 
 /// What the tiers are decided from.
@@ -111,12 +115,19 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
         if remembered.node.is_empty() {
             return Resolution::LastAddress { node: remembered.clone(), note: None };
         }
-        let found = browser.browse(Some(&remembered.node));
+        let found = browser.browse(Some(remembered));
         if let Some(advert) = found.iter().find(|advert| advert.node.node == remembered.node) {
+            // A node with several addresses (two interfaces, or seen from its own machine) keeps
+            // the one that is remembered for as long as it answers there: the address changes,
+            // and the line that says so appears, only when the node has really moved.
+            let mut advert = advert.clone();
+            if advert.addresses.iter().any(|address| *address == remembered.address) {
+                advert.node.address = remembered.address.clone();
+            }
             let note = (advert.node.address != remembered.address).then(|| {
                 format!("Node {} is now at {}.", label(&advert.node), advert.node.address)
             });
-            return checked(advert.clone(), true, note);
+            return checked(advert, true, note);
         }
         if found.is_empty() {
             return Resolution::LastAddress {
@@ -548,7 +559,7 @@ pub fn list_lines(inputs: &Inputs, adverts: &[Advert], models: &[Option<crate::S
 pub struct MdnsBrowser;
 
 impl Browser for MdnsBrowser {
-    fn browse(&self, wanted: Option<&str>) -> Vec<Advert> {
+    fn browse(&self, wanted: Option<&Node>) -> Vec<Advert> {
         let Ok(daemon) = mdns_sd::ServiceDaemon::new() else {
             return Vec::new();
         };
@@ -576,9 +587,14 @@ impl Browser for MdnsBrowser {
                     let Some(advert) = advert_from(&service.fullname, service.port, &addresses, &records) else {
                         continue;
                     };
-                    let is_wanted = wanted.is_some_and(|wanted| advert.node.node == wanted);
+                    let id = advert.node.node.clone();
                     merge(&mut found, advert);
-                    if is_wanted {
+                    // The remembered node, answering where it is remembered: nothing more to learn.
+                    let settled = wanted.is_some_and(|wanted| {
+                        wanted.node == id
+                            && found.iter().any(|seen| seen.node.node == id && seen.addresses.contains(&wanted.address))
+                    });
+                    if settled {
                         break;
                     }
                     settle.get_or_insert(Instant::now() + SETTLE);
@@ -602,11 +618,13 @@ pub fn advert_from(fullname: &str, port: u16, addresses: &[IpAddr], records: &[(
         .strip_suffix(locator::SERVICE_TYPE)
         .map(|name| name.trim_end_matches('.'))
         .unwrap_or(fullname);
+    let usable = usable_addresses(addresses);
     Some(Advert {
+        addresses: usable.iter().map(IpAddr::to_string).collect(),
         node: Node {
             node: record("node").unwrap_or_default().to_string(),
             name: name.to_string(),
-            address: best_address(addresses)?.to_string(),
+            address: usable.first()?.to_string(),
             model_port: port,
             web_port: port_record("web"),
             search_port: port_record("search"),
@@ -626,6 +644,11 @@ pub fn advert_from(fullname: &str, port: u16, addresses: &[IpAddr], records: &[(
 /// machine is looking for, because a node does not browse (the live browse of 2026-10-02, run on
 /// the node itself, was answered on loopback and on each Docker bridge in turn).
 pub fn best_address(addresses: &[IpAddr]) -> Option<IpAddr> {
+    usable_addresses(addresses).first().copied()
+}
+
+/// The addresses a client can connect to, best first, without duplicates.
+pub fn usable_addresses(addresses: &[IpAddr]) -> Vec<IpAddr> {
     let rank = |address: &IpAddr| match address {
         IpAddr::V4(v4) if v4.is_loopback() => None,
         IpAddr::V4(v4) if v4.is_link_local() => Some(1),
@@ -636,11 +659,12 @@ pub fn best_address(addresses: &[IpAddr]) -> Option<IpAddr> {
     };
     let mut usable: Vec<(u8, IpAddr)> = addresses.iter().filter_map(|address| Some((rank(address)?, *address))).collect();
     usable.sort();
-    usable.first().map(|(_, address)| *address)
+    usable.dedup();
+    usable.into_iter().map(|(_, address)| address).collect()
 }
 
-/// Adds a node to those found, or improves the address of one already there: answers arrive per
-/// interface and per address family, and one node must be one row.
+/// Adds a node to those found, or adds the addresses of this answer to one already there: answers
+/// arrive per interface and per address family, and one node must be one row, at its best address.
 fn merge(found: &mut Vec<Advert>, advert: Advert) {
     let same = |other: &Advert| {
         if advert.node.node.is_empty() { other.node.name == advert.node.name } else { other.node.node == advert.node.node }
@@ -648,14 +672,19 @@ fn merge(found: &mut Vec<Advert>, advert: Advert) {
     match found.iter_mut().find(|other| same(other)) {
         None => found.push(advert),
         Some(existing) => {
-            let old: Option<IpAddr> = existing.node.address.parse().ok();
-            let new: Option<IpAddr> = advert.node.address.parse().ok();
-            let better = match (old, new) {
-                (Some(old), Some(new)) => best_address(&[old, new]) == Some(new) && old != new,
-                _ => false,
+            let all: Vec<IpAddr> = existing
+                .addresses
+                .iter()
+                .chain(advert.addresses.iter())
+                .filter_map(|address| address.parse().ok())
+                .collect();
+            let usable = usable_addresses(&all);
+            let address = usable.first().map(IpAddr::to_string).unwrap_or_else(|| existing.node.address.clone());
+            *existing = Advert {
+                addresses: usable.iter().map(IpAddr::to_string).collect(),
+                node: Node { address, ..advert.node },
+                ..advert
             };
-            let address = if better { advert.node.address.clone() } else { existing.node.address.clone() };
-            *existing = Advert { node: Node { address, ..advert.node }, ..advert };
         }
     }
 }
@@ -684,14 +713,15 @@ mod tests {
     }
 
     impl Browser for Fixed {
-        fn browse(&self, wanted: Option<&str>) -> Vec<Advert> {
-            self.asked.borrow_mut().push(wanted.map(str::to_string));
+        fn browse(&self, wanted: Option<&Node>) -> Vec<Advert> {
+            self.asked.borrow_mut().push(wanted.map(|node| node.node.clone()));
             self.adverts.clone()
         }
     }
 
     fn advert(name: &str, id: &str, address: &str) -> Advert {
         Advert {
+            addresses: vec![address.to_string()],
             node: Node {
                 node: id.to_string(),
                 name: name.to_string(),
@@ -756,6 +786,22 @@ mod tests {
         // At the same address nothing is said.
         let same = Fixed::new(vec![spark1()]);
         assert_eq!(resolve(&inputs, &same), Resolution::Found { advert: spark1(), remember: true, note: None });
+    }
+
+    #[test]
+    fn a_node_with_several_addresses_keeps_the_remembered_one() {
+        // Seen live on 2026-10-02: a node with a Wi-Fi address and Docker bridges answered a
+        // different address on each start, and each start said it had moved.
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        let mut seen = advert("spark-1", "11111111-aaaa", "172.18.0.1");
+        seen.addresses = vec!["172.18.0.1".into(), "192.168.50.105".into()];
+        assert_eq!(
+            resolve(&inputs, &Fixed::new(vec![seen.clone()])),
+            Resolution::Found { advert: Advert { node: spark1().node, ..seen.clone() }, remember: true, note: None }
+        );
+        // It no longer answers there: it has moved, and the line says so.
+        seen.addresses = vec!["172.18.0.1".into()];
+        assert!(matches!(resolve(&inputs, &Fixed::new(vec![seen])), Resolution::Found { note: Some(note), .. } if note.contains("now at 172.18.0.1")));
     }
 
     #[test]
@@ -940,6 +986,7 @@ mod tests {
         merge(&mut found, advert("spark-2", "2222", "192.168.50.106"));
         assert_eq!(found.iter().map(|a| (a.node.name.as_str(), a.node.address.as_str())).collect::<Vec<_>>(),
                    vec![("spark-1", "192.168.50.105"), ("spark-2", "192.168.50.106")]);
+        assert_eq!(found[0].addresses, vec!["192.168.50.105".to_string(), "fd00::2".to_string()]);
     }
 
     #[test]
@@ -969,7 +1016,7 @@ mod tests {
         let all = MdnsBrowser.browse(None);
         println!("browse(None): {:?} in {:?}", all, started.elapsed());
         let started = Instant::now();
-        let one = MdnsBrowser.browse(Some(&wanted));
+        let one = MdnsBrowser.browse(Some(&Node { node: wanted.clone(), ..Node::default() }));
         println!("browse(Some({wanted})): {:?} in {:?}", one, started.elapsed());
         assert!(all.iter().any(|advert| advert.node.node == wanted), "the advertised node was not found");
         assert!(one.iter().any(|advert| advert.node.node == wanted));
