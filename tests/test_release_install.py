@@ -416,7 +416,7 @@ def test_setup_runs_each_command_through_sudo_and_reads_the_host_again(host, mon
     assert HostSafetySetup.setup() is True
     assert [command[:2] for command in ran] == [["sudo", "sysctl"], ["sudo", "sh"]]
     output = capsys.readouterr().out
-    assert "sudo sysctl -w vm.watermark_scale_factor=200" in output and "now passes" in output
+    assert "sudo sysctl -w vm.watermark_scale_factor=200" in output and "now has what a model load" in output
 
 
 def test_a_failed_command_stops_its_step_and_setup_reports_what_remains(host, monkeypatch, capsys):
