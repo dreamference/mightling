@@ -268,7 +268,46 @@ The runner gains `--prompt <name>`, recorded in the run's manifest and printed i
 
 ### 6.4 Pilot (2026-10-02)
 
-*(In progress: six instances, arms A, B and C of §6.2 once each. Results follow in a later commit.)*
+A check that the model follows `high-swe` and of what it does differently, not a measurement of the score. Arms A, B and C of §6.2, once each, on six instances chosen from §1.4's classes (django-16454 regression, django-13512 incomplete, django-16502 wrong place, sympy-13798 invented behaviour, and two that `acc-25` resolved).
+
+**What was the same as `acc-25`:** the `puffin` build (the runtime's source hash, `9d107cf7…`, is `acc-25`'s `runtime_hash`), the model, the images and the task preamble.
+
+**How it differed from `acc-25`, so arm A is not that run again:**
+- the Phase 0 permission fix of §6.1 in every arm (`chmod -R a+rwX /testbed` before the agent starts);
+- 25 minutes per instance instead of 45, 3 GB per container instead of 8, two at a time;
+- arms B and C got the text through `-c model_instructions_file=` (§1.2), so no launcher block was appended. In the container that matches `high-swe` as specified, because neither `puffin-code` nor a mail account is there; arm A's prompt in the container is the template plus the web block (about 22,700 chars), not the host's 24,289;
+- **the model server was shared**: other tasks kept about six requests running throughout. Arm A on sympy-13798 got through 12 commands in 25 minutes; in `acc-25` the same instance took 45 commands and 196 s. Wall times and time-outs below measure the queue as much as the prompt;
+- the agent phase was cut off after 10 of 18 runs by the job's own two-hour limit; the B and C runs of sympy-13798 were interrupted and not graded, and django-11880 and pytest-5631 never ran.
+
+**What came out** (graded with the same harness; a time-out still submits whatever was in the tree):
+
+| Instance | A `default`, ultra | B `high-swe`, ultra | C `high-swe`, off |
+|---|---|---|---|
+| django-16454 | resolved, 1,053 s | resolved, 598 s | not resolved (time-out; one previously passing test broken) |
+| django-13512 | **not resolved**: 1 of 3 target tests; `forms/fields.py` only, as in `acc-25` | **resolved** (time-out): 2 files | **resolved** (time-out): `forms/fields.py` and `contrib/admin/utils.py`, the reference's two files |
+| django-16502 | empty (time-out) | empty (time-out) | empty (time-out) |
+| sympy-13798 | empty (time-out) | interrupted | interrupted |
+
+**Behaviour, which is what the pilot can speak to** (the six finished-or-timed-out runs of the two Django instances that every arm completed):
+
+| Per run | A | B | C |
+|---|---|---|---|
+| edits through `apply_patch` (all applied) | 0 | 2–4 | 2–7 |
+| edits through Python or `sed -i` | 1–2 | 0–1 | 0 |
+| scripts written to `/tmp` | 0–1 | 4–6 | 2–7 |
+| `git status` / `git diff` read before stopping | 0 | 1–3 | 0–1 |
+| files outside the source tree in the patch | 0–3 (django-16454: 3) | 0 | 0 |
+| words written before the last edit | 146–244 | 223–502 | 1,119–1,552 |
+
+**Reading it:**
+- **The rules are followed.** `high-swe` arms edit with `apply_patch` and it works (the permission fix is part of why), write their scripts outside the repository, and submit no test or scratch files.
+- **The "fix every place" rule did what it was written for, once.** On django-13512, from §1.4's *incomplete* class, both `high-swe` arms went looking for the same logic outside the forms module (arm B's third command was `grep -l JSONField … | grep -i admin`) and changed a second file: arm C the reference's `contrib/admin/utils.py`, arm B `db/models/fields/json.py` instead, and both passed all three target tests. Arm A changed one file, again. One instance, one run each: an example, not a rate.
+- **`high-swe` runs are longer.** More scripts, more test runs, more reading of the diff. Under a 25-minute limit on a busy server that cost arm B one time-out the default did not have (and the time-out still resolved). The benchmark's 45 minutes is the right limit for §6.2; a shorter one penalises exactly the verification the prompt asks for.
+- **Cave `off` made it worse here.** Arm C wrote four to six times as many words before its last edit and timed out on both Django instances, once leaving a previously passing test broken. That is the opposite of the reasoning in §5.4, on two instances; arm C stays in §6.2.
+
+**Changes for the text that ships (v2), from reading these trajectories:**
+- Step 6 says "Delete scratch files"; arm B spent its last turns deleting scripts in `/tmp`, which is never collected. v2: "Remove anything you created inside the repository; scratch files in /tmp can stay."
+- Nothing says when verification is enough. v2 adds to step 5: "When your script shows the fix and the area's tests pass, stop: do not keep adding checks."
 
 ---
 
@@ -346,7 +385,8 @@ The runner gains `--prompt <name>`, recorded in the run's manifest and printed i
 - the tool list after disabling `multi_agent`, `goals` and `web_search` (§5.5);
 - the failure classes of §1.4, from the grading reports, the predictions and the reference patches of `acc-25`;
 - the permission defect of §6.1, from the trajectories ("Permission denied", "Failed to write file") and in a pilot container (`-rw-r--r-- root` before the fix, `-rw-rw-rw-` after);
-- no existing `/prompt` slash command and no `prompt` subcommand in the pinned Codex.
+- no existing `/prompt` slash command and no `prompt` subcommand in the pinned Codex;
+- the pilot of §6.4: ten runs against the live model on a shared server, graded with the benchmark's harness.
 
 **Read from the source, not run:** that `get_prompt_base_instructions()` is the only place a request's prompt is rendered (its callers: the turn, both compaction paths, the prewarm, world state, the reviewer); that `puffin-prompt` as a standard-library crate creates no cycle, by analogy with `puffin-airgapped`.
 
@@ -367,7 +407,7 @@ The runner gains `--prompt <name>`, recorded in the run's manifest and printed i
 
 ## Appendix A. The `high-swe` text (v1)
 
-The candidate the pilot of §6.4 ran, verbatim (4,229 chars). Phase 1 ships it as `puffin-rs/prompts/high-swe.md`, with the changes §6.4 lists, and a test pins the shipped file to the text the benchmark measured.
+The candidate the pilot of §6.4 ran, verbatim (4,229 chars). Phase 1 ships v2, which is this text with the two edits §6.4 lists, as `puffin-rs/prompts/high-swe.md`; the runs of §6.2 measure v2; and once they are recorded a test pins the shipped file to the text of the most recent recorded run, as cave mode's test does for its levels.
 
 ````markdown
 You are Puffin, a coding agent. You work in a software repository through a shell, and your job is to resolve the task you are given by changing the repository's source code, correctly and completely, without breaking anything that worked before.
