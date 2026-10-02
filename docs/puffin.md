@@ -17,8 +17,10 @@ puffin resume --last                # pick up the last session
 
 Before the agent starts, `puffin` connects itself to the local model:
 
-1. It finds the model server: `DREAMFERENCE_VLLM_HOST`, otherwise `vllm_host` in
-   `dreamference.toml`, otherwise `http://localhost:8000`.
+1. It finds the model server. On the GB10 that is the server on the same machine. On any other
+   computer it looks for a Puffin node on the local network and uses the one it finds, with no
+   address to type (see [Using a GB10 from another computer](#using-a-gb10-from-another-computer)).
+   `DREAMFERENCE_VLLM_HOST`, or `vllm_host` in `dreamference.toml`, overrides both.
 2. If the server is still loading, it waits and shows progress.
 3. It asks the server which model it serves and how long a context that model takes.
 4. It writes the settings the agent needs to use that model, and starts the session.
@@ -68,6 +70,41 @@ Some Codex features depend on OpenAI's servers or an OpenAI account. Puffin hide
 | `/voice` | Hidden. It uses OpenAI's realtime voice service. |
 | `/approve` (auto-review) | Hidden. It relies on an OpenAI review model. |
 | Update check | Off. Codex's check would offer to replace Puffin with upstream Codex. |
+
+## Using a GB10 from another computer
+
+`puffin` on a laptop can use the model on a GB10 in the same network. The GB10 is the *node*; the
+laptop is a *client*, and only the agent's prompts and answers cross the network: your code, the
+commands the agent runs and the code index stay on the laptop.
+
+On the GB10, once:
+
+```bash
+puffin-admin node enable        # asks for your password once; `--no-web` keeps the web UI private
+```
+
+That announces the node on the local network and lets other computers reach its web search and
+its web UI. **Anyone on your network can then use the model, search through the node and open the
+web UI**, which has one shared account and can search the mail connected on the node. Nothing is
+encrypted or password-protected, so do this only on a network you trust. `puffin-admin node
+disable` undoes it, and `puffin-admin node status` shows what is announced.
+
+On the other computer, type `puffin`. It finds the node and remembers it:
+
+| Command | What it does |
+|---|---|
+| `puffin node list` | Every node on the network, the model each serves, and the address to paste into other tools |
+| `puffin node use <name or address>` | Use that node from now on. An address works on networks that block discovery |
+| `puffin node forget` | Forget the node; the next start looks again |
+| `PUFFIN_NODE=<name> puffin …` | Another node, for one command |
+
+If there are several nodes, `puffin` asks once which to use and never switches by itself. If the
+node's model server is stopped or still loading, it says so instead of waiting.
+
+What does not work from a client yet: Gmail in `puffin`, Night Shift (`/night add` is refused: tasks
+run on the node), and anything `puffin-admin` does. The desktop window, `puffin-app`, shows the
+node's web UI on a client. This is new and has been tested on one machine only; see
+`specs/DREAMFERENCE_PUFFIN_NODE.md` §18 for what was measured.
 
 ## Debugging
 

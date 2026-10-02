@@ -58,7 +58,7 @@ Puffin never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
 Onyx has **no environment variable for the LLM provider**. Providers live in its database, so `configure` drives the admin API that the Admin panel uses. In order:
 
-1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
+1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`), except on a node advertised with `puffin-admin node enable`, where port 3000 is published on every interface for clients' `puffin-app` and port 80 stays on loopback (`web_bind_env()`; [PUFFIN_NODE §4](./DREAMFERENCE_PUFFIN_NODE.md)): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
 2. **Authenticate** as `admin@dreamference.dev` / `dreamference` by default. The account is registered, and becomes admin, when login fails.
 3. **Register the model** as provider `dreamference-vllm`, type `openai_compatible`:
    - `api_base` is the vLLM URL with loopback rewritten to the Docker **bridge gateway** (`docker network inspect bridge` → e.g. `http://172.17.0.1:8000/v1`), because vLLM uses `--network host` and `localhost` inside Onyx is the container itself;

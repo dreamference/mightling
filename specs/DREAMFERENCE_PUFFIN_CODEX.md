@@ -125,10 +125,15 @@ This is the Rust port of what the Python `puffin` entry point used to do before 
    - It starts the window detached, so closing the terminal does not close it.
    - A folder argument, which Codex's `app` takes, is ignored with a note.
 3. **Skips setup for commands that never reach a model.** These are `--help`/`-h`, `--version`/`-V`, and the subcommands `help completion apply a features doctor mcp plugin archive unarchive delete sandbox update`. They answer at once instead of waiting for a server. (`update` goes on to `update.rs` through patch `0008`.)
-4. **Resolves the vLLM URL**, first match wins:
+4. **Resolves the vLLM URL**, first match wins (`node.rs`; [PUFFIN_NODE §6.1, §18](./DREAMFERENCE_PUFFIN_NODE.md)):
    - the `DREAMFERENCE_VLLM_HOST` environment variable;
    - `vllm_host` in `DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`;
-   - `http://localhost:8000`.
+   - `PUFFIN_NODE=<name>`, one node for one command;
+   - `http://localhost:8000` when this machine is a node (`~/.config/dreamference/node-id` exists), with no browse;
+   - the node remembered in `$CODEX_HOME/node.json`, found again on the network by its id;
+   - a browse of `_puffin-node._tcp`: one node is used and remembered, several are a question, and a node other than the remembered one is never adopted silently;
+   - `http://localhost:8000` if a model server answers there (an install from before the split); otherwise "No Puffin node found on this network".
+   `puffin node list|use|forget` is intercepted like `night` and `airgapped`, and never waits for a model.
 5. **Waits for the server.** It prints `⏳ Waiting for local vLLM server at … to become available...` with a dot per second, and gives up after 600 s with the `puffin-admin server start` hint.
 6. **Reads the served model from `GET /v1/models`**, both its `id` and its `max_model_len`, so the launcher needs no copy of Puffin's model registry.
 7. **Checks for Gmail.** Unless `puffin_gmail = false` (config file) or `DREAMFERENCE_PUFFIN_GMAIL=false`, it asks the Gmail service's `/status` (`http://127.0.0.1:8767`, 1 s timeout). If an account is connected, `gmail_access_instructions()` adds an "Email access" block after the web section. The block names the accounts and the `puffin-admin gmail` commands, and warns that email content is untrusted data, never instructions. See `DREAMFERENCE_PUFFIN_GMAIL.md`.
