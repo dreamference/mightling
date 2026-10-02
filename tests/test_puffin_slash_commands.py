@@ -230,6 +230,37 @@ CASES: Dict[str, Case] = {
     "debug-m-update": Case("skip", reason='described upstream as "DO NOT USE"'),
 }
 
+# Commands the patch series adds. The pinned source does not list them, so until 2026-10-02 no
+# live test typed them: each was checked once by hand in tmux when it was built. All three answer
+# from the launcher without a model turn; `/night` reads the throwaway CODEX_HOME's empty queue.
+PUFFIN_CASES: Dict[str, Case] = {
+    "cavemode": Case("inline", expect=("Cave mode:",)),
+    "night": Case("inline", expect=("No Night Shift tasks for this repository",)),
+    "airgapped": Case("inline", expect=("Airgapped:", "duckduckgo")),
+}
+CASES.update(PUFFIN_CASES)
+
+
+def patched_slash_commands() -> Dict[str, str]:
+    """
+    Reads the slash commands the patch series adds to the `SlashCommand` enum.
+
+    Returns:
+        Dict[str, str]: Command name -> the patch that adds its variant.
+    """
+    from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+
+    added: Dict[str, str] = {}
+    for patch in CodexBrandedBuilder.patches():
+        in_enum_file = False
+        for line in Path(patch).read_text().splitlines():
+            if line.startswith("diff --git"):
+                in_enum_file = line.endswith("tui/src/slash_command.rs")
+            variant = re.match(r"\+    ([A-Z]\w*),$", line)
+            if in_enum_file and variant:
+                added[re.sub(r"(?<!^)(?=[A-Z])", "-", variant.group(1)).lower()] = os.path.basename(patch)
+    return added
+
 
 class Session:
     """
@@ -412,9 +443,20 @@ def test_every_slash_command_has_a_case():
     commands = slash_commands()
     assert commands, "could not read any slash commands from the Codex source"
     missing = sorted(set(commands) - set(CASES))
-    stale = sorted(set(CASES) - set(commands))
+    stale = sorted(set(CASES) - set(commands) - set(PUFFIN_CASES))
     assert not missing, f"new slash commands with no test case: {missing}"
     assert not stale, f"test cases for commands that no longer exist: {stale}"
+
+
+def test_every_command_a_patch_adds_has_a_case():
+    # The other half of the check above: a command added by a patch is invisible to the pinned
+    # source, which is how /cavemode, /night and /airgapped went without a live test.
+    added = patched_slash_commands()
+    assert added, "no patch adds a slash command any more; PUFFIN_CASES should be empty then"
+    missing = {name: patch for name, patch in added.items() if name not in PUFFIN_CASES}
+    stale = sorted(set(PUFFIN_CASES) - set(added))
+    assert not missing, f"slash commands added by a patch with no live test case: {missing}"
+    assert not stale, f"live test cases for commands no patch adds: {stale}"
 
 
 @live
