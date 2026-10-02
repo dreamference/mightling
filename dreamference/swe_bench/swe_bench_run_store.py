@@ -13,6 +13,7 @@ runs/<run>/report.md           written by `report`
 
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
@@ -23,6 +24,11 @@ from dreamference.swe_bench import swe_bench_settings
 FINISHED_STATUSES: Final[tuple] = ("done", "empty", "stalled", "timeout", "error")
 
 _PREDICTIONS_LOCK: Final[threading.Lock] = threading.Lock()
+
+# A command that asks the index something. Naming the binary is not enough: in the first run
+# with the index, the one command that mentioned it was `ls /opt/puffin-code/bin`.
+PUFFIN_CODE_QUERY: Final[re.Pattern] = re.compile(
+    r"\bpuffin-code\s+(def|refs|callers|callees|impl|impact|show|outline|search|status)\b")
 
 
 class SweBenchRunStore:
@@ -145,7 +151,7 @@ class SweBenchRunStore:
     def log_stats(self, instance_id: str) -> Dict[str, int]:
         """
         Counts what the agent did, from `puffin exec`'s events: its commands, how many of them
-        called `puffin-code`, and the tokens of every turn.
+        asked `puffin-code` something, and the tokens of every turn.
 
         Args:
             instance_id: The instance.
@@ -170,7 +176,7 @@ class SweBenchRunStore:
             item = event.get("item") or {}
             if event.get("type") == "item.completed" and item.get("type") == "command_execution":
                 stats["commands"] += 1
-                if "puffin-code" in str(item.get("command", "")):
+                if PUFFIN_CODE_QUERY.search(str(item.get("command", ""))):
                     stats["puffin_code_calls"] += 1
             elif event.get("type") == "turn.completed":
                 usage = event.get("usage") or {}

@@ -834,6 +834,17 @@ def test_against_sets_the_two_arms_side_by_side(bench):
     assert "only with" in row_line and "1 puffin-code" in row_line
 
 
+def test_naming_puffin_code_is_not_calling_it(bench):
+    store = SweBenchRunStore("counts")
+    store.log_path("x").parent.mkdir(parents=True)
+    command = lambda text: json.dumps({"type": "item.completed", "item": {"type": "command_execution", "command": text}})
+    store.log_path("x").write_text("Reading additional input from stdin...\n" + "\n".join([
+        command("/bin/bash -lc 'ls /opt/puffin-code/bin'"), command("/bin/bash -lc 'which puffin-code'"),
+        command("/bin/bash -lc 'cd /testbed && puffin-code refs Widget'"),
+        command("/bin/bash -lc 'puffin-code   callers a.b | head'")]) + "\n")
+    assert store.log_stats("x")["commands"] == 4 and store.log_stats("x")["puffin_code_calls"] == 2
+
+
 def test_an_arm_that_never_used_the_index_is_said_to_prove_nothing(bench, monkeypatch):
     run(bench, name="without", instances=["acme__widget-1"])
     run(bench, name="with", instances=["acme__widget-1"], code_index="universal")

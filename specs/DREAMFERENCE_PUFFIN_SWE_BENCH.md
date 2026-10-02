@@ -413,7 +413,7 @@ All on 2026-10-01, on the GB10 with the default model resident (Qwen3.8-27B NVFP
 - **Interrupted on purpose and resumed.** After four predictions, SIGTERM to the `puffin-admin` process: it exited in 4 s, left no container, four parseable predictions, and the two instances it cut off in state `interrupted` with no prediction. The same command with the same `--name` then ran the remaining 20, those two among them. (The first SIGTERM went to the wrong process, a shell wrapper, and did nothing; that was the test's mistake, not the command's.)
 - **`eval acc-25` through the command** found everything graded and printed 24 graded, 13 resolved; the grading itself had run inside `run --eval`.
 - **No turn spent on the web commands.** The 24 logs mention `puffin-search` once and `pip install` once (both inside quoted text), so §5.2's worry did not show at this size.
-- **Not run:** the run-to-run spread of §7.3 item 3 (the time went to the code-index arm of §13, which is a different configuration and not a spread measurement), and the connection trace of item 5 (the internal network was checked by hand: the model server answers, `github.com` does not).
+- **Not run as designed:** the run-to-run spread of §7.3 item 3. The pair of §13.5 turned out to be a repeat in effect, since the tool that distinguished the arms went unused, with one confound (the prompt block); it differed in two instances each way. Also not run: and the connection trace of item 5 (the internal network was checked by hand: the model server answers, `github.com` does not).
 
 ---
 
@@ -444,7 +444,31 @@ The exact (SCIP) layer is left out, by pointing `PUFFIN_CODE_INDEXERS_DIR` at an
 
 ### 13.5 With and without, measured
 
-(filled in below)
+Two runs on the same 24 validated instances (the sample of §12.5), the same `puffin` build (`runtime_hash` `9d107cf700c4`), the same model, one after the other on the night of 2026-10-01: `acc-25` without the index, `acc-25-index` with the universal layer. One run per arm, so one sample of each.
+
+| | With the index | Without |
+|---|---|---|
+| Resolved | 13 of 24 (54.2%) | 13 of 24 (54.2%) |
+| Resolved in both / only this arm / neither | 11 / 2 / 9 | 11 / 2 / 9 |
+| Median agent time per instance | 10 min 26 s | 5 min 49 s |
+| Agent time in all | 5 h 1 min | 3 h 58 min |
+| Input tokens (cached) | 78.4 M (75.8 M) | 50.7 M (49.3 M) |
+| Output tokens | 503 K | 306 K |
+| Commands | 2,824 | 2,288 |
+| **`puffin-code` queries** | **0, in 0 of 24 instances** | 0 |
+| Index time, outside the agent's | 7 min 57 s in all, median 19 s | none |
+| Timeouts / empty patches | 0 / 1 | 1 / 0 |
+
+Difference in resolved rate: 0.0 points, 95% interval −16.3 to +16.3, McNemar p = 1.0. Only with the index: `django__django-15563`, `sympy__sympy-13877`. Only without: `django__django-16100`, `sympy__sympy-18211`.
+
+**What this does and does not show.**
+
+- **It says nothing about whether the index helps, because the agent never used it.** All 24 prompts carried the `# Code navigation` block and `puffin-code` answered in the container, yet no command in the 24 logs asked it anything. The one command that named it was `ls /opt/puffin-code/bin`. The first version of the counter counted that as a call; it now counts only `puffin-code <query verb>`, and a test fixes the difference.
+- **The two arms differ in four instances out of 24 with the model, build and instances unchanged and the tool unused.** That is this benchmark's run-to-run noise at this size, and the nearest thing to the spread measurement §7.3 asked for: a difference of two instances either way is not a finding.
+- **The with-arm was slower and used more tokens, and the cause is not established.** The index cannot be it directly (no query was made). What differed: about 250 tokens of prompt block on every request; and whatever else used the model server that night, which was not recorded. A third run without the index would separate the two and was not made.
+- **The isolation held where it was tested by the agent itself.** In `django__django-16100` the agent tried `puffin-fetch` on the upstream file at `raw.githubusercontent.com`, which would have shown it the fix; the command does not exist in the container and there is no route out. Its looking around for the web commands is what named `puffin-code`.
+- **The manifest's `repository_commit` is `HEAD` when the run started, not proof of the code that ran:** both runs were made from a working tree with uncommitted changes, and `--against` lists the two commits as differing for that reason only.
+- **Open, and the real result:** this model does not reach for `puffin-code` on its own in this setting. It does elsewhere: 25 recorded session files under `~/.puffin/sessions` contain `puffin-code` queries (not checked: how many of those were tests that asked for them), so the setting, a bare issue text and an unattended run, is the likelier cause than the model. Whether the task prompt should name it, or the block's wording should change, is a question for the code-index spec; an A/B where the tool is actually used needs one of those first.
 
 ---
 

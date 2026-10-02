@@ -202,8 +202,10 @@ class SweBenchReport:
         only_theirs = sorted(i for i in both if theirs["results"][i].get("resolved") and not ours["results"][i].get("resolved"))
         lines = [f"{store.name} against {other.name}: {len(both)} instance(s) graded in both"]
         for field in COMPARED_FIELDS:
-            if a.get(field) != b.get(field):
-                lines.append(f"  differs: {field}: {a.get(field)} | {b.get(field)}")
+            # Runs made before the code-index arm existed have no such field: they are `off`.
+            first, second = (m.get(field, "off" if field == "code_index" else None) for m in (a, b))
+            if first != second:
+                lines.append(f"  differs: {field}: {first} | {second}")
         lines.append(f"Resolved only by {store.name} ({len(only_ours)}): {', '.join(only_ours) or 'none'}")
         lines.append(f"Resolved only by {other.name} ({len(only_theirs)}): {', '.join(only_theirs) or 'none'}")
         if both:
