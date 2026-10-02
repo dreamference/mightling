@@ -249,6 +249,7 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `test_sandbox` | `true` | Run the test command in the agent's sandbox (§6, §11.1). `false` runs it with the user's rights, for a test command that must reach Docker or write outside the worktree; at `/airgapped on` the tests are then not run at all, because nothing would keep them off the network. Read from the user's configuration, never from the worktree. |
 | `airgapped` | *(none)* | A stricter `/airgapped` level for night runs alone ([PUFFIN_AIRGAPPED §7](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)); a looser one than the configured level is ignored (§11.1). |
 | `task_context` | `49152` | Tokens of KV cache budgeted per concurrent task (§11.1). |
+| `compact_at` | `0` | A compaction limit for every `puffin exec` of a task (`-c model_auto_compact_token_limit=<n>`). `0` passes none and the launcher's own limit, 60% of the KV pool, applies. Setting it to `task_context` would make that budget true, but measured on 2026-10-02 it cost the task: at 32K no run finished, at 49,152 the run did not finish its own tests in an hour ([PUFFIN_COMPACTION §11](./DREAMFERENCE_PUFFIN_COMPACTION.md)). |
 | `idle_minutes` | `10` | How long the model must have been idle before a night starts (§5.2). |
 | `index` | `true` | Refresh each repository's code index before its tasks start (§11.1). |
 | `index_timeout` | `20m` | The most one repository's refresh may take; never more than half of what is left of the window. |

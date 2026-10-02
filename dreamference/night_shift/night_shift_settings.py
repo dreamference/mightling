@@ -29,6 +29,7 @@ DEFAULT_INDEX_TIMEOUT: Final[str] = "20m"
 # turns but rarely nears the window, and SGLang shares the common prompt prefix between streams,
 # so tasks are budgeted at this size instead (144,870 / 49,152 = 2 here). Measured on 2026-10-01.
 DEFAULT_TASK_CONTEXT: Final[int] = 49_152
+DEFAULT_COMPACT_AT: Final[int] = 0
 
 
 class NightShiftSettings:
@@ -55,10 +56,13 @@ class NightShiftSettings:
         # runner takes the stricter of this and the configured level, so a looser one is ignored.
         self.airgapped: Any = table.get("airgapped")
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
-        # Where a task's session compacts (compaction spec §4.1). Without it a task may grow to the
-        # model's whole window, and the `task_context` the parallelism is computed from is a wish;
-        # by default the two are the same number. 0 passes no limit.
-        self.compact_at: int = max(0, int(table.get("compact_at", self.task_context)))
+        # Where a task's session compacts, passed to every `puffin exec` of the task (compaction
+        # spec §4.1). 0, the default, passes none, and the launcher's own limit (60% of the KV pool)
+        # applies. Making it `task_context` would make the parallelism's budget true, but measured on
+        # 2026-10-02 it cost the task: at 32K no run finished in an hour, at 49,152 the one run
+        # finished the code but not its own tests, where the same task without a limit passed in
+        # 14-18 minutes (compaction spec §11).
+        self.compact_at: int = max(0, int(table.get("compact_at", DEFAULT_COMPACT_AT)))
         self.idle_minutes: float = float(table.get("idle_minutes", DEFAULT_IDLE_MINUTES))
         # Refresh each repository's code index before its tasks start (code-index spec §6.3).
         self.index: bool = bool(table.get("index", True))

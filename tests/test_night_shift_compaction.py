@@ -20,26 +20,20 @@ def exec_calls(setup, monkeypatch, table):
     return calls(setup)
 
 
-def test_every_exec_of_a_task_carries_the_compaction_limit(setup, monkeypatch):
-    first, nudge = exec_calls(setup, monkeypatch, {})[:2]
+def test_every_exec_of_a_task_carries_a_configured_limit(setup, monkeypatch):
+    first, nudge = exec_calls(setup, monkeypatch, {"compact_at": 64000})[:2]
     for call in (first, nudge):
-        assert call[call.index("-c") + 1] == "model_auto_compact_token_limit=49152"
+        assert call[call.index("-c") + 1] == "model_auto_compact_token_limit=64000"
     # The limit is an option of `exec`, so it comes before `resume` and before the prompt.
     assert nudge.index("-c") < nudge.index("resume")
 
 
-def test_the_limit_follows_task_context_unless_set(setup, monkeypatch):
-    assert NightShiftSettings({}).compact_at == NightShiftSettings({}).task_context == 49152
-    assert NightShiftSettings({"task_context": 65536}).compact_at == 65536
-    assert NightShiftSettings({"task_context": 65536, "compact_at": 40000}).compact_at == 40000
-    call = exec_calls(setup, monkeypatch, {"compact_at": 40000})[0]
-    assert "model_auto_compact_token_limit=40000" in call
-
-
-def test_zero_passes_no_limit(setup, monkeypatch):
-    assert NightShiftSettings({"compact_at": 0}).compact_at == 0
+def test_by_default_no_limit_is_passed_and_the_launchers_applies(setup, monkeypatch):
+    # Measured on 2026-10-02 (compaction spec §11): a limit at task_context cost the task.
+    assert NightShiftSettings({}).compact_at == 0
+    assert NightShiftSettings({"task_context": 65536}).compact_at == 0
     assert not any(arg.startswith("model_auto_compact_token_limit")
-                   for call in exec_calls(setup, monkeypatch, {"compact_at": 0}) for arg in call)
+                   for call in exec_calls(setup, monkeypatch, {}) for arg in call)
 
 
 # -- the launcher's settings, mirrored in the Python configuration ---------------------------------

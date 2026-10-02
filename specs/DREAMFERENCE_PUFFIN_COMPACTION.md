@@ -1,6 +1,6 @@
 # Puffin Compaction — at night, at idle, and what the diffusion model can do
 
-**Status:** proposed. Nothing in this spec is implemented yet; §1 and §3 are measurements and a literature review made on 2026-10-01. §7–§10 were added the same day for a second question, the compaction **prompt and algorithm**: §7 is read from the pinned Codex source, §9 is measured, §8 is literature, §10 is proposed.
+**Status:** partly implemented on 2026-10-02, after the Phase 0 measurement (§11): the interactive limit follows the KV pool (§4.2, on), the ledger hook is built and registered by the launcher (§10.1, off by default), and Night Shift's per-task limit is a setting (§4.1, off by default, because the measurement said so). §4.3, §4.4, §10.2 and §10.3 are not built. Before that: §1 and §3 are measurements and a literature review made on 2026-10-01. §7–§10 were added the same day for a second question, the compaction **prompt and algorithm**: §7 is read from the pinned Codex source, §9 is measured, §8 is literature, §10 is proposed.
 **Question asked:** can Puffin's compaction be improved by running it at night, and continuously with the diffusion model beside the main one?
 **Short answer:** compaction is not slow or poor on this machine; it is **switched off in effect**. The useful changes are two configuration values and one Night Shift task, none needs a Codex patch, and the current diffusion sidecar has no part in any of them.
 **Short answer on the prompt and algorithm (§7–§10):** Codex's stock prompt already writes a good summary with this model, except for the trail of files; a structured prompt fixed the trail and lost the code, a trade and not a gain. What compaction loses is not prose but the **tool history**: every tool call and output is dropped, and the summary alone decides which paths survive. The fix that measured best is not a model at all: a rule-built ledger (files touched, failed commands, last test result) re-injected by a hook after each compaction. At night the useful job is an audit of the day's compactions; the diffusion sidecar failed the three new roles it was tried in.
@@ -65,6 +65,9 @@ Figures in this table are from abstracts and summaries read on 2026-10-01, not f
 
 ### 4.1 Do: give Night Shift tasks the compaction limit their budget assumes
 
+*Built as a setting, off by default: Phase 0 (§11) found no limit at or below `task_context` that is no slower than none.*
+
+
 `NightShiftTaskRun._exec` adds `-c model_auto_compact_token_limit=<n>` to every `puffin exec`, with `n` from a new `[night] compact_at` (default: `task_context`, 49,152).
 
 - No patch: the key exists (`core/src/config/mod.rs`, `model_auto_compact_token_limit`) and §1 shows `-c` reaches `puffin exec`.
@@ -72,6 +75,9 @@ Figures in this table are from abstracts and summaries read on 2026-10-01, not f
 - **Accept only on measurement** (§5, Phase 0): the §1 probe shows a limit can cost more than it saves.
 
 ### 4.2 Do: make the interactive limit follow the KV pool, not the window
+
+*Built (§11.1), with the 0.6 kept: no recorded session, and no Phase 0 run, reached 94K, so the share is a ceiling, not a measured optimum.*
+
 
 The launcher already reads `/v1/models`; it would also read the pool (`sglang:max_total_num_tokens`, or `num_gpu_blocks × block_size` on vLLM, as `NightShiftHost` does) and write `auto_compact_token_limit = min(max_model_len, pool × 0.6)`: about 94K today. The pool is read at each start because it changes between launches (§1). The 0.6 is a placeholder, leaving room for a second stream and the summary request; Phase 0 sets it. No session recorded so far would have compacted; one that grows now compacts instead of exhausting the pool. `max_context_window` should be capped at the pool the same way once §1's untested case is tested. The interactive limit and Night Shift's do not compete: a night run does not start while a `puffin` session is open.
 
@@ -230,6 +236,9 @@ Input: `git log --stat` of this repository. A regular expression finds its 8 pat
 
 ### 10.1 Do, after one more measurement: a ledger re-injected after every compaction
 
+*Built (§11.1) and measured (§11.2): at a 32K limit it halved compactions, commands and prompt tokens in the pair that finished. Off by default, because registering it writes a trusted hook into the user's `config.toml`, which this section leaves to the user.*
+
+
 A small program, shipped with Puffin and registered as a `SessionStart` hook with matcher `compact`. It reads the rollout at `transcript_path`, and prints as `additionalContext`, by rule:
 - files the session's commands wrote or read, changed files first;
 - every command that exited non-zero, with its code, since the previous compaction (both failures in §9.2's session were incidental, so this list can be noise: whether to keep it is part of the test below);
@@ -284,4 +293,54 @@ No role for Tiny-A2D (§9.3, §1). If the slot gets a capable model, §4.6's two
 ### 10.7 Where the ideas came from
 
 Asked for ideas before the measurements, the advisor proposed: scoring the **stock prompt** with the identifier test rather than only compressors, and doing it against the chat endpoint from a rollout instead of resuming a real session; the **hook-delivered rule-built ledger** (§10.1); the **night-time audit** (§10.3); testing the sidecar as an **extractor and verifier** against a regular expression (§9.3); and recording the 20,000-token verbatim user messages and the false summary prefix (§7.3, §7.6). The structured candidate's sections follow its suggestion and Claude Code's published prompt. Found while measuring, not proposed by anyone: that no recorded session was usable, that an untrusted hook is skipped silently, that the model overlooked the injected ledger in the same turn, and the 9K–14K floor.
+
+---
+
+## 11. As built, and Phase 0 (2026-10-02)
+
+### 11.1 What was built
+
+| Piece | Where | Default |
+|---|---|---|
+| The interactive limit follows the KV pool (§4.2) | `puffin-rs/src/compaction.rs`: at every launch that reaches the model, the pool is read from `/metrics` (`sglang:max_total_num_tokens`, or vLLM's `num_gpu_blocks × block_size`) and `-c model_auto_compact_token_limit=<60% of it>` goes in front of the user's arguments, unless the command line or `config.toml` sets that key. With the default model that is **94,144** against the catalog's 262,144. An unreadable `/metrics` leaves the catalog's limit | on |
+| The ledger (§10.1) | `puffin-rs/src/ledger.rs`, run as `puffin ledger` (the hook: JSON on stdin, JSON on stdout) or `puffin ledger show <rollout> [<cwd>]`. By rule, no model, in ~15 ms: `git status --porcelain` (or the `apply_patch` headers outside a repository); the other workspace files any command named, checked on disk and most recent first; the commands that exited non-zero since the previous compaction; the last test-summary line (pytest, `cargo test`, Jest, `go test`). Capped at 6,000 characters, under Codex's 2,500-token spill limit | — |
+| The hook's registration | `compaction.rs`: one `[[hooks.SessionStart]]` group, matcher `compact`, command `<this binary> ledger`, timeout 10 s, and `[hooks.state."<config path>:session_start:<n>:0"] trusted_hash = "sha256:…"`. The hash is rebuilt from Codex's own definition (`hooks/src/engine/discovery.rs`, `hook_hash`: SHA-256 of the canonical JSON of the normalised hook); a test pins a value Codex accepted. The group is updated in place, the user's own hooks and their trust entries are untouched, switching off removes both, and with a `hooks.json` beside `config.toml` nothing is written | off: `puffin_compaction_ledger` / `DREAMFERENCE_PUFFIN_COMPACTION_LEDGER` |
+| Night Shift's per-task limit (§4.1) | `[night] compact_at`: `-c model_auto_compact_token_limit=<n>` on every `puffin exec` of a task; on the command line it beats the launcher's | `0`: none, so the launcher's 60% applies |
+
+**Trust, checked live** (puffin 0.158.0, scratch `CODEX_HOME`, a three-command task at a 14,000 limit): the registration as written by `compaction.rs` made the hook run after the compaction with **no** `--dangerously-bypass-hook-trust`, and the ledger arrived as a developer message after the summary; the same file with one hex digit of the hash changed compacted and ran no hook. An untrusted hook is still skipped in silence (§7).
+
+### 11.2 Phase 0
+
+**The task.** §5 asked for "one long task … in this repository". A cut-down copy of this repository (its `dreamference/` package and the Night Shift tests, 3.1 MB, committed as one base) and a 2,500-character task: five changes to Night Shift (a dry run, a per-night task cap, a totals line in the report, a `--dry-run` flag, a JSON report), each with a test, and the whole test file passing. It reads every Night Shift module (the largest ~20 KB) and a 600-line test file. Graded afterwards by five **hidden** acceptance tests copied in after the agent stopped, and by the agent's own test file. `puffin exec -s workspace-write` from a pinned copy of the installed binary, one hour each, two runs at a time.
+
+**Load.** The model server was shared with other tasks all day. Running and queued requests were sampled every minute; the first pair of limited runs saw on average 4.5 running and 6.5 queued, the second pair 2.2–2.4 running and none queued. The unlimited runs were not sampled (spot readings during `none-2`: 5–8 running). **Wall times are comparable only within a pair.**
+
+| Run | Limit | Load (running / queued) | Wall | Finished | Hidden tests | Own tests | Commands | Compactions | Files re-read after a compaction | Prompt tokens | Output tokens |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| none-1 | none | not sampled | 14 min 23 s | yes | **5/5** | 45 pass | 33 | 0 | — | 1.91 M | 8,440 |
+| none-2 | none | not sampled (5–8 / ?) | 17 min 57 s | yes | **5/5** | 45 pass | 28 | 0 | — | 0.88 M | 6,273 |
+| 32k-1 | 32,000 | 4.7 / 5.8 | 60 min | **no** | 0/5 | 39 pass | 40 | 5 | 33 | 0.89 M | 14,911 |
+| 32k-L1 | 32,000 + ledger | 4.5 / 6.5 | 60 min | **no** | 0/5 | 39 pass | 34 | 2 | 11 | 0.76 M | 11,041 |
+| 49k-1 | 49,152 | 4.5 / 6.5 | 60 min | **no** | **5/5** | 42 pass, 2 fail | 52 | 2 | 7 | 1.76 M | 15,402 |
+| 32k-2 | 32,000 | 2.2 / 0 | 58 min | yes | **5/5** | 44 pass | 245 | **24** | 155 | 4.71 M | 74,485 |
+| 32k-L2 | 32,000 + ledger | 2.4 / 0 | 49 min | yes | **5/5** | 44 pass | 114 | **11** | 72 | 2.25 M | 55,702 |
+
+The unlimited runs peaked at 79,909 and 49,241 prompt tokens: the same task varies twofold in its prompt tokens without any limit. A first, three-change version of the task finished in 6 min 20 s with a 49K peak and was enlarged because it would barely have compacted at 49K.
+
+**What it says.**
+
+1. **Every limit at or below `task_context` cost the task.** No limited run was as fast as either unlimited one, and the two under light load took 49–58 minutes where none took 14–18. §5's rule (ship the limit that is no slower and no less successful than none) is met by no limit, so §4.1 does not ship as a default: `compact_at` exists, and is `0`.
+2. **The mechanism is a thrash, not a bad summary.** Puffin's fixed prefix is ~11K tokens and the user's message is kept verbatim, so a 32K limit leaves ~15–20K for work; one 20 KB module and the test file fill it. After each compaction the model reads the files again (155 re-reads in 32k-2), fills the window, and compacts: 24 compactions in one task, some only minutes apart with a summary of the same length as the last. Summaries also grow, since each folds the previous one in (3.6K → 16.8K characters in 32k-1).
+3. **The ledger helped, in both pairs.** Under light load, with the ledger: 11 compactions instead of 24, 114 commands instead of 245, 72 re-reads instead of 155, half the prompt tokens, 9 minutes less. Under heavy load neither finished, but the ledger run again compacted less (2 against 5) and re-read less (11 against 33). Two pairs, one task: a direction, not a measured size. It did not make 32K competitive with no limit.
+4. **4 of the 44 summaries in these runs were a tool call, not a summary**: the compaction request's answer was a stray `<tool_call>…` in the model's text format, and Codex kept it as the summary. Over every compaction recorded on this machine it is 5 of 92 before these runs. The next turn then starts from the user's messages alone. Not investigated further; a candidate cause is that the request carries the session's tools.
+5. **64K and a third repetition of each arm were not run.** The plan in §5 was four limits by three runs; with one hour per run and a shared server, the order was cut to the arms that decide: none, 32K (the floor CliffCompaction names), 49,152 (`task_context`), and 32K with the ledger. 64K would sit between 49K and the unlimited runs' 80K peak.
+
+**Not measured:** the 94K interactive limit's cost. No recorded session and no Phase 0 run reached it, which is the point of it (§1): it guards the pool, and on today's sessions it never fires.
+
+### 11.3 What is open
+
+- **Turning the ledger on.** Measured as helpful, and off only because it writes a trusted hook into the user's `config.toml` (§10.1, item 2). `puffin_compaction_ledger = true` turns it on at the next launch.
+- **Night Shift's budget is not enforced.** With `compact_at = 0` a task may grow to the launcher's 94K; three tasks at once could ask for more than the pool. What SGLang does then (queue, retract, or fail) was not tested.
+- **The tool-call summaries** (§11.2 item 4).
+- **§4.3, §4.4, §10.2, §10.3**: not built.
 
