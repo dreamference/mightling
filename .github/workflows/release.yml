@@ -195,11 +195,12 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-registry-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'puffin-rs/**', 'puffin-web-rs/Cargo.lock') }}
+          key: cargo-registry-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'puffin-rs/**', 'puffin-web-rs/Cargo.lock', 'puffin-code-rs/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.arch }}-
       # The same build `puffin-admin codex build` runs locally: export the submodule, add
       # puffin-rs/, apply codex-patches/, cargo build with prebuilt V8 fetched and verified; then
-      # the web commands from puffin-web-rs/, a separate --locked build.
+      # the web commands from puffin-web-rs/ and the code index router from puffin-code-rs/, each a
+      # separate --locked build.
       - name: Build puffin
         run: puffin-admin codex build --force
       # Their own tests run the two binaries against a local stand-in for SearXNG and for web
@@ -216,9 +217,12 @@ jobs:
           gzip -9 -c "$bin/codex-code-mode-host" > "dist/codex-code-mode-host-$target.gz"
           gzip -9 -c "$bin/puffin-search" > "dist/puffin-search-$target.gz"
           gzip -9 -c "$bin/puffin-fetch" > "dist/puffin-fetch-$target.gz"
+          # The router only: `puffin-admin code setup` fetches the indexers it runs.
+          gzip -9 -c "$bin/puffin-code" > "dist/puffin-code-$target.gz"
           # `puffin update` checks every archive against this file before installing any.
           (cd dist && sha256sum "puffin-$target.gz" "codex-code-mode-host-$target.gz" \
-            "puffin-search-$target.gz" "puffin-fetch-$target.gz" > "puffin-$target.sha256sums")
+            "puffin-search-$target.gz" "puffin-fetch-$target.gz" "puffin-code-$target.gz" \
+            > "puffin-$target.sha256sums")
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:

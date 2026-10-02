@@ -3,11 +3,12 @@
 //! Codex's own `update` picks an installer (npm, brew, OpenAI's install script) from how Codex was
 //! installed, which would put upstream Codex in Puffin's place. Patch 0008 sends the subcommand
 //! here instead. The release workflow attaches, per target, a gzipped `puffin`, a gzipped
-//! `codex-code-mode-host`, the gzipped web commands `puffin-search` and `puffin-fetch`, and a
-//! `sha256sums` file covering all of them; this downloads the latest published release's assets,
-//! verifies every archive against the checksum file, and swaps the binaries in next to the running
-//! executable. The web commands are optional, because releases made before they were Rust binaries
-//! do not carry them; the installed ones are then kept.
+//! `codex-code-mode-host`, the gzipped web commands `puffin-search` and `puffin-fetch`, the gzipped
+//! code index router `puffin-code`, and a `sha256sums` file covering all of them; this downloads
+//! the latest published release's assets, verifies every archive against the checksum file, and
+//! swaps the binaries in next to the running executable. The web commands and `puffin-code` are
+//! optional, because earlier releases do not carry them (v1.3.0 has the web commands and no
+//! `puffin-code`); the installed ones are then kept.
 //!
 //! The repository is private, so the GitHub API needs a token: `GH_TOKEN`, `GITHUB_TOKEN`, or
 //! whatever `gh auth token` prints.
@@ -35,6 +36,18 @@ const CODE_MODE_HOST: &str = "codex-code-mode-host";
 /// The agent's web commands (`puffin-web-rs/`), installed beside `puffin` and linked into
 /// `~/.local/bin`, because the prompt names them and the model's shell must find them.
 pub const WEB_COMMANDS: [&str; 2] = ["puffin-search", "puffin-fetch"];
+
+/// The code index router (`puffin-code-rs/`). The launcher looks for it beside `puffin`
+/// (`code_index::binary`), and the prompt names it, so it is linked into `~/.local/bin` as well.
+/// The release carries the router only: the indexers it runs are fetched by
+/// `puffin-admin code setup`.
+pub const CODE_COMMAND: &str = "puffin-code";
+
+/// The commands a release may carry beside `puffin`, each installed if its asset is present and
+/// kept as installed if not.
+pub fn optional_commands() -> [&'static str; 3] {
+    [WEB_COMMANDS[0], WEB_COMMANDS[1], CODE_COMMAND]
+}
 
 /// What `puffin update` should do, given this build's version and the latest release's.
 #[derive(Debug, PartialEq, Eq)]
@@ -74,9 +87,9 @@ pub fn asset_names(target: &str) -> [String; 3] {
     ]
 }
 
-/// Asset names of the web commands for a target, in `WEB_COMMANDS` order.
-pub fn web_asset_names(target: &str) -> [String; 2] {
-    WEB_COMMANDS.map(|name| format!("{name}-{target}.gz"))
+/// Asset names of the optional commands for a target, in `optional_commands` order.
+pub fn optional_asset_names(target: &str) -> [String; 3] {
+    optional_commands().map(|name| format!("{name}-{target}.gz"))
 }
 
 /// Parses `sha256sum` output: `<hex>  <name>` per line, with an optional `*` before binary names.
@@ -211,7 +224,7 @@ pub async fn run() -> anyhow::Result<()> {
     // Everything is downloaded and verified before anything is replaced, so a failure part-way
     // leaves the installation as it was.
     let mut wanted = vec![(puffin_asset, exe_name), (host_asset, CODE_MODE_HOST.to_string())];
-    for (asset, name) in web_asset_names(&target).into_iter().zip(WEB_COMMANDS) {
+    for (asset, name) in optional_asset_names(&target).into_iter().zip(optional_commands()) {
         if assets.contains_key(asset.as_str()) {
             wanted.push((asset, name.to_string()));
         } else {
@@ -233,7 +246,7 @@ pub async fn run() -> anyhow::Result<()> {
     }
     for (installed, binary) in binaries {
         replace(install_dir, &installed, &binary)?;
-        if WEB_COMMANDS.contains(&installed.as_str()) {
+        if optional_commands().contains(&installed.as_str()) {
             link_onto_path(install_dir, &installed);
         }
     }
@@ -308,11 +321,14 @@ mod tests {
         assert_eq!(sums, "puffin-aarch64-unknown-linux-gnu.sha256sums");
         assert_eq!(hex_sha256(b"abc").len(), 64);
         assert_eq!(
-            web_asset_names("aarch64-unknown-linux-gnu"),
+            optional_asset_names("aarch64-unknown-linux-gnu"),
             [
                 "puffin-search-aarch64-unknown-linux-gnu.gz".to_string(),
-                "puffin-fetch-aarch64-unknown-linux-gnu.gz".to_string()
+                "puffin-fetch-aarch64-unknown-linux-gnu.gz".to_string(),
+                "puffin-code-aarch64-unknown-linux-gnu.gz".to_string()
             ]
         );
+        // The launcher finds the router by this name beside `puffin` (code_index::binary).
+        assert!(optional_commands().contains(&"puffin-code"));
     }
 }
