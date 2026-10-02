@@ -1,0 +1,26 @@
+# Skills from other agents (specs/DREAMFERENCE_PUFFIN_SKILLS.md): what `puffin skill` and the
+# launcher's start-up pass do to files on disk. It reads no network and knows nothing of Codex or
+# the model server, so its tests run on their own (`cargo test` in a copy of this folder), without
+# compiling the Codex workspace. The launcher (`../src/skills.rs`) adds the downloads, the air-gap
+# check and the hook into `puffin`'s start. Versions are the Codex workspace's, so building inside
+# it adds no second copy of any crate.
+[package]
+name = "puffin-skills"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "puffin_skills"
+path = "src/lib.rs"
+
+[dependencies]
+flate2 = "1.1.8"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tar = { version = "0.4.45", default-features = false }
+toml = "0.9.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.182"

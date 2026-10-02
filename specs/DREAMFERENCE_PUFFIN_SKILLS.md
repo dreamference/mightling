@@ -1,6 +1,6 @@
 # Puffin Skills — skills from OpenAI, Claude, Gemini, OpenClaw and Hermes
 
-**Status:** proposed. Nothing in this spec is implemented yet; §2 is what was measured on this machine on 2026-10-01 and what was only read from the pinned source or from each project's documentation.
+**Status:** Phases 1 and 2 implemented on 2026-10-02: the crate `puffin-rs/skills/` and the launcher module `puffin-rs/src/skills.rs`. Phase 3 (ClawHub and Hermes as install sources, repository `.claude/skills`) is not built. §15 records what was built, where it departs from the design below, and what was measured; the sections before it are the design as specified, with §2 being what was measured on 2026-10-01 before any code.
 **Goal:** a skill written for Codex, Claude Code, Gemini CLI, OpenClaw or Hermes Agent can be installed into `puffin` with one command and used by the local model, without the user knowing which ecosystem it came from.
 **Short answer:** the file format is already shared. All five consume the [Agent Skills](https://agentskills.io/specification) `SKILL.md` (Hermes and OpenClaw add fields under `metadata`; Claude Code adds top-level fields). Every dialect loads today when its files are where `puffin` looks: a Claude-style and a Hermes-style skill were discovered, read and used in a live session, and so was a real skill from Anthropic's catalogue (§2.2). `~/.claude/skills`, `~/.gemini/skills`, `~/.hermes/skills` and `~/.openclaw/skills` are not where it looks (§2.3). What differs between the ecosystems, and what this spec designs, is four things: **where** each keeps skills on disk, what each one's **extra frontmatter** means, which **tool names** the instruction bodies assume, and how skills are **installed**.
 **Target:** the `puffin` terminal agent. The web chat (Onyx) has no skills and is not covered.
@@ -318,3 +318,90 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 - [OpenClaw: skills](https://docs.openclaw.ai/tools/skills); [ClawHub skill format](https://github.com/openclaw/clawhub/blob/main/docs/skill-format.md)
 - [Hermes Agent: skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills); [creating skills](https://hermes-agent.nousresearch.com/docs/developer-guide/creating-skills)
 - [openai/skills](https://github.com/openai/skills)
+
+---
+
+## 15. As built (2026-10-02)
+
+### 15.1 What is built, and where
+
+| Piece | Path |
+|---|---|
+| Finding skills, the preflight, collisions, the budget: one plan | `puffin-rs/skills/src/catalog.rs`, `frontmatter.rs`, `preflight.rs`, `budget.rs` |
+| The `from-<agent>` folders, their lock, the swap and the quarantine | `puffin-rs/skills/src/links.rs` |
+| The launcher's `[[skills.config]]` entries | `puffin-rs/skills/src/config_entries.rs` |
+| `add`, `remove`, `adopt`, `.puffin-origin.toml`, the catalogue listing for `search` | `puffin-rs/skills/src/install.rs` |
+| `list`, `show`, and what `add` prints before installing | `puffin-rs/skills/src/report.rs` |
+| `puffin-skills.toml` | `puffin-rs/skills/src/settings.rs` |
+| The glossary text | `puffin-rs/skills/src/glossary.rs` |
+| The start-up pass, `enable`/`disable`/`source`, the command line's grammar | `puffin-rs/skills/src/lib.rs` |
+| `puffin skill …`, the GitHub downloads, the air-gap check, the hook into `puffin`'s start | `puffin-rs/src/skills.rs`, four lines in `puffin-rs/src/lib.rs` |
+
+The on-disk half is a crate of its own with no dependency on Codex or the network, like `puffin-rs/airgapped/`, so its 51 tests run in seconds in a copy of the folder (`cargo test`) without compiling the Codex workspace. Its dependency versions are the workspace's, so building inside the workspace adds no second copy of a crate. No Codex patch was needed; the series is unchanged.
+
+Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `search`, `enable`, `disable`, `source`, `adopt`. `add` takes `openai/<name>`, `anthropic/<name>`, `<owner>/<repo>/<path>`, a `github.com` URL with or without `/tree/<ref>/<path>`, and a local folder; `clawhub/…` and `hermes/…` answer that they are not built and name the GitHub form. `search` reads OpenAI's `.curated` and `.experimental` folders and Anthropic's `skills/` from each repository's tarball and matches every word against name and description.
+
+### 15.2 Departures from the design, each for a reason
+
+- **`synced/` has one more level than §3 says.** On this machine `~/.claude/skills/synced/` holds one folder per claude.ai account (`synced/<account ids>/<name>`), 22 skills in two of them. The walk's depth of 3 reaches them; the second account's copies of the same names are shadowed by the first's, and the shadowing line names the winner's folder, since "shadowed by Claude Code" said nothing when both were Claude Code's.
+- **Launcher-owned `config.toml` entries carry one comment each, not two markers around a block.** `configure_codex_home` re-parses and rewrites the same file with toml_edit at every start, and toml_edit appends a table it creates at the end of the file, which is after the entries: a block between two markers would have swallowed it. Each entry is the comment line, `[[skills.config]]`, `path`, `enabled = false`; only groups of exactly that shape are ever removed. A test runs the entries through the config rewrite and back (`the_launchers_config_entries_survive_the_config_rewrite_and_are_still_removable`). If the user's file defines `skills.config` as an inline array, entries cannot be added; the launcher says so in one line and leaves the file parseable.
+- **A path the user has an entry for is left to them**, on or off. Codex applies entries in order and the launcher's come last, so writing one would have overridden the user's.
+- **A `from-*` folder that is already right is not touched.** The rebuild compares each folder's links with the plan first, so in the common case nothing is renamed under a running session's Codex. When a folder does change it is exchanged in one step with `renameat2(RENAME_EXCHANGE)` on Linux; elsewhere, and on a filesystem without the exchange, by two renames with a moment between them.
+- **A link whose target contains `..` is not the launcher's**, even if it begins with the agent's folder; it is quarantined with the rest.
+- **The same `SKILL.md` reached by two routes is one skill.** A folder linked into another (`~/.agents/skills/x -> ~/.claude/skills/x`) is listed once, under the route of higher precedence, and is never both offered and switched off: Codex identifies a skill by the canonical path of its `SKILL.md`, and an entry for the loser would have switched off the winner.
+- **`enable` also overrides a collision**, as §7 says, and undoes a `disable`; when two skills share a name a decision is stored by folder, otherwise by name.
+- **The glossary is off by default** (§15.3). `glossary = true` in `~/.puffin/puffin-skills.toml` turns it on; it is then added only while a foreign skill is offered. Its text names three more tools than §5's draft (`execute_code`, `skills_list`, `cronjob_manage`, and OpenClaw's lowercase `read`/`write`), so that the test "every tool name of §1's row appears" holds; it is 1,111 bytes, about 280 tokens.
+- **The nearly-full line (80%) is printed to a person only.** `puffin exec`, and so Night Shift, gets the left-out and over-budget lines but not the advice. The line about skills changed outside `puffin skill add` is likewise printed, and marked as told, only on an interactive start, so an unattended run cannot swallow it.
+- **Hashing is not done at every start.** An installed skill's record is read at start (for the glossary gate); its files are hashed only for `list`, `show` and the interactive changed-skills check. The plan for this machine's 37 skill folders takes 3 ms.
+- **`add` downloads the repository's tarball at a resolved commit** (two requests: the commit, then `codeload`), as Codex's own `skill-installer` downloads the repository's zip. A tarball over 200 MB is refused with the advice to clone and install the folder: Hermes's repository is 1.1 GB, which is one reason `hermes/…` is not a source yet.
+- **`add` without `--yes` needs a terminal.** With none there is nobody to ask, and it stops after printing what it would install. A local folder is copied at every air-gap level, since nothing is downloaded.
+- **Budget arithmetic uses the full description**, which is what Codex's core rendering uses; where Codex renders `metadata.short-description` instead, the launcher overestimates, which errs towards leaving a linked skill out.
+
+### 15.3 Measured
+
+**Phase 0 item 5, the `path` selector written in `config.toml`** (installed 17-patch build, a scratch home, one run). With an entry `path = "<home>/.agents/skills/blocked/SKILL.md"`, `enabled = false`, the model listed `kept` and the linked `claude-probe` but not `blocked`, and answered "UNKNOWN" for the code only `blocked` held. An entry naming a file that does not exist did not stop Codex. A second scratch home with an entry for `skills/.system/skill-creator/SKILL.md` listed the other bundled skills without `skill-creator` (one clean run of two; in the other the model ignored the prompt and the run timed out), so a bundled skill can be switched off the same way.
+
+**Phase 0 item 4, read-only through the link, with the real writable root** (one run, the commands' own output). From a session whose `writable_roots` holds `<home>/.puffin/skills`, with `from-claude/claude-probe -> <home>/.claude/skills/claude-probe`:
+
+| Command | Result |
+|---|---|
+| `touch …/from-claude/claude-probe/x.txt` | "Read-only file system" |
+| `echo hi > …/from-claude/claude-probe/SKILL.md` | "Read-only file system" |
+| `touch <home>/.claude/skills/claude-probe/y.txt` | "Read-only file system" |
+| `touch <home>/.puffin/skills/direct.txt` | succeeds |
+| `ln -s /etc …/from-claude/planted` | **succeeds** |
+
+So a session cannot edit another agent's skill through its link, and it can plant something under a `from-` name, which is what the quarantine is for. One condition: the first attempt put the scratch home under `/tmp`, and there the write through the link succeeded, because the workspace-write sandbox makes `/tmp` writable whatever links point into it. The guarantee is "the target is as writable as it would be without the link"; a home folder is not under `/tmp`.
+
+**The glossary, with and without** (Qwen3.8-27B, `puffin exec -s workspace-write`, default cave mode; the block was put into the prompt of the installed build through the code-index block's hook, in the position the launcher now gives it). Two skills, linked from a scratch `~/.claude/skills`:
+
+- a Claude-dialect probe, `release-notes`: "Use the Read tool to read `${CLAUDE_SKILL_DIR}/template.md`", "Use the Bash tool to run `python3 ${CLAUDE_SKILL_DIR}/scripts/changes.py`", "Use the Write tool to create `RELEASE_NOTES.md` … with VERSION replaced by `$ARGUMENTS`", "Use the Grep tool to check …", and a `` !`git describe --tags --always` `` line; asked "Write the release notes for version 2.4.0.";
+- Anthropic's `algorithmic-art`, unmodified, whose step 0 is "Read `templates/viewer.html` using the Read tool"; asked for a flow-field piece as one HTML file.
+
+| | Without the glossary | With it |
+|---|---|---|
+| `release-notes`: correct file (version, both changes, the footer) | 3 of 3 | 3 of 3 |
+| read the template and ran the script from the skill's folder | 3 of 3 | 3 of 3 |
+| ran the `` !`command` `` line itself | 1 of 3 | 2 of 3 |
+| did the "Grep tool" check with `rg`/`grep` | 2 of 3 | 3 of 3 |
+| seconds per run | 21, 33, 21 | 23, 71, 51 |
+| `algorithmic-art`: read `templates/viewer.html`, wrote the HTML from it | 1 of 1 (11 commands, a 22 KB file built on the template, 724 s) | 0 of 1: the model read the first 60 lines of the skill's 405 and wrote a 1.2 KB file of its own, without the template, in 2 commands (200 s) |
+
+No skill failed without the block, so by §5's own rule it does not ship on: it is off by default and kept as an opt-in. The one run that did not follow its skill was a run *with* the block: the prompt asked for something short, the model stopped reading before the step that names the template, and that is one run, so it is not evidence that the block does harm. The timings are single runs on a model server shared with other work (up to seven requests running and five queued during these) and say nothing about the block's cost. This is two skills and one model; a Hermes- or OpenClaw-dialect skill (`terminal`, `skill_view`) and the other catalogues of Phase 0 item 1 were not run.
+
+**This machine's catalogue** (the plan, run read-only against the real folders). 27 skills would be offered: 2 installed (`pdf`, `jupyter-notebook`), 7 in `~/.agents/skills`, 13 linked from Claude's `synced/` (`docx`, `xlsx`, `pptx`, `deep-research`, `computer-use`, `chrome-browser`, `google-workspace`, …) and 5 bundled. That is **4,256 of 5,242 catalogue tokens (81%)**, of which the 13 Claude skills are 2,777 (the seven in `~/.agents/skills` 731, the five bundled 592, the two installed 156), so the nearly-full line is printed at every interactive start here until something is switched off. Ten are not offered, all shadowed: the second account's copies, Claude's `pdf` by the installed one, and the bundled `skill-creator` by Claude's (one `config.toml` entry). Several of the 13 are written for claude.ai's own tools (a browser, computer use, Google Workspace connectors) and cannot do their job in a terminal agent; they declare nothing a preflight could read. `puffin skill source claude off` leaves them all out, `puffin skill disable <name>` one at a time.
+
+### 15.4 Not built
+
+- **Phase 3:** `clawhub/…` and `hermes/…` as sources (their endpoints and paths are still unverified, Phase 0 items 2 and 3), ClawHub's verdict, and links for a repository's `.claude/skills` and `.gemini/skills` under the trust rule.
+- **Phase 0 item 6:** `policy.allow_implicit_invocation` as the way to keep a manual-only skill usable by name. Manual-only skills are simply not offered.
+- **Phase 0 item 1 in full:** one real skill from each of the five catalogues.
+- **No `puffin skill update`** (by design, §6.2) and no command for the glossary setting; it is a key in `puffin-skills.toml`.
+- **macOS and Windows.** The crate compiles its links for both (`symlink_dir` on Windows needs Developer Mode or elevation) but was built and tested on Linux only.
+- **Not run with a build that carries this code:** the start-up pass inside `puffin` itself, and `puffin skill` from a shell. The pieces were run separately: the crate's and the launcher's tests, the link layout and the `config.toml` entries by hand against the installed build (above), and the plan read-only against this machine's folders. `puffin` has to be rebuilt (`puffin-admin codex build`) before `puffin skill` exists.
+
+### 15.5 Tests
+
+- **`puffin-skills`** (51, `cargo test` in a copy of `puffin-rs/skills/`, or `-p puffin-skills` in the export): frontmatter of each dialect and the repair of an unquoted colon; the preflight on a made-up `PATH`; link creation, pruning, the untouched folder (same inode), planted folders, wrong-target and `..` links, a `from-` name that is a link or a file; the plan's discovery through `synced/` and Hermes's categories, hidden folders, collisions in the order of §7, a switched-off source, the budget drop from the last source, one file by two routes; `config.toml` entries added, rewritten whole, a table appended after them kept, a user's entry left alone, a config that cannot take them; `add`'s sources, one folder out of a tarball, escapes, outside links and the 50 MB limit refused, the origin record and later edits; `remove` only what `puffin` installed; `adopt`; the start-up pass's lines, each once; the glossary naming every tool of §1.
+- **Launcher** (`cargo test --release -p puffin-launcher`, 7 tests in `skills.rs`): `add` against a stand-in GitHub (the commit, then the tarball: two requests), the installed skill offered and counted as foreign, a second `add` refused, `remove`; nothing requested at `/airgapped on` for `add` or `search`, while a local folder still installs; `search` across both catalogues; no install without `--yes` and without a terminal; the local commands with GitHub unreachable; the budget window read from `model_catalog.json`; the entries through `updated_config` and back.
+- **Never in tests:** the real `~/.puffin`, `~/.claude`, `~/.agents`, or the network.

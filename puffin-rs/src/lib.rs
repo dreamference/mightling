@@ -41,6 +41,7 @@ pub mod home;
 pub mod ledger;
 pub mod night;
 pub mod node;
+pub mod skills;
 
 pub mod update;
 pub mod usage;
@@ -72,7 +73,7 @@ pub const UPSTREAM_TESTS_ENV: &str = "PUFFIN_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node",
+    "unarchive", "delete", "sandbox", "update", "node", "skill",
 ];
 
 /// Codex subcommands Puffin does not offer, each with the reason it gives. They are refused here,
@@ -217,6 +218,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(ledger::run_cli(&user_args[index + 1..]));
     }
+    // `skill` lists, installs and switches skills, Codex's own and other agents' (skills.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "skill"
+    {
+        std::process::exit(skills::run_cli(&user_args[index + 1..]).await);
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
@@ -256,6 +263,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // The code index: its session process starts here, outside the sandbox, and its prompt block
     // joins the others (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2).
     extra_instructions.push_str(&code_index::start_and_prompt_block());
+    // Skills other agents installed are linked in, and the glossary of their tool names joins the
+    // prompt when one is offered (specs/DREAMFERENCE_PUFFIN_SKILLS.md §3, §5).
+    extra_instructions.push_str(skills::start(&codex_home, interactive, model.max_model_len));
     cave::prune_session_files();
     airgapped::prune_session_files();
     configure_codex_home(&codex_home, &host, &model, &extra_instructions)?;

@@ -25,6 +25,8 @@ flate2 = { workspace = true }
 mdns-sd = { version = "0.21.4", default-features = false }
 puffin-airgapped = { path = "airgapped" }
 puffin-node-locator = { path = "node-locator" }
+# Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
+puffin-skills = { path = "skills" }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 semver = { workspace = true }
@@ -42,4 +44,5 @@ openssl-sys = { workspace = true, features = ["vendored"] }
 
 [dev-dependencies]
 clap = { workspace = true, features = ["derive"] }
+tar = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
