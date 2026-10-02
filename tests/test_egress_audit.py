@@ -2,7 +2,7 @@
 
 The parser and the verdict are tested on a recorded trace of a real session and on the same trace
 with the channels patches 0013 and 0015 closed written back in. No test here runs strace, puffin
-or the model server.
+or the model server: the full-screen session is played by a stand-in on a real pseudo-terminal.
 """
 
 import json
@@ -11,7 +11,7 @@ import stat
 
 import pytest
 
-from dreamference.audit import EgressAudit, EgressTrace, StraceParser
+from dreamference.audit import EgressAudit, EgressTrace, StraceParser, TuiSession
 from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "egress")
@@ -203,3 +203,185 @@ def test_missing_tools_are_named(missing, tmp_path, monkeypatch, capsys):
             pytest.skip("strace is not installed here")
         assert EgressAudit.run(vllm_host="http://x") == 2
         assert "puffin is not built" in capsys.readouterr().out
+
+
+# -- the full-screen session (--tui) ---------------------------------------------------------------
+
+def test_the_recorded_interface_session_reaches_only_the_model_server_and_gmail():
+    trace = fixture("tui_pass.strace")
+    assert trace.destinations == {"127.0.0.1:8000": 3, "127.0.0.1:8767": 1}
+    assert trace.dns_names == {} and trace.dns_servers == {} and trace.networked_git == []
+    # What `exec` never opens: the session bus (the interface asks the desktop's accessibility
+    # service). A unix socket is listed, and is not a destination.
+    assert "/run/user/1000/bus" in trace.unix_sockets
+    assert trace.processes["puffin"] == 1
+    assert EgressAudit.judge(trace, ALLOWED, True).status == PASS
+
+
+def test_the_reply_is_read_from_the_session_file(tmp_path):
+    assert TuiSession.reply_in(str(tmp_path)) is None
+    rollout = tmp_path / "sessions" / "2026" / "10" / "02" / "rollout-x.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text(json.dumps({"type": "response_item", "payload": {"type": "message", "role": "user"}}) + "\n"
+                       + "not json\n")
+    assert TuiSession.reply_in(str(tmp_path)) is None  # the prompt alone is not a reply
+    with open(rollout, "a") as handle:
+        handle.write(json.dumps({"type": "event_msg", "payload": {"type": "task_complete", "last_agent_message": "pong"}}) + "\n")
+    assert TuiSession.reply_in(str(tmp_path)) == "pong"
+
+
+def interface_stand_in(tmp_path, monkeypatch, answers: bool):
+    """A stand-in for strace that plays the interface on the pseudo-terminal it is given."""
+    pytest.importorskip("pexpect")
+    pytest.importorskip("pyte")
+    calls = tmp_path / "calls.json"
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{os.sys.executable}
+import json, os, shutil, sys, time
+args = sys.argv[1:]
+home = os.environ["CODEX_HOME"]
+record = {{"args": args, "cwd": os.getcwd(), "CODEX_HOME": home, "pid": os.getpid(), "tty": sys.stdin.isatty(),
+          "term": os.environ.get("TERM"), "config": open(os.path.join(home, "config.toml")).read(), "typed": []}}
+def save():
+    json.dump(record, open({str(calls)!r}, "w"))
+save()
+print(">_ Puffin (v0.0.0)", flush=True)
+print("› ", end="", flush=True)
+record["typed"].append(sys.stdin.readline().strip()); save()
+if not {answers!r}:
+    time.sleep(600)
+sessions = os.path.join(home, "sessions", "2026", "10", "02")
+os.makedirs(sessions)
+with open(os.path.join(sessions, "rollout-test.jsonl"), "w") as handle:
+    handle.write(json.dumps({{"type": "event_msg", "payload": {{"type": "task_complete", "last_agent_message": "pong"}}}}) + "\\n")
+shutil.copy({os.path.join(FIXTURES, "tui_pass.strace")!r}, args[args.index("-o") + 1])
+record["typed"].append(sys.stdin.readline().strip()); save()
+""")
+    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    for name in ("SETTLE_AFTER_READY_S", "SETTLE_AFTER_REPLY_S", "TYPE_PAUSE_S"):
+        monkeypatch.setattr(f"dreamference.audit.tui_session.{name}", 0.2)
+    return calls
+
+
+def test_the_interface_is_opened_prompted_and_quit_on_a_pseudo_terminal(tmp_path, monkeypatch, capsys):
+    calls = interface_stand_in(tmp_path, monkeypatch, answers=True)
+    home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    code = EgressAudit.run(write_json=True, puffin_bin="/opt/puffin", vllm_host="http://localhost:8000", tui=True)
+    out = capsys.readouterr().out
+    assert code == 0 and "✅ Egress audit: pass" in out and "full-screen `puffin` session" in out
+    call = json.loads(calls.read_text())
+    # The interface itself: `puffin` with no subcommand, on a terminal.
+    assert call["args"][:7] == ["-f", "-qq", "-e", "trace=connect,sendto,sendmsg,sendmmsg,execve", "-s", "256", "-o"]
+    assert call["args"][8:] == ["/opt/puffin"]
+    assert call["tty"] is True and call["term"] == "xterm-256color"
+    # It typed the prompt, and after the reply it quit.
+    assert call["typed"] == ["Reply with exactly: pong", "/quit"]
+    assert EgressAudit.tui_stage == "quit"
+    # The throwaway home trusts the throwaway repository, so the session opens on the composer.
+    assert f'[projects."{os.path.realpath(call["cwd"])}"]' in call["config"] and 'trust_level = "trusted"' in call["config"]
+    assert call["CODEX_HOME"] != str(home) and not os.path.exists(call["CODEX_HOME"]) and not os.path.exists(call["cwd"])
+    (result_file,) = list((home / "audit").glob("*-tui.json"))
+    result = json.loads(result_file.read_text())
+    assert result["session"] == "tui" and result["verdict"] == "pass"
+    assert result["destinations"] == {"127.0.0.1:8000": 3, "127.0.0.1:8767": 1}
+
+
+def test_an_interface_that_never_answers_is_stopped_and_is_not_a_pass(tmp_path, monkeypatch, capsys):
+    calls = interface_stand_in(tmp_path, monkeypatch, answers=False)
+    monkeypatch.setattr("dreamference.audit.egress_audit.SESSION_TIMEOUT_S", 3)
+    assert EgressAudit.run(puffin_bin="/opt/puffin", vllm_host="http://localhost:8000", tui=True) == 2
+    out = capsys.readouterr().out
+    assert "Egress audit: trace failed" in out and "The interface opened and took the prompt" in out
+    assert EgressAudit.tui_stage == "composer"
+    # Nothing is left running.
+    pid = json.loads(calls.read_text())["pid"]
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+def test_tui_without_its_terminal_modules_says_how_to_add_them(monkeypatch, capsys):
+    if __import__("shutil").which("strace") is None:
+        pytest.skip("strace is not installed here")
+    monkeypatch.setattr(TuiSession, "missing_modules", classmethod(lambda cls: ["pexpect", "pyte"]))
+    assert EgressAudit.run(puffin_bin="/opt/puffin", vllm_host="http://x", tui=True) == 2
+    out = capsys.readouterr().out
+    assert "trace failed" in out and "pip install pexpect pyte" in out
+
+
+# -- after `puffin-admin codex build` ---------------------------------------------------------------
+
+@pytest.fixture
+def after_build(monkeypatch):
+    """`EgressAudit.after_build` with the model server and the sessions replaced."""
+    runs = []
+    state = {"served": ("model", 4096), "codes": {False: 0, True: 0}}
+    monkeypatch.setattr("dreamference.night_shift.NightShiftHost.served_model",
+                        classmethod(lambda cls, host, timeout=3.0: state["served"]))
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(TuiSession, "missing_modules", classmethod(lambda cls: []))
+
+    def run(cls, prompt=None, write_json=False, puffin_bin=None, vllm_host=None, tui=False):
+        runs.append({"tui": tui, "write_json": write_json, "vllm_host": vllm_host})
+        return state["codes"][tui]
+    monkeypatch.setattr(EgressAudit, "run", classmethod(run))
+    return state, runs
+
+
+def test_after_a_build_both_kinds_of_session_are_traced_and_recorded(after_build, capsys):
+    _, runs = after_build
+    assert EgressAudit.after_build(vllm_host="http://localhost:8000") == 0
+    assert runs == [{"tui": False, "write_json": True, "vllm_host": "http://localhost:8000"},
+                    {"tui": True, "write_json": True, "vllm_host": "http://localhost:8000"}]
+
+
+def test_after_a_build_without_a_model_server_the_audit_does_not_wait(after_build, capsys):
+    state, runs = after_build
+    state["served"] = None
+    assert EgressAudit.after_build(vllm_host="http://localhost:8000") is None
+    out = capsys.readouterr().out
+    assert runs == [] and "Egress audit skipped" in out and "puffin-admin audit egress --tui" in out
+
+
+def test_after_a_build_an_unexpected_destination_is_said_plainly(after_build, capsys):
+    state, runs = after_build
+    state["codes"] = {False: 2, True: 1}  # a failed trace must not hide a failing verdict
+    assert EgressAudit.after_build(vllm_host="http://localhost:8000") == 1
+    assert "❌ This build reaches something it should not" in capsys.readouterr().out
+    state["codes"] = {False: 0, True: 2}
+    assert EgressAudit.after_build(vllm_host="http://localhost:8000") == 2
+    assert "could not show what this build does" in capsys.readouterr().out
+
+
+def test_after_a_build_a_broken_audit_is_reported_not_raised(after_build, monkeypatch, capsys):
+    def broken(cls, **kwargs):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(EgressAudit, "run", classmethod(broken))
+    assert EgressAudit.after_build(vllm_host="http://localhost:8000") is None
+    assert "Egress audit did not run (boom)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv, was_current, built, audited", [
+    (["codex", "build"], False, True, True),                  # a new binary: audit it
+    (["codex", "build"], True, True, False),                  # nothing was built
+    (["codex", "build", "--force"], True, True, True),        # rebuilt on request
+    (["codex", "build", "--no-audit"], False, True, False),
+    (["codex", "build"], False, False, False),                # the build failed: nothing to audit
+])
+def test_codex_build_audits_a_new_binary_and_keeps_its_own_exit_code(argv, was_current, built, audited, monkeypatch):
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+    calls = []
+    monkeypatch.setattr(controller.DreamferenceCLIController, "_refuse_during_night_run", classmethod(lambda cls, what: None))
+    monkeypatch.setattr("dreamference.node.NodeIdentity.ensure", classmethod(lambda cls: None))
+    monkeypatch.setattr(CodexBrandedBuilder, "is_current", classmethod(lambda cls: was_current))
+    monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: built))
+    # A failing verdict: the build's exit code must not change with it.
+    monkeypatch.setattr(EgressAudit, "after_build", classmethod(lambda cls: calls.append("audit") or 1))
+    monkeypatch.setattr("sys.argv", ["puffin-admin", *argv])
+    with pytest.raises(SystemExit) as exit_info:
+        controller.main()
+    assert exit_info.value.code == (0 if built else 1)
+    assert calls == (["audit"] if audited else [])

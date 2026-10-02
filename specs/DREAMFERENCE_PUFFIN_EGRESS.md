@@ -1,6 +1,6 @@
 # Puffin Egress — audit and airlock
 
-**Status:** Phase 1 (the audit, exec sessions) implemented on 2026-10-01: `dreamference/audit/`, `puffin-admin audit egress`; §10 records what was built and where it differs. Phase 2 (the airlock) is not built; its mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2).
+**Status:** Phase 1 (the audit) implemented: `exec` sessions on 2026-10-01, the full-screen interface (`--tui`) and the audit after `puffin-admin codex build` on 2026-10-02: `dreamference/audit/`, `puffin-admin audit egress`; §10 records what was built and where it differs. Phase 2 (the airlock) is not built; its mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2).
 **Superseded in part (2026-10-01):** the airlock's switch is now the `on` level of `/airgapped` ([PUFFIN_AIRGAPPED §5.4](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)), not `puffin --airlock`. The mechanism (§4.1, §4.2), the ledger (§4.4) and the audit (§3) stand; the surface (§2), the allowlist (§4.3) and §5 are read through that spec, which allows only the model server at `on`.
 **Target:** the `puffin` terminal agent. `puffin-admin` runs the audit.
 **Builds on:**
@@ -40,7 +40,7 @@ This spec adds no slash command of its own. (When it was written the patch budge
 | `puffin --airlock …` or `airlock = true` in `$CODEX_HOME/config.toml` | 2 | Runs `puffin` in the airlock. The launcher handles the flag before Codex parses its arguments, like `puffin app`, so it needs no patch. |
 | `puffin airlock log [--since 1d]` | 2 | Prints the ledger (§4.4). |
 
-**`codex build` runs the audit.** After a build with a new Codex release, `puffin-admin codex build` runs `audit egress` and prints the verdict. A failing verdict does not undo the build, but it is shown in red with the offending destinations. [PUFFIN_CODEX §6](./DREAMFERENCE_PUFFIN_CODEX.md) says to re-run the trace after every Codex bump; this makes that automatic.
+**`codex build` runs the audit.** After a build with a new Codex release, `puffin-admin codex build` runs `audit egress` and prints the verdict. A failing verdict does not undo the build, but it is shown in red with the offending destinations. (As built, §10.5: after every build that installs a new `puffin`, both kinds of session, `--no-audit` to skip; the verdict is marked ❌, the CLI's mark for a failure, not coloured.) [PUFFIN_CODEX §6](./DREAMFERENCE_PUFFIN_CODEX.md) says to re-run the trace after every Codex bump; this makes that automatic.
 
 ---
 
@@ -63,7 +63,7 @@ This productises the 2026-09-29 procedure.
 - **Fail:** anything else, listed first.
 - **Trace failed:** the session did not produce a reply, or `strace` could not attach. This is not a pass.
 
-`--json` writes the full result to `~/.puffin/audit/<timestamp>.json` as well: destinations, DNS names, processes, verdict, the `puffin --version` output, and the Codex tag and patch hashes from the build stamp. Two audits can then be compared across builds.
+`--json` writes the full result to `~/.puffin/audit/<timestamp>-<exec|tui>.json` as well (the session kind is in the name since 2026-10-02, so a build's two records cannot collide): destinations, DNS names, processes, verdict, the `puffin --version` output, and the Codex tag and patch hashes from the build stamp. Two audits can then be compared across builds.
 
 ### 3.3. Requirements
 
@@ -226,7 +226,48 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 
 ### 10.4 Not built
 
-- **`--tui`** (§3.1 step 3): the pseudo-terminal session that found the announcement fetch. Until it exists, a TUI-only channel is invisible to the audit, as it was to `exec` in September.
-- **The audit after `puffin-admin codex build`** (§2): it would put a model request into every build. The command is there to run by hand after a Codex bump.
-- **§8's acceptance on a build without `0015`**: needs a second build of `puffin`; the failing case is covered by the fixture only.
+- **§8's acceptance on a build without `0015`**: needs a second build of `puffin`; the failing case is covered by the fixture only. For `--tui` this matters more than for `exec`: the announcement fetch that only the interface made is closed in every build that exists, so **no real trace of the interface has ever failed**, and that it would is argued from the parser's tests, not shown.
 - **Phase 2**, the airlock and its ledger (§4): its switch is now the `on` level of `/airgapped`.
+
+### 10.5 The interface, and the audit after a build (2026-10-02)
+
+**`puffin-admin audit egress --tui`** traces the full-screen interface instead of `puffin exec` (`dreamference/audit/tui_session.py`, `TuiSession`). The same strace is put around `puffin` with no subcommand, on a pseudo-terminal of 160×50 with `TERM=xterm-256color`; the audit waits for the composer, types the prompt, waits for the reply, lets the session settle for 3 s, types `/quit`, and reads the trace.
+
+Where it differs from §3.1 step 3:
+
+- **The trust prompt is not answered; it is not shown.** The throwaway `CODEX_HOME` is given `[projects."<repo>"] trust_level = "trusted"` before the session starts (the launcher edits `config.toml` in place and keeps the table), as the live slash-command tests do. So the trust screen itself, and any other first-run screen, is not part of the trace.
+- **The reply is read from the session file, not from the screen.** The screen also shows the typed prompt, and the default prompt contains the word the reply consists of. A session has replied when a `rollout-*.jsonl` under the throwaway home holds a `task_complete` event with a non-empty `last_agent_message`.
+- **The terminal is driven with `pexpect` and rendered with `pyte`**, which the live tests already use and which are not dependencies of the package. Without them `--tui` is "trace failed" (exit 2) and prints the `pip install` line, as a missing `strace` does.
+- **A session that does not end is stopped with its process group**, after the same 300 s; "trace failed" then also says whether the interface had opened and taken the prompt.
+- **The interface's commands can reach the network; `exec`'s cannot.** The launcher gives the interface's workspace-write sandbox `network_access = true`, while `puffin exec` runs read-only with none. A command the model chooses to run in the traced interface session is therefore traced with network access. The default prompt asks for one word so that no command runs; `--prompt` is how to look at what a task does.
+
+**Run on this machine, 2026-10-02 11:49, both a pass**, on the `puffin` installed 2026-10-01 21:41 (build key `064c6b8c737f-4b9f72c9a5ce`, 17 patches; `build_matches_checkout: false`, because the launcher source had moved on since). Records: `~/.puffin/audit/20261002-114937-tui.json`, `20261002-114948-exec.json`.
+
+| | `exec` | interface |
+|---|---|---|
+| `127.0.0.1:8000` (model server) | 2 connects | 3 |
+| `127.0.0.1:8767` (Gmail service) | 1 | 1 |
+| DNS queries, networked git | none | none |
+| Unix sockets | glibc's absent `nscd` | the same, and `/run/user/1000/bus` (twice, with one message to `/org/a11y/bus`) |
+| Wall time | about 3 s | 17 s |
+
+The session bus is the one thing the interface opens that `exec` does not. It is a unix socket on this machine and is listed, not judged; which part of the interface asks the accessibility service was not looked into.
+
+**After a build.** `puffin-admin codex build` now ends with the audit when, and only when, it installed a new `puffin`: the build was not current beforehand, or `--force` was given, and it succeeded. `EgressAudit.after_build()` traces an `exec` session and then the interface, and writes both records.
+
+- **Not every build:** §10.4's old objection was a model request in every build. A `codex build` that finds the binary current runs nothing. Whether the binary was current is asked *before* the build, because afterwards a build that compiled and one that found nothing to do both report success.
+- **It never waits for a model server.** The server is asked once with a 3 s timeout; if it does not answer, one line says the audit was skipped and names the two commands to run later. Without that check a build on a machine whose server is down would end with the launcher's five-minute wait.
+- **It never changes the build's exit code.** The binary is installed either way. An unexpected destination ends with a ❌ line saying the build reaches something it should not; a trace that failed says the audit could not show what the build does; an audit that itself breaks is reported in one line.
+- **`--no-audit`** skips it. Without `pexpect` and `pyte` only the `exec` session is traced, and a line says so.
+- **Where the hook is:** in the CLI's `codex build` branch, not in `CodexBrandedBuilder`, so nothing that calls the builder from a test can start a session.
+- **Not exercised by a real build.** On 2026-10-02 several tasks were rebuilding `puffin` and the model server was shared with a benchmark, so no `codex build` was started for this. The branch is covered by tests with the builder and the audit replaced; the two sessions it runs are the ones measured above.
+
+### 10.6 Tests added (`tests/test_egress_audit.py`, 27 in all)
+
+- A recorded trace of a real interface session (`tests/fixtures/egress/tui_pass.strace`, 385 lines): the same destinations as `exec` plus one more connect to the model server, and the session bus among the unix sockets.
+- The session file: a prompt alone is not a reply; a `task_complete` with a message is.
+- The interface played by a stand-in on a real pseudo-terminal, under a stand-in `strace`: `puffin` is started with no subcommand on a terminal, the prompt and then `/quit` are typed, the throwaway home trusts the throwaway repository, both are removed afterwards, and the record is `…-tui.json` with `"session": "tui"`.
+- A stand-in that never answers: "trace failed", the report says the interface had taken the prompt, and the process is gone.
+- `--tui` without `pexpect` and `pyte`.
+- After a build: both sessions traced and recorded; no model server, no session and no wait; a failed trace does not hide a failing verdict; a broken audit is reported, not raised.
+- `codex build`: audited when a new binary was installed or `--force` was given; not when the build was current, failed, or `--no-audit` was given; its exit code is the build's whatever the audit returned.

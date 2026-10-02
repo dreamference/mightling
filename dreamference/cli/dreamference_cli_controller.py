@@ -925,6 +925,7 @@ class DreamferenceCLIController:
             "build", help="Build the Puffin-branded Codex from the codex submodule and codex-patches/"
         )
         codex_build_parser.add_argument("--force", action="store_true", help="Rebuild even if the installed build is current")
+        codex_build_parser.add_argument("--no-audit", action="store_true", help="Do not trace the new build's network use afterwards (`puffin-admin audit egress`)")
         codex_subparsers.add_parser("start", help="Start puffin's app-server daemon in the background")
         codex_subparsers.add_parser("stop", help="Stop puffin's app-server daemon")
         codex_test_parser = codex_subparsers.add_parser(
@@ -971,6 +972,7 @@ class DreamferenceCLIController:
         audit_subparsers = audit_parser.add_subparsers(dest="audit_command")
         audit_egress_parser = audit_subparsers.add_parser(
             "egress", help="Trace one real puffin session and list every network destination and process, with a verdict")
+        audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `puffin exec` (needs pexpect and pyte)")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
 
@@ -2181,7 +2183,7 @@ class DreamferenceCLIController:
             from dreamference.audit import EgressAudit
             if args.audit_command == "egress":
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
-                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json))
+                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui))
             print("usage: puffin-admin audit {egress}")
             sys.exit(2)
 
@@ -2262,7 +2264,16 @@ class DreamferenceCLIController:
                 # then uses the local model server and never browses for another.
                 from dreamference.node import NodeIdentity
                 NodeIdentity.ensure()
-                sys.exit(0 if CodexBrandedBuilder.build(force=args.force) else 1)
+                # Asked before the build: afterwards a build that compiled and one that found
+                # nothing to do both report success.
+                was_current = CodexBrandedBuilder.is_current()
+                built = CodexBrandedBuilder.build(force=args.force)
+                if built and not args.no_audit and (args.force or not was_current):
+                    # A new binary is when a new network channel would appear. The verdict is
+                    # printed and recorded; it never changes the build's exit code.
+                    from dreamference.audit import EgressAudit
+                    EgressAudit.after_build()
+                sys.exit(0 if built else 1)
             if args.codex_command == "test":
                 from dreamference.runner.codex_test_runner import CodexTestRunner
                 sys.exit(CodexTestRunner.run(user_filter=args.filter, test_threads=args.test_threads,

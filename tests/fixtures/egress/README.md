@@ -14,3 +14,7 @@
   the same day: what a lookup and an outbound connect look like on this machine (glibc's
   `sendmmsg` to systemd-resolved's stub, the address-sorting `connect`s, an fd reused from the
   resolver to the web server). The TLS payload lines were dropped.
+- `tui_pass.strace`: a real trace of the full-screen interface, recorded on 2026-10-02 by
+  `puffin-admin audit egress --tui`'s own session (the same strace around `puffin` on a
+  pseudo-terminal: the prompt typed, the reply awaited, `/quit`), with the 17-patch build of Codex
+  `rust-v0.158.0` installed on 2026-10-01 21:41. Only the home and scratch paths were rewritten.

@@ -2,10 +2,10 @@
 `puffin-admin audit egress`: where does a `puffin` session connect?
 (specs/DREAMFERENCE_PUFFIN_EGRESS.md §3)
 
-This module provides the EgressAudit class. It runs one real `puffin exec` session under
-`strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network
-destination, every name asked of a resolver and every process the session started, with a
-verdict. It makes "your code stays on your machine" something a user can check and re-check
+This module provides the EgressAudit class. It runs one real `puffin` session under `strace`
+(`puffin exec`, or with `--tui` the full-screen interface on a pseudo-terminal), in a throwaway
+repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked
+of a resolver and every process the session started, with a verdict. It makes "your code stays on your machine" something a user can check and re-check
 after each Codex bump, instead of a promise.
 
 The audit reads; the one thing it writes outside its scratch directory is the `--json` result
@@ -19,6 +19,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict
 from typing import Any, Dict, Final, List, Optional, Tuple
@@ -27,6 +28,7 @@ from urllib.parse import urlparse
 from dreamference.audit.egress_trace import EgressTrace
 from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED, EgressVerdict
 from dreamference.audit.strace_parser import StraceParser
+from dreamference.audit.tui_session import TuiSession
 
 DEFAULT_PROMPT: Final[str] = "Reply with exactly: pong"
 
@@ -44,9 +46,18 @@ SEARXNG_PORT: Final[int] = 8888
 # fails on this machine. A connect there is exactly such a call.
 CHATGPT_BLACKHOLE_PORT: Final[int] = 9
 
+# The two kinds of session, and what the report calls them.
+EXEC: Final[str] = "exec"
+TUI: Final[str] = "tui"
+SESSION_NAMES: Final[Dict[str, str]] = {EXEC: "`puffin exec` session", TUI: "full-screen `puffin` session"}
+
 
 class EgressAudit:
     """Traces one session and judges where it connected."""
+
+    # How far the last `tui` session got (`start`, `composer`, `reply`, `quit`), for the report
+    # of a trace that failed: "no reply" alone does not say whether the interface ever opened.
+    tui_stage: str = ""
 
     @classmethod
     def allowed_ports(cls, vllm_host: str) -> Dict[int, str]:
@@ -105,10 +116,17 @@ class EgressAudit:
         return EgressVerdict(PASS)
 
     @classmethod
-    def trace_session(cls, puffin_bin: str, vllm_host: str, prompt: str, work_dir: str) -> Tuple[EgressTrace, bool, str]:
+    def trace_session(cls, puffin_bin: str, vllm_host: str, prompt: str, work_dir: str,
+                      session: str = EXEC) -> Tuple[EgressTrace, bool, str]:
         """
-        Runs `puffin exec` under strace in a throwaway repository with a throwaway `CODEX_HOME`,
-        so no login, history or config of the user's influences the result, and none is touched.
+        Runs one `puffin` session under strace in a throwaway repository with a throwaway
+        `CODEX_HOME`, so no login, history or config of the user's influences the result, and
+        none is touched.
+
+        An `exec` session writes its reply to a file. A `tui` session is the interface itself on
+        a pseudo-terminal (TuiSession): the throwaway home already trusts the throwaway
+        repository, so it opens on the composer, and its reply is read from the session file it
+        writes.
 
         The code index is switched off for the session (`code_index_enabled = false` in the
         throwaway config): its indexers run detached in their own network-less sandbox and
@@ -119,6 +137,7 @@ class EgressAudit:
             vllm_host (str): The model server's base URL.
             prompt (str): The prompt to send.
             work_dir (str): A scratch directory, owned by the caller.
+            session (str): `exec` or `tui`.
 
         Returns:
             Tuple[EgressTrace, bool, str]: The parsed trace, whether the session replied, and the
@@ -140,8 +159,16 @@ class EgressAudit:
         reply_path = os.path.join(work_dir, "reply.txt")
         env = dict(os.environ)
         env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
-        command = ["strace", "-f", "-qq", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path,
-                   puffin_bin, "exec", "--skip-git-repo-check", "-o", reply_path, prompt]
+        strace = ["strace", "-f", "-qq", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, puffin_bin]
+        if session == TUI:
+            TuiSession.trust(home, repo)
+            try:
+                outcome = TuiSession.run(strace, repo, env, home, prompt, SESSION_TIMEOUT_S)
+            except OSError:
+                outcome = {"replied": False, "stage": "start"}
+            cls.tui_stage = str(outcome.get("stage", ""))
+            return cls._read_trace(trace_path), bool(outcome["replied"]), trace_path
+        command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]
         try:
             # Its own process group, so a session that never answers is stopped with everything
             # it started: strace alone, killed, would leave `puffin` waiting for the server.
@@ -159,12 +186,16 @@ class EgressAudit:
                         continue
         except OSError:
             pass
+        replied = os.path.isfile(reply_path) and bool(open(reply_path, errors="replace").read().strip())
+        return cls._read_trace(trace_path), replied, trace_path
+
+    @classmethod
+    def _read_trace(cls, trace_path: str) -> EgressTrace:
         text = ""
         if os.path.isfile(trace_path):
             with open(trace_path, errors="replace") as handle:
                 text = handle.read()
-        replied = os.path.isfile(reply_path) and bool(open(reply_path, errors="replace").read().strip())
-        return StraceParser.parse(text), replied, trace_path
+        return StraceParser.parse(text)
 
     @classmethod
     def render(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: Dict[int, str]) -> List[str]:
@@ -239,13 +270,15 @@ class EgressAudit:
 
     @classmethod
     def run(cls, prompt: Optional[str] = None, write_json: bool = False,
-            puffin_bin: Optional[str] = None, vllm_host: Optional[str] = None) -> int:
+            puffin_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False) -> int:
         """
         Runs the audit and prints its report.
 
         Args:
             prompt (Optional[str]): The prompt for the traced session; a one-word reply by default.
             write_json (bool): Also write the full result to `$CODEX_HOME/audit/<timestamp>.json`.
+            tui (bool): Trace the full-screen interface on a pseudo-terminal instead of
+                `puffin exec`. Codex starts things there that `exec` never does.
             puffin_bin (Optional[str]): The `puffin` executable; the installed build by default.
             vllm_host (Optional[str]): The model server; the configured one by default.
 
@@ -262,28 +295,88 @@ class EgressAudit:
             print("⚠️  Egress audit: trace failed")
             print("   - puffin is not built: run `puffin-admin codex build` first.")
             return 2
+        session = TUI if tui else EXEC
+        missing = TuiSession.missing_modules() if tui else []
+        if missing:
+            print("⚠️  Egress audit: trace failed")
+            print(f"   - --tui drives the interface with {' and '.join(missing)}, which this environment lacks: "
+                  f"{sys.executable} -m pip install {' '.join(missing)}")
+            return 2
         if vllm_host is None:
             from dreamference.config import DreamferenceConfig
             vllm_host = DreamferenceConfig().vllm_host
         allowed = cls.allowed_ports(vllm_host)
-        print(f"🚀 Tracing one `puffin exec` session against {vllm_host} (throwaway repository and CODEX_HOME)...")
+        print(f"🚀 Tracing one {SESSION_NAMES[session]} against {vllm_host} (throwaway repository and CODEX_HOME)...")
         work_dir = tempfile.mkdtemp(prefix="puffin-audit-")
         try:
-            trace, replied, _ = cls.trace_session(puffin_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir)
+            trace, replied, _ = cls.trace_session(puffin_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session)
             verdict = cls.judge(trace, allowed, replied)
             for line in cls.render(trace, verdict, allowed):
                 print(line)
             if verdict.status == TRACE_FAILED:
+                if tui and cls.tui_stage == "composer":
+                    print("💡 The interface opened and took the prompt, but no reply was recorded.")
                 print(f"💡 The session needs the model server at {vllm_host}: `puffin-admin server start`.")
             if write_json:
-                print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(puffin_bin))}")
+                print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(puffin_bin), session)}")
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
         return verdict.exit_code
 
     @classmethod
+    def after_build(cls, vllm_host: Optional[str] = None, puffin_bin: Optional[str] = None) -> Optional[int]:
+        """
+        The audit `puffin-admin codex build` runs once it has installed a new `puffin` (§2): a
+        Codex bump is when a new channel would appear, and nobody remembers to re-run a trace by
+        hand. Both kinds of session are traced, `exec` and then the interface, and each result
+        is written under `$CODEX_HOME/audit/`.
+
+        It never fails the build: the binary is installed either way, and the verdict is what
+        the user reads. Without a model server it does not wait for one; it says how to run the
+        audit later.
+
+        Args:
+            vllm_host (Optional[str]): The model server; the configured one by default.
+            puffin_bin (Optional[str]): The `puffin` executable; the installed build by default.
+
+        Returns:
+            Optional[int]: The worst exit code of the sessions traced (0 pass, 1 unexpected
+            destination, 2 trace failed), or None when the audit was skipped.
+        """
+        later = "run `puffin-admin audit egress` and `puffin-admin audit egress --tui` to check this build"
+        try:
+            if vllm_host is None:
+                from dreamference.config import DreamferenceConfig
+                vllm_host = DreamferenceConfig().vllm_host
+            if shutil.which("strace") is None:
+                print(f"💡 Egress audit skipped: strace is not installed (sudo apt-get install strace); then {later}.")
+                return None
+            from dreamference.night_shift import NightShiftHost
+            if NightShiftHost.served_model(vllm_host, timeout=3.0) is None:
+                print(f"💡 Egress audit skipped: the model server at {vllm_host} is not answering. "
+                      f"After `puffin-admin server start`, {later}.")
+                return None
+            print("🔎 Auditing what the new build does on the network...")
+            codes = [cls.run(write_json=True, puffin_bin=puffin_bin, vllm_host=vllm_host)]
+            if TuiSession.missing_modules():
+                print("💡 The full-screen interface was not traced (pexpect and pyte are not installed): "
+                      "`puffin-admin audit egress --tui` says how to add them.")
+            else:
+                codes.append(cls.run(write_json=True, puffin_bin=puffin_bin, vllm_host=vllm_host, tui=True))
+            worst = 1 if 1 in codes else max(codes)
+            if worst == 1:
+                print("❌ This build reaches something it should not: see the destinations above. "
+                      "The build is installed; do not use it for private work until that is explained.")
+            elif worst == 2:
+                print(f"⚠️  The audit could not show what this build does; {later}.")
+            return worst
+        except Exception as error:  # An audit that breaks must not turn a good build into a failed one.
+            print(f"⚠️  Egress audit did not run ({error}); {later}.")
+            return None
+
+    @classmethod
     def write_result(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: Dict[int, str],
-                     identity: Dict[str, Any]) -> str:
+                     identity: Dict[str, Any], session: str = EXEC) -> str:
         """
         Writes the full result as JSON under `$CODEX_HOME/audit/`.
 
@@ -292,6 +385,7 @@ class EgressAudit:
             verdict (EgressVerdict): The verdict.
             allowed (Dict[int, str]): The allowed loopback ports.
             identity (Dict[str, Any]): Which build was audited.
+            session (str): `exec` or `tui`, the kind of session that was traced.
 
         Returns:
             str: The file written.
@@ -300,10 +394,10 @@ class EgressAudit:
         directory = os.path.join(CodexInstaller.home_dir(), "audit")
         os.makedirs(directory, exist_ok=True)
         now = datetime.datetime.now().astimezone()
-        path = os.path.join(directory, f"{now:%Y%m%d-%H%M%S}.json")
+        path = os.path.join(directory, f"{now:%Y%m%d-%H%M%S}-{session}.json")
         result = {
             "at": now.isoformat(timespec="seconds"),
-            "session": "exec",
+            "session": session,
             "verdict": verdict.status,
             "problems": verdict.problems,
             "allowed_loopback_ports": {str(port): service for port, service in allowed.items()},

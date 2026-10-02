@@ -211,6 +211,7 @@ Build the Puffin-branded Codex from the codex submodule and codex-patches/.
 | Option | Description |
 |---|---|
 | `--force` | Rebuild even if the installed build is current. |
+| `--no-audit` | Do not trace the new build's network use afterwards (`puffin-admin audit egress`) |
 
 #### `puffin-admin codex start`
 
@@ -354,6 +355,7 @@ Trace one real puffin session and list every network destination and process, wi
 
 | Option | Description |
 |---|---|
+| `--tui` | Trace the full-screen interface on a pseudo-terminal instead of `puffin exec` (needs pexpect and pyte) |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
 | `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
 
