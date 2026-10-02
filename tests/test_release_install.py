@@ -299,7 +299,8 @@ def host(monkeypatch):
     state = {"sar": True, "oom_problem": None, "earlyoom": ["earlyoom", "-m", "5,2", "-s", "100"],
              "swap_gb": 64.0, "areas": [{"name": "/swap.img", "type": "file", "size_gb": 64.0, "used_gb": 1.0}],
              "sysctl": {"vm.min_free_kbytes": 1_048_576, "vm.watermark_scale_factor": 200},
-             "disk_free_gb": 300.0, "mem_available_gb": 60.0, "swap_file_exists": True}
+             "disk_free_gb": 300.0, "mem_available_gb": 60.0, "swap_file_exists": True, "sandbox": True}
+    monkeypatch.setattr(HostSafetySetup, "sandbox_works", classmethod(lambda cls: state["sandbox"]))
     monkeypatch.setattr(host_safety_setup.shutil, "which",
                         lambda name: "/usr/bin/" + name if name != "sar" or state["sar"] else None)
     monkeypatch.setattr(VLLMServerManager, "_oom_handler_problem", classmethod(lambda cls: state["oom_problem"]))
@@ -373,6 +374,32 @@ def test_swap_that_is_not_safe_to_resize_is_explained_not_touched(host, change, 
     host.update(change)
     (step,) = HostSafetySetup.steps()
     assert "commands" not in step and said in step["manual"]
+
+
+def test_a_sandbox_that_only_works_under_the_ide_is_reported_and_not_changed(host, monkeypatch, capsys):
+    # Measured 2026-10-02: bwrap worked from the IDE's terminal (a snap's AppArmor label) and from
+    # nowhere else, so a release install typed into a plain terminal had no working sandbox.
+    host["sandbox"] = False
+    monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", lambda *a, **k: pytest.fail("nothing is run"))
+    (step,) = HostSafetySetup.steps()
+    assert "commands" not in step and "apparmor_restrict_unprivileged_userns" in step["manual"]
+    assert HostSafetySetup.setup() is False
+    assert "bubblewrap" in capsys.readouterr().out
+    host["sandbox"] = None          # cannot be tried (no bwrap, no user systemd): nothing reported
+    assert HostSafetySetup.steps() == []
+
+
+@pytest.mark.parametrize("stderr, code, expected", [
+    ("", 0, True), ("bwrap: setting up uid map: Permission denied\n", 1, False),
+    ("bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n", 0, False),
+    ("Failed to connect to bus: No medium found\n", 1, None),
+])
+def test_the_sandbox_probe_reads_bubblewraps_own_complaint(monkeypatch, stderr, code, expected):
+    monkeypatch.setattr(host_safety_setup.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(host_safety_setup.subprocess, "run",
+                        lambda command, **kw: subprocess.CompletedProcess(command, code, "", stderr))
+    assert HostSafetySetup.sandbox_works() is expected
 
 
 def test_setup_runs_each_command_through_sudo_and_reads_the_host_again(host, monkeypatch, capsys):

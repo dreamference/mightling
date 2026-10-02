@@ -2,6 +2,9 @@
 Applies the host settings `VLLMServerManager.check_host_safety()` demands
 (`puffin-admin host check|setup`).
 
+It also reports one thing `check_host_safety()` does not look at, because it is the agent's
+prerequisite and not the model's: whether bubblewrap can create a sandbox from an ordinary login.
+
 `check_host_safety()` refuses to load a model on a machine without sysstat, an armed OOM handler,
 64 GB of swap and two raised sysctls, and until 2026-10-02 it only printed the `sudo` lines: a
 fresh GB10 could not load a model until its owner had copied five commands by hand. This class
@@ -51,7 +54,8 @@ class HostSafetySetup:
             to do). Empty when the host already passes.
         """
         found: List[Dict[str, Any]] = []
-        for step in (cls._sysstat_step(), cls._oom_step(), cls._swap_step(), *cls._sysctl_steps()):
+        for step in (cls._sysstat_step(), cls._oom_step(), cls._swap_step(), *cls._sysctl_steps(),
+                     cls._sandbox_step()):
             if step is not None:
                 found.append(step)
         return found
@@ -66,12 +70,13 @@ class HostSafetySetup:
         """
         steps = cls.steps()
         if not steps:
-            print("✅ Host safety: nothing to do. This machine passes every check a model load makes.")
+            print("✅ Host setup: nothing to do. This machine has what a model load and puffin's sandbox need.")
             return True
-        print(f"⚠️  Host safety: {len(steps)} thing(s) to fix before a model can load.\n")
+        print(f"⚠️  Host setup: {len(steps)} thing(s) to fix on this machine.\n")
         for number, step in enumerate(steps, 1):
             cls._describe(number, step)
-        print("💡 `puffin-admin host setup` applies these (sudo asks for your password).")
+        if any("commands" in step for step in steps):
+            print("💡 `puffin-admin host setup` runs the commands listed (sudo asks for your password).")
         return False
 
     @classmethod
@@ -84,7 +89,7 @@ class HostSafetySetup:
         """
         steps = cls.steps()
         if not steps:
-            print("✅ Host safety: nothing to do. This machine passes every check a model load makes.")
+            print("✅ Host setup: nothing to do. This machine has what a model load and puffin's sandbox need.")
             return True
         can_prompt = sys.stdin.isatty() and shutil.which("sudo") is not None
         if not can_prompt:
@@ -100,7 +105,7 @@ class HostSafetySetup:
                     break
         remaining = cls.steps()
         if not remaining:
-            print("✅ Host safety: this machine now passes every check a model load makes.")
+            print("✅ Host setup: this machine now has what a model load and puffin's sandbox need.")
             return True
         print(f"⚠️  {len(remaining)} thing(s) still to fix: "
               + "; ".join(step["name"] for step in remaining) + ".")
@@ -219,7 +224,59 @@ class HostSafetySetup:
             })
         return steps
 
+    @classmethod
+    def _sandbox_step(cls) -> Optional[Dict[str, Any]]:
+        """
+        The one prerequisite here that is `puffin`'s, not the model server's: its command sandbox.
+
+        Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, under which bubblewrap
+        (and so Codex's sandbox, Night Shift's tasks and the code indexers) fails unless an
+        AppArmor profile allows it. On the machine this was written on it had only ever worked
+        because every shell was a child of a snap-confined IDE; from a plain terminal, an SSH
+        login or a systemd timer every sandboxed command failed (measured 2026-10-02).
+        """
+        if cls.sandbox_works() is not False:
+            return None
+        return {
+            "name": "let bubblewrap create its sandbox",
+            "why": "from an ordinary login `bwrap` is refused a user namespace, so every command "
+                   "`puffin` runs in its sandbox fails, as do Night Shift tasks and the code indexers",
+            "manual": ("AppArmor restricts unprivileged user namespaces here "
+                       "(kernel.apparmor_restrict_unprivileged_userns=1) and no profile exempts "
+                       "/usr/bin/bwrap. Either add an AppArmor profile that grants `userns,` to "
+                       "/usr/bin/bwrap (Ubuntu's apparmor-profiles package ships "
+                       "`bwrap-userns-restrict` as a model), or, more broadly, "
+                       "`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` and persist it "
+                       "in /etc/sysctl.d. Neither is applied automatically: no profile has been "
+                       "tested on this hardware yet."),
+        }
+
     # -- readings --------------------------------------------------------------------------------
+
+    @classmethod
+    def sandbox_works(cls) -> Optional[bool]:
+        """
+        Tries bubblewrap from a process with no inherited AppArmor label: a transient unit of the
+        user's systemd, which is how a login shell, an SSH session and the Night Shift timer run.
+        Trying it from this process would only test whatever happens to confine the caller.
+
+        Returns:
+            Optional[bool]: True or False, or None where it cannot be tried (no bubblewrap, no
+            user systemd), in which case nothing is reported.
+        """
+        if shutil.which("bwrap") is None or shutil.which("systemd-run") is None:
+            return None
+        try:
+            result = subprocess.run(
+                ["systemd-run", "--user", "--wait", "--pipe", "--quiet", "--collect", "--",
+                 "bwrap", "--ro-bind", "/", "/", "--unshare-net", "true"],
+                capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        output = result.stdout + result.stderr
+        if "bwrap:" in output:
+            return False
+        return True if result.returncode == 0 else None
 
     @classmethod
     def swap_areas(cls) -> List[Dict[str, Any]]:
