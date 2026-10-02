@@ -3,14 +3,17 @@
     python run.py --reps 1,2,3 --levels off,lite,full,ultra [--tasks all] [--out results/new.jsonl]
 
 Each run gets a fresh CODEX_HOME and a fresh git workspace copied from tasks/<task>/ws. A level
-other than `off` is passed as `developer_instructions` from levels/<level>.txt, which is the text
-the cave_mode World State fragment would add. The rollout is split into final answer, commentary
+other than `off` is passed as `developer_instructions` from levels/<level>.txt (or, for an older or
+candidate text such as `ultra_v5`, levels/history/<level>.txt), which is the text the cave_mode
+World State fragment would add. `puffin`'s own cave mode is switched off for every run
+(DREAMFERENCE_PUFFIN_CAVE_MODE=off), so the level under test is the only one the model sees. The rollout is split into final answer, commentary
 between tool calls and tool-call arguments, counted with the served model's tokenizer, and the
 task's check.py decides pass or fail. Results are appended as JSON lines; finished cells are
 skipped, so an interrupted run resumes.
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import random
@@ -25,6 +28,7 @@ from tok import n
 
 HERE = Path(__file__).resolve().parent
 TASKS = sorted(p.name for p in (HERE / "tasks").iterdir() if p.is_dir())
+QUESTION_TASKS = {"howto", "debug", "safety", "openq", "repoq"}
 
 
 def text_of(item):
@@ -67,11 +71,42 @@ def workspace(task, root):
     return ws
 
 
+def level_file(level, suffix=".txt"):
+    """levels/<level><suffix>, or the same name under levels/history for an older or candidate text."""
+    current = HERE / "levels" / f"{level}{suffix}"
+    return current if current.exists() else HERE / "levels" / "history" / f"{level}{suffix}"
+
+
 def exec_args(ws, level):
     args = ["-s", "workspace-write", "-C", str(ws), "--skip-git-repo-check"]
     if level != "off":
-        args += ["-c", "developer_instructions=" + json.dumps((HERE / "levels" / f"{level}.txt").read_text())]
+        args += ["-c", "developer_instructions=" + json.dumps(level_file(level).read_text())]
     return args
+
+
+def bench_env(home):
+    # Since 2026-10-01 `puffin` adds its own cave_mode section (ultra by default); without this the
+    # model would get the shipped level on top of the one under test, and `off` would not be off.
+    return {**os.environ, "CODEX_HOME": str(home), "DREAMFERENCE_PUFFIN_CAVE_MODE": "off"}
+
+
+def dirty(ws):
+    """{path: content hash} of every file that differs from the workspace's commit."""
+    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=ws,
+                            capture_output=True, text=True).stdout
+    paths = [line[3:] for line in status.splitlines() if line.strip()]
+    found = {}
+    for path in paths:
+        if "__pycache__" in path or ".pytest_cache" in path:
+            continue
+        target = Path(ws) / path
+        found[path] = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else "gone"
+    return found
+
+
+def wrote_files(ws, baseline):
+    """Files the run created or changed, not counting what the task's setup left uncommitted."""
+    return sorted(path for path, digest in dirty(ws).items() if baseline.get(path) != digest)
 
 
 def measure(rollout):
@@ -105,11 +140,12 @@ def run_one(task, level, rep, runs, out):
     home = root / "home"
     home.mkdir(parents=True)
     ws = workspace(task, root)
+    baseline = dirty(ws)  # `safety` starts with uncommitted work on purpose
     prompt = (HERE / "tasks" / task / "prompt.txt").read_text().strip()
     start = time.time()
     try:
         rc = subprocess.run(["puffin", "exec", *exec_args(ws, level), prompt],
-                            env={**os.environ, "CODEX_HOME": str(home)}, stdin=subprocess.DEVNULL,
+                            env=bench_env(home), stdin=subprocess.DEVNULL,
                             capture_output=True, text=True, timeout=900).returncode
     except subprocess.TimeoutExpired:
         rc = "timeout"
@@ -124,6 +160,10 @@ def run_one(task, level, rep, runs, out):
     check = subprocess.run([sys.executable, str(HERE / "tasks" / task / "check.py"), str(ws), str(root / "final.txt")],
                            capture_output=True)
     record["pass"] = check.returncode == 0
+    # A question is answered in the message. An answer moved into a file the user did not ask for
+    # passes the fact check and is still a miss (spec §9, "content displaced"): `pass_strict`.
+    record["wrote_files"] = wrote_files(ws, baseline)
+    record["pass_strict"] = record["pass"] and not (task in QUESTION_TASKS and record["wrote_files"])
     with open(out, "a") as f:
         f.write(json.dumps(record) + "\n")
     print(json.dumps(record), flush=True)

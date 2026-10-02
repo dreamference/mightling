@@ -49,6 +49,8 @@ def summary(path):
     for level in dict.fromkeys(r["variant"] for r in records):
         runs = [r for r in records if r["variant"] == level]
         line = f"  {level:11} pass {sum(r['pass'] for r in runs)}/{len(runs)}"
+        if any("pass_strict" in r and "wrote_files" in r for r in runs):
+            line += f" strict {sum(r.get('pass_strict', r['pass']) for r in runs)}/{len(runs)}"
         line += f"  articles {statistics.mean(r['article_rate'] for r in runs):.1f}%"
         line += f"  offers {sum(r['closing_offer'] for r in runs)}"
         for name, tasks in (("questions", QUESTIONS), ("coding", CODING)):
@@ -68,7 +70,7 @@ def drift(path):
     for (variant, rep), turns in sorted(sessions.items()):
         tokens = [turns[t]["final_tok"] for t in sorted(turns)]
         offers = sum(turns[t]["closing_offer"] for t in turns)
-        print(f"{variant:12} {rep}   {' '.join(f'{x:4}' for x in tokens):44} {sum(tokens[:4]):5} {sum(tokens[4:8]):5}  {offers}")
+        print(f"{variant:14} {rep}   {' '.join(f'{x:4}' for x in tokens):49} {sum(tokens[:4]):5} {sum(tokens[4:8]):5}  {offers}")
 
 
 if __name__ == "__main__":
