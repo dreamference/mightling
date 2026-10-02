@@ -35,8 +35,10 @@ pub mod airgapped;
 pub mod app;
 pub mod cave;
 pub mod code_index;
+pub mod compaction;
 pub mod help;
 pub mod home;
+pub mod ledger;
 pub mod night;
 pub mod node;
 
@@ -209,6 +211,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(node::run_cli(&user_args[index + 1..]).await);
     }
+    // `ledger` is the hook Codex runs after a compaction (ledger.rs); it reads a file and answers.
+    if let Some(index) = subcommand
+        && user_args[index] == "ledger"
+    {
+        std::process::exit(ledger::run_cli(&user_args[index + 1..]));
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
@@ -251,6 +259,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     cave::prune_session_files();
     airgapped::prune_session_files();
     configure_codex_home(&codex_home, &host, &model, &extra_instructions)?;
+    // When the session compacts and what it is handed afterwards (compaction.rs).
+    let args = compaction::prepare(args, &codex_home, &host, &model).await;
     Ok(with_local_model_args(args, &model.id))
 }
 
@@ -592,7 +602,7 @@ pub fn configure_codex_home(
 /// at the same moment reads them. `std::fs::write` truncates first, so that reader could see an
 /// empty or half-written file and refuse to start; a rename is atomic, so it sees one version or
 /// the other.
-fn write_atomically(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     let name = path
         .file_name()
         .context("a config path has no file name")?

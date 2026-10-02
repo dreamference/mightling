@@ -39,6 +39,11 @@ DEFAULT_USE_TENSORIZER: Final[bool] = False
 # Whether the puffin agent's prompt advertises `puffin-admin gmail` when an account is connected.
 # Read by the Rust launcher too (DREAMFERENCE_PUFFIN_GMAIL, then `puffin_gmail` in the TOML file).
 DEFAULT_PUFFIN_GMAIL: Final[bool] = True
+# Whether the puffin agent is handed a rule-built ledger (files, failed commands, last test result)
+# after each compaction (specs/DREAMFERENCE_PUFFIN_COMPACTION.md §10.1). Read by the Rust launcher
+# (DREAMFERENCE_PUFFIN_COMPACTION_LEDGER, then `puffin_compaction_ledger` in the TOML file); a test
+# keeps this default equal to LEDGER_DEFAULT in puffin-rs/src/compaction.rs.
+DEFAULT_PUFFIN_COMPACTION_LEDGER: Final[bool] = False
 # How tersely the puffin agent answers (`/cavemode`, specs/DREAMFERENCE_PUFFIN_CAVE_MODE.md). Read by
 # the Rust launcher too (DREAMFERENCE_PUFFIN_CAVE_MODE, then `puffin_cave_mode` in the TOML file);
 # a test keeps this default equal to DEFAULT_PUFFIN_CAVE_MODE in puffin-rs/src/cave.rs.
@@ -83,6 +88,7 @@ class DreamferenceConfig:
         use_tensorizer: Optional[bool] = None,
         guided_decoding_backend: Optional[str] = None,
         puffin_gmail: Optional[bool] = None,
+        puffin_compaction_ledger: Optional[bool] = None,
         puffin_cave_mode: Optional[str] = None,
         puffin_airgapped: Optional[str] = None,
     ):
@@ -261,6 +267,15 @@ class DreamferenceConfig:
         else:
             self.puffin_gmail = bool(self.file_data.get("puffin_gmail", DEFAULT_PUFFIN_GMAIL))
 
+        env_ledger = os.getenv("DREAMFERENCE_PUFFIN_COMPACTION_LEDGER")
+        if puffin_compaction_ledger is not None:
+            self.puffin_compaction_ledger: bool = puffin_compaction_ledger
+        elif env_ledger:
+            self.puffin_compaction_ledger = env_ledger.lower() in ("1", "true", "yes", "on")
+        else:
+            self.puffin_compaction_ledger = bool(
+                self.file_data.get("puffin_compaction_ledger", DEFAULT_PUFFIN_COMPACTION_LEDGER))
+
         # The same tiers the launcher reads, first valid value wins; an invalid one is skipped there
         # too, so a typo in one tier falls through rather than switching cave mode off.
         self.puffin_cave_mode: str = DEFAULT_PUFFIN_CAVE_MODE
@@ -428,6 +443,8 @@ class DreamferenceConfig:
         if self.guided_decoding_backend != DEFAULT_GUIDED_DECODING_BACKEND: data["guided_decoding_backend"] = self.guided_decoding_backend
         if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
         if self.puffin_gmail != DEFAULT_PUFFIN_GMAIL: data["puffin_gmail"] = self.puffin_gmail
+        if self.puffin_compaction_ledger != DEFAULT_PUFFIN_COMPACTION_LEDGER:
+            data["puffin_compaction_ledger"] = self.puffin_compaction_ledger
         if self.puffin_cave_mode != DEFAULT_PUFFIN_CAVE_MODE: data["puffin_cave_mode"] = self.puffin_cave_mode
         if self.puffin_airgapped != DEFAULT_PUFFIN_AIRGAPPED: data["puffin_airgapped"] = self.puffin_airgapped
 
