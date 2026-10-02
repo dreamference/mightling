@@ -18,7 +18,7 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
-| [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Part 1 partly implemented (2026-10-02, §18):* splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; then several nodes with no stored roles, and jobs sent to another node over SSH |
+| [DREAMFERENCE_PUFFIN_NODE.md](./DREAMFERENCE_PUFFIN_NODE.md) | *Implemented in part on one GB10 (2026-10-02, §18): discovery and `puffin node`, `puffin-admin node enable`, pairing and managing a second node over SSH, script jobs on another node.* Splitting Puffin into a client (`puffin`, `puffin-code`, `puffin-app`; Ubuntu, macOS, Windows) and `puffin-node` (the GB10), found over mDNS with nothing to configure; then several nodes with no stored roles, and jobs sent to another node over SSH |
 | [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the twelve packages |
 | [DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md) | Source layout, class inventory, import conventions, the default model's full launch command |
 | [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md) | Requirements, installation, helper scripts, troubleshooting |
