@@ -4,7 +4,9 @@ One Night Shift task, from worktree to branch (specs/DREAMFERENCE_PUFFIN_NIGHT_S
 The agent works in a git worktree of its own, on `night/<id>`, through `puffin exec` under a
 transient systemd scope with a memory cap, so neither the user's checkout nor the model server is
 at risk. The runner, not the agent, commits: the agent's sandbox cannot write the repository's
-`.git`, and nothing is merged, pushed or rebased.
+`.git`, and nothing is merged, pushed or rebased. The runner's own test run executes code the agent
+wrote, so it goes through the same sandbox as the agent's commands (`puffin sandbox`), with a
+policy the runner fixes: nothing the agent wrote runs with the user's full rights.
 """
 
 import os
@@ -17,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional, Tuple
 
+from dreamference.config.dreamference_config import DreamferenceConfig, PUFFIN_AIRGAPPED_LEVELS
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
@@ -41,6 +44,12 @@ ANNOUNCES_WORK: Final[re.Pattern] = re.compile(
     r"now I'll|I'll now|going to (?:make|add|update|implement|write|create|fix))\b", re.IGNORECASE)
 
 KILL_GRACE_S: Final[int] = 30
+
+# `/airgapped` (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §3): the variable that overrides the
+# configuration files, and the key those files carry. Mirrors puffin-rs/airgapped/src/lib.rs.
+AIRGAPPED_ENV: Final[str] = "DREAMFERENCE_PUFFIN_AIRGAPPED"
+AIRGAPPED_KEY: Final[str] = "puffin_airgapped"
+SEALED: Final[str] = PUFFIN_AIRGAPPED_LEVELS[-1]
 TEST_TAIL_LINES: Final[int] = 200
 
 
@@ -50,6 +59,10 @@ class NightShiftTaskRun:
     # The memory and CPU cap around each `puffin exec` and test run. Tests switch it off: nothing in
     # the suite may create a real systemd scope.
     USE_SCOPE: bool = True
+
+    # Whether the test run goes through `puffin sandbox`. Tests switch it off unless they supply a
+    # stand-in for `puffin`: nothing in the suite may run the installed binary or bubblewrap.
+    USE_SANDBOX: bool = True
 
     def __init__(self, night_dir: Path, task: Dict[str, Any], settings: NightShiftSettings,
                  puffin_bin: str, deadline: float, model_host: Optional[str] = None) -> None:
@@ -73,6 +86,9 @@ class NightShiftTaskRun:
         self.text: str = task["task"]
         self.test_override: Optional[str] = task.get("test")
         self.session: Optional[str] = task.get("session")
+        # The `/airgapped` level this task runs at, fixed before its first command (`_fix_level`).
+        self.airgapped: Optional[str] = None
+        self._recorded_level: Optional[str] = task.get("airgapped")
         self.settings = settings
         self.puffin_bin = puffin_bin
         self.deadline = deadline
@@ -117,6 +133,7 @@ class NightShiftTaskRun:
             self.worktree, self.test_override, self.settings.test, self.repo)
         if self._cancelled():
             return self._cleanup_and_finish("cancelled")
+        self._fix_level()
 
         prompt = RESUME if self.session else self.compose_prompt(test_command)
         outcome = self._exec(prompt, resume=bool(self.session))
@@ -145,6 +162,9 @@ class NightShiftTaskRun:
         # agent's own commands left is staged with its changes: the runner cannot tell them apart.
         self._git(self.worktree, "add", "-A")
         test_result = self._run_tests(test_command) if test_command else None
+        if test_result and test_result.get("refused"):
+            test_result = None
+            test_source = f"{test_source}; not run: {self.REFUSED_UNSEALED}"
         if self._cancelled():
             return self._cleanup_and_finish("cancelled")
         if test_result and test_result.get("timed_out") == "window":
@@ -184,6 +204,9 @@ class NightShiftTaskRun:
         """Runs one `puffin exec` turn; returns `ok`, `error` or `interrupted`."""
         command = [self.puffin_bin, "exec", "--json", "-o", str(self.last_message_path),
                    "-C", str(self.worktree), "-s", "workspace-write", "--skip-git-repo-check"]
+        if self.settings.compact_at > 0:
+            # On the command line it beats the launcher's own, larger limit for interactive sessions.
+            command += ["-c", f"model_auto_compact_token_limit={self.settings.compact_at}"]
         command += ["resume", self.session, prompt] if resume and self.session else [prompt]
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0
@@ -200,12 +223,49 @@ class NightShiftTaskRun:
             return "interrupted"
         return "ok" if code == 0 else "error"
 
+    REFUSED_UNSEALED: Final[str] = ("/airgapped is on and `[night] test_sandbox` is false, so nothing "
+                                    "would keep the tests off the network")
+
+    def _fix_level(self) -> str:
+        """
+        Fixes the task's `/airgapped` level, once, before the agent has run anything.
+
+        Every later command of the task (each `puffin exec` and the test run) gets it in
+        `DREAMFERENCE_PUFFIN_AIRGAPPED`, which outranks the configuration files: the agent can
+        edit the worktree's `dreamference.toml`, and a level read again before the test run would
+        be a level the agent could loosen for its own tests. A task resumed on a later night
+        keeps at least the level its first night recorded, for the same reason.
+
+        Returns:
+            str: The level.
+        """
+        if self.airgapped is None:
+            levels = [self.airgapped_level(self.worktree, self.session, self.night_dir.parent, self.repo),
+                      DreamferenceConfig.parse_airgapped_level(getattr(self.settings, "airgapped", None)),
+                      DreamferenceConfig.parse_airgapped_level(self._recorded_level)]
+            self.airgapped = max((level for level in levels if level), key=PUFFIN_AIRGAPPED_LEVELS.index)
+            if self.airgapped != self._recorded_level:
+                NightShiftQueue.transition(self.night_dir, self.task_id, "running", airgapped=self.airgapped)
+        return self.airgapped
+
     def _run_tests(self, test_command: str) -> Dict[str, Any]:
         output_path = self.night_dir / "logs" / f"{self.task_id}.test.log"
-        code = self._run_capped(["bash", "-c", test_command], self.worktree, output_path,
-                                timeout=self.settings.test_timeout_s, append=False)
+        level = self._fix_level()
+        sandboxed = self.USE_SANDBOX and self.settings.test_sandbox
+        if level == SEALED and not self.settings.test_sandbox:
+            return {"command": test_command, "refused": True}
+        command, extra_env = ["bash", "-c", test_command], {}
+        if sandboxed:
+            command, extra_env = self.sandboxed_test_command(self.puffin_bin, test_command, level, self.session)
+        code = self._run_capped(command, self.worktree, output_path,
+                                timeout=self.settings.test_timeout_s, append=False, extra_env=extra_env)
         lines = output_path.read_text(errors="replace").splitlines() if output_path.exists() else []
         result: Dict[str, Any] = {"command": test_command, "tail": "\n".join(lines[-TEST_TAIL_LINES:])}
+        if sandboxed:
+            result["sandbox"] = "workspace-write, no network (/airgapped on)" if level == SEALED \
+                else "workspace-write"
+        else:
+            result["sandbox"] = "off ([night] test_sandbox = false)"
         if code == "timeout":
             window_over = time.time() >= self.deadline or self.stop_event.is_set()
             result["timed_out"] = "window" if window_over else "test_timeout"
@@ -266,6 +326,7 @@ class NightShiftTaskRun:
                 result["test_result"] = "passed" if test_result["exit_code"] == 0 \
                     else f"failed (exit {test_result['exit_code']})"
             result["test_tail"] = test_result["tail"]
+            result["test_sandbox"] = test_result.get("sandbox", "")
         else:
             result["test_result"] = "untested"
         return result
@@ -277,10 +338,19 @@ class NightShiftTaskRun:
     # -- processes ---------------------------------------------------------------------------
 
     def _run_capped(self, command: List[str], cwd: Path, output: Path,
-                    timeout: Optional[int], append: bool = True) -> Any:
+                    timeout: Optional[int], append: bool = True,
+                    extra_env: Optional[Dict[str, str]] = None) -> Any:
         """
         Runs `command` under the task's scope until it exits, the deadline passes, `timeout`
         seconds pass or the runner asks it to stop; then SIGTERM, and SIGKILL 30 s later.
+
+        Args:
+            command: The command line.
+            cwd: Its working directory.
+            output: The file its output goes to.
+            timeout: Seconds it may take, beside the task's own deadline.
+            append: Whether `output` is appended to or replaced.
+            extra_env: Variables set for this command only.
 
         Returns:
             Any: The exit code, or "timeout".
@@ -297,6 +367,9 @@ class NightShiftTaskRun:
         if self.model_host:
             env["DREAMFERENCE_VLLM_HOST"] = self.model_host
         env["GIT_TERMINAL_PROMPT"] = "0"
+        if self.airgapped:
+            env[AIRGAPPED_ENV] = self.airgapped
+        env.update(extra_env or {})
         limit = self.deadline if timeout is None else min(self.deadline, time.time() + timeout)
         with open(output, "ab" if append else "wb") as sink:
             process = subprocess.Popen(prefix + command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
@@ -350,6 +423,100 @@ class NightShiftTaskRun:
     def _cancelled(self) -> bool:
         record = NightShiftQueue.read(self.night_dir, self.task_id) or {}
         return record.get("status") in ("cancel-requested", "cancelled")
+
+    @classmethod
+    def sandboxed_test_command(cls, puffin_bin: str, test_command: str, level: str,
+                               session: Optional[str]) -> Tuple[List[str], Dict[str, str]]:
+        """
+        Wraps the test command in the sandbox the agent's own commands run in.
+
+        The test command executes what the agent wrote, unattended, so it gets the agent's rights
+        and no more: writes inside the worktree and `/tmp` only, the rest of the machine read-only.
+        The policy is fixed here and not inherited from `~/.puffin/config.toml`: that file lists
+        `~/.puffin/skills` as writable for the skill installer, and a test run that could write
+        there could leave instructions behind for every later session. Only the `/airgapped`
+        level comes from outside.
+
+        Args:
+            puffin_bin: The `puffin` executable.
+            test_command: The shell command that decides pass or fail.
+            level: The `/airgapped` level in force (`airgapped_level`).
+            session: The task's session id, which the sandbox helper looks the level up by.
+
+        Returns:
+            Tuple[List[str], Dict[str, str]]: The command line, and variables to set for it.
+        """
+        sealed = level == SEALED
+        command = [puffin_bin, "sandbox",
+                   "-c", 'sandbox_mode="workspace-write"',
+                   "-c", "sandbox_workspace_write.writable_roots=[]",
+                   "-c", f"sandbox_workspace_write.network_access={'false' if sealed else 'true'}",
+                   "--", "bash", "-c", test_command]
+        # The sandbox helper (patch 0019) resolves the level again by itself, from the variable the
+        # runner sets for every command of the task and from the session's own file if it has one.
+        return command, ({"CODEX_THREAD_ID": session} if session else {})
+
+    @classmethod
+    def airgapped_level(cls, worktree: Path, session: Optional[str], codex_home: Path,
+                        repo: Optional[Path] = None) -> str:
+        """
+        Resolves the `/airgapped` level for a command run in `worktree`, in the launcher's order
+        (puffin-rs/airgapped): the session's file, the environment variable, then the strictest
+        of the configuration files (a repository's file may tighten the user's level and never
+        loosen it), then `off`.
+
+        The main checkout's `dreamference.toml` is read beside the worktree's: it is usually
+        untracked, so a worktree has no copy of it, and a level the user set there for this
+        repository would otherwise not reach its night tasks.
+
+        Args:
+            worktree: The directory the command runs in.
+            session: The task's session id, if it has one.
+            codex_home: `$CODEX_HOME`, where `airgapped/<session>` lives.
+            repo: The main checkout, if its file is to count too.
+
+        Returns:
+            str: `off`, `duckduckgo` or `on`.
+        """
+        tiers: List[Optional[str]] = []
+        if session and re.fullmatch(r"[A-Za-z0-9-]+", session):
+            try:
+                tiers.append((codex_home / "airgapped" / session).read_text())
+            except OSError:
+                pass
+        tiers.append(os.environ.get(AIRGAPPED_ENV))
+        for value in tiers:
+            level = DreamferenceConfig.parse_airgapped_level(value)
+            if level:
+                return level
+        named = os.environ.get("DREAMFERENCE_CONFIG_PATH")
+        files = [Path(named)] if named else [worktree / "dreamference.toml"] + (
+            [repo / "dreamference.toml"] if repo else [])
+        files.append(Path(os.path.expanduser("~/.config/dreamference/config.toml")))
+        strictest = PUFFIN_AIRGAPPED_LEVELS[0]
+        for path in files:
+            level = DreamferenceConfig.parse_airgapped_level(cls._toml_top_level(path, AIRGAPPED_KEY))
+            if level and PUFFIN_AIRGAPPED_LEVELS.index(level) > PUFFIN_AIRGAPPED_LEVELS.index(strictest):
+                strictest = level
+        return strictest
+
+    @classmethod
+    def _toml_top_level(cls, path: Path, key: str) -> Optional[str]:
+        """The value of a top-level `key = "value"` line before the first table, as the helper reads it."""
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            return None
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                return None
+            if not line.startswith(key):
+                continue
+            rest = line[len(key):].lstrip()
+            if rest.startswith("="):
+                return rest[1:].split("#")[0].strip().strip("\"'")
+        return None
 
     @classmethod
     def announces_work(cls, message: str) -> bool:

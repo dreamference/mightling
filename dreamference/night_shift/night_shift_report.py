@@ -59,8 +59,9 @@ class NightShiftReport:
             summary = result["diff_stat"].splitlines()[-1].strip()
             lines.append(f"- Changes: {summary}")
         if result.get("test_command"):
+            sandbox = f", sandbox: {result['test_sandbox']}" if result.get("test_sandbox") else ""
             lines.append(f"- Tests: `{result['test_command']}` ({result.get('test_source', '?')}): "
-                         f"{result.get('test_result', '?')}")
+                         f"{result.get('test_result', '?')}{sandbox}")
         lines.append(f"- Attempts: {result.get('attempts', task.get('attempts', 0))}, "
                      f"nudges: {result.get('nudges', 0)}, wall time: {cls._minutes(result.get('wall_s'))}")
         if task.get("status") in LAST_MESSAGE_STATUSES and result.get("last_message"):

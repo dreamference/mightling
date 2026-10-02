@@ -157,6 +157,11 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # that builds a docker command into creating folders in the real cache.
     for name in ("HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME"):
         monkeypatch.delenv(name, raising=False)
+    # `puffin` exports CODEX_HOME to every command it runs, so a suite started by the agent, or by
+    # Night Shift's sandboxed test run, resolved `$CODEX_HOME/night` and the rest to the real
+    # ~/.puffin whatever HOME said: outside a sandbox it wrote the real `night/runner.lock`, and
+    # inside one that write failed a test (2026-10-02). A test that needs the variable sets it.
+    monkeypatch.delenv("CODEX_HOME", raising=False)
 
     # HOME alone does not reach paths a module resolved at import, like VLLM_CACHE_HOME: a test
     # that ran start_server stamped the real ~/.cache/dreamference/vllm/.compile_signature with a

@@ -48,7 +48,14 @@ class NightShiftSettings:
         self.task_memory: str = str(table.get("task_memory", DEFAULT_TASK_MEMORY))
         self.nudges: int = max(0, int(table.get("nudges", DEFAULT_NUDGES)))
         self.test: Optional[str] = table.get("test")
+        # The runner's test run executes agent-written code; `false` runs it with the user's rights
+        # (for a test command that must reach Docker or write outside the worktree).
+        self.test_sandbox: bool = bool(table.get("test_sandbox", True))
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
+        # Where a task's session compacts (compaction spec §4.1). Without it a task may grow to the
+        # model's whole window, and the `task_context` the parallelism is computed from is a wish;
+        # by default the two are the same number. 0 passes no limit.
+        self.compact_at: int = max(0, int(table.get("compact_at", self.task_context)))
         self.idle_minutes: float = float(table.get("idle_minutes", DEFAULT_IDLE_MINUTES))
         # Refresh each repository's code index before its tasks start (code-index spec §6.3).
         self.index: bool = bool(table.get("index", True))

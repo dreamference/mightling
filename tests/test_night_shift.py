@@ -26,8 +26,16 @@ from dreamference.night_shift.night_shift_task_run import NUDGE
 FAKE_PUFFIN = textwrap.dedent("""\
     #!{python}
     # A stand-in for `puffin exec`: behaviour from $FAKE_PUFFIN_MODE, every call logged.
+    # `puffin sandbox … -- <command>` is logged apart, with what the runner set for it, and the
+    # command is run as it is: the suite never starts the real sandbox.
     import json, os, sys, time, uuid
     args = sys.argv[1:]
+    if args[0] == "sandbox":
+        with open(os.environ["FAKE_PUFFIN_CALLS"] + ".sandbox", "a") as log:
+            seen = {{name: os.environ.get(name) for name in ("CODEX_THREAD_ID", "DREAMFERENCE_PUFFIN_AIRGAPPED")}}
+            log.write(json.dumps({{"args": args, "env": seen, "cwd": os.getcwd()}}) + "\\n")
+        command = args[args.index("--") + 1:]
+        os.execvp(command[0], command)
     with open(os.environ["FAKE_PUFFIN_CALLS"], "a") as log:
         log.write(json.dumps(args) + "\\n")
     cwd = args[args.index("-C") + 1]
@@ -44,6 +52,10 @@ FAKE_PUFFIN = textwrap.dedent("""\
         time.sleep(600)
     if mode == "error":
         sys.exit(1)
+    if mode == "loosen":
+        with open(os.path.join(cwd, "dreamference.toml"), "w") as handle:
+            handle.write('puffin_airgapped = "off"\\n')
+        say("Loosened the level.")
     acts = mode == "change" or (mode == "stall_then_act" and prompt == {nudge!r}) \\
         or (mode == "act_on_resume" and resume)
     if acts:
@@ -110,6 +122,12 @@ def calls(setup):
     return [json.loads(line) for line in setup["calls"].read_text().splitlines()]
 
 
+def sandbox_calls(setup):
+    """The test runs the runner sent through `puffin sandbox`, with their environment."""
+    log = Path(str(setup["calls"]) + ".sandbox")
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
 # -- one task -------------------------------------------------------------------------------------
 
 def test_a_change_is_committed_on_its_branch_and_the_checkout_is_untouched(setup, monkeypatch):
@@ -141,6 +159,131 @@ def test_what_the_test_run_leaves_behind_is_not_committed(setup, monkeypatch):
     assert status == "done"
     files = git(setup["repo"], "show", "--name-only", "--format=", "night/20261001-0100-abc").stdout
     assert files.split() == ["hello.txt"]
+
+
+def test_the_test_run_is_sandboxed_with_a_policy_the_runner_fixes(setup, monkeypatch):
+    # The test command runs what the agent wrote. Until 2026-10-02 it ran as plain `bash -c`, with
+    # the user's full rights; it now goes through `puffin sandbox`, the agent's own sandbox.
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    status, record, run = run_task(setup, monkeypatch, "change", test="test -f hello.txt")
+    assert status == "done" and record["result"]["test_result"] == "passed"
+    assert record["result"]["test_sandbox"] == "workspace-write"
+    (call,) = sandbox_calls(setup)
+    args = call["args"]
+    assert args[:2] == ["sandbox", "-c"] and args[-3:] == ["bash", "-c", "test -f hello.txt"]
+    options = [args[index + 1] for index, arg in enumerate(args) if arg == "-c" and index < args.index("--")]
+    # Workspace-write, and nothing from the user's config: `~/.puffin/skills` is writable there, and
+    # a test run that could write it could leave instructions for every later session.
+    assert options == ['sandbox_mode="workspace-write"', "sandbox_workspace_write.writable_roots=[]",
+                       "sandbox_workspace_write.network_access=true"]
+    assert call["cwd"] == str(run.worktree)
+    # The sandbox helper looks the /airgapped level up by the task's own session.
+    # ...and the runner hands every command of the task the level it fixed before the first one.
+    assert call["env"] == {"CODEX_THREAD_ID": record["session"], "DREAMFERENCE_PUFFIN_AIRGAPPED": "off"}
+    assert record["airgapped"] == "off"
+    assert "sandbox: workspace-write" in NightShiftReport.render(datetime.now().astimezone(), [record], [])
+
+
+def test_at_airgapped_on_the_test_run_has_no_network(setup, monkeypatch):
+    # The worktree's own config file may tighten the level (the agent can write it), never loosen it.
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "on"\n')
+    git(setup["repo"], "add", "-A")
+    git(setup["repo"], "commit", "-q", "-m", "seal")
+    status, record, _ = run_task(setup, monkeypatch, "change", test="true")
+    assert status == "done"
+    (call,) = sandbox_calls(setup)
+    assert "sandbox_workspace_write.network_access=false" in call["args"]
+    assert call["env"]["DREAMFERENCE_PUFFIN_AIRGAPPED"] == "on"
+    assert record["result"]["test_sandbox"] == "workspace-write, no network (/airgapped on)"
+
+
+def test_the_agent_cannot_loosen_the_level_for_its_own_tests(setup, monkeypatch):
+    # The level is fixed before the agent runs. Read again before the test run, it would be whatever
+    # the agent had by then written into the worktree's dreamference.toml.
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "on"\n')
+    git(setup["repo"], "add", "-A")
+    git(setup["repo"], "commit", "-q", "-m", "seal")
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "loosen")
+    record = queue(setup["night"], setup["repo"], test="true")
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["puffin"], time.time() + 60)
+    assert run.run() == "done"
+    assert (run.repo / "dreamference.toml").exists()
+    changed = git(setup["repo"], "show", "--format=", record["branch"]).stdout
+    assert '+puffin_airgapped = "off"' in changed
+    (call,) = sandbox_calls(setup)
+    assert "sandbox_workspace_write.network_access=false" in call["args"]
+    assert call["env"]["DREAMFERENCE_PUFFIN_AIRGAPPED"] == "on"
+    # A task cut off and resumed another night keeps at least the level its first night recorded.
+    resumed = dict(NightShiftQueue.read(setup["night"], record["id"]), id="20261001-0100-abe",
+                   branch="night/20261001-0100-abe")
+    (setup["night"] / "tasks" / "20261001-0100-abe.json").write_text(json.dumps(resumed))
+    again = NightShiftTaskRun(setup["night"], resumed, NightShiftSettings({}), setup["puffin"], time.time() + 60)
+    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "off"\n')
+    again.worktree.mkdir(parents=True)
+    assert again._fix_level() == "on"
+
+
+def test_the_main_checkouts_untracked_level_reaches_its_night_tasks(setup, monkeypatch):
+    # dreamference.toml is usually untracked, so the worktree has no copy of it.
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    (setup["repo"] / ".gitignore").write_text("dreamference.toml\n")
+    git(setup["repo"], "add", "-A")
+    git(setup["repo"], "commit", "-q", "-m", "ignore the local config")
+    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "on"\n')
+    status, record, _ = run_task(setup, monkeypatch, "change", test="true")
+    assert status == "done" and record["airgapped"] == "on"
+    (call,) = sandbox_calls(setup)
+    assert "sandbox_workspace_write.network_access=false" in call["args"]
+
+
+def test_the_airgapped_level_resolves_as_the_launcher_does(tmp_path, monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH", raising=False)
+    worktree, home = tmp_path / "tree", tmp_path / "puffin-home"
+    worktree.mkdir()
+    level = lambda session=None: NightShiftTaskRun.airgapped_level(worktree, session, home)
+    assert level() == "off"
+    user = Path(os.path.expanduser("~/.config/dreamference/config.toml"))
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text('puffin_airgapped = "duckduckgo"\n')
+    assert level() == "duckduckgo"
+    # Strictest of the files: the worktree's can tighten the user's, and cannot loosen it.
+    (worktree / "dreamference.toml").write_text('puffin_airgapped = "on"  # sealed\n[night]\ntest = "x"\n')
+    assert level() == "on"
+    (worktree / "dreamference.toml").write_text('puffin_airgapped = "off"\n')
+    assert level() == "duckduckgo"
+    # A key under a table is not the top-level key.
+    user.write_text('[night]\npuffin_airgapped = "on"\n')
+    assert level() == "off"
+    # The environment overrides the files, and the session's own file overrides both.
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "ON")
+    assert level() == "on"
+    (home / "airgapped").mkdir(parents=True)
+    (home / "airgapped" / "0a1b-2c3d").write_text("ddg\n")
+    assert level("0a1b-2c3d") == "duckduckgo"
+    assert level("../escape") == "on"
+
+
+def test_unsandboxed_tests_are_an_explicit_choice_and_refused_at_airgapped_on(setup, monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    record = queue(setup["night"], setup["repo"], test="test -f hello.txt")
+    settings = NightShiftSettings({"test_sandbox": False})
+    run = NightShiftTaskRun(setup["night"], record, settings, setup["puffin"], time.time() + 60)
+    assert run.run() == "done"
+    result = NightShiftQueue.read(setup["night"], record["id"])["result"]
+    assert result["test_result"] == "passed" and result["test_sandbox"] == "off ([night] test_sandbox = false)"
+    assert sandbox_calls(setup) == []
+    # With no sandbox nothing would keep the tests off the network, so at `on` they do not run.
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "on")
+    record = queue(setup["night"], setup["repo"], test="touch ran.txt", task_id="20261001-0100-abd")
+    run = NightShiftTaskRun(setup["night"], record, settings, setup["puffin"], time.time() + 60)
+    assert run.run() == "done"
+    result = NightShiftQueue.read(setup["night"], record["id"])["result"]
+    assert result["test_result"] == "untested" and "not run: /airgapped is on" in result["test_source"]
+    assert "ran.txt" not in git(setup["repo"], "show", "--name-only", "--format=", record["branch"]).stdout
 
 
 def test_a_failing_test_is_recorded_not_hidden(setup, monkeypatch):
