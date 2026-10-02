@@ -348,20 +348,15 @@ impl Context {
 
     /// The header's source line: which snapshot each tag comes from.
     fn sources(&self, only: Option<&BTreeSet<usize>>) -> Vec<String> {
-        let mut exact: Vec<String> = self
+        let stores = self
             .stores
             .iter()
             .enumerate()
             .filter(|(i, _)| only.map(|set| set.contains(i)).unwrap_or(true))
-            .map(|(_, s)| {
-                let commit = s.entry.commit.as_deref().map(|c| &c[..c.len().min(7)]).unwrap_or("no commit");
-                format!("{} {}@ {commit}", s.entry.indexer, if s.entry.root.is_empty() { String::new() } else { format!("{} ", s.entry.root) })
-            })
-            .collect();
-        exact.dedup();
+            .map(|(_, s)| (s.entry.indexer.as_str(), s.entry.root.as_str(), s.entry.commit.as_deref()));
         let mut out = Vec::new();
-        if !exact.is_empty() {
-            out.push(format!("exact = SCIP {}", exact.join(", ")));
+        if let Some(line) = sources_line(stores) {
+            out.push(line);
         }
         out.push("heuristic = codebase-memory or text search".to_string());
         out
@@ -1146,16 +1141,19 @@ impl Context {
             if manifest.runs.contains_key(&key) {
                 continue;
             }
+            let executing = target.kind == crate::index::host::Kind::Executing;
+            let untrusted = if executing { crate::index::plan::untrusted_reason(&self.repo, trusted, &self.submodules, &target) } else { None };
             let why = match tools.unavailable(target.indexer) {
                 Some(why) => why,
-                None if target.kind == crate::index::host::Kind::Executing && !trusted => continue, // the untrusted line below says it
-                None if target.kind == crate::index::host::Kind::Executing => "not built yet (`puffin-code index --exact`)".to_string(),
+                None if untrusted.is_some() && target.submodule.is_empty() => continue, // the untrusted line below says it
+                None if untrusted.is_some() => untrusted.unwrap_or_default(),
+                None if executing => "not built yet (`puffin-code index --exact`)".to_string(),
                 None if target.on_demand => "not built yet; runs on demand (`puffin-code index`)".to_string(),
                 None => "not built yet (`puffin-code index`)".to_string(),
             };
             lines.push(format!("exact: {} for {}: {why}", target.indexer, crate::index::plan::display_root(&target.root)));
         }
-        for why in skipped_in_submodules {
+        for why in crate::index::plan::root_python_note(crate::index::plan::root_python_files(&self.repo).1, "").into_iter().chain(skipped_in_submodules) {
             lines.push(format!("exact: {why}"));
         }
         let submodules: Vec<String> = self.submodules.iter().filter(|s| !s.indexed).map(|s| s.path.clone()).collect();
@@ -1188,6 +1186,42 @@ impl Context {
         }
         lines
     }
+}
+
+/// Roots named per indexer and snapshot in an answer's header; the rest are counted.
+const SOURCE_ROOTS_NAMED: usize = 4;
+
+/// `exact = SCIP scip-python dreamference, tests @ c673c5e; rust-analyzer puffin-code-rs @ e240c2d`:
+/// the stores an answer's `exact` rows come from, grouped by indexer and snapshot. A repository
+/// has a store per root, and a Python file at its root is a root of its own, so naming every one
+/// on every answer would cost more than the answer; past [`SOURCE_ROOTS_NAMED`] they are counted.
+fn sources_line<'a>(stores: impl Iterator<Item = (&'a str, &'a str, Option<&'a str>)>) -> Option<String> {
+    let mut groups: Vec<((&str, &str), Vec<&str>)> = Vec::new();
+    for (indexer, root, commit) in stores {
+        let commit = commit.map(|c| &c[..c.len().min(7)]).unwrap_or("no commit");
+        match groups.iter_mut().find(|(key, _)| *key == (indexer, commit)) {
+            Some((_, roots)) if !roots.contains(&root) => roots.push(root),
+            Some(_) => {}
+            None => groups.push(((indexer, commit), vec![root])),
+        }
+    }
+    if groups.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = groups
+        .into_iter()
+        .map(|((indexer, commit), roots)| {
+            let named: Vec<&str> = roots.iter().copied().filter(|r| !r.is_empty()).take(SOURCE_ROOTS_NAMED).collect();
+            let more = roots.iter().filter(|r| !r.is_empty()).count() - named.len();
+            let roots = match (named.is_empty(), more) {
+                (true, _) => String::new(),
+                (false, 0) => format!("{} ", named.join(", ")),
+                (false, more) => format!("{} and {more} more ", named.join(", ")),
+            };
+            format!("{indexer} {roots}@ {commit}")
+        })
+        .collect();
+    Some(format!("exact = SCIP {}", parts.join("; ")))
 }
 
 /// Levels `impact` follows by default, and at most.
@@ -1342,6 +1376,27 @@ fn defines_on_line(repo: &Repo, path: &str, line: u32, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::diff_ranges;
+
+    #[test]
+    fn the_header_groups_stores_by_indexer_and_snapshot() {
+        let c = Some("c673c5ea0000");
+        let stores = [
+            ("rust-analyzer", "puffin-code-rs", Some("e240c2d50000")),
+            ("scip-python", "dreamference", c),
+            ("scip-python", "tests", c),
+            ("scip-python", "setup.py", c),
+            ("scip-python", "fano/main.py", c),
+            ("scip-python", "fano/make_figures.py", c),
+            ("scip-python", "scripts", Some("0f9868400000")),
+            ("scip-typescript", "", None),
+        ];
+        assert_eq!(
+            super::sources_line(stores.into_iter()).unwrap(),
+            "exact = SCIP rust-analyzer puffin-code-rs @ e240c2d; scip-python dreamference, tests, setup.py, fano/main.py and 1 more @ c673c5e; \
+             scip-python scripts @ 0f98684; scip-typescript @ no commit"
+        );
+        assert_eq!(super::sources_line(std::iter::empty()), None);
+    }
 
     #[test]
     fn diff_hunks_give_new_side_ranges() {

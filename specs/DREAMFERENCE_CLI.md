@@ -393,7 +393,7 @@ While a night run holds its lock, `server start`, `codex build` and `index` refu
 
 ### 4.22. `puffin-admin code setup`, `puffin-admin searxng start`
 
-- **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+) the optional indexers need. The index itself is the Rust binary `puffin-code`, built and linked by `codex build`. See `DREAMFERENCE_PUFFIN_CODE_INDEX.md`.
+- **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+, and Maven and Gradle when installed) the optional indexers need. The index itself is the Rust binary `puffin-code`, built and linked by `codex build`. See `DREAMFERENCE_PUFFIN_CODE_INDEX.md`.
 - **`searxng start`:** creates the SearXNG container on the project network `dreamference-sidecars`, published on `127.0.0.1:8888` only. A container found on Docker's default bridge is replaced. See `DREAMFERENCE_DOCKER.md` §6. On a node that `node enable` advertised (§4.25) it is published beyond loopback instead.
 
 ### 4.23. `puffin-admin swe-bench`
