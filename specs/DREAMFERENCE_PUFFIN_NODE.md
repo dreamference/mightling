@@ -629,7 +629,7 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 
 | Piece | Where | State |
 |---|---|---|
-| `puffin-admin node enable [--no-web]`, `disable`, `status` | `dreamference/node/` (`NodeAdvertiser`, `NodeServiceFile`, `NodeSettings`, `NodeIdentity`, `NodeBrowser`) | Tested offline (20 tests). `status` run live. **`enable` was not run on this machine**: it needs root once and it opens the web UI to the LAN, which is the owner's act |
+| `puffin-admin node enable [--no-web]`, `disable`, `status`, `id` | `dreamference/node/` (`NodeAdvertiser`, `NodeServiceFile`, `NodeSettings`, `NodeIdentity`, `NodeBrowser`) | Tested offline (20 tests). `status` run live. **`enable` was not run on this machine**: it needs root once and it opens the web UI to the LAN, which is the owner's act |
 | The Avahi service file, rewritten by `server start|stop|remove` | `NodeServiceFile`; hooks in the CLI controller | Exact text tested; the three state changes tested |
 | The two binds (§4) | `OnyxRunner.web_bind_env()`, `SearxngSidecar.run_command()` and `start()` | Tested offline; no container was recreated |
 | The locator crate and its copies | `puffin-rs/node-locator/`, `puffin-web-rs/src/node_locator.rs`, `desktop/src-tauri/src/node_locator.rs` | 8 tests; a Python test holds the three byte-identical |
@@ -677,8 +677,8 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 - **No client on a second machine.** The Phase 1 "done when" needs one; §18.3 has the one-machine stand-in. The "No Puffin node found" message was not seen live either: on this machine a model server always answers on loopback, which is the last tier.
 - **`node enable` with root**, the file under `/etc/avahi/services`, Avahi publishing a file the user owns, and the two containers recreated on `0.0.0.0`.
 - **SearXNG answering a LAN client** (its limiter may treat non-loopback addresses differently).
-- The installers of §9 for macOS and Windows (another task is writing `install.sh` with the role detection; `puffin-admin node enable` at the end of its node role and `install.ps1` are still to add), the release matrix of §8.1, `puffin-code setup` in Rust (§8.3), and every macOS and Windows build. The macOS bundle's two local-network keys are in `desktop/src-tauri/Info.plist`, untested.
-- **Voice through the forwarder**, and the window on port 33000.
+- `install.ps1` and a macOS run of `install.sh` (§9). `install.sh` itself exists (written by another task on the same day: release assets with checksums, the role decided by the machine, `--role`); its node role now writes the node id (`puffin-admin node id`) and runs `puffin-admin node enable` when there is a terminal for sudo to ask on, with `--no-advertise` to skip it. The node role was not run end to end. Also not built: the release matrix of §8.1, `puffin-code setup` in Rust (§8.3), and every macOS and Windows build. The macOS bundle's two local-network keys are in `desktop/src-tauri/Info.plist`, untested.
+- **The window itself**: `puffin-app` was built and tested as a crate, but not opened as a client, so the one-time sign-in (tested under node, and the default account answers 204 here), voice through the forwarder and the port-33000 fallback were not watched.
 - **In Part 2:** per-node parallelism in Night Shift and SWE-bench (§12.3), `node sync-model`, and memory in `node list`. **In Part 3:** agent tasks on another node (`/night add --on <node>`), with the per-job `CODEX_HOME` they need; `--setup` environments, `--out` and `--bind` (§13.3, §13.6); pruning of finished jobs; sending jobs from a client (the sender is Python).
 
 ### 18.5 Tests
@@ -719,6 +719,7 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 | The job on the node: record, admission, unit, sandbox, commit | `node_job.py`; `puffin-admin node job-exec <id>` inside the unit |
 | git and job requests through the forced command | `NodeServe.git_service`, `NodeServe.job_operation` |
 
+- **Options go after the node's name**, as §13.3 writes them, and what follows `--` is the command verbatim: `node run spark-2 --memory 16G --test "pytest -q" -- python train.py --epochs 3`.
 - **What travels.** `node run` pushes `HEAD` to `ssh://<node>/jobs/<name>-<digest>.git` as `refs/jobs/<id>`; `serve-job` runs `git-receive-pack` for that path and refuses any other, creating the bare repository on first push. The request (`job-submit`, base64 JSON) names the commit, the command, the caps, the sender's `/airgapped` level and its git identity.
 - **The node validates everything**: the id and repository name by pattern, the commit as a full hash it already holds, the command as a list, the caps present and under the node's ceilings (32 GiB, 8 h; constants for now, not config), and `--gpu` refused outright (§15.1).
 - **Admission is Night Shift's without the model checks**: no night run or benchmark run holding the lock, no build or index run, and memory available for the reserve (8 GiB) plus the job's cap. An open `puffin` session does not block a script job.
