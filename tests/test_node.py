@@ -481,6 +481,11 @@ def test_only_a_key_of_the_nodes_own_matrix_is_loaded(monkeypatch, capsys):
     monkeypatch.setattr(NodeServe, "run_admin", classmethod(lambda cls, arguments: ran.append(arguments) or 3))
     assert NodeServe.serve("set-model qwen3.8-27b-nvfp4-dflash2") == 3          # a refusal comes back as it is
     assert len(ran) == 1
+    # A node with no server running: the stop fails, and the start still happens.
+    ran.clear()
+    monkeypatch.setattr(NodeServe, "run_admin", classmethod(
+        lambda cls, arguments: ran.append(arguments) or (1 if arguments == ["server", "stop"] else 0)))
+    assert NodeServe.serve("set-model qwen3.8-27b-nvfp4-dflash2") == 0 and ran[-1] == ["server", "start"]
 
 
 def paired_record(node_id="2222-bbbb", address="192.168.50.106"):

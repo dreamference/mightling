@@ -264,11 +264,12 @@ class NodeServe:
         if ModelMatrixRegistry.is_diffusion(model_key):
             print(f"❌ {model_key} is a diffusion model and cannot be a node's main model.", file=sys.stderr)
             return 2
-        for arguments in (["main-model", "set", model_key], ["server", "stop"], ["server", "start"]):
-            code = cls.run_admin(arguments)
-            if code != 0:
-                return code
-        return 0
+        code = cls.run_admin(["main-model", "set", model_key])
+        if code != 0:
+            return code
+        # Stopping a server that is not running is not a failure of the assignment.
+        cls.run_admin(["server", "stop"])
+        return cls.run_admin(["server", "start"])
 
     @classmethod
     def info(cls) -> dict:
