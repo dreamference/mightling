@@ -17,6 +17,7 @@
 pub mod airgapped;
 pub mod fetch;
 pub mod html_text;
+pub mod node_locator;
 pub mod search;
 
 use std::time::Duration;

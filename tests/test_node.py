@@ -284,6 +284,24 @@ def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
         "port": "8000", "main": "1", "state": "ready", "version": "1.3.0", "node": "abc", "proto": "1"}]
 
 
+# -- the locator crate ------------------------------------------------------------------------------
+
+def test_the_web_crates_locator_is_a_byte_identical_copy():
+    # puffin-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a
+    # launcher and a `puffin-search` that read node.json differently would talk to two machines.
+    from pathlib import Path
+    repo = Path(__file__).resolve().parent.parent
+    leaf = repo / "puffin-rs" / "node-locator" / "src" / "lib.rs"
+    assert (repo / "puffin-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
+    # ...and it agrees with the node about the service type and the contract's version.
+    from dreamference.node import PROTO, SERVICE_TYPE
+    text = leaf.read_text()
+    assert f'pub const SERVICE_TYPE: &str = "{SERVICE_TYPE}.local.";' in text
+    assert f"pub const PROTO: u32 = {PROTO};" in text
+    assert str(NodeIdentity.path()).endswith(".config/dreamference/node-id")
+    assert 'join(".config").join("dreamference").join("node-id")' in text
+
+
 # -- the command line ------------------------------------------------------------------------------
 
 def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):

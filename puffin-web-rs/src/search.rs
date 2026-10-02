@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::agent;
 use crate::airgapped::Level;
+use crate::node_locator::Node;
 
 /// Self-hosted SearXNG, published on loopback only. `DREAMFERENCE_SEARXNG_URL` overrides it.
 pub const DEFAULT_SEARXNG_URL: &str = "http://127.0.0.1:8888";
@@ -59,12 +60,55 @@ pub struct SearchError {
     pub hint: Option<String>,
 }
 
-/// The configured SearXNG base URL.
+/// The SearXNG base URL: `DREAMFERENCE_SEARXNG_URL`, then the node's on a client that remembers one
+/// (specs/DREAMFERENCE_PUFFIN_NODE.md §6.2), then loopback.
 pub fn searxng_url() -> String {
-    std::env::var("DREAMFERENCE_SEARXNG_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty())
+    searxng_url_from(
+        std::env::var("DREAMFERENCE_SEARXNG_URL").ok().as_deref(),
+        crate::node_locator::remote_node().as_ref(),
+    )
+}
+
+/// [`searxng_url`] with its inputs given. A node that does not share its SearXNG leaves the
+/// default in place; the error then names the node (see [`start_hint`]).
+pub fn searxng_url_from(configured: Option<&str>, node: Option<&Node>) -> String {
+    if let Some(url) = configured.filter(|url| !url.trim().is_empty()) {
+        return url.to_string();
+    }
+    node.and_then(Node::search_url)
         .unwrap_or_else(|| DEFAULT_SEARXNG_URL.to_string())
+}
+
+/// What to say when SearXNG does not answer. On a node, the command that starts it. On a client,
+/// the same command and where to type it: web search runs on the node, so nothing typed on the
+/// client can start it.
+pub fn start_hint(node: Option<&Node>) -> String {
+    match node {
+        None => format!("Start it with: {SEARXNG_START_HINT}"),
+        Some(node) if node.search_port.is_none() => format!(
+            "Web search runs on the Puffin node ({}), which does not share its SearXNG. On the node: {SEARXNG_START_HINT}, then puffin-admin node enable",
+            node_label(node)
+        ),
+        Some(node) => format!(
+            "Web search runs on the Puffin node ({}). On the node: {SEARXNG_START_HINT}",
+            node_label(node)
+        ),
+    }
+}
+
+/// [`RESTART_HINT`], said for the machine the container is on.
+pub fn restart_hint(node: Option<&Node>) -> String {
+    match node {
+        None => RESTART_HINT.to_string(),
+        Some(node) => format!(
+            "If the Puffin node ({}) is online, restart the container there: docker restart dreamference-searxng",
+            node_label(node)
+        ),
+    }
+}
+
+fn node_label(node: &Node) -> &str {
+    if node.name.is_empty() { &node.address } else { &node.name }
 }
 
 /// Searches the web through SearXNG.
@@ -78,6 +122,17 @@ pub fn searxng_url() -> String {
 /// category's engines to the ones in `engines`, so with both it asked all five general engines.
 /// At `on` nothing is sent; the binary refuses before calling this, and so does this function.
 pub fn search(base_url: &str, query: &str, max_results: i64, level: Level) -> Result<SearchPayload, SearchError> {
+    search_from(base_url, query, max_results, level, crate::node_locator::remote_node().as_ref())
+}
+
+/// [`search`], told which node the instance is on (`None`: this machine), for the hints.
+pub fn search_from(
+    base_url: &str,
+    query: &str,
+    max_results: i64,
+    level: Level,
+    node: Option<&Node>,
+) -> Result<SearchPayload, SearchError> {
     if level == Level::On {
         return Err(SearchError {
             error: crate::AIRGAPPED_ON_MESSAGE.to_string(),
@@ -117,14 +172,14 @@ pub fn search(base_url: &str, query: &str, max_results: i64, level: Level) -> Re
                 hint: if status == 403 {
                     Some(JSON_FORMAT_HINT.to_string())
                 } else {
-                    hint(RESTART_HINT.to_string())
+                    hint(restart_hint(node))
                 },
             });
         }
         Err(error) => {
             return Err(SearchError {
                 error: format!("SearXNG at {base_url} is unreachable: {error}"),
-                hint: hint(format!("Start it with: {SEARXNG_START_HINT}")),
+                hint: hint(start_hint(node)),
             });
         }
     };
@@ -304,6 +359,53 @@ mod tests {
             "DuckDuckGo did not answer (duckduckgo: CAPTCHA). This session searches through DuckDuckGo only (/airgapped duckduckgo)."
         );
         assert_eq!(error.hint, None);
+    }
+
+    fn remote() -> Node {
+        Node {
+            node: "7c1e".to_string(),
+            name: "gx10-1a2b".to_string(),
+            address: "192.168.50.105".to_string(),
+            model_port: 8000,
+            web_port: Some(3000),
+            search_port: Some(8888),
+            ..Node::default()
+        }
+    }
+
+    #[test]
+    fn a_client_searches_through_its_node_and_a_node_through_itself() {
+        // On a node, and on a client that remembers no node, `remote_node()` is None: loopback.
+        assert_eq!(searxng_url_from(None, None), DEFAULT_SEARXNG_URL);
+        assert_eq!(searxng_url_from(Some("  "), None), DEFAULT_SEARXNG_URL);
+        assert_eq!(searxng_url_from(None, Some(&remote())), "http://192.168.50.105:8888");
+        // The override still wins, on either kind of machine.
+        assert_eq!(searxng_url_from(Some("http://10.0.0.9:1234"), Some(&remote())), "http://10.0.0.9:1234");
+        // A node that keeps its SearXNG to itself: nothing to connect to but loopback.
+        let unshared = Node { search_port: None, ..remote() };
+        assert_eq!(searxng_url_from(None, Some(&unshared)), DEFAULT_SEARXNG_URL);
+    }
+
+    #[test]
+    fn on_a_client_the_hint_says_where_to_type_the_command() {
+        assert_eq!(start_hint(None), "Start it with: puffin-admin searxng start");
+        assert_eq!(
+            start_hint(Some(&remote())),
+            "Web search runs on the Puffin node (gx10-1a2b). On the node: puffin-admin searxng start"
+        );
+        let unshared = Node { search_port: None, name: String::new(), ..remote() };
+        assert!(start_hint(Some(&unshared)).contains("(192.168.50.105), which does not share its SearXNG"));
+        assert!(start_hint(Some(&unshared)).ends_with("puffin-admin node enable"));
+        assert_eq!(restart_hint(None), RESTART_HINT);
+        assert!(restart_hint(Some(&remote())).contains("restart the container there"));
+    }
+
+    #[test]
+    fn an_unreachable_node_is_named_in_the_error() {
+        // Port 9 on loopback refuses at once; the hint is the client's, because a node was given.
+        let error = search_from("http://127.0.0.1:9", "q", 5, Level::Off, Some(&remote())).unwrap_err();
+        assert!(error.error.contains("unreachable"), "{error:?}");
+        assert_eq!(error.hint.as_deref(), Some(start_hint(Some(&remote())).as_str()));
     }
 
     #[test]
