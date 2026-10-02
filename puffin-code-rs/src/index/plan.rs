@@ -392,6 +392,15 @@ pub fn repo_id(repo: &Repo) -> String {
     crate::manifest::hex(&digest[..5])
 }
 
+/// The systemd unit of a run: `puffin-index-<repository>-<indexer>-<root>`. A root may now be a
+/// file, and a script may be called `plot (v2).py` or `résumé.py`: systemd accepts only ASCII
+/// letters, digits and `:-_.\\` in a unit name, and `systemd-run` refuses anything else, so the
+/// rest become `-`. (The store keeps the root's own name; only the unit is narrowed.)
+pub fn unit_name(repo: &Repo, slug: &str) -> String {
+    let safe: String = slug.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.') { c } else { '-' }).collect();
+    format!("puffin-index-{}-{safe}", repo_id(repo))
+}
+
 fn scratch_for(repo: &Repo, slug: &str) -> PathBuf {
     let base = std::env::var_os("PUFFIN_CODE_SCRATCH_DIR")
         .map(PathBuf::from)
@@ -451,7 +460,7 @@ pub fn universal_run(repo: &Repo, settings: &Settings, tools: &Tools, recorded_p
         converted: None,
         need: super::host::need(Kind::Universal, recorded_peak_mb),
         ceiling,
-        unit: format!("puffin-index-{}-codebase-memory", repo_id(repo)),
+        unit: unit_name(repo, "codebase-memory"),
     })
 }
 
@@ -771,7 +780,7 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
         converted: Some(converted),
         need: super::host::need(target.kind, recorded_peak_mb),
         ceiling,
-        unit: format!("puffin-index-{}-{slug}", repo_id(repo)),
+        unit: unit_name(repo, &slug),
     })
 }
 
@@ -1012,6 +1021,20 @@ mod tests {
         assert_eq!(crate::scip_store::join_normalized(&run.path_prefix, ""), "setup.py");
         assert_eq!(crate::scip_store::join_normalized(&run.path_prefix, "../pkg/__init__.py"), "pkg/__init__.py");
         assert_eq!(super::super::store::slug("scip-python", "setup.py"), "scip-python-setup.py");
+    }
+
+    #[test]
+    fn a_unit_name_is_one_systemd_accepts_whatever_the_file_is_called() {
+        let (dir, repo) = make_repo(&[("plot (v2)+résumé@home.py", "x = 1\n")]);
+        std::env::set_var("PUFFIN_CODE_SCRATCH_DIR", dir.path().join("scratch"));
+        let tools = Tools { scip_python: Some((dir.path().join("node/bin/node"), dir.path().join("indexers/index.js"))), ..fake_tools(dir.path()) };
+        let target = detect(&repo).into_iter().find(|t| t.indexer == "scip-python").unwrap();
+        assert_eq!(target.root, "plot (v2)+résumé@home.py");
+        let run = run_for(&repo, &tools, target);
+        assert_eq!(run.unit, format!("puffin-index-{}-scip-python-plot--v2--r-sum--home.py", repo_id(&repo)));
+        assert!(run.unit.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.')), "{}", run.unit);
+        // The file itself is still named exactly, quoted for the shell.
+        assert!(run.spec.argv[2].contains("--target-only 'plot (v2)+résumé@home.py'"), "{}", run.spec.argv[2]);
     }
 
     #[test]
