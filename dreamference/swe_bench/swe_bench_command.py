@@ -58,6 +58,8 @@ class SweBenchCommand:
         run.add_argument("--remove-images", action="store_true", help="With --eval: work one repository at a time and remove its images once it is graded")
         run.add_argument("--code-index", default="off", choices=["off", "universal"],
                          help="universal: index each instance's repository on the host and give the agent puffin-code (default off)")
+        run.add_argument("--prompt", default=None,
+                         help="The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one)")
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open puffin sessions to close (for testing)")
@@ -96,7 +98,7 @@ class SweBenchCommand:
                 dataset=args.dataset, instances=cls._ids(args.instances), limit=args.limit,
                 subset=args.subset, name=args.name, evaluate=args.eval, until=args.until,
                 idle_minutes=args.idle_minutes, ignore_sessions=args.ignore_open_sessions,
-                keep_images=not args.remove_images, code_index=args.code_index)
+                keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt)
         if command == "eval":
             return cls.evaluate(args.run)
         if command == "report":

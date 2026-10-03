@@ -6,6 +6,7 @@ that edits it. Another stand-in plays the upstream harness. Nothing here starts 
 pulls an image, installs a package or reaches the network.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -952,3 +953,60 @@ def test_status_and_clean_touch_only_the_benchmarks_own_things(bench, capsys):
     assert not (SweBenchRunStore("r1").directory / "scratch").exists()
     assert bench["docker"].present == set()
     assert ["ps", "-aq", "--filter", "label=puffin.swe-bench.run=r1"] in bench["docker"].calls
+
+
+# -- the system prompt (specs/DREAMFERENCE_PUFFIN_PROMPT.md §6.2) ---------------------------------
+
+def container_env(bench):
+    created = next(call for call in bench["docker"].calls if call[0] == "run")
+    env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
+    mounts = [created[i + 1] for i, word in enumerate(created) if word == "-v"]
+    return env, mounts
+
+
+def test_without_prompt_the_run_records_and_passes_the_configured_one(bench, monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_PROMPT", raising=False)
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    env, mounts = container_env(bench)
+    assert env["DREAMFERENCE_PUFFIN_PROMPT"] == "default"
+    assert not any("system-prompts" in mount for mount in mounts)
+    manifest = SweBenchRunStore("r1").manifest()
+    assert (manifest["prompt"], manifest["prompt_sha256"]) == ("default", None)
+    assert "Prompt default; cave mode" in SweBenchReport.render(SweBenchRunStore("r1"))
+
+
+def test_a_built_in_prompt_needs_no_file_and_two_prompts_are_told_apart(bench, monkeypatch):
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_PROMPT", raising=False)
+    assert run(bench, name="a", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="b", instances=["acme__widget-1"], prompt="high-swe") == 0
+    runs = [call for call in bench["docker"].calls if call[0] == "run"]
+    assert "-e" in runs[-1] and "DREAMFERENCE_PUFFIN_PROMPT=high-swe" in runs[-1]
+    assert "DREAMFERENCE_PUFFIN_PROMPT=default" in runs[0]
+    for name in "ab":
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("a"), SweBenchRunStore("b"))
+    assert "differs: prompt: default | high-swe" in text
+    # A manifest from before named prompts ran the default, and is compared as such.
+    manifest_path = SweBenchRunStore("a").manifest_path
+    old = json.loads(manifest_path.read_text())
+    del old["prompt"], old["prompt_sha256"]
+    manifest_path.write_text(json.dumps(old))
+    assert "differs: prompt: default | high-swe" in SweBenchReport.against(SweBenchRunStore("a"), SweBenchRunStore("b"))
+
+
+def test_a_custom_prompt_is_mounted_read_only_and_its_text_is_recorded(bench, monkeypatch, tmp_path):
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_PROMPT", raising=False)
+    home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    assert run(bench, instances=["acme__widget-1"], prompt="mine") == 1, "no such file: not started"
+    assert not SweBenchRunStore("r1").manifest_path.exists()
+    assert run(bench, instances=["acme__widget-1"], prompt="Mine") == 1, "not a prompt's name"
+    (home / "system-prompts").mkdir(parents=True)
+    text = "<!-- puffin: blocks=code -->\nFix it.\n"
+    (home / "system-prompts" / "mine.md").write_text(text)
+    assert run(bench, instances=["acme__widget-1"], prompt="mine") == 0
+    env, mounts = container_env(bench)
+    assert env["DREAMFERENCE_PUFFIN_PROMPT"] == "mine"
+    expected = f"{home}/system-prompts/mine.md:/puffin-scratch/codex-home/system-prompts/mine.md:ro"
+    assert expected in mounts
+    assert SweBenchRunStore("r1").manifest()["prompt_sha256"] == hashlib.sha256(text.encode()).hexdigest()

@@ -112,7 +112,8 @@ class SweBenchInstanceRun:
     def __init__(self, store: SweBenchRunStore, row: Dict[str, Any], image: str, model_name: str,
                  settings: "swe_bench_settings.SweBenchSettings", runtime_dir: Path, model_url: str,
                  deadline: float, extra_env: Optional[Dict[str, str]] = None,
-                 code_index: Optional[Dict[str, Any]] = None) -> None:
+                 code_index: Optional[Dict[str, Any]] = None,
+                 extra_mounts: Optional[List[str]] = None) -> None:
         """
         Args:
             store: The run's files.
@@ -127,6 +128,7 @@ class SweBenchInstanceRun:
             extra_env: More environment for the container (the cave-mode and air-gap levels).
             code_index: How the container is given a code index (`mounts`, `env`, `path`, and
                 the index's `record`); None for the arm without one.
+            extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -140,6 +142,7 @@ class SweBenchInstanceRun:
         self.deadline = deadline
         self.extra_env = dict(extra_env or {})
         self.code_index = code_index
+        self.extra_mounts: List[str] = list(extra_mounts or [])
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -282,11 +285,11 @@ class SweBenchInstanceRun:
             "GIT_CONFIG_VALUE_0": "/testbed",
             **self.extra_env,
         }
-        mounts: List[str] = []
+        mounts: List[str] = list(self.extra_mounts)
         if self.code_index:
             environment.update(self.code_index["env"])
             environment["PATH"] = f"{self.code_index['path']}:{CONTAINER_PATH}"
-            mounts = list(self.code_index["mounts"])
+            mounts += list(self.code_index["mounts"])
         command = ["run", "-d", "--init", "--name", self.container,
                    "--label", f"puffin.swe-bench.run={self.store.name}",
                    "--network", swe_bench_settings.NETWORK_NAME,

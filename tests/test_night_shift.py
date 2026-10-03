@@ -38,6 +38,8 @@ FAKE_PUFFIN = textwrap.dedent("""\
         os.execvp(command[0], command)
     with open(os.environ["FAKE_PUFFIN_CALLS"], "a") as log:
         log.write(json.dumps(args) + "\\n")
+    with open(os.environ["FAKE_PUFFIN_CALLS"] + ".env", "a") as log:
+        log.write(json.dumps({{"DREAMFERENCE_PUFFIN_PROMPT": os.environ.get("DREAMFERENCE_PUFFIN_PROMPT")}}) + "\\n")
     cwd = args[args.index("-C") + 1]
     out = args[args.index("-o") + 1]
     resume = "resume" in args
@@ -151,6 +153,24 @@ def test_a_change_is_committed_on_its_branch_and_the_checkout_is_untouched(setup
     assert "Do not commit, push" in first[-1] and first[-1].endswith("Add hello.txt")
     assert "run `test -f hello.txt`" in first[-1]
     assert record["session"]
+
+
+def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup, monkeypatch):
+    # `[night] prompt` (prompt spec §7): set, every `puffin exec` of the task starts under it;
+    # unset, the runner adds nothing and the configured prompt applies.
+    monkeypatch.delenv("DREAMFERENCE_PUFFIN_PROMPT", raising=False)
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    record = queue(setup["night"], setup["repo"])
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"prompt": "high-swe"}), setup["puffin"],
+                            deadline=time.time() + 60)
+    assert run.run() == "done"
+    seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
+    assert seen and all(entry["DREAMFERENCE_PUFFIN_PROMPT"] == "high-swe" for entry in seen)
+    Path(str(setup["calls"]) + ".env").unlink()
+    status, _, _ = run_task(setup, monkeypatch, "change", task_id="20261001-0100-def")
+    assert status == "done"
+    seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
+    assert seen and all(entry["DREAMFERENCE_PUFFIN_PROMPT"] is None for entry in seen)
 
 
 def test_what_the_test_run_leaves_behind_is_not_committed(setup, monkeypatch):

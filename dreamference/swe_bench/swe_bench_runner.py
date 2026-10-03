@@ -28,7 +28,7 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
-from dreamference.swe_bench.swe_bench_instance_run import SweBenchInstanceRun
+from dreamference.swe_bench.swe_bench_instance_run import SCRATCH_MOUNT, SweBenchInstanceRun
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 
@@ -36,6 +36,12 @@ POLL_S: Final[float] = 5.0
 
 # What the lock file says while a benchmark run holds Night Shift's runner lock.
 LOCK_HOLDER: Final[str] = "a SWE-bench run"
+
+# The prompts compiled into `puffin` (puffin-rs/src/prompt.rs); any other name is a file in
+# `$CODEX_HOME/system-prompts/`. A run's manifest without a prompt ran the default.
+BUILT_IN_PROMPTS: Final[tuple] = ("default", "high-swe")
+DEFAULT_RUN_PROMPT: Final[str] = "default"
+PROMPT_DIR: Final[str] = "system-prompts"
 
 
 class SweBenchRunner:
@@ -131,7 +137,7 @@ class SweBenchRunner:
     def build_manifest(cls, name: str, dataset: str, selected: List[str], excluded: Dict[str, str],
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
                        runtime_hash: str, puffin_bin: str, parallel: int,
-                       code_index: str = "off") -> Dict[str, Any]:
+                       code_index: str = "off", prompt: Optional[str] = None) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -170,6 +176,8 @@ class SweBenchRunner:
             "codex_tag": CODEX_RELEASE_TAG,
             "runtime_hash": runtime_hash,
             "cave_mode": config.puffin_cave_mode,
+            "prompt": prompt or config.puffin_prompt,
+            "prompt_sha256": cls.prompt_digest(prompt or config.puffin_prompt),
             "airgapped": "off (the container has no network; see the spec's §12)",
             "code_index": code_index,
             "task_context": settings.task_context,
@@ -179,6 +187,41 @@ class SweBenchRunner:
             "parallelism": parallel,
             "repository_commit": cls._output(["git", "-C", REPO_ROOT, "rev-parse", "HEAD"]),
         }
+
+    @classmethod
+    def prompt_file(cls, name: str) -> Optional[Path]:
+        """
+        The file a custom prompt is read from: `$CODEX_HOME/system-prompts/<name>.md`. The built-in
+        prompts are in the binary and have none.
+
+        Args:
+            name: The prompt's name.
+
+        Returns:
+            Optional[Path]: The file, or None for a built-in prompt.
+        """
+        if name in BUILT_IN_PROMPTS:
+            return None
+        from dreamference.runner.codex_installer import CodexInstaller
+        return Path(CodexInstaller.home_dir()) / PROMPT_DIR / f"{name}.md"
+
+    @classmethod
+    def prompt_digest(cls, name: str) -> Optional[str]:
+        """
+        The SHA-256 of a custom prompt's file, so the manifest names the text a run measured; None
+        for a built-in prompt, which `runtime_hash` already covers.
+
+        Args:
+            name: The prompt's name.
+
+        Returns:
+            Optional[str]: The hex digest, or None.
+        """
+        path = cls.prompt_file(name)
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest() if path else None
+        except OSError:
+            return None
 
     @classmethod
     def _output(cls, command: List[str]) -> Optional[str]:
@@ -196,7 +239,7 @@ class SweBenchRunner:
             limit: Optional[int] = None, subset: Optional[str] = None, name: Optional[str] = None,
             evaluate: bool = False, until: Optional[str] = None, idle_minutes: Optional[float] = None,
             ignore_sessions: bool = False, keep_images: bool = True, require_smoke: bool = True,
-            code_index: str = "off",
+            code_index: str = "off", prompt: Optional[str] = None,
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
@@ -216,6 +259,8 @@ class SweBenchRunner:
             require_smoke: Refuse to run unless a smoke has passed on this machine.
             code_index: `off`, or `universal` to index each instance's repository on the host
                 and give the agent `puffin-code` (a new run only; a resumed run keeps its arm).
+            prompt: The system prompt the agent starts with (prompt spec §6.2); None takes the
+                configured one. A new run only, like `code_index`.
             settings: Benchmark settings; defaults to the config file's.
 
         Returns:
@@ -226,6 +271,16 @@ class SweBenchRunner:
         if code_index not in ARMS:
             print(f"❌ --code-index is one of: {', '.join(ARMS)}.")
             return 1
+        if prompt is not None:
+            from dreamference.config import DreamferenceConfig
+            if DreamferenceConfig.parse_prompt_name(prompt) is None:
+                print(f"❌ --prompt {prompt!r} is not a prompt's name (lowercase letters, digits, hyphens).")
+                return 1
+            custom = cls.prompt_file(prompt)
+            if custom is not None and not custom.is_file():
+                print(f"❌ No prompt named {prompt}: it is not built in ({', '.join(BUILT_IN_PROMPTS)}) "
+                      f"and {custom} does not exist.")
+                return 1
         if require_smoke and not cls.smoke_passed():
             print("❌ No smoke has passed on this machine with this harness version: "
                   "run `puffin-admin swe-bench smoke` first.")
@@ -275,7 +330,8 @@ class SweBenchRunner:
                 problems = SweBenchEvaluator.validate(dataset, selected, settings)
                 excluded = {i: problem for i, problem in problems.items() if problem}
                 manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
-                                              served, runtime_hash, puffin_bin, parallel, code_index)
+                                              served, runtime_hash, puffin_bin, parallel, code_index,
+                                              prompt)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                 print(f"❌ Run {store.name} was started with another puffin build or model "
@@ -287,8 +343,15 @@ class SweBenchRunner:
                 print(f"❌ Could not create the internal Docker network {swe_bench_settings.NETWORK_NAME}.")
                 return 1
             model_url = f"http://{gateway}:{urlparse(vllm_host).port or 8000}"
+            run_prompt = str(manifest.get("prompt") or DEFAULT_RUN_PROMPT)
             extra_env = {"DREAMFERENCE_PUFFIN_CAVE_MODE": str(manifest.get("cave_mode") or "ultra"),
-                         "DREAMFERENCE_PUFFIN_AIRGAPPED": "off"}
+                         "DREAMFERENCE_PUFFIN_AIRGAPPED": "off",
+                         "DREAMFERENCE_PUFFIN_PROMPT": run_prompt}
+            # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
+            # the text a later session of the same instance would start from.
+            custom_prompt = cls.prompt_file(run_prompt)
+            extra_mounts = [f"{custom_prompt}:{SCRATCH_MOUNT}/codex-home/{PROMPT_DIR}/{run_prompt}.md:ro"] \
+                if custom_prompt is not None else []
 
             finished = set(store.finished())
             pending = [i for i in manifest["instances"] if i not in finished]
@@ -326,7 +389,7 @@ class SweBenchRunner:
                 for repo, group in groups.items():
                     stopped = cls.schedule(store, group, rows, manifest, settings, runtime_hash,
                                            model_url, vllm_host, puffin_bin, parallel, end, extra_env,
-                                           indexes)
+                                           indexes, extra_mounts)
                     if evaluate:
                         graded_now = [i for i in manifest["instances"] if repo is None or rows[i]["repo"] == repo]
                         SweBenchEvaluator.grade(store, settings, only=graded_now)
@@ -356,7 +419,8 @@ class SweBenchRunner:
                  manifest: Dict[str, Any], settings: "swe_bench_settings.SweBenchSettings",
                  runtime_hash: str, model_url: str, vllm_host: str, puffin_bin: str, parallel: int,
                  end: Optional[datetime], extra_env: Dict[str, str],
-                 indexes: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[str]:
+                 indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+                 extra_mounts: Optional[List[str]] = None) -> Optional[str]:
         """
         Starts instances while the machine is quiet, memory and disk admit one more and `--until`
         has not passed; waits for the running ones.
@@ -387,7 +451,7 @@ class SweBenchRunner:
                             store, rows[instance_id], manifest["images"][instance_id]["image"],
                             manifest["model_name_or_path"], settings, SweBenchRuntime.directory(),
                             model_url, time.time() + settings.task_timeout_s, extra_env,
-                            (indexes or {}).get(instance_id))
+                            (indexes or {}).get(instance_id), extra_mounts)
                         thread = threading.Thread(target=cls._run_one, args=(run,),
                                                   name=f"swe-{instance_id}", daemon=True)
                         thread.start()
