@@ -1,6 +1,6 @@
 # Puffin Prompts — `/prompt`
 
-**Status:** Phase 1 implemented on 2026-10-03 (§13 records what was built and where it departs from the design); Phase 0 and Phase 2 are not built, and the runs of §6.2 have not been made. §1 is read from the pinned Codex source and checked against the requests `puffin` actually sends (a stub endpoint recorded them; no model was involved); §6.4 is a small pilot against the live model on 2026-10-02. §12 separates what was checked from what is assumed.
+**Status:** Phase 1 implemented on 2026-10-03 (§13 records what was built and where it departs from the design); Phase 0 is built in part (§6.1 item 1, the writable `/testbed`, fixed in the runner on 2026-10-03), Phase 2 is not built, and the runs of §6.2 have not been made. §1 is read from the pinned Codex source and checked against the requests `puffin` actually sends (a stub endpoint recorded them; no model was involved); §6.4 is a small pilot against the live model on 2026-10-02. §12 separates what was checked from what is assumed.
 **Goal:** `puffin` can run under more than one system prompt, chosen by name. Two ship: `default`, today's prompt byte for byte, and `high-swe`, a prompt written to resolve as many SWE-bench tasks as the local model can. `/prompt` shows and switches them.
 **Builds on:**
 - the launcher, which already composes the system prompt and writes it to the model catalog (`puffin-rs/src/lib.rs`, `base_instructions()` and `model_catalog()`);
