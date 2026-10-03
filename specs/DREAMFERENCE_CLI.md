@@ -2,7 +2,7 @@
 
 > **Version:** 1.2.0 (`setup.py`)
 > **Subject:** Command Suite, Subcommands, Configuration, Environment Variables
-> **Checked against the code:** 2026-10-02 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`: a script walked the parser and found every subcommand and every visible `--option` in this document)
+> **Checked against the code:** 2026-10-02 (`dreamference/cli/dreamference_cli_controller.py`, `build_parser()`: a script walked the parser and found every subcommand and every visible `--option` in this document); the subcommand list walked again on 2026-10-03
 
 ---
 
@@ -30,10 +30,10 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 
 **Commands:**
 
-- **Setup:** `init`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}`, `clear {model-cache,tensorize-cache}`
+- **Setup:** `init`, `host {check,setup}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off, §4.2), `clear {model-cache,tensorize-cache}`
 - **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run}`
 - **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
-- **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}`
+- **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}` (plus `authorize`, `serve-job` and `job-exec`, which a person does not type, §4.25)
 - **Web UI and desktop:** `puffin {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
 - **Agent tools:** `gmail {search,read,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `puffin-search` and `puffin-fetch` (§4.16), and so is the code index, `puffin-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
@@ -276,7 +276,7 @@ It prints two tables:
    - `/health` (GET)
 2. **Credentials:**
    - the base URL on localhost and on the LAN IP;
-   - the diffusion model URL (`http://localhost:8001/v1`);
+   - the diffusion model URL (`http://localhost:8001/v1`), only while diffusion is switched on;
    - the API key, which is optional and set only by `server start --api-key`;
    - the `Authorization: Bearer <key>` header format.
 
@@ -461,7 +461,7 @@ The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_PU
 - **`sync-model`:** copies a model's Hugging Face cache folders (and its drafter's) to a paired node over the pairing, so it need not download them; `--address` uses another address of the same node, such as its QSFP link's. The node accepts only folders of a key of its own matrix, checks each weight file's checksum, and keeps files it already has.
 - **`run`:** runs a command on a paired node, in this repository at `HEAD`, in a sandboxed, memory-capped and time-limited unit there; its changes come back as the branch `job/<id>`. `--setup` builds an environment once per lock-file content and binds it read-only into later jobs; `--out` names a folder that comes back as files to `~/.puffin/jobs/received/<id>/`, never committed; `--bind` binds a path on the node read-only, if the node's `[node] bindable` allows it. `jobs`, `logs`, `cancel` and `fetch` follow a job; a finished job is pruned on the node a day after it was fetched, or 14 days after it finished.
 
-Two more subcommands are not typed by a person: `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model, model-receive, unpair, the two git services for a job repository, and the job and night-task requests). There is no primary node: the machine `puffin-admin node …` is typed on is the one doing the managing. With one GB10 here, pairing was run against a scratch sshd on loopback, not against a second machine.
+Three more subcommands are not typed by a person: `node job-exec <job>` (run inside a job's systemd unit to carry out that job), `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model, model-receive, unpair, the two git services for a job repository, and the job and night-task requests). There is no primary node: the machine `puffin-admin node …` is typed on is the one doing the managing. With one GB10 here, pairing was run against a scratch sshd on loopback, not against a second machine.
 
 The switches are kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory first. On a client the counterpart is `puffin node list|use|forget`, in the launcher.
 
@@ -472,7 +472,7 @@ puffin-admin host check     # what `server start` would refuse over; changes not
 puffin-admin host setup     # applies it: each command printed, then run through sudo
 ```
 
-`HostSafetySetup` applies what `check_host_safety()` (§4.6) only prints: sysstat, an armed earlyoom, 64 GB of swap, and the two sysctls. The cases it reports instead of acting on, and what was verified, are in [SETUP §3.3](./DREAMFERENCE_SETUP.md). `install.sh` and `scripts/install_gb10.sh` both run `host setup`.
+`HostSafetySetup` applies what `check_host_safety()` (§4.6) only prints: sysstat, an armed earlyoom, 64 GB of swap, and the two sysctls. It also covers the agent's prerequisite: on Ubuntu (`kernel.apparmor_restrict_unprivileged_userns = 1`) it installs `/etc/apparmor.d/puffin-bwrap`, a profile granting `userns` to `/usr/bin/bwrap` alone, so Codex's sandbox works from a systemd unit, the Night Shift timer or an SSH job, not only from a terminal (`sandbox_prerequisite.py`). Every other `puffin-admin` run checks that sandbox from a throwaway user unit (~25 ms) and, when it fails, offers to fix it, to turn Night Shift off, or to ask again later; `mcp`, `host` and `node serve-job` never ask. Loaded and verified on this machine on 2026-10-03. The cases it reports instead of acting on, and what was verified, are in [SETUP §3.3](./DREAMFERENCE_SETUP.md). `install.sh` and `scripts/install_gb10.sh` both run `host setup`.
 
 **On a release install** (no checkout; [SETUP §3.2](./DREAMFERENCE_SETUP.md)) `codex build` builds nothing: it reports the installed release binaries and refreshes the links, or says how to install them; `desktop build` and `desktop install` point at the release's `.deb` and AppImage.
 
