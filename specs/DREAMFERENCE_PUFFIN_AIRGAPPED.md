@@ -355,7 +355,7 @@ All on 2026-10-01, with the rebuilt `puffin` (17 patches) against the default mo
 - ~~**A session switched to Full Access through `/permissions`** shows no warning.~~ Closed on 2026-10-03: the two are refused together (§14.7).
 - **A tampered level takes effect at the next restart.** A seal lasts as long as the `puffin` process that wrote it. If a command rewrote the level's files while the session was held, a later `puffin resume` reads those files and starts at what they say. Keeping seals across restarts would close it, at the price of a session nobody can loosen without the TUI; left as it is.
 - **`writable_roots` the user adds** are not known to the exposure check, which looks at the working directory, `/tmp` and `$TMPDIR`. The seal does not depend on that check, so this only affects what `/airgapped` reports where there is no runtime directory.
-- **The airlock** (§5.4, Phase 2), the 50-query DuckDuckGo measurement (Phase 0), and the strace of an `on` session (§11).
+- **The airlock** (§5.4, Phase 2) and the strace of an `on` session (§11). (The 50-query DuckDuckGo measurement of Phase 0 is moot: the level was removed, §14.6.)
 - **Codex's own TUI snapshots** that list the slash-command popup change again with `/airgapped` in it.
 
 ### 14.4a Added on 2026-10-03: the start-up line
@@ -392,7 +392,7 @@ DuckDuckGo answered SearXNG with a CAPTCHA when the level was first tried live (
 - **The launcher** (`puffin-rs/src/airgapped.rs`): the usage line, the status table and the fragments know two levels. A session resumed after having been at `duckduckgo` gets the `off` fragment, which says web access is back.
 - **The web commands and the MCP server's `web_search`**: always `categories=<category>`; the DuckDuckGo-only error text is gone, and every-engine-failed errors carry the restart hint at `off`.
 - **Python** (`PUFFIN_AIRGAPPED_LEVELS`, `NodeJob.AIRGAP_LEVELS`): two levels. A node job from an older sender that still names `duckduckgo` counts as `on`, because `NodeJob.stricter` treats an unknown name as the strictest.
-- **Not changed:** SearXNG's own engine list, which still includes DuckDuckGo for `off`; and the installed `puffin`, which keeps the old resolver until the next `puffin-admin codex build`.
+- **Not changed:** SearXNG's own engine list, which still includes DuckDuckGo for `off`; and, until 2026-10-03, the installed `puffin`, which kept the old resolver until the build of `258c3b5` replaced it (the live checks of §14.7 ran on that build).
 
 ### 14.7 Added on 2026-10-03: `on` and Full Access are refused together
 
