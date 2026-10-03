@@ -204,7 +204,7 @@ Exit code: 0
 - An item is shown as a placeholder if and only if its `call_id` is in the set, so the view is stable between moves by construction.
 - `puffin resume` restores the same history and `token_info` (§3), so it reads the same file and sends the same view.
 - After a compaction or a rollback the masked ids are gone from the history and are ignored; the new segment starts empty.
-- A subagent or a forked thread has its own calls, so its own key.
+- A subagent has its own calls, so its own key. A forked thread starts with its parent's history, so it shares the parent's key and file until one of them compacts: a move made in either changes the other's next view (one extra re-prefill, not a wrong answer). Forks are rare in `puffin`; if they stop being rare, the key gains the thread id, which the patch would then have to pass in.
 - Files older than 30 days are deleted at launch, with the outputs they name, as cave mode's session files are.
 - A sandboxed command started from the home folder can write `$CODEX_HOME` (AIRGAPPED §14.5), so it could edit or delete these files. The worst it can do is unmask outputs (the context grows and compacts sooner) or mask more (restorably). Nothing here is a security boundary.
 
