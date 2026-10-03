@@ -1,5 +1,4 @@
-"""
-Read-only Google Drive and Google Calendar for Puffin's apps.
+"""Read-only Google Drive and Google Calendar for Puffin's apps.
 
 Specified in specs/DREAMFERENCE_PUFFIN_APPS.md §9 and §9a.
 
@@ -18,7 +17,8 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable, Dict, Final, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any, Final
 
 DRIVE_SCOPE: Final[str] = "https://www.googleapis.com/auth/drive"
 CALENDAR_SCOPE: Final[str] = "https://www.googleapis.com/auth/calendar"
@@ -35,7 +35,7 @@ MAX_TEXT_CHARACTERS: Final[int] = 20_000
 MAX_DOWNLOAD_BYTES: Final[int] = 1024 * 1024
 
 # Google Workspace types and what each is exported as.
-EXPORT_TYPES: Final[Dict[str, str]] = {
+EXPORT_TYPES: Final[dict[str, str]] = {
     "application/vnd.google-apps.document": "text/plain",
     "application/vnd.google-apps.presentation": "text/plain",
     "application/vnd.google-apps.spreadsheet": "text/csv",
@@ -50,14 +50,14 @@ EVENT_FIELDS: Final[str] = (
 )
 
 REQUEST_TIMEOUT_SECONDS: Final[int] = 30
+HTTP_OK: Final[int] = 200
 
-Account = Dict[str, Any]
+Account = dict[str, Any]
 Opener = Callable[..., Any]
 
 
 class GoogleWorkspaceReader:
-    """
-    Searches and reads Drive files and Calendar events, read-only.
+    """Searches and reads Drive files and Calendar events, read-only.
 
     Every connected account that holds the scope is asked.
     """
@@ -66,9 +66,8 @@ class GoogleWorkspaceReader:
     opener: Opener = staticmethod(urllib.request.urlopen)
 
     @classmethod
-    def holding(cls, accounts: List[Account], scope: str) -> List[Account]:
-        """
-        Picks the accounts whose grant includes a scope.
+    def holding(cls, accounts: list[Account], scope: str) -> list[Account]:
+        """Picks the accounts whose grant includes a scope.
 
         Args:
             accounts (List[Account]): `email`, `access_token` and `scopes` per account.
@@ -80,9 +79,8 @@ class GoogleWorkspaceReader:
         return [account for account in accounts if scope in (account.get("scopes") or [])]
 
     @classmethod
-    def _get(cls, url: str, token: str, raw: bool = False) -> Tuple[int, Any]:
-        """
-        Sends one authenticated GET.
+    def _get(cls, url: str, token: str, raw: bool = False) -> tuple[int, Any]:
+        """Sends one authenticated GET.
 
         Args:
             url (str): The full URL.
@@ -106,8 +104,7 @@ class GoogleWorkspaceReader:
 
     @classmethod
     def _drive_query(cls, terms: str) -> str:
-        """
-        Builds a Drive `q` that matches names or content and leaves out the bin.
+        """Builds a Drive `q` that matches names or content and leaves out the bin.
 
         Args:
             terms (str): What the user looks for, as plain words.
@@ -119,9 +116,8 @@ class GoogleWorkspaceReader:
         return f"(name contains '{quoted}' or fullText contains '{quoted}') and trashed = false"
 
     @classmethod
-    def drive_search(cls, accounts: List[Account], terms: str, limit: int) -> Dict[str, Any]:
-        """
-        Searches My Drive and the shared drives of every account holding the Drive scope.
+    def drive_search(cls, accounts: list[Account], terms: str, limit: int) -> dict[str, Any]:
+        """Searches My Drive and the shared drives of every account holding the Drive scope.
 
         Args:
             accounts (List[Account]): Connected accounts with fresh access tokens.
@@ -147,11 +143,11 @@ class GoogleWorkspaceReader:
                 "orderBy": "modifiedTime desc",
             }
         )
-        files: List[Dict[str, Any]] = []
-        errors: List[Dict[str, str]] = []
+        files: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
         for account in holders:
             status, body = cls._get(f"{DRIVE_API}/files?{query}", account["access_token"])
-            if status != 200:
+            if status != HTTP_OK:
                 errors.append(
                     {"account": account["email"], "error": body.get("error", f"HTTP {status}")}
                 )
@@ -170,17 +166,16 @@ class GoogleWorkspaceReader:
                         "shared_drive": item.get("driveId", ""),
                     }
                 )
-        answer: Dict[str, Any] = {"files": files[:limit]}
+        answer: dict[str, Any] = {"files": files[:limit]}
         if errors:
             answer["errors"] = errors
         return answer
 
     @classmethod
     def _split(
-        cls, accounts: List[Account], scope: str, qualified: str
-    ) -> Tuple[Optional[Account], str]:
-        """
-        Resolves an `"<account>|<id>"` id to its account; a bare id goes to the first holder.
+        cls, accounts: list[Account], scope: str, qualified: str
+    ) -> tuple[Account | None, str]:
+        """Resolves an `"<account>|<id>"` id to its account; a bare id goes to the first holder.
 
         Args:
             accounts (List[Account]): Connected accounts.
@@ -197,9 +192,8 @@ class GoogleWorkspaceReader:
         return (holders[0] if holders else None), bare
 
     @classmethod
-    def drive_read(cls, accounts: List[Account], qualified_id: str) -> Dict[str, Any]:
-        """
-        Reads one file as text: Docs and Slides exported as text, Sheets as CSV, `text/*` as is.
+    def drive_read(cls, accounts: list[Account], qualified_id: str) -> dict[str, Any]:
+        """Reads one file as text: Docs and Slides exported as text, Sheets as CSV, `text/*` as is.
 
         Args:
             accounts (List[Account]): Connected accounts with fresh access tokens.
@@ -218,7 +212,7 @@ class GoogleWorkspaceReader:
             f"{DRIVE_API}/files/{quoted}?supportsAllDrives=true&fields=id,name,mimeType,modifiedTime,size",
             token,
         )
-        if status != 200:
+        if status != HTTP_OK:
             return {"error": meta.get("error", f"HTTP {status}")}
         mime = meta.get("mimeType", "")
         if mime in EXPORT_TYPES:
@@ -233,7 +227,7 @@ class GoogleWorkspaceReader:
                 f"({meta.get('size', '?')} bytes), which Puffin does not read as text."
             }
         status, body = cls._get(url, token, raw=True)
-        if status != 200:
+        if status != HTTP_OK:
             return {
                 "error": body.get("error", f"HTTP {status}")
                 if isinstance(body, dict)
@@ -250,9 +244,8 @@ class GoogleWorkspaceReader:
         }
 
     @classmethod
-    def _calendars(cls, account: Account) -> Tuple[List[str], Optional[str]]:
-        """
-        Lists one account's calendars.
+    def _calendars(cls, account: Account) -> tuple[list[str], str | None]:
+        """Lists one account's calendars.
 
         Args:
             account (Account): A connected account.
@@ -263,14 +256,13 @@ class GoogleWorkspaceReader:
         status, body = cls._get(
             f"{CALENDAR_API}/users/me/calendarList?fields=items(id)", account["access_token"]
         )
-        if status != 200:
+        if status != HTTP_OK:
             return [], body.get("error", f"HTTP {status}")
         return [item["id"] for item in body.get("items", []) if item.get("id")], None
 
     @classmethod
-    def _event(cls, account: Account, calendar: str, item: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Flattens one event to the columns the tools show.
+    def _event(cls, account: Account, calendar: str, item: dict[str, Any]) -> dict[str, Any]:
+        """Flattens one event to the columns the tools show.
 
         Args:
             account (Account): The account it came from.
@@ -304,15 +296,14 @@ class GoogleWorkspaceReader:
     @classmethod
     def calendar_events(
         cls,
-        accounts: List[Account],
+        accounts: list[Account],
         start: str,
         end: str,
         calendar: str = "",
         terms: str = "",
         limit: int = 25,
-    ) -> Dict[str, Any]:
-        """
-        Lists (or searches) events between two times.
+    ) -> dict[str, Any]:
+        """Lists (or searches) events between two times.
 
         Every calendar of every account holding the Calendar scope is asked.
 
@@ -343,8 +334,8 @@ class GoogleWorkspaceReader:
         }
         if terms:
             params["q"] = terms
-        events: List[Dict[str, Any]] = []
-        errors: List[Dict[str, str]] = []
+        events: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
         wanted_account, _, wanted_calendar = calendar.rpartition("|")
         for account in holders:
             if wanted_account and account["email"] != wanted_account:
@@ -361,7 +352,7 @@ class GoogleWorkspaceReader:
                     + urllib.parse.urlencode(params)
                 )
                 status, body = cls._get(url, account["access_token"])
-                if status != 200:
+                if status != HTTP_OK:
                     errors.append(
                         {
                             "account": account["email"],
@@ -373,17 +364,16 @@ class GoogleWorkspaceReader:
                     cls._event(account, calendar_id, item) for item in body.get("items", [])
                 )
         events.sort(key=lambda event: event["start"])
-        answer: Dict[str, Any] = {"events": events[:limit]}
+        answer: dict[str, Any] = {"events": events[:limit]}
         if errors:
             answer["errors"] = errors
         return answer
 
     @classmethod
     def calendar_event(
-        cls, accounts: List[Account], calendar: str, event_id: str
-    ) -> Dict[str, Any]:
-        """
-        Reads one event with its description.
+        cls, accounts: list[Account], calendar: str, event_id: str
+    ) -> dict[str, Any]:
+        """Reads one event with its description.
 
         Args:
             accounts (List[Account]): Connected accounts with fresh access tokens.
@@ -401,6 +391,6 @@ class GoogleWorkspaceReader:
             f"{urllib.parse.quote(event_id, safe='')}"
         )
         status, body = cls._get(url, account["access_token"])
-        if status != 200:
+        if status != HTTP_OK:
             return {"error": body.get("error", f"HTTP {status}")}
         return cls._event(account, calendar_id, body)

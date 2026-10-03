@@ -560,37 +560,64 @@ class DreamferenceCLIController:
         return facts
 
     @classmethod
-    def _run_google(cls, command: Optional[str]) -> None:
-        """
-        Runs `puffin-admin google start|stop|status` and exits.
+    def _run_google(cls, command: str | None) -> None:
+        """Runs `puffin-admin google start|stop|status` and exits.
 
         Args:
-            command (Optional[str]): The subcommand; the group's help is printed when it is None.
+            command (str | None): The subcommand.
         """
-        from dreamference.chat.gmail_client import GmailClient
+        actions = {"start": cls._google_start, "stop": cls._google_stop, "status": cls._google_status}
+        action = actions.get(command or "")
+        if action is None:
+            print("usage: puffin-admin google {start,stop,status}")
+            sys.exit(2)
+        sys.exit(action())
+
+    @classmethod
+    def _google_start(cls) -> int:
+        """Starts the Google service (specs/DREAMFERENCE_PUFFIN_APPS.md §5.1).
+
+        Returns:
+            int: The exit code.
+        """
         from dreamference.chat.google_service import GOOGLE_HOST_PORT, GoogleService
 
-        if command == "start":
-            if not GoogleService.start():
-                print("❌ The Google service did not start.")
-                sys.exit(1)
-            print(f"✅ The Google service is running on http://127.0.0.1:{GOOGLE_HOST_PORT}")
-            print("💡 Connect accounts with /apps in puffin, or in the web UI's Settings.")
-            sys.exit(0)
-        if command == "stop":
-            sys.exit(0 if GoogleService.stop() else 1)
-        if command == "status":
-            state = GoogleService.state() or "absent"
-            print(f"Container: {state}")
-            answer = GmailClient.status()
-            for account in answer.get("accounts") or []:
-                scopes = ", ".join(scope.rsplit("/", 1)[-1] or scope for scope in account.get("scopes", []))
-                print(f"  {account.get('email')}: {scopes}")
-            if answer.get("error"):
-                print(f"⚠️  {answer['error']}")
-            sys.exit(0)
-        print("usage: puffin-admin google {start,stop,status}")
-        sys.exit(2)
+        if not GoogleService.start():
+            print(f"❌ The Google service did not start. {GoogleService.problem}")
+            return 1
+        print(f"✅ The Google service is running on http://127.0.0.1:{GOOGLE_HOST_PORT}")
+        print("💡 Connect accounts with /apps in puffin, or in the web UI's Settings.")
+        return 0
+
+    @classmethod
+    def _google_stop(cls) -> int:
+        """Removes the Google service container; connected accounts stay stored.
+
+        Returns:
+            int: The exit code.
+        """
+        from dreamference.chat.google_service import GoogleService
+
+        return 0 if GoogleService.stop() else 1
+
+    @classmethod
+    def _google_status(cls) -> int:
+        """Prints the container's state and each account's granted apps.
+
+        Returns:
+            int: The exit code.
+        """
+        from dreamference.chat.gmail_client import GmailClient
+        from dreamference.chat.google_service import GoogleService
+
+        print(f"Container: {GoogleService.state() or 'absent'}")
+        answer = GmailClient.status()
+        for account in answer.get("accounts") or []:
+            scopes = ", ".join(scope.rstrip("/").rsplit("/", 1)[-1] for scope in account.get("scopes", []))
+            print(f"  {account.get('email')}: {scopes}")
+        if answer.get("error"):
+            print(f"⚠️  {answer['error']}")
+        return 0
 
     @classmethod
     def _refuse_during_night_run(cls, what: str) -> None:
@@ -1210,9 +1237,15 @@ class DreamferenceCLIController:
         # Command: puffin-admin google (the service behind Gmail, Drive and Calendar in /apps)
         google_parser = subparsers.add_parser("google", help="Manage the local Google service (Gmail, Drive, Calendar)")
         google_subparsers = google_parser.add_subparsers(dest="google_command")
-        google_subparsers.add_parser("start", help="Start the Google service on 127.0.0.1:8767 (adopts the web UI's if it exists)")
-        google_subparsers.add_parser("stop", help="Remove the Google service container; connected accounts stay stored")
-        google_subparsers.add_parser("status", help="Show whether it runs and which accounts hold which apps")
+        google_subparsers.add_parser(
+            "start", help="Start the Google service on 127.0.0.1:8767 (adopts the web UI's if it exists)"
+        )
+        google_subparsers.add_parser(
+            "stop", help="Remove the Google service container; connected accounts stay stored"
+        )
+        google_subparsers.add_parser(
+            "status", help="Show whether it runs and which accounts hold which apps"
+        )
 
         # Command: puffin-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
@@ -2106,7 +2139,8 @@ class DreamferenceCLIController:
                 # On a node the Google service runs by default, so /apps can connect accounts
                 # (specs/DREAMFERENCE_PUFFIN_APPS.md §5.1); its failure never blocks the model.
                 from dreamference.chat.google_service import GoogleService
-                GoogleService.ensure_on_node()
+                if GoogleService.ensure_on_node() is False:
+                    print(f"⚠️  {GoogleService.problem}")
 
                 # The diffusion sidecar starts *before* the vLLM launch on purpose: vLLM's
                 # pre-flight reads current free memory, so a sidecar already resident is

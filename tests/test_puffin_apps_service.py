@@ -1,5 +1,4 @@
-"""
-Puffin's apps, the Python half (specs/DREAMFERENCE_PUFFIN_APPS.md).
+"""Puffin's apps, the Python half (specs/DREAMFERENCE_PUFFIN_APPS.md).
 
 The Google service's per-app consent and recorded scopes, its read-only Drive and Calendar
 endpoints, and the container that `puffin-admin google start` and `server start` create. Nothing
@@ -11,7 +10,7 @@ import json
 import subprocess
 import urllib.error
 import urllib.parse
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -27,7 +26,7 @@ from dreamference.chat.google_workspace_reader import (
     GoogleWorkspaceReader,
 )
 
-ACCOUNTS: List[Dict[str, Any]] = [
+ACCOUNTS: list[dict[str, Any]] = [
     {
         "email": "a@x.com",
         "access_token": "tok-a",
@@ -40,9 +39,9 @@ ACCOUNTS: List[Dict[str, Any]] = [
 class FakeGoogle:
     """Answers the reader's GETs from a table keyed by URL path, recording each request."""
 
-    def __init__(self, answers: Dict[str, Any]) -> None:
+    def __init__(self, answers: dict[str, Any]) -> None:
         self.answers = answers
-        self.requests: List[urllib.request.Request] = []
+        self.requests: list[urllib.request.Request] = []
 
     def __call__(self, request, timeout=None):
         self.requests.append(request)
@@ -69,7 +68,7 @@ class FakeGoogle:
 
         return Response(body)
 
-    def queries(self) -> List[Dict[str, List[str]]]:
+    def queries(self) -> list[dict[str, list[str]]]:
         return [
             urllib.parse.parse_qs(urllib.parse.urlparse(r.full_url).query) for r in self.requests
         ]
@@ -77,7 +76,7 @@ class FakeGoogle:
 
 @pytest.fixture
 def google(monkeypatch):
-    def install(answers: Dict[str, Any]) -> FakeGoogle:
+    def install(answers: dict[str, Any]) -> FakeGoogle:
         fake = FakeGoogle(answers)
         monkeypatch.setattr(GoogleWorkspaceReader, "opener", fake)
         return fake
@@ -344,7 +343,7 @@ class FakeDocker:
 
     def __init__(self, state: str) -> None:
         self.state = state
-        self.commands: List[List[str]] = []
+        self.commands: list[list[str]] = []
 
     def __call__(self, argv, **kwargs):
         self.commands.append(list(argv))
@@ -360,6 +359,7 @@ def test_start_adopts_an_existing_container_and_creates_one_otherwise(
     monkeypatch, tmp_path, state, runs
 ):
     from conftest import REAL_GOOGLE_SERVICE_START
+
     import dreamference.chat.gmail_credentials as credentials
     from dreamference.chat.onyx_runner import OnyxRunner
 
@@ -381,7 +381,7 @@ def test_start_adopts_an_existing_container_and_creates_one_otherwise(
 def test_server_start_starts_it_only_on_a_node_without_one(monkeypatch):
     from dreamference.node.node_identity import NodeIdentity
 
-    started: List[bool] = []
+    started: list[bool] = []
     monkeypatch.setattr(
         GoogleService, "start", classmethod(lambda cls: started.append(True) or True)
     )

@@ -641,6 +641,22 @@ Manage the local SearXNG search container.
 
 Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge).
 
+### `puffin-admin google`
+
+Manage the local Google service (Gmail, Drive, Calendar).
+
+#### `puffin-admin google start`
+
+Start the Google service on 127.0.0.1:8767 (adopts the web UI's if it exists).
+
+#### `puffin-admin google stop`
+
+Remove the Google service container; connected accounts stay stored.
+
+#### `puffin-admin google status`
+
+Show whether it runs and which accounts hold which apps.
+
 ### `puffin-admin web`
 
 Launch Web Canvas UI interactive pair-programming pane.

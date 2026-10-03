@@ -86,8 +86,16 @@ GOOGLE_OAUTH_SCOPES: Final[str] = EMAIL_SCOPE + " " + GMAIL_SCOPE
 # What each of Puffin's apps asks Google for (specs/DREAMFERENCE_PUFFIN_APPS.md §5.2). The full Drive
 # and Calendar scopes: GNOME's client is refused the read-only ones ("This app is blocked", measured
 # 2026-10-03), so read-only is enforced here, where no write request exists.
-APP_SCOPES: Final[Dict[str, str]] = {"gmail": GMAIL_SCOPE, "drive": DRIVE_SCOPE, "calendar": CALENDAR_SCOPE}
-APP_NAMES: Final[Dict[str, str]] = {"gmail": "Gmail", "drive": "Google Drive", "calendar": "Google Calendar"}
+APP_SCOPES: Final[dict[str, str]] = {
+    "gmail": GMAIL_SCOPE,
+    "drive": DRIVE_SCOPE,
+    "calendar": CALENDAR_SCOPE,
+}
+APP_NAMES: Final[dict[str, str]] = {
+    "gmail": "Gmail",
+    "drive": "Google Drive",
+    "calendar": "Google Calendar",
+}
 
 # Google's consent screen lets each permission be unticked. A grant without Gmail access still
 # signs in and still names the address, but IMAP refuses it as "Invalid credentials" -- so such a
@@ -96,6 +104,8 @@ MISSING_GMAIL_SCOPE: Final[str] = (
     "Google did not grant Gmail access for {email}. Connect it again and leave the box "
     "\"Read, compose, send and permanently delete all your email from Gmail\" ticked."
 )
+# What Google grants an access token for when its reply does not say.
+TOKEN_LIFETIME_SECONDS: Final[int] = 3599
 MISSING_APP_SCOPE: Final[str] = (
     "Google did not grant {app} access for {email}. Connect it again and leave the {app} box ticked."
 )
@@ -384,8 +394,13 @@ class GmailSearchService:
         
     @classmethod
     def save_token(
-        cls, address: str, token: str, lifetime: int, directory: Optional[str] = None,
-        refresh_token: Optional[str] = None, scopes: Optional[List[str]] = None,
+        cls,
+        address: str,
+        token: str,
+        lifetime: int,
+        directory: str | None = None,
+        refresh_token: str | None = None,
+        scopes: list[str] | None = None,
     ) -> bool:
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
         stored = cls._raw(directory)
@@ -467,27 +482,25 @@ class GmailSearchService:
         return True
 
     @classmethod
-    def account_scopes(cls, account: Dict[str, Any]) -> List[str]:
-        """
-        Tells which scopes a stored account was granted.
+    def account_scopes(cls, account: dict[str, Any]) -> list[str]:
+        """Tells which scopes a stored account was granted.
 
         Args:
-            account (Dict[str, Any]): One entry of the credentials file.
+            account (dict[str, Any]): One entry of the credentials file.
 
         Returns:
-            List[str]: The recorded scopes; an account saved before scopes were recorded was a
+            list[str]: The recorded scopes; an account saved before scopes were recorded was a
                 Gmail grant, the only kind there was.
         """
         return list(account.get("scopes") or [GMAIL_SCOPE])
 
     @classmethod
-    def status(cls) -> Dict[str, Any]:
-        """
-        Says which accounts are connected and what each was granted. Unauthenticated: addresses
+    def status(cls) -> dict[str, Any]:
+        """Says which accounts are connected and what each was granted. Unauthenticated: addresses
         and scope names only, never mail or files.
 
         Returns:
-            Dict[str, Any]: `connected` and `email` (comma-separated, as the web UI reads them) and
+            dict[str, Any]: `connected` and `email` (comma-separated, as the web UI reads them) and
                 `accounts`, each with its `scopes`, which `/apps` reads.
         """
         creds = cls.credentials()
@@ -565,12 +578,11 @@ class GmailSearchService:
         return connections, None, failures
 
     @classmethod
-    def grants_scope(cls, token_response: Dict[str, Any], scope: str) -> bool:
-        """
-        Tells whether a token response carries a scope.
+    def grants_scope(cls, token_response: dict[str, Any], scope: str) -> bool:
+        """Tells whether a token response carries a scope.
 
         Args:
-            token_response (Dict[str, Any]): Google's token endpoint reply.
+            token_response (dict[str, Any]): Google's token endpoint reply.
             scope (str): The scope the app needs.
 
         Returns:
@@ -580,22 +592,20 @@ class GmailSearchService:
         return granted is None or scope in str(granted).split()
 
     @classmethod
-    def granted_scopes(cls, token_response: Dict[str, Any]) -> List[str]:
-        """
-        Lists the scopes a token response names.
+    def granted_scopes(cls, token_response: dict[str, Any]) -> list[str]:
+        """Lists the scopes a token response names.
 
         Args:
-            token_response (Dict[str, Any]): Google's token endpoint reply.
+            token_response (dict[str, Any]): Google's token endpoint reply.
 
         Returns:
-            List[str]: Its scopes; Gmail's alone when the reply names none (the old behaviour).
+            list[str]: Its scopes; Gmail's alone when the reply names none (the old behaviour).
         """
         return str(token_response.get("scope") or GMAIL_SCOPE).split()
 
     @classmethod
     def auth_url(cls, app: str, state: str, challenge: str) -> str:
-        """
-        Builds Google's consent URL for one app.
+        """Builds Google's consent URL for one app.
 
         Args:
             app (str): `gmail`, `drive` or `calendar`; anything else means Gmail.
@@ -616,8 +626,7 @@ class GmailSearchService:
 
     @classmethod
     def missing_scope_message(cls, app: str, address: str) -> str:
-        """
-        Says which box to tick when Google returned a grant without the app's scope.
+        """Says which box to tick when Google returned a grant without the app's scope.
 
         Args:
             app (str): The app being connected.
@@ -629,6 +638,49 @@ class GmailSearchService:
         if app == "gmail" or app not in APP_SCOPES:
             return MISSING_GMAIL_SCOPE.format(email=address)
         return MISSING_APP_SCOPE.format(app=APP_NAMES[app], email=address)
+
+    @classmethod
+    def accept_grant(cls, app: str, token_response: dict[str, Any], address: str) -> str | None:
+        """Checks a grant against the app it was asked for, and stores it if it fits.
+
+        Args:
+            app (str): `gmail`, `drive` or `calendar`.
+            token_response (dict[str, Any]): Google's token endpoint reply.
+            address (str): The account it is for.
+
+        Returns:
+            str | None: None when stored; otherwise the message naming the box to tick.
+        """
+        if not cls.grants_scope(token_response, APP_SCOPES.get(app, GMAIL_SCOPE)):
+            return cls.missing_scope_message(app, address)
+        cls.save_token(
+            address,
+            token_response["access_token"],
+            token_response.get("expires_in", TOKEN_LIFETIME_SECONDS),
+            refresh_token=token_response.get("refresh_token"),
+            scopes=cls.granted_scopes(token_response),
+        )
+        return None
+
+    @classmethod
+    def grant_page(cls, app: str, refused: str | None) -> str:
+        """Says, on the page Google redirects to, how connecting went.
+
+        Args:
+            app (str): The app connected.
+            refused (str | None): Why the grant was refused, or None when it was stored.
+
+        Returns:
+            str: The page's HTML body.
+        """
+        name = html.escape(APP_NAMES.get(app, "Gmail"))
+        if refused:
+            return f"<h2>{name} access was not granted</h2><p>{html.escape(refused)}</p>"
+        return (
+            f"<h2>{name} connected</h2><p>You can close this tab. In <code>puffin</code>, choose "
+            "<b>I've connected it</b> in <code>/apps</code>; the tools arrive when you restart it "
+            "or run <code>puffin resume</code>.</p>"
+        )
 
     @classmethod
     def grants_gmail(cls, token_response: Dict[str, Any]) -> bool:
@@ -864,9 +916,8 @@ class GmailSearchService:
         }
 
     @classmethod
-    def workspace(cls, path: str, query: Dict[str, List[str]]) -> Dict[str, Any]:
-        """
-        Answers the read-only Drive and Calendar endpoints (specs/DREAMFERENCE_PUFFIN_APPS.md §9,
+    def workspace(cls, path: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        """Answers the read-only Drive and Calendar endpoints (specs/DREAMFERENCE_PUFFIN_APPS.md §9,
         §9a): `/drive/search`, `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>`.
 
         Args:
@@ -1198,12 +1249,12 @@ class GmailSearchService:
                                     email_addr = user_data.get("email", "")
                                 
                                 app = OAUTH_STATES[state].get("app", "gmail")
-                                if email_addr and not GmailSearchService.grants_scope(tdata, APP_SCOPES.get(app, GMAIL_SCOPE)):
-                                    self._reply(400, {"error": cls.missing_scope_message(app, email_addr)})
-                                    return
                                 if email_addr and "access_token" in tdata:
-                                    GmailSearchService.save_token(email_addr, tdata["access_token"], tdata.get("expires_in", 3599), refresh_token=tdata.get("refresh_token"), scopes=cls.granted_scopes(tdata))
-                                    self._reply(200, {"status": "ok", "email": email_addr})
+                                    refused = cls.accept_grant(app, tdata, email_addr)
+                                    if refused:
+                                        self._reply(400, {"error": refused})
+                                    else:
+                                        self._reply(200, {"status": "ok", "email": email_addr})
                                     return
                     except Exception as e:
                         self._reply(400, {"error": str(e)})
@@ -1242,16 +1293,8 @@ class GmailSearchService:
                                 email_addr = user_data.get("email", "")
                             
                             app = OAUTH_STATES[state].get("app", "gmail")
-                            if email_addr and not GmailSearchService.grants_scope(data, APP_SCOPES.get(app, GMAIL_SCOPE)):
-                                self._html(f"<h2>{APP_NAMES.get(app, 'Gmail')} access was not granted</h2><p>{html.escape(cls.missing_scope_message(app, email_addr))}</p>")
-                                return
                             if email_addr and "access_token" in data:
-                                GmailSearchService.save_token(email_addr, data["access_token"], data.get("expires_in", 3599), refresh_token=data.get("refresh_token"), scopes=cls.granted_scopes(data))
-                                self._html(
-                                    f"<h2>{html.escape(APP_NAMES.get(app, 'Gmail'))} connected</h2>"
-                                    "<p>You can close this tab. In <code>puffin</code>, choose <b>I've connected it</b> in "
-                                    "<code>/apps</code>; the tools arrive when you restart it or run <code>puffin resume</code>.</p>"
-                                )
+                                self._html(cls.grant_page(app, cls.accept_grant(app, data, email_addr)))
                                 return
                         except Exception as e:
                             self._html(f"<h2>Error</h2><p>{html.escape(str(e))}</p>")
