@@ -4,7 +4,7 @@
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified LPDDR5X)
 > - **Deployment Model:** single node; the model, the code and the sessions stay on the machine. Web search, page fetch and Gmail reach the internet at the default `/airgapped off`; only `/airgapped on` allows none of them
 > - **License:** AGPL-3.0-or-later
-> - **Checked against the code:** 2026-10-02 (packages and modules against the tracked source tree, by script; model matrix and containers on 2026-10-01)
+> - **Checked against the code:** 2026-10-03 (packages and modules against the tracked source tree; the diffusion switch and the roadmap on 2026-10-03; model matrix and containers on 2026-10-01)
 
 ---
 
@@ -36,7 +36,7 @@ Since 2026-10-02 the GB10 can also be offered to the local network as a **node**
                         | docker run
 +-----------------------v------------------------------------------------------------+
 |  Containers on the GB10                                                            |
-|   dreamference-vllm-8000 (main model)   dreamference-diffusion-8001 (sidecar)      |
+|   dreamference-vllm-8000 (main model)   (diffusion sidecar: switched off)          |
 |   puffin-* (Onyx: api, web, db, nginx, code-interpreter)                           |
 |   dreamference-gmail, dreamference-image-search, dreamference-stt, dreamference-searxng |
 +------------------------------------------------------------------------------------+
@@ -59,7 +59,7 @@ The model matrix (`hardware/model_matrix_registry.py`, `MATRIX`) is the source o
 | `qwen3.6-35b-a3b-nvfp4` | `nvidia/Qwen3.6-35B-A3B-NVFP4` | Smaller MoE |
 | `qwen3.8-27b-dflash2-draft` | `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` | DFlash2 drafter of the default, not served on its own |
 | `qwen3.5-122b-a10b-dflash-draft` | `z-lab/Qwen3.5-122B-A10B-DFlash` | DFlash drafter, not served on its own |
-| `tiny-a2d-coder-0.5b-diffusion` | `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1` | **Default** diffusion model, served by the sidecar (vLLM cannot serve diffusion checkpoints) |
+| `tiny-a2d-coder-0.5b-diffusion` | `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1` | Default diffusion model, served by the sidecar (vLLM cannot serve diffusion checkpoints). **Not offered since 2026-10-03:** diffusion is switched off (`DIFFUSION_ENABLED = False`), so it is never started, downloaded or listed |
 
 The default runs at a 262k context; the vLLM recipes run at 32k. See `DREAMFERENCE_MODELS.md` and `DREAMFERENCE_INFERENCE.md`.
 
@@ -95,7 +95,7 @@ Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
 - **Host safety:** unified memory means a bad load can freeze the whole host. Two layers guard against it:
   - `check_host_safety()` runs *before* the load (swap, sysctl, earlyoom/systemd-oomd);
   - `psi_watchdog.MemoryPressureWatchdog` runs *during* it, sampling `/proc/pressure/memory` and killing the container on sustained pressure.
-- `diffusion_server_manager.py` / `diffusion_openai_service.py`: the diffusion sidecar. It runs in the main model's image, starts *before* vLLM, and is capped at `--memory=8g`.
+- `diffusion_server_manager.py` / `diffusion_openai_service.py`: the diffusion sidecar. It runs in the main model's image, starts *before* vLLM, and is capped at `--memory=8g`. **Switched off since 2026-10-03** (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`): `server start` starts no sidecar and removes one an older Puffin left behind; the code and its tests are kept.
 
 ### 3.4. `runner/`: agents
 
@@ -159,7 +159,7 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 
 - [x] GB10 model matrix, unified-memory targeting and host-safety guards
 - [x] Docker vLLM lifecycle, weight pre-download, tensorizer, benchmark, deep inspection
-- [x] Diffusion sidecar beside the main model
+- [x] Diffusion sidecar beside the main model (switched off on 2026-10-03; the code is kept)
 - [x] Agent runners (Cline, Continue, OpenHands) and the stdio MCP server
 - [x] Context engine (AST, FTS5, TF-IDF, embeddings) and web canvas
 - [x] `puffin`: branded Codex from a pinned fork, Rust launcher, `update`, `app`, `/usage`
@@ -167,7 +167,9 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 - [x] Code index for `puffin` (`puffin-code`: codebase-memory-mcp + SCIP), implemented 2026-10-01; its §14 lists the parts not built (`DREAMFERENCE_PUFFIN_CODE_INDEX.md`)
 - [x] Cave mode (`/cavemode`) and Night Shift (`/night`, `puffin-admin night`), 2026-10-01
 - [x] `/airgapped` (Phase 1, in part), the egress audit for `exec` sessions (`puffin-admin audit egress`) and SWE-bench (`puffin-admin swe-bench`, Phase 1), 2026-10-01
-- [ ] Client/server split (`puffin-admin node`, `puffin node`, the `puffin-app` forwarder, SSH pairing between nodes): built in part, 2026-10-02, and not run between two machines (`DREAMFERENCE_PUFFIN_NODE.md`)
+- [ ] Client/server split (`puffin-admin node`, `puffin node`, the `puffin-app` forwarder, SSH pairing between nodes): Part 1 built in part on 2026-10-02, Parts 2 and 3 (other nodes as extra model servers, `node sync-model`, `node run --setup/--out/--bind`, `/night add --on`) on 2026-10-03; nothing run between two machines (`DREAMFERENCE_PUFFIN_NODE.md`)
+- [x] `/airgapped` at two levels (`duckduckgo` removed), `on` refused with Full Access, the start-up line; the sandbox prerequisite (`puffin-admin host setup`, the AppArmor profile for `bwrap`), 2026-10-03
+- [x] Named system prompts (`/prompt` Phase 1: `puffin prompt`, `default` and `high-swe`) and skills Phase 3 (Hermes, ClawHub, repository skills), 2026-10-03
 - [ ] Proposed specs are marked *Proposed* in `specs/README.md`
 
 ---
