@@ -228,8 +228,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         return Ok(args);
     }
     // At a configured `on`, Full Access contradicts the level: there is no sandbox to enforce it.
-    if let Some(reason) = airgapped::full_access_conflict(&user_args, airgapped::resolve(None).level) {
+    let configured = airgapped::resolve(None);
+    if let Some(reason) = airgapped::full_access_conflict(&user_args, configured.level) {
         bail!("{reason}");
+    }
+    // A session that starts at `on` says first whether that holds (airgapped.rs).
+    for line in airgapped::startup_lines_now(&configured) {
+        eprintln!("{line}");
     }
 
     // The interactive TUI (no subcommand, or a prompt) says once what a night run finished.
