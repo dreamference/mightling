@@ -183,7 +183,16 @@ pub fn start_and_prompt_block(tools: bool, dir: &std::path::Path) -> String {
             .process_group(0)
             .spawn()
     };
-    let mut prompt_block = Command::new(&binary);
+    block_from(&binary, tools, dir)
+}
+
+/// The prompt block alone, starting nothing: what `puffin prompt show` appends.
+pub fn prompt_block(tools: bool, dir: &std::path::Path) -> String {
+    binary().map(|binary| block_from(&binary, tools, dir)).unwrap_or_default()
+}
+
+fn block_from(binary: &std::path::Path, tools: bool, dir: &std::path::Path) -> String {
+    let mut prompt_block = Command::new(binary);
     prompt_block.arg("prompt-block").current_dir(dir);
     if tools {
         prompt_block.arg("--tools");

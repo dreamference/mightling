@@ -22,9 +22,11 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "airgapped", "code_index", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit",
 )
+# What a manifest written before a field existed ran with.
+MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default"}
 
 
 class SweBenchReport:
@@ -132,7 +134,8 @@ class SweBenchReport:
         lines += ["", "Per repository (resolved / validated):"]
         for repo, (resolved, total) in sorted(summary["per_repo"].items()):
             lines.append(f"  {repo:<28} {resolved} / {total}")
-        lines += ["", f"Cave mode {manifest.get('cave_mode')}; {manifest.get('task_context')} tokens per task; "
+        lines += ["", f"Prompt {manifest.get('prompt', 'default')}; cave mode {manifest.get('cave_mode')}; "
+                      f"{manifest.get('task_context')} tokens per task; "
                       f"timeout {int(manifest.get('task_timeout_s', 0)) // 60} min; nudges {manifest.get('nudges')}.",
                   "", CAVEATS]
         return "\n".join(lines) + "\n"
@@ -202,8 +205,8 @@ class SweBenchReport:
         only_theirs = sorted(i for i in both if theirs["results"][i].get("resolved") and not ours["results"][i].get("resolved"))
         lines = [f"{store.name} against {other.name}: {len(both)} instance(s) graded in both"]
         for field in COMPARED_FIELDS:
-            # Runs made before the code-index arm existed have no such field: they are `off`.
-            first, second = (m.get(field, "off" if field == "code_index" else None) for m in (a, b))
+            # Runs made before the code-index arm or named prompts existed have no such field.
+            first, second = (m.get(field, MISSING_FIELDS.get(field)) for m in (a, b))
             if first != second:
                 lines.append(f"  differs: {field}: {first} | {second}")
         lines.append(f"Resolved only by {store.name} ({len(only_ours)}): {', '.join(only_ours) or 'none'}")

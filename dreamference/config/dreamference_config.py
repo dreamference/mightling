@@ -6,6 +6,7 @@ variables, `.dreamference/config.yaml`, and system defaults into a unified setti
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, Final
 
@@ -55,6 +56,13 @@ PUFFIN_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
 # to its DEFAULT_PUFFIN_AIRGAPPED. Listed loosest first.
 DEFAULT_PUFFIN_AIRGAPPED: Final[str] = "off"
 PUFFIN_AIRGAPPED_LEVELS: Final[tuple] = ("off", "duckduckgo", "on")
+# The system prompt new puffin sessions start with (`puffin prompt`, specs/DREAMFERENCE_PUFFIN_PROMPT.md):
+# `default` (Codex's own), `high-swe`, or a custom prompt in `$CODEX_HOME/system-prompts/<name>.md`.
+# The Rust launcher reads it too (DREAMFERENCE_PUFFIN_PROMPT, then `puffin_prompt` in the TOML file)
+# and decides whether a name is installed; a test keeps this default equal to DEFAULT_PROMPT in
+# puffin-rs/src/prompt.rs.
+DEFAULT_PUFFIN_PROMPT: Final[str] = "default"
+PUFFIN_PROMPT_NAME: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -91,6 +99,7 @@ class DreamferenceConfig:
         puffin_compaction_ledger: Optional[bool] = None,
         puffin_cave_mode: Optional[str] = None,
         puffin_airgapped: Optional[str] = None,
+        puffin_prompt: Optional[str] = None,
     ):
         """
         Initializes DreamferenceConfig by loading file defaults and overriding with environment variables and parameters.
@@ -294,6 +303,15 @@ class DreamferenceConfig:
                 self.puffin_airgapped = level
                 break
 
+        # The prompt's name, through the same tiers. Only its form is checked here: which prompts
+        # are installed is known to the launcher, which skips a name it does not have.
+        self.puffin_prompt: str = DEFAULT_PUFFIN_PROMPT
+        for candidate in (puffin_prompt, os.getenv("DREAMFERENCE_PUFFIN_PROMPT"), self.file_data.get("puffin_prompt")):
+            name = self.parse_prompt_name(candidate)
+            if name is not None:
+                self.puffin_prompt = name
+                break
+
     @property
     def model(self) -> str:
         """
@@ -365,6 +383,22 @@ class DreamferenceConfig:
         if name == "ddg":
             return "duckduckgo"
         return name if name in PUFFIN_AIRGAPPED_LEVELS else None
+
+    @classmethod
+    def parse_prompt_name(cls, value: Any) -> Optional[str]:
+        """
+        Reads a prompt's name as the launcher does: lowercase letters, digits and hyphens.
+
+        Args:
+            value: What a tier holds.
+
+        Returns:
+            Optional[str]: The name, stripped; None when it is not one a prompt can have.
+        """
+        if not isinstance(value, str):
+            return None
+        name = value.strip()
+        return name if PUFFIN_PROMPT_NAME.fullmatch(name) else None
 
     @classmethod
     def resolve_airgapped_level(cls, cwd: Optional[Path] = None) -> str:
@@ -447,6 +481,7 @@ class DreamferenceConfig:
             data["puffin_compaction_ledger"] = self.puffin_compaction_ledger
         if self.puffin_cave_mode != DEFAULT_PUFFIN_CAVE_MODE: data["puffin_cave_mode"] = self.puffin_cave_mode
         if self.puffin_airgapped != DEFAULT_PUFFIN_AIRGAPPED: data["puffin_airgapped"] = self.puffin_airgapped
+        if self.puffin_prompt != DEFAULT_PUFFIN_PROMPT: data["puffin_prompt"] = self.puffin_prompt
 
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

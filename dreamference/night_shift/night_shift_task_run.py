@@ -50,6 +50,8 @@ KILL_GRACE_S: Final[int] = 30
 AIRGAPPED_ENV: Final[str] = "DREAMFERENCE_PUFFIN_AIRGAPPED"
 AIRGAPPED_KEY: Final[str] = "puffin_airgapped"
 SEALED: Final[str] = PUFFIN_AIRGAPPED_LEVELS[-1]
+# The system prompt a new session starts with (specs/DREAMFERENCE_PUFFIN_PROMPT.md §7); `[night] prompt`.
+PROMPT_ENV: Final[str] = "DREAMFERENCE_PUFFIN_PROMPT"
 TEST_TAIL_LINES: Final[int] = 200
 
 
@@ -375,6 +377,8 @@ class NightShiftTaskRun:
         env["GIT_TERMINAL_PROMPT"] = "0"
         if self.airgapped:
             env[AIRGAPPED_ENV] = self.airgapped
+        if getattr(self.settings, "prompt", None):
+            env[PROMPT_ENV] = self.settings.prompt
         env.update(extra_env or {})
         limit = self.deadline if timeout is None else min(self.deadline, time.time() + timeout)
         with open(output, "ab" if append else "wb") as sink:

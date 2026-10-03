@@ -1,6 +1,6 @@
 # Puffin Prompts — `/prompt`
 
-**Status:** proposed. Nothing in this spec is implemented yet. §1 is read from the pinned Codex source and checked against the requests `puffin` actually sends (a stub endpoint recorded them; no model was involved); §6.4 is a small pilot against the live model on 2026-10-02. §12 separates what was checked from what is assumed.
+**Status:** Phase 1 implemented on 2026-10-03 (§13 records what was built and where it departs from the design); Phase 0 and Phase 2 are not built, and the runs of §6.2 have not been made. §1 is read from the pinned Codex source and checked against the requests `puffin` actually sends (a stub endpoint recorded them; no model was involved); §6.4 is a small pilot against the live model on 2026-10-02. §12 separates what was checked from what is assumed.
 **Goal:** `puffin` can run under more than one system prompt, chosen by name. Two ship: `default`, today's prompt byte for byte, and `high-swe`, a prompt written to resolve as many SWE-bench tasks as the local model can. `/prompt` shows and switches them.
 **Builds on:**
 - the launcher, which already composes the system prompt and writes it to the model catalog (`puffin-rs/src/lib.rs`, `base_instructions()` and `model_catalog()`);
@@ -391,6 +391,29 @@ A check that the model follows `high-swe` and of what it does differently, not a
 **Read from the source, not run:** that `get_prompt_base_instructions()` is the only place a request's prompt is rendered (its callers: the turn, both compaction paths, the prewarm, world state, the reviewer); that `puffin-prompt` as a standard-library crate creates no cycle, by analogy with `puffin-airgapped`.
 
 **Assumed:** the patch size; the 30-second figure for a switch at 50K tokens (scaled from one cold read of 39.5K tokens); that a hundred instances validate on arm64.
+
+---
+
+## 13. What was built (Phase 1, 2026-10-03)
+
+**In the launcher** (`puffin-rs/src/prompt.rs`, no Codex patch):
+- The two built-in prompts: `default` (`Core::Codex`, all three blocks) and `high-swe` (`puffin-rs/prompts/high-swe.md`, v2: Appendix A with §6.4's two edits, 4,381 chars, the `code` block only). Custom prompts from `$CODEX_HOME/system-prompts/<name>.md` with the optional `<!-- puffin: blocks=… -->` first line; a file with a bad name, no text, or a built-in's name is passed over with a note in `puffin prompt list`, and an unknown block name is ignored with one.
+- The tiers of §4.1: `DREAMFERENCE_PUFFIN_PROMPT`, `puffin_prompt` in the configuration file, `default`. An unknown name prints `⚠️  prompt "<name>" from <tier> is not installed (installed: …); skipped.` at launch and the next tier is used. An interactive session started under another prompt than `default` prints `Prompt: <name> (<tier>).` once.
+- `puffin prompt` / `list`, `show [<name>]` and `use <name>`, intercepted before Codex like `night` and `node`. `show` prints the text on stdout and its size and blocks on stderr; `use` writes the key with `toml_edit` and says when the variable still wins.
+- The catalog route of §4.2: `model_catalog.json` is written as before and always carries `default`; another prompt is written to `model_catalog.<name>.json` and named with `-c model_catalog_json="…"` in front of the user's arguments, unless the user passed their own `model_catalog_json`.
+
+**Elsewhere:** `DreamferenceConfig.puffin_prompt` (`DEFAULT_PUFFIN_PROMPT`, a test keeps it equal to the launcher's), `[night] prompt` (passed as `DREAMFERENCE_PUFFIN_PROMPT` to every command of the task), `puffin-admin swe-bench run --prompt <name>` (§6.2), and `prompt` among the subcommands Night Shift does not count as an open session.
+
+**Where it departs from the design above:**
+- **`model_catalog.json` always holds `default`,** not the chosen prompt: `config.toml` names it, and `puffin skill` and `/night` read the served model's id and window from it.
+- **The skills glossary follows every prompt.** It is not one of the three blocks: the skills list is a developer message both prompts see (§7), so the glossary that explains it goes wherever the list goes. It is off by default.
+- **Codex's search sentence is rewritten only for a prompt that carries the `code` block,** because the rewritten sentence points at the Code navigation section. `high-swe` has no such sentence; its own says `rg`, then `grep -rn`.
+- **The benchmark mounts the one file** (`<host>/system-prompts/<name>.md` at the container's `$CODEX_HOME/system-prompts/<name>.md`, read-only), not the folder, and the manifest records its SHA-256 as `prompt_sha256`; a built-in prompt is covered by `runtime_hash`. A manifest written before this has no `prompt` and is compared as `default`.
+- **The Python side checks the name's form only** (lowercase letters, digits, hyphens): which prompts are installed is the launcher's to say.
+
+**Tested:** 10 launcher tests (`cargo test --release -p puffin-launcher` in a scratch export: 131 passed, 1 ignored), among them that `default` composes byte for byte to what the launcher sent before, for the combinations of email, code block, glossary and `rg`; and the Python tests in `tests/test_puffin_prompt.py`, `tests/test_night_shift.py` and `tests/test_swe_bench.py`, among them that the shipped text is Appendix A with §6.4's two edits and nothing else.
+
+**Not run:** no `puffin` binary carrying this code has been built, so the stub-endpoint checks of §10 (a `high-swe` session's `instructions` field, a resumed session keeping its prompt) and `puffin prompt` from a shell are owed after the next `puffin-admin codex build`. Phase 0 (§6.1), the runs of §6.2, and Phase 2 (`/prompt` in the TUI, the live switch and its patch) are not built.
 
 ---
 

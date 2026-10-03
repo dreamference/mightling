@@ -41,6 +41,7 @@ pub mod home;
 pub mod ledger;
 pub mod night;
 pub mod node;
+pub mod prompt;
 pub mod skills;
 
 pub mod update;
@@ -224,6 +225,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(skills::run_cli(&user_args[index + 1..]).await);
     }
+    // `prompt` lists, shows and chooses the system prompt new sessions get (prompt.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "prompt"
+    {
+        std::process::exit(prompt::run_cli(&user_args[index + 1..]).await);
+    }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
     }
@@ -250,9 +257,14 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         .context("could not resolve CODEX_HOME")?
         .as_path()
         .to_path_buf();
+    // Which system prompt a new session gets (prompt.rs; specs/DREAMFERENCE_PUFFIN_PROMPT.md).
+    let chosen = prompt::resolve(&codex_home);
+    for line in prompt::startup_lines(&chosen, interactive) {
+        eprintln!("{line}");
+    }
     // Gmail only on a node: `puffin-admin gmail` is Python and the service's secret is a file
     // there, so a client is never told of a command it cannot run (§10).
-    let mut extra_instructions = if puffin_gmail_enabled() && host_is_local(&host) {
+    let email = if puffin_gmail_enabled() && host_is_local(&host) {
         connected_gmail_accounts()
             .await
             .map(|accounts| gmail_access_instructions(&accounts))
@@ -263,13 +275,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // The code index: its session process starts here, outside the sandbox, and its prompt block
     // joins the others (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2).
     let code_block = code_index::start_and_prompt_block(code_index::tools_enabled(), &code_index::session_dir(&user_args));
-    extra_instructions.push_str(&code_block);
     // Skills other agents installed are linked in, and the glossary of their tool names joins the
     // prompt when one is offered (specs/DREAMFERENCE_PUFFIN_SKILLS.md §3, §5).
-    extra_instructions.push_str(skills::start(&codex_home, interactive, model.max_model_len));
+    let glossary = skills::start(&codex_home, interactive, model.max_model_len).to_string();
+    let parts = prompt::Parts { email, code: code_block.clone(), glossary, rg_installed: code_index::rg_installed() };
     cave::prune_session_files();
     airgapped::prune_session_files();
-    configure_codex_home(&codex_home, &host, &model, &extra_instructions)?;
+    let catalog = configure_codex_home(&codex_home, &host, &model, &parts, &chosen.prompt)?;
     // When the session compacts and what it is handed afterwards (compaction.rs).
     let args = compaction::prepare(args, &codex_home, &host, &model).await;
     // The index as tools, when the block just written names them (code_index.rs).
@@ -277,6 +289,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         code_index::with_tools(args)
     } else {
         args
+    };
+    // `default` is `model_catalog.json`, already named in `config.toml`; another prompt's catalog
+    // is named for this process only, so a session it resumes keeps the prompt it recorded.
+    let args = match catalog {
+        Some(catalog) => prompt::with_catalog(args, &catalog),
+        None => args,
     };
     Ok(with_local_model_args(args, &model.id))
 }
@@ -514,15 +532,21 @@ async fn wait_for_model(host: &str) -> anyhow::Result<ServedModel> {
     }
 }
 
-/// Codex's own system prompt, renamed to Puffin, with the web section appended.
+/// Codex's own system prompt, renamed to Puffin, with the web section appended: the core of the
+/// `default` prompt (prompt.rs) and its first block.
 ///
 /// The catalog must supply `base_instructions` or Codex rejects the model, and what goes there is
-/// the entire system prompt, not a label. The longest bundled template is used: the shorter ones
-/// are trimmed variants for narrower modes, and a missing section costs more than an irrelevant
-/// one. The rename happens here rather than in a patch to `models.json`, whose templates are each
-/// one JSON line of ~20 KB, so a patch touching them was ~390 KB of diff.
+/// the entire system prompt, not a label. The rename happens here rather than in a patch to
+/// `models.json`, whose templates are each one JSON line of ~20 KB, so a patch touching them was
+/// ~390 KB of diff.
 pub fn base_instructions() -> String {
-    let prompt = codex_models_manager::bundled_models_response()
+    rebrand(&codex_template()) + WEB_ACCESS_INSTRUCTIONS
+}
+
+/// Codex's longest bundled prompt template, as Codex ships it. The shorter ones are trimmed
+/// variants for narrower modes, and a missing section costs more than an irrelevant one.
+pub(crate) fn codex_template() -> String {
+    codex_models_manager::bundled_models_response()
         .ok()
         .and_then(|response| {
             response
@@ -531,8 +555,7 @@ pub fn base_instructions() -> String {
                 .filter_map(|model| model.model_messages?.instructions_template)
                 .max_by_key(String::len)
         })
-        .unwrap_or_else(|| "You are Puffin, a coding agent.".to_string());
-    rebrand(&prompt) + WEB_ACCESS_INSTRUCTIONS
+        .unwrap_or_else(|| "You are Puffin, a coding agent.".to_string())
 }
 
 /// Renames the agent in a Codex prompt.
@@ -557,8 +580,9 @@ pub fn rebrand(prompt: &str) -> String {
 /// Codex parses this with named serde structs, so a field of the wrong shape stops it at startup.
 /// The non-obvious shapes: reasoning levels are `{effort, description}` structs, `visibility` is
 /// `list|hide|none`, and `truncation_policy` is `{mode, limit}`. `tool_mode = "code_mode"` gives
-/// the model Code Mode's `exec` tool, the only place MCP tools are reachable.
-pub fn model_catalog(model: &ServedModel, extra_instructions: &str) -> serde_json::Value {
+/// the model Code Mode's `exec` tool, the only place MCP tools are reachable. `instructions` is the
+/// whole system prompt (`prompt::compose`).
+pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Value {
     let context = model.max_model_len;
     json!({
         "models": [{
@@ -579,32 +603,41 @@ pub fn model_catalog(model: &ServedModel, extra_instructions: &str) -> serde_jso
             "truncation_policy": {"mode": "tokens", "limit": context},
             "experimental_supported_tools": [],
             "tool_mode": "code_mode",
-            "base_instructions": code_index::search_habit(
-                &base_instructions(),
-                code_index::named_in(extra_instructions),
-                code_index::rg_installed(),
-            ) + extra_instructions,
+            "base_instructions": instructions,
         }]
     })
 }
 
-/// Writes the catalog and brings `config.toml` up to what a local session needs.
+/// Writes the catalogs and brings `config.toml` up to what a local session needs.
 ///
-/// The catalog is rewritten on every launch, because the served model can change between runs.
+/// The catalogs are rewritten on every launch, because the served model can change between runs.
+/// `model_catalog.json` always carries the `default` prompt: `config.toml` names it, and other
+/// commands read the served model from it. A `chosen` prompt other than `default` is written to a
+/// catalog of its own, whose path is returned for the command line (prompt.rs).
 /// In `config.toml`, keys the user may want to override are only added when absent. The provider
 /// URL is always rewritten, because it has to follow the server.
 pub fn configure_codex_home(
     codex_home: &Path,
     host: &str,
     model: &ServedModel,
-    extra_instructions: &str,
-) -> anyhow::Result<()> {
+    parts: &prompt::Parts,
+    chosen: &prompt::Prompt,
+) -> anyhow::Result<Option<PathBuf>> {
     std::fs::create_dir_all(codex_home)?;
     let catalog_path = codex_home.join("model_catalog.json");
+    let default_text = prompt::compose(&prompt::Prompt::default_prompt(), parts);
     write_atomically(
         &catalog_path,
-        serde_json::to_string_pretty(&model_catalog(model, extra_instructions))?.as_bytes(),
+        serde_json::to_string_pretty(&model_catalog(model, &default_text))?.as_bytes(),
     )?;
+    let chosen_catalog = if chosen.is_default() {
+        None
+    } else {
+        let path = prompt::catalog_file(codex_home, chosen);
+        let text = prompt::compose(chosen, parts);
+        write_atomically(&path, serde_json::to_string_pretty(&model_catalog(model, &text))?.as_bytes())?;
+        Some(path)
+    };
 
     // A writable root of the sandbox (see `updated_config`) has to exist to be mounted.
     let _ = std::fs::create_dir_all(codex_home.join("skills"));
@@ -614,7 +647,7 @@ pub fn configure_codex_home(
     if updated != existing {
         write_atomically(&config_path, updated.as_bytes())?;
     }
-    Ok(())
+    Ok(chosen_catalog)
 }
 
 /// Replaces a file by writing a sibling and renaming it over the original.
@@ -707,7 +740,7 @@ fn set_if_absent(table: &mut Table, key: &str, setting: bool) {
 
 /// The values given to any of `flags` on a command line: `--flag value`, `--flag=value`, and for a
 /// short flag `-f value` or `-fvalue`.
-fn option_values<'a>(user_args: &'a [String], flags: &'a [&'a str]) -> impl Iterator<Item = &'a str> {
+pub(crate) fn option_values<'a>(user_args: &'a [String], flags: &'a [&'a str]) -> impl Iterator<Item = &'a str> {
     user_args.iter().enumerate().filter_map(move |(index, arg)| {
         flags.iter().find_map(|flag| {
             if arg == flag {
@@ -1091,12 +1124,40 @@ mod tests {
     #[test]
     fn the_catalog_prompt_keeps_web_access_and_appends_gmail() {
         let model = ServedModel { id: "m".into(), max_model_len: 1024 };
-        let with_gmail = model_catalog(&model, &gmail_access_instructions("a@x.com"));
-        let prompt = with_gmail["models"][0]["base_instructions"].as_str().unwrap_or_default();
-        assert!(prompt.contains("puffin-search") && prompt.contains("puffin-admin gmail read"));
-        let without = model_catalog(&model, "");
-        let prompt = without["models"][0]["base_instructions"].as_str().unwrap_or_default();
-        assert!(prompt.contains("puffin-search") && !prompt.contains("puffin-admin gmail"));
+        let default = prompt::Prompt::default_prompt();
+        let parts = prompt::Parts { email: gmail_access_instructions("a@x.com"), ..Default::default() };
+        let with_gmail = model_catalog(&model, &prompt::compose(&default, &parts));
+        let text = with_gmail["models"][0]["base_instructions"].as_str().unwrap_or_default();
+        assert!(text.contains("puffin-search") && text.contains("puffin-admin gmail read"));
+        let without = model_catalog(&model, &prompt::compose(&default, &prompt::Parts::default()));
+        let text = without["models"][0]["base_instructions"].as_str().unwrap_or_default();
+        assert!(text.contains("puffin-search") && !text.contains("puffin-admin gmail"));
+    }
+
+    #[test]
+    fn another_prompt_gets_a_catalog_of_its_own_and_default_stays_in_the_shared_one() {
+        let home = std::env::temp_dir().join(format!("puffin-catalogs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let model = ServedModel { id: "m".into(), max_model_len: 1024 };
+        let parts = prompt::Parts::default();
+        let read = |path: &Path| -> String {
+            let catalog: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_default()).unwrap_or_default();
+            catalog["models"][0]["base_instructions"].as_str().unwrap_or_default().to_string()
+        };
+        let none = configure_codex_home(&home, DEFAULT_VLLM_HOST, &model, &parts, &prompt::Prompt::default_prompt());
+        assert_eq!(none.ok().flatten(), None);
+        let own = configure_codex_home(&home, DEFAULT_VLLM_HOST, &model, &parts, &prompt::Prompt::high_swe())
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        assert_eq!(own, home.join("model_catalog.high-swe.json"));
+        assert_eq!(read(&own), prompt::HIGH_SWE.trim_end());
+        // The shared catalog, which config.toml names, still carries the default.
+        assert!(read(&home.join("model_catalog.json")).contains("# Web access"));
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap_or_default();
+        assert!(config.contains("model_catalog.json") && !config.contains("high-swe"));
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

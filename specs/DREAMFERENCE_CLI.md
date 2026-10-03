@@ -22,7 +22,7 @@
 **Entry points** (`setup.py` `console_scripts`):
 
 - `puffin-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
-- `puffin`: **not** a Python entry point. It is the Rust binary built by `puffin-admin codex build`: Codex with Puffin's branding and launcher compiled in, linked at `~/.local/bin/puffin`. It takes Codex's command line, plus four subcommands the launcher answers itself before Codex parses anything (`puffin app`, `puffin night …`, `puffin airgapped [default <level>]`, `puffin node list|use|forget`) and `puffin update`, a subcommand patch `0008` adds to Codex's own parser. See `DREAMFERENCE_PUFFIN_CODEX.md`.
+- `puffin`: **not** a Python entry point. It is the Rust binary built by `puffin-admin codex build`: Codex with Puffin's branding and launcher compiled in, linked at `~/.local/bin/puffin`. It takes Codex's command line, plus five subcommands the launcher answers itself before Codex parses anything (`puffin app`, `puffin night …`, `puffin airgapped [default <level>]`, `puffin node list|use|forget`, `puffin prompt [list|show [<name>]|use <name>]`, which chooses the system prompt new sessions get: `default` or `high-swe`, `DREAMFERENCE_PUFFIN_PROMPT` or `puffin_prompt`, see `DREAMFERENCE_PUFFIN_PROMPT.md`) and `puffin update`, a subcommand patch `0008` adds to Codex's own parser. See `DREAMFERENCE_PUFFIN_CODEX.md`.
 
 There is no `chat` subcommand any more (removed 2026-09-28). The interactive agent is `puffin`. The other agents (Cline, Continue, OpenHands) are reachable through `puffin-admin run "…" --agent …`.
 
@@ -402,7 +402,7 @@ While a night run holds its lock, `server start`, `codex build` and `index` refu
 puffin-admin swe-bench setup [--dataset verified|lite|full|<HF id>] [--validate [--instances IDS] [--limit N] [--force]]
 puffin-admin swe-bench smoke [--idle-minutes N] [--ignore-open-sessions]
 puffin-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limit N] [--name NAME]
-                           [--eval [--remove-images]] [--code-index off|universal]
+                           [--eval [--remove-images]] [--code-index off|universal] [--prompt <name>]
                            [--until HH:MM] [--idle-minutes N] [--ignore-open-sessions]
 puffin-admin swe-bench eval [RUN]
 puffin-admin swe-bench report [RUN] [--against RUN]
@@ -414,7 +414,7 @@ SWE-bench on this machine (`dreamference/swe_bench/`, `DREAMFERENCE_PUFFIN_SWE_B
 
 - **`setup`:** installs the upstream harness (`swebench` 5.0.2) in a virtualenv of its own, downloads the dataset and builds the relocated copy of `puffin` that starts inside the instance images. `--validate` also checks which instances grade correctly here (the reference patch resolves, a no-op patch does not), which pulls their images.
 - **`smoke`:** proves the whole pipeline on five fixed instances. `run` refuses until a smoke has passed with the installed harness version.
-- **`run`:** the agent phase. One `puffin exec` per instance, each inside that instance's own container on the internal Docker network `puffin-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `puffin-code` (default `off`).
+- **`run`:** the agent phase. One `puffin exec` per instance, each inside that instance's own container on the internal Docker network `puffin-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `puffin-code` (default `off`). `--prompt <name>` starts the agent under that system prompt (`default`, `high-swe`, or a custom one from `$CODEX_HOME/system-prompts/`, mounted read-only); without it the configured one. The manifest records it, with the custom file's SHA-256, and `report --against` names it when two runs differ.
 - **`eval`:** the grading phase: the upstream harness applies each patch and runs the tests. It needs no model.
 - **`report`:** the resolved rate and what it was measured with; `--against` compares two runs instance by instance.
 - **`status`:** runs, their progress, the images present and free disk.
@@ -536,6 +536,7 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_PUFFIN_GMAIL` | `true` | Add the Gmail section to `puffin`'s prompt when an account is connected |
 | `DREAMFERENCE_PUFFIN_CAVE_MODE` | `ultra` | Cave-mode level for new `puffin` sessions (`off`, `lite`, `full`, `ultra`); also the config key `puffin_cave_mode` |
+| `DREAMFERENCE_PUFFIN_PROMPT` | `default` | System prompt for new `puffin` sessions (`default`, `high-swe`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `puffin_prompt`, which `puffin prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |
 | `DREAMFERENCE_PUFFIN_AIRGAPPED` | `off` | How much of the internet a `puffin` session may use (`off`, `duckduckgo`, `on`); also the config key `puffin_airgapped` |
 | `DREAMFERENCE_PUFFIN_COMPACTION_LEDGER` | `true` | Register `puffin ledger` as the hook that runs after each compaction of a `puffin` session ([PUFFIN_COMPACTION §11](./DREAMFERENCE_PUFFIN_COMPACTION.md)); also the config key `puffin_compaction_ledger` |
 | `DREAMFERENCE_SEARXNG_URL` | `http://127.0.0.1:8888` | SearXNG instance used by `puffin-search` and the MCP server's `web_search` |
