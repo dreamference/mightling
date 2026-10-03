@@ -302,7 +302,7 @@ pub fn start(codex_home: &Path, interactive: bool, context_window: u64) -> &'sta
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let started = puffin_skills::start(&machine, interactive, &stamp);
     for line in &started.lines {
-        eprintln!("{line}");
+        crate::notice::say(line);
     }
     if started.glossary { puffin_skills::glossary::GLOSSARY } else { "" }
 }

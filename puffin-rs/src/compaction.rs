@@ -41,11 +41,18 @@ pub const LIMIT_KEY: &str = "model_auto_compact_token_limit";
 /// (specs/DREAMFERENCE_PUFFIN_COMPACTION.md §11.2) found it halved compactions and commands.
 pub const LEDGER_DEFAULT: bool = true;
 
-/// Seconds Codex waits for the hook. It reads one file and runs `git status`.
-const HOOK_TIMEOUT_SEC: i64 = 10;
+/// A `SessionStart` hook the launcher registers in `config.toml`: `<this binary> <subcommand>`,
+/// under `matcher`, waited for `timeout` seconds. The trust hash covers all three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionHook {
+    /// The command's last word, which is also how the launcher recognises its own group.
+    pub subcommand: &'static str,
+    pub matcher: &'static str,
+    pub timeout: i64,
+}
 
-/// The last word of the hook's command: `<this binary> ledger`.
-const HOOK_SUBCOMMAND: &str = "ledger";
+/// The ledger (ledger.rs), after each compaction. It reads one file and runs `git status`.
+pub const LEDGER_HOOK: SessionHook = SessionHook { subcommand: "ledger", matcher: "compact", timeout: 10 };
 
 /// Registers the ledger hook and puts the pool-derived limit on the command line. Nothing here
 /// may stop a session from starting, so every failure leaves things as they were.
@@ -144,27 +151,40 @@ pub fn ledger_enabled() -> bool {
 /// gone. A `hooks.json` beside it means the user keeps hooks there, and two representations in
 /// one folder draw a warning from Codex at every start, so then the file is left as it is.
 pub fn register_ledger_hook(config_path: &Path, enabled: bool) -> anyhow::Result<()> {
+    register_session_hook(config_path, &LEDGER_HOOK, "", enabled)
+}
+
+/// Brings `config.toml` in line with `enabled` for any of the launcher's `SessionStart` hooks;
+/// `argument` follows the subcommand on the command line (empty for none). See
+/// [`register_ledger_hook`] for the `hooks.json` rule.
+pub fn register_session_hook(config_path: &Path, hook: &SessionHook, argument: &str, enabled: bool) -> anyhow::Result<()> {
     let has_hooks_json = config_path
         .parent()
         .is_some_and(|home| home.join("hooks.json").is_file());
     let Ok(exe) = std::env::current_exe() else { return Ok(()) };
     let existing = std::fs::read_to_string(config_path).unwrap_or_default();
-    let command = hook_command(&exe);
-    let updated = with_ledger_hook(&existing, config_path, &command, enabled && !has_hooks_json)?;
+    let command = hook_command_for(&exe, hook, argument);
+    let updated = with_session_hook(&existing, config_path, &command, hook, enabled && !has_hooks_json)?;
     if updated != existing {
         crate::write_atomically(config_path, updated.as_bytes())?;
     }
     Ok(())
 }
 
-/// The hook's command line: this executable, quoted for the shell where it has to be.
+/// The ledger hook's command line: this executable, quoted for the shell where it has to be.
 pub fn hook_command(exe: &Path) -> String {
+    hook_command_for(exe, &LEDGER_HOOK, "")
+}
+
+/// A hook's command line: `<exe> <subcommand>[ <argument>]`, the path quoted where it has to be.
+/// `argument` must be a plain word (letters, digits, `-`, `_`).
+pub fn hook_command_for(exe: &Path, hook: &SessionHook, argument: &str) -> String {
     let path = exe.to_string_lossy();
     let plain = path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c));
-    if plain {
-        format!("{path} {HOOK_SUBCOMMAND}")
-    } else {
-        format!("'{}' {HOOK_SUBCOMMAND}", path.replace('\'', r"'\''"))
+    let program = if plain { path.to_string() } else { format!("'{}'", path.replace('\'', r"'\''")) };
+    match argument {
+        "" => format!("{program} {}", hook.subcommand),
+        argument => format!("{program} {} {argument}", hook.subcommand),
     }
 }
 
@@ -174,16 +194,21 @@ pub fn hook_command(exe: &Path) -> String {
 /// pins a value Codex itself accepted, so a Codex bump that changes the scheme fails the test
 /// rather than silently switching the hook off.
 pub fn hook_hash(command: &str) -> String {
+    hook_hash_for(command, &LEDGER_HOOK)
+}
+
+/// [`hook_hash`] for any of the launcher's hooks: the matcher and timeout are part of the hash.
+pub fn hook_hash_for(command: &str, hook: &SessionHook) -> String {
     // Keys in sorted order, which is what the canonical form is whatever the map's own order.
     let mut handler = serde_json::Map::new();
     handler.insert("async".to_string(), json!(false));
     handler.insert("command".to_string(), json!(command));
-    handler.insert("timeout".to_string(), json!(HOOK_TIMEOUT_SEC));
+    handler.insert("timeout".to_string(), json!(hook.timeout));
     handler.insert("type".to_string(), json!("command"));
     let mut identity = serde_json::Map::new();
     identity.insert("event_name".to_string(), json!("session_start"));
     identity.insert("hooks".to_string(), json!([handler]));
-    identity.insert("matcher".to_string(), json!("compact"));
+    identity.insert("matcher".to_string(), json!(hook.matcher));
     let serialized = serde_json::to_vec(&identity).unwrap_or_default();
     let hex: String = Sha256::digest(serialized).iter().map(|byte| format!("{byte:02x}")).collect();
     format!("sha256:{hex}")
@@ -197,6 +222,13 @@ pub fn hook_hash(command: &str) -> String {
 /// never collects stale ones. Hooks the user wrote are not touched, and if `SessionStart` is
 /// written in a form other than an array of tables the file is returned unchanged.
 pub fn with_ledger_hook(existing: &str, config_path: &Path, command: &str, enabled: bool) -> anyhow::Result<String> {
+    with_session_hook(existing, config_path, command, &LEDGER_HOOK, enabled)
+}
+
+/// [`with_ledger_hook`] for any of the launcher's hooks. Each is recognised as the group whose
+/// matcher is the hook's and whose only handler's command has the hook's subcommand as its last
+/// word or the word before an argument, so two of them live side by side.
+pub fn with_session_hook(existing: &str, config_path: &Path, command: &str, hook: &SessionHook, enabled: bool) -> anyhow::Result<String> {
     let mut doc: DocumentMut = existing.parse().context("config.toml is not valid TOML")?;
     let has_hooks = doc.get("hooks").is_some();
     if !has_hooks && !enabled {
@@ -214,9 +246,14 @@ pub fn with_ledger_hook(existing: &str, config_path: &Path, command: &str, enabl
     let groups = hooks["SessionStart"].or_insert(Item::ArrayOfTables(ArrayOfTables::new()));
     let Some(groups) = groups.as_array_of_tables_mut() else { return Ok(existing.to_string()) };
 
-    // Ours is the group whose only handler runs `<something> ledger` under matcher `compact`.
+    // Ours is the group whose only handler runs `<something> <subcommand>[ <argument>]` under the
+    // hook's matcher.
+    let runs_ours = |text: &str| {
+        let words: Vec<&str> = text.rsplit(' ').take(2).collect();
+        words.first() == Some(&hook.subcommand) || words.get(1) == Some(&hook.subcommand)
+    };
     let is_ours = |group: &Table| {
-        group.get("matcher").and_then(Item::as_str) == Some("compact")
+        group.get("matcher").and_then(Item::as_str) == Some(hook.matcher)
             && group
                 .get("hooks")
                 .and_then(Item::as_array_of_tables)
@@ -226,7 +263,7 @@ pub fn with_ledger_hook(existing: &str, config_path: &Path, command: &str, enabl
                             handler
                                 .get("command")
                                 .and_then(Item::as_str)
-                                .is_some_and(|text| text.ends_with(&format!(" {HOOK_SUBCOMMAND}")))
+                                .is_some_and(runs_ours)
                         })
                 })
     };
@@ -252,7 +289,7 @@ pub fn with_ledger_hook(existing: &str, config_path: &Path, command: &str, enabl
                 .and_then(|handlers| handlers.get_mut(0))
             {
                 handler.insert("command", value(command));
-                handler.insert("timeout", value(HOOK_TIMEOUT_SEC));
+                handler.insert("timeout", value(hook.timeout));
             }
             Some(index)
         }
@@ -264,11 +301,11 @@ pub fn with_ledger_hook(existing: &str, config_path: &Path, command: &str, enabl
             let mut handler = Table::new();
             handler.insert("type", value("command"));
             handler.insert("command", value(command));
-            handler.insert("timeout", value(HOOK_TIMEOUT_SEC));
+            handler.insert("timeout", value(hook.timeout));
             let mut handlers = ArrayOfTables::new();
             handlers.push(handler);
             let mut group = Table::new();
-            group.insert("matcher", value("compact"));
+            group.insert("matcher", value(hook.matcher));
             group.insert("hooks", Item::ArrayOfTables(handlers));
             groups.push(group);
             Some(groups.len() - 1)
@@ -282,7 +319,7 @@ pub fn with_ledger_hook(existing: &str, config_path: &Path, command: &str, enabl
     // The trust entries that are ours carry the hash of our command, the one in the file until
     // now or the one written now. They go, and the one for the group's position is written.
     let prefix = format!("{}:session_start:", config_path.display());
-    let ours: Vec<String> = old_command.iter().map(|old| hook_hash(old)).chain([hook_hash(command)]).collect();
+    let ours: Vec<String> = old_command.iter().map(|old| hook_hash_for(old, hook)).chain([hook_hash_for(command, hook)]).collect();
     if let Some(state) = hooks.get_mut("state").and_then(Item::as_table_mut) {
         let stale: Vec<String> = state
             .iter()
@@ -304,7 +341,7 @@ pub fn with_ledger_hook(existing: &str, config_path: &Path, command: &str, enabl
         if let Some(state) = state.as_table_mut() {
             state.set_implicit(true);
             let mut entry = Table::new();
-            entry.insert("trusted_hash", value(hook_hash(command)));
+            entry.insert("trusted_hash", value(hook_hash_for(command, hook)));
             state.insert(&format!("{prefix}{position}:0"), Item::Table(entry));
         }
     } else if hooks.get("state").and_then(Item::as_table).is_some_and(Table::is_empty) {
