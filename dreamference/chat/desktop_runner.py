@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Final, List, Optional
 
 from dreamference.chat.desktop_installer import CARGO_BIN, DesktopInstaller
@@ -40,7 +41,7 @@ DESKTOP_PROJECT_DIR: Final[str] = os.path.join(
 
 # The Work window's frontend (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §4.5): bundled into the binary
 # from `ui/dist`, which `tauri.conf.json` names as `frontendDist`.
-UI_DIR: Final[str] = os.path.join(DESKTOP_PROJECT_DIR, "ui")
+UI_DIR: Final[Path] = Path(DESKTOP_PROJECT_DIR) / "ui"
 
 # How long to wait for Onyx to answer before deciding it is not running.
 HEALTH_TIMEOUT_SECONDS: Final[int] = 5
@@ -158,8 +159,7 @@ class DesktopRunner:
 
     @classmethod
     def build_ui(cls) -> bool:
-        """
-        Builds the Work window's bundle, `desktop/ui/dist`, which Tauri embeds in the binary.
+        """Builds the Work window's bundle, `desktop/ui/dist`, which Tauri embeds in the binary.
 
         The Chat window needs none of it: it is the Onyx page at its URL. But Tauri embeds
         `frontendDist` at compile time, so every build and `tauri dev` needs it present. npm's
@@ -172,7 +172,7 @@ class DesktopRunner:
         if npm is None:
             print("❌ npm is needed to build the Work window (desktop/ui): install Node.js 20 or later.")
             return False
-        if not os.path.isdir(os.path.join(UI_DIR, "node_modules")):
+        if not (UI_DIR / "node_modules").is_dir():
             print("📦 Installing the Work window's packages (desktop/ui)...")
             if subprocess.call([npm, "ci", "--no-audit", "--no-fund"], cwd=UI_DIR, env=cls._environment()) != 0:
                 return False

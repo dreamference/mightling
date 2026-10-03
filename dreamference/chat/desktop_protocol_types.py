@@ -1,5 +1,4 @@
-"""
-The app-server protocol's TypeScript types for the desktop app's Work window.
+"""The app-server protocol's TypeScript types for the desktop app's Work window.
 
 Work talks to `puffin app-server` (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §4.4), so its types must be
 the ones the pinned Codex speaks, never copied from a newer Codex or from another client. They are
@@ -14,23 +13,23 @@ build rather than the UI.
 """
 
 import json
-import os
 import re
 import shutil
 import subprocess
-from typing import Dict, Final, List
+from pathlib import Path
+from typing import Final
 
 from dreamference.chat.desktop_runner import DESKTOP_PROJECT_DIR
 from dreamference.runner.codex_branded_builder import CODEX_SUBMODULE_DIR
 
 # The precomputed export `generate-ts --experimental` writes from (`precomputed_exports.rs`).
-EXPERIMENTAL_EXPORTS: Final[str] = os.path.join(
-    CODEX_SUBMODULE_DIR, "codex-rs", "app-server-protocol", "schema", "precomputed",
-    "app-server-exports-experimental.json.zst",
+EXPERIMENTAL_EXPORTS: Final[Path] = (
+    Path(CODEX_SUBMODULE_DIR) / "codex-rs" / "app-server-protocol" / "schema" / "precomputed"
+    / "app-server-exports-experimental.json.zst"
 )
 
 # Where Work's frontend keeps the generated types.
-PROTOCOL_DIR: Final[str] = os.path.join(DESKTOP_PROJECT_DIR, "ui", "src", "protocol")
+PROTOCOL_DIR: Final[Path] = Path(DESKTOP_PROJECT_DIR) / "ui" / "src" / "protocol"
 
 # `trim_trailing_line_whitespace` in `precomputed_exports.rs`: spaces and tabs before each newline.
 TRAILING_WHITESPACE: Final[re.Pattern] = re.compile(r"[ \t]+(?=\n|\Z)")
@@ -41,34 +40,33 @@ class DesktopProtocolTypes:
 
     @classmethod
     def has_source(cls) -> bool:
-        """
-        Tells whether the types can be generated here: a checkout with the Codex submodule, and
-        `zstd` to read its export. A release install has neither and needs neither.
+        """Tells whether the types can be generated here.
+
+        A checkout has the Codex submodule, and `zstd` reads its export. A release install has
+        neither and needs neither.
 
         Returns:
             bool: True when both are present.
         """
-        return os.path.isfile(EXPERIMENTAL_EXPORTS) and shutil.which("zstd") is not None
+        return EXPERIMENTAL_EXPORTS.is_file() and shutil.which("zstd") is not None
 
     @classmethod
-    def exports(cls, source: str = EXPERIMENTAL_EXPORTS) -> Dict[str, str]:
-        """
-        Reads the files `generate-ts --experimental` would write.
+    def exports(cls, source: Path = EXPERIMENTAL_EXPORTS) -> dict[str, str]:
+        """Reads the files `generate-ts --experimental` would write.
 
         Args:
             source: The compressed export.
 
         Returns:
-            Dict[str, str]: Relative path to contents, trailing whitespace trimmed as Codex trims it.
+            dict[str, str]: Relative path to contents, trailing whitespace trimmed as Codex trims it.
         """
-        raw = subprocess.run(["zstd", "-dc", source], capture_output=True, check=True).stdout
+        raw = subprocess.run(["zstd", "-dc", str(source)], capture_output=True, check=True).stdout
         typescript = json.loads(raw)["typescript"]
         return {path: TRAILING_WHITESPACE.sub("", text) for path, text in typescript.items()}
 
     @classmethod
-    def write(cls, out_dir: str = PROTOCOL_DIR) -> int:
-        """
-        Replaces `out_dir` with freshly generated types.
+    def write(cls, out_dir: Path = PROTOCOL_DIR) -> int:
+        """Replaces `out_dir` with freshly generated types.
 
         Args:
             out_dir: The folder to write; anything already in it is removed first.
@@ -79,32 +77,29 @@ class DesktopProtocolTypes:
         exports = cls.exports()
         shutil.rmtree(out_dir, ignore_errors=True)
         for relative, text in exports.items():
-            path = os.path.join(out_dir, relative)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8", newline="") as handle:
-                handle.write(text)
+            path = out_dir / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="")
         return len(exports)
 
     @classmethod
-    def drift(cls, out_dir: str = PROTOCOL_DIR) -> List[str]:
-        """
-        Compares the committed types with what the pinned Codex would generate.
+    def drift(cls, out_dir: Path = PROTOCOL_DIR) -> list[str]:
+        """Compares the committed types with what the pinned Codex would generate.
 
         Args:
             out_dir: The committed types.
 
         Returns:
-            List[str]: One line per file that is missing, extra or different; empty when in step.
+            list[str]: One line per file that is missing, extra or different; empty when in step.
         """
         expected = cls.exports()
-        found = {}
-        for root, _dirs, files in os.walk(out_dir):
-            for name in files:
-                path = os.path.join(root, name)
-                with open(path, encoding="utf-8", newline="") as handle:
-                    found[os.path.relpath(path, out_dir)] = handle.read()
+        found = {
+            path.relative_to(out_dir).as_posix(): path.read_bytes().decode("utf-8")
+            for path in out_dir.rglob("*") if path.is_file()
+        }
         lines = [f"missing: {path}" for path in sorted(expected.keys() - found.keys())]
-        lines += [f"not generated by the pinned Codex: {path}" for path in sorted(found.keys() - expected.keys())]
+        lines += [f"not generated by the pinned Codex: {path}"
+                  for path in sorted(found.keys() - expected.keys())]
         lines += [f"differs: {path}" for path in sorted(expected.keys() & found.keys())
                   if expected[path] != found[path]]
         return lines

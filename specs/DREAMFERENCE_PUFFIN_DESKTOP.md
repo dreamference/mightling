@@ -1,6 +1,6 @@
 # Puffin Desktop — the Codex desktop app's shape, on `puffin app-server`, grown from today's `puffin-app`
 
-**Status:** proposed on 2026-10-03, revised the same day after an advisor review. Nothing here is built. §1 was read from OpenAI's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`). §2 lists the Codex app's features from the launch announcement (read from the Wayback Machine's copy; the page itself answers 403 and its videos could not be analysed, only their captions) and OpenAI's documentation and third-party write-ups. **§5 records what was measured on this GB10 on 2026-10-03** by driving the installed `puffin app-server` over stdio from a script; everything else about behaviour is marked as read, not run.
+**Status:** proposed on 2026-10-03, revised the same day after an advisor review. **Phase 1's code is written** (branch `desktop/work-window`, §15) but not yet built into `puffin-app` or watched live; the rest is proposed. §1 was read from OpenAI's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`). §2 lists the Codex app's features from the launch announcement (read from the Wayback Machine's copy; the page itself answers 403 and its videos could not be analysed, only their captions) and OpenAI's documentation and third-party write-ups. **§5 records what was measured on this GB10 on 2026-10-03** by driving the installed `puffin app-server` over stdio from a script; everything else about behaviour is marked as read, not run.
 
 **Goal:** make Puffin's desktop app work the way OpenAI's Codex desktop app does — a desktop client that drives the agent through Codex's **app-server** (JSON-RPC over stdio), with the same projects → threads → turns model, the same composer, approvals, diffs, review, worktrees and terminal — and **get there by growing today's `puffin-app` in place, never breaking it**. Today `puffin-app` (`desktop/`) is a window on the Onyx web chat with no coding agent in it. That window stays exactly as it is and becomes the app's **Chat** window; the coding agent arrives beside it as the **Work** window.
 
@@ -344,7 +344,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 2. **The launcher fix, a hard gate for everything after it:** `-c model="<id>"` for `app-server` (**built** on branch `fix/startup-lines-app-server`, 2026-10-03, with tests; a model the user names as `-c model=` or `--model` wins; not yet in an installed build); offline `generate-ts`. It is a bug in today's `puffin` (any app-server client, including OpenAI's app pointed at `puffin`, gets Codex's fallback prompt) and ships on its own, before any desktop work. Re-run §5's probe without the manual `-c` and see the metadata found and Puffin's prompt in the request.
 3. ~~Why `model/list` is empty with a catalog entry present.~~ Found and fixed (§5): `supported_in_api` was `false`. Re-measure after the next build.
 4. ~~`generate-ts --experimental`~~ — done (§5): plan mode, projects, queues, search, terminals.
-5. §8.2: which of the three places holds the air-gap check; measure that a `thread/start` with `sandbox: "danger-full-access"` at `on` is refused.
+5. §8.2: which of the three places holds the air-gap check — **decided: the third**, as a validator on the config's permission constraint (§15.3); written as patch `0023`, not yet in the series (the cap). Still to measure: a `thread/start` with `sandbox: "danger-full-access"` at `on` is refused.
 6. The reference run (§4.6), with OpenAI's package installed by the user (§14 question 5): OpenAI's app on `puffin app-server`, scratch `HOME`, network namespace reaching only the model server; record each screen and request.
 7. ~~A non-ephemeral thread appears in `puffin resume`, and a TUI session in `thread/list`~~ — done (§5).
 8. Memory of an idle and a busy app-server.
@@ -398,6 +398,51 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 5. ~~Installing OpenAI's package for the reference run?~~ **Decided (2026-10-03): yes, installed and kept** for reference comparisons beyond the one run of §4.6. The user runs `sudo apt install ~/Downloads/chatgpt_arm64.deb` from a terminal. Kept means OpenAI's apt repository (`/etc/apt/sources.list.d/chatgpt.sources`) and its updater stay, and the app's own `~/.codex` is separate from Puffin's `~/.puffin`. Every reference run still uses a scratch `HOME` and a network namespace reaching only the model server (§4.6, Phase 0 item 6), because the window carries OpenAI's telemetry clients and must not reach OpenAI while pointed at `puffin app-server`.
 
 ---
+
+## 15. As built (2026-10-03, branch `desktop/work-window`)
+
+Written while an overnight SWE-bench run held the machine: nothing below was built into `puffin-app`, installed, or run against the model server. What was run is named in §15.5.
+
+### 15.1 Where it is
+
+| Part | Where |
+|---|---|
+| The bridge's pure half: the method allow-list, the thread fields never sent (`baseInstructions`, `developerInstructions`, `modelProvider`, `config`, `personality`), the framing of stdout, the busy marker, the served model from the catalog, finding `puffin` | `desktop/bridge/` (`puffin-desktop-bridge`, serde_json only) |
+| The bridge: one `puffin app-server` per app, started through the launcher when Work first asks; stdout to Work as `work://message`, stderr as `work://stderr` (the start-up screen), a non-protocol line as `work://protocol-error`; answers only to server requests still waiting; the busy marker kept and removed on exit | `desktop/src-tauri/src/bridge.rs` |
+| Two windows: Chat exactly as configured; Work created only for `--work`, `--cwd <folder>` or `--thread <id>`, in which case Chat's entry is taken out of the configuration and opened later from Work's Chat button. The sign-in script and the forwarder's port rewrite now name Chat's label | `desktop/src-tauri/src/main.rs` |
+| Work's capability (`core:default`, window `work` only); the CSP of §4.2 plus `style-src 'self' 'unsafe-inline'`; `frontendDist` `../ui/dist` | `desktop/src-tauri/capabilities/work.json`, `tauri.conf.json` |
+| The UI: React 19 + Vite 8 + TypeScript; threads grouped by project folder, a new thread on a folder, streaming items (messages as markdown, reasoning, commands with output, file changes and the turn's diff), inline approvals (command, file change, permissions, the legacy pair, questions), steer while a turn runs, Stop (and Esc), revert of the last turn, the context indicator with Compress, the served model, the air-gap level, the permission picker | `desktop/ui/src/` |
+| Protocol types | `desktop/ui/src/protocol/` (873 files), §15.2 |
+| `puffin app --work`, `puffin app <folder>`, `puffin app --thread <id>` (Work needs no Onyx; `puffin app` alone still opens Chat) | `puffin-rs/src/app.rs` |
+| Night Shift holds back while a Work turn runs | `NightShiftHost.busy_app_server_pids` |
+| The UI built before every `desktop build` and `desktop run` | `DesktopRunner.build_ui` |
+
+### 15.2 Protocol types without running a binary
+
+`codex app-server generate-ts --experimental` does not generate anything at run time: it writes the `typescript` map of `app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst`, which the binary carries through `include_bytes!`, trimming trailing spaces and tabs from each line. `DesktopProtocolTypes` reads the same file from the submodule (`zstd -dc`), so the committed types are byte for byte what the pinned binary writes, with no binary and no model server, and the launcher's `generate-ts` wait (§4.2) does not matter to the build. The drift test compares them and is skipped where there is no submodule (a release install, a worktree without it).
+
+### 15.3 The air-gap rule in the server
+
+The extension registry (§8.2 option 2) cannot veto: its turn admission sees no configuration and skips silently, and its config contributor only observes. Option 3 is therefore a hook, and the narrowest place found is not the app-server's request paths (thread start, resume, fork, each turn's `sandboxPolicy`, `permissions` and `runtimeWorkspaceRoots`, `thread/settings/update`) but the one thing they all set: the config's `Constrained<PermissionProfile>`. Codex already composes validators onto it for managed deny-read rules (`add_validator`), and the session's settings commits run every later change through it, so one validator covers every client and every path. It calls `puffin_airgapped::permission_refusal`, new in the resolver crate (and its byte-identical web copy), which refuses Full Access at a configured `on`, and a writable root that holds the seals while the configured level is `on` or any session is sealed; Full Access is not judged by the seal rule.
+
+- **Patch `0023-airgapped-app-server.patch`, 1,220 bytes:** a dependency line in `core/Cargo.toml` and the validator line in `core/src/config/mod.rs`. It applies cleanly after 0001–0020. It is kept in `codex-patches-proposed/`, outside the series, because the series' cap (33,750 today, 37,500 approved for 0021 and 0022) has no room for it: with 0021 (882) and 0022 (2,385) the series would be about 38,170. Adding it is the user's decision about the cap.
+- **What it does not see:** a thread's own `/airgapped on` (a session file or a seal for that thread), because the config is resolved before the thread has an id. Work's picker disables Full Access per thread from `work_airgapped`, a courtesy, not enforcement.
+- **Not compiled:** no Codex build ran tonight.
+
+### 15.4 Departures
+
+- **No `git.rs`, settings pages, model picker or the egress audit's `--app` mode yet** (Phase 1 lists them): the served model is shown, not chosen; review and worktrees were Phase 2 anyway.
+- **Chat and Work are separate processes** when started separately: `puffin app` then `puffin app --work` gives two `puffin-app` processes. A single-instance plugin is a new dependency and was left for Phase 2.
+- **Links in the agent's messages are not followable** (no opener plugin yet), and images show their alt text.
+- **`thread/start` passes `permissions`** (a profile id), not `sandbox`, and each `turn/start` passes the picker's profile.
+
+### 15.5 Checked
+
+- `desktop/bridge`: `cargo test` 6 passed. The resolver crate: 11 passed (2 new). `puffin app`'s argument parsing, compiled alone: 3 passed.
+- `desktop/src-tauri`: `cargo check --tests` passed (no warnings). Its own tests were not run: that links the webview.
+- `desktop/ui`: `tsc --noEmit` clean against the generated types; `vitest` 11 passed (the scripted session: a turn with a command, its approval, a patch, the answer; an interrupt; errors; the sidebar; the picker at `on`; markdown safety); `vite build` 287 KB of script.
+- Python: `tests/test_desktop_work.py` (Chat unchanged, Chat without IPC, the CSP, the allow-list against the generated `ClientRequest`, the UI built before Tauri; the drift test run once against the main checkout's submodule: no drift), the Night Shift marker test.
+- **Not checked:** the window itself, a turn through the real bridge, the busy marker under a real night run, the patch compiled or measured.
 
 ## Sources
 

@@ -285,10 +285,10 @@ class NightShiftHost:
         return pids + [pid for pid in cls.busy_app_server_pids(puffin_bin) if pid not in pids]
 
     @classmethod
-    def busy_app_server_pids(cls, puffin_bin: str, codex_home: Optional[str] = None) -> List[int]:
-        """
-        Finds `puffin app-server` processes that are running a turn for the desktop app's Work
-        window. An app-server is not a session by its command line (`NON_INTERACTIVE`): an idle
+    def busy_app_server_pids(cls, puffin_bin: str, codex_home: str | None = None) -> list[int]:
+        """Finds `puffin app-server` processes running a turn for the desktop app's Work window.
+
+        An app-server is not a session by its command line (`NON_INTERACTIVE`): an idle
         window left open must not hold every night back. While a turn runs, `puffin-app` keeps a
         marker named after the server's pid in `$CODEX_HOME/night/busy/`
         (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §8.3). A marker counts when its pid is alive and is
@@ -299,7 +299,7 @@ class NightShiftHost:
             codex_home: `puffin`'s home folder; defaults to the one `puffin` resolves.
 
         Returns:
-            List[int]: The busy servers' process ids.
+            list[int]: The busy servers' process ids.
         """
         busy_dir = Path(codex_home or CodexInstaller.home_dir()) / "night" / BUSY_DIR_NAME
         try:
@@ -318,8 +318,7 @@ class NightShiftHost:
 
     @classmethod
     def _process_alive(cls, pid: int) -> bool:
-        """
-        Signal 0: whether a process exists, without touching it.
+        """Signal 0: whether a process exists, without touching it.
 
         Args:
             pid: The process id.
