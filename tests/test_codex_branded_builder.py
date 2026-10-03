@@ -60,6 +60,9 @@ def test_the_patches_stay_small():
     # tool reaches the local model at all; 32,425 after. Raised to 33,750 on 2026-10-03 for 0019's
     # Full Access hooks (1,261 bytes: the Full Access row disabled at `on` in both permission
     # pickers, and `/airgapped` told whether the session runs in Full Access); 33,686 after.
+    # On 2026-10-03 the user approved a ceiling of 37,500 for two planned patches, the context
+    # budget's masking hook (~0.9 KB) and PUFFIN_APPS' `/apps` hooks (~2.4 KB). The cap is still
+    # raised here only when each lands, by its size as written, with a line saying so.
     assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 33_750
 
 
