@@ -62,8 +62,11 @@ def test_the_patches_stay_small():
     # pickers, and `/airgapped` told whether the session runs in Full Access); 33,686 after.
     # On 2026-10-03 the user approved a ceiling of 37,500 for two planned patches, the context
     # budget's masking hook (~0.9 KB) and PUFFIN_APPS' `/apps` hooks (~2.4 KB). The cap is still
-    # raised here only when each lands, by its size as written, with a line saying so.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 33_750
+    # raised here only when each lands, by its size as written, with a line saying so. Raised to
+    # 34,750 for 0021's observation masking (1,011 bytes: one dependency line, and four lines at the
+    # end of `for_prompt_annotated` that read the size auto-compaction uses and hand it with the
+    # items to the leaf crate puffin-rs/masking); 34,697 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 34_750
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

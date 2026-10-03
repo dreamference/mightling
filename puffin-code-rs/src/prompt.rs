@@ -14,7 +14,7 @@ use crate::paths::Repo;
 pub const READY: &str = "# Code navigation
 
 This repository has a code index, `puffin-code`. Make it your first step whenever you need to find code, before `rg`, `grep`, `find` or reading files:
-- You do not know the name (a bug report, a feature, \"the code that does X\"): `puffin-code search <words>` finds the definitions; then `show <name>` or `outline <file>`.
+- You do not know the name (a bug report, a feature, \"the code that does X\"): `puffin-code search <words>` finds the definitions; then `show <name>`, or `outline <file>` before reading a file you have not seen.
 - You know a name: `puffin-code def <name>` (where it is), `show <name>` (its source), `refs <name>` (every use), `callers <name>` / `callees <name>`, `impl <trait>`.
 - Before you change a definition: `puffin-code impact <name>` (or `--diff`) says what breaks.
 Names may be qualified (`Circle.area`, `config::load`) or given as `path:line`.
@@ -27,7 +27,7 @@ pub const READY_TOOLS: &str = "# Code navigation
 This repository has a code index, behind the `code_*` tools (the same answers as `puffin-code <verb>` in a shell). Make it your first step whenever you need to find code, before `rg`, `grep`, `find` or reading files:
 - You do not know the name (a bug report, a feature, \"the code that does X\"): `code_search` with a few of its words finds the definitions.
 - You know a name: `code_def` (where it is), `code_show` (its source), `code_refs` (every use), `code_callers` / `code_callees`, `code_impl`.
-- `code_outline` lists a file's definitions before you read it; `code_impact` says what breaks before you change a definition.
+- Before reading a file you have not seen, `code_outline` it and `code_show` the definition you need, instead of `cat`; `code_impact` says what breaks before you change one.
 Names may be qualified (`Circle.area`, `config::load`) or given as `path:line`.
 `grep` is for text that is not code: strings, comments, config keys, docs. Rows are tagged `exact`, `heuristic` or `heuristic (text)`; confirm with `grep` when a row is `heuristic`, `unresolved` or `not indexed`, or a `not checked` line appears, and run the build or tests after an edit.";
 

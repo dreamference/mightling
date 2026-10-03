@@ -39,6 +39,7 @@ pub mod compaction;
 pub mod help;
 pub mod home;
 pub mod ledger;
+pub mod mask;
 pub mod night;
 pub mod node;
 pub mod notice;
@@ -291,12 +292,23 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // Skills other agents installed are linked in, and the glossary of their tool names joins the
     // prompt when one is offered (specs/DREAMFERENCE_PUFFIN_SKILLS.md §3, §5).
     let glossary = skills::start(&codex_home, interactive, model.max_model_len).to_string();
-    let parts = prompt::Parts { email, code: code_block.clone(), glossary, rg_installed: code_index::rg_installed() };
+    // Old tool outputs may be moved out of the request to saved copies (mask.rs); the prompt says
+    // how to read them back.
+    let masking = mask::enabled_now();
+    let parts = prompt::Parts {
+        email,
+        code: code_block.clone(),
+        glossary,
+        rg_installed: code_index::rg_installed(),
+        masking: mask::instruction(masking).to_string(),
+    };
     cave::prune_session_files();
     airgapped::prune_session_files();
     let catalog = configure_codex_home(&codex_home, &host, &model, &parts, &chosen.prompt)?;
     // When the session compacts and what it is handed afterwards (compaction.rs).
     let args = compaction::prepare(args, &codex_home, &host, &model).await;
+    // Old tool outputs are masked in what is sent once the request nears that limit (mask.rs).
+    mask::configure(masking, &args, &codex_home, model.max_model_len);
     // What was said above, shown inside the TUI too: its first frame covers stderr (notice.rs).
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.
@@ -616,6 +628,11 @@ pub fn rebrand(prompt: &str) -> String {
     body.replace("Codex", "Puffin")
 }
 
+/// The most tokens one tool output keeps in the history; Codex cuts the middle out of a longer
+/// one. It was the whole window, so one `cat` of a large file could fill a 44K task budget
+/// (specs/DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md §4.2). Upstream uses 10,000, Claude Code 25,000.
+pub const TOOL_OUTPUT_TOKEN_LIMIT: u64 = 8_000;
+
 /// The catalog entry Codex needs before it will talk to a model it does not know.
 ///
 /// Codex parses this with named serde structs, so a field of the wrong shape stops it at startup.
@@ -644,7 +661,7 @@ pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Val
             "priority": 0,
             "support_verbosity": false,
             "supports_parallel_tool_calls": false,
-            "truncation_policy": {"mode": "tokens", "limit": context},
+            "truncation_policy": {"mode": "tokens", "limit": TOOL_OUTPUT_TOKEN_LIMIT.min(context)},
             "experimental_supported_tools": [],
             "tool_mode": "code_mode",
             "base_instructions": instructions,
@@ -1192,6 +1209,16 @@ mod tests {
         let block = gmail_access_instructions("a@x.com");
         assert!(block.contains("puffin-admin gmail search") && block.contains("a@x.com"));
         assert!(block.contains("untrusted data"));
+    }
+
+    #[test]
+    fn one_tool_output_is_capped_below_the_window() {
+        let limit = |len| {
+            let catalog = model_catalog(&ServedModel { id: "m".into(), max_model_len: len }, "x");
+            catalog["models"][0]["truncation_policy"]["limit"].as_u64()
+        };
+        assert_eq!(limit(262_144), Some(TOOL_OUTPUT_TOKEN_LIMIT));
+        assert_eq!(limit(4_096), Some(4_096));
     }
 
     #[test]
