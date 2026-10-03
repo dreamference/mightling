@@ -4,7 +4,7 @@
 **What v2 changed, and why:**
 - **Compaction costs about 104 s here, not 24 s** (§1.8). The v1 time table used COMPACTION §9.2's single-stream 14K figure. With the measured cost, masking is a clear time win at 44K and 49K, not "about even".
 - **A masking move re-prefills from the first masked item,** not from the oldest newly masked one (§1.7). Every move costs about the whole tail, so moves should be rarer and larger: the defaults are now 0.85/0.50 of the limit with a 16,000-token step (§4.1).
-- **v1's trigger could never fire** (§1.9). It measured the view with Codex's byte estimator over the history items, which exclude the base instructions and tool schemas (7–9K tokens) and under-count code. At a 44K limit its "36K" high mark was really about 48K, above the limit. The trigger now uses the quantity auto-compaction itself uses, and the boundary is stored per thread instead of replayed (§4.1).
+- **v1's trigger could never fire** (§1.9). It measured the view with Codex's byte estimator over the history items, which exclude the base instructions and tool schemas (7–9K tokens) and under-count code. At a 44K limit its "36K" high mark was really about 48K, above the limit. The trigger now uses the quantity auto-compaction itself uses, and the boundary is stored per history segment instead of replayed (§4.1).
 - **The placeholder points to a saved copy** of the output instead of telling the model to run the command again, which is wrong for anything that edits files or takes minutes (§4.1, after Manus and Cursor in §2).
 **Question asked:** in the index arm of the benchmark, sympy-18211 made 216 calls with 247K characters of tool output against 86 and 66K without the index, compacted three times against none, and the summaries lost what had been found. Does the code index put too much noise into the context, could something like `rtk` make the output brief, and what fixes it?
 **Short answer:**
@@ -18,7 +18,7 @@
 - [PUFFIN_COMPACTION](./DREAMFERENCE_PUFFIN_COMPACTION.md): the limits (§4.1, §4.2) and the rule-built ledger re-injected after a compaction (§10.1). Masking reduces how often compaction runs; the ledger improves what survives when it does. The idea of keeping the last reproduction in the ledger belongs there, not here.
 - [PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md): `puffin-code`'s MCP tools and their output format.
 - [PUFFIN_SWE_BENCH](./DREAMFERENCE_PUFFIN_SWE_BENCH.md) §13.6: the pair measured here.
-- The patch series in `codex-patches/`: one more one-line hook (§4.1).
+- The patch series in `codex-patches/`: one more small hook, within the 37,500-byte ceiling the user approved on 2026-10-03 (§4.1).
 
 ---
 
@@ -116,14 +116,14 @@ The probe was one stream on an idle server. Under three concurrent sessions the 
 
 ### 1.8 What a compaction costs here
 
-Measured from the 42 compactions in the pair: the time from the response before the compaction request to the `compacted` record.
+Measured from the pair's 42 compactions: for the 26 whose compaction request is identifiable in the rollout (it reports nothing cached), the time from the response before it to the `compacted` record; for all 42, the first request after.
 
 | | Median | p25 | p75 |
 |---|---|---|---|
 | Compaction request (prefill of ~39.5K tokens, then the summary) | **96 s** | 70 s | 132 s |
 | First request after it | 8 s | | |
 
-- **The compaction request starts with nothing cached** in at least 26 of the 42, so it prefills the whole history, about 39.5K tokens. Its prefix differs from the session's from the first tokens: it is built with `..Default::default()` (`core/src/compact.rs`), so it carries no tools, and the chat template renders the tools at the head of the prompt.
+- **The compaction request starts with nothing cached** (those 26), so it prefills the whole history, about 39.5K tokens. Its prefix differs from the session's from the first tokens: it is built with `..Default::default()` (`core/src/compact.rs`), so it carries no tools, and the chat template renders the tools at the head of the prompt.
 - **The summary is long:** median 5,366 characters, up to 12,195, generated at decode speed.
 - **The first request after** often re-prefills its whole 13K too (above).
 
@@ -248,6 +248,8 @@ At Night Shift's 49,152 the index arm goes from 29.5 to 20.3–21.2 minutes and 
 
 Set `truncation_policy.limit` in the catalog to **8,000** tokens (about 30,000 characters), not the whole context. Upstream uses 10,000, Claude Code 25,000. It changes nothing measured here (the largest output was about 2K tokens) and stops one `cat` of a large file from filling a 44K budget. One line in `puffin-rs/src/lib.rs`, and a test.
 
+**Later, the same cap without the loss.** Codex's truncation cuts the middle of the output when it is recorded, so the cut part is gone from the history and the rollout. Once the hook of §4.1 exists it can do better, as Cursor does (§2): leave `truncation_policy` as a backstop well above 8,000 tokens, and have the hook show any output over 8,000 tokens as its first and last 40 lines plus the path of its saved copy, from the first request that carries it. That view never changes afterwards, so it costs the prefix cache nothing, and the full text stays one ranged read away. Phase 2, since no output measured here came near the cap.
+
 ### 4.3 Do: `puffin-code`'s own output
 
 `puffin-code` is ours, so its format is the cheapest lever, but a small one: all `code_*` output is 23% of the index arm.
@@ -327,7 +329,7 @@ Interactive sessions are not the target, and nothing here should be read as a ge
 
 **Phase 1 acceptance, the A/B.** On a rebuilt `puffin`, the same 14 instances at 44K, four arms: index with masking (0.85/0.50/16K), index without, plain without, and the plain arm repeated for noise. If the machine's time allows, a fifth: index with v1's 0.82/0.55/8K. Report per arm: compactions, moves, `cached_tokens` after each move, re-read characters across compactions, reads of saved copies and re-runs of masked commands, tool output per kind, agent time, resolved. Masking ships on by default for Night Shift and the benchmark if compactions fall by at least a third and neither resolved instances nor agent time get worse beyond the plain arm's repeat-to-repeat spread. The number of resolved instances is reported, not claimed: at 14 instances a difference of two is noise (SWE_BENCH §13.5).
 
-**Phase 2.** Masking old long commands (§4.1); a 60-line `code_show`; `code_search` row caps; three tools instead of nine if the call counts hold.
+**Phase 2.** Masking old long commands (§4.1); the lossless cap of §4.2; a 60-line `code_show`; `code_search` row caps; three tools instead of nine if the call counts hold.
 
 **Phase 3.** §4.5, after Phase 1 shows what remains.
 
