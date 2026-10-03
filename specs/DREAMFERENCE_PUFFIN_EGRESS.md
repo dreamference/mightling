@@ -226,7 +226,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 
 ### 10.4 Not built
 
-- **§8's acceptance on a build without `0015`**: needs a second build of `puffin`; the failing case is covered by the fixture only. For `--tui` this matters more than for `exec`: the announcement fetch that only the interface made is closed in every build that exists, so **no real trace of the interface has ever failed**, and that it would is argued from the parser's tests, not shown.
+- ~~**§8's acceptance on a build without `0015`**~~ Done on 2026-10-03. A scratch build of the same tree with every patch except `0015` (built in `~/.cache/dreamference/puffin-codex/no0015`, the installed build untouched) **fails `audit egress --tui` with exit 1**, naming all four channels: DNS lookups of `ab.chatgpt.com` (the metrics exporter), `git ls-remote` and a fetch of `github.com/openai/plugins`, `raw.githubusercontent.com` (the announcement tip only the interface fetches), and a connect to `127.0.0.1:9`, reported as a ChatGPT-backend call no patch closes. The installed build passed the same audit the same day (model server and Gmail only, no DNS). Results: `~/.puffin/audit/20261003-131301-tui.json` (pass) and `20261003-132456-tui.json` (fail). That run's file listed `0015` among the patches, because the result recorded the checkout's patches rather than the traced binary's; since then the result names the traced binary and its SHA-256, and records the patch list only when the binary is the installed build and that build matches the checkout.
 - **Phase 2**, the airlock and its ledger (§4): its switch is now the `on` level of `/airgapped`.
 
 ### 10.5 The interface, and the audit after a build (2026-10-02)

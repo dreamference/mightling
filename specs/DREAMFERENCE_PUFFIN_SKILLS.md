@@ -398,7 +398,7 @@ No skill failed without the block, so by §5's own rule it does not ship on: it 
 - **Phase 0 item 1 in full:** one real skill from each of the five catalogues.
 - **No `puffin skill update`** (by design, §6.2) and no command for the glossary setting; it is a key in `puffin-skills.toml`.
 - **macOS and Windows.** The crate compiles its links for both (`symlink_dir` on Windows needs Developer Mode or elevation) but was built and tested on Linux only.
-- **Not run with a build that carries this code:** the start-up pass inside `puffin` itself, and `puffin skill` from a shell. The pieces were run separately: the crate's and the launcher's tests, the link layout and the `config.toml` entries by hand against the installed build (above), and the plan read-only against this machine's folders. `puffin` has to be rebuilt (`puffin-admin codex build`) before `puffin skill` exists.
+- ~~**Not run with a build that carries this code**~~ Run on 2026-10-03 with the installed build (Phases 1 and 2). `puffin skill list` from a shell listed 27 skills at 4,256 of the 5,242-token budget. From an empty start (no `from-claude`, no `[[skills.config]]`), one `puffin exec` created the 13 `from-claude` links, `synced/<account>/` ones included, and wrote the entry switching off `.system/skill-creator`, which Claude's copy shadows; asked which skills came from Claude Code, the model named exactly those 13. With the `docx` link removed and a folder planted at `from-claude/planted/`, the next `exec` restored the link and moved the planted folder to `.quarantine/<timestamp>/`. Phase 3 (§15) has not yet been run in a built `puffin`.
 
 ### 15.5 Tests
 
