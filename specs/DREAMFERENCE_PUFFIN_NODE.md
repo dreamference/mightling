@@ -48,7 +48,7 @@ Checked on this GB10 (`gx10-1a2b`, Wi-Fi address `192.168.50.105`) on 2026-10-01
 | Does the service type work? | `avahi-publish -s puffin-spec-probe _puffin-node._tcp 8000 proto=1 version=1.2.0 node=… web=3000 search=8888`, run as an ordinary user, was browsed back with `avahi-browse -rtp`: it resolved to `gx10-1a2b.local`, `192.168.50.105`, port 8000, with all five TXT records. |
 | Which interfaces does Avahi advertise on? | All of them: the Wi-Fi interface, loopback, both Docker bridges and every container veth. mDNS is per link, so LAN clients see only the Wi-Fi record. |
 | Is the model server already reachable from the LAN? | Yes: `http://192.168.50.105:8000/v1/models` answers 200 (it binds `0.0.0.0:8000`, accepted by design). |
-| What else listens beyond loopback? | Nothing of Puffin's. The web UI (3000, 80), SearXNG (8888), Gmail (8767), image search (8768), speech-to-text (8100) and the diffusion sidecar (8001) are all on `127.0.0.1`. |
+| What else listens beyond loopback? | Nothing of Puffin's. The web UI (3000, 80), SearXNG (8888), Gmail (8767), image search (8768), speech-to-text (8100) and the diffusion sidecar (8001; switched off since 2026-10-03) are all on `127.0.0.1`. |
 | Does the web UI accept a non-localhost `Host`? | Yes: `/app` answers 200 for `Host: 192.168.50.105:3000` and `Host: gx10-1a2b.local:3000` as for `localhost:3000`. |
 | Do the model containers come back after a reboot with nobody logged in? | Their restart policy is `unless-stopped` (model server, SearXNG, nginx). The user's systemd lingering is **off**, so a user unit would not run before login. |
 | Can Codex be built for the client platforms? | Upstream's release workflows build `aarch64`/`x86_64` for `apple-darwin` and `unknown-linux-musl`, and `x86_64`/`aarch64-pc-windows-msvc` in a separate Windows workflow. The pinned V8 manifests (`third_party/v8/rusty_v8_150_4_0_release_manifests.sha256`) list pointer-compression-and-sandbox builds for all of them plus `linux-gnu`. Read from the submodule; **never built here**. |
@@ -77,7 +77,7 @@ Not checked, and so the first work of Part 1 (Phase 0 in §14):
 | `puffin-search`, `puffin-fetch` | Rust | ✔ | ✔ |
 | `puffin-code` (code index) and its pinned tools | Rust, tools installed by `puffin-admin code setup` | ✔, tools installed by `puffin-code setup` (§8.3) | ✔ |
 | `puffin-app` (desktop window) | Tauri, Linux | ✔ | ✔ |
-| Model server (SGLang or vLLM), diffusion sidecar | Docker | | ✔ |
+| Model server (SGLang or vLLM), diffusion sidecar (switched off since 2026-10-03) | Docker | | ✔ |
 | SearXNG, speech-to-text, image search, Gmail service | Docker sidecars | | ✔ |
 | Web UI (Onyx Lite stack) | Docker | | ✔ |
 | `puffin-admin` (Python): `server`, `model`, `puffin`, `night`, `swe-bench`, `audit`, `mcp`, … | Python package | | ✔ |
@@ -100,7 +100,7 @@ A node that is not advertised keeps today's binds. `puffin-admin node enable` (�
 | Web UI (nginx), 80 | `127.0.0.1` | unchanged | nobody remote |
 | SearXNG, 8888 | `127.0.0.1` | `0.0.0.0` | `puffin-search` on clients |
 | Gmail service, 8767 | `127.0.0.1` | unchanged | node only (§10) |
-| Diffusion sidecar, 8001 | `127.0.0.1` | unchanged | node only |
+| Diffusion sidecar, 8001 (switched off since 2026-10-03) | `127.0.0.1` | unchanged | node only |
 | Speech-to-text 8100, image search 8768 | `127.0.0.1` | unchanged | the web UI's own containers |
 
 **This reverses two fixes of 2026-09-29**, deliberately:
@@ -732,7 +732,7 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 
 **Run live (2026-10-02)**, with this GB10 as sender and node and the test `sshd` of §18.6:
 - `node run` pushed a commit through the forced command, which created `jobs/job-repo-<digest>.git` and ran `git-receive-pack` for it.
-- **Through the real unit the job was refused, and that is a finding about this machine, not about jobs.** `kernel.apparmor_restrict_unprivileged_userns` is 1 and `/etc/apparmor.d` has no profile for bubblewrap, so a process that AppArmor counts as unconfined cannot create the user namespace bubblewrap needs: `bwrap: setting up uid map: Permission denied`. A unit of the user's service manager is unconfined, which is what was measured; an SSH login and an ordinary terminal should be too, and were not tried. Everything in this repository that uses bubblewrap has so far been run from the PyCharm terminal, whose processes carry the profile `snap.pycharm.pycharm (complain)`, where it is allowed. **Codex's own sandbox fails the same way**: `puffin sandbox -- sh -c 'echo x'` prints `x` from that terminal and `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` from a user service. So a Night Shift run started by its timer would have every sandboxed command fail on this machine, and so, if an ordinary terminal is unconfined as expected, would `puffin` typed in one. The fix needs root (an AppArmor profile with `userns,` for the installed `puffin` and for `/usr/bin/bwrap`, or the sysctl), belongs with the host checks of `server start`, and was not applied.
+- **Through the real unit the job was refused, and that is a finding about this machine, not about jobs** (fixed on 2026-10-03: `puffin-admin host setup` installs an AppArmor profile for `/usr/bin/bwrap`, loaded and verified here, SETUP §3.3; the job has not been re-run through the unit since). `kernel.apparmor_restrict_unprivileged_userns` is 1 and `/etc/apparmor.d` has no profile for bubblewrap, so a process that AppArmor counts as unconfined cannot create the user namespace bubblewrap needs: `bwrap: setting up uid map: Permission denied`. A unit of the user's service manager is unconfined, which is what was measured; an SSH login and an ordinary terminal should be too, and were not tried. Everything in this repository that uses bubblewrap has so far been run from the PyCharm terminal, whose processes carry the profile `snap.pycharm.pycharm (complain)`, where it is allowed. **Codex's own sandbox fails the same way**: `puffin sandbox -- sh -c 'echo x'` prints `x` from that terminal and `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` from a user service. So a Night Shift run started by its timer would have every sandboxed command fail on this machine, and so, if an ordinary terminal is unconfined as expected, would `puffin` typed in one. The fix needs root (an AppArmor profile with `userns,` for the installed `puffin` and for `/usr/bin/bwrap`, or the sysctl), belongs with the host checks of `server start`, and was not applied.
 - **With the node's code run in the terminal's context**, the same job ran end to end: worktree `~/.puffin/jobs/<id>/tree`, home folder holding only `.puffin`, three lines of output a second apart, the test command passing, a commit `Job Test <job-test@localhost> job: python3 work.py` on `job/<id>` changing `data.txt` and adding `result.txt`, 3 s wall. `node fetch` brought the branch into the sender's repository, whose checkout stayed on `master` with `data.txt` unchanged, and `node jobs` listed both jobs through the pairing.
 - The test jobs and their repository were removed from `~/.puffin/jobs` afterwards.
 
