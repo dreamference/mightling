@@ -1,16 +1,16 @@
-# Puffin Desktop — the Codex desktop app's shape, on `puffin app-server`
+# Puffin Desktop — the Codex desktop app's shape, on `puffin app-server`, grown from today's `puffin-app`
 
-**Status:** proposed on 2026-10-03. Nothing here is built. §1 was read from OpenAI's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`); §3's CodexMonitor facts are from its repository, not from a build. Every claim about how either app *behaves* is marked as read, not run, and Phase 0 (§10) runs them.
+**Status:** proposed on 2026-10-03, revised the same day after an advisor review. Nothing here is built. §1 was read from OpenAI's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`). §2 lists the Codex app's features from the launch announcement (read from the Wayback Machine's copy; the page itself answers 403 and its videos could not be analysed, only their captions) and OpenAI's documentation and third-party write-ups. **§5 records what was measured on this GB10 on 2026-10-03** by driving the installed `puffin app-server` over stdio from a script; everything else about behaviour is marked as read, not run.
 
-**Goal:** make Puffin's desktop app work the way OpenAI's Codex desktop app does — a desktop client that drives the agent through Codex's **app-server** (JSON-RPC over stdio), with the same projects → threads → turns model, the same composer, approvals, diffs, worktrees, review and terminal — and look and feel as close to it as Puffin's constraints allow (§2). Today `puffin-app` is a window on the Onyx web chat (DREAMFERENCE_ONYX, `desktop/`); it has no coding agent in it at all.
+**Goal:** make Puffin's desktop app work the way OpenAI's Codex desktop app does — a desktop client that drives the agent through Codex's **app-server** (JSON-RPC over stdio), with the same projects → threads → turns model, the same composer, approvals, diffs, review, worktrees and terminal — and **get there by growing today's `puffin-app` in place, never breaking it**. Today `puffin-app` (`desktop/`) is a window on the Onyx web chat with no coding agent in it. That window stays exactly as it is and becomes the app's **Chat** window; the coding agent arrives beside it as the **Work** window.
 
 **Builds on:**
-- `puffin` itself: the launcher in `puffin-rs/` resolves the model server, writes the model catalog, the prompt blocks and `config.toml`, and every Codex hook Puffin has (cave mode's extension is already registered in the app-server, patch `0017`; MCP tools as plain functions, `0020`; the air-gap sandbox hook, `0019`) applies to app-server clients because they are Codex's;
-- the Tauri shell in `desktop/` and its hard-won WebKitGTK settings (CLAUDE.md, "The webview's own environment lives in `src-tauri/src/main.rs`");
+- `puffin` itself: the launcher in `puffin-rs/` resolves the model server, writes the model catalog, the prompt blocks and `config.toml`; every Codex hook Puffin has (cave mode's extension, patch `0017`; MCP tools as plain functions, `0020`; the air-gap sandbox hook, `0019`) applies to app-server clients because they are Codex's;
+- the Tauri shell in `desktop/`: `main.rs` (the WebKitGTK environment), `forwarder.rs` and `discover.rs` (a client reaching its node's web UI), `auto_sign_in.js`;
 - `puffin app`, the launcher's entry to the window (`puffin-rs/src/app.rs`);
-- PUFFIN_APPS (Gmail and Drive through `/apps`, on branch `spec/puffin-apps`), PUFFIN_NIGHT_SHIFT, PUFFIN_AIRGAPPED, PUFFIN_NODE.
+- PUFFIN_APPS (Gmail and Drive through `/apps`), PUFFIN_NIGHT_SHIFT, PUFFIN_AIRGAPPED, PUFFIN_NODE, PUFFIN_CAVE_MODE, PUFFIN_SKILLS.
 
-**Needs no Codex patch for Phases 1–2,** with one exception that Phase 0 decides (§7.2, the air-gap check on `thread/start`).
+**Codex patches:** none for Phase 1. Phase 2 needs at most two one-line hooks, each counted against the patch cap and decided in Phase 0: the air-gap check on the app-server's thread and turn paths (§8.2), and `/app` from the TUI on Linux (§6.9).
 
 ---
 
@@ -19,206 +19,385 @@
 | What | Found |
 |---|---|
 | Package | `chatgpt` 26.930.31730, arm64, maintainer OpenAI, homepage `developers.openai.com/codex/app`; 1.5 GB installed. Adds OpenAI's apt repository and an AppArmor profile |
-| Shell | An Electron app on OpenAI's "owl" Chromium runtime (`owl-electron-app.json`: packaged from `codex/codex-apps/electron` in OpenAI's private monorepo). User data directory `Codex`. Main process in `app.asar` (`.vite/build/*.js`), UI a React bundle under `webview/` |
-| The agent | **A bundled `codex` binary** (`resources/codex`, `codex-cli 0.160.0`, statically linked), plus `codex-code-mode-host`, `rg` and `tectonic` (LaTeX) beside it |
-| How it runs the agent | Spawns **`codex -c features.code_mode_host=true app-server --analytics-default-enabled`** and speaks JSON-RPC over **stdio** (`kind: stdio`). Alternatives in the same code: a WebSocket URL (`CODEX_APP_SERVER_WS_URL` or `hostConfig.websocket_url`), a shared local daemon (`codex app-server daemon`, behind `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`), and host kinds `local`, `wsl`, `ssh` and `remote-control` |
-| Which binary | **`CODEX_CLI_PATH` overrides the bundled one**, as does `hostConfig.codex_cli_command`. `CODEX_APP_SERVER_CHATGPT_BASE_URL` and `CODEX_APP_SERVER_OPENAI_BASE_URL` become `-c chatgpt_base_url=…` / `-c openai_base_url=…` |
-| Handshake | `initialize` with `clientInfo: {name: "codex_desktop", title: "Codex Desktop"}` and `capabilities: {experimentalApi: true}`. The app-server treats a stdio client named `Codex Desktop` specially only for device user-verification (`initialize_processor.rs:107`), and on Windows for uninstall registration |
-| Sign-in gate | The UI computes `requiresAuth = account.requiresOpenaiAuth ?? true`. The app-server answers `account/read` with `requiresOpenaiAuth = config.model_provider.requires_openai_auth` (`account_processor.rs:1051`), which is **false for a local provider**. So the gate is the provider's, not the UI's — read, not run |
+| Shell | An Electron app on OpenAI's "owl" Chromium runtime (`owl-electron-app.json`, packaged from `codex/codex-apps/electron` in OpenAI's private monorepo). User data directory `Codex`. Main process in `app.asar` (`.vite/build/*.js`), UI a React bundle under `webview/` |
+| The agent | **A bundled `codex` binary** (`resources/codex`, `codex-cli 0.160.0`, statically linked), plus `codex-code-mode-host`, `rg` and `tectonic` beside it |
+| How it runs the agent | Spawns **`codex -c features.code_mode_host=true app-server --analytics-default-enabled`** and speaks JSON-RPC over **stdio**. Alternatives in the same code: a WebSocket URL, a shared local daemon (`codex app-server daemon`), and host kinds `local`, `wsl`, `ssh` and `remote-control` |
+| Which binary | **`CODEX_CLI_PATH` overrides the bundled one**, as does `hostConfig.codex_cli_command` |
+| Handshake | `initialize` with `clientInfo: {name: "codex_desktop", title: "Codex Desktop"}` and `capabilities: {experimentalApi: true}`. The app-server treats a stdio client named `Codex Desktop` specially only for device user-verification, and on Windows for uninstall registration |
+| Sign-in gate | The UI computes `requiresAuth = account.requiresOpenaiAuth ?? true`; the app-server answers from the model provider. **Measured against `puffin app-server`: `requiresOpenaiAuth: false`** (§5) |
+| Git, worktrees, terminal emulation | In the window's main process, not the app-server: the protocol has no commit, push, worktree or PR method (§5) |
 | Bundled extras | Plugins `browser`, `chrome`, `code-review`, `codex-app-tools`, `deep-research`, `latex`, `unified-computer-use`, `visualize`; a computer-use runtime (`cua_node`, 203 MB); skills; notification sounds |
 | Telemetry | The UI bundles reference Statsig 189 times, Sentry 130 times and `ab.chatgpt` 4 times; the agent is started with `--analytics-default-enabled` |
 
-The app-server it drives is the one in our submodule. Its client surface (`app-server-protocol/schema/typescript/ClientRequest.ts`, 637 generated v2 types) covers everything the app shows: `thread/start|resume|fork|archive|delete|list|read|name/set|revert|compact/start|shellCommand`, `turn/start|steer|interrupt`, `review/start`, `model/list`, `skills/list`, `plugin/*`, `marketplace/*`, `app/*`, `fs/*` (read, write, watch), `command/exec` (with stdin, resize and terminate: a terminal), `config/read`, `config/value/write`, `mcpServerStatus/list`, `permissionProfile/list`, `account/*`, `feedback/upload`. Approvals and streamed items come back as server requests and notifications. `codex app-server generate-ts` writes these types for whatever binary runs it.
+The app-server it drives is the one in our submodule. Its client requests (`app-server-protocol/schema/typescript/ClientRequest.ts`) are: `thread/start|resume|fork|archive|unarchive|delete|list|loaded/list|read|items/list|turns/list|name/set|metadata/update|revert|compact/start|shellCommand|inject_items|unsubscribe|approveGuardianDeniedAction`, `thread/goal/get|set|clear`, `thread/attachment/add|list|remove`, `threadSection/*`, `turn/start|steer|interrupt`, `review/start`, `model/list`, `modelProvider/capabilities/read`, `skills/list|config/write|extraRoots/set`, `plugin/*`, `marketplace/*`, `app/*`, `hooks/list`, `fs/*` (read, write, copy, remove, metadata, watch), `fuzzyFileSearch`, `gitDiffToRemote`, `command/exec|write|resize|terminate` (with `tty` and a PTY size: a terminal), `config/read|value/write|batchWrite|mcpServer/reload`, `configRequirements/read`, `mcpServerStatus/list`, `mcpServer/tool/call|resource/read|oauth/login`, `permissionProfile/list`, `experimentalFeature/list|enablement/set`, `externalAgentConfig/detect|import`, `account/*`, `feedback/upload`, `getConversationSummary`. Approvals and streamed items come back as server requests and notifications. `codex app-server generate-ts [--experimental]` writes the TypeScript types for whatever binary runs it.
 
-**What follows from this:** the Codex desktop app is a client of a published, open protocol, served by an open binary. Everything that makes it a *coding agent* is on our side of that line already. What is OpenAI's own is the window: its layout, its interaction design and its proprietary extras.
+**What follows:** the Codex desktop app is a client of a published, open protocol, served by an open binary. Everything that makes it a *coding agent* is on our side of that line. What is OpenAI's own is the window — its layout, its interaction design, its git and terminal plumbing, and its proprietary extras.
 
 ---
 
-## 2. What "identical" can and cannot mean here
+## 2. What the Codex app offers (the feature inventory)
+
+**From the launch announcement** (2 February 2026, macOS; Windows on 4 March 2026): "a command center for agents".
+- **Multiple agents in parallel:** "agents run in separate threads organized by projects, so you can seamlessly switch between tasks without losing context."
+- **Review in the thread:** "review the agent's changes in the thread, comment on the diff, and even open it in your editor to make manual changes."
+- **Worktrees:** "multiple agents can work on the same repo without conflicts … you can check out changes locally or let it continue making progress without touching your local git state."
+- **Shared history:** "the app picks up your session history and configuration from the Codex CLI and IDE extension."
+- **Skills:** "a dedicated interface to create and manage skills"; invoked explicitly or chosen automatically; a library (Figma, Linear, Cloudflare/Netlify/Render/Vercel deploys, GPT Image, OpenAI docs, PDF/spreadsheet/docx); skills made in the app work in the CLI and IDE; checked into a repository for a team.
+- **Automations:** "work in the background on an automatic schedule … instructions with optional skills … when an Automation finishes, the results land in a review queue."
+- **Personality:** "a terse, pragmatic style and a more conversational, empathetic one," chosen with `/personality`.
+- **Security:** the CLI's sandbox, cached web search by default, approval for elevated commands, project or team **rules** that let named commands run elevated.
+- **Video captions** (the videos themselves were not analysable): "Updating a website using the Vercel and image generation skills"; "Creating a spreadsheet to generate shopping lists using the spreadsheet skill"; "Setting up an automation to periodically create new skills"; a 3D racing game built from one prompt over 7 million tokens, with Codex "playing the game" to test it.
+
+**Added since, from OpenAI's documentation and changelog and third-party write-ups:** local / worktree / cloud execution modes and **hand-off** of a thread between Local and Worktree; a **review pane** with staged and unstaged diffs, stage / unstage / revert per file and per hunk, split or unified view, inline comments sent to the composer; **commit, push and "Create pull request"**; **"Open in"** an editor, terminal or file manager; **IDE extension sync** (the app follows the files open in the editor); an **integrated terminal** per thread (Cmd+J); a **command palette** (Cmd+K); **voice dictation**; **pop-out windows**; **queued follow-ups and steering** while a turn runs; editing the previous message (Esc twice); a **context-usage indicator** with a Compress action; **plan mode**; **thread fork**; **local environments** with setup scripts and **project actions**; **notifications**, prevent-sleep; an **artifact viewer** (documents, spreadsheets, images), **sites**; an **in-app browser** and **computer use**; image inputs and generation; web search; **MCP servers**, **plugins**, **apps** (connectors); settings pages and keyboard shortcuts; **Chat/Work** modes in the ChatGPT desktop app; `/app` in the CLI to continue a session in the app.
+
+§6 maps every one of these.
+
+---
+
+## 3. What "identical" can and cannot mean here
 
 | Constraint | Consequence |
 |---|---|
 | Puffin talks to no OpenAI service (patches `0013`, `0015`, `0016`; the egress audit) | No ChatGPT sign-in, no `codex_apps`, no cloud tasks, no rate-limit or credits UI, no Statsig, no Sentry |
 | OpenAI's app is proprietary and not ours to redistribute | Puffin cannot ship it, its webview bundle, its icons, sounds or strings |
-| Puffin is AGPL-3.0 | Anything we fork must be licence-compatible (MIT and Apache-2.0 are) |
+| Puffin is AGPL-3.0 | Anything we take must be licence-compatible (MIT and Apache-2.0 are) |
 | The model is local and smaller | Features that need OpenAI's hosted models (image generation, deep research, OpenAI's computer-use model) have nothing to call |
-| The webview is WebKitGTK, not Chromium | The in-app browser and Chromium-specific behaviour cannot be reproduced one to one |
+| The webview is WebKitGTK, not Chromium | OpenAI's agent-driven browser plugin cannot be reproduced. A **preview pane** showing a local dev server is just another webview and can be |
+| Today's `puffin-app` has users | Its window, its address, its sign-in and its client forwarding must keep working through every phase (§4.1) |
 
-So "as close as possible" means: **the same architecture** (an app-server client over stdio), **the same information architecture and interaction model** (projects, threads, a composer, item-by-item streaming, inline approvals, a diff and review pane, worktrees per thread, terminal tabs, settings that write `config.toml`), **the same keyboard shortcuts and slash commands where they apply**, and **sessions shared with the TUI** as OpenAI's app shares them with its CLI. Not the same pixels, and not OpenAI's trade dress: Puffin's own name, icon (`OnyxBrandAssets.render_app_icon()`), colours and copy.
-
----
-
-## 3. Three ways to get there
-
-### 3.1 Run OpenAI's app on `puffin` — rejected
-
-`CODEX_CLI_PATH=~/.local/bin/puffin chatgpt` would, as read, start `puffin app-server` under OpenAI's window, and the local provider would switch the sign-in gate off. It is the most faithful option and must not be the product:
-- the window itself is OpenAI's: its own Statsig and Sentry clients, its own updater and apt repository, and a ChatGPT-first UI. The egress audit would fail on the window even if the agent never left the machine;
-- it passes `--analytics-default-enabled` to the agent;
-- it cannot be shipped, so every user would install OpenAI's package and configure an environment variable.
-
-It is still useful once, as the **reference** (§10, Phase 0): run it against `puffin app-server` on a scratch home with the network namespace cut, and record each screen it reaches and each request it sends. That is how "as close as possible" gets measured instead of guessed. Nothing from it goes into Puffin.
-
-### 3.2 Fork CodexMonitor — chosen as the starting point
-
-[CodexMonitor](https://github.com/Dimillian/CodexMonitor) (Thomas Ricouard, **MIT**) is an open-source desktop client of the Codex app-server: Tauri with a Rust backend and a TypeScript/React/Vite frontend, which is Puffin's desktop stack already. It spawns `codex app-server` over stdio with a configurable binary path, and has workspaces and threads (resume, pin, rename, archive), per-thread drafts and interrupt, worktree and clone agents, git diff stats, branches and GitHub PR and issue views, a file tree, a prompt library, image attachments, autocomplete for skills, prompts and paths, a model picker, Whisper dictation, a terminal dock, and a remote daemon mode. It builds for Linux.
-
-Forking it saves the protocol plumbing and most of the panels; what changes is the **layout**, reshaped to the Codex app's (§5), the brand, and everything §6 adds. Its differences from OpenAI's app (one app-server per *workspace*, a "monitor" sidebar) are UI decisions, not protocol ones.
-
-### 3.3 Write it from scratch — the fallback
-
-Tauri + React on types generated from our pinned binary (`puffin app-server generate-ts`). Cleanest code, every layout decision ours, and about three times the work. It is the fallback if Phase 0 finds CodexMonitor's structure fights the Codex app's layout more than it helps, or its protocol use is too far from our pinned 0.158.0.
-
-**Either way, the protocol types are generated from the `puffin` binary the release ships,** never copied from CodexMonitor's or OpenAI's newer Codex: OpenAI's app bundles 0.160.0 and our pin is 0.158.0, and the protocol moves between releases. A test regenerates them at build time and fails on a diff.
+So "as close as possible" means: **the same architecture** (an app-server client over stdio), **the same information architecture and interaction model** (projects, threads, a composer, item-by-item streaming, inline approvals, a review pane, worktrees per thread, terminal tabs, settings that write `config.toml`), **the same keyboard shortcuts and slash commands where they apply** (§6.10), and **sessions shared with the TUI** as OpenAI's app shares them with its CLI. Not the same pixels, and not OpenAI's trade dress: Puffin's own name, icon (`OnyxBrandAssets.render_app_icon()`), colours and copy.
 
 ---
 
-## 4. Architecture
+## 4. The approach: grow `desktop/` in place
+
+**Chosen: evolve the existing Tauri project.** `desktop/` stays the project, `puffin-app` (`dev.dreamference.puffin`) stays the binary, and nothing a user has today changes until Work passes its Phase 1 acceptance.
+
+- **[CodexMonitor](https://github.com/Dimillian/CodexMonitor)** (Thomas Ricouard, **MIT**, Tauri + React, an app-server client with threads, worktrees, diffs, a terminal dock and dictation) is a **parts bin, not a fork**: the stdio bridge, the thread list, item rendering and the terminal dock are taken file by file where they fit, with its MIT notice kept in `desktop/LICENSES/`. Its layout (one app-server per workspace, a "monitor" sidebar) is not taken.
+- **Writing the rest from scratch** on types generated from our pinned binary (§4.4) is the default for everything CodexMonitor does not already do well.
+- **Running OpenAI's app on `puffin` is rejected** as the product (§4.6).
+
+### 4.1 What stays exactly as it is
+
+- The window labelled **`puffin`** on `http://localhost:3000/app` — Onyx, its patches, its fonts, its injected scripts — **is the Chat window**, unchanged.
+- `main.rs`'s webview environment (`WEBKIT_DISABLE_DMABUF_RENDERER`, `GTK_THEME`), `forwarder.rs`, `discover.rs`, `node_locator.rs` and `auto_sign_in.js`, unchanged.
+- `puffin app` with no arguments keeps opening the Chat window **until Work's Phase 1 acceptance passes**; then it opens Work, and Chat is one click (and one shortcut) away. People who never open Work keep everything they have.
+- A test loads the Chat window exactly as today (its URL, its sign-in script, the forwarder path on a client) and fails on any difference.
+
+### 4.2 What changes in the current code
+
+| Where | Today | Becomes |
+|---|---|---|
+| `tauri.conf.json` windows | one window, `puffin`, external URL | two: `puffin` (Chat, unchanged) and **`work`** (bundled UI, `WebviewUrl::App`), Work hidden until enabled |
+| `tauri.conf.json` `frontendDist` | `../dist`, which does not exist | the Work UI's build output (`desktop/ui/dist`), built by `puffin-admin desktop build` |
+| `tauri.conf.json` `security.csp` | `null` | for Work: `default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: data:` (no remote script, style, font or connect). Chat keeps no CSP of ours: it is Onyx's page |
+| `capabilities/` | none | one capability, **Work window only**, granting the bridge's commands. Chat gets no capability: Tauri gives a remote-URL webview no IPC unless a capability names its URL (read from `tauri` 2.11.5, `ipc/authority.rs`), so Onyx's page cannot reach the agent |
+| `src-tauri/src/` | `main.rs`, `discover.rs`, `forwarder.rs`, `node_locator.rs` | + `bridge.rs` (the app-server process and JSON-RPC routing), `git.rs` (worktrees, staging, commit, push), `pty.rs` only if `command/exec`'s terminal proves insufficient |
+| `puffin-rs/src/app.rs` | refuses to open on a node when Onyx is down; ignores a folder argument | refuses only when **the window being opened** needs a missing service (Chat needs Onyx; Work needs the model server, and shows its own waiting screen instead of refusing); `puffin app <folder>` opens Work on that project; `puffin app --thread <id>` opens that thread |
+| `puffin-rs/src/lib.rs` | `app-server` waits for the model and gets `--oss --model <id>`, which it ignores (§5) | `app-server` gets **`-c model="<id>"`**; `app-server generate-ts` and `generate-json-schema` are offline (`COMMANDS_WITHOUT_MODEL`) |
+| `dreamference/night_shift/night_shift_host.py` | `app-server` and `app` are in `NON_INTERACTIVE`: an app-server never holds a night run back | a live **turn** in Work holds it back; an idle open window does not (§8.3) |
+
+Two windows, not one window with two webviews: a child webview (`Window::add_child`) is behind Tauri's `unstable` feature (read from `tauri` 2.11.5), and a second top-level window is stable. The Chat/Work toggle (§6.1) therefore raises the other window, in the same position and size, rather than swapping a pane. If `unstable` multi-webview is ever stabilised, the toggle can become a pane without changing anything else.
+
+### 4.3 The bridge
 
 ```
 puffin-app (Tauri)
- ├─ Work  — bundled React UI ──Tauri IPC──► Rust bridge ──stdio JSON-RPC──► puffin app-server
- │                                                                            (the launcher, then Codex)
- └─ Chat  — webview on http://localhost:3000/app (the Onyx web UI, as today)
+ ├─ window "work" — Work UI (React, bundled) ──Tauri IPC──► bridge.rs ──stdio JSON-RPC──► puffin app-server
+ │                                                         git.rs ──► git (worktrees, stage, commit, push)
+ └─ window "puffin" — Chat: http://localhost:3000/app (Onyx, as today; forwarder on a client)
 ```
 
-- **One `puffin app-server` per window,** as OpenAI's app does: threads carry their own `cwd`, so one server serves every project. (CodexMonitor runs one per workspace; Phase 0 measures what each costs. The app-server itself is small; the model is not in it.)
-- **Started through the launcher, never as bare `codex`:** `puffin app-server`. The launcher is what makes it Puffin: the model server tier resolution (node, `node.json`, mDNS), the model catalog with Puffin's prompt blocks, `CODEX_HOME=~/.puffin`, `chatgpt_base_url` pointed at a closed port, skills links, the air-gap seal, `/prompt`'s choice. **Phase 0 must check** that `app-server` is not in `COMMANDS_WITHOUT_MODEL` for good reason (it needs the model), that the `--oss --local-provider … -c model_provider=… --model …` the launcher puts in front of the arguments is accepted with `app-server` after it (the `-c` certainly is; `--oss` and `--model` are TUI options and may be refused or ignored, in which case the launcher must pass `-c model=…` instead for this subcommand), and that **nothing the launcher prints reaches stdout** — the waiting dots, the start-up line at `on`, the night-run summary. Stdout is the JSON-RPC channel; one stray line breaks the handshake.
-- **The wait for the model server** (up to 600 s on a cold load) happens inside the launcher before Codex starts. The bridge reads the launcher's stderr and shows it as the app's start-up screen ("Waiting for the model server on …"), as OpenAI's app shows its slow-start window.
-- **`initialize`** with `clientInfo: {name: "puffin_desktop", title: "Puffin Desktop", version}` and `experimentalApi: true` (thread sections, attachments and `process/spawn` need it). Not `Codex Desktop`: that name unlocks device user-verification only, and claiming OpenAI's client identity is not ours to do.
-- **Chat stays.** OpenAI's app has a Chat/Work toggle above the composer; Puffin's maps it to its two halves: Work is the app-server client, Chat is the Onyx web UI that `puffin-app` shows today, in a second webview. Everything Onyx's patches do keeps working, and the forwarder, `discover.rs` and the auto sign-in stay as they are for Chat.
-- **On a client machine** the app-server runs locally (the client has `puffin`) and the launcher finds the node's model server as it does for the TUI; the Chat webview keeps using the forwarder. A Phase 3 option is OpenAI's `ssh` host kind: `ssh <node> puffin app-server` as the stdio transport, so the agent runs where the code is.
+- **One `puffin app-server` per app,** started when the Work window first opens, as OpenAI's app does: threads carry their own `cwd`, so one server serves every project. (Phase 0 measured an idle server; §5.)
+- **Started through the launcher, never as bare `codex`:** `puffin app-server`. The launcher brings the model server tiers (node, `node.json`, mDNS), the model catalog with Puffin's prompt blocks, `CODEX_HOME=~/.puffin`, `chatgpt_base_url` at a closed port, the skills links, the air-gap seal and `/prompt`'s choice.
+- **The launcher's wait for the model server** (up to 600 s on a cold load) goes to **stderr**, which the bridge shows as Work's start-up screen. Measured: stdout carried JSON-RPC only (§5).
+- **`initialize`** with `clientInfo: {name: "puffin_desktop", title: "Puffin Desktop", version}` and `experimentalApi: true`. Not `Codex Desktop`.
+- **What the UI never sends:** `thread/start`'s `baseInstructions`, `developerInstructions`, `modelProvider` and `config` (they would replace Puffin's prompt, provider or policy), `feedback/upload`, `account/login/*`. The bridge drops them, so a UI bug cannot send them either.
+- **Notifications the UI ignores:** `account/rateLimits/updated` (always empty here) and `remoteControl/status/changed` (`disabled`, measured).
+- **On a client machine** the app-server runs locally and the launcher finds the node's model server as it does for the TUI. A Phase 3 option is OpenAI's `ssh` host kind: `ssh <node> puffin app-server` as the stdio transport, so the agent runs where the code is.
+
+### 4.4 Protocol types
+
+Generated from the `puffin` binary the release ships: `puffin app-server generate-ts --experimental --out desktop/ui/src/protocol` (the subcommand exists in 0.158.0, `cli/src/main.rs`), never copied from CodexMonitor's or OpenAI's newer Codex (OpenAI's app bundles 0.160.0; our pin is 0.158.0; the protocol moves between releases). The generated files are committed; a test regenerates them from the submodule's `app-server-protocol` and fails on a diff, so a Codex bump that changes the protocol fails the build rather than the UI.
+
+### 4.5 Work's frontend
+
+React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinned Node toolchain; `node_modules` not committed. Diff rendering, the terminal (xterm.js) and Markdown/Mermaid rendering use MIT or Apache-2.0 libraries bundled into the app, never loaded from a CDN. Every Onyx-side lesson in CLAUDE.md still applies to Chat; for Work, §9 lists the WebKitGTK ones.
+
+### 4.6 Running OpenAI's app on `puffin` — rejected as the product
+
+`CODEX_CLI_PATH=~/.local/bin/puffin chatgpt` would, as read, start `puffin app-server` under OpenAI's window, and the local provider switches its sign-in gate off (measured: `requiresOpenaiAuth: false`). It is the most faithful option and must not be the product: the window carries its own Statsig and Sentry clients, its updater and apt repository, and passes `--analytics-default-enabled`; it cannot be shipped. It remains useful once, as the **reference run** of Phase 0 item 6, if the user allows installing the package (§14, question 5).
 
 ---
 
-## 5. Surface by surface
+## 5. Measured on 2026-10-03 (Phase 0, first part)
 
-| Codex app surface | App-server | Puffin |
+The installed `puffin` (0.158.0, built 2 October) was driven over stdio by a script: `initialize` → `initialized` → `account/read` → `model/list` → `permissionProfile/list` → `config/read` → `thread/start` (ephemeral, read-only) → `turn/start` ("Reply with exactly the word OK"), with Qwen3.8-27B serving.
+
+| Question | Answer |
+|---|---|
+| Does `puffin app-server` start and complete a turn? | **Yes.** The model answered `OK`; the notifications were `thread/started`, `turn/started`, `item/started`, `item/agentMessage/delta`, `item/reasoning/*`, `item/completed`, `thread/tokenUsage/updated`, `turn/completed`, `mcpServer/startupStatus/updated` |
+| Is stdout clean JSON-RPC through the launcher? | **Yes:** 0 non-JSON lines. The launcher's messages go to stderr |
+| Sign-in | `account/read` → `{"account": null, "requiresOpenaiAuth": false}`: nothing to sign in to |
+| **Does the launcher's model choice reach the app-server?** | **No.** The CLI applies only root `-c` overrides to `app-server` (`cli/src/main.rs`, the `AppServer` arm); `--oss --local-provider --model <id>` are the TUI's flags and are ignored there. The thread started with `model: ""` and the server warned "Model metadata for `` not found. Defaulting to fallback metadata" — **so Puffin's model catalog, and with it Puffin's prompt blocks, did not apply.** With `-c model="RadixArk/Qwen3.8-27B-NVFP4"` the warning is gone. Fix in §4.2 (the launcher) and, belt and braces, the bridge passes the served model in every `thread/start` |
+| `model/list` | **Empty** even with the model set, although `model_catalog.json` holds the served model. The model picker therefore reads the served model from the launcher (`/v1/models`), not from `model/list`, until Phase 0 finds why the catalog entry is not listed |
+| `permissionProfile/list` | `:read-only`, `:workspace`, `:danger-full-access`, all `allowed: true` at level `off` — the picker's three rows |
+| Remote control | `remoteControl/status/changed` → `disabled` |
+| Rate limits | `account/rateLimits/updated` with every field null: ignore it |
+| Do app-server threads appear in `puffin resume`? | **Yes, as read:** app-server sessions are recorded with source `VSCode`, which is in `INTERACTIVE_SESSION_SOURCES` (`rollout/src/lib.rs`). Not yet run with a non-ephemeral thread |
+| Does an open app-server hold a night run back? | **No:** `NON_INTERACTIVE` in `night_shift_host.py` lists `app-server` and `app`. §8.3 decides what it should do |
+| Terminal support | `command/exec` takes `tty` and an initial PTY size, with `write`, `resize` and `terminate`: terminal tabs need no PTY code of ours |
+| Git | No worktree, stage, commit, push or PR method; `gitDiffToRemote` only. The TUI's `/worktree` uses the `codex-worktree` crate inside the TUI, not the server. Git is the window's job (`git.rs`), as in OpenAI's app |
+| Plan mode | `TurnStartParams` in the non-experimental schema has no collaboration mode; `CollaborationModeMask` exists. Phase 0 regenerates with `--experimental` to find it |
+| `/app` in the TUI | Exists upstream: it opens `codex://threads/<id>`, and is compiled only on macOS and Windows (`slash_command.rs`) |
+| Types | `app-server generate-ts` exists in 0.158.0. Today the launcher would make it wait for the model server (§4.2 fixes that) |
+
+---
+
+## 6. Feature by feature
+
+Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the same idea through a Puffin mechanism), **Later** (a named phase), **No** (not offered, with the reason).
+
+### 6.1 Window and navigation
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Project sidebar, threads per project, pin, rename, archive, sections | `thread/list`, `threadSection/*`, `thread/name/set`, `thread/archive|unarchive`, `thread/metadata/update` | **Same.** Threads from `puffin` in a terminal appear here and back (both read `~/.puffin/sessions`) | 1 |
+| Switch threads without losing context; several threads running at once | `thread/loaded/list`, one server, per-thread subscriptions | **Same.** Parallel turns share one model server: Work shows the KV pool's headroom (§7) | 1 |
+| Chat / Work toggle | ChatGPT desktop app | **Puffin's:** Work is the agent, Chat is the Onyx window (§4.2) | 1 |
+| Command palette | client | **Same** (Ctrl+K): threads, projects, slash commands, settings | 2 |
+| Pop-out windows | client | **Same:** a thread in its own Tauri window | 2 |
+| Notifications when a turn ends or needs approval | client | **Same:** desktop notification, no bundled sounds | 2 |
+| Prevent sleep while a turn runs | client | **Same:** `systemd-inhibit`-style idle inhibitor while any turn is running | 2 |
+| Settings pages | `config/read`, `config/value/write`, `config/batchWrite` | **Same,** writing `~/.puffin/config.toml` | 1 |
+| Dark mode | client | Later, §14 question 3 | 3 |
+
+### 6.2 Composer and turns
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Text, `@` file mentions | `turn/start`, `fuzzyFileSearch` | **Same** | 1 |
+| Images and attachments | `thread/attachment/*`, input items | **Same** for images (Qwen3.8 is text-only today: attachments are offered only when the served model's entry says `supports_vision`) | 2 |
+| Model and effort picker | `model/list`, `turn/start` `model`/`effort` | **Puffin's:** the served model from the launcher (§5); efforts the patched template accepts | 1 |
+| Personality (`/personality`) | `personality` | **Puffin's: cave mode** (`/cavemode`, PUFFIN_CAVE_MODE), not a second mechanism; `personality` is not sent | 2 |
+| Plan mode | collaboration mode (experimental) | **Same** if Phase 0 finds it in the experimental schema; else the TUI's `/plan` text | 2 |
+| Steer while running, queued follow-ups, stop | `turn/steer`, `turn/interrupt` | **Same** | 1 |
+| Edit the previous message (Esc twice) | `thread/revert` + `turn/start` | **Same** | 2 |
+| Context-usage indicator and Compress | `thread/tokenUsage/updated`, `thread/compact/start` | **Same**, against the launcher's KV-pool-based limit | 1 |
+| Fork a thread | `thread/fork` | **Same** | 2 |
+| Thread goal | `thread/goal/*` | **Same** | 2 |
+| Slash commands | client | The Codex ones, plus Puffin's: `/airgapped`, `/cavemode`, `/night`, `/prompt`, `/apps`, each a call to the launcher's own command (`puffin airgapped`, `puffin night`, `puffin prompt` …) so the TUI and the app cannot drift | 2 |
+| Voice dictation | client | **Puffin's:** the speech-to-text sidecar (`dream-stt`, CPU Whisper) already running for Chat | 2 |
+
+### 6.3 The stream
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Reasoning, commands with output, file edits, plan updates, MCP and `code_*` tool calls | item notifications, `turn/plan/updated` | **Same** | 1 |
+| Markdown and Mermaid rendering | client | **Same** | 1 |
+| Inline approvals: command, patch, network | server requests | **Same**, with the air-gap rule (§8.2) | 1 |
+| Guardian-denied action override | `thread/approveGuardianDeniedAction` | **Same** if the guardian reviewer is configured | 2 |
+
+### 6.4 Review and git
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Diff of the thread's changes | items, `gitDiffToRemote`, git | **Same** | 1 |
+| Review pane: staged and unstaged, stage / unstage / discard per file and per hunk, split or unified | git (`git.rs`) | **Same** | 2 |
+| Inline comments on diff lines, sent to the composer | client | **Same** | 2 |
+| `/review` | `review/start` | **Same,** local model | 2 |
+| Commit, push | git | **Same** | 2 |
+| Create pull request | prefilled hosting URL | **Same,** no API or token: the forge's new-PR page opens with branches prefilled | 2 |
+| Open in editor, terminal, file manager | client | **Same:** detected from `.desktop` entries (VS Code, VSCodium, Cursor, Zed, JetBrains IDEs, terminals) | 2 |
+| Revert the thread's changes | `thread/revert` | **Same** | 1 |
+
+### 6.5 Worktrees and environments
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Worktree per thread; check out locally or let it continue | git (`git.rs`), the same layout as the TUI's `/worktree` | **Same.** Night Shift's `night/<id>` branches stay separate | 2 |
+| Hand-off between Local and Worktree | git | **Same** | 2 |
+| Delete a worktree, keeping the branch | git | **Same,** refusing while a turn runs there or with uncommitted changes | 2 |
+| Local environment setup script, project actions | client config | **Same,** in a project file Puffin reads; each runs in a terminal tab | 2 |
+
+### 6.6 Terminal
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| A terminal per thread, toggled with Ctrl+J, scoped to the thread's directory or worktree | `command/exec` with `tty`, `write`, `resize`, `terminate` | **Same.** Runs under the thread's sandbox profile, so `/airgapped on` holds there too | 2 |
+
+### 6.7 Skills, plugins, apps, MCP
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Skills list, enable, create | `skills/list`, `skills/config/write`, `skills/extraRoots/set`, `plugin/skill/read` | **Same,** with Puffin's sources shown (Claude, Gemini, OpenClaw, Hermes, ClawHub with its verdict, PUFFIN_SKILLS) | 2 |
+| Plugins and marketplaces | `plugin/*`, `marketplace/*` | **Same** for local marketplaces; OpenAI's featured catalogue stays closed (patch `0015`) | 2 |
+| Apps (Gmail, Drive …) | `app/list|read|installed` | **Puffin's:** PUFFIN_APPS — local sign-in, read-only tools, nothing through `chatgpt.com` | 2 |
+| MCP servers: status, reload, OAuth, call a tool, read a resource | `mcpServerStatus/list`, `config/mcpServer/reload`, `mcpServer/*` | **Same** | 2 |
+| Hooks | `hooks/list` | **Same** (read-only list), showing the ledger hook | 2 |
+| Import another agent's configuration | `externalAgentConfig/detect|import` | **Same,** beside PUFFIN_SKILLS's links | 3 |
+| Experimental features | `experimentalFeature/*` | **Same,** in Settings | 3 |
+
+### 6.8 Automations
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Scheduled tasks with instructions and optional skills | the app's own scheduler | **Puffin's: Night Shift.** `/night add` from the composer, the queue as a panel, a schedule on the timer `night enable` installs. No new scheduler | 2 |
+| Results land in a review queue | client | **Puffin's:** the morning report, each task's branch as a thread with its diff in the review pane | 2 |
+| Memory across automation runs | client | **Puffin's:** COMPACTION §4.4's nightly notes, if built | Later |
+| Cloud triggers | OpenAI | **No:** no cloud | — |
+
+### 6.9 Handoff and shared history
+
+| Codex app | How | Puffin | Phase |
+|---|---|---|---|
+| Sessions shared with the CLI | `~/.codex` | **Same,** `~/.puffin` (§5) | 1 |
+| `/app` in the TUI continues the session in the app | `codex://threads/<id>`, macOS and Windows only | **Puffin's:** `puffin app --thread <id>` from a shell (no patch); `/app` in the TUI needs one hook (enable on Linux, scheme `puffin://`), against the patch cap; `puffin-app.desktop` registers `x-scheme-handler/puffin` | 2 |
+| IDE extension sync | the IDE extension | **No:** Puffin has no IDE extension. The MCP server for JetBrains and VS Code (`puffin-admin mcp`) is a different thing | — |
+
+### 6.10 Keyboard shortcuts (Linux bindings)
+
+| Action | Codex app (macOS) | Puffin |
 |---|---|---|
-| Project sidebar, threads per project, pin, rename, archive, sections | `thread/list`, `threadSection/*`, `thread/name/set`, `thread/archive`, `thread/metadata/update` | **Same.** Threads from `puffin` in a terminal appear here and back, because both read `~/.puffin/sessions` |
-| Composer: text, `@` file mentions, images, attachments, model and effort picker | `turn/start`, `thread/attachment/*`, `fs/readDirectory`, `model/list` | **Same.** `model/list` shows the served model only; efforts are the ones Qwen3.8's patched template accepts |
-| Streamed reply: reasoning, commands with output, file edits, plan updates | item notifications | **Same** |
-| Steer while running, stop | `turn/steer`, `turn/interrupt` | **Same** |
-| Inline approvals (command, patch, network) | server requests | **Same.** The air-gap and Full Access rules hold here too (§7) |
-| Permissions picker (Read only / Default / Full Access) | `permissionProfile/list`, thread `sandbox` | **Same,** with Full Access disabled at `on` and the reason shown, as `/permissions` does in the TUI |
-| Diff pane, revert | `thread/revert`, git | **Same** |
-| Review (`/review`) | `review/start` | **Same,** local model |
-| Worktree per thread | `worktree` crate, git | **Same** idea; Night Shift's worktree conventions (`night/<id>`) stay separate |
-| Terminal tabs | `command/exec`, `command/exec/write|resize|terminate` | **Same,** run through Codex's sandbox when the thread's profile says so |
-| Skills, plugins, marketplaces | `skills/list`, `plugin/*`, `marketplace/*` | **Same,** with Puffin's skill links (Claude, Gemini, OpenClaw, Hermes) listed as sources; OpenAI's featured catalogue stays closed (patch `0015`) |
-| Apps (Gmail, Drive …) | `app/list|read|installed` | **Puffin's own,** from PUFFIN_APPS: local sign-in, read-only tools, nothing through `chatgpt.com` |
-| Scheduled tasks / automations | the app's own scheduler | **Night Shift:** `/night add` from the composer, the queue as a panel, the morning report as a thread-like page. Driven by `puffin night …`; no new scheduler |
-| Settings | `config/read`, `config/value/write` | **Same,** writing `~/.puffin/config.toml` (with `toml_edit` semantics the launcher already relies on) |
-| Slash commands in the composer | client-side | The Codex ones the app has, plus Puffin's: `/airgapped`, `/cavemode`, `/night`, `/prompt`, `/apps`. Each is a call to the launcher's own command (`puffin airgapped`, `puffin night`, `puffin prompt` …), so the TUI and the app cannot drift |
-| Voice dictation | the app's own | Puffin's speech-to-text sidecar (`dream-stt`, CPU Whisper), already running for the web UI |
-| Notifications when a turn ends | the app's own | Desktop notification, no bundled sounds |
-| Quick chat, Chat mode | ChatGPT | **The Onyx web UI** (§4) |
-| Artifact viewer (documents, spreadsheets, images) | `fs/readFile` | Phase 3: Markdown, images and PDF only |
-| ChatGPT sign-in, plan, credits, rate limits, workspace messages | `account/*` | **Not shown.** `account/read` answers `requiresOpenaiAuth: false`, so there is nothing to sign in to |
-| Cloud tasks, remote control | OpenAI's services | **Not offered** (`cloud` is refused by the launcher) |
-| Computer use, in-app browser, image generation, deep research | OpenAI's bundled plugins and models | **Not offered.** No local model or runtime for them; the browser is Chromium-only |
-| Feedback upload | `feedback/upload` | **Not offered:** it uploads to OpenAI |
+| Command palette | Cmd+K | Ctrl+K |
+| Toggle terminal | Cmd+J | Ctrl+J |
+| Toggle review pane | Cmd+Shift+G | Ctrl+Shift+G |
+| New thread | Cmd+N | Ctrl+N |
+| Edit previous message | Esc Esc | Esc Esc |
+| Stop the turn | Esc | Esc |
+| Chat / Work | — | Ctrl+Shift+C / Ctrl+Shift+W |
+
+Rebindable in Settings, stored with the window's preferences, not in `config.toml`.
+
+### 6.11 Not offered
+
+| Codex app | Why |
+|---|---|
+| ChatGPT sign-in, plan, credits, rate limits, workspace messages | No OpenAI account; `requiresOpenaiAuth: false` (§5) |
+| Cloud tasks, cloud environments, remote control | OpenAI's services; `cloud` is refused by the launcher, remote control is `disabled` |
+| Computer use, OpenAI's browser plugin, image generation, deep research | No local model or runtime for them |
+| Feedback upload | Uploads to OpenAI |
+| Sites | Hosted by OpenAI |
+
+**Offered later instead:** a **preview pane** (a WebKitGTK webview on a local dev server's URL, Phase 3) and an **artifact viewer** for Markdown, images and PDF (Phase 3).
 
 ---
 
-## 6. What Puffin adds, in the Codex app's idioms
+## 7. What Puffin adds, in the Codex app's idioms
 
-- **Air-gap status** in the window's title bar, as the TUI's status line shows it: `off` or `on`, with the seal held or not, and the `NOT ENFORCED` reasons a click away.
-- **The node:** which model server this window uses (this machine or a node found on the network), from the launcher's `node.json`, with `puffin node use` behind a picker on a client.
-- **The code index:** its state per project (`puffin-code status`), and its `code_*` tools rendered like any other tool call.
-- **The model server's state** (starting, serving, stopped) from `/v1/models`, with `puffin-admin server start` as the action when it is stopped, since without it nothing works.
-
----
-
-## 7. Security and privacy
-
-### 7.1 The window
-
-- **No telemetry SDK** of any kind in the bundle, no remote fonts or scripts (the Content-Security-Policy allows `self` and the Tauri IPC only; Chat's webview keeps its own origin), no auto-updater: updates come from `puffin update`, as for the binaries.
-- **The egress audit grows an `--app` mode:** trace `puffin-app` plus its `puffin app-server` through one scripted turn, with the same verdict rules. It must pass before a release ships the app.
-- The bridge passes JSON-RPC only between the bundled UI and the app-server; the Chat webview has no access to it.
-
-### 7.2 The air-gap rule must hold in the server, not the window
-
-The Full Access refusal at `on` (PUFFIN_AIRGAPPED §14.7) is enforced in the launcher's argument check and in the TUI's two permission pickers. **An app-server client chooses the sandbox per thread** (`thread/start`'s `sandbox`, `turn/start` overrides), so a desktop UI that only greys out a menu item enforces nothing: any other app-server client, or a bug, gets Full Access at `on`. Phase 0 reads whether the launcher extension the app-server already registers (patch `0017`'s registry) can refuse a `thread/start` or `turn/start`; if it can, the rule moves there with no new patch; if not, it is one hook in the app-server's thread-start path, the same size as `0019`'s.
-
-### 7.3 Sessions
-
-Threads the app starts are ordinary Codex sessions in `~/.puffin/sessions`: Night Shift's "an open `puffin` session holds the runner back" must count an app-server with a live turn as such a session. Phase 0 checks how Night Shift detects one today.
+- **Air-gap status** in the Work window's title bar: `off` or `on`, the seal held or not, and the `NOT ENFORCED` reasons a click away.
+- **The node:** which model server this app uses (this machine, or a node found on the network), from `node.json`, with `puffin node use` behind a picker on a client.
+- **The model server's state** (starting, serving, stopped) and its KV pool's headroom, from `/v1/models` and `/metrics`, with `puffin-admin server start` as the action when it is stopped, since without it nothing works. Parallel threads share one pool; the headroom is what makes "run several agents at once" honest on one GB10.
+- **The code index:** its state per project (`puffin-code status`); `code_*` tools rendered like any tool call.
+- **`/prompt`:** the system prompt in use per thread, from PUFFIN_PROMPT.
 
 ---
 
-## 8. The webview: what `desktop/` already learned
+## 8. Security and privacy
 
-Every setting in `desktop/src-tauri/src/main.rs` carries over: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` until the Work UI has a dark theme of its own (then it follows the system, as OpenAI's app does), the white `backgroundColor`, and **`target="_blank"` does nothing** in this window: links to the web go through `tauri-plugin-opener`. CodexMonitor was built on macOS first; its Linux build is untested here and Phase 0 builds it on the GB10.
+### 8.1 The window
 
----
+- **No telemetry SDK** of any kind in Work's bundle, no remote fonts or scripts (§4.2's CSP), no auto-updater: updates come from `puffin update`, as for the binaries.
+- **The egress audit grows an `--app` mode:** trace `puffin-app` plus its `puffin app-server` through one scripted turn, with the same verdict rules. It must pass before a release ships Work.
+- **Chat cannot reach the agent:** no capability names its origin (§4.2).
 
-## 9. Packaging
+### 8.2 The air-gap rule must hold in the server, not the window
 
-- The app stays `puffin-app` (`dev.dreamference.puffin`), built by `puffin-admin desktop build` and attached to releases as today; `install.sh` installs it on a client and a node alike.
-- **`puffin app [folder]`** opens the window **on that project**, as `codex app <folder>` does upstream; today the launcher ignores the folder with a note (`app.rs`).
-- Its frontend is built with the repository's pinned Node toolchain; the `node_modules` tree is not committed. CodexMonitor's code enters under `desktop/` with its MIT notice kept in `desktop/LICENSES/`.
+The Full Access refusal at `on` (PUFFIN_AIRGAPPED §14.7) is enforced in the launcher's argument check and in the TUI's two permission pickers. **An app-server client chooses the sandbox per thread and per turn** (`thread/start`'s `sandbox` and `config`, `turn/start`'s `sandboxPolicy`), so greying out a row in Work enforces nothing: any other app-server client, or a bug, gets Full Access at `on`. Measured: `permissionProfile/list` reports `:danger-full-access` as `allowed` (at `off`, where it should be).
 
----
+Where the check goes, decided in Phase 0 in this order:
+1. **Codex's requirements system** (`allowed_permission_profiles` in `requirements.toml`) already removes profiles for every client, but its file is system-wide (`/etc/codex/requirements.toml`) and fixed, not per session: rejected unless a per-`CODEX_HOME` layer exists.
+2. **The launcher's registered extension** (patch `0017`'s registry): if an extension can veto a thread or turn configuration, the rule moves there with no new patch.
+3. **One hook** where the app-server resolves a thread's or turn's permissions (`thread_processor.rs`, beside `has_permission_override`, and the turn path in `turn_processor.rs`), refusing Full Access when `puffin_airgapped::resolve` says `on`, with the same message as the launcher; and `permissionProfile/list` answering `allowed: false` with the reason at `on`, so every client's picker shows it.
 
-## 10. Phases
+Work also disables the Full Access row at `on`, but as a courtesy, not as the enforcement.
 
-**Phase 0 — check, before any UI work (about two days).**
-1. `puffin app-server` from a shell: the arguments the launcher prepends are accepted, stdout carries JSON-RPC only, `initialize` → `account/read` (`requiresOpenaiAuth: false`) → `model/list` (the served model) → `thread/start` → `turn/start` works against the GB10's model, and the thread appears in `puffin resume`'s list.
-2. The reference run (§3.1): OpenAI's app with `CODEX_CLI_PATH` pointing at `puffin`, on a scratch `HOME`, inside a network namespace that reaches only the model server. Record which screens open, which requests the app-server receives, and what fails. Uninstall afterwards.
-3. CodexMonitor at a pinned commit: build on the GB10, point it at `puffin app-server`, run one thread. List what breaks against our 0.158.0 protocol.
-4. §7.2: can the registered launcher extension refuse a `thread/start`?
-5. §7.3: does Night Shift see an app-server session?
-6. Memory: an idle and a busy app-server, CodexMonitor's per-workspace model against one per window.
+### 8.3 Sessions and Night Shift
 
-*Done when* each has a recorded answer here, and the fork-or-scratch choice of §3 is confirmed.
-
-**Phase 1 — Work mode.** The bridge, the project and thread sidebar, the composer, streaming items, approvals, the permissions picker with the air-gap rule, the diff pane, interrupt and steer, model and effort pickers, settings, the start-up screen, Chat as the second mode, `puffin app [folder]`, the egress audit's `--app` mode. *Done when* a task started in the app can be resumed in the TUI and the other way round, and the audit passes.
-
-**Phase 2 — the rest of the Codex surface.** Worktree per thread, review, terminal tabs, skills, plugins and apps pages (PUFFIN_APPS), Night Shift as scheduled tasks, Puffin's slash commands, dictation, notifications, the air-gap and node indicators.
-
-**Phase 3 — optional.** The `ssh` host kind to a node, the artifact viewer, macOS and Windows builds.
-
-**Not proposed:** ChatGPT sign-in, cloud tasks, OpenAI's bundled plugins, computer use, the in-app browser, image generation, feedback upload, any telemetry.
+Threads the app starts are ordinary Codex sessions in `~/.puffin/sessions`. Today Night Shift ignores an app-server entirely (§5). An always-open desktop app must not block every night, and process scanning cannot tell a busy server from an idle one. So: **the bridge writes a busy marker** (`$CODEX_HOME/night/busy/<pid>`, under the same flock discipline as the task files) on `turn/started` and removes it on `turn/completed` or when the server exits; Night Shift's admission treats a marker whose process is alive as an open session, and prunes the rest. The night run's own `puffin exec` processes are unaffected.
 
 ---
 
-## 11. Tests
+## 9. The webview: what `desktop/` already learned
 
-- The bridge: JSON-RPC framing, a server that dies mid-turn, a launcher that is still waiting for the model, stray stdout from the launcher (must fail loudly in the test, not hang).
-- The generated protocol types match `puffin app-server generate-ts` of the pinned binary (a diff fails the build).
-- The UI against a scripted app-server stand-in (as Night Shift's tests script `puffin`): a full turn with a command, a patch, an approval and an interrupt; the Full Access item disabled at `on`.
+Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (CLAUDE.md, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
+
+---
+
+## 10. Packaging
+
+- The app stays `puffin-app` (`dev.dreamference.puffin`), built by `puffin-admin desktop build` (which now also builds `desktop/ui/`) and attached to releases; `install.sh` installs it on a client and a node alike. The `.desktop` entry gains `MimeType=x-scheme-handler/puffin;`.
+- `puffin app` opens Chat until Work passes Phase 1, then Work; `puffin app --chat`, `puffin app <folder>`, `puffin app --thread <id>`.
+- The installed debug build in `~/.local/share/applications` (28 September) is replaced by the release build.
+
+---
+
+## 11. Phases
+
+**Phase 0 — check (about a day; part done, §5).**
+1. ~~`puffin app-server` handshake, sign-in gate, one turn, clean stdout~~ — done (§5).
+2. The launcher fix: `-c model="<id>"` for `app-server`; offline `generate-ts`; re-run §5's probe and see the model metadata found and Puffin's prompt in the turn's request.
+3. Why `model/list` is empty with a catalog entry present.
+4. `generate-ts --experimental`: plan mode, thread sections, attachments.
+5. §8.2: which of the three places holds the air-gap check; measure that a `thread/start` with `sandbox: "danger-full-access"` at `on` is refused.
+6. The reference run (§4.6), only if the user allows installing OpenAI's package: OpenAI's app on `puffin app-server`, scratch `HOME`, network namespace reaching only the model server; record each screen and request.
+7. A non-ephemeral thread appears in `puffin resume`, and a TUI session in `thread/list`.
+8. Memory of an idle and a busy app-server.
+
+*Done when* each has a recorded answer here.
+
+**Phase 1 — Work beside Chat.** The second window, the bridge, the busy marker, the project and thread sidebar, the composer, streaming items, approvals, the permission picker, interrupt and steer, the context indicator, the model picker, settings, the start-up screen, revert, the egress audit's `--app` mode, and the Chat window unchanged. *Done when* a task started in Work can be resumed in the TUI and the other way round, the audit passes, the Chat test passes unchanged — and only then does `puffin app` open Work by default.
+
+**Phase 2 — the rest of the Codex surface.** Review pane and git, worktrees and hand-off, terminal, command palette, pop-outs, notifications, prevent-sleep, fork, goal, edit-previous, images, skills, plugins, apps, MCP, hooks, Night Shift as automations, Puffin's slash commands, dictation, cave mode as personality, plan mode, `puffin app --thread` and the `puffin://` handler, the air-gap and node indicators, the KV headroom.
+
+**Phase 3 — optional.** `/app` from the TUI on Linux (one hook), the `ssh` host kind to a node, the preview pane, the artifact viewer, external agent import, dark mode, macOS and Windows builds.
+
+**Not proposed:** ChatGPT sign-in, cloud tasks and triggers, OpenAI's bundled plugins, computer use, OpenAI's browser, image generation, sites, feedback upload, IDE extension sync, any telemetry.
+
+---
+
+## 12. Tests
+
+- **The Chat window is unchanged:** its label, URL, sign-in script and the forwarder path on a client, compared with today's.
+- The bridge: JSON-RPC framing, a server that dies mid-turn, a launcher still waiting for the model (stderr shown, no hang), stray stdout (fails loudly), the dropped `thread/start` fields (§4.3).
+- The launcher: `app-server` gets `-c model=…`; `app-server generate-ts` does not wait for a model server.
+- The generated protocol types match `generate-ts` of the pinned submodule.
+- The UI against a scripted app-server stand-in (as Night Shift's tests script `puffin`): a full turn with a command, a patch, an approval and an interrupt; Full Access disabled at `on`.
+- The air-gap rule against the real app-server binary: `thread/start` and `turn/start` asking for Full Access at `on` are refused.
+- Night Shift: a live busy marker holds the run back; a stale one is pruned; an idle Work window does not hold it back.
+- `git.rs`: worktree create, hand-off, stage per hunk, commit, delete-keeping-branch, against scratch repositories.
 - The egress audit's `--app` fixture, as `--tui` has.
 - No test starts the real window, a real container or the model server, per `tests/conftest.py`.
 
 ---
 
-## 12. Risks
+## 13. Risks
 
-- **The protocol moves.** Codex's app-server changes with every release; every Codex bump now also has a desktop UI to re-check. The generated types make the breakage a compile error rather than a silent one.
-- **CodexMonitor moves too,** and follows newer Codex than our pin. The fork is pinned and owned; upstream fixes are taken by hand.
-- **"Close to the Codex app" is a moving target** OpenAI ships weekly. The reference is the version recorded in Phase 0; parity with later versions is a decision each time, not a promise.
+- **The protocol moves.** Every Codex bump now has a desktop UI to re-check. Generated types make breakage a compile error.
+- **CodexMonitor moves too,** and follows newer Codex. Parts taken from it are owned from then on.
+- **"Close to the Codex app" is a moving target.** The reference is the version recorded in §1–§2; parity with later versions is a decision each time.
 - **Trade dress.** Layout and interaction can follow OpenAI's; name, icon, colours, sounds and copy must not.
-- **WebKitGTK** has repeatedly behaved differently from Chromium here (the scrollbar, `target=_blank`, DMABUF). A React app built and tested in Chromium will meet more of it.
+- **WebKitGTK** has repeatedly behaved differently from Chromium here (the scrollbar, `target=_blank`, DMABUF).
+- **One model server for parallel threads.** The Codex app's "many agents at once" assumes a cloud. Here they share one GB10's KV pool; several busy threads slow each other and can push compaction (PUFFIN_COMPACTION). §7's headroom indicator makes that visible rather than solving it.
 
 ---
 
-## 13. Open questions
+## 14. Open questions
 
-1. **Fork CodexMonitor or start from scratch?** Proposed: fork, confirmed by Phase 0 item 3.
-2. **Does Chat stay inside the app** as the second mode, or does `puffin-app` become Work only, with the web UI left to the browser?
-3. **Dark mode:** follow the system in Work (every Onyx override is `html:not(.dark)`-scoped, so Chat would stay light)?
-4. **One app-server per window or per project?**
-5. **Is installing OpenAI's package for the one reference run (§3.1) acceptable** on this machine? It adds OpenAI's apt repository unless removed.
+1. ~~Fork CodexMonitor or start from scratch?~~ **Settled by the user's direction:** grow `desktop/` in place, CodexMonitor as a parts bin (§4).
+2. ~~Does Chat stay inside the app?~~ **Settled:** Chat is today's window, unchanged (§4.1).
+3. **Dark mode:** follow the system in Work (Chat would stay light: every Onyx override is `html:not(.dark)`-scoped)?
+4. **One app-server per app or per project?** Proposed: per app (§4.3); Phase 0 item 8 measures it.
+5. **Is installing OpenAI's package for the one reference run (§4.6) acceptable** on this machine? It adds OpenAI's apt repository unless removed.
 
 ---
 
 ## Sources
 
-- OpenAI's package, unpacked: `~/Downloads/chatgpt_arm64.deb` (26.930.31730, SHA-256 `dd980085e9746fad8bd45b48354885d2ea3a9ad09889e0f0d6232f1d819b26b2`); `resources/app.asar` main-process files `application-network-startup-*.js`, `bootstrap-*.js`, `main-*.js`.
-- Codex `rust-v0.158.0`: `codex-rs/app-server/README.md`, `app-server/src/request_processors/initialize_processor.rs`, `account_processor.rs`, `app-server-protocol/schema/typescript/`.
+- **The launch announcement**, [Introducing the Codex app](https://openai.com/index/introducing-the-codex-app/) (2 February 2026; updated 4 March 2026 for Windows). The page answered HTTP 403 to direct requests; it was read from the [Wayback Machine's copy](https://web.archive.org/web/2026/https://openai.com/index/introducing-the-codex-app/). Its videos could not be analysed; their captions are quoted in §2.
+- OpenAI's package, unpacked: `~/Downloads/chatgpt_arm64.deb` (26.930.31730, SHA-256 `dd980085e9746fad8bd45b48354885d2ea3a9ad09889e0f0d6232f1d819b26b2`).
+- Codex `rust-v0.158.0`: `cli/src/main.rs` (the `AppServer` arm, `AppServerSubcommand`), `app-server/src/request_processors/thread_processor.rs`, `turn_processor.rs`, `account_processor.rs`, `initialize_processor.rs`, `app-server-protocol/schema/typescript/`, `rollout/src/lib.rs`, `tui/src/slash_command.rs`, `tui/src/chatwidget/slash_dispatch.rs`, `tui/src/app/history_ui.rs`, `config/src/loader/mod.rs`.
+- `tauri` 2.11.5: `src/window/mod.rs` (`add_child` behind `unstable`), `src/ipc/authority.rs` (remote origins).
+- [Codex app documentation](https://learn.chatgpt.com/docs/app) and [changelog](https://learn.chatgpt.com/docs/changelog) (OpenAI).
 - [CodexMonitor](https://github.com/Dimillian/CodexMonitor) and its [LICENSE](https://github.com/Dimillian/CodexMonitor/blob/main/LICENSE) (MIT).
-- [Codex app documentation](https://learn.chatgpt.com/docs/app) (OpenAI).
-- [Inside the Codex App Workspace: PR Review Pane, Task Sidebar, and Artifact Viewer](https://codex.danielvaughan.com/2026/04/17/codex-app-workspace-pr-review-task-sidebar-artifact-viewer/) and [Mastering the Codex Desktop App: Automations, Triggers and the Review Queue](https://codex.danielvaughan.com/2026/04/08/codex-desktop-automations/) (third-party).
-- [Best Codex GUI 2026: 4 Codex Desktop Apps Compared](https://dev.to/stravukarl/best-codex-gui-2026-4-codex-desktop-apps-compared-4c8c) (third-party).
+- Third-party: [The Neuron's deep dive](https://www.theneuron.ai/explainer-articles/openai-codex-app-deep-dive-how-it-works/); [ALM Corp's guide](https://almcorp.com/blog/openai-codex-app-macos-guide-features-pricing-security/); [Developer Toolkit's app tips](https://developertoolkit.ai/en/codex/tips-tricks/app-features/); [Daniel Vaughan on the review pane and automations](https://codex.danielvaughan.com/2026/04/17/codex-app-workspace-pr-review-task-sidebar-artifact-viewer/); [ZCode's Codex-parity audit](https://github.com/jptorres26/ZCode/pull/13) (review pane, worktree setup and delete, project actions, diff comments, PR link, Open in); [Best Codex GUI 2026](https://dev.to/stravukarl/best-codex-gui-2026-4-codex-desktop-apps-compared-4c8c).
