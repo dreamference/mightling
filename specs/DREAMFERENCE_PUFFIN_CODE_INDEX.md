@@ -815,3 +815,13 @@ Twelve navigation tasks on this repository (find a definition and its callers, p
 - **The MCP server runs outside the sandbox**, as Codex starts every MCP server. Queries only read (§4), so this changes no permission, but it is a departure from "queries run inside the sandbox"; at `/airgapped on` it is unaffected, having no network code.
 - **Not measured yet:** SWE-bench with the tools (the run of §12 offered only the shell commands); interactive TUI sessions over days.
 
+### 15.4 The tools on SWE-bench (2026-10-03)
+
+The first SWE-bench arm with the tools (SWE_BENCH §13.6) found one defect in how they reach the model and two in their answers.
+
+- **The tools could be missing from the model's tool list.** Codex waits 1 s (`mcp_optional_startup_grace_ms`, default 1000) for an optional MCP server before the first request, then leaves out the tools of one that is not up (`codex-mcp/src/connection_manager/tool_catalog.rs`, `must_wait_for_startup`). With three containers starting at once, `puffin-code mcp` missed that second: the model, told to use `code_search`, called it anyway, got `unsupported call: code_search`, and used grep for the rest of the task (2 of 3 instances read before the run was stopped). A `puffin exec` probe in an idle container listed the tools and called them, which is why the 12 navigation tasks of §15.2 never showed it. The benchmark runner now declares the server itself with `required = true` (a required server is waited for; `5e7a134`), and the launcher passes a 15 s grace with its own declaration (`6ffb18f`: **not yet compiled or run**; `required` is not used there because a required server that fails to start ends the session).
+- **An absolute `path` matched nothing.** The model passes the path it sees (`/testbed/astropy`); rows carry repository-relative paths, so a search with results answered "0 results" (3 of 263 calls). `path` is now made repository-relative (`93386d5`).
+- **`refs`, `callers` and `impact` answered 0 for methods the repository calls** (10 of 263 calls): a call through an attribute names no type the graph can resolve, and the note said to confirm with `rg`, which is not installed in the images or on the GB10. When no exact layer covers the definition, whole-word matches of the name in tracked files of its language are now added as `heuristic (text)` rows from `git grep` (at most 100, the rest counted); `impact` lists them and does not follow them (`93386d5`). Checked by hand in a container: `refs get_related_updates` went from 0 rows to the one real call site.
+
+The two `puffin-code` fixes were made after the arm started and are **not measured**: the arm ran the installed `puffin-code` (`a2343be2…`).
+
