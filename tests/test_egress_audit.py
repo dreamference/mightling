@@ -5,7 +5,9 @@ with the channels patches 0013 and 0015 closed written back in. No test here run
 or the model server: the full-screen session is played by a stand-in on a real pseudo-terminal.
 """
 
+import hashlib
 import json
+import subprocess
 import os
 import stat
 
@@ -177,7 +179,39 @@ open(args[len(args) - 2], "w").write("pong")
     (result_file,) = list((home / "audit").glob("*.json"))
     result = json.loads(result_file.read_text())
     assert result["verdict"] == "pass" and result["destinations"] == {"127.0.0.1:8000": 2, "127.0.0.1:8767": 1}
-    assert result["codex_tag"].startswith("rust-v") and "0001-brand-puffin-name.patch" in result["patches"]
+    assert result["codex_tag"].startswith("rust-v")
+    # /opt/puffin is not the installed build: no build key and no patch list are credited to it.
+    assert result["puffin_bin"] == "/opt/puffin" and result["build_key"] == ""
+    assert result["build_matches_checkout"] is False and result["patches"] is None
+
+
+def test_the_identity_names_the_traced_binary_and_credits_patches_only_to_a_matching_install(tmp_path, monkeypatch):
+    from dreamference.runner import codex_branded_builder as builder
+    install = tmp_path / "install"
+    (install / "bin").mkdir(parents=True)
+    installed = install / "bin" / builder.BRANDED_EXECUTABLE_NAME
+    installed.write_bytes(b"installed")
+    scratch = tmp_path / "scratch-puffin"
+    scratch.write_bytes(b"without 0015")
+    monkeypatch.setattr(builder, "INSTALL_DIR", str(install))
+    monkeypatch.setattr(builder.CodexBrandedBuilder, "build_key", classmethod(lambda cls: "key-1"))
+    (install / builder.BUILD_STAMP_NAME).write_text("key-1\n")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "puffin 0.158.0", ""))
+
+    ours = EgressAudit.build_identity(str(installed))
+    assert ours["build_key"] == "key-1" and ours["build_matches_checkout"] is True
+    assert "0001-brand-puffin-name.patch" in ours["patches"]
+    assert ours["puffin_sha256"] == hashlib.sha256(b"installed").hexdigest()
+
+    # A scratch build beside it is told apart by its hash, and is credited with nothing.
+    theirs = EgressAudit.build_identity(str(scratch))
+    assert theirs["build_key"] == "" and theirs["patches"] is None
+    assert theirs["puffin_sha256"] == hashlib.sha256(b"without 0015").hexdigest()
+
+    # The installed binary built from another checkout: its key is kept, the patch list is not.
+    (install / builder.BUILD_STAMP_NAME).write_text("key-0\n")
+    stale = EgressAudit.build_identity(str(installed))
+    assert stale["build_key"] == "key-0" and stale["build_matches_checkout"] is False and stale["patches"] is None
 
 
 def test_without_a_reply_the_audit_says_the_trace_failed(tmp_path, monkeypatch, capsys):

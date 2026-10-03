@@ -239,8 +239,9 @@ class EgressAudit:
             puffin_bin (str): The `puffin` executable.
 
         Returns:
-            Dict[str, Any]: `puffin --version`, the Codex tag, the installed build's key, whether
-            that build matches this checkout, and each patch's hash.
+            Dict[str, Any]: `puffin --version`, the traced binary's path and hash, the Codex tag,
+            the build key when the traced binary is the installed one, whether that build matches
+            this checkout, and each patch's hash only when it does.
         """
         from dreamference.runner.codex_branded_builder import (
             BUILD_STAMP_NAME, CODEX_RELEASE_TAG, INSTALL_DIR, CodexBrandedBuilder,
@@ -249,22 +250,37 @@ class EgressAudit:
             version = subprocess.run([puffin_bin, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             version = ""
+        binary = os.path.realpath(puffin_bin)
+        binary_sha256 = None
+        if os.path.isfile(binary):
+            digest = hashlib.sha256()
+            with open(binary, "rb") as handle:
+                for block in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(block)
+            binary_sha256 = digest.hexdigest()
+        # The stamp describes the installed binary only: a scratch build traced with --puffin-bin
+        # (a build without one patch, say) has none, and must not be credited with the installed one's.
         build_key = ""
         stamp = os.path.join(INSTALL_DIR, BUILD_STAMP_NAME)
-        if os.path.isfile(stamp):
+        if binary == os.path.realpath(CodexBrandedBuilder.executable_path()) and os.path.isfile(stamp):
             with open(stamp) as handle:
                 build_key = handle.read().strip()
-        patches = {}
-        for path in CodexBrandedBuilder.patches():
-            with open(path, "rb") as handle:
-                patches[os.path.basename(path)] = hashlib.sha256(handle.read()).hexdigest()
+        matches = bool(build_key) and build_key == CodexBrandedBuilder.build_key()
+        patches: Optional[Dict[str, str]] = None
+        if matches:
+            patches = {}
+            for path in CodexBrandedBuilder.patches():
+                with open(path, "rb") as handle:
+                    patches[os.path.basename(path)] = hashlib.sha256(handle.read()).hexdigest()
         return {
             "puffin_version": version,
+            "puffin_bin": binary,
+            "puffin_sha256": binary_sha256,
             "codex_tag": CODEX_RELEASE_TAG,
             "build_key": build_key,
-            # The patch hashes are the checkout's; they describe the audited binary only when it
-            # was built from this checkout as it is now.
-            "build_matches_checkout": bool(build_key) and build_key == CodexBrandedBuilder.build_key(),
+            "build_matches_checkout": matches,
+            # The checkout's patch hashes, recorded only when they are known to be the traced
+            # binary's; otherwise None, and `puffin_sha256` is what identifies the build.
             "patches": patches,
         }
 
