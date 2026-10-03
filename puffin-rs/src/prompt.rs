@@ -296,6 +296,8 @@ pub struct Parts {
     /// glossary does too.
     pub glossary: String,
     pub rg_installed: bool,
+    /// How to read an output moved out of context, when masking is on (mask.rs).
+    pub masking: String,
 }
 
 /// The whole system prompt a session under `prompt` receives.
@@ -322,6 +324,7 @@ pub fn compose(prompt: &Prompt, parts: &Parts) -> String {
         text.push_str(&parts.code);
     }
     text.push_str(&parts.glossary);
+    text.push_str(&parts.masking);
     text
 }
 
@@ -438,7 +441,7 @@ async fn show(prompt: &Prompt) -> i32 {
         String::new()
     };
     let code = if prompt.blocks.code { code_index::prompt_block(code_index::tools_enabled(), &dir) } else { String::new() };
-    let parts = Parts { email, code, glossary: String::new(), rg_installed: code_index::rg_installed() };
+    let parts = Parts { email, code, rg_installed: code_index::rg_installed(), ..Default::default() };
     let text = compose(prompt, &parts);
     println!("{text}");
     eprintln!(
@@ -499,7 +502,7 @@ mod tests {
     }
 
     fn parts(email: &str, code: &str) -> Parts {
-        Parts { email: email.to_string(), code: code.to_string(), glossary: String::new(), rg_installed: true }
+        Parts { email: email.to_string(), code: code.to_string(), rg_installed: true, ..Default::default() }
     }
 
     #[test]
@@ -507,7 +510,7 @@ mod tests {
         let code = "\n\n# Code navigation\n\nbehind the `code_*` tools\n";
         let email = crate::gmail_access_instructions("a@x.com");
         for (email, code, rg) in [("", "", true), (email.as_str(), code, false), ("", code, true)] {
-            let parts = Parts { email: email.to_string(), code: code.to_string(), glossary: "\n\nG\n".to_string(), rg_installed: rg };
+            let parts = Parts { email: email.to_string(), code: code.to_string(), glossary: "\n\nG\n".to_string(), rg_installed: rg, ..Default::default() };
             let before = code_index::search_habit(&crate::base_instructions(), code_index::named_in(code), rg)
                 + email
                 + code

@@ -1,0 +1,21 @@
+diff --git a/codex-rs/core/Cargo.toml b/codex-rs/core/Cargo.toml
+index 1444e51..9cdf413 100644
+--- a/codex-rs/core/Cargo.toml
++++ b/codex-rs/core/Cargo.toml
+@@ -74,2 +74,3 @@ codex-tools = { workspace = true }
+ puffin-tools = { path = "../puffin/tools" }
++puffin-masking = { path = "../puffin/masking" }
+ codex-utils-absolute-path = { workspace = true }
+diff --git a/codex-rs/core/src/context_manager/history.rs b/codex-rs/core/src/context_manager/history.rs
+index 7e19dae..f5904be 100644
+--- a/codex-rs/core/src/context_manager/history.rs
++++ b/codex-rs/core/src/context_manager/history.rs
+@@ -539,4 +539,7 @@ impl ContextManager {
+     ) -> Vec<ResponseItemEnvelope> {
++        let size = self.get_total_token_usage(/*server_reasoning_included*/ false);
+         self.normalize_history(input_modalities);
+-        Arc::unwrap_or_clone(self.items)
++        let mut items = Arc::unwrap_or_clone(self.items);
++        puffin_masking::apply(&mut items, size, |envelope| &mut envelope.item);
++        items
+     }
