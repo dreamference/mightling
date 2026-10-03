@@ -41,6 +41,7 @@ pub mod home;
 pub mod ledger;
 pub mod night;
 pub mod node;
+pub mod notice;
 pub mod prompt;
 pub mod skills;
 
@@ -219,6 +220,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(ledger::run_cli(&user_args[index + 1..]));
     }
+    // `notice` is the hook that shows the start-up lines inside the TUI (notice.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "notice"
+    {
+        std::process::exit(notice::run_cli(&user_args[index + 1..]));
+    }
     // `skill` lists, installs and switches skills, Codex's own and other agents' (skills.rs).
     if let Some(index) = subcommand
         && user_args[index] == "skill"
@@ -241,7 +248,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     }
     // A session that starts at `on` says first whether that holds (airgapped.rs).
     for line in airgapped::startup_lines_now(&configured) {
-        eprintln!("{line}");
+        notice::say(&line);
     }
 
     // The interactive TUI (no subcommand, or a prompt) says once what a night run finished.
@@ -251,7 +258,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && let Ok(cwd) = std::env::current_dir()
         && let Some(line) = night::startup_line(&dir, &cwd)
     {
-        eprintln!("{line}");
+        notice::say(&line);
     }
 
     // Where the model server is: configuration, this machine if it is a node, or a node found on
@@ -265,7 +272,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // Which system prompt a new session gets (prompt.rs; specs/DREAMFERENCE_PUFFIN_PROMPT.md).
     let chosen = prompt::resolve(&codex_home);
     for line in prompt::startup_lines(&chosen, interactive) {
-        eprintln!("{line}");
+        notice::say(&line);
     }
     // Gmail only on a node: `puffin-admin gmail` is Python and the service's secret is a file
     // there, so a client is never told of a command it cannot run (§10). Not at a configured `on`
@@ -290,6 +297,11 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let catalog = configure_codex_home(&codex_home, &host, &model, &parts, &chosen.prompt)?;
     // When the session compacts and what it is handed afterwards (compaction.rs).
     let args = compaction::prepare(args, &codex_home, &host, &model).await;
+    // What was said above, shown inside the TUI too: its first frame covers stderr (notice.rs).
+    // After the ledger's registration, so the notice group follows it in `config.toml`.
+    // `resume` and `fork` open the TUI too.
+    let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
+    notice::publish(&codex_home, tui);
     // The index as tools, when the block just written names them (code_index.rs).
     let args = if code_index::named_in(&code_block) == Some(code_index::TOOLS_NAME) {
         code_index::with_tools(args)
@@ -302,7 +314,30 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         Some(catalog) => prompt::with_catalog(args, &catalog),
         None => args,
     };
-    Ok(with_local_model_args(args, &model.id))
+    let args = with_local_model_args(args, &model.id);
+    // `app-server` takes only `-c` overrides from the root command line, not `--model`, so the
+    // model has to be named as configuration there or its threads get Codex's fallback model and
+    // not Puffin's prompt (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §5).
+    let app_server = subcommand.is_some_and(|index| user_args[index] == "app-server");
+    Ok(if app_server { with_configured_model(args, &model.id) } else { args })
+}
+
+/// Names the model as `-c model="<id>"`, for subcommands that read only `-c` overrides from the
+/// root command line (`app-server`). A model the user named, as `-c model=…` or as `--model`, wins.
+pub fn with_configured_model(args: Vec<OsString>, model_id: &str) -> Vec<OsString> {
+    let user_args: Vec<String> = args.iter().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let configured = option_values(&user_args, &["-c", "--config"])
+        .any(|value| value.split_once('=').is_some_and(|(key, _)| key.trim() == "model"));
+    if configured {
+        return args;
+    }
+    let chosen = option_values(&user_args, &["--model", "-m"]).last().unwrap_or(model_id);
+    let setting = format!("model={}", toml::Value::String(chosen.to_string()));
+    let mut args = args.into_iter();
+    let mut out: Vec<OsString> = args.next().into_iter().collect();
+    out.extend(["-c".into(), setting.into()]);
+    out.extend(args);
+    out
 }
 
 /// Finds the first positional argument in `user_args`: the subcommand, or an interactive prompt.
@@ -602,7 +637,10 @@ pub fn model_catalog(model: &ServedModel, instructions: &str) -> serde_json::Val
             "shell_type": "default",
             "visibility": "list",
             "auto_compact_token_limit": context,
-            "supported_in_api": false,
+            // Codex lists a model in `/model` and app-server's `model/list` only if it is supported
+            // in the API or the session has a ChatGPT sign-in (`ModelPreset::filter_by_auth`);
+            // Puffin never has the sign-in, so `false` left both lists empty. Nothing else reads it.
+            "supported_in_api": true,
             "priority": 0,
             "support_verbosity": false,
             "supports_parallel_tool_calls": false,
@@ -813,6 +851,35 @@ mod tests {
 
     fn strings(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn the_catalog_entry_is_listed_without_a_chatgpt_sign_in() {
+        let model = ServedModel { id: "m".into(), max_model_len: 1000 };
+        let entry = &model_catalog(&model, "prompt")["models"][0];
+        assert_eq!(entry["supported_in_api"], json!(true));
+        assert_eq!(entry["visibility"], json!("list"));
+    }
+
+    #[test]
+    fn app_server_is_given_the_model_as_configuration() {
+        let args: Vec<OsString> = ["puffin", "--oss", "app-server"].iter().map(OsString::from).collect();
+        let out: Vec<String> = with_configured_model(args, "qwen3.8-27b")
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(out, strings(&["puffin", "-c", "model=\"qwen3.8-27b\"", "--oss", "app-server"]));
+    }
+
+    #[test]
+    fn a_model_the_user_named_wins_for_app_server() {
+        let configured: Vec<OsString> =
+            ["puffin", "-c", "model=\"mine\"", "app-server"].iter().map(OsString::from).collect();
+        assert_eq!(with_configured_model(configured.clone(), "served"), configured);
+        let flagged: Vec<OsString> = ["puffin", "--model", "mine", "app-server"].iter().map(OsString::from).collect();
+        let out: Vec<String> =
+            with_configured_model(flagged, "served").iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(&out[1..3], &strings(&["-c", "model=\"mine\""])[..]);
     }
 
     #[tokio::test]
