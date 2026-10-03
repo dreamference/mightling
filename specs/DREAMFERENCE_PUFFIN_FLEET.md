@@ -1,6 +1,6 @@
 # Puffin Fleet: setting up more GB10s from the one you have
 
-**Status:** proposed on 2026-10-02. Nothing here is built. The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-1a2b`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
+**Status:** proposed on 2026-10-02; §15's open questions answered by the user on 2026-10-03. Nothing here is built. The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-1a2b`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
 **Target:** new DGX Spark-class machines (DGX Spark and the partner GB10 units; this one is an ASUS Ascent GX10) on the same local network as an existing Puffin node.
 **Builds on:**
 - the client/node split, discovery and SSH pairing in [PUFFIN_NODE](./DREAMFERENCE_PUFFIN_NODE.md), in particular §9 (installing), §12.4 (no roles), §13.2 (pairing), §15.1 (control over SSH) and §18.6 (pairing as built);
@@ -153,7 +153,7 @@ NVIDIA's documented route (§2.2): repack the recovery image with a cloud-init s
 - **The tools are not obtainable as documented.** The repack scripts have no public URL. Whether the ASUS GX10's recovery image is NVIDIA's or ASUS's, and whether it accepts the same seed, is unknown.
 - **It erases the disk**, which is harmless on a new unit but a sharp tool to hand to a fleet command.
 
-If it is pursued later (question 8), Puffin's part is small. `puffin-admin node seed` would write the `user-data` and `meta-data`, containing:
+If it is pursued later (question 8 answered *not now*, 2026-10-03), Puffin's part is small. `puffin-admin node seed` would write the `user-data` and `meta-data`, containing:
 - the user, in the `docker` group;
 - the host name;
 - a **one-time bootstrap key** that `node provision` removes once the pairing exists.
@@ -180,7 +180,8 @@ puffin-admin node provision spark-1a2b --model qwen3.5-122b-a10b-hybrid-dflash -
 | `--user <name>` | The account on the new machines. Default: this user's name |
 | `--model <key>` | The model each named node is assigned. Default: this machine's configured model. Only keys of the matrix, as `node set` |
 | `--from this\|release[=X.Y.Z]` | What to install (§7.2). Default: `this` |
-| `--one-password` | With several hosts: ask once, not once per machine, and use the answer for every machine's login and `sudo` (§8.2) |
+| `--per-host-password` | With several hosts: ask for each machine's password separately. **Default is one password**, asked once and used for every machine's login and `sudo` (§8.2; decided 2026-10-03) |
+| `--mesh` | Also pair every provisioned node with every other, so any of them can manage the fleet. Off by default: only this machine pairs with each node (§9.3; decided 2026-10-03) |
 | `--web` | Also install and configure the web UI there (`puffin-admin puffin start` and `configure`). Off by default |
 | `--no-start` | Leave the model server stopped |
 | `--restart` | Restart a running model server whose image or model has changed. Without it, the summary says a restart is pending |
@@ -206,13 +207,13 @@ NVIDIA recommends Ansible for Spark fleets (§2.2), and it would work. It is not
 | Ansible | Here |
 |---|---|
 | Parallel fan-out | Only what pays at this scale: the questions are asked for every machine first, installs run side by side, and copies from this machine run one at a time (§9.2) |
-| `--ask-become-pass` | the passwords asked up front, or `--one-password` (§8.2) |
+| `--ask-become-pass` | the password asked up front, once for all machines by default (§8.2) |
 | Idempotent modules | Puffin's commands already read before they change |
 | A run report | The summary table (§11) |
 
 ### 6.3 The escape hatch
 
-If the fleet ever joins an organisation's own configuration management, a playbook that runs `puffin-admin node prepare` and `install.sh --from` is a few lines. The commands of §7 are the stable interface for it. Whether to ship one as an example is question 10.
+If the fleet ever joins an organisation's own configuration management, a playbook that runs `puffin-admin node prepare` and `install.sh --from` is a few lines. The commands of §7 are the stable interface for it. **Decided 2026-10-03: no example playbook is shipped**; one supported route.
 
 ---
 
@@ -262,9 +263,10 @@ A new command that does **every root step of a single-machine install, and nothi
 | Docker without `sudo` | new, small | `usermod -aG docker <user>` (NVIDIA: not done by the wizard, §2.1) |
 | Lingering | new, small | `loginctl enable-linger <user>`, which jobs and Night Shift need (PUFFIN_NODE §13.7) |
 | Advertising | `NodeAdvertiser.enable()`'s root part | `/etc/avahi/services/puffin-node.service`, owned by the user |
-| Sandbox | **whatever `host setup` adopts** for bubblewrap under AppArmor (SETUP §3.3, not yet decided) | until then: reported, not fixed |
+| Sandbox | `HostSafetySetup`'s AppArmor step (SETUP §3.3), adopted and verified on this machine on 2026-10-03 | `/etc/apparmor.d/puffin-bwrap` (`userns` for `/usr/bin/bwrap` alone), loaded with `apparmor_parser -r` |
+| **NVIDIA's telemetry** | new, small (decided 2026-10-03) | **`systemctl disable --now nvidia-dgx-telemetry`, always**, as Puffin disabled vLLM's and Onyx's telemetry. It is NVIDIA's service, so the step is printed before it runs and named in the summary; no flag skips it |
 
-What it **never** changes: `sshd`, netplan or NetworkManager, the firewall, users and passwords, APT sources, kernel parameters other than the two sysctls, and NVIDIA's services (question 5 asks about telemetry).
+What it **never** changes: `sshd`, netplan or NetworkManager, the firewall, users and passwords, APT sources, kernel parameters other than the two sysctls, and NVIDIA's services other than the telemetry service above.
 
 `node prepare` runs from the user's own virtualenv as root. Anyone who can write that virtualenv is the user, who has `sudo` anyway, so this grants no one anything new; it is stated so that the choice is visible.
 
@@ -288,8 +290,8 @@ What a node needs is computed **here**, from the matrix entry of the model assig
 ### 7.5 Which link
 
 - The session goes to the address the host name resolves to, or to the address given.
-- **Wired Ethernet is assumed** (§4.1, step 1). This machine is on Wi-Fi today. A copy of about 58 GB over Wi-Fi may take longer than each node downloading for itself; Phase 0 measures both, and the summary prints the throughput seen.
-- **QSFP.** If two machines are cabled directly and configured as NVIDIA's playbook does, `--via <address>` names the address to copy over. Provisioning does not configure that link, because it changes netplan (decision 6). No ConnectX device is visible on this machine without a cable (§3).
+- **Wired Ethernet or Wi-Fi, both supported** (decided 2026-10-03: a unit may be on either). Wired is recommended (§4.1, step 1) because it also skips the wizard's Wi-Fi step; this machine is on Wi-Fi today. A copy of about 58 GB over Wi-Fi may take longer than each node downloading for itself; Phase 0 measures both, and the summary prints the throughput seen. Nothing in provisioning depends on which.
+- **QSFP, optional.** If two machines are cabled directly and configured as NVIDIA's playbook does, `--via <address>` names the address to copy over. Provisioning does not configure that link, because it changes netplan (decision 6). No ConnectX device is visible on this machine without a cable (§3).
 - **Several new nodes copy one after another**, never in parallel. They share this machine's one link and its disk reads, and with sequential copies the summary's time for each is meaningful.
 
 ### 7.6 Pairing within the session
@@ -308,7 +310,7 @@ A second run on a provisioned node goes through the same table:
 - step 9 finds the pairing and checks it with `info`;
 - step 11 does not restart a running server unless `--restart` is given.
 
-**`node provision --all` is the fleet update**: every paired node is brought to what this machine runs. Its cost is one password per node, or one for all with `--one-password`.
+**`node provision --all` is the fleet update**: every paired node is brought to what this machine runs. Its cost is one password for all nodes, or one per node with `--per-host-password`.
 
 ---
 
@@ -324,7 +326,7 @@ A second run on a provisioned node goes through the same table:
 ### 8.2 `sudo`, and the passwords
 
 - **One host named:** the password is typed at `ssh`'s own prompt, and step 5 runs as `ssh -t … sudo <venv>/bin/puffin-admin node prepare`, so `sudo` prompts on the remote terminal. The password goes from the keyboard to that machine and nowhere else. `puffin-admin` never sees it.
-- **Several hosts named:** the `sudo` prompt cannot come before the slow part, because `prepare` needs the virtualenv that step 4 installs, which takes minutes. To keep §9.2's "questions first", `puffin-admin` asks for each machine's password at the start, with `getpass`; with `--one-password` it asks once for all. It then uses that password for both prompts:
+- **Several hosts named:** the `sudo` prompt cannot come before the slow part, because `prepare` needs the virtualenv that step 4 installs, which takes minutes. To keep §9.2's "questions first", `puffin-admin` asks for the password at the start, with `getpass`: **once for all machines by default** (decided 2026-10-03, the same username everywhere makes one password the common case), or once per machine with `--per-host-password`. A machine that refuses the shared password is asked for its own once. It then uses that password for both prompts:
   - for `ssh`'s password prompt, through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4 or later; this machine has 9.6). The askpass helper is `puffin-admin` itself, reading the password from an inherited pipe, never from the environment or argv;
   - for `sudo`, through `sudo -S -p ''`, the password written to the remote command's standard input over the encrypted channel.
 - Each password is checked when it is asked for, by opening that machine's session at once. It is held in memory for the run and nowhere else. A machine that refuses one is asked again once, then dropped from the run; nothing is retried in a loop.
@@ -365,7 +367,7 @@ Nothing is assumed from the name. Step 1 checks `/etc/dgx-release` before anythi
 ### 9.2 Questions first, then walk away
 
 With several hosts, every question is asked before any slow step starts:
-1. a password per machine, or one with `--one-password`, each checked at once by opening that machine's session (§8.2);
+1. one password for all machines (or one per machine with `--per-host-password`), checked at once by opening that machine's session (§8.2);
 2. the host-key fingerprint of each new machine, printed;
 3. then, unattended: install, root half (with the password already held), advertise, copy, pair, start. The installs run on all machines at once, since each downloads its own Python dependencies or reads its own copy of the bundle; the copies from this machine run one after another (§7.5).
 
@@ -373,7 +375,7 @@ Someone setting up five units types everything in the first minutes and can leav
 
 ### 9.3 Pairing between new nodes
 
-Only this machine pairs with each new node, which keeps pairing one-way, as built. Managing the fleet from a different node means running `node add` there. A `--mesh` option that pairs every node with every other is question 7. It is cheap to add, but it multiplies keys that nobody asked for.
+Only this machine pairs with each new node, which keeps pairing one-way, as built. Managing the fleet from a different node means running `node add` there. **Decided 2026-10-03: hub only by default.** `--mesh` pairs every node with every other for those who want any node to manage the fleet; it is off by default because it multiplies keys.
 
 ---
 
@@ -441,8 +443,8 @@ The `info` operation of `serve-job` (PUFFIN_NODE §18.6) gains read-only fields:
 | 0 | **Measurements on the first new unit** (below) | each has a measured answer recorded here |
 | 1 | `install.sh --from`, the bundle (`this` and `release`), `node add <address>`, the `info` fields, drift in `node list` | a node installed by hand from a bundle shows no drift against this machine |
 | 2 | `node prepare`; `node provision <host>` for one machine: session, root half, install, copy, pairing, start, verify, summary, log | one new unit goes from the end of the wizard to answering a completion through `puffin` on a laptop, with one command typed here |
-| 3 | Several machines: finding new units, questions first, `--one-password`, `--all` | three units in one run, with every password typed in the first minutes |
-| 4 | Opt-in extras: `--os-update`; `--web`; the image-id fix if Phase 0 calls for it; `node seed` if question 8 says yes | each tested on one unit |
+| 3 | Several machines: finding new units, questions first, one password for all (`--per-host-password` to opt out), `--all`, `--mesh` | three units in one run, with every password typed in the first minutes |
+| 4 | Opt-in extras: `--os-update`; `--web`; the image-id fix if Phase 0 calls for it; no `node seed` (question 8: not now) | each tested on one unit |
 
 **Phase 0, on the first new unit:**
 1. The wizard: attended time, total time to SSH-ready, and whether the Ethernet cable really skips the Wi-Fi step.
@@ -477,19 +479,19 @@ Live, from Phase 0 on: everything in §13's list, then one unit end to end, then
 
 ---
 
-## 15. Open questions
+## 15. Open questions, answered (2026-10-03)
 
-1. **The same username on every machine?** Assumed, as NVIDIA's playbooks require. `--user` covers an exception.
-2. **Network.** Is there wired Ethernet for the new units, and at what speed? Is a QSFP cable between any two of them planned? This machine is on Wi-Fi today.
-3. **Which model per node?** All the same as this one (the default), or a different assignment for some, such as the 122B fallback or a node for speech and embeddings (PUFFIN_NODE §12.3)?
-4. **The web UI on new nodes?** Off by default here, since each would bring its own account and its own Gmail tool. On with `--web`.
-5. **NVIDIA's telemetry service** (`nvidia-dgx-telemetry`, active here). Leave it, or should `prepare` disable it as Puffin disabled vLLM's and Onyx's? It is NVIDIA's software, so not silently.
-6. **OS and firmware updates.** Keep them opt-in (`--os-update`), or leave them to the Dashboard entirely?
-7. **Pair every node with every other** (`--mesh`), so that any of them can manage the fleet?
-8. **Zero-touch.** Worth pursuing NVIDIA's cloud-init repack (§4.3)? It needs NVIDIA's reference package and still a USB stick and a keyboard at each unit.
-9. **`--one-password` by default** when several hosts are named?
-10. **Ship an example Ansible playbook** for organisations that use one (§6.3)?
-11. **The bubblewrap fix** (SETUP §3.3): an AppArmor profile for `bwrap` or the sysctl? Provisioning applies whichever `host setup` adopts, and until one is adopted every node, this one included, fails `host check`'s sandbox line.
+1. **The same username on every machine:** yes. `--user` stays for an exception.
+2. **Network:** a unit may be on wired Ethernet **or** Wi-Fi; both are supported (§7.5). QSFP is optional (`--via`).
+3. **Model per node:** the same as this one (the default of `--model`).
+4. **The web UI on new nodes:** off by default; `--web` turns it on.
+5. **NVIDIA's telemetry service:** disabled always by `node prepare` (§7.3), printed and named in the summary.
+6. **OS and firmware updates:** opt-in with `--os-update`; otherwise NVIDIA's Dashboard.
+7. **Pairing:** hub only by default; `--mesh` optional (§9.3).
+8. **Zero-touch:** not now (§4.3 stays recorded, not chosen).
+9. **Passwords:** one password by default for several hosts; `--per-host-password` to opt out (§8.2).
+10. **An example Ansible playbook:** no (§6.3).
+11. **The bubblewrap fix:** the AppArmor profile route, `puffin-admin host setup` (`/etc/apparmor.d/puffin-bwrap`), loaded and verified on this machine on 2026-10-03: from a systemd user unit `bwrap --unshare-user --unshare-net` and `puffin sandbox` succeed and `host check` reports nothing to do. `node prepare` applies the same step (§7.3).
 
 ---
 
