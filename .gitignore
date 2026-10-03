@@ -44,6 +44,10 @@ ENV/
 
 # Tauri build output
 desktop/src-tauri/target/
+desktop/bridge/target/
+
+# The Work window's frontend: npm's install and Vite's build (dist/ is covered above)
+desktop/ui/node_modules/
 
 # puffin-code build output
 puffin-code-rs/target/

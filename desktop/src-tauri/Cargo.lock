@@ -2392,12 +2392,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "puffin-airgapped"
+version = "0.1.0"
+
+[[package]]
 name = "puffin-app"
 version = "0.1.0"
 dependencies = [
  "mdns-sd",
+ "puffin-airgapped",
+ "puffin-desktop-bridge",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
+]
+
+[[package]]
+name = "puffin-desktop-bridge"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

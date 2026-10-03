@@ -11,6 +11,10 @@ the white canvas, the hidden chrome -- shows up in both without being ported. Wh
 adds is a window of its own: its own launcher entry and icon, no address bar, and no tab that gets
 lost among thirty others.
 
+That is the Chat window. Beside it the app now carries a second, the Work window (the coding agent
+on `puffin app-server`, specs/DREAMFERENCE_PUFFIN_DESKTOP.md), whose frontend *is* bundled: it is
+built from `desktop/ui` before every Tauri build or dev run (`build_ui`). Chat is unchanged by it.
+
 It follows the same shape as the agent runners: check the service is healthy, provision the tooling
 if it is missing, then hand off to a subprocess. The health check is the one that matters -- a
 window opened against a stopped Onyx shows a connection error with no hint of what to start, so it
@@ -33,6 +37,10 @@ from dreamference.chat.onyx_runner import DEFAULT_ONYX_WEB_URL
 DESKTOP_PROJECT_DIR: Final[str] = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "desktop"
 )
+
+# The Work window's frontend (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §4.5): bundled into the binary
+# from `ui/dist`, which `tauri.conf.json` names as `frontendDist`.
+UI_DIR: Final[str] = os.path.join(DESKTOP_PROJECT_DIR, "ui")
 
 # How long to wait for Onyx to answer before deciding it is not running.
 HEALTH_TIMEOUT_SECONDS: Final[int] = 5
@@ -149,6 +157,29 @@ class DesktopRunner:
         return True
 
     @classmethod
+    def build_ui(cls) -> bool:
+        """
+        Builds the Work window's bundle, `desktop/ui/dist`, which Tauri embeds in the binary.
+
+        The Chat window needs none of it: it is the Onyx page at its URL. But Tauri embeds
+        `frontendDist` at compile time, so every build and `tauri dev` needs it present. npm's
+        packages are installed from the committed lock file the first time.
+
+        Returns:
+            bool: True when the bundle was built.
+        """
+        npm = shutil.which("npm")
+        if npm is None:
+            print("❌ npm is needed to build the Work window (desktop/ui): install Node.js 20 or later.")
+            return False
+        if not os.path.isdir(os.path.join(UI_DIR, "node_modules")):
+            print("📦 Installing the Work window's packages (desktop/ui)...")
+            if subprocess.call([npm, "ci", "--no-audit", "--no-fund"], cwd=UI_DIR, env=cls._environment()) != 0:
+                return False
+        print("🔨 Building the Work window (desktop/ui)...")
+        return subprocess.call([npm, "run", "build"], cwd=UI_DIR, env=cls._environment()) == 0
+
+    @classmethod
     def has_source(cls) -> bool:
         """
         Tells a checkout from a release install, which has the package but no `desktop/` project.
@@ -203,7 +234,7 @@ class DesktopRunner:
             return 1
         if not cls.has_source():
             return cls._run_installed()
-        if not cls._ensure_toolchain():
+        if not cls._ensure_toolchain() or not cls.build_ui():
             return 1
 
         # Only once something has been built -- on a first run there is no binary to point an
@@ -236,7 +267,7 @@ class DesktopRunner:
         """
         if not cls.has_source():
             return cls._no_source()
-        if not cls._ensure_toolchain():
+        if not cls._ensure_toolchain() or not cls.build_ui():
             return 1
 
         command = cls._tauri_command("build")
