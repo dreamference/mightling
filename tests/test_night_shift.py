@@ -259,13 +259,14 @@ def test_the_airgapped_level_resolves_as_the_launcher_does(tmp_path, monkeypatch
     assert level() == "off"
     user = Path(os.path.expanduser("~/.config/dreamference/config.toml"))
     user.parent.mkdir(parents=True, exist_ok=True)
-    user.write_text('puffin_airgapped = "duckduckgo"\n')
-    assert level() == "duckduckgo"
+    user.write_text('puffin_airgapped = "off"\n')
+    assert level() == "off"
     # Strictest of the files: the worktree's can tighten the user's, and cannot loosen it.
     (worktree / "dreamference.toml").write_text('puffin_airgapped = "on"  # sealed\n[night]\ntest = "x"\n')
     assert level() == "on"
+    user.write_text('puffin_airgapped = "on"\n')
     (worktree / "dreamference.toml").write_text('puffin_airgapped = "off"\n')
-    assert level() == "duckduckgo"
+    assert level() == "on"
     # A key under a table is not the top-level key.
     user.write_text('[night]\npuffin_airgapped = "on"\n')
     assert level() == "off"
@@ -273,8 +274,8 @@ def test_the_airgapped_level_resolves_as_the_launcher_does(tmp_path, monkeypatch
     monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "ON")
     assert level() == "on"
     (home / "airgapped").mkdir(parents=True)
-    (home / "airgapped" / "0a1b-2c3d").write_text("ddg\n")
-    assert level("0a1b-2c3d") == "duckduckgo"
+    (home / "airgapped" / "0a1b-2c3d").write_text("off\n")
+    assert level("0a1b-2c3d") == "off"
     assert level("../escape") == "on"
 
 

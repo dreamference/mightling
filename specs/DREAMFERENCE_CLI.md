@@ -500,7 +500,7 @@ attention_backend = "auto"
 # kv_cache_dtype unset = use the model recipe's value
 puffin_gmail = true
 puffin_cave_mode = "ultra"
-puffin_airgapped = "off"     # off | duckduckgo | on
+puffin_airgapped = "off"     # off | on
 puffin_compaction_ledger = true    # hand the agent a rule-built ledger after each compaction
 
 [night]                      # Night Shift, read by `puffin-admin night` (NightShiftSettings)
@@ -536,7 +536,7 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_PUFFIN_GMAIL` | `true` | Add the Gmail section to `puffin`'s prompt when an account is connected |
 | `DREAMFERENCE_PUFFIN_CAVE_MODE` | `ultra` | Cave-mode level for new `puffin` sessions (`off`, `lite`, `full`, `ultra`); also the config key `puffin_cave_mode` |
-| `DREAMFERENCE_PUFFIN_AIRGAPPED` | `off` | How much of the internet a `puffin` session may use (`off`, `duckduckgo`, `on`); also the config key `puffin_airgapped` |
+| `DREAMFERENCE_PUFFIN_AIRGAPPED` | `off` | How much of the internet a `puffin` session may use (`off`, `on`); also the config key `puffin_airgapped` |
 | `DREAMFERENCE_PUFFIN_COMPACTION_LEDGER` | `true` | Register `puffin ledger` as the hook that runs after each compaction of a `puffin` session ([PUFFIN_COMPACTION §11](./DREAMFERENCE_PUFFIN_COMPACTION.md)); also the config key `puffin_compaction_ledger` |
 | `DREAMFERENCE_SEARXNG_URL` | `http://127.0.0.1:8888` | SearXNG instance used by `puffin-search` and the MCP server's `web_search` |
 | `CODEX_HOME` | `~/.puffin` | `puffin`'s home folder: sessions, config, skills (`skills/`), the Night Shift queue (`night/`), audit results (`audit/`) |

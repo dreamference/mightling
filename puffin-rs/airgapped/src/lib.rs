@@ -1,8 +1,10 @@
 //! How much of the internet a `puffin` session may use (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md).
 //!
-//! Three levels: `off` (everything, the default), `duckduckgo` (search through DuckDuckGo only, a
-//! preference the web commands follow) and `on` (no network for anything the agent runs, enforced
-//! by the command sandbox). Resolved before every command, first match wins:
+//! Two levels: `off` (everything, the default) and `on` (no network for anything the agent runs,
+//! enforced by the command sandbox). A third, `duckduckgo` (search through DuckDuckGo only), was
+//! removed on 2026-10-03: DuckDuckGo answered SearXNG with a CAPTCHA, so the level searched nothing.
+//! A stored `duckduckgo` is now an invalid value, named and passed over like any other. Resolved
+//! before every command, first match wins:
 //!
 //! 1. the session's file, `$CODEX_HOME/airgapped/<id>`, written by `/airgapped <level>`;
 //! 2. `DREAMFERENCE_PUFFIN_AIRGAPPED`;
@@ -42,22 +44,20 @@ pub const SEAL_DIR: &str = "puffin-airgapped";
 /// Set by Codex for a command it runs without a network.
 pub const SANDBOX_NETWORK_DISABLED_ENV_VAR: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
 
-/// A level, ordered by strictness: `Off < DuckDuckGo < On`.
+/// A level, ordered by strictness: `Off < On`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
     Off,
-    DuckDuckGo,
     On,
 }
 
 impl Level {
-    pub const ALL: [Level; 3] = [Level::Off, Level::DuckDuckGo, Level::On];
+    pub const ALL: [Level; 2] = [Level::Off, Level::On];
 
-    /// Parses a level name, ignoring case and surrounding space. `ddg` is `duckduckgo`.
+    /// Parses a level name, ignoring case and surrounding space.
     pub fn parse(name: &str) -> Option<Level> {
         match name.trim().to_ascii_lowercase().as_str() {
             "off" => Some(Level::Off),
-            "duckduckgo" | "ddg" => Some(Level::DuckDuckGo),
             "on" => Some(Level::On),
             _ => None,
         }
@@ -66,7 +66,6 @@ impl Level {
     pub fn name(self) -> &'static str {
         match self {
             Level::Off => "off",
-            Level::DuckDuckGo => "duckduckgo",
             Level::On => "on",
         }
     }
@@ -344,18 +343,19 @@ mod tests {
     #[test]
     fn levels_parse_with_the_alias_and_reject_unknown_names() {
         assert_eq!(Level::parse(" ON "), Some(Level::On));
-        assert_eq!(Level::parse("ddg"), Some(Level::DuckDuckGo));
-        assert_eq!(Level::parse("DuckDuckGo"), Some(Level::DuckDuckGo));
         assert_eq!(Level::parse("off"), Some(Level::Off));
         assert_eq!(Level::parse("airgapped"), None);
-        assert!(Level::Off < Level::DuckDuckGo && Level::DuckDuckGo < Level::On);
+        // The removed level, and its alias, are unknown names now.
+        assert_eq!(Level::parse("duckduckgo"), None);
+        assert_eq!(Level::parse("ddg"), None);
+        assert!(Level::Off < Level::On);
         assert_eq!(Level::parse(DEFAULT_PUFFIN_AIRGAPPED), Some(Level::Off));
     }
 
     #[test]
     fn the_key_is_read_only_at_the_top_level() {
         assert_eq!(toml_value("puffin_airgapped = \"on\"\n").as_deref(), Some("on"));
-        assert_eq!(toml_value("model = \"x\"\npuffin_airgapped='ddg' # search\n").as_deref(), Some("ddg"));
+        assert_eq!(toml_value("model = \"x\"\npuffin_airgapped='on' # no network\n").as_deref(), Some("on"));
         assert_eq!(toml_value("[night]\npuffin_airgapped = \"on\"\n"), None);
         assert_eq!(toml_value("puffin_airgapped_other = \"on\"\n"), None);
         assert_eq!(toml_value(""), None);
@@ -364,10 +364,10 @@ mod tests {
     #[test]
     fn the_first_tier_that_has_a_valid_value_wins() {
         let configs = [config("/repo/dreamference.toml", "puffin_airgapped = \"on\"\n")];
-        let resolved = resolve_from(Some("off\n"), Some("duckduckgo"), &configs);
+        let resolved = resolve_from(Some("off\n"), Some("on"), &configs);
         assert_eq!((resolved.level, resolved.source), (Level::Off, Source::Session));
-        let resolved = resolve_from(None, Some("duckduckgo"), &configs);
-        assert_eq!((resolved.level, resolved.source), (Level::DuckDuckGo, Source::Environment));
+        let resolved = resolve_from(None, Some("off"), &configs);
+        assert_eq!((resolved.level, resolved.source), (Level::Off, Source::Environment));
         let resolved = resolve_from(None, None, &[]);
         assert_eq!((resolved.level, resolved.source), (Level::Off, Source::Default));
     }
@@ -377,6 +377,13 @@ mod tests {
         let resolved = resolve_from(Some("sealed"), Some("on"), &[]);
         assert_eq!(resolved.level, Level::On);
         assert_eq!(resolved.invalid, vec!["ignored \"sealed\" from this session".to_string()]);
+        // A session or a file still set to the removed `duckduckgo` level falls through the same way.
+        let user_on = config("/home/u/.config/dreamference/config.toml", "puffin_airgapped = \"on\"\n");
+        let resolved = resolve_from(Some("duckduckgo"), None, &[user_on]);
+        assert_eq!(resolved.level, Level::On);
+        assert_eq!(resolved.invalid, vec!["ignored \"duckduckgo\" from this session".to_string()]);
+        let repo_ddg = config("/repo/dreamference.toml", "puffin_airgapped = \"duckduckgo\"\n");
+        assert_eq!(resolve_from(None, None, &[repo_ddg]).level, Level::Off);
     }
 
     #[test]
@@ -389,8 +396,8 @@ mod tests {
         assert_eq!(resolved.source, Source::ConfigFile(user_on.0.clone()));
         // It may tighten it.
         let repo_on = config("/repo/dreamference.toml", "puffin_airgapped = \"on\"\n");
-        let user_ddg = config("/home/u/.config/dreamference/config.toml", "puffin_airgapped = \"ddg\"\n");
-        let resolved = resolve_from(None, None, &[repo_on.clone(), user_ddg]);
+        let user_off = config("/home/u/.config/dreamference/config.toml", "puffin_airgapped = \"off\"\n");
+        let resolved = resolve_from(None, None, &[repo_on.clone(), user_off]);
         assert_eq!(resolved.source, Source::ConfigFile(repo_on.0));
         // A file without the key does not count.
         let resolved = resolve_from(None, None, &[config("/repo/dreamference.toml", "model = \"x\"\n"), repo_off]);
@@ -428,10 +435,10 @@ mod tests {
         assert_eq!(resolved.level, Level::On);
         assert_eq!(resolved.source, Source::ConfigFile(user_on[0].0.clone()));
         assert!(resolved.invalid[0].starts_with("ignored \"off\" from this session: commands can write the level file here"));
-        let resolved = resolve_guarded(Some("duckduckgo"), Some("on"), &[], false, true);
+        let resolved = resolve_guarded(Some("off"), Some("on"), &[], false, true);
         assert_eq!((resolved.level, resolved.source), (Level::On, Source::Environment));
         // Tightening is still the session's to do, and nothing configured means nothing to loosen.
-        let resolved = resolve_guarded(Some("on"), Some("duckduckgo"), &[], false, true);
+        let resolved = resolve_guarded(Some("on"), Some("off"), &[], false, true);
         assert_eq!((resolved.level, resolved.source), (Level::On, Source::Session));
         let resolved = resolve_guarded(Some("off"), None, &[], false, true);
         assert_eq!((resolved.level, resolved.source, resolved.invalid.len()), (Level::Off, Source::Session, 0));

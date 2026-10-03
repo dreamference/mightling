@@ -129,41 +129,25 @@ fn search_asks_searxng_for_json_and_prints_results() {
 }
 
 #[test]
-fn at_duckduckgo_search_names_the_engine_and_no_category() {
+fn the_removed_duckduckgo_level_searches_every_general_engine() {
+    // `duckduckgo` was a level until 2026-10-03; a value left in the environment is now ignored.
     let server =
         Server::start(|_| response("200 OK", "application/json", SEARXNG_JSON.as_bytes(), ""));
     let output = search(
         &["lisbon", "--json"],
         &[
             ("DREAMFERENCE_SEARXNG_URL", &server.base),
-            ("DREAMFERENCE_PUFFIN_AIRGAPPED", "ddg"),
+            ("DREAMFERENCE_PUFFIN_AIRGAPPED", "duckduckgo"),
         ],
     );
     assert!(output.status.success());
     let request = &server.requests()[0];
     assert!(
-        request.starts_with("GET /search?q=lisbon&format=json&engines=duckduckgo&language=en "),
+        request.starts_with("GET /search?q=lisbon&format=json&categories=general&language=en "),
         "{request}"
     );
-    assert!(!request.contains("categories"));
     let printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(printed["airgapped"], "duckduckgo");
-}
-
-#[test]
-fn at_duckduckgo_no_hint_says_to_restart_or_start_anything() {
-    let body = r#"{"results": [], "answers": [], "unresponsive_engines": [["duckduckgo", "CAPTCHA"]]}"#;
-    let server =
-        Server::start(move |_| response("200 OK", "application/json", body.as_bytes(), ""));
-    let level = ("DREAMFERENCE_PUFFIN_AIRGAPPED", "duckduckgo");
-    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", &server.base), level]);
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(
-        stdout(&output),
-        "❌ DuckDuckGo did not answer (duckduckgo: CAPTCHA). This session searches through DuckDuckGo only (/airgapped duckduckgo).\n"
-    );
-    let output = search(&["q"], &[("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.1:9"), level]);
-    assert!(!stdout(&output).contains("💡"), "{}", stdout(&output));
+    assert_eq!(printed["airgapped"], "off");
 }
 
 #[test]

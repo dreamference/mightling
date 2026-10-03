@@ -100,8 +100,8 @@ agent or user invokes explicitly:
 \end{itemize}
 Gmail access can be switched off (\code{puffin\_gmail = false}). Web search cannot yet: the
 agent reaches it only through the shell commands its prompt describes, but that prompt section is
-always present; a three-level switch for it (\code{/airgapped}: every search engine, DuckDuckGo
-only, or no network at all, the last enforced by the command sandbox) is specified but not built.
+always present; a two-level switch for it (\code{/airgapped}: every search engine, or no network
+at all, enforced by the command sandbox) is specified but not built.
 Updates and builds happen only when the user starts them. No model traffic leaves
 the machine, with one exception: search queries the agent composes go to upstream engines through
 SearXNG, and they can contain fragments of code or context.

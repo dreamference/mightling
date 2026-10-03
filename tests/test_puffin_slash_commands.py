@@ -236,7 +236,7 @@ CASES: Dict[str, Case] = {
 PUFFIN_CASES: Dict[str, Case] = {
     "cavemode": Case("inline", expect=("Cave mode:",)),
     "night": Case("inline", expect=("No Night Shift tasks for this repository",)),
-    "airgapped": Case("inline", expect=("Airgapped:", "duckduckgo")),
+    "airgapped": Case("inline", expect=("Airgapped:", "← in force")),
 }
 CASES.update(PUFFIN_CASES)
 

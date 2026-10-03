@@ -9,8 +9,8 @@
 //! which the command sandbox cannot write, and the leaf crate holds the level at `on` while that
 //! file exists. Without it `puffin` started in the home directory let a command rewrite its own
 //! level file (`~/.puffin` is inside the working directory there). The seal is written by this
-//! process (when the section below sees `on`, and by `/airgapped on`), removed by `/airgapped off`
-//! or `duckduckgo`, and pruned at the next launch once the process that wrote it is gone.
+//! process (when the section below sees `on`, and by `/airgapped on`), removed by `/airgapped off`,
+//! and pruned at the next launch once the process that wrote it is gone.
 //!
 //! The level file is keyed by thread id, the only id the TUI's hook and the World State input
 //! carry; the sandbox helper also looks under the root session's id, so a subagent with no file of
@@ -39,10 +39,7 @@ const SECTION_ID: &str = "airgapped";
 const START_MARKER: &str = "<airgapped>";
 const END_MARKER: &str = "</airgapped>";
 const SESSION_FILE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
-const USAGE: &str = "Usage: /airgapped [off|duckduckgo|on] or /airgapped default <level>";
-
-/// What the model is told when the level changes to `duckduckgo`.
-pub const DUCKDUCKGO_TEXT: &str = "Web search in this session goes through DuckDuckGo only. If a search does not answer, say so: there is no other engine at this level and nothing to restart.";
+const USAGE: &str = "Usage: /airgapped [off|on] or /airgapped default <off|on>";
 
 /// What the model is told when the level changes to `on`.
 pub const ON_TEXT: &str = "This session has no network. puffin-search, puffin-fetch, puffin-admin gmail, curl, git fetch and push, and package installs fail by design. Do not try them, and do not ask to run a command outside the sandbox to get around it. Work from the files here; when an answer needs something you cannot look up, say which part is from memory and may be out of date.";
@@ -55,7 +52,6 @@ pub const OFF_TEXT: &str = "The user has lifted this session's air-gap restricti
 fn summary(level: Level) -> &'static str {
     match level {
         Level::Off => "search through every engine SearXNG has enabled; pages fetched directly",
-        Level::DuckDuckGo => "search through DuckDuckGo only (a preference, not a barrier); pages fetched directly",
         Level::On => "no network for anything the agent runs: no search, no fetch, no Gmail",
     }
 }
@@ -63,7 +59,6 @@ fn summary(level: Level) -> &'static str {
 fn text(level: Level) -> &'static str {
     match level {
         Level::Off => OFF_TEXT,
-        Level::DuckDuckGo => DUCKDUCKGO_TEXT,
         Level::On => ON_TEXT,
     }
 }
@@ -111,7 +106,7 @@ fn seal(thread_id: &str) -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-/// Lifts the hold. Only `/airgapped off` or `duckduckgo`, typed by the user, calls this.
+/// Lifts the hold. Only `/airgapped off`, typed by the user, calls this.
 fn unseal(thread_id: &str) {
     if let Some(path) = puffin_airgapped::seal_file(thread_id) {
         let _ = std::fs::remove_file(path);
@@ -123,7 +118,7 @@ fn unseal(thread_id: &str) {
 fn guard_lines(level: Level, seal: Option<&Path>, exposed: bool, can_seal: bool) -> Vec<String> {
     if let Some(seal) = seal {
         return vec![format!(
-            "Held: commands cannot change this level. It is kept outside the folders they can write ({}); /airgapped off or duckduckgo lifts it.",
+            "Held: commands cannot change this level. It is kept outside the folders they can write ({}); /airgapped off lifts it.",
             seal.display()
         )];
     }
@@ -192,7 +187,7 @@ pub fn run_cli(args: &[String]) -> i32 {
         None => command(None::<String>, ""),
         Some("default") => command(None::<String>, &args.join(" ")),
         Some(_) => vec![
-            "Usage: puffin airgapped [default <off|duckduckgo|on>]".to_string(),
+            "Usage: puffin airgapped [default <off|on>]".to_string(),
             format!("For one run: {ENV_VAR}=on puffin exec …; inside a session: /airgapped <level>."),
         ],
     };
@@ -266,9 +261,6 @@ fn set_session(thread_id: Option<&str>, level: Level) -> Vec<String> {
     match level {
         Level::On => lines.push(
             "Sandboxed commands now run with no network. Not covered: Full Access, commands you approve to run outside the sandbox, MCP servers.".to_string(),
-        ),
-        Level::DuckDuckGo => lines.push(
-            "puffin-search now asks DuckDuckGo only. This is a preference the web commands follow, not a barrier.".to_string(),
         ),
         Level::Off => {}
     }
@@ -415,21 +407,20 @@ mod tests {
     fn each_change_of_level_sends_its_fragment_once() {
         let off = known(r#"{"level":"off"}"#);
         let on = known(r#"{"level":"on"}"#);
-        let ddg = known(r#"{"level":"duckduckgo"}"#);
         assert_eq!(render(Level::On, PreviousWorldStateSection::Known(&off)), Some(ON_TEXT));
         assert_eq!(render(Level::On, PreviousWorldStateSection::Absent), Some(ON_TEXT));
         assert_eq!(render(Level::On, PreviousWorldStateSection::Known(&on)), None);
-        assert_eq!(render(Level::DuckDuckGo, PreviousWorldStateSection::Known(&on)), Some(DUCKDUCKGO_TEXT));
-        assert_eq!(render(Level::DuckDuckGo, PreviousWorldStateSection::Known(&ddg)), None);
         assert_eq!(render(Level::Off, PreviousWorldStateSection::Known(&on)), Some(OFF_TEXT));
+        // A session resumed from before the `duckduckgo` level was removed is told search is back.
+        let ddg = known(r#"{"level":"duckduckgo"}"#);
+        assert_eq!(render(Level::Off, PreviousWorldStateSection::Known(&ddg)), Some(OFF_TEXT));
     }
 
     #[test]
     fn only_on_is_called_a_session_without_network() {
-        // PUFFIN_EGRESS: no text may call `off` or `duckduckgo` air-gapped.
+        // PUFFIN_EGRESS: no text may call `off` air-gapped.
         assert!(ON_TEXT.contains("no network"));
-        assert!(!DUCKDUCKGO_TEXT.contains("no network") && !OFF_TEXT.contains("no network"));
-        assert!(summary(Level::DuckDuckGo).contains("a preference, not a barrier"));
+        assert!(!OFF_TEXT.contains("no network"));
     }
 
     #[test]
@@ -439,7 +430,9 @@ mod tests {
         assert_eq!(command(None::<String>, "default loud"), vec![USAGE.to_string()]);
         assert_eq!(command(None::<String>, "on off"), vec![USAGE.to_string()]);
         assert!(command(None::<String>, "on")[0].starts_with("No session yet"));
-        assert!(command(None::<String>, "DDG")[0].starts_with("No session yet"));
+        assert!(command(None::<String>, "OFF")[0].starts_with("No session yet"));
+        // The removed level is an unknown word.
+        assert_eq!(command(None::<String>, "duckduckgo"), vec![USAGE.to_string()]);
     }
 
     #[test]
@@ -462,8 +455,8 @@ mod tests {
         let updated = with_default("vllm_host = \"http://x\"\n\n[night]\nwindow = \"01:00-07:00\"\n", Level::On).unwrap_or_default();
         assert_eq!(puffin_airgapped::toml_value(&updated).as_deref(), Some("on"));
         assert!(updated.contains("vllm_host = \"http://x\"") && updated.contains("[night]\nwindow"));
-        let again = with_default(&updated, Level::DuckDuckGo).unwrap_or_default();
-        assert_eq!(puffin_airgapped::toml_value(&again).as_deref(), Some("duckduckgo"));
+        let again = with_default(&updated, Level::Off).unwrap_or_default();
+        assert_eq!(puffin_airgapped::toml_value(&again).as_deref(), Some("off"));
         assert_eq!(again.matches(TOML_KEY).count(), 1);
     }
 
@@ -474,7 +467,7 @@ mod tests {
         assert!(full_access_conflict(&args(&["exec", "--dangerously-bypass-approvals-and-sandbox", "x"]), Level::On).is_some());
         assert!(full_access_conflict(&args(&["--sandbox=danger-full-access"]), Level::On).is_some());
         assert_eq!(full_access_conflict(&args(&["-s", "workspace-write"]), Level::On), None);
-        assert_eq!(full_access_conflict(&args(&["-s", "danger-full-access"]), Level::DuckDuckGo), None);
+        assert_eq!(full_access_conflict(&args(&["-s", "danger-full-access"]), Level::Off), None);
         assert_eq!(full_access_conflict(&args(&["exec", "explain danger-full-access"]), Level::On), None);
     }
 

@@ -195,9 +195,7 @@ mod tests {
         assert_eq!(refusal(Level::On, false), Some(AIRGAPPED_ON_MESSAGE));
         assert_eq!(refusal(Level::On, true), Some(AIRGAPPED_ON_MESSAGE));
         assert_eq!(refusal(Level::Off, true), Some(NO_NETWORK_SANDBOX_MESSAGE));
-        assert_eq!(refusal(Level::DuckDuckGo, true), Some(NO_NETWORK_SANDBOX_MESSAGE));
         assert_eq!(refusal(Level::Off, false), None);
-        assert_eq!(refusal(Level::DuckDuckGo, false), None);
         assert!(!NO_NETWORK_SANDBOX_MESSAGE.contains("airgapped"));
     }
 

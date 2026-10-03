@@ -19,19 +19,22 @@ def test_the_level_resolves_through_the_tiers(tmp_path, monkeypatch):
     cfg_file.write_text("vllm_host: http://localhost:8000\n")
     assert DreamferenceConfig(config_file=str(cfg_file)).puffin_airgapped == "off"
 
-    cfg_file.write_text("puffin_airgapped: duckduckgo\n")
-    assert DreamferenceConfig(config_file=str(cfg_file)).puffin_airgapped == "duckduckgo"
-    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "ON")
+    cfg_file.write_text('puffin_airgapped: "on"\n')
     assert DreamferenceConfig(config_file=str(cfg_file)).puffin_airgapped == "on"
-    assert DreamferenceConfig(config_file=str(cfg_file), puffin_airgapped="ddg").puffin_airgapped == "duckduckgo"
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "OFF")
+    assert DreamferenceConfig(config_file=str(cfg_file)).puffin_airgapped == "off"
+    assert DreamferenceConfig(config_file=str(cfg_file), puffin_airgapped="On").puffin_airgapped == "on"
 
 
 def test_an_invalid_value_is_skipped_not_adopted(tmp_path, monkeypatch):
     cfg_file = tmp_path / "bad.yaml"
-    cfg_file.write_text("puffin_airgapped: duckduckgo\n")
+    cfg_file.write_text('puffin_airgapped: "on"\n')
     monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "sealed")
-    assert DreamferenceConfig(config_file=str(cfg_file)).puffin_airgapped == "duckduckgo"
-    assert DreamferenceConfig(config_file=str(cfg_file), puffin_airgapped="max").puffin_airgapped == "duckduckgo"
+    assert DreamferenceConfig(config_file=str(cfg_file)).puffin_airgapped == "on"
+    assert DreamferenceConfig(config_file=str(cfg_file), puffin_airgapped="max").puffin_airgapped == "on"
+    # `duckduckgo` was a level until 2026-10-03; a value left behind is invalid like any other.
+    assert DreamferenceConfig(config_file=str(cfg_file), puffin_airgapped="duckduckgo").puffin_airgapped == "on"
+    assert DreamferenceConfig.parse_airgapped_level("ddg") is None
 
 
 def test_a_yaml_boolean_is_the_level_it_spells(tmp_path, monkeypatch):
@@ -71,11 +74,11 @@ def test_the_web_commands_carry_the_same_resolver():
 
 
 def test_only_on_is_described_as_having_no_network():
-    # PUFFIN_EGRESS: nothing may call `off` or `duckduckgo` air-gapped.
+    # PUFFIN_EGRESS: nothing may call `off` air-gapped.
     text = LAUNCHER_RS.read_text()
-    duckduckgo = re.search(r'pub const DUCKDUCKGO_TEXT: &str = "([^"]+)";', text).group(1)
-    assert "no network" not in duckduckgo and "air-gapped" not in duckduckgo
-    assert "a preference, not a barrier" in text
+    off = re.search(r'pub const OFF_TEXT: &str = "([^"]+)";', text).group(1)
+    assert "no network" not in off and "air-gapped" not in off
+    assert "no network" in re.search(r'pub const ON_TEXT: &str = "([^"]+)";', text).group(1)
 
 
 # -- the resolver for whatever acts on the level in Python (spec §7) -------------------------------
@@ -102,11 +105,11 @@ def test_between_the_two_files_the_stricter_wins_as_on_the_rust_side(tmp_path, m
     cwd = _two_files(tmp_path / "a", monkeypatch, 'puffin_airgapped = "off"\n', 'puffin_airgapped = "on"\n')
     assert resolve(cwd) == "on"
     # It may tighten it.
-    cwd = _two_files(tmp_path / "b", monkeypatch, 'puffin_airgapped = "on"\n', 'puffin_airgapped = "ddg"\n')
+    cwd = _two_files(tmp_path / "b", monkeypatch, 'puffin_airgapped = "on"\n', 'puffin_airgapped = "off"\n')
     assert resolve(cwd) == "on"
     # A file without the key does not count, and neither does a missing file.
-    cwd = _two_files(tmp_path / "c", monkeypatch, 'model = "x"\n', 'puffin_airgapped = "duckduckgo"\n')
-    assert resolve(cwd) == "duckduckgo"
+    cwd = _two_files(tmp_path / "c", monkeypatch, 'model = "x"\n', 'puffin_airgapped = "on"\n')
+    assert resolve(cwd) == "on"
     cwd = _two_files(tmp_path / "d", monkeypatch, None, None)
     assert resolve(cwd) == "off"
 
@@ -122,9 +125,9 @@ def test_the_environment_decides_before_the_files_and_an_invalid_value_falls_thr
 def test_a_named_config_file_replaces_the_working_directorys(tmp_path, monkeypatch):
     cwd = _two_files(tmp_path, monkeypatch, 'puffin_airgapped = "on"\n', None)
     named = tmp_path / "named.toml"
-    named.write_text('puffin_airgapped = "duckduckgo"\n')
+    named.write_text('puffin_airgapped = "off"\n')
     monkeypatch.setenv("DREAMFERENCE_CONFIG_PATH", str(named))
-    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "duckduckgo"
+    assert DreamferenceConfig.resolve_airgapped_level(cwd) == "off"
 
 
 # -- the MCP server's web tools follow the level ---------------------------------------------------
@@ -144,30 +147,19 @@ def test_at_on_the_mcp_web_tools_send_nothing(monkeypatch):
     assert "/airgapped" not in AIRGAPPED_ON_MESSAGE and "puffin_airgapped = on" in AIRGAPPED_ON_MESSAGE
 
 
-def test_at_duckduckgo_the_mcp_search_names_that_engine_and_no_category(monkeypatch):
+def test_a_leftover_duckduckgo_level_searches_as_off(monkeypatch):
     from unittest.mock import MagicMock, patch
     from dreamference.mcp_server.web_tools import WebTools
 
+    # `duckduckgo` was a level until 2026-10-03 (DuckDuckGo answered SearXNG with a CAPTCHA); a
+    # value left behind is ignored, so search asks the category's engines as at `off`.
     monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "duckduckgo")
     response = MagicMock()
-    response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "duckduckgo"}]}
+    response.json.return_value = {"results": [{"title": "t", "url": "u", "content": "c", "engine": "bing"}]}
     with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response) as get:
         assert WebTools.search("python asyncio")["result_count"] == 1
     params = get.call_args.kwargs["params"]
-    # With `categories` beside `engines`, SearXNG asked all five general engines (measured).
-    assert params["engines"] == "duckduckgo" and "categories" not in params
-
-    # DuckDuckGo not answering is the level working as chosen: no hint to restart a container.
-    response.json.return_value = {"results": [], "answers": [], "unresponsive_engines": [["duckduckgo", "CAPTCHA"]]}
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=response):
-        outcome = WebTools.search("python asyncio")
-    assert outcome["error"].startswith("DuckDuckGo did not answer (duckduckgo: CAPTCHA).")
-    assert "hint" not in outcome and outcome["airgapped"] == "duckduckgo"
-    # Fetching is not restricted at this level.
-    page = MagicMock(headers={"Content-Type": "text/plain"}, encoding="utf-8", url="https://example.com", status_code=200)
-    page.iter_content.return_value = [b"hello"]
-    with patch("dreamference.mcp_server.web_tools.requests.get", return_value=page):
-        assert WebTools.fetch("https://example.com")["text"] == "hello"
+    assert params["categories"] == "general" and "engines" not in params
 
 
 def test_at_off_the_mcp_search_asks_the_category_as_before(monkeypatch):

@@ -43,7 +43,7 @@ MAX_TIME_S: Final[int] = 8 * 3600
 # Free memory a job never eats into, as for a night task.
 MEMORY_RESERVE: Final[int] = 8 * 1024 ** 3
 
-AIRGAP_LEVELS: Final[tuple] = ("off", "duckduckgo", "on")
+AIRGAP_LEVELS: Final[tuple] = ("off", "on")
 
 FINAL_STATUSES: Final[tuple] = ("done", "failed", "refused", "cancelled")
 

@@ -193,7 +193,7 @@ The exact download endpoints of ClawHub and the path of Hermes's optional skills
 
 ### 6.2 What `add` does
 
-1. Refuse at `/airgapped on` with that level's message, before any network call. Run from a shell there is no session, so the level is the one `puffin airgapped` reports: the environment variable, then the configuration files, strictest wins. At `duckduckgo` it proceeds: the level governs search engines, and this is a download the user typed.
+1. Refuse at `/airgapped on` with that level's message, before any network call. Run from a shell there is no session, so the level is the one `puffin airgapped` reports: the environment variable, then the configuration files, strictest wins. (A `duckduckgo` level, which let the download proceed, was removed from `/airgapped` on 2026-10-03.)
 2. Download to a staging directory under `~/.puffin/skills/.staging/` (hidden, so never scanned), over HTTPS, by tarball of the named ref; resolve and record the commit.
 3. Validate against the standard: `SKILL.md` present, frontmatter parses, `name` legal. A name that differs from its folder is installed under the frontmatter name. Refuse a bundle over 50 MB, any path that escapes the skill folder, and symlinks pointing outside it.
 4. Print before committing anything: name, description, origin and commit, the first line of its licence file or `license:` value, every file under `scripts/` with its size, the preflight result of §4, ClawHub's verdict if any, and the catalogue budget after this install (§7). Ask for confirmation unless `--yes`.

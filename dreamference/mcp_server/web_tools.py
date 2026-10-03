@@ -25,7 +25,7 @@ offline again.
 
 Both tools follow the air-gap level (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §7), resolved on every
 call the way `puffin-search` and `puffin-fetch` resolve it for a command with no session: at `on`
-nothing is sent, at `duckduckgo` the search names that one engine, at `off` nothing changes.
+nothing is sent, at `off` nothing changes.
 """
 
 import os
@@ -84,7 +84,7 @@ class WebTools:
         configured one (environment, then the stricter of the two configuration files).
 
         Returns:
-            str: `off`, `duckduckgo` or `on`.
+            str: `off` or `on`.
         """
         from dreamference.config import DreamferenceConfig
 
@@ -238,9 +238,7 @@ class WebTools:
         Args:
             query (str): Search terms.
             max_results (int): Maximum results to return.
-            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'. Not sent
-                at air-gap level `duckduckgo`: SearXNG adds a named category's engines to the ones
-                in `engines`, so with both it asked all five general engines.
+            categories (str): SearXNG category, e.g. 'general', 'it', 'news', 'science'.
             language (str): Result language code.
 
         Returns:
@@ -255,14 +253,13 @@ class WebTools:
             return {"query": query, "error": "empty query"}
 
         endpoint = f"{SEARXNG_URL.rstrip('/')}/search"
-        selector = {"engines": "duckduckgo"} if level == "duckduckgo" else {"categories": categories}
         try:
             response = requests.get(
                 endpoint,
                 params={
                     "q": query,
                     "format": "json",
-                    **selector,
+                    "categories": categories,
                     "language": language,
                 },
                 headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -302,15 +299,6 @@ class WebTools:
             # used to come back as zero results: a SearXNG container whose DNS had gone stale
             # answered every query that way, and the agent concluded the topic had no coverage.
             reasons = "; ".join(f"{name}: {reason}" for name, reason in failed)
-            if level == "duckduckgo":
-                # No hint to repair a container: one engine not answering is the level working as
-                # chosen, and there is no other engine to fall back to.
-                return {
-                    "query": query,
-                    "airgapped": level,
-                    "error": f"DuckDuckGo did not answer ({reasons}). Search is set to DuckDuckGo "
-                             "only (puffin_airgapped = duckduckgo).",
-                }
             return {
                 "query": query,
                 "error": f"SearXNG could not reach any search engine: {reasons}",

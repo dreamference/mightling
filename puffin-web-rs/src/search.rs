@@ -43,7 +43,7 @@ pub struct SearchResult {
 /// A successful search.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct SearchPayload {
-    /// The session's air-gap level the search ran at (`off` or `duckduckgo`).
+    /// The session's air-gap level the search ran at (`off`: at `on` nothing is searched).
     pub airgapped: String,
     pub query: String,
     pub result_count: usize,
@@ -118,8 +118,6 @@ fn node_label(node: &Node) -> &str {
 /// is off), rather than as "unreachable" with the start command, which sent people to start an
 /// instance that was running.
 ///
-/// At `duckduckgo` the request names that engine and **no category**: SearXNG adds a named
-/// category's engines to the ones in `engines`, so with both it asked all five general engines.
 /// At `on` nothing is sent; the binary refuses before calling this, and so does this function.
 pub fn search(base_url: &str, query: &str, max_results: i64, level: Level) -> Result<SearchPayload, SearchError> {
     search_from(base_url, query, max_results, level, crate::node_locator::remote_node().as_ref())
@@ -146,18 +144,11 @@ pub fn search_from(
         });
     }
     let endpoint = format!("{}/search", base_url.trim_end_matches('/'));
-    let (selector, selected) = match level {
-        Level::DuckDuckGo => ("engines", "duckduckgo"),
-        _ => ("categories", "general"),
-    };
-    // At `duckduckgo` no hint sends the model off to repair a container: one engine not answering
-    // is that level working as chosen.
-    let hint = |hint: String| (level == Level::Off).then_some(hint);
     let response = agent(None)
         .get(&endpoint)
         .query("q", query)
         .query("format", "json")
-        .query(selector, selected)
+        .query("categories", "general")
         .query("language", "en")
         .set("Accept", "application/json")
         .call();
@@ -172,14 +163,14 @@ pub fn search_from(
                 hint: if status == 403 {
                     Some(JSON_FORMAT_HINT.to_string())
                 } else {
-                    hint(restart_hint(node))
+                    Some(restart_hint(node))
                 },
             });
         }
         Err(error) => {
             return Err(SearchError {
                 error: format!("SearXNG at {base_url} is unreachable: {error}"),
-                hint: hint(start_hint(node)),
+                hint: Some(start_hint(node)),
             });
         }
     };
@@ -242,15 +233,6 @@ pub fn from_searxng(
                 _ => engine.to_string(),
             })
             .collect();
-        if level == Level::DuckDuckGo {
-            return Err(SearchError {
-                error: format!(
-                    "DuckDuckGo did not answer ({}). This session searches through DuckDuckGo only (/airgapped duckduckgo).",
-                    reasons.join("; ")
-                ),
-                hint: None,
-            });
-        }
         return Err(SearchError {
             error: format!(
                 "SearXNG could not reach any search engine: {}",
@@ -350,17 +332,6 @@ mod tests {
         assert_eq!(error.hint.as_deref(), Some(RESTART_HINT));
     }
 
-    #[test]
-    fn at_duckduckgo_a_silent_engine_is_named_without_a_restart_hint() {
-        let payload = searxng(json!([]), json!([]), json!([["duckduckgo", "CAPTCHA"]]));
-        let error = from_searxng("q", &payload, 5, Level::DuckDuckGo).unwrap_err();
-        assert_eq!(
-            error.error,
-            "DuckDuckGo did not answer (duckduckgo: CAPTCHA). This session searches through DuckDuckGo only (/airgapped duckduckgo)."
-        );
-        assert_eq!(error.hint, None);
-    }
-
     fn remote() -> Node {
         Node {
             node: "7c1e".to_string(),
@@ -423,9 +394,9 @@ mod tests {
             json!([]),
             json!([]),
         );
-        let found = from_searxng("q", &payload, 5, Level::DuckDuckGo).unwrap();
+        let found = from_searxng("q", &payload, 5, Level::Off).unwrap();
         assert_eq!(found.results[0].engines, vec!["duckduckgo".to_string(), "brave".to_string()]);
-        assert_eq!(found.airgapped, "duckduckgo");
+        assert_eq!(found.airgapped, "off");
     }
 
     #[test]

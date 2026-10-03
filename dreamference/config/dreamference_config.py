@@ -50,11 +50,11 @@ DEFAULT_PUFFIN_COMPACTION_LEDGER: Final[bool] = True
 DEFAULT_PUFFIN_CAVE_MODE: Final[str] = "ultra"
 PUFFIN_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
 # How much of the internet a puffin session may use (`/airgapped`,
-# specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md): everything, DuckDuckGo-only search, or nothing. The Rust
+# specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md): everything or nothing. The Rust
 # side (puffin-rs/airgapped) resolves it for the agent's commands; a test keeps this default equal
 # to its DEFAULT_PUFFIN_AIRGAPPED. Listed loosest first.
 DEFAULT_PUFFIN_AIRGAPPED: Final[str] = "off"
-PUFFIN_AIRGAPPED_LEVELS: Final[tuple] = ("off", "duckduckgo", "on")
+PUFFIN_AIRGAPPED_LEVELS: Final[tuple] = ("off", "on")
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -347,7 +347,8 @@ class DreamferenceConfig:
     @classmethod
     def parse_airgapped_level(cls, value: Any) -> Optional[str]:
         """
-        Reads an air-gap level as the launcher does: a level name in any case, or `ddg`.
+        Reads an air-gap level as the launcher does: a level name in any case. `duckduckgo` was a
+        level until 2026-10-03 and is now an unknown name, like any other.
 
         A YAML file turns a bare `on` or `off` into a boolean, so those are accepted too.
 
@@ -355,15 +356,13 @@ class DreamferenceConfig:
             value: What a tier holds.
 
         Returns:
-            Optional[str]: `off`, `duckduckgo` or `on`; None for anything else.
+            Optional[str]: `off` or `on`; None for anything else.
         """
         if isinstance(value, bool):
             return "on" if value else "off"
         if not isinstance(value, str):
             return None
         name = value.strip().lower()
-        if name == "ddg":
-            return "duckduckgo"
         return name if name in PUFFIN_AIRGAPPED_LEVELS else None
 
     @classmethod
@@ -383,7 +382,7 @@ class DreamferenceConfig:
             cwd: The directory whose `dreamference.toml` counts; defaults to the current one.
 
         Returns:
-            str: `off`, `duckduckgo` or `on`.
+            str: `off` or `on`.
         """
         level = cls.parse_airgapped_level(os.getenv("DREAMFERENCE_PUFFIN_AIRGAPPED"))
         if level is not None:

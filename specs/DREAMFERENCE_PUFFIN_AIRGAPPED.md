@@ -1,7 +1,7 @@
 # Puffin Airgapped — `/airgapped`
 
-**Status:** Phase 1 partly implemented on 2026-10-01: the three levels, `/airgapped` and `puffin airgapped`, the sandbox enforcement of `on`, the web commands, and the configuration field. §14 records what was built, where it departs from the design below (the enforcement hook is in the sandbox helper, not in core), what ran live, and what is not built. The rest of this document is the design as specified; §9 lists what was checked before the build.
-**Goal:** one command that says how much of a `puffin` session may reach the internet, with three levels: everything (the default), search through DuckDuckGo only, and nothing at all.
+**Status:** Phase 1 partly implemented on 2026-10-01: the levels, `/airgapped` and `puffin airgapped`, the sandbox enforcement of `on`, the web commands, and the configuration field. §14 records what was built, where it departs from the design below (the enforcement hook is in the sandbox helper, not in core), what ran live, and what is not built. The rest of this document is the design as specified; §9 lists what was checked before the build. **On 2026-10-03 the `duckduckgo` level was removed** (§14.6): DuckDuckGo answered SearXNG with a CAPTCHA, so the level searched nothing. The design below still describes it; where it does, it is history.
+**Goal:** one command that says how much of a `puffin` session may reach the internet, with two levels: everything (the default) and nothing at all. (A third, search through DuckDuckGo only, was removed on 2026-10-03; §14.6.)
 **Target:** the `puffin` terminal agent. The web chat is not covered (§8).
 **Builds on:**
 - the web commands `puffin-search` and `puffin-fetch` ([PUFFIN_CODEX §4.1](./DREAMFERENCE_PUFFIN_CODEX.md)), and the SearXNG instance on `127.0.0.1:8888` they search through;
@@ -18,12 +18,12 @@
 | Level | Search | `puffin-fetch` | Gmail | Network for commands the agent runs | Enforced by |
 |---|---|---|---|---|---|
 | `off` (default) | Every engine SearXNG has enabled | Any page | Yes | Yes | Nothing to enforce: this is today's behaviour |
-| `duckduckgo` | DuckDuckGo only | Any page | Yes | Yes | The web commands (§4). A preference, not a barrier |
+| ~~`duckduckgo`~~ | DuckDuckGo only | Any page | Yes | Yes | The web commands (§4). A preference, not a barrier. **Removed 2026-10-03** (§14.6) |
 | `on` | None | None | None | None | The kernel (§5) |
 
 **`off` is today's `puffin`.** On this machine a general search currently goes to Brave, DuckDuckGo, Google (through `google cse`), Startpage (which serves Google's results), Wikipedia and Wikidata, plus four small answer engines. SearXNG sends them the query text; they see SearXNG's address, not an account.
 
-**`duckduckgo` changes who reads the queries, and nothing else.** Search goes to DuckDuckGo alone. Fetching a page, Gmail and the agent's own commands (`git`, `pip`, `cargo`, `curl`) work as at `off`: the level is about which search company sees what the session is looking for.
+**`duckduckgo` changed who read the queries, and nothing else** (removed, §14.6). Search goes to DuckDuckGo alone. Fetching a page, Gmail and the agent's own commands (`git`, `pip`, `cargo`, `curl`) work as at `off`: the level is about which search company sees what the session is looking for.
 
 **`on` is the only level that may be called air-gapped.** Nothing the agent runs can open a connection to anything, on the internet or on this machine. Search, fetch and Gmail are off because each sends something out: a query to an engine, a URL to a site, a mail search to Google.
 
@@ -32,7 +32,7 @@
 - The launcher's check of the Gmail service on `127.0.0.1:8767` is skipped at `on`, since Gmail is not offered.
 - The code index reads its files; it has no network code.
 
-**Names.** The command is `/airgapped`, so `on` and `off` read as answers to it. `ddg` is accepted for `duckduckgo`. No document, message or prompt text may call `off` or `duckduckgo` air-gapped; [PUFFIN_EGRESS](./DREAMFERENCE_PUFFIN_EGRESS.md) already holds the docs to that.
+**Names.** The command is `/airgapped`, so `on` and `off` read as answers to it. No document, message or prompt text may call `off` or `duckduckgo` air-gapped; [PUFFIN_EGRESS](./DREAMFERENCE_PUFFIN_EGRESS.md) already holds the docs to that.
 
 ---
 
@@ -42,8 +42,8 @@
 
 | Form | Effect |
 |---|---|
-| `/airgapped` | Shows the level in force, where it came from, the three levels with one line each, and what is and is not enforced right now |
-| `/airgapped <level>` | Sets `off`, `duckduckgo` (or `ddg`) or `on` for this session. Applies to the next command the agent starts, mid-turn included |
+| `/airgapped` | Shows the level in force, where it came from, the levels with one line each, and what is and is not enforced right now |
+| `/airgapped <level>` | Sets `off` or `on` for this session. Applies to the next command the agent starts, mid-turn included |
 | `/airgapped default <level>` | Also writes `puffin_airgapped = "<level>"` to the user-level configuration file (§6.1), so new sessions start at it |
 | anything else | Prints the usage line. Nothing changes |
 
@@ -52,7 +52,6 @@ What `/airgapped` prints at the default:
 ```
 Airgapped: off (default)
   off         search through every engine SearXNG has enabled; pages fetched directly   ← in force
-  duckduckgo  search through DuckDuckGo only; pages fetched directly
   on          no network for anything the agent runs: no search, no fetch, no Gmail
 Not covered at any level: the web chat, MCP servers you configured.
 Change: /airgapped on (this session) or /airgapped default on (new sessions).
@@ -91,6 +90,8 @@ The exact texts go in an appendix when they are written, and are checked against
 ---
 
 ## 4. `duckduckgo`: the web commands follow the level
+
+> **Removed on 2026-10-03** (§14.6). The web commands now send `categories=general` at `off` and refuse at `on`; the rest of this section is the design as it was.
 
 `puffin-search` reads the level before it sends anything (§6.2):
 
@@ -369,3 +370,13 @@ All on 2026-10-01, with the rebuilt `puffin` (17 patches) against the default mo
 - **The resolver run inside the real sandbox; the helper not yet.** The new resolver, compiled into a small probe binary, was run under `puffin sandbox` (workspace-write) from a stand-in home directory with a seal in place. The command rewrote its session's level file to `off` (succeeded), wrote `puffin_airgapped = "off"` into the user-level config file (succeeded) and tried to delete the seal ("Read-only file system"); the resolver still answered `on`, source `Sealed`, `sealed_for_command() = true`, with a note naming the ignored `off`. With the seal removed, as `/airgapped off` does, the same files gave `off`. The launcher's side (writing the seal when the World State section sees `on`, lifting it on `/airgapped off`, pruning seals of exited processes, what the status prints) is unit-tested. The installed `puffin` predates this change, so its sandbox helper still uses the old resolver: a TUI session in the home directory at `on` whose command rewrites its level file, followed by a `curl` that must still fail, is the live check owed after the next `puffin-admin codex build`.
 
 **A night task's tests have no network at `on`** (§7): closed by the Night Shift change that runs the runner's test command through `puffin sandbox` (commit `7f55b56`; the `[night] airgapped` key landed in `4b82073`), measured there (level `off`: internet and model server reachable; `on`: neither). One departure for night tasks only: the runner exports `DREAMFERENCE_PUFFIN_AIRGAPPED` to every command of a task at every level, and the environment outranks the files, so an agent that writes `puffin_airgapped = "on"` into the worktree's `dreamference.toml` mid-task does not tighten its own later commands. The level is fixed at task start; a seal would still tighten it.
+
+### 14.6 Removed on 2026-10-03: the `duckduckgo` level
+
+DuckDuckGo answered SearXNG with a CAPTCHA when the level was first tried live (§14.3) and again when the MCP tools were checked (§14.5): a session at `duckduckgo` searched nothing, and the risk §4 names was the normal case, not the exception. The level is gone from every place that resolved or acted on it:
+
+- **The resolver** (`puffin-rs/airgapped/`, and its byte-identical copy in `puffin-web-rs/src/airgapped.rs`): `Level` is `Off < On`; `duckduckgo` and `ddg` are unknown names. A session file, the environment or a configuration file still holding `duckduckgo` is **ignored and named**, like any invalid value: `/airgapped` prints `Note: ignored "duckduckgo" from …` and the next tier decides, so a session left at `duckduckgo` searches every engine again. No alias to `off` or `on` was added: `off` would hide the change, `on` would cut the network from a user who only asked about search engines.
+- **The launcher** (`puffin-rs/src/airgapped.rs`): the usage line, the status table and the fragments know two levels. A session resumed after having been at `duckduckgo` gets the `off` fragment, which says web access is back.
+- **The web commands and the MCP server's `web_search`**: always `categories=<category>`; the DuckDuckGo-only error text is gone, and every-engine-failed errors carry the restart hint at `off`.
+- **Python** (`PUFFIN_AIRGAPPED_LEVELS`, `NodeJob.AIRGAP_LEVELS`): two levels. A node job from an older sender that still names `duckduckgo` counts as `on`, because `NodeJob.stricter` treats an unknown name as the strictest.
+- **Not changed:** SearXNG's own engine list, which still includes DuckDuckGo for `off`; and the installed `puffin`, which keeps the old resolver until the next `puffin-admin codex build`.

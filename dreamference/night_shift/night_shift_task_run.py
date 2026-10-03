@@ -482,7 +482,7 @@ class NightShiftTaskRun:
             repo: The main checkout, if its file is to count too.
 
         Returns:
-            str: `off`, `duckduckgo` or `on`.
+            str: `off` or `on`.
         """
         tiers: List[Optional[str]] = []
         if session and re.fullmatch(r"[A-Za-z0-9-]+", session):

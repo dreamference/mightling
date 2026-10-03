@@ -633,7 +633,7 @@ def test_the_node_sets_the_ceilings_and_refuses_what_came_from_outside_malformed
 
 def test_the_stricter_of_the_two_airgap_levels_applies(monkeypatch):
     from dreamference.node import NodeJob
-    assert NodeJob.stricter("off", "on") == "on" and NodeJob.stricter("duckduckgo", "off") == "duckduckgo"
+    assert NodeJob.stricter("off", "on") == "on" and NodeJob.stricter("on", "off") == "on"
     assert NodeJob.stricter("off", "off") == "off" and NodeJob.stricter("nonsense", "off") == "on"
     monkeypatch.setattr(NodeJob, "node_airgap_level", classmethod(lambda cls: "on"))
     assert NodeJob.validate(job_request(airgapped="off"))["airgapped"] == "on"

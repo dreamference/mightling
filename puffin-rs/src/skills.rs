@@ -472,14 +472,13 @@ mod tests {
         assert_eq!(asked.lock().map(|asked| asked.len()).unwrap_or(1), 0);
         assert!(!machine.skills_root().join("internal-comms").exists());
 
-        // A folder on this machine is a copy, not a download, and `duckduckgo` governs search
-        // engines, not this.
+        // A folder on this machine is a copy, not a download, and `off` downloads as before.
         let local = machine.cwd.join("mine");
         std::fs::create_dir_all(&local).unwrap_or_default();
         std::fs::write(local.join("SKILL.md"), "---\nname: mine\ndescription: Mine.\n---\n").unwrap_or_default();
         assert!(run(&machine, request(&["add", "./mine", "--yes"]), &github, Level::On).await.is_ok());
         assert!(machine.skills_root().join("mine/SKILL.md").is_file());
-        assert!(run(&machine, request(&["add", "anthropic/internal-comms", "--yes"]), &github, Level::DuckDuckGo).await.is_ok());
+        assert!(run(&machine, request(&["add", "anthropic/internal-comms", "--yes"]), &github, Level::Off).await.is_ok());
     }
 
     #[tokio::test]
