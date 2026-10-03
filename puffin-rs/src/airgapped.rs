@@ -486,11 +486,9 @@ mod tests {
         let exposed = startup_lines(&on, true, false);
         assert!(exposed[1].starts_with("NOT ENFORCED against a command rewriting the level"));
         assert_eq!(exposed.len(), 3);
-        // Nothing at the other levels.
-        for level in [Level::Off, Level::DuckDuckGo] {
-            let resolved = Resolved { level, source: puffin_airgapped::Source::Default, invalid: vec![] };
-            assert!(startup_lines(&resolved, true, false).is_empty());
-        }
+        // Nothing at `off`.
+        let off = Resolved { level: Level::Off, source: puffin_airgapped::Source::Default, invalid: vec![] };
+        assert!(startup_lines(&off, true, false).is_empty());
     }
 
     #[test]

@@ -367,7 +367,7 @@ A session that starts at a configured `on` (environment or configuration file; t
 NOT ENFORCED for: a switch to Full Access with /permissions, a command you approve to run outside the sandbox, MCP servers you configured.
 ```
 
-with `/airgapped`'s `NOT ENFORCED against a command rewriting the level` between the two when the level files are inside a writable root and there is no runtime directory for a seal. Nothing is printed at `off` or `duckduckgo`. Full Access at launch is not listed: it is refused before this line. It goes to stderr for `puffin exec` too. `startup_lines` in `puffin-rs/src/airgapped.rs`, unit-tested; not yet watched in a rebuilt `puffin`.
+with `/airgapped`'s `NOT ENFORCED against a command rewriting the level` between the two when the level files are inside a writable root and there is no runtime directory for a seal. Nothing is printed at `off`. Full Access at launch is not listed: it is refused before this line. It goes to stderr for `puffin exec` too. `startup_lines` in `puffin-rs/src/airgapped.rs`, unit-tested; not yet watched in a rebuilt `puffin`.
 
 ### 14.5 Added on 2026-10-02: the three gaps of "not built"
 
