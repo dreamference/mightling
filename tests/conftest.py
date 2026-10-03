@@ -8,6 +8,7 @@ unmocked container recreate fail the test instead of running `docker compose`.
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,9 @@ from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite  #
 REAL_SANDBOX_GATE = SandboxPrerequisite.gate
 # The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
 UI_PATCHERS = (OnyxBrandAssets, OnyxUIFonts, OnyxUILabels, OnyxUIOverrides, OnyxUIScripts)
+# The name MemoryPressureWatchdog gives its thread, and how long a stopped one may take to exit.
+PSI_THREAD_NAME = "psi-watchdog"
+LEAK_GRACE_S = 2.0
 
 
 @pytest.fixture(autouse=True)
@@ -154,6 +158,25 @@ def _changes_something(argv) -> bool:
     if words[0] in ("image", "container", "network", "volume") and len(words) > 1:
         return words[1] not in ("inspect", "ls")
     return True
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_watchdog():
+    # A background `start_server` leaves its PSI watchdog running. One test did so against the
+    # real /proc/pressure/memory, and the thread's `docker inspect` retries were counted by a
+    # later test's fake `subprocess.run`, which then failed only when run after it (2026-10-03).
+    # A test that starts a watchdog must stop it, or keep it from starting.
+    before = {thread.ident for thread in threading.enumerate() if thread.name == PSI_THREAD_NAME}
+    yield
+    leaked = []
+    for thread in threading.enumerate():
+        if thread.name != PSI_THREAD_NAME or thread.ident in before:
+            continue
+        thread.join(timeout=LEAK_GRACE_S)  # a stopped watchdog may still be finishing a sample
+        if thread.is_alive():
+            leaked.append(thread)
+    if leaked:
+        pytest.fail(f"the test left {len(leaked)} PSI watchdog thread(s) running; stop them")
 
 
 @pytest.fixture(autouse=True)

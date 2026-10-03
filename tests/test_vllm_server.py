@@ -682,6 +682,11 @@ def test_start_server_forwards_guided_decoding_backend(monkeypatch):
     monkeypatch.setattr("subprocess.run", lambda *a, **k: None)
     monkeypatch.setattr("subprocess.Popen", lambda *a, **k: FakeProc())
     monkeypatch.setattr(mgr.streamer, "start_streaming", lambda stream: None)
+    # A background start keeps the PSI watchdog running after it returns. With the real
+    # /proc/pressure/memory it watched this machine for the rest of the session and its
+    # `docker inspect` calls landed in later tests' fakes; with no PSI it is never started.
+    from dreamference.vllm_server import psi_watchdog
+    monkeypatch.setattr(psi_watchdog, "read_memory_pressure_full", lambda: None)
 
     mgr.start_server(model="qwen2.5-coder-32b", guided_decoding_backend="guidance", background=True)
     assert captured["guided_decoding_backend"] == "guidance"
