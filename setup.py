@@ -23,6 +23,11 @@ setup(
         "Pillow>=10.0.0",
         "beautifulsoup4>=4.12.0",
     ],
+    extras_require={
+        # The code standard's tools (specs/DREAMFERENCE_PYTHON_QUALITY.md §4), pinned: the ratchet
+        # test compares ruff's findings with a baseline that only the pinned version recorded.
+        "dev": ["ruff==0.16.10", "mypy==2.4.0"],
+    },
     entry_points={
         "console_scripts": [
             "puffin-admin=dreamference.cli:main",

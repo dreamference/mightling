@@ -93,7 +93,8 @@ jobs:
           # dependencies in setup.py, not requirements.txt or pyproject.toml.
           cache-dependency-path: setup.py
       - name: Install
-        run: pip install -e . pytest
+        # `.[dev]` brings the pinned ruff the code-standard ratchet (tests/test_code_quality.py) needs.
+        run: pip install -e ".[dev]" pytest
       # No GPU or Docker needed: every hardware and subprocess call in the suite is mocked.
       - name: Test
         run: python -m pytest tests/ -q

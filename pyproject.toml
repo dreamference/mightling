@@ -1,0 +1,70 @@
+# Tool settings only. The package is still built from setup.py (specs/DREAMFERENCE_PYTHON_QUALITY.md §3).
+# There is deliberately no [build-system] table: pip and `python -m build` then fall back to
+# setuptools' legacy backend, which runs setup.py exactly as before this file existed.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+# Python outside dreamference/ and tests/ is out of scope (spec, "Scope").
+extend-exclude = ["codex", "scratch", "desktop", "puffin-rs", "puffin-web-rs", "puffin-code-rs", "site"]
+
+[tool.ruff.lint]
+# PLR1702 (nested blocks) is a preview rule; explicit-preview-rules turns on that one and no other.
+preview = true
+explicit-preview-rules = true
+select = [
+    "E", "W",          # pycodestyle (§3.1)
+    "F",               # pyflakes (§3.7)
+    "I",               # import order (§3.1)
+    "UP",              # modern syntax for 3.12 (§3.1)
+    "N",               # names (§3.2)
+    "A",               # builtins shadowed (§3.2)
+    "D",               # docstrings, Google convention (§3.3)
+    "ERA",             # commented-out code (§3.3)
+    "C901",            # McCabe complexity (§3.4)
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR1702",  # decomposition limits (§3.4)
+    "PLR2004",         # magic values (§3.5)
+    "BLE",             # except Exception (§3.6)
+    "S110",            # try/except/pass (§3.6)
+    "B", "SIM", "RET", "PTH", "C4", "PIE", "RUF",           # correctness (§3.7)
+    "ANN401",          # Any in a signature (§3.8)
+    "T201",            # print outside the CLI (§3.9)
+]
+ignore = [
+    # The formatter owns these; selecting them beside `ruff format` only produces conflicts.
+    "W191", "E111", "E114", "E117", "D206", "D300",
+]
+
+[tool.ruff.lint.pycodestyle]
+# The formatter wraps at 100; strings and comments it cannot break may run to 120 (§3.1).
+max-line-length = 120
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-statements = 50
+max-args = 6
+max-returns = 6
+max-nested-blocks = 3
+# §3.5: numbers and strings in comparisons are named. ruff always allows 0, 1, -1 and "".
+allow-magic-value-types = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# §3.9: print is the CLI's output channel.
+"dreamference/cli/**" = ["T201"]
+# Tests: a test's name is its documentation, asserts compare literal expected values, and a test
+# prints only when it is diagnosing itself. Decided in Phase 0 (spec §6) as the noisy rules there.
+"tests/**" = ["D100", "D101", "D102", "D103", "D104", "D105", "D107", "PLR2004", "T201", "ANN401"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["dreamference"]
+# Phase 4 raises this package by package to `strict = true` (spec §3.8, §6).
+ignore_missing_imports = true
+warn_unused_configs = true
