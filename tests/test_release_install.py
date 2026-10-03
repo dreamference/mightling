@@ -20,7 +20,7 @@ from dreamference.chat.desktop_runner import DesktopRunner
 from dreamference.runner import codex_branded_builder
 from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
 from dreamference.runner.codex_installer import CodexInstaller
-from dreamference.vllm_server import HostSafetySetup, VLLMServerManager
+from dreamference.vllm_server import HostSafetySetup, SandboxPrerequisite, VLLMServerManager
 from dreamference.vllm_server import host_safety_setup
 
 INSTALL_SH = Path(__file__).resolve().parent.parent / "install.sh"
@@ -376,18 +376,40 @@ def test_swap_that_is_not_safe_to_resize_is_explained_not_touched(host, change, 
     assert "commands" not in step and said in step["manual"]
 
 
-def test_a_sandbox_that_only_works_under_the_ide_is_reported_and_not_changed(host, monkeypatch, capsys):
+def test_a_sandbox_that_only_works_under_the_ide_is_fixed_with_an_apparmor_profile(host, monkeypatch, capsys):
     # Measured 2026-10-02: bwrap worked from the IDE's terminal (a snap's AppArmor label) and from
     # nowhere else, so a release install typed into a plain terminal had no working sandbox.
     host["sandbox"] = False
+    monkeypatch.setattr(SandboxPrerequisite, "_userns_restricted", classmethod(lambda cls: True))
     monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: True, raising=False)
-    monkeypatch.setattr(host_safety_setup.subprocess, "run", lambda *a, **k: pytest.fail("nothing is run"))
     (step,) = HostSafetySetup.steps()
-    assert "commands" not in step and "apparmor_restrict_unprivileged_userns" in step["manual"]
-    assert HostSafetySetup.setup() is False
-    assert "bubblewrap" in capsys.readouterr().out
+    install, load = step["commands"]
+    assert install[:2] == ["install", "-m"] and install[-1] == "/etc/apparmor.d/puffin-bwrap"
+    assert "profile puffin-bwrap" in Path(install[-2]).read_text() and load == ["apparmor_parser", "-r", "/etc/apparmor.d/puffin-bwrap"]
+    ran = []
+
+    def fake_run(command, **kwargs):
+        ran.append(command)
+        if command[-1] == "/etc/apparmor.d/puffin-bwrap" and command[1] == "apparmor_parser":
+            host["sandbox"] = True
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", fake_run)
+    SandboxPrerequisite.decision_path().parent.mkdir(parents=True, exist_ok=True)
+    SandboxPrerequisite.decision_path().write_text('{"sandbox": "off"}')
+    assert HostSafetySetup.setup() is True
+    assert ran == [["sudo", *install], ["sudo", *load]]
+    assert not SandboxPrerequisite.decision_path().exists()     # the "turn it off" answer is void
+    assert "night enable" in capsys.readouterr().out
     host["sandbox"] = None          # cannot be tried (no bwrap, no user systemd): nothing reported
     assert HostSafetySetup.steps() == []
+
+
+def test_a_sandbox_refused_for_another_reason_is_explained_not_changed(host, monkeypatch):
+    host["sandbox"] = False
+    monkeypatch.setattr(SandboxPrerequisite, "_userns_restricted", classmethod(lambda cls: False))
+    (step,) = HostSafetySetup.steps()
+    assert "commands" not in step and "user.max_user_namespaces" in step["manual"]
 
 
 @pytest.mark.parametrize("stderr, code, expected", [

@@ -951,7 +951,7 @@ class DreamferenceCLIController:
         )
 
         # Command: puffin-admin host (the settings a model load is refused without)
-        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load needs (swap, sysctls, earlyoom, sysstat)")
+        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and puffin's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap)")
         host_subparsers = host_parser.add_subparsers(dest="host_command")
         host_subparsers.add_parser("check", help="Show what `server start` would refuse over, changing nothing")
         host_subparsers.add_parser("setup", help="Apply the settings; each command is printed first and sudo asks for your password")
@@ -1196,6 +1196,13 @@ class DreamferenceCLIController:
         group = parser.command_groups.get(args.command)
         if group is not None and not getattr(args, group[1], None):
             group[0].print_help()
+            sys.exit(1)
+
+        # bubblewrap's sandbox, checked on every run: where it is missing, the user is asked to
+        # fix it with sudo or to turn off what needs it (specs/DREAMFERENCE_SETUP.md §3.3).
+        from dreamference.vllm_server import SandboxPrerequisite
+        subcommand = getattr(args, args.command.replace("-", "_") + "_command", None)
+        if not SandboxPrerequisite.gate(args.command, subcommand):
             sys.exit(1)
 
         # Handle stdio MCP server command immediately

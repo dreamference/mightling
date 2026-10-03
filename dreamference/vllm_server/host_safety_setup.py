@@ -2,8 +2,9 @@
 Applies the host settings `VLLMServerManager.check_host_safety()` demands
 (`puffin-admin host check|setup`).
 
-It also reports one thing `check_host_safety()` does not look at, because it is the agent's
-prerequisite and not the model's: whether bubblewrap can create a sandbox from an ordinary login.
+It also checks, and fixes, one thing `check_host_safety()` does not look at, because it is the
+agent's prerequisite and not the model's: whether bubblewrap can create a sandbox from an ordinary
+login. `SandboxPrerequisite` asks about the same fix on every `puffin-admin` run.
 
 `check_host_safety()` refuses to load a model on a machine without sysstat, an armed OOM handler,
 64 GB of swap and two raised sysctls, and until 2026-10-02 it only printed the `sudo` lines: a
@@ -104,6 +105,12 @@ class HostSafetySetup:
                     print(f"❌ That command failed; the rest of \"{step['name']}\" was skipped.")
                     break
         remaining = cls.steps()
+        if not any(step["name"] == "let bubblewrap create its sandbox" for step in remaining):
+            # A "turn it off" answer given to `SandboxPrerequisite` no longer applies.
+            from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
+            if SandboxPrerequisite.turned_off():
+                SandboxPrerequisite._forget()
+                print("💡 Night Shift was turned off for the sandbox; `puffin-admin night enable` puts the timer back.")
         if not remaining:
             print("✅ Host setup: this machine now has what a model load and puffin's sandbox need.")
             return True
@@ -237,19 +244,23 @@ class HostSafetySetup:
         """
         if cls.sandbox_works() is not False:
             return None
-        return {
+        from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
+        step: Dict[str, Any] = {
             "name": "let bubblewrap create its sandbox",
             "why": "from an ordinary login `bwrap` is refused a user namespace, so every command "
                    "`puffin` runs in its sandbox fails, as do Night Shift tasks and the code indexers",
-            "manual": ("AppArmor restricts unprivileged user namespaces here "
-                       "(kernel.apparmor_restrict_unprivileged_userns=1) and no profile exempts "
-                       "/usr/bin/bwrap. Either add an AppArmor profile that grants `userns,` to "
-                       "/usr/bin/bwrap (Ubuntu's apparmor-profiles package ships "
-                       "`bwrap-userns-restrict` as a model), or, more broadly, "
-                       "`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` and persist it "
-                       "in /etc/sysctl.d. Neither is applied automatically: no profile has been "
-                       "tested on this hardware yet."),
         }
+        commands = SandboxPrerequisite.fix_commands()
+        if commands is None:
+            step["manual"] = ("bubblewrap is refused a user namespace, but not by Ubuntu's AppArmor "
+                              "restriction (kernel.apparmor_restrict_unprivileged_userns is not 1 here), "
+                              "so an AppArmor profile would not help. Check user.max_user_namespaces and, "
+                              "on Debian kernels, kernel.unprivileged_userns_clone.")
+            return step
+        # An AppArmor profile for bubblewrap alone, the shape of Ubuntu's own for sandboxing
+        # programs; see sandbox_prerequisite.py for why not the sysctl.
+        step["commands"] = commands
+        return step
 
     # -- readings --------------------------------------------------------------------------------
 

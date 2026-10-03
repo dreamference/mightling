@@ -243,7 +243,7 @@ Install codebase-memory-mcp, the scip CLI and the language indexers, each checke
 
 ### `puffin-admin host`
 
-Check or apply the host settings a model load needs (swap, sysctls, earlyoom, sysstat).
+Check or apply the host settings a model load and puffin's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap).
 
 #### `puffin-admin host check`
 

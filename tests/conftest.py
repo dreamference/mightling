@@ -40,6 +40,11 @@ from dreamference.vllm_server.vllm_server_manager import VLLMServerManager  # no
 
 # `server start` stops the code index's systemd scopes; the fixture below replaces it.
 REAL_STOP_INDEX_SCOPES = VLLMServerManager._stop_index_scopes
+from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite  # noqa: E402
+
+# Every `puffin-admin` run checks bubblewrap through a transient unit of the user's systemd and may
+# ask a question; the fixture below replaces the check, and its own tests restore this.
+REAL_SANDBOX_GATE = SandboxPrerequisite.gate
 # The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
 UI_PATCHERS = (OnyxBrandAssets, OnyxUIFonts, OnyxUILabels, OnyxUIOverrides, OnyxUIScripts)
 
@@ -88,6 +93,11 @@ def _isolate_node_advert(tmp_path_factory, monkeypatch):
     scratch = tmp_path_factory.mktemp("avahi") / "puffin-node.service"
     monkeypatch.setattr(NodeServiceFile, "service_path", scratch)
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose: False))
+
+
+@pytest.fixture(autouse=True)
+def _skip_sandbox_gate(monkeypatch):
+    monkeypatch.setattr(SandboxPrerequisite, "gate", classmethod(lambda cls, command, subcommand: True))
 
 
 @pytest.fixture(autouse=True)
