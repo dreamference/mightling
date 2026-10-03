@@ -749,6 +749,8 @@ def test_without_the_code_index_the_container_gets_nothing_of_puffin_code(bench)
     created = next(call for call in bench["docker"].calls if call[0] == "run")
     assert "puffin-code" not in json.dumps(created) and "PUFFIN_CODE" not in json.dumps(created)
     assert bench["index_calls"] == []
+    agent = next(call for call in bench["docker"].calls if call[0] == "exec" and "puffin" in call[2])
+    assert "mcp_servers" not in json.dumps(agent)
     store = SweBenchRunStore("r1")
     assert store.manifest()["code_index"] == "off" and "index" not in store.state("acme__widget-1")
     assert "Code index          off" in SweBenchReport.render(store)
@@ -775,6 +777,15 @@ def test_with_the_code_index_the_repository_is_indexed_on_the_host_and_mounted_r
     assert env["PUFFIN_CODE_GRAPH_DB"] == "/puffin-index/cbm/host-path-testbed.db"
     assert env["PUFFIN_CODE_PROJECT"] == "host-path-testbed"
     assert env["PATH"].startswith("/opt/puffin-code/bin:/opt/miniconda3/envs/testbed/bin:")
+    # The agent's puffin declares the index's MCP server itself, as a required one, so the first
+    # request waits for its tools instead of going out without them.
+    agent = next(call for call in docker.calls if call[0] == "exec" and "puffin" in call[2])
+    overrides = [agent[i + 1] for i, word in enumerate(agent) if word == "-c"]
+    assert "mcp_servers.puffin_code.required=true" in overrides
+    assert 'mcp_servers.puffin_code.command="/opt/puffin-code/bin/puffin-code"' in overrides
+    assert 'mcp_servers.puffin_code.args=["mcp"]' in overrides
+    forwarded = next(o for o in overrides if o.startswith("mcp_servers.puffin_code.env_vars="))
+    assert '"PUFFIN_CODE_GRAPH_DB"' in forwarded and '"PUFFIN_CODE_PROJECT"' in forwarded
     store = SweBenchRunStore("r1")
     state = store.state("acme__widget-1")
     assert store.manifest()["code_index"] == "universal"

@@ -325,6 +325,8 @@ class SweBenchInstanceRun:
         command = ["exec", self.container, f"{CONTAINER_MOUNT}/bin/puffin", "exec", "--json",
                    "-o", f"{SCRATCH_MOUNT}/last.txt", "--dangerously-bypass-approvals-and-sandbox",
                    "-C", "/testbed", "-c", f"model_auto_compact_token_limit={self.settings.task_context}"]
+        for override in (self.code_index or {}).get("config", []):
+            command += ["-c", override]
         command += ["resume", self.session, prompt] if resume and self.session else [prompt]
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0
         self.in_model = True
