@@ -112,7 +112,7 @@ puffin-app (Tauri)
 - **Started through the launcher, never as bare `codex`:** `puffin app-server`. The launcher brings the model server tiers (node, `node.json`, mDNS), the model catalog with Puffin's prompt blocks, `CODEX_HOME=~/.puffin`, `chatgpt_base_url` at a closed port, the skills links, the air-gap seal and `/prompt`'s choice.
 - **The launcher's wait for the model server** (up to 600 s on a cold load) goes to **stderr**, which the bridge shows as Work's start-up screen. Measured: stdout carried JSON-RPC only (§5).
 - **`initialize`** with `clientInfo: {name: "puffin_desktop", title: "Puffin Desktop", version}` and `experimentalApi: true`. Not `Codex Desktop`.
-- **What the UI never sends:** `thread/start`'s `baseInstructions`, `developerInstructions`, `modelProvider` and `config` (they would replace Puffin's prompt, provider or policy), `feedback/upload`, `account/login/*`. The bridge drops them, so a UI bug cannot send them either.
+- **What the UI never sends:** `thread/start`'s `baseInstructions`, `developerInstructions`, `modelProvider` and `config` (they would replace Puffin's prompt, provider or policy); `feedback/upload`, `account/login/*` and `account/bedrock/*`; `remoteControl/*` (it pairs the machine with OpenAI's remote control); `thread/realtime/*` (OpenAI's realtime voice); `userVerification/*`. The bridge holds an allow-list of methods and drops everything else, so a UI bug cannot send them either.
 - **Notifications the UI ignores:** `account/rateLimits/updated` (always empty here) and `remoteControl/status/changed` (`disabled`, measured).
 - **On a client machine** the app-server runs locally and the launcher finds the node's model server as it does for the TUI. A Phase 3 option is OpenAI's `ssh` host kind: `ssh <node> puffin app-server` as the stdio transport, so the agent runs where the code is.
 
@@ -139,16 +139,18 @@ The installed `puffin` (0.158.0, built 2 October) was driven over stdio by a scr
 | Does `puffin app-server` start and complete a turn? | **Yes.** The model answered `OK`; the notifications were `thread/started`, `turn/started`, `item/started`, `item/agentMessage/delta`, `item/reasoning/*`, `item/completed`, `thread/tokenUsage/updated`, `turn/completed`, `mcpServer/startupStatus/updated` |
 | Is stdout clean JSON-RPC through the launcher? | **Yes:** 0 non-JSON lines. The launcher's messages go to stderr |
 | Sign-in | `account/read` → `{"account": null, "requiresOpenaiAuth": false}`: nothing to sign in to |
-| **Does the launcher's model choice reach the app-server?** | **No.** The CLI applies only root `-c` overrides to `app-server` (`cli/src/main.rs`, the `AppServer` arm); `--oss --local-provider --model <id>` are the TUI's flags and are ignored there. The thread started with `model: ""` and the server warned "Model metadata for `` not found. Defaulting to fallback metadata" — **so Puffin's model catalog, and with it Puffin's prompt blocks, did not apply.** With `-c model="RadixArk/Qwen3.8-27B-NVFP4"` the warning is gone. Fix in §4.2 (the launcher) and, belt and braces, the bridge passes the served model in every `thread/start` |
+| **Does the launcher's model choice reach the app-server?** | **No — a bug in today's `puffin`, independent of the desktop work.** The CLI applies only root `-c` overrides to `app-server` (`cli/src/main.rs`, the `AppServer` arm); `--oss --local-provider --model <id>` are the TUI's flags and are ignored there. The thread started with `model: ""` and the server warned "Model metadata for `` not found. Defaulting to fallback metadata" — **so Puffin's model catalog, and with it Puffin's prompt blocks, did not apply.** With `-c model="RadixArk/Qwen3.8-27B-NVFP4"` the warning is gone and the session's request carries Puffin's prompt ("You are Puffin, a coding agent…", the `puffin-search` block): measured. Fix in §4.2 (the launcher) and, belt and braces, the bridge passes the served model in every `thread/start` |
 | `model/list` | **Empty** even with the model set, although `model_catalog.json` holds the served model. The model picker therefore reads the served model from the launcher (`/v1/models`), not from `model/list`, until Phase 0 finds why the catalog entry is not listed |
 | `permissionProfile/list` | `:read-only`, `:workspace`, `:danger-full-access`, all `allowed: true` at level `off` — the picker's three rows |
 | Remote control | `remoteControl/status/changed` → `disabled` |
 | Rate limits | `account/rateLimits/updated` with every field null: ignore it |
-| Do app-server threads appear in `puffin resume`? | **Yes, as read:** app-server sessions are recorded with source `VSCode`, which is in `INTERACTIVE_SESSION_SOURCES` (`rollout/src/lib.rs`). Not yet run with a non-ephemeral thread |
+| Do app-server threads appear in `puffin resume`? | **Yes, measured:** a non-ephemeral thread started over the app-server (with `-c model=…`) was written to `~/.puffin/sessions` with `source: vscode` and `originator` set to the client's name, and `puffin resume --last` in the TUI opened it with its turn on screen. (`vscode` is in `INTERACTIVE_SESSION_SOURCES`, `rollout/src/lib.rs`.) The probe's session file and its folder-trust entry were removed afterwards |
 | Does an open app-server hold a night run back? | **No:** `NON_INTERACTIVE` in `night_shift_host.py` lists `app-server` and `app`. §8.3 decides what it should do |
 | Terminal support | `command/exec` takes `tty` and an initial PTY size, with `write`, `resize` and `terminate`: terminal tabs need no PTY code of ours |
 | Git | No worktree, stage, commit, push or PR method; `gitDiffToRemote` only. The TUI's `/worktree` uses the `codex-worktree` crate inside the TUI, not the server. Git is the window's job (`git.rs`), as in OpenAI's app |
-| Plan mode | `TurnStartParams` in the non-experimental schema has no collaboration mode; `CollaborationModeMask` exists. Phase 0 regenerates with `--experimental` to find it |
+| Plan mode | **Found:** `puffin app-server generate-ts --experimental` (772 v2 types against 637) gives `turn/start` a `collaborationMode` and adds `collaborationMode/list` |
+| What `--experimental` adds | `project/create|list|read|update|move|delete|import` (projects kept by the server), `thread/queue/add|list|update|reorder|delete|start` (queued follow-ups), `thread/search`, `thread/searchOccurrences`, `thread/timeline/list`, `thread/settings/update`, `turn/settings/update`, `process/spawn|writeStdin|resizePty|kill` and `thread/backgroundTerminals/*` (terminals), `memory/status|reset`, `thread/memoryMode/set`, `environment/*`, `plugin/search`, `server/diagnostics`; and, never to be sent from Puffin, `thread/realtime/*` (OpenAI's realtime voice), `remoteControl/*`, `userVerification/*`, `account/bedrock/*`. `turn/start` also gains `permissions`, `environments` and `runtimeWorkspaceRoots` |
+| Worktree layout | The `codex-worktree` crate implements "the existing Codex Desktop contract": a checkout at `$CODEX_HOME/worktrees/<4-hex bucket>/<repository name>`, created with `git worktree add --detach` (no branch until one is made), the owning thread recorded in `codex-thread.json` in the worktree's git directory, and the settings `[desktop] git-worktree-root`, `worktree-auto-cleanup-enabled` and `worktree-keep-count` in `config.toml`. The TUI's `/worktree` uses it |
 | `/app` in the TUI | Exists upstream: it opens `codex://threads/<id>`, and is compiled only on macOS and Windows (`slash_command.rs`) |
 | Types | `app-server generate-ts` exists in 0.158.0. Today the launcher would make it wait for the model server (§4.2 fixes that) |
 
@@ -162,10 +164,10 @@ Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the s
 
 | Codex app | How | Puffin | Phase |
 |---|---|---|---|
-| Project sidebar, threads per project, pin, rename, archive, sections | `thread/list`, `threadSection/*`, `thread/name/set`, `thread/archive|unarchive`, `thread/metadata/update` | **Same.** Threads from `puffin` in a terminal appear here and back (both read `~/.puffin/sessions`) | 1 |
+| Project sidebar, threads per project, pin, rename, archive, sections | `project/*` (experimental), `thread/list`, `threadSection/*`, `thread/name/set`, `thread/archive|unarchive`, `thread/metadata/update` | **Same.** Threads from `puffin` in a terminal appear here and back (both read `~/.puffin/sessions`) | 1 |
 | Switch threads without losing context; several threads running at once | `thread/loaded/list`, one server, per-thread subscriptions | **Same.** Parallel turns share one model server: Work shows the KV pool's headroom (§7) | 1 |
 | Chat / Work toggle | ChatGPT desktop app | **Puffin's:** Work is the agent, Chat is the Onyx window (§4.2) | 1 |
-| Command palette | client | **Same** (Ctrl+K): threads, projects, slash commands, settings | 2 |
+| Command palette, thread search | client, `thread/search` (experimental) | **Same** (Ctrl+K): threads, projects, slash commands, settings | 2 |
 | Pop-out windows | client | **Same:** a thread in its own Tauri window | 2 |
 | Notifications when a turn ends or needs approval | client | **Same:** desktop notification, no bundled sounds | 2 |
 | Prevent sleep while a turn runs | client | **Same:** `systemd-inhibit`-style idle inhibitor while any turn is running | 2 |
@@ -180,14 +182,14 @@ Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the s
 | Images and attachments | `thread/attachment/*`, input items | **Same** for images (Qwen3.8 is text-only today: attachments are offered only when the served model's entry says `supports_vision`) | 2 |
 | Model and effort picker | `model/list`, `turn/start` `model`/`effort` | **Puffin's:** the served model from the launcher (§5); efforts the patched template accepts | 1 |
 | Personality (`/personality`) | `personality` | **Puffin's: cave mode** (`/cavemode`, PUFFIN_CAVE_MODE), not a second mechanism; `personality` is not sent | 2 |
-| Plan mode | collaboration mode (experimental) | **Same** if Phase 0 finds it in the experimental schema; else the TUI's `/plan` text | 2 |
-| Steer while running, queued follow-ups, stop | `turn/steer`, `turn/interrupt` | **Same** | 1 |
+| Plan mode | `turn/start` `collaborationMode`, `collaborationMode/list` (experimental, §5) | **Same** | 2 |
+| Steer while running, queued follow-ups, stop | `turn/steer`, `thread/queue/*` (experimental), `turn/interrupt` | **Same** | 1 |
 | Edit the previous message (Esc twice) | `thread/revert` + `turn/start` | **Same** | 2 |
 | Context-usage indicator and Compress | `thread/tokenUsage/updated`, `thread/compact/start` | **Same**, against the launcher's KV-pool-based limit | 1 |
 | Fork a thread | `thread/fork` | **Same** | 2 |
 | Thread goal | `thread/goal/*` | **Same** | 2 |
 | Slash commands | client | The Codex ones, plus Puffin's: `/airgapped`, `/cavemode`, `/night`, `/prompt`, `/apps`, each a call to the launcher's own command (`puffin airgapped`, `puffin night`, `puffin prompt` …) so the TUI and the app cannot drift | 2 |
-| Voice dictation | client | **Puffin's:** the speech-to-text sidecar (`dream-stt`, CPU Whisper) already running for Chat | 2 |
+| Voice dictation | client; `thread/realtime/*` is OpenAI's realtime API | **Puffin's:** the speech-to-text sidecar (`dream-stt`, CPU Whisper) already running for Chat; `thread/realtime/*` is never sent | 2 |
 
 ### 6.3 The stream
 
@@ -215,7 +217,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the s
 
 | Codex app | How | Puffin | Phase |
 |---|---|---|---|
-| Worktree per thread; check out locally or let it continue | git (`git.rs`), the same layout as the TUI's `/worktree` | **Same.** Night Shift's `night/<id>` branches stay separate | 2 |
+| Worktree per thread; check out locally or let it continue | git, **the Codex Desktop contract** of §5 (shared with the TUI's `/worktree`): `git.rs` either depends on the `codex-worktree` crate by path, if it builds outside Codex's workspace (it inherits workspace dependencies), or implements the same contract with a test that a checkout made by one is listed and owned correctly by the other | **Same.** A thread handed between Work and the TUI keeps its worktree. Night Shift's `night/<id>` branches stay separate | 2 |
 | Hand-off between Local and Worktree | git | **Same** | 2 |
 | Delete a worktree, keeping the branch | git | **Same,** refusing while a turn runs there or with uncommitted changes | 2 |
 | Local environment setup script, project actions | client config | **Same,** in a project file Puffin reads; each runs in a terminal tab | 2 |
@@ -224,7 +226,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the s
 
 | Codex app | How | Puffin | Phase |
 |---|---|---|---|
-| A terminal per thread, toggled with Ctrl+J, scoped to the thread's directory or worktree | `command/exec` with `tty`, `write`, `resize`, `terminate` | **Same.** Runs under the thread's sandbox profile, so `/airgapped on` holds there too | 2 |
+| A terminal per thread, toggled with Ctrl+J, scoped to the thread's directory or worktree | `command/exec` with `tty`, `write`, `resize`, `terminate`; or `process/*` (experimental) | **Same.** Runs under the thread's sandbox profile, so `/airgapped on` holds there too | 2 |
 
 ### 6.7 Skills, plugins, apps, MCP
 
@@ -244,7 +246,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the s
 |---|---|---|---|
 | Scheduled tasks with instructions and optional skills | the app's own scheduler | **Puffin's: Night Shift.** `/night add` from the composer, the queue as a panel, a schedule on the timer `night enable` installs. No new scheduler | 2 |
 | Results land in a review queue | client | **Puffin's:** the morning report, each task's branch as a thread with its diff in the review pane | 2 |
-| Memory across automation runs | client | **Puffin's:** COMPACTION §4.4's nightly notes, if built | Later |
+| Memory across automation runs | `memory/*`, `thread/memoryMode/set` (experimental) | **Puffin's:** COMPACTION §4.4's nightly notes, if built; Codex's own memory if Phase 0 finds it needs no OpenAI service | Later |
 | Cloud triggers | OpenAI | **No:** no cloud | — |
 
 ### 6.9 Handoff and shared history
@@ -303,7 +305,7 @@ Rebindable in Settings, stored with the window's preferences, not in `config.tom
 
 ### 8.2 The air-gap rule must hold in the server, not the window
 
-The Full Access refusal at `on` (PUFFIN_AIRGAPPED §14.7) is enforced in the launcher's argument check and in the TUI's two permission pickers. **An app-server client chooses the sandbox per thread and per turn** (`thread/start`'s `sandbox` and `config`, `turn/start`'s `sandboxPolicy`), so greying out a row in Work enforces nothing: any other app-server client, or a bug, gets Full Access at `on`. Measured: `permissionProfile/list` reports `:danger-full-access` as `allowed` (at `off`, where it should be).
+The Full Access refusal at `on` (PUFFIN_AIRGAPPED §14.7) is enforced in the launcher's argument check and in the TUI's two permission pickers. **An app-server client chooses the sandbox per thread and per turn** (`thread/start`'s `sandbox` and `config`; `turn/start`'s `sandboxPolicy`, `permissions` and `runtimeWorkspaceRoots`), so greying out a row in Work enforces nothing: any other app-server client, or a bug, gets Full Access at `on`. Measured: `permissionProfile/list` reports `:danger-full-access` as `allowed` (at `off`, where it should be).
 
 Where the check goes, decided in Phase 0 in this order:
 1. **Codex's requirements system** (`allowed_permission_profiles` in `requirements.toml`) already removes profiles for every client, but its file is system-wide (`/etc/codex/requirements.toml`) and fixed, not per session: rejected unless a per-`CODEX_HOME` layer exists.
@@ -314,7 +316,7 @@ Work also disables the Full Access row at `on`, but as a courtesy, not as the en
 
 ### 8.3 Sessions and Night Shift
 
-Threads the app starts are ordinary Codex sessions in `~/.puffin/sessions`. Today Night Shift ignores an app-server entirely (§5). An always-open desktop app must not block every night, and process scanning cannot tell a busy server from an idle one. So: **the bridge writes a busy marker** (`$CODEX_HOME/night/busy/<pid>`, under the same flock discipline as the task files) on `turn/started` and removes it on `turn/completed` or when the server exits; Night Shift's admission treats a marker whose process is alive as an open session, and prunes the rest. The night run's own `puffin exec` processes are unaffected.
+Threads the app starts are ordinary Codex sessions in `~/.puffin/sessions`. Today Night Shift ignores an app-server entirely (§5). An always-open desktop app must not block every night, and process scanning cannot tell a busy server from an idle one. So: **the bridge writes a busy marker** `$CODEX_HOME/night/busy/<pid>`, where `<pid>` is **the `puffin app-server` process's** (the bridge's child, so the night run can check it without knowing about windows), holding the ids of the threads with a live turn. It is written on `turn/started`, rewritten on `turn/completed`, and removed when the last turn ends or the server exits. Night Shift's admission treats a marker whose pid is alive (signal 0, the probe `_probe_direct_kill` uses) and whose `/proc/<pid>/exe` is the installed `puffin` as an open session, and deletes any other marker: a window killed hard leaves a marker with a dead pid, which the next check prunes. The night run's own `puffin exec` processes are unaffected.
 
 ---
 
@@ -336,17 +338,18 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 
 **Phase 0 — check (about a day; part done, §5).**
 1. ~~`puffin app-server` handshake, sign-in gate, one turn, clean stdout~~ — done (§5).
-2. The launcher fix: `-c model="<id>"` for `app-server`; offline `generate-ts`; re-run §5's probe and see the model metadata found and Puffin's prompt in the turn's request.
+2. **The launcher fix, a hard gate for everything after it:** `-c model="<id>"` for `app-server`; offline `generate-ts`. It is a bug in today's `puffin` (any app-server client, including OpenAI's app pointed at `puffin`, gets Codex's fallback prompt) and ships on its own, before any desktop work. Re-run §5's probe without the manual `-c` and see the metadata found and Puffin's prompt in the request.
 3. Why `model/list` is empty with a catalog entry present.
-4. `generate-ts --experimental`: plan mode, thread sections, attachments.
+4. ~~`generate-ts --experimental`~~ — done (§5): plan mode, projects, queues, search, terminals.
 5. §8.2: which of the three places holds the air-gap check; measure that a `thread/start` with `sandbox: "danger-full-access"` at `on` is refused.
 6. The reference run (§4.6), only if the user allows installing OpenAI's package: OpenAI's app on `puffin app-server`, scratch `HOME`, network namespace reaching only the model server; record each screen and request.
-7. A non-ephemeral thread appears in `puffin resume`, and a TUI session in `thread/list`.
+7. ~~A non-ephemeral thread appears in `puffin resume`~~ — done (§5). Still to see: a TUI session in `thread/list`.
 8. Memory of an idle and a busy app-server.
+9. `git.rs` against the worktree contract: does `codex-worktree` build as a path dependency of `desktop/` (without running cargo inside `codex/`, which rewrites its lock file)?
 
-*Done when* each has a recorded answer here.
+*Done when* each has a recorded answer here and item 2 has shipped.
 
-**Phase 1 — Work beside Chat.** The second window, the bridge, the busy marker, the project and thread sidebar, the composer, streaming items, approvals, the permission picker, interrupt and steer, the context indicator, the model picker, settings, the start-up screen, revert, the egress audit's `--app` mode, and the Chat window unchanged. *Done when* a task started in Work can be resumed in the TUI and the other way round, the audit passes, the Chat test passes unchanged — and only then does `puffin app` open Work by default.
+**Phase 1 — Work beside Chat.** The second window, the bridge, the busy marker, the project and thread sidebar, the composer, streaming items, approvals, the permission picker, interrupt and steer, the context indicator, the model picker, settings, the start-up screen, revert, the egress audit's `--app` mode, and the Chat window unchanged. *Done when* (with Phase 0 item 2 shipped, so both sides run Puffin's prompt) a task started in Work can be resumed in the TUI and the other way round, the audit passes, the Chat test passes unchanged — and only then does `puffin app` open Work by default.
 
 **Phase 2 — the rest of the Codex surface.** Review pane and git, worktrees and hand-off, terminal, command palette, pop-outs, notifications, prevent-sleep, fork, goal, edit-previous, images, skills, plugins, apps, MCP, hooks, Night Shift as automations, Puffin's slash commands, dictation, cave mode as personality, plan mode, `puffin app --thread` and the `puffin://` handler, the air-gap and node indicators, the KV headroom.
 
