@@ -37,6 +37,10 @@ REAL_BRAND_INSTALL = OnyxBrandAssets.install
 REAL_FONTS_INSTALL = OnyxUIFonts.install
 REAL_START_STT_SERVER = OnyxRunner._start_stt_server
 REAL_ALLOW_LOCAL_VOICE_ENDPOINT = OnyxRunner._allow_local_voice_endpoint
+from dreamference.chat.google_service import GoogleService  # noqa: E402
+
+# `server start` starts the Google service on a node, and `google start` creates its container.
+REAL_GOOGLE_SERVICE_START = GoogleService.start
 from dreamference.vllm_server.vllm_server_manager import VLLMServerManager  # noqa: E402
 
 # `server start` stops the code index's systemd scopes; the fixture below replaces it.
@@ -84,6 +88,7 @@ def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
     for patcher in UI_PATCHERS:
         monkeypatch.setattr(patcher, "install", classmethod(lambda cls, container=None: True))
     monkeypatch.setattr(VLLMServerManager, "_stop_index_scopes", classmethod(lambda cls: None))
+    monkeypatch.setattr(GoogleService, "start", classmethod(lambda cls: True))
 
 
 @pytest.fixture(autouse=True)

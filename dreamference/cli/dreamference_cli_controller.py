@@ -560,6 +560,39 @@ class DreamferenceCLIController:
         return facts
 
     @classmethod
+    def _run_google(cls, command: Optional[str]) -> None:
+        """
+        Runs `puffin-admin google start|stop|status` and exits.
+
+        Args:
+            command (Optional[str]): The subcommand; the group's help is printed when it is None.
+        """
+        from dreamference.chat.gmail_client import GmailClient
+        from dreamference.chat.google_service import GOOGLE_HOST_PORT, GoogleService
+
+        if command == "start":
+            if not GoogleService.start():
+                print("❌ The Google service did not start.")
+                sys.exit(1)
+            print(f"✅ The Google service is running on http://127.0.0.1:{GOOGLE_HOST_PORT}")
+            print("💡 Connect accounts with /apps in puffin, or in the web UI's Settings.")
+            sys.exit(0)
+        if command == "stop":
+            sys.exit(0 if GoogleService.stop() else 1)
+        if command == "status":
+            state = GoogleService.state() or "absent"
+            print(f"Container: {state}")
+            answer = GmailClient.status()
+            for account in answer.get("accounts") or []:
+                scopes = ", ".join(scope.rsplit("/", 1)[-1] or scope for scope in account.get("scopes", []))
+                print(f"  {account.get('email')}: {scopes}")
+            if answer.get("error"):
+                print(f"⚠️  {answer['error']}")
+            sys.exit(0)
+        print("usage: puffin-admin google {start,stop,status}")
+        sys.exit(2)
+
+    @classmethod
     def _refuse_during_night_run(cls, what: str) -> None:
         """
         Stops `puffin-admin <what>` while a Night Shift run or a SWE-bench run holds the runner
@@ -1174,6 +1207,13 @@ class DreamferenceCLIController:
         searxng_subparsers = searxng_parser.add_subparsers(dest="searxng_command")
         searxng_subparsers.add_parser("start", help="Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge)")
 
+        # Command: puffin-admin google (the service behind Gmail, Drive and Calendar in /apps)
+        google_parser = subparsers.add_parser("google", help="Manage the local Google service (Gmail, Drive, Calendar)")
+        google_subparsers = google_parser.add_subparsers(dest="google_command")
+        google_subparsers.add_parser("start", help="Start the Google service on 127.0.0.1:8767 (adopts the web UI's if it exists)")
+        google_subparsers.add_parser("stop", help="Remove the Google service container; connected accounts stay stored")
+        google_subparsers.add_parser("status", help="Show whether it runs and which accounts hold which apps")
+
         # Command: puffin-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -1190,6 +1230,7 @@ class DreamferenceCLIController:
             "onyx": (onyx_parser, "onyx_command"),
             "desktop": (desktop_parser, "desktop_command"),
             "searxng": (searxng_parser, "searxng_command"),
+            "google": (google_parser, "google_command"),
         }
         if diffusion_model_parser is not None:
             parser.command_groups["diffusion-model"] = (diffusion_model_parser, "diffusion_model_command")
@@ -2062,6 +2103,10 @@ class DreamferenceCLIController:
                 # A machine that loads a model is a node; an advertised one says `loading`.
                 from dreamference.node import NodeAdvertiser
                 NodeAdvertiser.on_server_starting(args.model, args.port)
+                # On a node the Google service runs by default, so /apps can connect accounts
+                # (specs/DREAMFERENCE_PUFFIN_APPS.md §5.1); its failure never blocks the model.
+                from dreamference.chat.google_service import GoogleService
+                GoogleService.ensure_on_node()
 
                 # The diffusion sidecar starts *before* the vLLM launch on purpose: vLLM's
                 # pre-flight reads current free memory, so a sidecar already resident is
@@ -2470,6 +2515,9 @@ class DreamferenceCLIController:
                 sys.exit(0)
             print("usage: puffin-admin searxng {start}")
             sys.exit(2)
+
+        elif args.command == "google":
+            cls._run_google(args.google_command)
 
         elif args.command == "web":
             cls.display_header()

@@ -24,6 +24,8 @@ flate2 = { workspace = true }
 # Pure-Rust mDNS browsing, one code path on Linux, macOS and Windows; no async runtime, no logging.
 mdns-sd = { version = "0.21.4", default-features = false }
 puffin-airgapped = { path = "airgapped" }
+# Puffin's apps for `/apps` (patch 0022) and as MCP tools (src/apps.rs).
+puffin-apps = { path = "apps" }
 puffin-node-locator = { path = "node-locator" }
 # Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
 puffin-skills = { path = "skills" }

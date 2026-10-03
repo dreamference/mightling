@@ -33,6 +33,7 @@ use toml_edit::value;
 
 pub mod airgapped;
 pub mod app;
+pub mod apps;
 pub mod cave;
 pub mod code_index;
 pub mod compaction;
@@ -214,6 +215,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(node::run_cli(&user_args[index + 1..]).await);
     }
+    // `apps` serves one of Puffin's apps as an MCP server, or lists them (apps.rs;
+    // specs/DREAMFERENCE_PUFFIN_APPS.md §6.1). Codex starts `apps serve` itself.
+    if let Some(index) = subcommand
+        && user_args[index] == "apps"
+    {
+        std::process::exit(apps::run_cli(&user_args[index + 1..]));
+    }
     // `ledger` is the hook Codex runs after a compaction (ledger.rs); it reads a file and answers.
     if let Some(index) = subcommand
         && user_args[index] == "ledger"
@@ -274,10 +282,21 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     for line in prompt::startup_lines(&chosen, interactive) {
         notice::say(&line);
     }
-    // Gmail only on a node: `puffin-admin gmail` is Python and the service's secret is a file
-    // there, so a client is never told of a command it cannot run (§10). Not at a configured `on`
-    // either, where the sandbox cuts it off (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §5.2).
-    let email = if airgapped::offers_gmail(configured.level) && puffin_gmail_enabled() && host_is_local(&host) {
+    // Puffin's apps (Gmail, Drive, Calendar) as read-only tools when this node offers them
+    // (specs/DREAMFERENCE_PUFFIN_APPS.md §6); otherwise Gmail as shell commands, as before. Both
+    // only on a node: the service and its secret live there, so a client is never told of tools or
+    // commands it cannot use (§10). Neither at a configured `on`, where the sandbox cuts commands
+    // off and each tool call refuses (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §5.2).
+    let declared_apps = apps::declared(
+        !airgapped::offers_gmail(configured.level),
+        host_is_local(&host),
+        &codex_home,
+        puffin_gmail_enabled(),
+    )
+    .await;
+    let email = if !declared_apps.is_empty() {
+        apps::instructions(&declared_apps)
+    } else if airgapped::offers_gmail(configured.level) && puffin_gmail_enabled() && host_is_local(&host) {
         connected_gmail_accounts()
             .await
             .map(|accounts| gmail_access_instructions(&accounts))
@@ -308,6 +327,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     } else {
         args
     };
+    // One MCP server per declared app (apps.rs).
+    let args = apps::with_servers(args, &declared_apps);
     // `default` is `model_catalog.json`, already named in `config.toml`; another prompt's catalog
     // is named for this process only, so a session it resumes keeps the prompt it recorded.
     let args = match catalog {

@@ -62,8 +62,11 @@ def test_the_patches_stay_small():
     # pickers, and `/airgapped` told whether the session runs in Full Access); 33,686 after.
     # On 2026-10-03 the user approved a ceiling of 37,500 for two planned patches, the context
     # budget's masking hook (~0.9 KB) and PUFFIN_APPS' `/apps` hooks (~2.4 KB). The cap is still
-    # raised here only when each lands, by its size as written, with a line saying so.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 33_750
+    # raised here only when each lands, by its size as written, with a line saying so. Raised to
+    # 35,250 on 2026-10-03 for 0022's `/apps` hooks (1,371 bytes: the TUI's gate also opens when
+    # Puffin offers apps, and the app server answers `app/list` with Puffin's rows before any
+    # directory request); 35,057 after. With 0021's masking hook (882 bytes) the series is 35,939.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 35_250
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
