@@ -23,7 +23,8 @@ from dreamference.swe_bench import (
 )
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATCH
-from dreamference.swe_bench.swe_bench_instance_run import COLLECT_SCRIPT, PREPARE_SCRIPT, SCRUB_SCRIPT
+from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, PREPARE_SCRIPT,
+                                                          SCRUB_SCRIPT)
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -314,6 +315,16 @@ def run(bench, **arguments):
 
 
 # -- the prompt and what the container is given ---------------------------------------------------
+
+def test_only_the_code_index_arm_is_told_to_use_the_code_tools():
+    issue = "The widget is broken."
+    without, with_index = (SweBenchInstanceRun.compose_prompt(issue, index) for index in (False, True))
+    assert "code_" not in without
+    assert "`code_search`" in with_index and "`code_impact`" in with_index
+    # The hint is the only difference, and the issue still ends the prompt.
+    assert with_index.replace(CODE_INDEX_HINT, "") == without
+    assert with_index.endswith(issue)
+
 
 def test_the_prompt_holds_the_issue_and_nothing_else_from_the_row(bench):
     assert run(bench, instances=["acme__widget-1"]) == 0
