@@ -354,9 +354,19 @@ All on 2026-10-01, with the rebuilt `puffin` (17 patches) against the default mo
 - **A session switched to Full Access through `/permissions`** shows no warning; only the launch-time refusal exists. The status at `on` lists the uncovered cases as fixed text, not as a check of the current session.
 - **A tampered level takes effect at the next restart.** A seal lasts as long as the `puffin` process that wrote it. If a command rewrote the level's files while the session was held, a later `puffin resume` reads those files and starts at what they say. Keeping seals across restarts would close it, at the price of a session nobody can loosen without the TUI; left as it is.
 - **`writable_roots` the user adds** are not known to the exposure check, which looks at the working directory, `/tmp` and `$TMPDIR`. The seal does not depend on that check, so this only affects what `/airgapped` reports where there is no runtime directory.
-- **The start-up line at `on`** (§5.3) is not printed; `/airgapped` shows the hold and any hole.
 - **The airlock** (§5.4, Phase 2), the 50-query DuckDuckGo measurement (Phase 0), and the strace of an `on` session (§11).
 - **Codex's own TUI snapshots** that list the slash-command popup change again with `/airgapped` in it.
+
+### 14.4a Added on 2026-10-03: the start-up line
+
+A session that starts at a configured `on` (environment or configuration file; the level is read before Codex parses its arguments, so a `puffin resume` of a session whose own file says `on` gets no line, though the session is still held) prints, before the wait for the model server:
+
+```
+🔒 Airgapped: on (<source>). Enforced: sandboxed commands run with no network.
+NOT ENFORCED for: a switch to Full Access with /permissions, a command you approve to run outside the sandbox, MCP servers you configured.
+```
+
+with `/airgapped`'s `NOT ENFORCED against a command rewriting the level` between the two when the level files are inside a writable root and there is no runtime directory for a seal. Nothing is printed at `off` or `duckduckgo`. Full Access at launch is not listed: it is refused before this line. It goes to stderr for `puffin exec` too. `startup_lines` in `puffin-rs/src/airgapped.rs`, unit-tested; not yet watched in a rebuilt `puffin`.
 
 ### 14.5 Added on 2026-10-02: the three gaps of "not built"
 

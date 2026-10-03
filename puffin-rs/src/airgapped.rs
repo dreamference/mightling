@@ -319,6 +319,31 @@ fn with_default(existing: &str, level: Level) -> Result<String, toml_edit::TomlE
     Ok(document.to_string())
 }
 
+/// What `puffin` prints before a session that starts at `on` (§5.3), so the user sees whether the
+/// level holds before typing anything; nothing at the other levels. `exposed` and `can_seal` are
+/// as for [`guard_lines`]: the seal itself is written with the first message, so at start the only
+/// hole that depends on this machine is a level file a command could rewrite with no seal to hold it.
+fn startup_lines(resolved: &Resolved, exposed: bool, can_seal: bool) -> Vec<String> {
+    if resolved.level != Level::On {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "🔒 Airgapped: on ({}). Enforced: sandboxed commands run with no network.",
+        resolved.source.label()
+    )];
+    lines.extend(guard_lines(Level::On, None, exposed, can_seal));
+    lines.push(
+        "NOT ENFORCED for: a switch to Full Access with /permissions, a command you approve to run outside the sandbox, MCP servers you configured.".to_string(),
+    );
+    lines.extend(resolved.invalid.iter().map(|note| format!("Note: {note}.")));
+    lines
+}
+
+/// [`startup_lines`] for the configured level, read from the machine.
+pub fn startup_lines_now(resolved: &Resolved) -> Vec<String> {
+    startup_lines(resolved, puffin_airgapped::level_files_exposed(), puffin_airgapped::seal_dir().is_some())
+}
+
 /// The reason `puffin` must not start with these arguments at a configured `on`, if there is one:
 /// Full Access has no sandbox to take the network away, so the two contradict each other.
 pub fn full_access_conflict(user_args: &[String], level: Level) -> Option<String> {
@@ -455,6 +480,24 @@ mod tests {
         assert_eq!(lines[0], "Airgapped: off (default)");
         assert!(!lines.iter().any(|line| line.contains("ENFORCED")));
         assert!(lines.iter().any(|line| line == "Note: ignored \"x\" from this session."));
+    }
+
+    #[test]
+    fn a_session_starting_at_on_is_told_what_holds_and_what_does_not() {
+        let on = Resolved { level: Level::On, source: puffin_airgapped::Source::Environment, invalid: vec![] };
+        let lines = startup_lines(&on, false, true);
+        assert_eq!(lines[0], format!("🔒 Airgapped: on ({ENV_VAR}). Enforced: sandboxed commands run with no network."));
+        assert!(lines[1].starts_with("NOT ENFORCED for: a switch to Full Access with /permissions"));
+        assert_eq!(lines.len(), 2);
+        // The machine's own hole is named between the two when there is no place for a seal.
+        let exposed = startup_lines(&on, true, false);
+        assert!(exposed[1].starts_with("NOT ENFORCED against a command rewriting the level"));
+        assert_eq!(exposed.len(), 3);
+        // Nothing at the other levels.
+        for level in [Level::Off, Level::DuckDuckGo] {
+            let resolved = Resolved { level, source: puffin_airgapped::Source::Default, invalid: vec![] };
+            assert!(startup_lines(&resolved, true, false).is_empty());
+        }
     }
 
     #[test]
