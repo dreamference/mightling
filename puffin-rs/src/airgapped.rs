@@ -336,6 +336,13 @@ pub fn startup_lines_now(resolved: &Resolved) -> Vec<String> {
     startup_lines(resolved, puffin_airgapped::level_files_exposed(), puffin_airgapped::seal_dir().is_some())
 }
 
+/// Whether a session starting at this configured level is told about Gmail (§5.2): not at `on`,
+/// where `puffin-admin gmail` cannot reach the service, so the prompt does not offer what fails. A
+/// session switched to `on` later keeps the section, and the `on` fragment says Gmail is unavailable.
+pub fn offers_gmail(level: Level) -> bool {
+    level != Level::On
+}
+
 /// Why `on` and Full Access are never had together; every refusal of one for the other says it.
 const INCOMPATIBLE: &str = "Full Access runs commands with no sandbox, and the sandbox is what takes their network away, so the two are incompatible";
 
@@ -641,6 +648,12 @@ mod tests {
         // Nothing at `off`.
         let off = Resolved { level: Level::Off, source: puffin_airgapped::Source::Default, invalid: vec![] };
         assert!(startup_lines(&off, true, false).is_empty());
+    }
+
+    #[test]
+    fn a_session_starting_at_on_is_not_offered_gmail() {
+        assert!(!offers_gmail(Level::On));
+        assert!(offers_gmail(Level::Off));
     }
 
     #[test]

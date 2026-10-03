@@ -268,8 +268,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         eprintln!("{line}");
     }
     // Gmail only on a node: `puffin-admin gmail` is Python and the service's secret is a file
-    // there, so a client is never told of a command it cannot run (§10).
-    let email = if puffin_gmail_enabled() && host_is_local(&host) {
+    // there, so a client is never told of a command it cannot run (§10). Not at a configured `on`
+    // either, where the sandbox cuts it off (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §5.2).
+    let email = if airgapped::offers_gmail(configured.level) && puffin_gmail_enabled() && host_is_local(&host) {
         connected_gmail_accounts()
             .await
             .map(|accounts| gmail_access_instructions(&accounts))
