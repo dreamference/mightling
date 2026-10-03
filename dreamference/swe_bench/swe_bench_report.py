@@ -22,11 +22,11 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit",
 )
 # What a manifest written before a field existed ran with.
-MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default"}
+MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off"}
 
 
 class SweBenchReport:

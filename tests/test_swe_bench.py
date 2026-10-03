@@ -997,6 +997,20 @@ def test_without_prompt_the_run_records_and_passes_the_configured_one(bench, mon
     assert "Prompt default; cave mode" in SweBenchReport.render(SweBenchRunStore("r1"))
 
 
+def test_masking_is_off_unless_asked_and_two_runs_are_told_apart_by_it(bench, monkeypatch):
+    # specs/DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md §4.1: the container's launcher reads the switch.
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="masked", instances=["acme__widget-1"], mask="on") == 0
+    runs = [call for call in bench["docker"].calls if call[0] == "run"]
+    assert "DREAMFERENCE_PUFFIN_MASK=off" in runs[0]
+    assert "DREAMFERENCE_PUFFIN_MASK=on" in runs[-1]
+    assert SweBenchRunStore("masked").manifest()["masking"] == "on"
+    for name in ("plain", "masked"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("masked"))
+    assert "differs: masking: off | on" in text
+
+
 def test_a_built_in_prompt_needs_no_file_and_two_prompts_are_told_apart(bench, monkeypatch):
     monkeypatch.delenv("DREAMFERENCE_PUFFIN_PROMPT", raising=False)
     assert run(bench, name="a", instances=["acme__widget-1"]) == 0

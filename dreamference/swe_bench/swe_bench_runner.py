@@ -138,7 +138,8 @@ class SweBenchRunner:
     def build_manifest(cls, name: str, dataset: str, selected: List[str], excluded: Dict[str, str],
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
                        runtime_hash: str, puffin_bin: str, parallel: int,
-                       code_index: str = "off", prompt: Optional[str] = None) -> Dict[str, Any]:
+                       code_index: str = "off", prompt: Optional[str] = None,
+                       mask: str = "off") -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -181,6 +182,7 @@ class SweBenchRunner:
             "prompt_sha256": cls.prompt_digest(prompt or config.puffin_prompt),
             "airgapped": "off (the container has no network; see the spec's §12)",
             "code_index": code_index,
+            "masking": mask,
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
             "task_memory": settings.task_memory,
@@ -240,7 +242,7 @@ class SweBenchRunner:
             limit: Optional[int] = None, subset: Optional[str] = None, name: Optional[str] = None,
             evaluate: bool = False, until: Optional[str] = None, idle_minutes: Optional[float] = None,
             ignore_sessions: bool = False, keep_images: bool = True, require_smoke: bool = True,
-            code_index: str = "off", prompt: Optional[str] = None,
+            code_index: str = "off", prompt: Optional[str] = None, mask: str = "off",
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
@@ -262,6 +264,8 @@ class SweBenchRunner:
                 and give the agent `puffin-code` (a new run only; a resumed run keeps its arm).
             prompt: The system prompt the agent starts with (prompt spec §6.2); None takes the
                 configured one. A new run only, like `code_index`.
+            mask: `on` masks old tool outputs in the agent's requests (context budget spec
+                §4.1), `off` does not. A new run only, like `code_index`.
             settings: Benchmark settings; defaults to the config file's.
 
         Returns:
@@ -332,7 +336,7 @@ class SweBenchRunner:
                 excluded = {i: problem for i, problem in problems.items() if problem}
                 manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
                                               served, runtime_hash, puffin_bin, parallel, code_index,
-                                              prompt)
+                                              prompt, mask)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                 print(f"❌ Run {store.name} was started with another puffin build or model "
@@ -352,7 +356,9 @@ class SweBenchRunner:
                 print(f"   {note}")
             extra_env = {"DREAMFERENCE_PUFFIN_CAVE_MODE": str(manifest.get("cave_mode") or "ultra"),
                          "DREAMFERENCE_PUFFIN_AIRGAPPED": "off",
-                         "DREAMFERENCE_PUFFIN_PROMPT": run_prompt}
+                         "DREAMFERENCE_PUFFIN_PROMPT": run_prompt,
+                         # A run made before masking existed has no key: it ran unmasked.
+                         "DREAMFERENCE_PUFFIN_MASK": str(manifest.get("masking") or "off")}
             # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
             # the text a later session of the same instance would start from.
             custom_prompt = cls.prompt_file(run_prompt)
