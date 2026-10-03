@@ -92,6 +92,8 @@ class SweBenchSettings:
         self.eval_memory: str = str(table.get("eval_memory", DEFAULT_EVAL_MEMORY))
         self.eval_timeout_s: int = duration(table.get("eval_timeout", DEFAULT_EVAL_TIMEOUT))
         self.disk_reserve: str = str(table.get("disk_reserve", DEFAULT_DISK_RESERVE))
+        # Paired nodes serving the same model add lanes (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3).
+        self.nodes: Any = table.get("nodes", "paired")
 
     @classmethod
     def read_table(cls, path: Optional[Path] = None) -> Dict[str, Any]:

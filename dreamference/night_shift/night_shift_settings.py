@@ -69,14 +69,18 @@ class NightShiftSettings:
         # Refresh each repository's code index before its tasks start (code-index spec §6.3).
         self.index: bool = bool(table.get("index", True))
         self.index_timeout_s: int = self.parse_duration(table.get("index_timeout", DEFAULT_INDEX_TIMEOUT))
+        # Other nodes' model servers a run may also use (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3):
+        # "paired" (every paired node serving the same model), "none", or a list of names.
+        self.nodes: Any = table.get("nodes", "paired")
 
     @classmethod
-    def read_table(cls, path: Optional[Path] = None) -> Dict[str, Any]:
+    def read_table(cls, path: Optional[Path] = None, section: str = "night") -> Dict[str, Any]:
         """
-        Reads `[night]` from a TOML file.
+        Reads `[night]` (or another table) from a TOML file.
 
         Args:
             path: The file; None resolves the config file.
+            section: The table to read.
 
         Returns:
             Dict[str, Any]: The table, or an empty one when absent or unreadable.
@@ -87,7 +91,7 @@ class NightShiftSettings:
                 document = tomllib.load(handle)
         except (OSError, tomllib.TOMLDecodeError):
             return {}
-        table = document.get("night", {})
+        table = document.get(section, {})
         return table if isinstance(table, dict) else {}
 
     @classmethod

@@ -25,7 +25,7 @@ use std::process::Stdio;
 use serde_json::Value;
 use serde_json::json;
 
-const USAGE: &str = "Usage: /night [list] | /night add [--test \"<cmd>\"] <task> | /night show <id> | /night drop <id> | /night report";
+const USAGE: &str = "Usage: /night [list] | /night add [--test \"<cmd>\"] [--on <node>] <task> | /night show <id> | /night drop <id> | /night report";
 
 /// Statuses after which a task is finished for the night: the startup line counts them.
 const FINISHED: &[&str] = &["done", "no-change", "stalled", "failed", "interrupted"];
@@ -37,7 +37,8 @@ const DEFAULT_WINDOW: &str = "01:00-07:00";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     List,
-    Add { test: Option<String>, task: String },
+    /// `on`: a paired node whose own runner works the task (specs/DREAMFERENCE_PUFFIN_NODE.md §13.3).
+    Add { test: Option<String>, on: Option<String>, task: String },
     Show(String),
     Drop(String),
     Report,
@@ -61,9 +62,10 @@ impl Request {
                 [id] => Request::Drop(id.to_string()),
                 _ => Request::Usage(USAGE.to_string()),
             },
-            "add" => match take_test_option(rest) {
-                Ok((test, task)) if !task.trim().is_empty() => Request::Add {
+            "add" => match take_add_options(rest) {
+                Ok((test, on, task)) if !task.trim().is_empty() => Request::Add {
                     test,
+                    on,
                     task: task.trim().to_string(),
                 },
                 Ok(_) => Request::Usage("Nothing to queue: /night add <task>".to_string()),
@@ -79,27 +81,92 @@ impl Request {
             Some("add") => {
                 let mut rest = &args[1..];
                 let mut test = None;
-                if let Some(first) = rest.first() {
-                    if first == "--test" {
-                        let Some(command) = rest.get(1) else {
-                            return Request::Usage("--test needs a command".to_string());
-                        };
-                        test = Some(command.clone());
-                        rest = &rest[2..];
-                    } else if let Some(command) = first.strip_prefix("--test=") {
-                        test = Some(command.to_string());
-                        rest = &rest[1..];
+                let mut on = None;
+                while let Some(first) = rest.first() {
+                    let (option, inline) = match first.split_once('=') {
+                        Some((option, value)) => (option, Some(value.to_string())),
+                        None => (first.as_str(), None),
+                    };
+                    if option != "--test" && option != "--on" {
+                        break;
                     }
+                    let (value, used) = match inline {
+                        Some(value) => (value, 1),
+                        None => match rest.get(1) {
+                            Some(value) => (value.clone(), 2),
+                            None => return Request::Usage(format!("{option} needs a value")),
+                        },
+                    };
+                    if option == "--test" {
+                        test = Some(value);
+                    } else {
+                        match node_name(&value) {
+                            Ok(name) => on = Some(name),
+                            Err(error) => return Request::Usage(error),
+                        }
+                    }
+                    rest = &rest[used..];
                 }
                 let task = rest.join(" ");
                 if task.trim().is_empty() {
                     Request::Usage("Nothing to queue: puffin night add <task>".to_string())
                 } else {
-                    Request::Add { test, task: task.trim().to_string() }
+                    Request::Add { test, on, task: task.trim().to_string() }
                 }
             }
             _ => Request::from_line(&args.join(" ")),
         }
+    }
+}
+
+/// Splits the leading `--test` and `--on` options, in either order, off `rest`.
+fn take_add_options(mut rest: &str) -> Result<(Option<String>, Option<String>, &str), String> {
+    let mut test = None;
+    let mut on = None;
+    loop {
+        rest = rest.trim_start();
+        let (found, after) = take_test_option(rest)?;
+        if found.is_some() {
+            test = found;
+            rest = after;
+            continue;
+        }
+        let (found, after) = take_on_option(rest)?;
+        if found.is_some() {
+            on = found;
+            rest = after;
+            continue;
+        }
+        return Ok((test, on, rest));
+    }
+}
+
+/// Splits a leading `--on <node>` (or `--on=<node>`) off `rest`.
+fn take_on_option(rest: &str) -> Result<(Option<String>, &str), String> {
+    let Some(after) = rest.strip_prefix("--on") else {
+        return Ok((None, rest));
+    };
+    // A task may begin with a word such as `--only`: only the option proper is taken.
+    if !after.is_empty() && !after.starts_with(|next: char| next == '=' || next.is_whitespace()) {
+        return Ok((None, rest));
+    }
+    let after = after.strip_prefix('=').unwrap_or(after).trim_start();
+    let end = after.find(char::is_whitespace).unwrap_or(after.len());
+    Ok((Some(node_name(&after[..end])?), &after[end..]))
+}
+
+/// A node's name as `puffin-admin node list` shows it: a host name, not a path or an option.
+fn node_name(name: &str) -> Result<String, String> {
+    let valid = !name.is_empty()
+        && name.len() <= 63
+        && name.chars().next().is_some_and(|first| first.is_ascii_alphanumeric())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    if valid {
+        Ok(name.to_string())
+    } else if name.is_empty() {
+        Err("--on needs a node's name (see puffin-admin node list)".to_string())
+    } else {
+        Err(format!("--on: {name:?} is not a node's name"))
     }
 }
 
@@ -191,14 +258,14 @@ pub fn run(dir: &Path, request: Request, cwd: &Path) -> Vec<String> {
     match request {
         Request::Usage(text) => vec![text],
         Request::List => list(dir, &repo),
-        Request::Add { test, task } => add(dir, &repo, cwd, test, &task),
+        Request::Add { test, on, task } => add(dir, &repo, cwd, test, on, &task),
         Request::Show(id) => show(dir, &repo, &id),
         Request::Drop(id) => drop_task(dir, &repo, &id),
         Request::Report => report(dir, &repo),
     }
 }
 
-fn add(dir: &Path, repo: &Path, cwd: &Path, test: Option<String>, task: &str) -> Vec<String> {
+fn add(dir: &Path, repo: &Path, cwd: &Path, test: Option<String>, on: Option<String>, task: &str) -> Vec<String> {
     let Some(base) = git(cwd, &["rev-parse", "HEAD"]) else {
         return vec!["Night Shift: this repository has no commit yet, so there is nothing to start from.".to_string()];
     };
@@ -211,6 +278,7 @@ fn add(dir: &Path, repo: &Path, cwd: &Path, test: Option<String>, task: &str) ->
             "branch": format!("night/{id}"),
             "task": task,
             "test": test,
+            "on": on,
             "model_at_add": served_model_id(),
             "status": "queued",
             "history": [{"at": now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false), "status": "queued"}],
@@ -231,6 +299,12 @@ fn add(dir: &Path, repo: &Path, cwd: &Path, test: Option<String>, task: &str) ->
             None => "Test command: detected in the worktree when the task runs.".to_string(),
         },
     ];
+    if let Some(node) = &on {
+        lines.push(format!(
+            "Runs on {node}: tonight's run here hands it over, {node}'s own runner works it with its own model, \
+             and the branch comes back here."
+        ));
+    }
     if git(cwd, &["status", "--porcelain"]).is_some_and(|status| !status.is_empty()) {
         lines.push("Note: the working tree has uncommitted changes; the night run starts from HEAD and will not see them.".to_string());
     }
@@ -273,8 +347,9 @@ fn list(dir: &Path, repo: &Path) -> Vec<String> {
         let age = last_change(task)
             .map(|at| short_age(now.signed_duration_since(at)))
             .unwrap_or_default();
+        let node = task["on"].as_str().map(|node| format!("[{node}] ")).unwrap_or_default();
         lines.push(format!(
-            "{}  {:<16} {:>4}  {}",
+            "{}  {:<16} {:>4}  {node}{}",
             text(task, "id"),
             text(task, "status"),
             age,
@@ -294,8 +369,11 @@ fn show(dir: &Path, repo: &Path, id: &str) -> Vec<String> {
         format!("Branch: {}   base: {}", text(&task, "branch"), text(&task, "base")),
         format!("Test: {}", task["test"].as_str().unwrap_or("detected at run time")),
         format!("Model when queued: {}", task["model_at_add"].as_str().unwrap_or("unknown")),
-        "Task:".to_string(),
     ];
+    if let Some(node) = task["on"].as_str() {
+        lines.push(format!("Node: {node} (its own runner works the task)"));
+    }
+    lines.push("Task:".to_string());
     lines.extend(text(&task, "task").lines().map(|line| format!("  {line}")));
     lines.push("History:".to_string());
     for entry in task["history"].as_array().into_iter().flatten() {
@@ -324,7 +402,8 @@ fn drop_task(dir: &Path, repo: &Path, id: &str) -> Vec<String> {
         let status = text(task, "status");
         let next = match status.as_str() {
             "queued" | "interrupted" => "cancelled",
-            "running" => "cancel-requested",
+            // A task another node holds is dropped there by the next night run here.
+            "running" | "sent" => "cancel-requested",
             _ => return Err(format!("{id} is {status}; there is nothing to cancel.")),
         };
         set_status(task, next, None);
@@ -332,6 +411,10 @@ fn drop_task(dir: &Path, repo: &Path, id: &str) -> Vec<String> {
     });
     match outcome {
         Ok("cancelled") => vec![format!("Cancelled {id}.")],
+        Ok(_) if text(&found, "status") == "sent" => vec![format!(
+            "{id} is on {}; the next night run here tells that node to stop it.",
+            found["on"].as_str().unwrap_or("another node")
+        )],
         Ok(_) => vec![format!("{id} is running; it stops at its next step.")],
         Err(message) => vec![message],
     }
@@ -625,20 +708,34 @@ mod tests {
         assert_eq!(Request::from_line("drop abc"), Request::Drop("abc".into()));
         assert_eq!(
             Request::from_line("add Fix the flaky test.\nThen run it twice."),
-            Request::Add { test: None, task: "Fix the flaky test.\nThen run it twice.".into() }
+            Request::Add { test: None, on: None, task: "Fix the flaky test.\nThen run it twice.".into() }
         );
         assert_eq!(
             Request::from_line("add --test \"pytest -q tests/x.py\" Add type hints"),
-            Request::Add { test: Some("pytest -q tests/x.py".into()), task: "Add type hints".into() }
+            Request::Add { test: Some("pytest -q tests/x.py".into()), on: None, task: "Add type hints".into() }
         );
         assert_eq!(
             Request::from_line("add --test=make Build it"),
-            Request::Add { test: Some("make".into()), task: "Build it".into() }
+            Request::Add { test: Some("make".into()), on: None, task: "Build it".into() }
         );
         assert_eq!(
             Request::from_line("add --tests are slow, speed them up"),
-            Request::Add { test: None, task: "--tests are slow, speed them up".into() }
+            Request::Add { test: None, on: None, task: "--tests are slow, speed them up".into() }
         );
+        assert_eq!(
+            Request::from_line("add --on spark-2 --test \"pytest -q\" Fix the flaky test"),
+            Request::Add { test: Some("pytest -q".into()), on: Some("spark-2".into()), task: "Fix the flaky test".into() }
+        );
+        assert_eq!(
+            Request::from_line("add --test=make --on=spark-2.local Build it"),
+            Request::Add { test: Some("make".into()), on: Some("spark-2.local".into()), task: "Build it".into() }
+        );
+        assert_eq!(
+            Request::from_line("add --only the docs need it"),
+            Request::Add { test: None, on: None, task: "--only the docs need it".into() }
+        );
+        assert!(matches!(Request::from_line("add --on"), Request::Usage(_)));
+        assert!(matches!(Request::from_line("add --on /etc Fix"), Request::Usage(_)));
         assert!(matches!(Request::from_line("add"), Request::Usage(_)));
         assert!(matches!(Request::from_line("add --test \"unclosed task"), Request::Usage(_)));
         assert!(matches!(Request::from_line("show"), Request::Usage(_)));
@@ -660,8 +757,14 @@ mod tests {
         assert_eq!(Request::from_args(&[]), Request::List);
         assert_eq!(
             Request::from_args(&args(&["add", "--test", "cargo test -p x", "Fix", "it"])),
-            Request::Add { test: Some("cargo test -p x".into()), task: "Fix it".into() }
+            Request::Add { test: Some("cargo test -p x".into()), on: None, task: "Fix it".into() }
         );
+        assert_eq!(
+            Request::from_args(&args(&["add", "--on", "spark-2", "--test=make", "Fix", "it"])),
+            Request::Add { test: Some("make".into()), on: Some("spark-2".into()), task: "Fix it".into() }
+        );
+        assert!(matches!(Request::from_args(&args(&["add", "--on", "../x", "Fix"])), Request::Usage(_)));
+        assert!(matches!(Request::from_args(&args(&["add", "--on"])), Request::Usage(_)));
         assert_eq!(Request::from_args(&args(&["drop", "abc"])), Request::Drop("abc".into()));
         assert!(matches!(Request::from_args(&args(&["add", "--test"])), Request::Usage(_)));
     }
@@ -688,6 +791,27 @@ mod tests {
         assert!(drop_task(&dir, &repo, &id)[0].contains("nothing to cancel"));
         // No staging or lock files are mistaken for tasks.
         assert_eq!(tasks_for(&dir, &repo).len(), 1);
+    }
+
+    #[test]
+    fn a_task_for_another_node_records_it_and_its_drop_is_forwarded() {
+        let (repo, dir) = repo("on");
+        let added = run(&dir, Request::from_line("add --on spark-2 Fix the flaky test"), &repo);
+        assert!(added.iter().any(|line| line.starts_with("Runs on spark-2")), "{added:?}");
+        let id = text(&tasks_for(&dir, &repo)[0], "id");
+        assert_eq!(tasks_for(&dir, &repo)[0]["on"], json!("spark-2"));
+        assert!(list(&dir, &repo).iter().any(|line| line.contains("[spark-2] Fix the flaky test")));
+        assert!(show(&dir, &repo, &id).iter().any(|line| line.starts_with("Node: spark-2")));
+        update_task(&dir, &id, |task| {
+            set_status(task, "sent", None);
+            Ok(())
+        })
+        .unwrap_or_default();
+        assert!(drop_task(&dir, &repo, &id)[0].contains("tells that node to stop it"));
+        assert_eq!(text(&tasks_for(&dir, &repo)[0], "status"), "cancel-requested");
+        // Without --on the field is there and empty: the runner reads it as "run it here".
+        run(&dir, Request::from_line("add Here"), &repo);
+        assert!(tasks_for(&dir, &repo).iter().any(|task| task["on"].is_null()));
     }
 
     #[test]

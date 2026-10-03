@@ -6,6 +6,11 @@ It never starts, stops or loads the model server, and gives way to anyone workin
 Admission (§5.2) decides whether the night runs at all; after that a scheduling loop starts tasks
 while the window is open, the machine is quiet and memory admits one more, and stops them when
 the window closes.
+
+A paired node serving the same model is a second *lane* (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3):
+the tasks still run here, but some of them send their model requests to that node, each lane
+holding as many tasks as its own KV pool allows. A task queued with `--on <node>` is not run here
+at all: it is handed to that node, whose own runner works it (`NightShiftRemote`).
 """
 
 import os
@@ -14,11 +19,12 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 from dreamference.night_shift.night_shift_host import GIB, NIGHT_POOL_SHARE, NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE_STATUSES
+from dreamference.night_shift.night_shift_remote import NightShiftRemote
 from dreamference.night_shift.night_shift_report import NightShiftReport
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
@@ -37,6 +43,7 @@ class NightShiftRunner:
     sleep = staticmethod(time.sleep)
     host = NightShiftHost
     index = NightShiftIndex
+    remote = NightShiftRemote
     ignore_sessions: bool = False
 
     @classmethod
@@ -81,35 +88,77 @@ class NightShiftRunner:
                 print("⚠️  Another night run holds the runner lock.")
                 return 1
             pending = cls.pending_tasks(night_dir)
-            if not pending:
+            sent = cls.remote.sent_tasks(night_dir)
+            if not pending and not sent:
                 print("✅ Night Shift: nothing queued.")
                 return 0
             print(f"🌙 Night Shift: {len(pending)} task(s) queued; window ends {end:%H:%M}.")
             notes: List[str] = []
-            idle = settings.idle_minutes if idle_minutes is None else idle_minutes
-            cls.ignore_sessions = ignore_sessions
-            reason = cls.admit(vllm_host, puffin_bin, idle, end)
-            if reason:
-                notes.append(f"Not run: {reason}. The tasks stay queued for the next night.")
-                print(f"⚠️  {reason}")
-                cls._write_report(night_dir, started, pending, notes)
-                return 0
-            metrics = cls.host.metrics(vllm_host) or {}
-            kv_pool = metrics.get("kv_pool", 0.0)
-            parallel, budget = cls.host.task_budget(settings.max_parallel, kv_pool,
-                                                    settings.task_context, settings.compact_at)
-            notes.append(cls.budget_note(parallel, budget, kv_pool, settings))
-            cls.refresh_indexes(pending, settings, end, notes)
-            cls.schedule(night_dir, pending, settings, puffin_bin, vllm_host, end, parallel, notes,
-                         context_budget=budget)
-            final = [NightShiftQueue.read(night_dir, task["id"]) or task for task in pending]
-            path = cls._write_report(night_dir, started, final, notes)
-            counts: Dict[str, int] = {}
-            for task in final:
-                counts[task.get("status", "?")] = counts.get(task.get("status", "?"), 0) + 1
-            summary = ", ".join(f"{count} {status}" for status, count in counts.items())
-            print(f"✅ Night Shift finished: {summary}. Report: {path}")
-            return 0
+            # A task queued for another node is handed over whatever this machine's own state: that
+            # node's runner admits it by that node's checks.
+            sent += cls.remote.hand_off(night_dir, pending, notes)
+            local_tasks = [task for task in pending if not task.get("on")]
+            looked_at = pending + [task for task in sent if task["id"] not in {t["id"] for t in pending}]
+            if local_tasks:
+                idle = settings.idle_minutes if idle_minutes is None else idle_minutes
+                cls.ignore_sessions = ignore_sessions
+                reason = cls.admit(vllm_host, puffin_bin, idle, end)
+                if reason:
+                    notes.append(f"Not run: {reason}. The tasks stay queued for the next night.")
+                    print(f"⚠️  {reason}")
+                    cls.remote.collect(night_dir, sent, end, notes, wait=False)
+                    cls._write_report(night_dir, started, cls._reread(night_dir, looked_at), notes)
+                    return 0
+                lanes, lane_notes = cls.lanes(vllm_host, settings)
+                local = lanes[0]
+                notes.append(cls.budget_note(local["parallel"], local["budget"], local["kv_pool"], settings))
+                notes.extend(lane_notes)
+                cls.refresh_indexes(local_tasks, settings, end, notes)
+                cls.schedule(night_dir, local_tasks, settings, puffin_bin, vllm_host, end, local["parallel"],
+                             notes, context_budget=local["budget"], lanes=lanes)
+            cls.remote.collect(night_dir, sent, end, notes, wait=False)
+        # Waiting for other nodes uses nothing of this machine's, so it does not hold the runner
+        # lock: `server start`, `codex build` and `index` refuse while that is held.
+        cls.remote.collect(night_dir, sent, end, notes, wait=True)
+        final = cls._reread(night_dir, looked_at)
+        path = cls._write_report(night_dir, started, final, notes)
+        counts: Dict[str, int] = {}
+        for task in final:
+            counts[task.get("status", "?")] = counts.get(task.get("status", "?"), 0) + 1
+        summary = ", ".join(f"{count} {status}" for status, count in counts.items())
+        print(f"✅ Night Shift finished: {summary}. Report: {path}")
+        return 0
+
+    @classmethod
+    def _reread(cls, night_dir: Path, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [NightShiftQueue.read(night_dir, task["id"]) or task for task in tasks]
+
+    @classmethod
+    def lanes(cls, vllm_host: str, settings: NightShiftSettings) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """
+        This machine's model server and every paired node serving the same model, each with the
+        tasks it may hold and their compaction limit.
+
+        Args:
+            vllm_host: This machine's model server.
+            settings: Night Shift settings (`max_parallel`, `task_context`, `compact_at`, `nodes`).
+
+        Returns:
+            Tuple[List[Dict[str, Any]], List[str]]: The lanes, this machine's first; and the
+            report's lines on the other lanes and on each paired node left out.
+        """
+        from dreamference.node.node_lanes import NodeLanes
+        from dreamference.node.node_pairing import NodePairing
+        budget = lambda pool: cls.host.task_budget(settings.max_parallel, pool, settings.task_context,
+                                                   settings.compact_at)
+        if NodeLanes.wanted(settings.nodes) == [] or not NodePairing.paired():
+            kv_pool = (cls.host.metrics(vllm_host) or {}).get("kv_pool", 0.0)
+            parallel, limit = budget(kv_pool)
+            return [{"name": "this machine", "node": None, "host": vllm_host, "kv_pool": kv_pool,
+                     "parallel": parallel, "budget": limit}], []
+        served = cls.host.served_model(vllm_host) or ("", 0)
+        lanes, skipped = NodeLanes.lanes(vllm_host, served, settings.nodes, cls.host, budget)
+        return lanes, [NodeLanes.describe(lane) for lane in lanes[1:]] + skipped
 
     @classmethod
     def admit(cls, vllm_host: str, puffin_bin: str, idle_minutes: float, end: datetime) -> Optional[str]:
@@ -184,6 +233,9 @@ class NightShiftRunner:
             return
         repos: List[str] = []
         for task in pending:
+            if task.get("remote"):
+                # Another machine's repository, held here as a bare job repository: not indexed.
+                continue
             if task.get("repo") and task["repo"] not in repos:
                 repos.append(task["repo"])
         for repo in repos:
@@ -225,12 +277,18 @@ class NightShiftRunner:
     @classmethod
     def schedule(cls, night_dir: Path, pending: List[Dict[str, Any]], settings: NightShiftSettings,
                  puffin_bin: str, vllm_host: str, end: datetime, parallel: int, notes: List[str],
-                 context_budget: Optional[int] = None) -> None:
+                 context_budget: Optional[int] = None, lanes: Optional[List[Dict[str, Any]]] = None) -> None:
         """
         Starts tasks while the window is open, the machine is quiet and memory admits one more;
         at the window's end asks every running task to stop (it is then `interrupted`). Each task
         compacts at `context_budget`, its share of the KV pool (None: no limit is passed).
+
+        With `lanes`, a task goes to the first lane that has room and nothing in its way: this
+        machine's server first, then each replica, each holding its own `parallel` tasks and
+        compacting them at its own `budget`.
         """
+        lanes = lanes or [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel,
+                           "budget": context_budget}]
         queue = cls.round_robin(pending)
         active: List[tuple] = []
         end_ts = end.timestamp()
@@ -245,13 +303,27 @@ class NightShiftRunner:
                 if queue:
                     notes.append(f"The window closed with {len(queue)} task(s) not started; they stay queued.")
                 return
-            if queue and len(active) < parallel:
-                reason = cls.start_blocker(vllm_host, puffin_bin, active, settings)
-                if reason is None:
+            free = [lane for lane in lanes
+                    if sum(1 for _, run in active if cls.lane_of(run, vllm_host) == lane["host"]) < lane["parallel"]]
+            if queue and free:
+                reason, lane = None, None
+                for candidate in free:
+                    # This machine's lane is asked exactly as before lanes existed; a replica's
+                    # says it is not this machine's, so a session open here does not hold it up.
+                    blocked = cls.start_blocker(candidate["host"], puffin_bin, active, settings) \
+                        if candidate.get("node") is None else \
+                        cls.start_blocker(candidate["host"], puffin_bin, active, settings, local=False)
+                    if blocked is None:
+                        reason, lane = None, candidate
+                        break
+                    reason = reason or (blocked if candidate.get("node") is None else f"{candidate['name']}: {blocked}")
+                if lane is not None:
                     task = queue.pop(0)
                     deadline = min(end_ts, time.time() + settings.task_timeout_s)
-                    run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline, model_host=vllm_host,
-                                            context_budget=context_budget)
+                    run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline, model_host=lane["host"],
+                                            context_budget=lane["budget"],
+                                            model_node=lane["name"] if lane.get("node") else None)
+                    run.lane_host = lane["host"]
                     thread = threading.Thread(target=run.run, name=f"night-{task['id']}", daemon=True)
                     thread.start()
                     active.append((thread, run))
@@ -279,23 +351,44 @@ class NightShiftRunner:
         return re.sub(r"\d+(?:\.\d+)?", "#", reason)
 
     @classmethod
+    def lane_of(cls, run: Any, default: str) -> str:
+        """
+        Args:
+            run: A running task (or benchmark instance).
+            default: The run's own model server.
+
+        Returns:
+            str: The model server the task sends its requests to.
+        """
+        return getattr(run, "lane_host", None) or default
+
+    @classmethod
     def start_blocker(cls, vllm_host: str, puffin_bin: str, active: List[tuple],
-                      settings: NightShiftSettings) -> Optional[str]:
+                      settings: NightShiftSettings, local: bool = True) -> Optional[str]:
         """
         Whether another task may start now (§5.5 and memory).
 
         An outside request is one beyond the night's own: the engine's running and queued
         requests exceed the number of night tasks currently waiting on the model.
 
+        Args:
+            vllm_host: The model server the task would use.
+            puffin_bin: The `puffin` executable.
+            active: The running tasks.
+            settings: Night Shift settings.
+            local: Whether that server is this machine's. An open `puffin` session here uses this
+                machine's server, so it blocks this machine's lane and no other; a replica's own
+                users show up as its outside requests.
+
         Returns:
             Optional[str]: What blocks a start, or None.
         """
-        if not cls.ignore_sessions and cls.host.interactive_puffin_pids(puffin_bin):
+        if local and not cls.ignore_sessions and cls.host.interactive_puffin_pids(puffin_bin):
             return "a puffin session is open"
         metrics = cls.host.metrics(vllm_host)
         if metrics is None:
             return "the model server's /metrics does not answer"
-        ours = sum(1 for _, run in active if run.in_model)
+        ours = sum(1 for _, run in active if run.in_model and cls.lane_of(run, vllm_host) == vllm_host)
         if metrics["running"] > ours:
             return "the model server is serving a request that is not the night run's"
         cap = cls.host.parse_size(settings.task_memory)

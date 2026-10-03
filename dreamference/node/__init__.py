@@ -9,6 +9,8 @@ from dreamference.node.node_browser import NodeBrowser
 from dreamference.node.node_identity import NodeIdentity
 from dreamference.node.node_job import NodeJob
 from dreamference.node.node_job_sender import NodeJobSender
+from dreamference.node.node_lanes import NodeLanes
+from dreamference.node.node_model_sync import NodeModelSync
 from dreamference.node.node_pairing import NodePairing
 from dreamference.node.node_remote import NodeRemote
 from dreamference.node.node_serve import NodeServe
@@ -21,6 +23,8 @@ __all__ = [
     "NodeIdentity",
     "NodeJob",
     "NodeJobSender",
+    "NodeLanes",
+    "NodeModelSync",
     "NodePairing",
     "NodeRemote",
     "NodeServe",

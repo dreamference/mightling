@@ -3,8 +3,10 @@ Sending a job to another node (specs/DREAMFERENCE_PUFFIN_NODE.md §13.3):
 `puffin-admin node run|jobs|logs|cancel|fetch`.
 
 The sender pushes `HEAD` to the node over the pairing, asks for the job, and shows its output;
-when it ends, the branch the node committed is fetched back. Nothing lands in this checkout until
-the user merges it, and uncommitted changes are not sent.
+when it ends, the branch the node committed is fetched back, and the files the job kept under
+`--out` are copied to `$CODEX_HOME/jobs/received/<id>/`. Nothing lands in this checkout until the
+user merges it, and uncommitted changes are not sent. Once the result is here the node is told,
+which starts its shorter keep (§13.7).
 """
 
 import base64
@@ -13,6 +15,7 @@ import json
 import os
 import random
 import subprocess
+import tarfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -33,6 +36,18 @@ class NodeJobSender:
             which repository.
         """
         return NodePairing.nodes_dir() / "jobs"
+
+    @classmethod
+    def received_dir(cls, job_id: str) -> Path:
+        """
+        Args:
+            job_id: A job sent from this machine.
+
+        Returns:
+            Path: Where its `--out` files are put: `$CODEX_HOME/jobs/received/<id>`.
+        """
+        codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.puffin")
+        return Path(codex_home) / "jobs" / "received" / job_id
 
     @classmethod
     def repo_slug(cls, repo: str) -> str:
@@ -90,7 +105,8 @@ class NodeJobSender:
 
     @classmethod
     def compose(cls, repo: str, commit: str, command: List[str], memory: Optional[str], time_limit: Optional[str],
-                test: Optional[str], gpu: bool = False) -> Dict[str, Any]:
+                test: Optional[str], gpu: bool = False, setup: Optional[str] = None, out: Optional[str] = None,
+                binds: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Builds the request sent to the node. The memory cap and the time limit are always in it:
         Night Shift's defaults when the user gave none.
@@ -103,6 +119,9 @@ class NodeJobSender:
             time_limit: `--time`, or None for the default.
             test: `--test`, the command that decides pass or fail.
             gpu: `--gpu`; sent so that the node refuses it by its own rule.
+            setup: `--setup`, the command that builds the job's environment.
+            out: `--out`, a folder the job writes that comes back as files, not as a commit.
+            binds: `--bind`, paths on the node bound read-only (the node decides which it allows).
 
         Returns:
             Dict[str, Any]: The request.
@@ -116,13 +135,15 @@ class NodeJobSender:
             "id": cls.new_id(), "repo": cls.repo_slug(repo), "commit": commit, "command": list(command),
             "memory": memory or DEFAULT_MEMORY, "time": time_limit or DEFAULT_TIME, "test": test,
             "gpu": bool(gpu), "airgapped": level, "sender": NodeIdentity.read() or "",
+            "setup": setup, "out": out, "binds": list(binds or []),
             "author": {"name": cls._git(repo, "config", "user.name").stdout.strip(),
                        "email": cls._git(repo, "config", "user.email").stdout.strip()},
         }
 
     @classmethod
     def run(cls, name: str, command: List[str], memory: Optional[str] = None, time_limit: Optional[str] = None,
-            test: Optional[str] = None, gpu: bool = False, cwd: Optional[str] = None) -> int:
+            test: Optional[str] = None, gpu: bool = False, cwd: Optional[str] = None, setup: Optional[str] = None,
+            out: Optional[str] = None, binds: Optional[List[str]] = None) -> int:
         """
         Runs a command on another node, in the current repository at HEAD.
 
@@ -134,6 +155,9 @@ class NodeJobSender:
             test: A command that decides pass or fail, run after the job's own.
             gpu: Ask for the GPU (refused by the node for now).
             cwd: Where to run from; the working directory by default.
+            setup: The command that builds the job's environment, once per lock-file content.
+            out: A folder the job writes, brought back as files.
+            binds: Paths on the node to bind read-only.
 
         Returns:
             int: The job's exit code; 1 when it could not be sent.
@@ -154,7 +178,7 @@ class NodeJobSender:
         repo, commit = top.stdout.strip(), head.stdout.strip()
         if cls._git(repo, "status", "--porcelain").stdout.strip():
             print("⚠️  Uncommitted changes are not sent: the job runs at HEAD.")
-        request = cls.compose(repo, commit, command, memory, time_limit, test, gpu)
+        request = cls.compose(repo, commit, command, memory, time_limit, test, gpu, setup, out, binds)
         url = cls.git_url(record, request["repo"])
         print(f"📤 Sending {commit[:10]} to {record['name']} as job {request['id']} "
               f"(memory {request['memory']}, time {request['time']})...")
@@ -166,7 +190,16 @@ class NodeJobSender:
         cls._remember(request["id"], record, repo, request["repo"])
         payload = base64.urlsafe_b64encode(json.dumps(request).encode()).decode()
         code = NodePairing.run(record, f"job-submit {payload}", capture=False).returncode
+        if code == 255:
+            # The stream was lost, not the job: it carries on there.
+            print(f"⚠️  The connection to {record['name']} ended; the job carries on there. "
+                  f"`puffin-admin node logs {request['id']}` shows it, `node fetch` brings it back.")
+            return code
         cls._fetch_branch(request["id"], quiet_when_absent=True)
+        if out:
+            cls._fetch_out(request["id"], quiet_when_absent=True)
+        # A refused job has no record there, so the node ignores this; a job that exited 2 has one.
+        NodePairing.run(record, f"job-fetched {request['id']}")
         return code
 
     @classmethod
@@ -179,8 +212,8 @@ class NodeJobSender:
             words: Everything after the node's name.
 
         Returns:
-            Any: `(options, command)`: the options (`memory`, `time`, `test`, `gpu`) and the
-            command's words. With `--`, what follows it is the command verbatim, so the
+            Any: `(options, command)`: the options (`memory`, `time`, `test`, `gpu`, `setup`,
+            `out`, `bind`) and the command's words. With `--`, what follows it is the command verbatim, so the
             command's own options are never read as this one's; without it, the command starts
             at the first word that is not one of these options.
         """
@@ -190,13 +223,16 @@ class NodeJobSender:
         parser.add_argument("--time", default=None)
         parser.add_argument("--test", default=None)
         parser.add_argument("--gpu", action="store_true")
+        parser.add_argument("--setup", default=None)
+        parser.add_argument("--out", default=None)
+        parser.add_argument("--bind", action="append", default=[])
         if "--" in words:
             at = words.index("--")
             options, extra = parser.parse_known_args(words[:at])
             return options, extra + words[at + 1:]
         options, command = parser.parse_known_args([])
         index = 0
-        own = {"--memory": 2, "--time": 2, "--test": 2, "--gpu": 1}
+        own = {"--memory": 2, "--time": 2, "--test": 2, "--gpu": 1, "--setup": 2, "--out": 2, "--bind": 2}
         while index < len(words):
             word = words[index].split("=", 1)[0]
             if word not in own:
@@ -233,7 +269,10 @@ class NodeJobSender:
                 print(f"{record['name']}: no jobs")
             for job in listed:
                 branch = f"  branch {job['branch']}" if job.get("branch") else ""
-                print(f"{record['name']}  {job['id']}  {job['status']:<9}  {' '.join(job['command'])[:60]}{branch}")
+                out = f"  {job['out_files']} --out file(s)" if job.get("out_files") else ""
+                prune = f"  (pruned after {job['prune_after'][:16].replace('T', ' ')})" if job.get("prune_after") else ""
+                print(f"{record['name']}  {job['id']}  {job['status']:<9}  {' '.join(job['command'])[:60]}"
+                      f"{branch}{out}{prune}")
         return 0
 
     @classmethod
@@ -248,8 +287,23 @@ class NodeJobSender:
 
     @classmethod
     def fetch(cls, job_id: str) -> int:
-        """Brings a job's result branch into the repository it was sent from."""
-        return 0 if cls._fetch_branch(job_id, quiet_when_absent=False) else 1
+        """
+        Brings a job's result branch into the repository it was sent from, and its `--out`
+        files to `received_dir`; then tells the node it may prune the job a day later.
+
+        Args:
+            job_id: The job's id.
+
+        Returns:
+            int: 0 when anything came back.
+        """
+        branch = cls._fetch_branch(job_id, quiet_when_absent=False)
+        files = cls._fetch_out(job_id, quiet_when_absent=True)
+        sent = cls._sent(job_id)
+        record = NodePairing.find(sent["node"], browse=False) if sent else None
+        if record is not None and (branch or files):
+            NodePairing.run(record, f"job-fetched {job_id}")
+        return 0 if branch or files else 1
 
     # -- pieces ----------------------------------------------------------------------------------
 
@@ -279,6 +333,38 @@ class NodeJobSender:
                 print(f"No result branch for {job_id}: the job changed no file, or has not finished.")
             return False
         print(f"📥 The job's changes are on branch {branch} (review: git diff HEAD...{branch}).")
+        return True
+
+    @classmethod
+    def _fetch_out(cls, job_id: str, quiet_when_absent: bool) -> bool:
+        """Copies the files a job kept under `--out` to `received_dir`, from the node's tar stream."""
+        sent = cls._sent(job_id)
+        record = NodePairing.find(sent["node"], browse=False) if sent else None
+        if record is None:
+            return False
+        target = cls.received_dir(job_id)
+        try:
+            process = subprocess.Popen(NodePairing.ssh_command(record, f"job-out {job_id}"), stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+        except OSError:
+            return False
+        count = 0
+        try:
+            with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+                target.mkdir(parents=True, exist_ok=True)
+                for member in archive:
+                    # The node is paired, not trusted with this machine's files: nothing may land
+                    # outside the job's folder, and no link may point out of it.
+                    archive.extract(member, target, filter="data")
+                    count += member.isfile()
+        except (tarfile.TarError, OSError):
+            pass
+        process.wait()
+        if process.returncode != 0 or not count:
+            if not quiet_when_absent:
+                print(f"No --out files for {job_id}.")
+            return False
+        print(f"📥 {count} --out file(s) of {job_id} are in {target}")
         return True
 
     @classmethod

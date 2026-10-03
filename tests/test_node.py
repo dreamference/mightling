@@ -573,13 +573,49 @@ def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypat
         lambda cls, host, timeout=3.0: ("RadixArk/Qwen3.8-27B-NVFP4", 262144) if "105" in host else None))
     monkeypatch.setattr(NightShiftHost, "metrics", classmethod(
         lambda cls, host, timeout=3.0: {"running": 2.0, "served": 1.0, "kv_pool": 156907.0}))
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 40 * 1024 ** 3))
+    monkeypatch.setattr(NightShiftHost, "mem_total_bytes", classmethod(lambda cls: 120 * 1024 ** 3))
     lines = NodeRemote.list_lines()
     assert lines[0] == ("spark-1  http://192.168.50.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens), "
-                        "2 request(s) running, KV pool 156907 tokens  Puffin 1.3.0  (this machine)")
+                        "2 request(s) running, KV pool 156907 tokens, 40.0 of 120.0 GiB free  Puffin 1.3.0  (this machine)")
+    # Memory is not on the open model port: an unpaired node shows none.
     assert lines[1] == ("spark-2  http://192.168.50.106:8000/v1  model server stopped  Puffin 1.3.0  "
                         "(not paired: `puffin-admin node add spark-2` to manage it; not a coding model)")
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     assert "No Puffin node answers" in NodeRemote.list_lines()[0]
+
+
+def test_a_paired_nodes_memory_is_asked_over_the_pairing(monkeypatch):
+    from dreamference.node import NodePairing, NodeRemote
+    from dreamference.night_shift import NightShiftHost
+    paired_record()
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: [
+        {"name": "spark-2", "node": "2222-bbbb", "address": "192.168.50.106", "port": "8000", "main": "1",
+         "version": "1.3.0", "state": "stopped"}]))
+    monkeypatch.setattr(NightShiftHost, "served_model", classmethod(lambda cls, host, timeout=3.0: None))
+    asked = []
+    info = {"node": "2222-bbbb", "mem_available": 60 * 1024 ** 3, "mem_total": 120 * 1024 ** 3}
+    monkeypatch.setattr(NodePairing, "run", classmethod(
+        lambda cls, record, request, capture=True, input_text=None:
+        asked.append(request) or subprocess.CompletedProcess([], 0, json.dumps(info) + "\n", "")))
+    assert NodeRemote.list_lines() == ["spark-2  http://192.168.50.106:8000/v1  model server stopped, "
+                                       "60.0 of 120.0 GiB free  Puffin 1.3.0  (paired)"]
+    assert asked == ["info"]
+    # A paired node that does not answer is listed without memory, not left out.
+    monkeypatch.setattr(NodePairing, "run", classmethod(
+        lambda cls, record, request, capture=True, input_text=None: subprocess.CompletedProcess([], 255, "", "timeout")))
+    assert NodeRemote.list_lines() == ["spark-2  http://192.168.50.106:8000/v1  model server stopped  Puffin 1.3.0  (paired)"]
+
+
+def test_info_says_what_a_lane_and_the_list_need(monkeypatch, capsys):
+    from dreamference.night_shift import NightShiftHost
+    from dreamference.node import NodeServe
+    monkeypatch.setattr(NodeServe, "linger", classmethod(lambda cls: True))
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 1))
+    monkeypatch.setattr(NightShiftHost, "mem_total_bytes", classmethod(lambda cls: 2))
+    assert NodeServe.serve("info") == 0
+    info = json.loads(capsys.readouterr().out)
+    assert (info["mem_available"], info["mem_total"], info["model_port"], info["runner"]) == (1, 2, 8000, None)
 
 
 # -- Part 3: jobs on another node (§13) ------------------------------------------------------------
@@ -591,6 +627,14 @@ def _real_sandbox_blocker():
 
 # The job fixture replaces the probe; the test of the probe itself puts it back.
 REAL_SANDBOX_BLOCKER = _real_sandbox_blocker()
+
+
+def _real_sandbox_command():
+    from dreamference.node import NodeJob
+    return NodeJob.__dict__["sandbox_command"]
+
+
+REAL_SANDBOX_COMMAND = _real_sandbox_command()
 
 
 def job_request(**changes):
@@ -684,7 +728,9 @@ def job_node(tmp_path, monkeypatch):
     from dreamference.node import NodeJob
     monkeypatch.setattr(NodeJob, "USE_UNIT", False)
     monkeypatch.setattr(NodeJob, "sandbox_blocker", classmethod(lambda cls: None))
-    monkeypatch.setattr(NodeJob, "sandbox_command", classmethod(lambda cls, tree, command, network, job_id: list(command)))
+    monkeypatch.setattr(NodeJob, "sandbox_command", classmethod(
+        lambda cls, tree, command, network, job_id, writable=(), readable=(), environment=None:
+        ["env", *[f"{key}={value}" for key, value in (environment or {}).items()], *command]))
     monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: []))
     monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 64 * 1024 ** 3))
     source = tmp_path / "source"
@@ -821,6 +867,181 @@ def test_job_requests_through_serve_job(job_node, monkeypatch, capsys):
     assert NodeServe.serve("job-cancel 20261002-1200-abc") == 1                    # already finished
 
 
+def test_a_jobs_environment_is_built_once_per_lock_file_content_and_bound_read_only(job_node, capsys):
+    from dreamference.node import NodeJob
+    setup = ('mkdir -p "$PUFFIN_ENV/bin" && printf "#!/bin/sh\\necho from-the-env\\n" > "$PUFFIN_ENV/bin/tool" '
+             '&& chmod +x "$PUFFIN_ENV/bin/tool" && echo built >> "$PUFFIN_ENV/../builds"')
+    first = NodeJob.submit(job_request(id="20261002-1300-aaa", commit=job_node["commit"], command=["tool"], setup=setup), "/x")
+    assert NodeJob.execute(first["id"]) == 0
+    record = NodeJob.read(first["id"])
+    assert record["environment"].endswith("(built)") and record["environment"].startswith("calc-0123456789-")
+    assert "from-the-env" in (NodeJob.job_dir(first["id"]) / "output.log").read_text()
+    second = NodeJob.submit(job_request(id="20261002-1301-bbb", commit=job_node["commit"], command=["tool"], setup=setup), "/x")
+    assert NodeJob.execute(second["id"]) == 0
+    assert NodeJob.read(second["id"])["environment"].endswith("(reused)")
+    assert (NodeJob.jobs_dir() / "envs" / "builds").read_text() == "built\n"            # built once
+    # The real sandbox binds the environment read-only and puts its bin first on PATH.
+    tree = NodeJob.job_dir("20261002-1300-aaa") / "tree"
+    env_dir = NodeJob.jobs_dir() / "envs" / "calc-0123456789-0123"
+    argv = REAL_SANDBOX_COMMAND.__func__(NodeJob, tree, ["tool"], True, "20261002-1300-aaa", readable=[str(env_dir)],
+                                          environment=NodeJob.environment_variables(env_dir))
+    assert [argv[i + 1] for i, word in enumerate(argv) if word == "--bind"] == [str(tree)]
+    assert [argv[i + 1] for i, word in enumerate(argv) if word == "--ro-bind"] == ["/", str(env_dir)]
+    variables = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
+    assert variables["PATH"].startswith(f"{env_dir}/bin:") and variables["PUFFIN_ENV"] == str(env_dir)
+
+
+def test_a_changed_lock_file_or_setup_command_is_a_new_environment(tmp_path):
+    from dreamference.node import NodeJob
+    (tmp_path / "requirements.txt").write_text("numpy==2.1\n")
+    first = NodeJob.environment_key("calc", "pip install -r requirements.txt", tmp_path)
+    assert NodeJob.environment_key("calc", "pip install -r requirements.txt", tmp_path) == first
+    (tmp_path / "notes.md").write_text("not a lock file")
+    assert NodeJob.environment_key("calc", "pip install -r requirements.txt", tmp_path) == first
+    (tmp_path / "requirements.txt").write_text("numpy==2.2\n")
+    assert NodeJob.environment_key("calc", "pip install -r requirements.txt", tmp_path) != first
+    assert NodeJob.environment_key("calc", "uv sync", tmp_path) != first
+
+
+def test_a_failed_setup_fails_the_job_and_a_missing_module_is_called_an_environment_failure(job_node):
+    from dreamference.node import NodeJob
+    failed = NodeJob.submit(job_request(id="20261002-1302-ccc", commit=job_node["commit"], command=["true"], setup="exit 4"), "/x")
+    assert NodeJob.execute(failed["id"]) == 1
+    record = NodeJob.read(failed["id"])
+    assert record["status"] == "failed" and "setup command failed (exit 4)" in record["note"]
+    assert not any(path.is_dir() for path in (NodeJob.jobs_dir() / "envs").glob("calc-*"))   # nothing half-built kept
+    bare = NodeJob.submit(job_request(id="20261002-1303-ddd", commit=job_node["commit"],
+                                      command=["bash", "-c", "echo \"ModuleNotFoundError: No module named 'numpy'\"; exit 1"]), "/x")
+    assert NodeJob.execute(bare["id"]) == 1
+    record = NodeJob.read(bare["id"])
+    assert "environment failure" in record["note"] and record["environment"].startswith("none")
+
+
+def test_out_files_are_kept_beside_the_job_and_never_committed(job_node, capsysbinary):
+    import io
+    import tarfile
+    from dreamference.node import NodeJob, NodeServe
+    job = NodeJob.submit(job_request(commit=job_node["commit"], out="ckpt",
+                                     command=["bash", "-c", "mkdir -p ckpt/sub && echo w > ckpt/sub/w.bin && echo two >> data.txt"]), "/x")
+    assert NodeJob.execute(job["id"]) == 0
+    record = NodeJob.read(job["id"])
+    assert record["out_files"] == 1
+    git = lambda *args: subprocess.run(["git", "--git-dir", str(job_node["repo"]), *args], capture_output=True, text=True).stdout
+    assert git("show", "--name-only", "--format=", f"job/{job['id']}").split() == ["data.txt"]
+    capsysbinary.readouterr()
+    assert NodeServe.serve(f"job-out {job['id']}") == 0
+    with tarfile.open(fileobj=io.BytesIO(capsysbinary.readouterr().out)) as archive:
+        assert archive.getnames() == ["ckpt", "ckpt/sub", "ckpt/sub/w.bin"]
+    for changes in ({"out": "../x"}, {"out": "/etc"}, {"out": "a b"}):
+        with pytest.raises(ValueError, match="--out"):
+            NodeJob.validate(job_request(**changes))
+
+
+def test_out_files_come_back_and_a_hostile_archive_cannot_write_outside(tmp_path, monkeypatch, capsys):
+    import io
+    import tarfile
+    from dreamference.node import NodeJobSender, NodePairing
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    record = paired_record()
+    NodeJobSender._remember("20261002-1200-abc", record, str(tmp_path), "calc-0123456789")
+    stream = tmp_path / "stream.tar"
+    with tarfile.open(stream, "w") as archive:
+        for name, data in (("ckpt/model.bin", b"weights"), ("../../escape.txt", b"x")):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    monkeypatch.setattr(NodePairing, "ssh_command", classmethod(lambda cls, record, request: ["cat", str(stream)]))
+    NodeJobSender._fetch_out("20261002-1200-abc", quiet_when_absent=False)
+    received = NodeJobSender.received_dir("20261002-1200-abc")
+    assert (received / "ckpt" / "model.bin").read_bytes() == b"weights"
+    assert not (received.parent.parent / "escape.txt").exists() and not (tmp_path / "escape.txt").exists()
+
+
+def test_only_paths_the_node_allows_are_bound_and_only_read_only(job_node, tmp_path, monkeypatch):
+    from dreamference.node import NodeJob
+    data = tmp_path / "datasets" / "imagenet"
+    data.mkdir(parents=True)
+    with pytest.raises(ValueError, match="allows nothing"):
+        NodeJob.validate(job_request(binds=[str(data)]))
+    config = tmp_path / "home-config.toml"
+    config.write_text(f'[node]\nbindable = ["{tmp_path / "datasets"}"]\n')
+    monkeypatch.setattr("os.path.expanduser", lambda path: str(config) if path.endswith("config.toml") else
+                        path.replace("~", os.environ["HOME"]))
+    assert NodeJob.validate(job_request(binds=[str(data)]))["binds"] == [str(data)]
+    for path, reason in ((str(tmp_path), "does not allow"), (f"{tmp_path}/datasets/../../etc", "does not allow"),
+                         (str(tmp_path / "datasets" / "missing"), "does not exist"), ("relative/path", "absolute")):
+        with pytest.raises(ValueError, match=reason):
+            NodeJob.validate(job_request(binds=[path]))
+
+
+def test_finished_jobs_are_pruned_a_day_after_the_fetch_or_after_fourteen_days(job_node, capsys):
+    from datetime import datetime, timedelta
+    from dreamference.node import NodeJob, NodeServe
+    fetched = NodeJob.submit(job_request(id="20261002-1400-aaa", commit=job_node["commit"],
+                                         command=["bash", "-c", "echo x > new.txt"]), "/x")
+    NodeJob.execute(fetched["id"])
+    unfetched = NodeJob.submit(job_request(id="20261002-1401-bbb", commit=job_node["commit"], command=["true"]), "/x")
+    NodeJob.execute(unfetched["id"])
+    assert NodeServe.serve(f"job-fetched {fetched['id']}") == 0
+    now = datetime.now().astimezone()
+    assert NodeJob.prune(now) == []                                              # nothing is due yet
+    listed = [json.loads(line) for line in (capsys.readouterr(), NodeServe.serve("job-list"), capsys.readouterr().out)[2].splitlines()]
+    assert all(job["prune_after"] for job in listed)
+    assert NodeJob.prune(now + timedelta(days=2)) == ["20261002-1400-aaa"]
+    assert not NodeJob.job_dir("20261002-1400-aaa").exists()
+    branches = subprocess.run(["git", "--git-dir", str(job_node["repo"]), "branch", "--list", "job/*"],
+                              capture_output=True, text=True).stdout
+    assert "20261002-1400-aaa" not in branches
+    assert NodeJob.prune(now + timedelta(days=15)) == ["20261002-1401-bbb"]
+    # A running job is never pruned, and cannot be marked fetched.
+    running = NodeJob.submit(job_request(id="20261002-1402-ccc", commit=job_node["commit"]), "/x")
+    assert NodeJob.mark_fetched(running["id"]) is False
+    assert NodeJob.prune(now + timedelta(days=100)) == []
+
+
+def test_a_paired_node_serving_the_same_model_is_a_lane_and_every_other_is_named(monkeypatch):
+    from dreamference.node import NodeLanes, NodePairing
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    paired_record()                                                               # spark-2, .106
+    for number in (3, 4, 5):
+        NodePairing._save({"node": f"{number}{number}{number}{number}-x", "name": f"spark-{number}",
+                           "address": f"192.168.50.10{number + 4}", "user": "owner", "ssh_port": 22})
+    answers = {"192.168.50.106": {"model_port": 8000}, "192.168.50.107": {"model_port": 8000},
+               "192.168.50.108": {"runner": "a Night Shift run"}}
+    asked = []
+
+    def run(cls, record, request, capture=True, input_text=None):
+        asked.append((record["name"], request))
+        info = answers.get(record["address"])
+        return subprocess.CompletedProcess([], 0, json.dumps(info) + "\n", "") if info else \
+            subprocess.CompletedProcess([], 255, "", "No route to host")
+    monkeypatch.setattr(NodePairing, "run", classmethod(run))
+
+    class Host:
+        @classmethod
+        def served_model(cls, host, timeout=3.0):
+            return {"http://192.168.50.106:8000": ("m", 1), "http://192.168.50.107:8000": ("other", 1)}.get(host)
+
+        @classmethod
+        def metrics(cls, host, timeout=3.0):
+            return {"running": 0.0, "served": 0.0, "kv_pool": 300000.0 if "106" in host else 100000.0}
+
+    budget = lambda pool: (int(pool // 100000), 50000)
+    lanes, notes = NodeLanes.lanes("http://127.0.0.1:8000", ("m", 1), "paired", Host, budget)
+    assert [(lane["name"], lane["host"], lane["parallel"]) for lane in lanes] == [
+        ("this machine", "http://127.0.0.1:8000", 1), ("spark-2", "http://192.168.50.106:8000", 3)]
+    assert any("spark-3: serves other, not m" in note for note in notes)
+    assert any("spark-4: a Night Shift run is in progress there" in note for note in notes)
+    assert any("spark-5: did not answer" in note for note in notes)
+    assert "Also using spark-2's model server" in NodeLanes.describe(lanes[1])
+    lanes, notes = NodeLanes.lanes("http://127.0.0.1:8000", ("m", 1), ["spark-3", "spark-9"], Host, budget)
+    assert len(lanes) == 1 and any("spark-9: not a paired node" in note for note in notes)
+    asked.clear()
+    assert NodeLanes.lanes("http://127.0.0.1:8000", ("m", 1), "none", Host, budget) == (lanes[:1], [])
+    assert asked == []                                                           # "none" asks nobody
+    assert NodeLanes.wanted(None) is None and NodeLanes.wanted(False) == [] and NodeLanes.wanted("a, b") == ["a", "b"]
+
+
 def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(tmp_path, monkeypatch):
     from dreamference.node import NodeJobSender, NodePairing
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
@@ -850,6 +1071,9 @@ def test_the_jobs_own_options_are_not_read_as_node_runs():
     assert options.gpu is True and options.time is None and command == ["python", "train.py", "--time", "5"]
     options, command = split(["--", "ls", "-la"])
     assert options.memory is None and command == ["ls", "-la"]
+    options, command = split(["--bind", "/data/a", "--out=ckpt", "--setup", "uv sync", "python", "--bind", "x"])
+    assert (options.bind, options.out, options.setup) == (["/data/a"], "ckpt", "uv sync")
+    assert command == ["python", "--bind", "x"]
     assert split([])[1] == []
 
 
@@ -960,9 +1184,11 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
     # The committed file once had the job commands after the catch-all usage exit; the working
     # tree, which the tests ran, did not. Each command is now reached through `main()`.
     from dreamference.cli import main
-    from dreamference.node import NodeJob, NodeJobSender, NodePairing, NodeRemote, NodeServe
+    from dreamference.node import NodeJob, NodeJobSender, NodeModelSync, NodePairing, NodeRemote, NodeServe
     reached = []
     note = lambda name, code=0: (lambda *args, **kwargs: reached.append(name) or code)
+    monkeypatch.setattr(NodeModelSync, "sync", classmethod(
+        lambda cls, name, model, address=None: reached.append(("sync-model", name, model, address)) or 0))
     monkeypatch.setattr(NodeRemote, "list_lines", classmethod(lambda cls: reached.append("list") or ["x"]))
     monkeypatch.setattr(NodeRemote, "status", classmethod(note("status")))
     monkeypatch.setattr(NodeRemote, "set_model", classmethod(note("set")))
@@ -970,7 +1196,8 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
     monkeypatch.setattr(NodeRemote, "stop", classmethod(note("stop")))
     monkeypatch.setattr(NodePairing, "add", classmethod(note("add", True)))
     monkeypatch.setattr(NodePairing, "remove", classmethod(note("remove", True)))
-    monkeypatch.setattr(NodeJobSender, "run", classmethod(lambda cls, name, command, **kw: reached.append(("run", command, kw["memory"])) or 0))
+    monkeypatch.setattr(NodeJobSender, "run", classmethod(lambda cls, name, command, **kw: reached.append(
+        ("run", command, kw["memory"], kw["setup"], kw["out"], kw["binds"])) or 0))
     monkeypatch.setattr(NodeJobSender, "jobs", classmethod(note("jobs")))
     monkeypatch.setattr(NodeJobSender, "logs", classmethod(note("logs")))
     monkeypatch.setattr(NodeJobSender, "cancel", classmethod(note("cancel")))
@@ -981,13 +1208,106 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
     job = "20261002-1200-abc"
     for argv in (["list"], ["status", "spark-2"], ["set", "spark-2", "--model", "m"], ["start", "spark-2"],
                  ["stop", "spark-2"], ["add", "spark-2"], ["remove", "spark-2"],
-                 ["run", "spark-2", "--memory", "4G", "--", "python3", "x.py", "--epochs", "3"],
+                 ["run", "spark-2", "--memory", "4G", "--setup", "uv sync", "--out", "ckpt", "--bind", "/data/a",
+                  "--bind", "/data/b", "--", "python3", "x.py", "--epochs", "3"],
                  ["jobs"], ["logs", job], ["cancel", job], ["fetch", job], ["job-exec", job],
-                 ["serve-job", "--key", "abc"]):
+                 ["serve-job", "--key", "abc"], ["sync-model", "spark-2", "m", "--address", "10.0.0.2"]):
         monkeypatch.setattr("sys.argv", ["puffin-admin", "node", *argv])
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == 0, argv
     assert reached == ["list", "status", "set", "start", "stop", "add", "remove",
-                       ("run", ["python3", "x.py", "--epochs", "3"], "4G"),
-                       "jobs", "logs", "cancel", "fetch", "job-exec", ("serve-job", "info", "abc")]
+                       ("run", ["python3", "x.py", "--epochs", "3"], "4G", "uv sync", "ckpt", ["/data/a", "/data/b"]),
+                       "jobs", "logs", "cancel", "fetch", "job-exec", ("serve-job", "info", "abc"),
+                       ("sync-model", "spark-2", "m", "10.0.0.2")]
+
+
+# -- copying a model to another node (§12.2) -------------------------------------------------------
+
+SYNC_KEY = "qwen3.8-27b-nvfp4-dflash2"
+
+
+def model_cache(hub, repo, files):
+    """A hub cache folder as huggingface_hub writes one: blobs by checksum, a snapshot of links."""
+    import hashlib
+    folder = hub / ("models--" + repo.replace("/", "--"))
+    for name, data in files.items():
+        digest = hashlib.sha256(data).hexdigest()
+        (folder / "blobs").mkdir(parents=True, exist_ok=True)
+        (folder / "blobs" / digest).write_bytes(data)
+        link = folder / "snapshots" / "rev1" / name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(os.path.relpath(folder / "blobs" / digest, link.parent))
+    (folder / "refs").mkdir(exist_ok=True)
+    (folder / "refs" / "main").write_text("rev1")
+    return folder
+
+
+def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatch, capsys):
+    import sys
+    from pathlib import Path
+    from dreamference.node import NodeModelSync, NodePairing
+    monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
+    here, there = tmp_path / "here", tmp_path / "there"
+    monkeypatch.setenv("HF_HUB_CACHE", str(here))
+    repos = NodeModelSync.repos(SYNC_KEY)
+    assert len(repos) == 2                                                    # the checkpoint and its drafter
+    for index, repo in enumerate(repos):
+        model_cache(here, repo, {"model.safetensors": b"w" * (1000 + index), "config.json": b"{}"})
+    paired_record()
+    checkout = Path(__file__).resolve().parent.parent
+    receiver = [sys.executable, "-c", "import sys; from dreamference.node.node_model_sync import NodeModelSync; "
+                f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, 0))"]
+    environment = dict(os.environ, HF_HUB_CACHE=str(there), PYTHONPATH=str(checkout))
+    monkeypatch.setattr(NodePairing, "ssh_command", classmethod(
+        lambda cls, record, request: ["env", *[f"{k}={v}" for k, v in environment.items()], *receiver]))
+    assert NodeModelSync.sync("spark-2", SYNC_KEY) == 0
+    for repo in repos:
+        folder = there / ("models--" + repo.replace("/", "--"))
+        assert (folder / "snapshots" / "rev1" / "config.json").read_bytes() == b"{}"
+        assert (folder / "snapshots" / "rev1" / "model.safetensors").is_symlink()
+        assert (folder / "refs" / "main").read_text() == "rev1"
+    assert not list(there.glob(".puffin-sync-*"))
+    assert "Serve it there with: puffin-admin node set spark-2" in capsys.readouterr().out
+    # A model this machine does not have is not sent.
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty"))
+    assert NodeModelSync.sync("spark-2", SYNC_KEY) == 1
+
+
+def receive(monkeypatch, hub, members, size=0):
+    import io
+    import sys
+    import tarfile
+    from dreamference.node import NodeModelSync
+    monkeypatch.setenv("HF_HUB_CACHE", str(hub))
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(buffer.getvalue())))
+    return NodeModelSync.receive(SYNC_KEY, size)
+
+
+def test_the_receiving_node_decides_what_lands_in_its_cache(tmp_path, monkeypatch, capsys):
+    import hashlib
+    from dreamference.node import NodeModelSync
+    folder = "models--" + NodeModelSync.repos(SYNC_KEY)[0].replace("/", "--")
+    good = b"weights"
+    digest = hashlib.sha256(good).hexdigest()
+    hub = tmp_path / "hub"
+    assert receive(monkeypatch, hub, [(f"{folder}/blobs/{'0' * 64}", good)]) == 1          # checksum mismatch
+    assert "does not match its checksum" in capsys.readouterr().err and not (hub / folder).exists()
+    assert receive(monkeypatch, hub, [("models--someone--else/blobs/x", good)]) == 1          # another model
+    assert receive(monkeypatch, hub, [(f"{folder}/../../escape", good)]) == 1                  # out of the folder
+    assert not (tmp_path / "escape").exists() and not list(hub.glob(".puffin-sync-*"))
+    assert receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)], size=10 ** 18) == 2   # no room
+    assert receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)]) == 0
+    assert (hub / folder / "blobs" / digest).read_bytes() == good
+    # A second copy keeps what is there.
+    assert receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["already_here"] == 1
+    from dreamference.node import NodeServe
+    assert NodeServe.serve("model-receive not-a-model 10") == 2
+    assert NodeServe.serve(f"model-receive {SYNC_KEY} lots") == 2

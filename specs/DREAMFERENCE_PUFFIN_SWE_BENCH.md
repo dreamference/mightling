@@ -417,6 +417,10 @@ All on 2026-10-01, on the GB10 with the default model resident (Qwen3.8-27B NVFP
 
 ---
 
+### 12.6 A replica's model server (2026-10-03)
+
+A paired node serving the same model adds a lane (`[swe_bench] nodes`, default `"paired"`; [PUFFIN_NODE §18.8](./DREAMFERENCE_PUFFIN_NODE.md)). The containers still run here; the run listens on the internal network's gateway at a port of its own and relays each connection to that node's model port, so the network stays closed to everything else. Each instance's state notes which server answered it when it was not this machine's. With no paired node nothing changes. Not run with a second node; the relay was run live from a container on `puffin-swe-bench`.
+
 ## 13. The code index as an arm (2026-10-02)
 
 `swe-bench run --code-index universal` gives the agent `puffin-code` ([PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md)); the default, `off`, is the agent of §12, which navigates with `grep` and `find` because the runtime carries nothing of the index. The arm is recorded in the manifest (`code_index`), a resumed run keeps the arm it started with, and `report --against` lists it among the fields that differ.

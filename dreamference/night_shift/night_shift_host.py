@@ -197,6 +197,18 @@ class NightShiftHost:
         return 0
 
     @classmethod
+    def mem_total_bytes(cls) -> int:
+        """
+        Returns:
+            int: `MemTotal` from `/proc/meminfo`, in bytes.
+        """
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) * 1024
+        return 0
+
+    @classmethod
     def parse_size(cls, size: str) -> int:
         """
         Parses a systemd-style size (`8G`, `512M`, bytes).

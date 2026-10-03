@@ -793,3 +793,178 @@ def test_report_rows_carry_what_the_spec_lists():
     assert "Last message: I'll now do it." in text
     assert f"git -C /r diff {'b' * 12}..night/a" in text
     assert "## Notes" in text
+
+
+# -- several nodes (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3, §13.3) --------------------------------
+
+REPLICA = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "kv_pool": 144870.0,
+           "parallel": 1, "budget": 65536}
+
+
+def test_a_session_here_holds_up_this_machines_lane_and_not_a_replicas(setup, fake_host, monkeypatch):
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    for index in range(2):
+        queue(setup["night"], setup["repo"], task_text=f"Task {index}", task_id=f"20261001-0100-b{index}0")
+    local = {"name": "this machine", "node": None, "host": "http://x", "kv_pool": 144870.0, "parallel": 1, "budget": 65536}
+    monkeypatch.setattr(NightShiftRunner, "lanes", classmethod(
+        lambda cls, host, settings: ([local, dict(REPLICA)], ["Also using spark-2's model server (…)."])))
+    monkeypatch.setattr(NightShiftRunner, "admit", classmethod(lambda cls, *args: None))
+    monkeypatch.setattr(FakeHost, "sessions", [4242])                    # someone is working here
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+                                vllm_host="http://x", settings=NightShiftSettings({})) == 0
+    tasks = NightShiftQueue.tasks(setup["night"])
+    assert [task["status"] for task in tasks] == ["done", "done"]
+    assert [task["result"]["model_node"] for task in tasks] == ["spark-2", "spark-2"]
+    report = next((setup["night"] / "reports").glob("*.md")).read_text()
+    assert report.count("- Model server: spark-2's (the task ran on this machine)") == 2
+    assert "Also using spark-2's model server" in report
+
+
+def test_a_replica_counts_only_its_own_tasks_and_never_a_session_here(fake_host, monkeypatch):
+    class Running:
+        in_model = True
+        lane_host = "http://192.168.50.106:8000"
+        current_unit = None
+    settings = NightShiftSettings({})
+    monkeypatch.setattr(FakeHost, "sessions", [4242])
+    monkeypatch.setattr(FakeHost, "samples", [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}])
+    active = [(None, Running())]
+    assert "session is open" in NightShiftRunner.start_blocker("http://x", "p", active, settings)
+    # One request running there is the night's own task on that lane, not someone else's.
+    assert NightShiftRunner.start_blocker(REPLICA["host"], "p", active, settings, local=False) is None
+    assert "not the night run's" in NightShiftRunner.start_blocker(REPLICA["host"], "p", [], settings, local=False)
+
+
+def test_without_a_paired_node_the_run_has_one_lane_and_asks_nobody(fake_host, monkeypatch):
+    from dreamference.node import NodePairing
+    monkeypatch.setattr(NodePairing, "run", classmethod(lambda cls, *args, **kwargs: pytest.fail("no SSH")))
+    lanes, notes = NightShiftRunner.lanes("http://x", NightShiftSettings({}))
+    assert len(lanes) == 1 and lanes[0]["host"] == "http://x" and notes == []
+
+
+@pytest.fixture
+def two_nodes(setup, fake_host, monkeypatch):
+    """This machine as both sender and node: the pairing reaches `serve-job` in this process, and
+    git reaches the node's job repository by its path."""
+    import contextlib
+    import io
+    from dreamference.node import NodeJob, NodeJobSender, NodePairing, NodeServe
+    record = {"node": "2222-bbbb", "name": "spark-2", "address": "192.168.50.106", "user": "owner", "ssh_port": 22}
+    NodePairing._save(record)
+    monkeypatch.setattr(NodePairing, "find", classmethod(lambda cls, name, browse=True: dict(record)))
+    requests = []
+
+    def serve(cls, record, request, capture=True, input_text=None):
+        requests.append(request)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = NodeServe.serve(request)
+        return subprocess.CompletedProcess([], code, out.getvalue(), err.getvalue())
+    monkeypatch.setattr(NodePairing, "run", classmethod(serve))
+
+    def url(cls, record, slug):
+        repo = NodeJob.repo_path(slug)
+        if not repo.is_dir():
+            repo.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
+        return str(repo)
+    monkeypatch.setattr(NodeJobSender, "git_url", classmethod(url))
+    monkeypatch.setattr(NodeJobSender, "git_environment", classmethod(lambda cls, record: dict(os.environ)))
+    sandboxed = []
+
+    def no_bubblewrap(self, command, extra_env):
+        sandboxed.append(self.task_id)
+        self.home.mkdir(parents=True, exist_ok=True)
+        return command
+    monkeypatch.setattr(NightShiftTaskRun, "remote_sandbox", no_bubblewrap)
+    monkeypatch.setattr(NodeJob, "sandbox_blocker", classmethod(lambda cls: None))
+    return {"requests": requests, "sandboxed": sandboxed, **setup}
+
+
+def test_a_task_for_another_node_is_worked_there_and_its_branch_comes_back(two_nodes, monkeypatch):
+    from dreamference.night_shift import NightShiftRemote
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    task = queue(two_nodes["night"], two_nodes["repo"], task_text="Add hello.txt on the other node",
+                 task_id="20261001-0100-c00")
+    path = two_nodes["night"] / "tasks" / f"{task['id']}.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), on="spark-2")))
+    node_runs = []
+
+    def the_other_nodes_night(seconds):
+        # While this machine waits, the node's own runner works its queue.
+        node_runs.append(NightShiftRunner.run(minutes=5, idle_minutes=0, puffin_bin=two_nodes["puffin"],
+                                              vllm_host="http://127.0.0.1:8000", settings=NightShiftSettings({})))
+    monkeypatch.setattr(NightShiftRemote, "sleep", staticmethod(the_other_nodes_night))
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=two_nodes["night"], puffin_bin=two_nodes["puffin"],
+                                vllm_host="http://x", settings=NightShiftSettings({})) == 0
+    assert node_runs == [0]
+    here = NightShiftQueue.read(two_nodes["night"], task["id"])
+    assert here["status"] == "done" and here["result"]["node"] == "spark-2"
+    assert [entry["status"] for entry in here["history"]] == ["queued", "sent", "done"]
+    # The branch is in this repository, committed as this repository's author; nothing was merged.
+    log = git(two_nodes["repo"], "log", "-1", "--format=%an %s", f"night/{task['id']}").stdout.strip()
+    assert log == "Night Test night: Add hello.txt on the other node"
+    assert git(two_nodes["repo"], "show", "--name-only", "--format=", f"night/{task['id']}").stdout.split() == ["hello.txt"]
+    assert not (two_nodes["repo"] / "hello.txt").exists()
+    # On the node: worked inside the job sandbox, with a home of its own, and marked fetched.
+    there = NightShiftQueue.read(NightShiftQueue.night_dir(), task["id"])
+    assert there["remote"] and there["fetched"] and two_nodes["sandboxed"] == [task["id"]]
+    report = sorted((two_nodes["night"] / "reports").glob("*.md"))[-1].read_text()
+    assert "- Ran on: spark-2, by that node's own runner and model server" in report
+    asked = [request.split()[0] for request in two_nodes["requests"] if request.startswith("night-")]
+    assert asked[0] == "night-submit" and asked[-1] == "night-fetched" and set(asked[1:-1]) == {"night-status"}
+
+
+def test_a_dropped_task_is_dropped_on_the_node_too(two_nodes, monkeypatch):
+    from dreamference.night_shift import NightShiftRemote
+    task = queue(two_nodes["night"], two_nodes["repo"], task_id="20261001-0100-d00")
+    path = two_nodes["night"] / "tasks" / f"{task['id']}.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), on="spark-2")))
+    sent = NightShiftRemote.hand_off(two_nodes["night"], NightShiftQueue.tasks(two_nodes["night"]), [])
+    assert [entry["id"] for entry in sent] == [task["id"]]
+    NightShiftQueue.transition(two_nodes["night"], task["id"], "cancel-requested")
+    NightShiftRemote.collect(two_nodes["night"], sent, far_end(), [], wait=False)
+    assert NightShiftQueue.read(NightShiftQueue.night_dir(), task["id"])["status"] == "cancelled"
+    assert NightShiftQueue.read(two_nodes["night"], task["id"])["status"] == "cancelled"
+
+
+def test_the_node_refuses_a_malformed_task_and_answers_only_about_tasks_from_other_machines(two_nodes, capsys, monkeypatch):
+    import base64
+    from dreamference.night_shift import NightShiftRemote
+    encode = lambda request: base64.urlsafe_b64encode(json.dumps(request).encode()).decode()
+    good = {"id": "20261001-0100-e00", "repo": "calc-0123456789", "base": "a" * 40, "task": "Fix it"}
+    for change in ({"id": "../x"}, {"repo": "../etc"}, {"base": "HEAD"}, {"task": ""}, {"task": "x" * 20001},
+                   {"test": ["x"]}, {}):
+        assert NightShiftRemote.serve("night-submit", [encode(dict(good, **change))]) == 2, change
+    assert "was not pushed" in capsys.readouterr().out
+    from dreamference.node import NodeJob
+    monkeypatch.setattr(NodeJob, "sandbox_blocker", classmethod(lambda cls: "this node cannot sandbox a job (uid map)"))
+    task = queue(two_nodes["night"], two_nodes["repo"], task_id="20261001-0100-e02")
+    path = two_nodes["night"] / "tasks" / f"{task['id']}.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), on="spark-2")))
+    NightShiftRemote.hand_off(two_nodes["night"], NightShiftQueue.tasks(two_nodes["night"]), [])
+    refused = NightShiftQueue.read(two_nodes["night"], task["id"])
+    assert refused["status"] == "failed" and "cannot sandbox" in refused["result"]["last_message"]
+    assert NightShiftQueue.read(NightShiftQueue.night_dir(), task["id"]) is None        # never queued there
+    queue(NightShiftQueue.night_dir(), two_nodes["repo"], task_id="20261001-0100-e01")   # the owner's own task
+    for operation in ("night-status", "night-cancel", "night-fetched"):
+        assert NightShiftRemote.serve(operation, ["20261001-0100-e01"]) == 1
+        assert NightShiftRemote.serve(operation, ["../../x"]) == 2
+
+
+def test_a_task_from_another_machine_runs_in_the_job_sandbox_with_its_own_home(setup, tmp_path):
+    from dreamference.night_shift import NightShiftRemote
+    task = {"id": "20261001-0100-f00", "repo": str(setup["repo"]), "base": "a" * 40, "task": "x",
+            "remote": {"sender": "1111", "sender_name": "spark-1"}, "author": {"name": "S", "email": "s@x"}}
+    run = NightShiftTaskRun(setup["night"], task, NightShiftSettings({}), setup["puffin"], time.time() + 60,
+                            model_host="http://127.0.0.1:8000")
+    run.airgapped = "on"
+    argv = NightShiftTaskRun.__dict__["remote_sandbox"](run, [setup["puffin"], "exec", "-C", str(run.worktree)], {})
+    home = NightShiftRemote.task_home(task["id"])
+    assert argv[0] == "bwrap" and "--unshare-net" not in argv                  # loopback reaches the model
+    assert [argv[i + 1] for i, word in enumerate(argv) if word == "--bind"] == [str(run.worktree), str(home)]
+    assert os.path.expanduser("~") in [argv[i + 1] for i, word in enumerate(argv) if word == "--tmpfs"]
+    variables = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
+    assert variables["CODEX_HOME"] == str(home) and variables["DREAMFERENCE_PUFFIN_GMAIL"] == "false"
+    assert variables["DREAMFERENCE_PUFFIN_AIRGAPPED"] == "on" and variables["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:8000"
+    assert run.last_message_path.parent == home

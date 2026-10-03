@@ -16,18 +16,29 @@ for the sender to fetch. Three things differ from a night task on one's own mach
 
 The job is a systemd user unit, not a child of the sender's SSH connection, so closing the laptop
 does not stop it (with lingering on; `puffin-admin node add` says when it is off).
+
+A worktree on another machine has no virtualenv, so a job that needs one says how to build it
+(`--setup`, or `[night] setup` in the repository's `dreamference.toml`); the result is kept per
+repository and per content of its lock files, and bound read-only into later jobs (§13.6). Data
+the job needs is bound read-only from paths this node's owner allows (`[node] bindable`), and
+artifacts named with `--out` are kept beside the job, never committed (§13.3). Finished jobs are
+pruned a day after the sender fetched them, and unfetched ones after 14 days (§13.7).
 """
 
+import fcntl
+import hashlib
 import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tarfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Dict, Final, List, Optional, Sequence
 
 JOB_ID: Final[re.Pattern] = re.compile(r"\d{8}-\d{4}-[0-9a-f]{3}")
 REPO_SLUG: Final[re.Pattern] = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
@@ -46,6 +57,21 @@ MEMORY_RESERVE: Final[int] = 8 * 1024 ** 3
 AIRGAP_LEVELS: Final[tuple] = ("off", "duckduckgo", "on")
 
 FINAL_STATUSES: Final[tuple] = ("done", "failed", "refused", "cancelled")
+
+# How long a finished job is kept: a day after the sender fetched it (so `node logs` still reads it
+# that day), 14 days when nobody fetched it.
+KEEP_AFTER_FETCH: Final[timedelta] = timedelta(days=1)
+KEEP_UNFETCHED: Final[timedelta] = timedelta(days=14)
+
+# The files whose content decides whether a job's environment can be reused: the same setup
+# command and the same lock files give the same environment.
+LOCK_FILES: Final[tuple] = (
+    "requirements.txt", "requirements-dev.txt", "requirements-test.txt", "pyproject.toml", "setup.py",
+    "setup.cfg", "poetry.lock", "uv.lock", "Pipfile.lock", "package.json", "package-lock.json", "yarn.lock",
+    "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock", "go.mod", "go.sum")
+
+# What `--out` may name: a path inside the worktree.
+OUT_PATH: Final[re.Pattern] = re.compile(r"[A-Za-z0-9._-][A-Za-z0-9._/-]{0,200}")
 
 
 class NodeJob:
@@ -157,11 +183,20 @@ class NodeJob:
         test = request.get("test")
         if test is not None and not isinstance(test, str):
             raise ValueError("the test command is a string")
+        setup = request.get("setup")
+        if setup is not None and (not isinstance(setup, str) or not setup.strip()):
+            raise ValueError("the setup command is a string")
+        out = request.get("out")
+        if out is not None and (not isinstance(out, str) or not OUT_PATH.fullmatch(out)
+                                or ".." in out.split("/") or out.startswith("/")):
+            raise ValueError("--out names a folder inside the repository, such as `checkpoints`")
+        binds = cls.allowed_binds(request.get("binds") or [])
         author = request.get("author") if isinstance(request.get("author"), dict) else {}
         return {
             "id": job_id, "repo": request["repo"], "commit": request["commit"], "command": command,
             "memory": str(request["memory"]), "memory_bytes": memory, "time": str(request["time"]),
-            "time_s": seconds, "test": test or None,
+            "time_s": seconds, "test": test or None, "setup": setup or None,
+            "out": out.strip("/") if out else None, "binds": binds,
             "airgapped": cls.stricter(str(request.get("airgapped") or "off"), cls.node_airgap_level()),
             "author": {"name": str(author.get("name") or "Puffin Job")[:100],
                        "email": str(author.get("email") or "puffin-job@localhost")[:200]},
@@ -181,6 +216,52 @@ class NodeJob:
         """
         rank = lambda level: AIRGAP_LEVELS.index(level) if level in AIRGAP_LEVELS else len(AIRGAP_LEVELS) - 1
         return AIRGAP_LEVELS[max(rank(first), rank(second))]
+
+    @classmethod
+    def bindable_roots(cls) -> List[str]:
+        """
+        Returns:
+            List[str]: The folders under which a sender may ask for a read-only bind: `[node]
+            bindable` in this node's user-level `config.toml`. None by default; it is the node
+            owner's decision, never the sender's.
+        """
+        from dreamference.night_shift.night_shift_settings import NightShiftSettings
+        path = Path(os.path.expanduser("~/.config/dreamference/config.toml"))
+        table = NightShiftSettings.read_table(path, section="node")
+        roots = table.get("bindable") or []
+        if isinstance(roots, str):
+            roots = [roots]
+        return [os.path.realpath(os.path.expanduser(str(root))) for root in roots if str(root).strip()]
+
+    @classmethod
+    def allowed_binds(cls, binds: Any) -> List[str]:
+        """
+        Checks the read-only binds a sender asked for against what this node allows.
+
+        Args:
+            binds: The requested paths (a list of absolute paths on this node).
+
+        Returns:
+            List[str]: The paths, resolved.
+
+        Raises:
+            ValueError: If a path is malformed, missing, or outside every allowed root.
+        """
+        if not isinstance(binds, list) or not all(isinstance(path, str) and path.startswith("/") for path in binds):
+            raise ValueError("--bind names absolute paths on the node")
+        if len(binds) > 16:
+            raise ValueError("a job may bind at most 16 paths")
+        roots = cls.bindable_roots() if binds else []
+        resolved = []
+        for path in binds:
+            real = os.path.realpath(path)
+            if not any(real == root or real.startswith(root.rstrip("/") + "/") for root in roots):
+                allowed = ", ".join(roots) or "nothing ([node] bindable in its config.toml is empty)"
+                raise ValueError(f"this node does not allow binding {path}; it allows {allowed}")
+            if not os.path.exists(real):
+                raise ValueError(f"{path} does not exist on this node")
+            resolved.append(real)
+        return resolved
 
     @classmethod
     def node_airgap_level(cls) -> str:
@@ -279,6 +360,7 @@ class NodeJob:
             ValueError: When the job is refused; nothing was started.
         """
         record = cls.validate(request)
+        cls.prune()
         if cls.read(record["id"]) is not None:
             raise ValueError(f"job {record['id']} already exists on this node")
         repo = cls.repo_path(record["repo"])
@@ -379,18 +461,23 @@ class NodeJob:
     # -- running it (inside the unit) ------------------------------------------------------------
 
     @classmethod
-    def sandbox_command(cls, tree: Path, command: List[str], network: bool, job_id: str) -> List[str]:
+    def sandbox_command(cls, tree: Path, command: List[str], network: bool, job_id: str,
+                        writable: Sequence[str] = (), readable: Sequence[str] = (),
+                        environment: Optional[Dict[str, str]] = None) -> List[str]:
         """
         The bubblewrap command line a job's command runs under.
 
         Args:
-            tree: The job's worktree, the only writable place.
+            tree: The job's worktree, writable.
             command: The job's command.
             network: False removes the network (the `/airgapped` level `on`).
             job_id: The job's id, given to the command as `PUFFIN_JOB`.
+            writable: Other folders bound read-write (the environment while setup builds it).
+            readable: Folders bound read-only (a built environment, the node's allowed data).
+            environment: Variables set on top of the fixed ones (`PUFFIN_ENV`, a longer `PATH`).
 
         Returns:
-            List[str]: The argv. Every tmpfs comes before the one bind, because bubblewrap hides
+            List[str]: The argv. Every tmpfs comes before the binds, because bubblewrap hides
             a bind made under a later tmpfs.
         """
         home = os.path.expanduser("~")
@@ -402,14 +489,20 @@ class NodeJob:
         argv += ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
         for hidden in ("/tmp", "/run", "/var/tmp", "/dev/shm", home):
             argv += ["--tmpfs", hidden]
-        argv += ["--bind", str(tree), str(tree), "--clearenv"]
-        environment = {
+        argv += ["--bind", str(tree), str(tree)]
+        for path in writable:
+            argv += ["--bind", str(path), str(path)]
+        for path in readable:
+            argv += ["--ro-bind", str(path), str(path)]
+        argv.append("--clearenv")
+        variables = {
             "PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": home, "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": "dumb", "PUFFIN_JOB": job_id, "GIT_TERMINAL_PROMPT": "0",
             # CPU-only: a job that reached CUDA would be outside its memory cap.
             "CUDA_VISIBLE_DEVICES": "", "NVIDIA_VISIBLE_DEVICES": "none",
         }
-        for key, value in environment.items():
+        variables.update(environment or {})
+        for key, value in variables.items():
             argv += ["--setenv", key, value]
         return argv + ["--chdir", str(tree), "--", *command]
 
@@ -444,14 +537,28 @@ class NodeJob:
                 return 1
             network = record["airgapped"] != "on"
             with open(log, "ab") as sink:
-                code = cls._run(cls.sandbox_command(tree, record["command"], network, job_id), sink, tree)
+                env_dir, problem = cls._environment(record, tree, network, sink)
+                if problem:
+                    record["note"] = problem
+                    return 1
+                readable = ([str(env_dir)] if env_dir else []) + list(record.get("binds") or [])
+                variables = cls.environment_variables(env_dir)
+                sandboxed = lambda command: cls.sandbox_command(tree, command, network, job_id,
+                                                                readable=readable, environment=variables)
+                code = cls._run(sandboxed(record["command"]), sink, tree)
                 record["exit_code"] = code
                 if code == 0 and record.get("test"):
                     sink.write(f"\n--- test: {record['test']}\n".encode())
                     sink.flush()
-                    test_code = cls._run(cls.sandbox_command(tree, ["bash", "-c", record["test"]], network, job_id), sink, tree)
+                    test_code = cls._run(sandboxed(["bash", "-c", record["test"]]), sink, tree)
                     record["test_exit_code"] = test_code
                     code = test_code
+            if code != 0 and not env_dir and cls.missing_module(log):
+                record["note"] = ("an environment failure, not a failing job: a Python module was missing, and with "
+                                  "no setup command the job ran with the node's system interpreter "
+                                  "(send it with --setup, or set [night] setup in dreamference.toml)")
+            if record.get("out"):
+                record["out_files"] = cls._keep_out(record, tree, directory)
             record["branch"] = cls._commit(record, tree, repo)
             return code
         except Exception as error:  # A runner bug must not leave the job `running` forever.
@@ -466,6 +573,229 @@ class NodeJob:
                 record["status"] = "done" if code == 0 else "failed"
             record.update(finished=cls.now(), wall_s=int(time.time() - started))
             cls.write(record)
+
+    # -- the environment (§13.6) ------------------------------------------------------------------
+
+    @classmethod
+    def setup_command(cls, record: Dict[str, Any], tree: Path) -> Optional[str]:
+        """
+        Args:
+            record: The job's record.
+            tree: Its worktree, at the job's commit.
+
+        Returns:
+            Optional[str]: The command that builds the job's environment: `--setup`, else `[night]
+            setup` in the repository's `dreamference.toml`; None when there is none.
+        """
+        if record.get("setup"):
+            return record["setup"]
+        from dreamference.night_shift.night_shift_settings import NightShiftSettings
+        configured = NightShiftSettings.read_table(tree / "dreamference.toml").get("setup")
+        return str(configured) if configured else None
+
+    @classmethod
+    def environment_key(cls, slug: str, setup: str, tree: Path) -> str:
+        """
+        Args:
+            slug: The job repository's name.
+            setup: The setup command.
+            tree: The worktree, whose lock files are read.
+
+        Returns:
+            str: The name of the environment folder: the repository, then a digest of the setup
+            command and the content of every lock file at the worktree's top.
+        """
+        digest = hashlib.sha256(setup.encode())
+        for name in LOCK_FILES:
+            path = tree / name
+            if path.is_file():
+                digest.update(f"\0{name}\0".encode())
+                digest.update(path.read_bytes())
+        return f"{slug}-{digest.hexdigest()[:16]}"
+
+    @classmethod
+    def environment_variables(cls, env_dir: Optional[Path]) -> Dict[str, str]:
+        """
+        Args:
+            env_dir: The job's built environment, or None.
+
+        Returns:
+            Dict[str, str]: `PUFFIN_ENV`, and `PATH` with the environment's `bin` first.
+        """
+        if not env_dir:
+            return {}
+        return {"PUFFIN_ENV": str(env_dir), "VIRTUAL_ENV": str(env_dir),
+                "PATH": f"{env_dir}/bin:/usr/local/bin:/usr/bin:/bin"}
+
+    @classmethod
+    def _environment(cls, record: Dict[str, Any], tree: Path, network: bool, sink: Any) -> Any:
+        """
+        Builds the job's environment, or finds it built.
+
+        Returns:
+            Any: `(folder or None, problem or None)`.
+        """
+        setup = cls.setup_command(record, tree)
+        if not setup:
+            record["environment"] = "none: the node's system interpreter"
+            return None, None
+        key = cls.environment_key(record["repo"], setup, tree)
+        env_dir = cls.jobs_dir() / "envs" / key
+        env_dir.parent.mkdir(parents=True, exist_ok=True)
+        with open(env_dir.parent / f"{key}.lock", "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                if (env_dir / ".complete").is_file():
+                    record["environment"] = f"{key} (reused)"
+                    os.utime(env_dir / ".complete")
+                    return env_dir, None
+                shutil.rmtree(env_dir, ignore_errors=True)
+                env_dir.mkdir()
+                sink.write(f"--- setup: {setup}\n".encode())
+                sink.flush()
+                argv = cls.sandbox_command(tree, ["bash", "-c", setup], network, record["id"],
+                                           writable=[str(env_dir)], environment=cls.environment_variables(env_dir))
+                code = cls._run(argv, sink, tree)
+                if code != 0:
+                    shutil.rmtree(env_dir, ignore_errors=True)
+                    return None, f"the environment's setup command failed (exit {code}); its output is in the log"
+                (env_dir / ".complete").write_text(setup + "\n")
+                sink.write(b"--- setup done\n")
+                record["environment"] = f"{key} (built)"
+                return env_dir, None
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    @classmethod
+    def missing_module(cls, log: Path) -> bool:
+        """
+        Args:
+            log: The job's output.
+
+        Returns:
+            bool: True when its last lines show a Python module that could not be imported.
+        """
+        try:
+            with open(log, "rb") as handle:
+                handle.seek(max(0, log.stat().st_size - 8192))
+                tail = handle.read().decode("utf-8", "replace")
+        except OSError:
+            return False
+        return "ModuleNotFoundError" in tail or "No module named" in tail
+
+    # -- artifacts (§13.3) -----------------------------------------------------------------------
+
+    @classmethod
+    def _keep_out(cls, record: Dict[str, Any], tree: Path, directory: Path) -> int:
+        """
+        Moves what the job wrote under `--out` out of the worktree, so it is kept as files beside
+        the job and never committed.
+
+        Returns:
+            int: How many files were kept.
+        """
+        source = tree / record["out"]
+        if not source.exists() or source.is_symlink():
+            return 0
+        kept = directory / "out"
+        shutil.rmtree(kept, ignore_errors=True)
+        kept.mkdir(parents=True)
+        target = kept / Path(record["out"]).name
+        shutil.move(str(source), str(target))
+        return sum(1 for path in kept.rglob("*") if path.is_file())
+
+    @classmethod
+    def send_out(cls, job_id: str) -> int:
+        """
+        Writes a job's `--out` folder to standard output as a tar stream, for `node fetch`.
+
+        Args:
+            job_id: The job's id.
+
+        Returns:
+            int: 0, or 1 when the job kept nothing.
+        """
+        kept = cls.job_dir(job_id) / "out"
+        if not kept.is_dir():
+            print("this job kept no --out files", file=sys.stderr)
+            return 1
+        with tarfile.open(fileobj=sys.stdout.buffer, mode="w|") as archive:
+            for child in sorted(kept.iterdir()):
+                archive.add(str(child), arcname=child.name)
+        sys.stdout.buffer.flush()
+        return 0
+
+    # -- pruning (§13.7) -------------------------------------------------------------------------
+
+    @classmethod
+    def prune_after(cls, record: Dict[str, Any]) -> Optional[str]:
+        """
+        Args:
+            record: A job's record.
+
+        Returns:
+            Optional[str]: When the job may be pruned, RFC 3339; None while it is not finished.
+        """
+        if record.get("status") not in FINAL_STATUSES:
+            return None
+        try:
+            if record.get("fetched"):
+                return (datetime.fromisoformat(record["fetched"]) + KEEP_AFTER_FETCH).isoformat(timespec="seconds")
+            finished = record.get("finished") or record.get("submitted")
+            return (datetime.fromisoformat(finished) + KEEP_UNFETCHED).isoformat(timespec="seconds")
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def mark_fetched(cls, job_id: str) -> bool:
+        """
+        Records that the sender has the job's result, which starts its shorter keep.
+
+        Args:
+            job_id: The job's id.
+
+        Returns:
+            bool: True when the job is finished and is now marked.
+        """
+        record = cls.reconcile(job_id)
+        if record is None or record.get("status") not in FINAL_STATUSES:
+            return False
+        record.setdefault("fetched", cls.now())
+        cls.write(record)
+        return True
+
+    @classmethod
+    def prune(cls, now: Optional[datetime] = None) -> List[str]:
+        """
+        Removes finished jobs that are past their keep: the folder, the worktree if one was left
+        (a cancelled or killed job's), the result branch and the pushed ref.
+
+        Args:
+            now: The time to compare with; the current time by default.
+
+        Returns:
+            List[str]: The ids removed.
+        """
+        now = now or datetime.now().astimezone()
+        removed = []
+        for record in cls.records():
+            after = cls.prune_after(record)
+            if not after or datetime.fromisoformat(after) > now:
+                continue
+            directory = cls.job_dir(record["id"])
+            try:
+                repo = cls.repo_path(record["repo"])
+            except ValueError:
+                repo = None
+            if repo is not None and repo.is_dir():
+                if (directory / "tree").exists():
+                    cls._git(["--git-dir", str(repo), "worktree", "remove", "--force", str(directory / "tree")])
+                cls._git(["--git-dir", str(repo), "worktree", "prune"])
+                cls._git(["--git-dir", str(repo), "update-ref", "-d", f"refs/jobs/{record['id']}"])
+                cls._git(["--git-dir", str(repo), "branch", "-D", f"job/{record['id']}"])
+            shutil.rmtree(directory, ignore_errors=True)
+            removed.append(record["id"])
+        return removed
 
     @classmethod
     def _commit(cls, record: Dict[str, Any], tree: Path, repo: Path) -> Optional[str]:

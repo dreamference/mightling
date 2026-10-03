@@ -28,7 +28,8 @@ from dreamference.node.node_pairing import KEY_COMMENT, NodePairing
 MODEL_KEY: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9._-]{1,80}")
 
 REFUSAL: Final[str] = ("puffin-admin node serve-job: this key may only ask for Puffin node operations "
-                       "(info, status, start, stop, set-model <key>, unpair, and jobs).")
+                       "(info, status, start, stop, set-model <key>, model-receive <key>, unpair, jobs "
+                       "and night tasks).")
 
 # The two git services a job's push and fetch ask for, and the only path shape they may name.
 GIT_SERVICES: Final[tuple] = ("git-receive-pack", "git-upload-pack")
@@ -162,10 +163,16 @@ class NodeServe:
             removed = cls.unauthorize(key_tag or "")
             print("unpaired" if removed else "no such key")
             return 0 if removed else 1
+        if operation == "model-receive" and len(arguments) == 2 and arguments[1].isdigit():
+            from dreamference.node.node_model_sync import NodeModelSync
+            return NodeModelSync.receive(arguments[0], int(arguments[1]))
         if operation in GIT_SERVICES and len(arguments) == 1:
             return cls.git_service(operation, arguments[0])
         if operation.startswith("job-"):
             return cls.job_operation(operation, arguments)
+        if operation.startswith("night-"):
+            from dreamference.night_shift.night_shift_remote import NightShiftRemote
+            return NightShiftRemote.serve(operation, arguments)
         print(REFUSAL, file=sys.stderr)
         return 2
 
@@ -228,11 +235,20 @@ class NodeServe:
                   f"{'off' if record['airgapped'] == 'on' else 'on'}).", flush=True)
             return NodeJob.follow(record["id"])
         if operation == "job-list" and not arguments:
+            NodeJob.prune()
             for record in NodeJob.records():
                 settled = NodeJob.reconcile(record["id"]) or record
-                print(json.dumps({key: settled.get(key) for key in
-                                  ("id", "status", "command", "branch", "submitted", "finished", "exit_code", "note")}))
+                listed = {key: settled.get(key) for key in
+                          ("id", "status", "command", "branch", "submitted", "finished", "exit_code", "note",
+                           "fetched", "out_files")}
+                listed["prune_after"] = NodeJob.prune_after(settled)
+                print(json.dumps(listed))
             return 0
+        if operation in ("job-fetched", "job-out") and len(arguments) == 1 and JOB_ID.fullmatch(arguments[0]) \
+                and NodeJob.read(arguments[0]) is not None:
+            if operation == "job-fetched":
+                return 0 if NodeJob.mark_fetched(arguments[0]) else 1
+            return NodeJob.send_out(arguments[0])
         if operation in ("job-logs", "job-cancel") and arguments and JOB_ID.fullmatch(arguments[0]) \
                 and NodeJob.read(arguments[0]) is not None:
             if operation == "job-cancel" and len(arguments) == 1:
@@ -275,12 +291,23 @@ class NodeServe:
     def info(cls) -> dict:
         """
         Returns:
-            dict: This node's id, name, user, version and whether lingering is on (a job or a
-            model load started over SSH stops with the connection when it is off).
+            dict: This node's id, name, user, version, whether lingering is on (a job or a
+            model load started over SSH stops with the connection when it is off), its model
+            server's port, its free and total memory in bytes, and what holds its runner lock
+            (a night or benchmark run), if anything.
         """
         from dreamference import __version__
+        from dreamference.night_shift.night_shift_host import NightShiftHost
+        from dreamference.night_shift.night_shift_queue import NightShiftQueue
+        from dreamference.node.node_advertiser import NodeAdvertiser
+        try:
+            available = NightShiftHost.mem_available_bytes()
+            total = NightShiftHost.mem_total_bytes()
+        except OSError:
+            available = total = None
         return {"node": NodeIdentity.read(), "name": socket.gethostname(), "user": getpass.getuser(),
-                "version": __version__, "linger": cls.linger()}
+                "version": __version__, "linger": cls.linger(), "model_port": NodeAdvertiser.model_port(),
+                "mem_available": available, "mem_total": total, "runner": NightShiftQueue.runner_holder()}
 
     @classmethod
     def linger(cls) -> Optional[bool]:

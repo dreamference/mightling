@@ -457,6 +457,9 @@ Run a command on a paired node, in this repository at HEAD; its changes come bac
 | `--time` | The job's time limit (default 90m; the node sets the ceiling) |
 | `--test` | A command that decides pass or fail, run after the job's own. |
 | `--gpu` | Ask for the GPU (nodes refuse this for now) |
+| `--setup` | The command that builds the job's environment, run once per lock-file content and kept on the node. |
+| `--out` | A folder the job writes that comes back as files (to ~/.puffin/jobs/received/<id>), never as a commit. |
+| `--bind` | A path on the node to bind read-only; the node's [node] bindable decides which are allowed (repeatable) |
 | `job_command` | -- then the command and its arguments. |
 
 #### `puffin-admin node jobs`
@@ -485,11 +488,21 @@ Stop a running job.
 
 #### `puffin-admin node fetch`
 
-Bring a job's result branch into the repository it was sent from.
+Bring a job's result branch into the repository it was sent from, and its --out files.
 
 | Option | Description |
 |---|---|
 | `job` | The job id. |
+
+#### `puffin-admin node sync-model`
+
+Copy a model's files from this machine's cache to a paired node, so it need not download them.
+
+| Option | Description |
+|---|---|
+| `name` | The paired node. |
+| `model` | A key of the model matrix. |
+| `--address` | Reach the node at this address instead, such as its QSFP link's. |
 
 #### `puffin-admin node job-exec`
 

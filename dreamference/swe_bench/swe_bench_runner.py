@@ -29,6 +29,7 @@ from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_instance_run import SweBenchInstanceRun
+from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 
@@ -287,6 +288,11 @@ class SweBenchRunner:
                 print(f"❌ Could not create the internal Docker network {swe_bench_settings.NETWORK_NAME}.")
                 return 1
             model_url = f"http://{gateway}:{urlparse(vllm_host).port or 8000}"
+            lanes, lane_notes = cls.lanes(vllm_host, served, settings, parallel)
+            lanes[0]["model_url"] = model_url
+            relays = cls.open_relays(gateway, lanes[1:])
+            for note in lane_notes:
+                print(f"   {note}")
             extra_env = {"DREAMFERENCE_PUFFIN_CAVE_MODE": str(manifest.get("cave_mode") or "ultra"),
                          "DREAMFERENCE_PUFFIN_AIRGAPPED": "off"}
 
@@ -326,7 +332,7 @@ class SweBenchRunner:
                 for repo, group in groups.items():
                     stopped = cls.schedule(store, group, rows, manifest, settings, runtime_hash,
                                            model_url, vllm_host, puffin_bin, parallel, end, extra_env,
-                                           indexes)
+                                           indexes, lanes=lanes)
                     if evaluate:
                         graded_now = [i for i in manifest["instances"] if repo is None or rows[i]["repo"] == repo]
                         SweBenchEvaluator.grade(store, settings, only=graded_now)
@@ -340,6 +346,8 @@ class SweBenchRunner:
                 interrupted = True
                 print("\n⏸️  Interrupted; the instances that were running will run again on resume.")
             finally:
+                for relay in relays:
+                    relay.close()
                 if threading.current_thread() is threading.main_thread():
                     signal.signal(signal.SIGTERM, previous)
             done = len(store.finished())
@@ -352,18 +360,72 @@ class SweBenchRunner:
         raise KeyboardInterrupt
 
     @classmethod
+    def lanes(cls, vllm_host: str, served: Any, settings: "swe_bench_settings.SweBenchSettings",
+              parallel: int) -> Any:
+        """
+        This machine's model server and every paired node serving the same model
+        (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3). The containers all run here; a replica only
+        answers some of their model requests, each lane holding as many instances as its own KV
+        pool allows.
+
+        Args:
+            vllm_host: This machine's model server.
+            served: What it serves.
+            settings: The benchmark's settings (`max_parallel`, `task_context`, `nodes`).
+            parallel: This machine's lane's size, already computed.
+
+        Returns:
+            Any: `(lanes, notes)`, this machine's lane first.
+        """
+        from dreamference.node.node_lanes import NodeLanes
+        from dreamference.node.node_pairing import NodePairing
+        local = {"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel, "budget": None}
+        if NodeLanes.wanted(settings.nodes) == [] or not NodePairing.paired():
+            return [local], []
+        budget = lambda pool: (cls.host.parallelism(settings.max_parallel, pool, settings.task_context), None)
+        lanes, skipped = NodeLanes.lanes(vllm_host, served, settings.nodes, cls.host, budget)
+        lanes[0]["parallel"] = parallel
+        notes = [f"Also using {lane['name']}'s model server ({lane['host']}): up to {lane['parallel']} instance(s) "
+                 f"there; the containers run on this machine." for lane in lanes[1:]]
+        return lanes, notes + skipped
+
+    @classmethod
+    def open_relays(cls, gateway: str, lanes: List[Dict[str, Any]]) -> List[SweBenchRelay]:
+        """
+        Gives each replica lane an address its containers can reach: a relay on the gateway.
+
+        Args:
+            gateway: The benchmark network's gateway.
+            lanes: The replica lanes; each gets `model_url`.
+
+        Returns:
+            List[SweBenchRelay]: The relays, to close when the run ends.
+        """
+        relays = []
+        for lane in lanes:
+            target = urlparse(lane["host"])
+            relay = SweBenchRelay(gateway, (target.hostname, target.port or 8000))
+            lane["model_url"] = f"http://{gateway}:{relay.start()}"
+            relays.append(relay)
+        return relays
+
+    @classmethod
     def schedule(cls, store: SweBenchRunStore, pending: List[str], rows: Dict[str, Dict[str, Any]],
                  manifest: Dict[str, Any], settings: "swe_bench_settings.SweBenchSettings",
                  runtime_hash: str, model_url: str, vllm_host: str, puffin_bin: str, parallel: int,
                  end: Optional[datetime], extra_env: Dict[str, str],
-                 indexes: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[str]:
+                 indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+                 lanes: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
         """
         Starts instances while the machine is quiet, memory and disk admit one more and `--until`
-        has not passed; waits for the running ones.
+        has not passed; waits for the running ones. With `lanes`, an instance goes to the first
+        model server with room and nothing in its way.
 
         Returns:
             Optional[str]: Why the run stopped before finishing `pending`; None when it finished.
         """
+        lanes = lanes or [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel,
+                           "model_url": model_url}]
         queue = list(pending)
         active: List[tuple] = []
         waiting_for: Optional[str] = None
@@ -379,15 +441,30 @@ class SweBenchRunner:
                     if stopped:
                         queue.clear()
                         continue
-                if queue and len(active) < parallel:
-                    reason = cls.admission.start_blocker(vllm_host, puffin_bin, active, settings)
-                    if reason is None:
+                lane_of = NightShiftRunner.lane_of
+                free = [lane for lane in lanes
+                        if sum(1 for _, run in active if lane_of(run, vllm_host) == lane["host"]) < lane["parallel"]]
+                if queue and free:
+                    reason, lane = None, None
+                    for candidate in free:
+                        blocked = cls.admission.start_blocker(candidate["host"], puffin_bin, active, settings) \
+                            if candidate.get("node") is None else \
+                            cls.admission.start_blocker(candidate["host"], puffin_bin, active, settings, local=False)
+                        if blocked is None:
+                            reason, lane = None, candidate
+                            break
+                        reason = reason or (blocked if candidate.get("node") is None
+                                            else f"{candidate['name']}: {blocked}")
+                    if lane is not None:
                         instance_id = queue.pop(0)
                         run = SweBenchInstanceRun(
                             store, rows[instance_id], manifest["images"][instance_id]["image"],
                             manifest["model_name_or_path"], settings, SweBenchRuntime.directory(),
-                            model_url, time.time() + settings.task_timeout_s, extra_env,
+                            lane.get("model_url") or model_url, time.time() + settings.task_timeout_s, extra_env,
                             (indexes or {}).get(instance_id))
+                        run.lane_host = lane["host"]
+                        if lane.get("node"):
+                            run.notes.append(f"model server: {lane['name']} (a replica of this machine's model)")
                         thread = threading.Thread(target=cls._run_one, args=(run,),
                                                   name=f"swe-{instance_id}", daemon=True)
                         thread.start()

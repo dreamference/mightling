@@ -1011,6 +1011,9 @@ class DreamferenceCLIController:
         node_run_parser.add_argument("--time", default=None, help="The job's time limit (default 90m; the node sets the ceiling)")
         node_run_parser.add_argument("--test", default=None, help="A command that decides pass or fail, run after the job's own")
         node_run_parser.add_argument("--gpu", action="store_true", help="Ask for the GPU (nodes refuse this for now)")
+        node_run_parser.add_argument("--setup", default=None, help="The command that builds the job's environment, run once per lock-file content and kept on the node")
+        node_run_parser.add_argument("--out", default=None, help="A folder the job writes that comes back as files (to ~/.puffin/jobs/received/<id>), never as a commit")
+        node_run_parser.add_argument("--bind", action="append", default=None, help="A path on the node to bind read-only; the node's [node] bindable decides which are allowed (repeatable)")
         node_run_parser.add_argument("job_command", nargs=argparse.REMAINDER, help="-- then the command and its arguments")
         node_jobs_parser = node_subparsers.add_parser("jobs", help="List the jobs on a paired node, or on every paired node")
         node_jobs_parser.add_argument("name", nargs="?", default=None, help="A paired node (default: all)")
@@ -1018,9 +1021,13 @@ class DreamferenceCLIController:
         node_logs_parser.add_argument("job", help="The job id")
         node_cancel_parser = node_subparsers.add_parser("cancel", help="Stop a running job")
         node_cancel_parser.add_argument("job", help="The job id")
-        node_fetch_parser = node_subparsers.add_parser("fetch", help="Bring a job's result branch into the repository it was sent from")
+        node_fetch_parser = node_subparsers.add_parser("fetch", help="Bring a job's result branch into the repository it was sent from, and its --out files")
         node_fetch_parser.add_argument("job", help="The job id")
         # The commands the other side of a pairing runs; not for typing.
+        node_sync_parser = node_subparsers.add_parser("sync-model", help="Copy a model's files from this machine's cache to a paired node, so it need not download them")
+        node_sync_parser.add_argument("name", help="The paired node")
+        node_sync_parser.add_argument("model", help="A key of the model matrix")
+        node_sync_parser.add_argument("--address", default=None, help="Reach the node at this address instead, such as its QSFP link's")
         node_job_exec_parser = node_subparsers.add_parser("job-exec", help="(Run inside a job's systemd unit) carry out one job")
         node_job_exec_parser.add_argument("job", help="The job id")
         node_subparsers.add_parser("authorize", help="(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only")
@@ -2244,6 +2251,9 @@ class DreamferenceCLIController:
                 sys.exit(NodeRemote.start(args.name))
             if args.node_command == "stop":
                 sys.exit(NodeRemote.stop(args.name))
+            if args.node_command == "sync-model":
+                from dreamference.node import NodeModelSync
+                sys.exit(NodeModelSync.sync(args.name, args.model, address=args.address))
             if args.node_command in ("run", "jobs", "logs", "cancel", "fetch", "job-exec"):
                 from dreamference.node import NodeJob, NodeJobSender
                 if args.node_command == "run":
@@ -2253,7 +2263,9 @@ class DreamferenceCLIController:
                     sys.exit(NodeJobSender.run(args.name, job_command,
                                                memory=options.memory or args.memory,
                                                time_limit=options.time or args.time,
-                                               test=options.test or args.test, gpu=options.gpu or args.gpu))
+                                               test=options.test or args.test, gpu=options.gpu or args.gpu,
+                                               setup=options.setup or args.setup, out=options.out or args.out,
+                                               binds=(args.bind or []) + options.bind))
                 if args.node_command == "jobs":
                     sys.exit(NodeJobSender.jobs(args.name))
                 if args.node_command == "logs":
@@ -2267,7 +2279,7 @@ class DreamferenceCLIController:
                 sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
             if args.node_command == "serve-job":
                 sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
-            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop,run,jobs,logs,cancel,fetch}")
+            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
             sys.exit(2)
 
         elif args.command == "host":

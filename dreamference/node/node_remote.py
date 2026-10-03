@@ -22,14 +22,17 @@ class NodeRemote:
         """
         Returns:
             List[str]: One line per node on the network: name, address, the model it serves and
-            its context, its load, whether it is paired, and which one is this machine.
+            its context, its load, its free memory (this machine's and paired nodes' only: memory
+            is not on the open model port, so it is asked over the pairing), whether it is paired,
+            and which one is this machine.
         """
         from dreamference.night_shift.night_shift_host import NightShiftHost
         nodes = NodeBrowser.browse()
         if not nodes:
             return ["No Puffin node answers on this network (`puffin-admin node enable` advertises this one)."]
         mine = NodeIdentity.read()
-        paired = {record["node"] for record in NodePairing.paired()}
+        records = {record["node"]: record for record in NodePairing.paired()}
+        paired = set(records)
         lines = []
         for node in sorted(nodes, key=lambda entry: entry["name"]):
             host = f"http://{cls.url_host(node['address'])}:{node['port']}"
@@ -42,6 +45,9 @@ class NodeRemote:
                 detail = f"{serving}, {load}{pool}"
             else:
                 detail = f"model server {node.get('state', 'not answering')}"
+            memory = cls.memory(node.get("node"), mine, records)
+            if memory:
+                detail = f"{detail}, {memory}"
             tags = []
             if mine and node.get("node") == mine:
                 tags.append("this machine")
@@ -53,6 +59,34 @@ class NodeRemote:
                 tags.append("not a coding model")
             lines.append(f"{node['name']}  {host}/v1  {detail}  Puffin {node.get('version', '?')}  ({'; '.join(tags)})")
         return lines
+
+    @classmethod
+    def memory(cls, node_id: Optional[str], mine: Optional[str], records: Dict[str, Dict[str, Any]]) -> Optional[str]:
+        """
+        Args:
+            node_id: The listed node's id.
+            mine: This machine's node id.
+            records: The paired nodes' records, by id.
+
+        Returns:
+            Optional[str]: `<free> of <total> GiB free`, or None for a node that is neither this
+            machine nor paired, or that did not say.
+        """
+        from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
+        from dreamference.node.node_lanes import NodeLanes
+        if node_id and node_id == mine:
+            try:
+                available, total = NightShiftHost.mem_available_bytes(), NightShiftHost.mem_total_bytes()
+            except OSError:
+                return None
+        elif node_id in records:
+            info = NodeLanes.info(records[node_id]) or {}
+            available, total = info.get("mem_available"), info.get("mem_total")
+        else:
+            return None
+        if not isinstance(available, int) or not isinstance(total, int) or not total:
+            return None
+        return f"{available / GIB:.1f} of {total / GIB:.1f} GiB free"
 
     @classmethod
     def url_host(cls, address: str) -> str:

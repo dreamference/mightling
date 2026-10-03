@@ -952,3 +952,75 @@ def test_status_and_clean_touch_only_the_benchmarks_own_things(bench, capsys):
     assert not (SweBenchRunStore("r1").directory / "scratch").exists()
     assert bench["docker"].present == set()
     assert ["ps", "-aq", "--filter", "label=puffin.swe-bench.run=r1"] in bench["docker"].calls
+
+
+# -- a replica's model server (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3) ---------------------------
+
+class BusyHere(QuietMachine):
+    """This machine's server is busy; a replica's is free."""
+
+    @classmethod
+    def start_blocker(cls, vllm_host, puffin_bin, active, settings, local=True):
+        return "the model server is serving a request that is not the night run's" if local else None
+
+
+def test_instances_go_to_a_replica_through_a_relay_on_the_gateway(bench, monkeypatch):
+    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "parallel": 1, "budget": None}
+    monkeypatch.setattr(SweBenchRunner, "admission", BusyHere)
+    monkeypatch.setattr(SweBenchRunner, "lanes", classmethod(
+        lambda cls, vllm_host, served, settings, parallel: (
+            [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel, "budget": None},
+             dict(replica)], ["Also using spark-2's model server"])))
+    opened = []
+
+    def relays(cls, gateway, lanes):
+        for lane in lanes:
+            lane["model_url"] = f"http://{gateway}:40001"
+            opened.append((gateway, lane["host"]))
+        return []
+    monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(relays))
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    assert opened == [("172.30.0.1", "http://192.168.50.106:8000")]
+    created = [call for call in bench["docker"].calls if call[0] == "run"]
+    hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
+             for call in created}
+    assert hosts == {"http://172.30.0.1:40001"}                         # the relay, never the LAN address
+    store = SweBenchRunStore("r1")
+    assert all("model server: spark-2 (a replica of this machine's model)" in store.state(i)["notes"]
+               for i in ("acme__widget-1", "acme__widget-2"))
+
+
+def test_without_a_paired_node_a_benchmark_asks_nobody(bench, monkeypatch):
+    from dreamference.node import NodePairing
+    monkeypatch.setattr(NodePairing, "run", classmethod(lambda cls, *args, **kwargs: pytest.fail("no SSH")))
+    lanes, notes = SweBenchRunner.lanes("http://127.0.0.1:8000", ("m", 1), bench["settings"], 2)
+    assert [(lane["host"], lane["parallel"]) for lane in lanes] == [("http://127.0.0.1:8000", 2)] and notes == []
+
+
+def test_the_relay_forwards_to_its_one_target_and_closes():
+    import socket
+    import threading
+    from dreamference.swe_bench import SweBenchRelay
+    upstream = socket.socket()
+    upstream.bind(("127.0.0.1", 0))
+    upstream.listen(1)
+
+    def answer():
+        connection, _ = upstream.accept()
+        request = connection.recv(1024)
+        connection.sendall(b"HTTP/1.0 200 OK\r\n\r\n" + request.split()[1])
+        connection.close()
+    threading.Thread(target=answer, daemon=True).start()
+    relay = SweBenchRelay("127.0.0.1", upstream.getsockname())
+    port = relay.start()
+    assert port != upstream.getsockname()[1]
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+        client.sendall(b"GET /v1/models HTTP/1.0\r\n\r\n")
+        reply = b""
+        while chunk := client.recv(1024):
+            reply += chunk
+    assert reply.endswith(b"/v1/models")
+    relay.close()
+    with pytest.raises(OSError):
+        socket.create_connection(("127.0.0.1", port), timeout=1).recv(1)
+    upstream.close()
