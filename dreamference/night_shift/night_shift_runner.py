@@ -19,8 +19,9 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, Final, List, Optional, Tuple
 
+from dreamference.night_shift.night_shift_compaction_audit import NightShiftCompactionAudit
 from dreamference.night_shift.night_shift_host import GIB, NIGHT_POOL_SHARE, NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue, RUNNABLE_STATUSES
@@ -44,7 +45,10 @@ class NightShiftRunner:
     host = NightShiftHost
     index = NightShiftIndex
     remote = NightShiftRemote
+    compaction_audit = NightShiftCompactionAudit
     ignore_sessions: bool = False
+    # The compaction audit's lines for this run's report (compaction spec §10.3).
+    compactions: ClassVar[list[str]] = []
 
     @classmethod
     def run(cls, until: Optional[str] = None, minutes: Optional[float] = None,
@@ -87,10 +91,11 @@ class NightShiftRunner:
             if not held:
                 print("⚠️  Another night run holds the runner lock.")
                 return 1
+            cls.compactions = cls.audit_compactions(night_dir, settings)
             pending = cls.pending_tasks(night_dir)
             sent = cls.remote.sent_tasks(night_dir)
             if not pending and not sent:
-                print("✅ Night Shift: nothing queued.")
+                print(f"✅ Night Shift: nothing queued.{cls._audit_only_report(night_dir, started)}")
                 return 0
             print(f"🌙 Night Shift: {len(pending)} task(s) queued; window ends {end:%H:%M}.")
             notes: List[str] = []
@@ -463,6 +468,37 @@ class NightShiftRunner:
         return candidate
 
     @classmethod
+    def audit_compactions(cls, night_dir: Path, settings: NightShiftSettings) -> list[str]:
+        """Audits the compactions of the sessions written since the last run (compaction spec §10.3).
+
+        Args:
+            night_dir: The queue directory, where the audit keeps its state.
+            settings: Night Shift settings (`compaction_audit`).
+
+        Returns:
+            list[str]: The report's lines; empty when switched off or nothing compacted.
+        """
+        if not settings.compaction_audit:
+            return []
+        sessions = Path(os.environ.get("CODEX_HOME") or Path.home() / ".puffin") / "sessions"
+        try:
+            return cls.compaction_audit.run(sessions, night_dir)
+        except Exception as error:  # noqa: BLE001 - a report section must never stop a night run
+            return [f"The audit could not run: {error}."]
+
+    @classmethod
+    def _audit_only_report(cls, night_dir: Path, started: datetime) -> str:
+        """Writes a report holding only the compaction audit, when it has something to say.
+
+        Returns:
+            str: Where it went, as a sentence for the console line; "" when nothing was written.
+        """
+        if not cls.compactions:
+            return ""
+        return f" Compaction audit: {cls._write_report(night_dir, started, [], [])}"
+
+    @classmethod
     def _write_report(cls, night_dir: Path, started: datetime, tasks: List[Dict[str, Any]],
                       notes: List[str]) -> Path:
-        return NightShiftReport.write(night_dir, started, NightShiftReport.render(started, tasks, notes))
+        text = NightShiftReport.render(started, tasks, notes, compactions=cls.compactions)
+        return NightShiftReport.write(night_dir, started, text)

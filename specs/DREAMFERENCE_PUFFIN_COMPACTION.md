@@ -1,6 +1,6 @@
 # Puffin Compaction — at night, at idle, and what the diffusion model can do
 
-**Status:** partly implemented on 2026-10-02, after the Phase 0 measurement (§11): the interactive limit follows the KV pool (§4.2, on), the ledger hook is built and registered by the launcher (§10.1, on by default since 2026-10-02), and Night Shift's per-task limit is a setting (§4.1, off by default, because the measurement said so). §4.3, §4.4, §10.2 and §10.3 are not built. Before that: §1 and §3 are measurements and a literature review made on 2026-10-01. §7–§10 were added the same day for a second question, the compaction **prompt and algorithm**: §7 is read from the pinned Codex source, §9 is measured, §8 is literature, §10 is proposed.
+**Status:** partly implemented on 2026-10-02, after the Phase 0 measurement (§11): the interactive limit follows the KV pool (§4.2, on), the ledger hook is built and registered by the launcher (§10.1, on by default since 2026-10-02), and Night Shift's per-task limit is a setting (§4.1, off by default, because the measurement said so). On 2026-10-03 (§12) turn-end compaction (§4.3) was built as a setting, off until measured, and the nightly audit of §10.3 as a Night Shift built-in, on; its replay half, §4.4 and §10.2 are not built. Before that: §1 and §3 are measurements and a literature review made on 2026-10-01. §7–§10 were added the same day for a second question, the compaction **prompt and algorithm**: §7 is read from the pinned Codex source, §9 is measured, §8 is literature, §10 is proposed.
 **Question asked:** can Puffin's compaction be improved by running it at night, and continuously with the diffusion model beside the main one?
 **Short answer:** compaction is not slow or poor on this machine; it is **switched off in effect**. The useful changes are two configuration values and one Night Shift task, none needs a Codex patch, and the current diffusion sidecar has no part in any of them.
 **Short answer on the prompt and algorithm (§7–§10):** Codex's stock prompt already writes a good summary with this model, except for the trail of files; a structured prompt fixed the trail and lost the code, a trade and not a gain. What compaction loses is not prose but the **tool history**: every tool call and output is dropped, and the summary alone decides which paths survive. The fix that measured best is not a model at all: a rule-built ledger (files touched, failed commands, last test result) re-injected by a hook after each compaction. At night the useful job is an audit of the day's compactions; the diffusion sidecar failed the three new roles it was tried in.
@@ -82,6 +82,8 @@ Figures in this table are from abstracts and summaries read on 2026-10-01, not f
 The launcher already reads `/v1/models`; it would also read the pool (`sglang:max_total_num_tokens`, or `num_gpu_blocks × block_size` on vLLM, as `NightShiftHost` does) and write `auto_compact_token_limit = min(max_model_len, pool × 0.6)`: about 94K today. The pool is read at each start because it changes between launches (§1). The 0.6 is a placeholder, leaving room for a second stream and the summary request; Phase 0 sets it. No session recorded so far would have compacted; one that grows now compacts instead of exhausting the pool. `max_context_window` should be capped at the pool the same way once §1's untested case is tested. The interactive limit and Night Shift's do not compete: a night run does not start while a `puffin` session is open.
 
 ### 4.3 Try: compact at idle, with Codex's own turn-end compaction
+
+*Built as a setting, off by default (§12.1): `puffin_turn_end_compaction = true`. Not measured.*
 
 Codex has `model_post_turn_compact_threshold_percent` (default 0, off): when a turn **ends** above that percentage of the window, and no input is queued, it compacts then, while the user reads the answer, instead of in the middle of the next turn. This is "continuous" compaction at the only moment it is free. The launcher would set it so the turn-end threshold sits below the §4.2 limit (for example 25% of 262K ≈ 65K). Unverified: how it behaves in `puffin exec`, and whether a user who types at once waits for it.
 
@@ -264,6 +266,8 @@ If §10.1 ships, the prompt's **Files** and **Commands** sections become redunda
 
 ### 10.3 Night: audit the day's compactions (new), and replay candidates
 
+*The audit is built and on (§12.2); the replay is not.*
+
 Not compaction at night, which has nothing to work on (§4.5), but **measurement at night**, when the model is idle and tokens are free:
 
 - **Audit.** For every `compacted` item in the day's rollouts, compare the identifiers in the items it replaced with the summary: paths acted on, failed commands, test results. Report the losses per session in the Night Shift morning report. No model call. It answers, on real sessions rather than on §9.1's one made-up task, whether summaries lose what matters.
@@ -342,5 +346,40 @@ The unlimited runs peaked at 79,909 and 49,241 prompt tokens: the same task vari
 - **The ledger is on by default** (decided 2026-10-02, after Phase 0). It writes a trusted hook into the user's `config.toml` at every launch; `puffin_compaction_ledger = false` removes it at the next one. Its benefit rests on two pairs on one task (§11.2).
 - **Night Shift's budget is not enforced.** With `compact_at = 0` a task may grow to the launcher's 94K; three tasks at once could ask for more than the pool. What SGLang does then (queue, retract, or fail) was not tested.
 - **The tool-call summaries** (§11.2 item 4).
-- **§4.3, §4.4, §10.2, §10.3**: not built.
+- **§4.4, §10.2 and §10.3's replay**: not built. §4.3 and §10.3's audit: see §12.
 
+---
+
+## 12. Phase 2 as built (2026-10-03)
+
+Code and unit tests only: an overnight benchmark held the model server, so nothing here has run in a live session or been measured.
+
+### 12.1 Turn-end compaction (§4.3)
+
+Read from the pinned source (`rust-v0.158.0`), which settles §4.3's "unverified":
+
+- **The key** is `model_post_turn_compact_threshold_percent` (`config/src/config_toml.rs`), 0–100, 0 or absent meaning off. It is a percentage of the **usable** window, the model's window less `effective_context_window_percent` (95 when the catalog sets none, as Puffin's does): `context_window.rs`. On the default model the base is therefore 249,036 tokens, not 262,144.
+- **When it fires**: after a turn's final answer, when no input is queued and the turn was not cancelled (`session/turn.rs`), if the context has passed that share of the usable window **or** the ordinary limit has been reached. It does not run with the `TokenBudget` feature on. A compaction interrupted by the user's next message ends with the turn's error; any other failure is logged and the completed turn kept.
+- **`exec` does it too.** The turn loop is shared, so `puffin exec` would compact after its last answer and then exit: about 24 s (§9.2) spent on a summary nobody reads. The launcher therefore leaves the key off for `exec` and `review`, and sets it for the TUI, `resume`, `fork` and `app-server` (`lib.rs`, via clap's own subcommand lookup). Night Shift and SWE-bench run `exec`, so neither is affected.
+
+What the launcher does (`puffin-rs/src/compaction.rs`, `with_turn_end`): when switched on (`DREAMFERENCE_PUFFIN_TURN_END_COMPACTION`, then `puffin_turn_end_compaction` in the config file, then off), it reads the limit the session will use (a `-c model_auto_compact_token_limit` on the command line, which §4.2 has just put there, then `config.toml`, then Codex's own 90%-of-window cap), takes 70% of it and converts that to Codex's base: **26** for the default model, i.e. a turn ends in a compaction once the context passes 64,749 tokens, below the 94,144 limit. A `-c model_context_window` narrows the base, as it does in Codex. A percentage the user set, on the command line or in `config.toml`, is left alone. The highest it can produce is 66 (70% of Codex's 90% cap). Tests: six in `compaction.rs`; the launcher's 143 pass.
+
+**To measure before switching it on** (§5 Phase 2): a TUI session that grows past 65K, with and without, recording the wall time of the turn-end compaction, whether a message typed during it waits or interrupts it, and how many mid-turn compactions it saves. It interacts with masking (CONTEXT_BUDGET, branch `ctx/budget`), which also acts below the limit; measure the two separately first.
+
+### 12.2 The nightly audit (§10.3)
+
+`dreamference/night_shift/night_shift_compaction_audit.py`, run by `puffin-admin night run` under its lock, before the queue is looked at; `[night] compaction_audit = false` switches it off. No model call. It reads the rollouts under `$CODEX_HOME/sessions` written since the previous audit (the first looks back a day; the end time is kept in `night/compaction-audit.json`), at most 400 files of at most 64 MB, and for each `compacted` record compares the span the summary replaced with the summary:
+
+| Identifier | Taken from the span | Counts as kept when the summary has |
+|---|---|---|
+| Files changed | `apply_patch` headers; `>`/`>>`/`tee`/`sed -i` targets; files a script opens for writing. Files outside the working directory (`/tmp/repro.py`) are left out as scratch | the path, its last two parts, or its basename unless generic (`__init__.py`) |
+| Failed commands | exit code ≠ 0; identified by the files they name and the last error class in their output. A failure with neither (`python - <<EOF` that printed no error name) is not judged | any of those |
+| Last test result | the last pytest, `cargo test`, Jest or sympy summary line | every count in it (`3 failed`, `12 passed`) |
+
+It also counts, of the losses, how many the ledger handed over after the summary names (§10.1), and flags a summary that is a stray `<tool_call>` (§11.2 item 4). The morning report gets a `## Compactions` section: one totals line, then one line per compaction that lost something (at most 20). A night with an empty queue still writes a report when the audit found compactions; one with neither writes nothing, as before.
+
+**First readings**, run over the recorded benchmark sessions (not a night run): the 14 index-on runs of 2026-10-03 had 27 compactions whose summaries named 24 of 34 files changed, 30 of 54 failed commands and 2 of 5 last test results; the 14 index-off runs, 15 compactions, 25 of 41, 31 of 63 and 0 of 2. On this machine's own sessions: 51 compactions in 11 sessions, almost all from the compaction tests, which run read-only commands, and one stray tool-call summary. These are rule-based matches: a summary that names a file without saying what changed in it counts as keeping it, and an error class the whole task is about (`NotImplementedError`) is easily named. The numbers bound losses from below.
+
+Tests: eight in `tests/test_night_shift_compaction_audit.py` (synthetic rollouts in Codex's record shapes; nothing reads the user's sessions), and Night Shift's own pass.
+
+**Not built:** the replay half of §10.3 (re-summarising each compaction with the §10.2 candidate), which needs the model in the window, and §4.4.

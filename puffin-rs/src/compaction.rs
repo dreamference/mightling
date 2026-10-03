@@ -12,6 +12,10 @@
 //! 2. **The ledger hook.** `puffin ledger` (ledger.rs) is registered in `config.toml` as a
 //!    `SessionStart` hook with matcher `compact`, together with the hash that marks it trusted:
 //!    Codex skips a hook nobody trusted, silently. The hook is this binary and nothing else.
+//! 3. **Compaction at the end of a turn** (§4.3), off until measured: Codex's
+//!    `model_post_turn_compact_threshold_percent` compacts after a final answer, while the user
+//!    reads it, instead of in the middle of the next turn. [`with_turn_end`] sets it so that it
+//!    fires below the limit of point 1, for sessions someone reads (not `exec`).
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -40,6 +44,38 @@ pub const LIMIT_KEY: &str = "model_auto_compact_token_limit";
 /// Whether the ledger hook is registered when nothing says otherwise. On since 2026-10-02: Phase 0
 /// (specs/DREAMFERENCE_PUFFIN_COMPACTION.md §11.2) found it halved compactions and commands.
 pub const LEDGER_DEFAULT: bool = true;
+
+/// Codex's key for turn-end compaction (`codex-rs/config/src/config_toml.rs`, rust-v0.158.0): the
+/// percentage of the *usable* context window at which a turn that has just given its final answer
+/// compacts, when no input is queued (`core/src/session/turn.rs`). 0 or absent switches it off.
+/// It fires as well whenever the ordinary limit has been reached (`context_window.rs`).
+pub const TURN_END_KEY: &str = "model_post_turn_compact_threshold_percent";
+
+/// The environment variable that switches turn-end compaction on or off for one process.
+pub const TURN_END_ENV: &str = "DREAMFERENCE_PUFFIN_TURN_END_COMPACTION";
+
+/// The key in the Dreamference config file.
+pub const TURN_END_SETTING: &str = "puffin_turn_end_compaction";
+
+/// Off until the measurement of §5 Phase 2 says what a turn-end compaction costs a user who types
+/// at once (about 24 s per compaction measured, §9.2).
+pub const TURN_END_DEFAULT: bool = false;
+
+/// Where the turn-end threshold sits, as a share of the session's compaction limit: 70% of
+/// today's 94K limit is about 66K, the spec's example (§4.3: 25% of 262K ≈ 65K).
+pub const TURN_END_SHARE_PERCENT: u64 = 70;
+
+/// The headroom Codex keeps off a model's window when it has no `effective_context_window_percent`
+/// (the catalog sets none): `default_effective_context_window_percent` in
+/// `protocol/src/openai_models.rs`. The turn-end percentage is of the window *after* it.
+const EFFECTIVE_WINDOW_PERCENT: u64 = 95;
+
+/// Codex compacts at 90% of the window at most, whatever the limit says
+/// (`ModelInfo::auto_compact_token_limit`).
+const MAX_LIMIT_PERCENT_OF_WINDOW: u64 = 90;
+
+/// Codex's key for the model's window; a `-c` of it narrows the catalog's (`with_config_overrides`).
+const WINDOW_KEY: &str = "model_context_window";
 
 /// Seconds Codex waits for the hook. It reads one file and runs `git status`.
 const HOOK_TIMEOUT_SEC: i64 = 10;
@@ -104,24 +140,112 @@ pub fn limit_for(max_model_len: u64, pool: Option<u64>) -> Option<u64> {
 /// passes its own, smaller limit this way, and it must win.
 pub fn with_limit(args: Vec<OsString>, limit: Option<u64>, config: &str) -> Vec<OsString> {
     let Some(limit) = limit else { return args };
-    let in_config = config
-        .parse::<toml::Table>()
-        .is_ok_and(|table| table.contains_key(LIMIT_KEY));
-    let words: Vec<String> = args.iter().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
-    let sets_key = |assignment: &str| assignment.split('=').next().is_some_and(|key| key.trim() == LIMIT_KEY);
-    let on_command_line = words.iter().enumerate().any(|(index, word)| match word.as_str() {
-        "-c" | "--config" => words.get(index + 1).is_some_and(|next| sets_key(next)),
-        _ => word
-            .strip_prefix("--config=")
-            .or_else(|| word.strip_prefix("-c").filter(|rest| !rest.is_empty()))
-            .is_some_and(sets_key),
-    });
-    if in_config || on_command_line {
+    if is_set(&args, config, LIMIT_KEY) {
         return args;
     }
+    with_assignment(args, LIMIT_KEY, limit)
+}
+
+/// Turn-end compaction for this launch: reads the switch and `config.toml`, then
+/// [`with_turn_end`]. Called once the limit of [`prepare`] is on the command line.
+pub fn prepare_turn_end(args: Vec<OsString>, codex_home: &Path, window: u64, is_read: bool) -> Vec<OsString> {
+    let settings = crate::config_file()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .unwrap_or_default();
+    let enabled = turn_end_enabled(std::env::var(TURN_END_ENV).ok().as_deref(), &settings);
+    let config = std::fs::read_to_string(codex_home.join("config.toml")).unwrap_or_default();
+    with_turn_end(args, &config, window, is_read, enabled)
+}
+
+/// Whether turn-end compaction is on: [`TURN_END_ENV`], then [`TURN_END_SETTING`] in the
+/// Dreamference config file (`settings`), then [`TURN_END_DEFAULT`].
+pub fn turn_end_enabled(env: Option<&str>, settings: &toml::Table) -> bool {
+    if let Some(value) = env.filter(|value| !value.is_empty()) {
+        return matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on");
+    }
+    settings.get(TURN_END_SETTING).and_then(toml::Value::as_bool).unwrap_or(TURN_END_DEFAULT)
+}
+
+/// The percentage to give [`TURN_END_KEY`] so that a turn ends in a compaction once the context
+/// passes [`TURN_END_SHARE_PERCENT`] of `limit`. Codex reads the percentage against the usable
+/// window, `window` less its 5% headroom, so the share is converted to that base: 26 for the
+/// default model (64,749 of its 262,144 tokens, below the 94,144 limit). At most 66, since Codex
+/// never compacts later than 90% of the window. `None` only for a window of 0.
+pub fn turn_end_percent(window: u64, limit: u64) -> Option<u8> {
+    let usable = window * EFFECTIVE_WINDOW_PERCENT / 100;
+    if usable == 0 {
+        return None;
+    }
+    let target = limit.min(window * MAX_LIMIT_PERCENT_OF_WINDOW / 100) * TURN_END_SHARE_PERCENT / 100;
+    let percent = (target * 100 / usable).max(1);
+    (percent < 100).then(|| percent as u8)
+}
+
+/// Puts `-c model_post_turn_compact_threshold_percent=<p>` in front of the arguments when
+/// turn-end compaction is `enabled` and the session `is_read` (the TUI, `resume`, `app-server`:
+/// not `exec`, whose process ends with its turn, so a compaction after its last answer would cost
+/// ~24 s and serve nothing). The limit it sits below is the one the session will use: a `-c` on
+/// the command line (point 1, or Night Shift's), then `config.toml` (`config`), then the window's.
+/// A percentage the user set themselves, either way, is left alone.
+pub fn with_turn_end(args: Vec<OsString>, config: &str, window: u64, is_read: bool, enabled: bool) -> Vec<OsString> {
+    if !enabled || !is_read || is_set(&args, config, TURN_END_KEY) {
+        return args;
+    }
+    let number = |key: &str| value_of(&args, config, key).and_then(|text| text.parse::<u64>().ok());
+    let window = number(WINDOW_KEY).map_or(window, |narrowed| narrowed.min(window));
+    let limit = number(LIMIT_KEY).unwrap_or(window);
+    match turn_end_percent(window, limit) {
+        Some(percent) => with_assignment(args, TURN_END_KEY, percent),
+        None => args,
+    }
+}
+
+/// Whether `key` is set on the command line (`-c key=…` in any of its spellings) or at the top of
+/// `config.toml` (`config`).
+fn is_set(args: &[OsString], config: &str, key: &str) -> bool {
+    command_line_value(args, key).is_some()
+        || config.parse::<toml::Table>().is_ok_and(|table| table.contains_key(key))
+}
+
+/// What `key` is set to: the command line first, as Codex applies `-c` over the file.
+fn value_of(args: &[OsString], config: &str, key: &str) -> Option<String> {
+    command_line_value(args, key).or_else(|| {
+        let table = config.parse::<toml::Table>().ok()?;
+        match table.get(key)? {
+            toml::Value::Integer(number) => Some(number.to_string()),
+            toml::Value::String(text) => Some(text.clone()),
+            _ => None,
+        }
+    })
+}
+
+/// The value of the last `-c key=value` on the command line (`-c k=v`, `--config k=v`,
+/// `--config=k=v`, `-ck=v`); `Some("")` for a `-c key` with no value.
+fn command_line_value(args: &[OsString], key: &str) -> Option<String> {
+    let words: Vec<String> = args.iter().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let mut found = None;
+    for (index, word) in words.iter().enumerate() {
+        let assignment = match word.as_str() {
+            "-c" | "--config" => words.get(index + 1).map(String::as_str),
+            _ => word
+                .strip_prefix("--config=")
+                .or_else(|| word.strip_prefix("-c").filter(|rest| !rest.is_empty())),
+        };
+        let Some(assignment) = assignment else { continue };
+        let (name, value) = assignment.split_once('=').unwrap_or((assignment, ""));
+        if name.trim() == key {
+            found = Some(value.trim().trim_matches('"').to_string());
+        }
+    }
+    found
+}
+
+/// `args` with `-c key=value` after the program name.
+fn with_assignment(args: Vec<OsString>, key: &str, value: impl std::fmt::Display) -> Vec<OsString> {
     let mut args = args.into_iter();
     let mut out: Vec<OsString> = args.next().into_iter().collect();
-    out.extend(["-c".into(), format!("{LIMIT_KEY}={limit}").into()]);
+    out.extend(["-c".into(), format!("{key}={value}").into()]);
     out.extend(args);
     out
 }
@@ -366,6 +490,67 @@ mod tests {
         assert_eq!(with_limit(given.clone(), Some(94_144), "model_auto_compact_token_limit = 64000\n"), given);
         // Another `-c` does not count.
         assert_eq!(with_limit(args(&["puffin", "-c", "x=1"]), Some(1), "").len(), 5);
+    }
+
+    #[test]
+    fn the_turn_end_threshold_sits_below_the_limit_on_codexs_base() {
+        // The default model: 70% of the 94,144 limit is 65,900; on the usable window of
+        // 249,036 (95% of 262,144) that is 26%, i.e. 64,749 tokens.
+        assert_eq!(turn_end_percent(262_144, 94_144), Some(26));
+        let threshold = 262_144 * EFFECTIVE_WINDOW_PERCENT / 100 * 26 / 100;
+        assert!(threshold < 94_144 && threshold > 94_144 / 2, "{threshold}");
+        // With no limit below the window, Codex's own 90% cap is the limit: 63% of the window.
+        assert_eq!(turn_end_percent(262_144, 262_144), Some(66));
+        // Never 0 (which would switch it off), and nothing for an empty window.
+        assert_eq!(turn_end_percent(262_144, 100), Some(1));
+        assert_eq!(turn_end_percent(0, 0), None);
+    }
+
+    #[test]
+    fn turn_end_compaction_is_off_unless_switched_on() {
+        let on: toml::Table = "puffin_turn_end_compaction = true".parse().unwrap();
+        let off: toml::Table = "puffin_turn_end_compaction = false".parse().unwrap();
+        assert!(!turn_end_enabled(None, &toml::Table::new()));
+        assert!(turn_end_enabled(None, &on));
+        assert!(!turn_end_enabled(Some("0"), &on));
+        assert!(turn_end_enabled(Some("on"), &off));
+        assert!(!turn_end_enabled(Some(""), &off));
+    }
+
+    #[test]
+    fn turn_end_follows_the_limit_on_the_command_line() {
+        let given = with_limit(args(&["puffin"]), Some(94_144), "");
+        assert_eq!(
+            with_turn_end(given.clone(), "", 262_144, true, true),
+            [args(&["puffin", "-c", "model_post_turn_compact_threshold_percent=26"]), given[1..].to_vec()].concat()
+        );
+        // The limit in config.toml counts when the command line has none.
+        let from_file = with_turn_end(args(&["puffin"]), "model_auto_compact_token_limit = 94144\n", 262_144, true, true);
+        assert_eq!(from_file, args(&["puffin", "-c", "model_post_turn_compact_threshold_percent=26"]));
+        // A narrower window on the command line is the base Codex uses.
+        // 65,900 of a usable 124,518 (95% of 131,072) is 52%.
+        let narrowed = args(&["puffin", "-c", "model_context_window=131072", "-c", "model_auto_compact_token_limit=94144"]);
+        assert_eq!(command_line_value(&with_turn_end(narrowed, "", 262_144, true, true), TURN_END_KEY).as_deref(), Some("52"));
+    }
+
+    #[test]
+    fn turn_end_is_left_alone_for_exec_when_off_and_when_the_user_set_it() {
+        let given = args(&["puffin", "-c", "model_auto_compact_token_limit=94144", "exec", "hi"]);
+        assert_eq!(with_turn_end(given.clone(), "", 262_144, false, true), given);
+        assert_eq!(with_turn_end(given.clone(), "", 262_144, true, false), given);
+        let own = args(&["puffin", "--config=model_post_turn_compact_threshold_percent=40"]);
+        assert_eq!(with_turn_end(own.clone(), "", 262_144, true, true), own);
+        let in_file = "model_post_turn_compact_threshold_percent = 0\n";
+        assert_eq!(with_turn_end(args(&["puffin"]), in_file, 262_144, true, true), args(&["puffin"]));
+    }
+
+    #[test]
+    fn a_value_is_read_from_every_spelling_of_c_and_the_last_wins() {
+        let given = args(&["puffin", "-c", "a=1", "--config", "a=2", "--config=b=3", "-cc=\"4\"", "-c", "a=5"]);
+        assert_eq!(command_line_value(&given, "a").as_deref(), Some("5"));
+        assert_eq!(command_line_value(&given, "b").as_deref(), Some("3"));
+        assert_eq!(command_line_value(&given, "c").as_deref(), Some("4"));
+        assert_eq!(command_line_value(&given, "d"), None);
     }
 
     /// The hook and hash below are the ones a live session accepted on 2026-10-02: defined in a

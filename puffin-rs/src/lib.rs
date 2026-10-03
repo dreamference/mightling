@@ -296,6 +296,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     } else {
         args
     };
+    // Compaction at the end of a turn, when switched on, for sessions someone reads: not `exec` or
+    // `review`, whose process ends with the turn (compaction.rs; compaction spec §4.3).
+    let one_shot = subcommand
+        .and_then(|index| command.find_subcommand(&user_args[index]))
+        .is_some_and(|found| matches!(found.get_name(), "exec" | "review"));
+    let args = compaction::prepare_turn_end(args, &codex_home, model.max_model_len, !one_shot);
     // `default` is `model_catalog.json`, already named in `config.toml`; another prompt's catalog
     // is named for this process only, so a session it resumes keeps the prompt it recorded.
     let args = match catalog {

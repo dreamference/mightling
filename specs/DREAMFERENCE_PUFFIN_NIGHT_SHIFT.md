@@ -254,6 +254,7 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `idle_minutes` | `10` | How long the model must have been idle before a night starts (§5.2). |
 | `index` | `true` | Refresh each repository's code index before its tasks start (§11.1). |
 | `index_timeout` | `20m` | The most one repository's refresh may take; never more than half of what is left of the window. |
+| `compaction_audit` | `true` | Before the queue, audit the compactions of the sessions written since the last run for what their summaries lost, by rule and with no model call, into the report's `## Compactions` section; an empty queue still gets a report when there is something to say ([COMPACTION §12.2](./DREAMFERENCE_PUFFIN_COMPACTION.md)). |
 
 ---
 

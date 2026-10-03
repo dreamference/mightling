@@ -74,6 +74,9 @@ class NightShiftSettings:
         # Refresh each repository's code index before its tasks start (code-index spec §6.3).
         self.index: bool = bool(table.get("index", True))
         self.index_timeout_s: int = self.parse_duration(table.get("index_timeout", DEFAULT_INDEX_TIMEOUT))
+        # Audit the compactions of the day's sessions for what their summaries lost, by rule and with
+        # no model call, into the morning report (compaction spec §10.3).
+        self.compaction_audit: bool = bool(table.get("compaction_audit", True))
         # Other nodes' model servers a run may also use (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3):
         # "paired" (every paired node serving the same model), "none", or a list of names.
         self.nodes: Any = table.get("nodes", "paired")

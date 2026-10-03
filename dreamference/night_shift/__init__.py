@@ -3,6 +3,7 @@ Night Shift: coding tasks queued with `/night add` run overnight, each in its ow
 leave a branch and a morning report (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md).
 """
 
+from dreamference.night_shift.night_shift_compaction_audit import NightShiftCompactionAudit
 from dreamference.night_shift.night_shift_host import NightShiftHost
 from dreamference.night_shift.night_shift_index import NightShiftIndex
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
@@ -14,6 +15,7 @@ from dreamference.night_shift.night_shift_settings import NightShiftSettings
 from dreamference.night_shift.night_shift_task_run import NightShiftTaskRun
 
 __all__ = [
+    "NightShiftCompactionAudit",
     "NightShiftHost",
     "NightShiftIndex",
     "NightShiftQueue",
