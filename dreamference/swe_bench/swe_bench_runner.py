@@ -366,8 +366,13 @@ class SweBenchRunner:
             if manifest.get("code_index", "off") != "off" and pending:
                 # Every index is built before the first agent starts: an index run beside the
                 # agents would compete with them, and its time is not the agent's.
-                if SweBenchCodeIndex.ensure_runtime(SweBenchHarness.tool("patchelf")) is None:
+                code_hash = SweBenchCodeIndex.ensure_runtime(SweBenchHarness.tool("patchelf"))
+                if code_hash is None:
                     return 1
+                # Which `puffin-code` answered, beside the manifest, which is never edited: a
+                # resumed run may use another build, so each start appends its own line.
+                with open(store.directory / "puffin-code.sha256", "a") as record:
+                    record.write(f"{code_hash}  {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
                 print(f"🗂️  Indexing {len(pending)} repositories on the host (universal layer)...", flush=True)
                 for instance_id in pending:
                     image = manifest["images"][instance_id]["image"]

@@ -35,6 +35,17 @@ from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 # The arms `--code-index` accepts.
 ARMS: Final[tuple] = ("off", "universal")
 
+# Names a `puffin-code` to use in place of the installed one (`host_binary`).
+PUFFIN_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_PUFFIN_CODE"
+
+# The MCP server's name in Codex's configuration, and the variables Codex must pass it; both as
+# the launcher has them (`puffin-rs/src/code_index.rs`, `MCP_SERVER` and `FORWARDED_ENV`).
+MCP_SERVER: Final[str] = "puffin_code"
+MCP_FORWARDED_ENV: Final[List[str]] = [
+    "PUFFIN_CODE_ROOT", "PUFFIN_CODE_STATE_DIR", "PUFFIN_CODE_GRAPH_DB", "PUFFIN_CODE_PROJECT",
+    "PUFFIN_CODE_TOOLS_DIR", "PUFFIN_CODE_INDEXERS_DIR", "CODEX_HOME", "DREAMFERENCE_CONFIG_PATH",
+    "DREAMFERENCE_VLLM_HOST"]
+
 # Where the relocated `puffin-code` and the instance's index are mounted in the container.
 CODE_MOUNT: Final[str] = "/opt/puffin-code"
 INDEX_MOUNT: Final[str] = "/puffin-index"
@@ -56,8 +67,13 @@ class SweBenchCodeIndex:
     def host_binary(cls) -> Optional[str]:
         """
         Returns:
-            Optional[str]: The installed `puffin-code` (beside `puffin`), or None if absent.
+            Optional[str]: The installed `puffin-code` (beside `puffin`), or None if absent; or
+            the one `DREAMFERENCE_SWE_BENCH_PUFFIN_CODE` names, to measure a build of it that
+            is not installed (the arm then differs from the plain one in `puffin-code` alone).
         """
+        override = os.environ.get(PUFFIN_CODE_OVERRIDE_ENV)
+        if override:
+            return override if os.path.exists(override) else None
         puffin = SweBenchRuntime.installed_puffin()
         if not puffin:
             return None
@@ -247,7 +263,32 @@ class SweBenchCodeIndex:
                 "PUFFIN_CODE_PROJECT": str(record["project"]),
             },
             "path": f"{CODE_MOUNT}/bin",
+            "config": cls.mcp_overrides(),
         }
+
+    @classmethod
+    def mcp_overrides(cls) -> List[str]:
+        """
+        The `-c` overrides that declare `puffin-code mcp` to Codex as a **required** server.
+
+        The launcher declares it without `required`, and Codex then gives an optional server a
+        short grace period before the first request and leaves its tools out if it is not up: in
+        the first arm run with the tools (2026-10-03), with three containers starting at once,
+        the model's first `code_search` came back "unsupported call: code_search" and it went
+        back to grep for the rest of the task. A required server is waited for. The launcher
+        adds its own declaration only when none is given, so this one is the whole declaration:
+        the same command, arguments and forwarded variables (`puffin-rs/src/code_index.rs`).
+
+        Returns:
+            List[str]: The `key=value` overrides, each to follow a `-c`.
+        """
+        key = f"mcp_servers.{MCP_SERVER}"
+        forwarded = ", ".join(json.dumps(name) for name in MCP_FORWARDED_ENV)
+        return [f"{key}.command={json.dumps(f'{CODE_MOUNT}/bin/puffin-code')}",
+                f'{key}.args=["mcp"]',
+                f"{key}.env_vars=[{forwarded}]",
+                f"{key}.required=true",
+                f"{key}.startup_timeout_sec=120"]
 
     @classmethod
     def cached(cls) -> List[str]:

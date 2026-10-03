@@ -105,7 +105,7 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
     let page = Page {
         limit: args["limit"].as_u64().map(|v| v as usize).unwrap_or(settings.row_limit),
         offset: args["offset"].as_u64().unwrap_or(0) as usize,
-        path: args["path"].as_str().map(str::to_string),
+        path: args["path"].as_str().map(|path| output::repository_relative(path, &repo.root)),
         ..Page::default()
     };
     output::narrow(&mut answer, &page)?;

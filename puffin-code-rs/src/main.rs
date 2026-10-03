@@ -223,7 +223,7 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
         limit: page.limit.unwrap_or(limit_default),
         offset: page.offset,
         cursor: page.cursor.clone(),
-        path: page.path.clone(),
+        path: page.path.as_deref().map(|path| output::repository_relative(path, &context.repo.root)),
         exact_only: page.exact_only,
         kind: page.kind.clone(),
     };

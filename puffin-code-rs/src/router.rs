@@ -30,6 +30,8 @@ use crate::textscan;
 
 /// Definitions `search` adds from body matches, after the graph's own ranking.
 const BODY_ROWS: usize = 30;
+/// At most this many text matches are added to an answer the graph alone gave ([`Context::graph_gap_rows`]).
+const GRAPH_GAP_ROWS: usize = 100;
 
 /// Whether `search` reads a file's text for body matches: source, not prose or data. Prose is
 /// already in the graph as sections, and data files would bury the code under their matches.
@@ -560,6 +562,49 @@ impl Context {
             .collect()
     }
 
+    /// Whole-word matches of the name in the tracked files of the definition's language, for an
+    /// answer that rests on the graph alone.
+    ///
+    /// The graph misses about half of the files that reference a Python method (a call through an
+    /// attribute, `self.query.get_related_updates()`, names no type it could resolve), and an answer
+    /// of "0 results" reads as "nothing uses this": in the SWE-bench arm of 2026-10-03, `refs`,
+    /// `impact` and `callers` answered 0 for methods the repository calls, and the note's advice to
+    /// confirm with `rg` named a tool that is not installed there. The rows over-report (another
+    /// definition of the same name matches too), the safe direction, and say `heuristic (text)`.
+    fn graph_gap_rows(&self, candidate: &Candidate, found: &[Row], answer: &mut Answer) -> Vec<Row> {
+        let extension = std::path::Path::new(&candidate.path).extension().and_then(|e| e.to_str());
+        let (Some(extension), true) = (extension, self.repo.is_git) else { return Vec::new() };
+        // `safe.directory`: the files may belong to another user (a SWE-bench image's root), and
+        // an MCP server is not given the agent's git configuration.
+        let output = std::process::Command::new("git")
+            .args(["-c", "safe.directory=*", "-C"])
+            .arg(&self.repo.root)
+            .args(["grep", "-n", "-I", "-w", "-F", "--no-color", "-e", &candidate.name, "--", &format!("*.{extension}")])
+            .output();
+        let Ok(output) = output else { return Vec::new() };
+        let mut rows = Vec::new();
+        let mut matches = 0;
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let mut parts = line.splitn(3, ':');
+            let (Some(path), Some(Ok(number))) = (parts.next(), parts.next().map(str::parse::<u32>)) else { continue };
+            if (path == candidate.path && number == candidate.line) || found.iter().any(|r| r.path == path && r.line == number) {
+                continue;
+            }
+            matches += 1;
+            if rows.len() < GRAPH_GAP_ROWS {
+                rows.push(Row { tag: Some(Tag::Text), path: path.to_string(), line: number, detail: "text match of the name".to_string() });
+            }
+        }
+        if matches > rows.len() {
+            answer.notes.push(format!(
+                "{} more text matches of `{}` are not listed; narrow with `path`",
+                matches - rows.len(),
+                candidate.name
+            ));
+        }
+        rows
+    }
+
     /// Asks the session process for a re-index when anything changed (§7.3).
     fn request_reindex(&self, answer: &mut Answer) {
         if self.changed.is_empty() && self.deleted.is_empty() {
@@ -633,6 +678,8 @@ impl Context {
         }
         if candidate.scip.is_empty() {
             answer.notes.push(graph_only_note(&candidate.path));
+            let gap = self.graph_gap_rows(&candidate, &rows, &mut answer);
+            rows.extend(gap);
         }
         self.set_sources(&mut answer, &exact_stores);
         // Text files are changed or not indexed, so none of them is covered exactly.
@@ -1346,7 +1393,9 @@ fn graph_only_note(path: &str) -> String {
         "Rust" => "about 78%",
         _ => "an unmeasured share",
     };
-    format!("no exact index for {path}: the graph finds {recall} of the files that reference a {language} symbol; confirm with rg")
+    format!(
+        "no exact index for {path}: the graph finds {recall} of the files that reference a {language} symbol, so text matches of the name are listed too (`heuristic (text)`)"
+    )
 }
 
 fn impl_block_label(symbol: &str) -> String {

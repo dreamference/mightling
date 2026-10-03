@@ -55,6 +55,15 @@ const FORWARDED_ENV: &[&str] = &[
     "DREAMFERENCE_VLLM_HOST",
 ];
 
+/// How long the first request of a session waits for MCP servers still starting, in place of
+/// Codex's 1 s default (`mcp_optional_startup_grace_ms`). Codex leaves an optional server out of
+/// the tool list when it is not up by then, and keeps it out for that first request's turn: on a
+/// busy GB10 (three SWE-bench containers starting at once, 2026-10-03) `puffin-code mcp` was not up
+/// within that second, the model's `code_search` came back "unsupported call", and it used grep for
+/// the rest of the task. The wait ends as soon as the servers are up, so a fast start costs nothing;
+/// `required = true` would wait too, but makes a server that fails to start end the session.
+pub const STARTUP_GRACE_MS: u64 = 15_000;
+
 /// The sentence of Codex's prompt that teaches the search habit ([`search_habit`]).
 pub const RG_SENTENCE: &str = "- When you search for text or files, you reach first for `rg` or `rg --files`; they are much faster than alternatives like `grep`. If `rg` is unavailable, you use the next best tool without fuss.";
 
@@ -87,11 +96,14 @@ pub fn with_tools(args: Vec<OsString>) -> Vec<OsString> {
     }
     let quoted = |text: &str| toml::Value::String(text.to_string()).to_string();
     let forwarded: Vec<String> = FORWARDED_ENV.iter().map(|name| quoted(name)).collect();
-    let settings = [
+    let mut settings = vec![
         format!("{key}command={}", quoted(&binary.to_string_lossy())),
         format!("{key}args=[\"mcp\"]"),
         format!("{key}env_vars=[{}]", forwarded.join(", ")),
     ];
+    if !args.iter().any(|arg| arg.to_string_lossy().contains("mcp_optional_startup_grace_ms")) {
+        settings.push(format!("mcp_optional_startup_grace_ms={STARTUP_GRACE_MS}"));
+    }
     let mut args = args.into_iter();
     let mut out: Vec<OsString> = args.next().into_iter().collect();
     for setting in settings {
@@ -256,15 +268,22 @@ mod tests {
         assert_eq!(out[2], format!("mcp_servers.puffin_code.command=\"{}\"", binary.display()));
         assert_eq!(out[4], "mcp_servers.puffin_code.args=[\"mcp\"]");
         assert!(out[6].starts_with("mcp_servers.puffin_code.env_vars=[\"PUFFIN_CODE_ROOT\", "), "{}", out[6]);
-        assert_eq!(&out[7..], ["exec", "hi"]);
+        assert_eq!(out[8], format!("mcp_optional_startup_grace_ms={STARTUP_GRACE_MS}"));
+        assert_eq!(&out[9..], ["exec", "hi"]);
         // Each value is TOML, which is what Codex parses a `-c` value as.
-        for setting in [&out[2], &out[4], &out[6]] {
+        for setting in [&out[2], &out[4], &out[6], &out[8]] {
             let (_, value) = setting.split_once('=').unwrap_or_default();
             assert!(format!("v = {value}").parse::<toml::Table>().is_ok(), "{setting}");
         }
         // The user's own setting for the server wins.
         let own: Vec<OsString> = vec!["puffin".into(), "-c".into(), "mcp_servers.puffin_code.enabled=false".into()];
         assert_eq!(with_tools(own.clone()), own);
+        // So does the user's own grace.
+        let grace: Vec<String> = with_tools(vec!["puffin".into(), "-c".into(), "mcp_optional_startup_grace_ms=0".into()])
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(grace.iter().filter(|arg| arg.contains("mcp_optional_startup_grace_ms")).count(), 1);
         unsafe { std::env::remove_var("PUFFIN_CODE_BIN") };
         let _ = std::fs::remove_dir_all(&dir);
     }

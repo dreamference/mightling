@@ -474,6 +474,59 @@ Difference in resolved rate: 0.0 points, 95% interval −16.3 to +16.3, McNemar 
 - **The manifest's `repository_commit` is `HEAD` when the run started, not proof of the code that ran:** both runs were made from a working tree with uncommitted changes, and `--against` lists the two commits as differing for that reason only.
 - **Open, and the real result:** this model does not reach for `puffin-code` on its own in this setting. It does elsewhere: 25 recorded session files under `~/.puffin/sessions` contain `puffin-code` queries (not checked: how many of those were tests that asked for them), so the setting, a bare issue text and an unattended run, is the likelier cause than the model. Whether the task prompt should name it, or the block's wording should change, is a question for the code-index spec; an A/B where the tool is actually used needs one of those first.
 
+
+### 13.6 With the tools, measured (2026-10-03)
+
+After §13.5 the index became tools (`code_*`, CODE_INDEX §15). This pair is the first in which the agent used them. Branch `swe/index-arm`: `a7e49af`, `5e7a134`, `93386d5`, `6ffb18f`.
+
+**What had to change first.**
+- **The agent could not write `/testbed`** (PUFFIN_PROMPT §6.1 item 1): the scrub step now opens it all, in both arms.
+- **The tools were missing under load.** In the first attempt (`idx14-on`, stopped after three instances and marked `INVALID.txt`), `code_search` came back `unsupported call: code_search`: Codex waits 1 s for an optional MCP server before the first request and leaves out the tools of one that is not up (CODE_INDEX §15.4). The runner now declares `puffin_code` itself with `required = true`.
+- **The task prompt names the tools in this arm only** (`CODE_INDEX_HINT`, two sentences: `code_search`/`code_def` before grep, `code_impact`/`code_callers` before an edit). The system prompt's block alone had left the index unused (§13.5). A test pins the plain arm's prompt as it was.
+
+**The pair.** `idx14b-on` then `idx14b-off`, back to back on one `puffin` (`runtime_hash` `bd978d3ede04`, the build installed on 2026-10-02 15:37, which predates that day's merges) and the installed `puffin-code` (`a2343be2…`). Chosen before either ran: the 14 instances of the §12.5 sample **not** resolved by both earlier arms (the 9 resolved by neither plus the 5 on which they differed; `astropy-13453` counted as differing, since the two runs' records disagree on it). The 10 others were resolved by both and say little about a difference. Departures from §12, the same in both arms: `task_context` 44,000 (the KV pool was 133,308 tokens, not 157K, and 49,152 allowed two at once), three at once, no idle wait, open sessions ignored (other tasks were using the machine), `--until 17:05`.
+
+| | With the tools (`idx14b-on`) | Without (`idx14b-off`) |
+|---|---|---|
+| Resolved | 6 of 14 (42.9%) | 4 of 14 (28.6%) |
+| Resolved in both / only this arm / neither | 3 / 3 / 7 | 3 / 1 / 7 |
+| Median wall per instance | 10 min 9 s | 10 min 1 s |
+| Agent time in all | 4 h 11 min | 3 h 40 min |
+| Input tokens / output tokens | 36.4 M / 202 K | 47.4 M / 279 K |
+| Commands (tool calls included) | 1,999 | 1,716 |
+| `code_*` calls | 295, in 14 of 14 instances | 0 |
+| Timeouts / empty patches | 2 / 0 | 0 / 1 |
+| Index time, outside the agent's | 5 min 0 s | none |
+
+| Instance | With | Without |
+|---|---|---|
+| astropy-13453 | resolved, 592 s | resolved, 716 s |
+| django-12774 | resolved, 461 s | resolved, 436 s |
+| django-13512 | 228 s | 302 s |
+| django-15563 | **resolved**, timeout 2,702 s (partial patch) | 2,032 s |
+| django-15957 | timeout 2,701 s | 1,518 s |
+| django-16100 | **resolved**, 495 s | 2,305 s |
+| django-16454 | 1,607 s | 1,603 s |
+| django-16502 | 921 s | 651 s |
+| scikit-learn-25747 | 413 s | 1,663 s |
+| sympy-13031 | **resolved**, 494 s | empty, 140 s |
+| sympy-13798 | 328 s | 552 s |
+| sympy-13877 | resolved, 2,040 s | resolved, 405 s |
+| sympy-17318 | 627 s | 454 s |
+| sympy-18211 | 1,471 s | **resolved**, 435 s |
+
+Difference in resolved rate: +14.3 points, 95% interval −12.7 to +41.3, McNemar exact p = 0.625; the report's own verdict is "No measurable difference". `--against` lists `repository_commit` as differing (`5e7a134` and `6ffb18f`): the worktree gained two commits between the two starts, and they change only the code-index arm's host side (`swe_bench_code_index.py`, the `puffin-code.sha256` record), `puffin-code-rs`, the launcher and tests; `swe_bench_instance_run.py`, the plain arm's whole path, is the same in both.
+
+**How the tools were used** (295 calls in 14 of 14 instances): `code_show` 207, `code_search` 54, `code_impact` 17, `code_callers` 9, `code_refs` 4, `code_def` 4. 20 answers were empty: 3 searches because the model passed an absolute `path`, 10 `refs`/`impact` answers for methods the graph cannot see called (both fixed in `93386d5`, **not measured** here), 6 `show`s of a name not found and 1 other search. The run store's `puffin_code_calls` and a count from the session files agree for every instance.
+
+**What this does and does not show.**
+
+- **The tools are used now**: 295 calls in 14 of 14 instances, against none in 24 in §13.5. That, not the score, is the result of the fixes above.
+- **The score is inside the noise.** Two arms with the tool unused differed on 4 of 24 instances (§13.5); here 4 of 14 differ, 3 one way and 1 the other. Two instances no earlier run had resolved were resolved here: `django-12774` in both arms (so more likely the write fix than the index) and `sympy-13031` only with the tools (without them it stopped at 140 s with an empty patch). That is one sample, an observation and not a finding.
+- **The cost is mixed.** With the tools: 23% fewer input tokens and 28% fewer output tokens, the first efficiency number for the index; but 14% more agent time, 16% more commands, and both of the pair's timeouts (one of them resolved on its partial patch). `code_show` (207 calls) mostly replaced `sed -n` reads, which is why commands did not fall.
+- **"Tests run after the last edit"** (a pattern match on the session's commands, not a measured behaviour): 9 of 14 with the tools, 8 without.
+- **What remains unmeasured**: the two `puffin-code` fixes (`93386d5`) and the launcher's grace (`6ffb18f`, not yet compiled), since the arm ran the installed builds. The next pair should run on a rebuilt `puffin` and `puffin-code`, on the full 24 validated instances, with the plain arm run twice so the floor is measured in the same session.
+
 ---
 
 ## Sources

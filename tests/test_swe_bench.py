@@ -24,7 +24,8 @@ from dreamference.swe_bench import (
 )
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATCH
-from dreamference.swe_bench.swe_bench_instance_run import COLLECT_SCRIPT, PREPARE_SCRIPT, SCRUB_SCRIPT
+from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, PREPARE_SCRIPT,
+                                                          SCRUB_SCRIPT)
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -315,6 +316,16 @@ def run(bench, **arguments):
 
 
 # -- the prompt and what the container is given ---------------------------------------------------
+
+def test_only_the_code_index_arm_is_told_to_use_the_code_tools():
+    issue = "The widget is broken."
+    without, with_index = (SweBenchInstanceRun.compose_prompt(issue, index) for index in (False, True))
+    assert "code_" not in without
+    assert "`code_search`" in with_index and "`code_impact`" in with_index
+    # The hint is the only difference, and the issue still ends the prompt.
+    assert with_index.replace(CODE_INDEX_HINT, "") == without
+    assert with_index.endswith(issue)
+
 
 def test_the_prompt_holds_the_issue_and_nothing_else_from_the_row(bench):
     assert run(bench, instances=["acme__widget-1"]) == 0
@@ -739,6 +750,8 @@ def test_without_the_code_index_the_container_gets_nothing_of_puffin_code(bench)
     created = next(call for call in bench["docker"].calls if call[0] == "run")
     assert "puffin-code" not in json.dumps(created) and "PUFFIN_CODE" not in json.dumps(created)
     assert bench["index_calls"] == []
+    agent = next(call for call in bench["docker"].calls if call[0] == "exec" and "puffin" in call[2])
+    assert "mcp_servers" not in json.dumps(agent)
     store = SweBenchRunStore("r1")
     assert store.manifest()["code_index"] == "off" and "index" not in store.state("acme__widget-1")
     assert "Code index          off" in SweBenchReport.render(store)
@@ -765,6 +778,15 @@ def test_with_the_code_index_the_repository_is_indexed_on_the_host_and_mounted_r
     assert env["PUFFIN_CODE_GRAPH_DB"] == "/puffin-index/cbm/host-path-testbed.db"
     assert env["PUFFIN_CODE_PROJECT"] == "host-path-testbed"
     assert env["PATH"].startswith("/opt/puffin-code/bin:/opt/miniconda3/envs/testbed/bin:")
+    # The agent's puffin declares the index's MCP server itself, as a required one, so the first
+    # request waits for its tools instead of going out without them.
+    agent = next(call for call in docker.calls if call[0] == "exec" and "puffin" in call[2])
+    overrides = [agent[i + 1] for i, word in enumerate(agent) if word == "-c"]
+    assert "mcp_servers.puffin_code.required=true" in overrides
+    assert 'mcp_servers.puffin_code.command="/opt/puffin-code/bin/puffin-code"' in overrides
+    assert 'mcp_servers.puffin_code.args=["mcp"]' in overrides
+    forwarded = next(o for o in overrides if o.startswith("mcp_servers.puffin_code.env_vars="))
+    assert '"PUFFIN_CODE_GRAPH_DB"' in forwarded and '"PUFFIN_CODE_PROJECT"' in forwarded
     store = SweBenchRunStore("r1")
     state = store.state("acme__widget-1")
     assert store.manifest()["code_index"] == "universal"
@@ -1082,3 +1104,14 @@ def test_the_relay_forwards_to_its_one_target_and_closes():
     with pytest.raises(OSError):
         socket.create_connection(("127.0.0.1", port), timeout=1).recv(1)
     upstream.close()
+
+
+def test_a_named_puffin_code_build_replaces_the_installed_one(tmp_path, monkeypatch):
+    from dreamference.swe_bench.swe_bench_code_index import PUFFIN_CODE_OVERRIDE_ENV
+    build = tmp_path / "puffin-code"
+    build.write_text("")
+    monkeypatch.setenv(PUFFIN_CODE_OVERRIDE_ENV, str(build))
+    assert SweBenchCodeIndex.host_binary() == str(build)
+    # A name that does not exist is not silently replaced by the installed binary.
+    monkeypatch.setenv(PUFFIN_CODE_OVERRIDE_ENV, str(tmp_path / "missing"))
+    assert SweBenchCodeIndex.host_binary() is None

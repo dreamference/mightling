@@ -31,9 +31,18 @@ where something is unclear, make the reasonable choice.
 - Fix the issue below by changing the repository's source files.
 - You may run the repository's tests. There is no network.
 - Do not commit. Your changes are collected when you stop.
-
+{code_index}
 Issue:
 {problem_statement}"""
+
+# Added to the prompt in the code-index arm. The system prompt's Code navigation block alone left
+# the index unused (0 queries in 24 instances, spec §13.5): an issue text names symptoms, and the
+# model reached for grep. Two sentences, because the arm that carried an unused tool was already
+# the slower one.
+CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before grep: `code_search` with the issue's words, then
+  `code_show` or `code_def`. Before you edit a function, `code_impact` (or `code_callers`) says
+  what else uses it and so which tests to run.
+"""
 
 # The image's default PATH puts conda's *base* environment first, which has none of the
 # repository's dependencies; `conda activate testbed` only happens in the grading script. Without
@@ -63,7 +72,10 @@ for remote in $(git remote); do git remote remove "$remote"; done
 rm -rf .git/ORIG_HEAD .git/FETCH_HEAD .git/refs/remotes .git/logs/refs/remotes
 git reflog expire --expire=now --all
 git gc --prune=now --quiet || echo "note: git gc failed"
-chmod -R a+rwX .git
+# The image's sources are root's and 0644, and the agent runs as the host's user: without this
+# it cannot edit the files it is asked to fix (PUFFIN_PROMPT §6.1 item 1). Git does not track
+# the write bit and the patch is collected with core.fileMode=false, so the patch is unaffected.
+chmod -R a+rwX .
 echo "refs: $(git for-each-ref | wc -l)"
 """
 
@@ -171,17 +183,19 @@ class SweBenchInstanceRun:
         return "puffin-swe-" + re.sub(r"[^a-zA-Z0-9_.-]", "-", f"{run}-{instance_id}".lower())
 
     @classmethod
-    def compose_prompt(cls, problem_statement: str) -> str:
+    def compose_prompt(cls, problem_statement: str, code_index: bool = False) -> str:
         """
         Builds the prompt: the fixed preamble and the issue text, verbatim.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
+            code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
 
         Returns:
             str: The prompt.
         """
-        return PROMPT.format(problem_statement=problem_statement)
+        return PROMPT.format(problem_statement=problem_statement,
+                             code_index=CODE_INDEX_HINT if code_index else "")
 
     def run(self) -> str:
         """
@@ -236,7 +250,7 @@ class SweBenchInstanceRun:
                               f"{(prepared.stderr or prepared.stdout).strip()[-300:]}")
             return "error", ""
 
-        outcome = self._exec(self.compose_prompt(self.problem_statement), resume=False)
+        outcome = self._exec(self.compose_prompt(self.problem_statement, bool(self.code_index)), resume=False)
         while outcome == "ok" and self.nudges_used < self.settings.nudges and not self._changed() \
                 and NightShiftTaskRun.announces_work(self._last_message()):
             self.nudges_used += 1
@@ -314,6 +328,8 @@ class SweBenchInstanceRun:
         command = ["exec", self.container, f"{CONTAINER_MOUNT}/bin/puffin", "exec", "--json",
                    "-o", f"{SCRATCH_MOUNT}/last.txt", "--dangerously-bypass-approvals-and-sandbox",
                    "-C", "/testbed", "-c", f"model_auto_compact_token_limit={self.settings.task_context}"]
+        for override in (self.code_index or {}).get("config", []):
+            command += ["-c", override]
         command += ["resume", self.session, prompt] if resume and self.session else [prompt]
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0
         self.in_model = True
