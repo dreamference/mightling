@@ -84,16 +84,17 @@ all use the same file, so Puffin offers the model the skills it finds in any of 
 | `~/.agents/skills` | The folder Codex, Gemini CLI and OpenClaw share |
 | `~/.claude/skills`, `~/.gemini/skills`, `~/.openclaw/skills`, `~/.hermes/skills` | Other agents' own folders. Puffin links to each skill there at every start; nothing is copied, and a session cannot change them through the link |
 | `.agents/skills` in the repository | Skills that travel with the project |
+| `.claude/skills`, `.gemini/skills` in the repository | Linked like the other agents' folders, but only once you have trusted the repository in Puffin (its trust prompt), since whoever wrote the repository wrote them |
 
 | Command | What it does |
 |---|---|
 | `puffin skill list` | What the model is offered, by source, and what it is not offered and why. `--all` adds skills another one shadows |
 | `puffin skill show <name>` | One skill: its description, origin, licence, files and scripts |
-| `puffin skill search <words>` | Search OpenAI's and Anthropic's catalogues |
-| `puffin skill add <source>` | Install into `~/.puffin/skills`. `<source>` is `openai/<name>`, `anthropic/<name>`, `<owner>/<repo>/<path>`, a github.com URL or a folder. It shows the description, licence and scripts first and asks; `--yes` skips the question |
+| `puffin skill search <words>` | Search OpenAI's, Anthropic's and Hermes's catalogues and ClawHub |
+| `puffin skill add <source>` | Install into `~/.puffin/skills`. `<source>` is `openai/<name>`, `anthropic/<name>`, `hermes/<category>/<name>`, `clawhub/<owner>/<slug>`, `<owner>/<repo>/<path>`, a github.com URL or a folder. It shows the description, licence and scripts first and asks; `--yes` skips the question |
 | `puffin skill remove <name>` | Delete a skill Puffin installed |
 | `puffin skill enable <name>` / `disable <name>` | Offer a skill anyway, or never offer it |
-| `puffin skill source <agent> on\|off` | Link, or stop linking, the skills of `claude`, `gemini`, `openclaw` or `hermes` |
+| `puffin skill source <agent> on\|off` | Link, or stop linking, the skills of `claude`, `gemini`, `openclaw` or `hermes`, or with `repo` a trusted repository's `.claude/skills` and `.gemini/skills` |
 | `puffin skill adopt <name>` | Record a skill you wrote by hand as known, so later changes to it are reported |
 
 Things to know:
@@ -101,7 +102,8 @@ Things to know:
 - **Not every skill is offered.** One that names another operating system or a program that is not
   installed is left out, as is one its author marked as not to be started by a model. When two
   skills have the same name, one is offered: the repository's first, then Puffin's own, then
-  `~/.agents/skills`, then Claude's, Gemini's, OpenClaw's and Hermes's, then the bundled ones.
+  `~/.agents/skills`, then the repository's `.claude` and `.gemini` skills, then Claude's,
+  Gemini's, OpenClaw's and Hermes's, then the bundled ones.
 - **Skills cost context.** The model is shown each skill's name and description in every session,
   within a budget of 2% of the context window. Puffin tells you at start when that is nearly full,
   and leaves linked skills out before Codex would drop every description.
@@ -112,6 +114,9 @@ Things to know:
   `~/.puffin/skills` outside `puffin skill add` is reported once at the next start, and anything
   found in the `from-*` link folders that Puffin did not put there is moved to
   `~/.puffin/skills/.quarantine/`.
+- **ClawHub checks every skill it lists, and Puffin shows what it found.** A skill its scan calls
+  clean installs like any other; one it calls suspicious, or has no result for, is installed only
+  when you confirm it at a terminal (`--yes` is refused); one it marks malicious is never installed.
 - **`/airgapped on`** refuses `add` and `search` before any request is made; installing from a
   folder still works.
 - Skills written for another agent name its tools ("use the Read tool"). The local model followed

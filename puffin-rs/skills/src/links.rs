@@ -23,9 +23,41 @@ const LOCK_FILE: &str = ".puffin-links.lock";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkSet {
     pub agent: String,
-    /// The agent's own skills folder. A link pointing anywhere else is not the launcher's.
-    pub source: PathBuf,
+    /// Where the launcher's links in this folder point. A link pointing anywhere else is not the
+    /// launcher's.
+    pub source: Source,
     pub links: BTreeMap<String, PathBuf>,
+}
+
+/// Where the links of one `from-` folder may point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Source {
+    /// The agent's own skills folder: `~/.claude/skills`.
+    Folder(PathBuf),
+    /// That folder in any repository (`.claude/skills`, relative): the `from-repo-*` folders point
+    /// into whichever repository `puffin` last started in, so a link left from the previous one is
+    /// still the launcher's, removed rather than quarantined.
+    AnyRepository(&'static str),
+}
+
+impl Source {
+    /// Whether a link to `target` is one the launcher could have written. A target with `..` in it
+    /// starts with the source and ends anywhere, so it never is.
+    pub fn holds(&self, target: &Path) -> bool {
+        if target.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+            return false;
+        }
+        match self {
+            Source::Folder(folder) => target.starts_with(folder),
+            Source::AnyRepository(folder) => {
+                let wanted: Vec<_> = Path::new(folder).components().collect();
+                let parts: Vec<_> = target.components().collect();
+                target.is_absolute()
+                    && !wanted.is_empty()
+                    && parts.windows(wanted.len()).any(|window| window == wanted.as_slice())
+            }
+        }
+    }
 }
 
 /// What a rebuild did.
@@ -77,7 +109,7 @@ pub fn rebuild(skills_root: &Path, wanted: &[LinkSet], stamp: &str) -> io::Resul
         let source = wanted
             .iter()
             .find(|set| format!("{LINK_PREFIX}{}", set.agent) == name)
-            .map(|set| set.source.as_path());
+            .map(|set| &set.source);
         set_aside_foreign(&folder, source, &quarantine.join(&name), &mut rebuilt.quarantined)?;
         match set {
             Some(set) => replace_folder(skills_root, &name, set)?,
@@ -108,7 +140,7 @@ fn holds_exactly(folder: &Path, set: &LinkSet) -> bool {
 /// that does not point into `source`.
 fn set_aside_foreign(
     folder: &Path,
-    source: Option<&Path>,
+    source: Option<&Source>,
     quarantine: &Path,
     moved: &mut Vec<PathBuf>,
 ) -> io::Result<()> {
@@ -117,11 +149,7 @@ fn set_aside_foreign(
         return set_aside(folder, quarantine, moved);
     }
     for entry in std::fs::read_dir(folder)?.flatten() {
-        // A target with `..` in it starts with the source and ends anywhere: not the launcher's.
-        let ours = std::fs::read_link(entry.path()).is_ok_and(|target| {
-            source.is_some_and(|source| target.starts_with(source))
-                && !target.components().any(|part| matches!(part, std::path::Component::ParentDir))
-        });
+        let ours = std::fs::read_link(entry.path()).is_ok_and(|target| source.is_some_and(|source| source.holds(&target)));
         if !ours {
             set_aside(&entry.path(), &quarantine.join(entry.file_name()), moved)?;
         }
@@ -224,7 +252,7 @@ mod tests {
     fn set(agent: &str, source: &Path, names: &[&str]) -> LinkSet {
         LinkSet {
             agent: agent.to_string(),
-            source: source.to_path_buf(),
+            source: Source::Folder(source.to_path_buf()),
             links: names.iter().map(|name| (name.to_string(), source.join(name))).collect(),
         }
     }
@@ -318,5 +346,41 @@ mod tests {
         assert!(!skills.join("from-gemini").exists());
         assert_eq!(rebuilt.quarantined.len(), 2);
         assert!(own.join("fake").is_dir());
+    }
+
+    #[test]
+    fn a_repository_folder_keeps_links_into_any_repository_and_nothing_else() {
+        let root = scratch("links-repository");
+        let skills = root.join("puffin/skills");
+        let (first, second) = (root.join("one/.claude/skills"), root.join("two/.claude/skills"));
+        for dir in [first.join("lint"), second.join("fmt")] {
+            std::fs::create_dir_all(dir).unwrap_or_default();
+        }
+        let repo = |links: &[(&str, &Path)]| LinkSet {
+            agent: "repo-claude".to_string(),
+            source: Source::AnyRepository(".claude/skills"),
+            links: links.iter().map(|(name, target)| (name.to_string(), target.to_path_buf())).collect(),
+        };
+        rebuild(&skills, &[repo(&[("lint", &first.join("lint"))])], "t1").unwrap_or_default();
+        assert_eq!(listing(&skills.join("from-repo-claude")), vec!["lint"]);
+
+        // Started in another repository: the first one's link is the launcher's, so it is removed,
+        // not quarantined; a link planted beside it pointing elsewhere is quarantined.
+        symlink_dir(Path::new("/etc"), &skills.join("from-repo-claude/planted")).unwrap_or_default();
+        let rebuilt = rebuild(&skills, &[repo(&[("fmt", &second.join("fmt"))])], "t2").unwrap_or_default();
+        assert_eq!(listing(&skills.join("from-repo-claude")), vec!["fmt"]);
+        assert_eq!(rebuilt.quarantined, vec![skills.join(".quarantine/t2/from-repo-claude/planted")]);
+
+        // Outside any repository the folder goes, quietly.
+        let gone = rebuild(&skills, &[repo(&[])], "t3").unwrap_or_default();
+        assert!(gone.quarantined.is_empty());
+        assert!(!skills.join("from-repo-claude").exists());
+        assert!(second.join("fmt").is_dir());
+
+        let holds = |target: &str| Source::AnyRepository(".claude/skills").holds(Path::new(target));
+        assert!(holds("/w/r/.claude/skills/x"));
+        assert!(!holds("/w/r/.claude/x"));
+        assert!(!holds("/w/r/.claude/skills/../../etc"));
+        assert!(!holds("relative/.claude/skills/x"));
     }
 }

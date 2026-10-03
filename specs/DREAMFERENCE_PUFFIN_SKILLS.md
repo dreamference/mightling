@@ -1,6 +1,6 @@
 # Puffin Skills — skills from OpenAI, Claude, Gemini, OpenClaw and Hermes
 
-**Status:** Phases 1 and 2 implemented on 2026-10-02: the crate `puffin-rs/skills/` and the launcher module `puffin-rs/src/skills.rs`. Phase 3 (ClawHub and Hermes as install sources, repository `.claude/skills`) is not built. §15 records what was built, where it departs from the design below, and what was measured; the sections before it are the design as specified, with §2 being what was measured on 2026-10-01 before any code.
+**Status:** Phases 1 and 2 implemented on 2026-10-02: the crate `puffin-rs/skills/` and the launcher module `puffin-rs/src/skills.rs`. Phase 3 (ClawHub and Hermes as install sources, a trusted repository's `.claude/skills` and `.gemini/skills`) implemented on 2026-10-03 (§15.6). §15 records what was built, where it departs from the design below, and what was measured; the sections before it are the design as specified, with §2 being what was measured on 2026-10-01 before any code.
 **Goal:** a skill written for Codex, Claude Code, Gemini CLI, OpenClaw or Hermes Agent can be installed into `puffin` with one command and used by the local model, without the user knowing which ecosystem it came from.
 **Short answer:** the file format is already shared. All five consume the [Agent Skills](https://agentskills.io/specification) `SKILL.md` (Hermes and OpenClaw add fields under `metadata`; Claude Code adds top-level fields). Every dialect loads today when its files are where `puffin` looks: a Claude-style and a Hermes-style skill were discovered, read and used in a live session, and so was a real skill from Anthropic's catalogue (§2.2). `~/.claude/skills`, `~/.gemini/skills`, `~/.hermes/skills` and `~/.openclaw/skills` are not where it looks (§2.3). What differs between the ecosystems, and what this spec designs, is four things: **where** each keeps skills on disk, what each one's **extra frontmatter** means, which **tool names** the instruction bodies assume, and how skills are **installed**.
 **Target:** the `puffin` terminal agent. The web chat (Onyx) has no skills and is not covered.
@@ -189,7 +189,7 @@ puffin skill adopt <name>             record a hand-written or model-installed s
 
 Gemini has no catalogue (§1); a skill published "for Gemini CLI" is a git repository and installs through the GitHub form.
 
-The exact download endpoints of ClawHub and the path of Hermes's optional skills inside its repository are **not verified** and are Phase 0 items (§9). If ClawHub offers no stable unauthenticated download, `clawhub/…` is dropped from Phase 1 and its skills install through their GitHub source where they have one.
+The exact download endpoints of ClawHub and the path of Hermes's optional skills inside its repository are **not verified** and are Phase 0 items (§9). (Both verified on 2026-10-03; §15.6 has what they are.) If ClawHub offers no stable unauthenticated download, `clawhub/…` is dropped from Phase 1 and its skills install through their GitHub source where they have one.
 
 ### 6.2 What `add` does
 
@@ -264,8 +264,8 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 **Phase 0, before any code**
 
 1. One real skill from each catalogue, installed by hand and run against the local model on a task it is meant for: OpenAI `pdf`, an Anthropic skill that does name Claude's tools (`mcp-builder` or `skill-creator`; `internal-comms`, which names none, already passed once), one ClawHub skill, one Hermes optional skill, and one skill a Gemini CLI user published. For each: does the model choose it, read it, follow it, and finish. Then the same five with the §5 glossary added by hand. This decides whether the glossary earns its 190 tokens, and it is the only evidence of fitness on Qwen3.8; today's evidence is one code-word probe.
-2. ClawHub: the unauthenticated download and verdict endpoints.
-3. Hermes: where optional skills live in its repository, and how many skills a default install puts in `~/.hermes/skills` (the budget question of §7).
+2. ClawHub: the unauthenticated download and verdict endpoints. *(Done 2026-10-03, §15.6.)*
+3. Hermes: where optional skills live in its repository, and how many skills a default install puts in `~/.hermes/skills` (the budget question of §7). *(The first half done 2026-10-03, §15.6; the second needs Hermes installed.)*
 4. The read-only link target of §3, repeated with the real writable root `~/.puffin/skills` in a scratch home (measured so far from a workspace).
 5. `[[skills.config]]` with the `path` selector (the `name` selector is measured), written in `config.toml` rather than passed with `-c`, and what happens when the path no longer exists. §4 and §7 need `path` for skills in `~/.agents/skills`, because two skills may share a name; foreign skills do not depend on it (§3).
 6. Whether `policy.allow_implicit_invocation: false` in `agents/openai.yaml` removes a skill from the model's catalogue while a user mention still loads it, and whether a wrapper folder under `from-*` (links to the skill's files plus a generated sidecar) is a sound way to apply it to a foreign manual-only skill.
@@ -339,7 +339,7 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 The on-disk half is a crate of its own with no dependency on Codex or the network, like `puffin-rs/airgapped/`, so its 51 tests run in seconds in a copy of the folder (`cargo test`) without compiling the Codex workspace. Its dependency versions are the workspace's, so building inside the workspace adds no second copy of a crate. No Codex patch was needed; the series is unchanged.
 
-Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `search`, `enable`, `disable`, `source`, `adopt`. `add` takes `openai/<name>`, `anthropic/<name>`, `<owner>/<repo>/<path>`, a `github.com` URL with or without `/tree/<ref>/<path>`, and a local folder; `clawhub/…` and `hermes/…` answer that they are not built and name the GitHub form. `search` reads OpenAI's `.curated` and `.experimental` folders and Anthropic's `skills/` from each repository's tarball and matches every word against name and description.
+Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `search`, `enable`, `disable`, `source`, `adopt`. `add` takes `openai/<name>`, `anthropic/<name>`, `<owner>/<repo>/<path>`, a `github.com` URL with or without `/tree/<ref>/<path>`, and a local folder; `clawhub/…` and `hermes/…` answered that they were not built until Phase 3 (§15.6). `search` reads OpenAI's `.curated` and `.experimental` folders and Anthropic's `skills/` from each repository's tarball and matches every word against name and description; since Phase 3 also Hermes's catalogue and ClawHub's own search.
 
 ### 15.2 Departures from the design, each for a reason
 
@@ -353,7 +353,7 @@ Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `se
 - **The glossary is off by default** (§15.3). `glossary = true` in `~/.puffin/puffin-skills.toml` turns it on; it is then added only while a foreign skill is offered. Its text names three more tools than §5's draft (`execute_code`, `skills_list`, `cronjob_manage`, and OpenClaw's lowercase `read`/`write`), so that the test "every tool name of §1's row appears" holds; it is 1,111 bytes, about 280 tokens.
 - **The nearly-full line (80%) is printed to a person only.** `puffin exec`, and so Night Shift, gets the left-out and over-budget lines but not the advice. The line about skills changed outside `puffin skill add` is likewise printed, and marked as told, only on an interactive start, so an unattended run cannot swallow it.
 - **Hashing is not done at every start.** An installed skill's record is read at start (for the glossary gate); its files are hashed only for `list`, `show` and the interactive changed-skills check. The plan for this machine's 37 skill folders takes 3 ms.
-- **`add` downloads the repository's tarball at a resolved commit** (two requests: the commit, then `codeload`), as Codex's own `skill-installer` downloads the repository's zip. A tarball over 200 MB is refused with the advice to clone and install the folder: Hermes's repository is 1.1 GB, which is one reason `hermes/…` is not a source yet.
+- **`add` downloads the repository's tarball at a resolved commit** (two requests: the commit, then `codeload`), as Codex's own `skill-installer` downloads the repository's zip. A tarball over 200 MB is refused with the advice to clone and install the folder. (Hermes's repository is 1.1 GB as a clone, which was taken as a reason not to make `hermes/…` a source; its tarball is 79 MB, §15.6.)
 - **`add` without `--yes` needs a terminal.** With none there is nobody to ask, and it stops after printing what it would install. A local folder is copied at every air-gap level, since nothing is downloaded.
 - **Budget arithmetic uses the full description**, which is what Codex's core rendering uses; where Codex renders `metadata.short-description` instead, the launcher overestimates, which errs towards leaving a linked skill out.
 
@@ -393,7 +393,7 @@ No skill failed without the block, so by §5's own rule it does not ship on: it 
 
 ### 15.4 Not built
 
-- **Phase 3:** `clawhub/…` and `hermes/…` as sources (their endpoints and paths are still unverified, Phase 0 items 2 and 3), ClawHub's verdict, and links for a repository's `.claude/skills` and `.gemini/skills` under the trust rule.
+- ~~**Phase 3:** `clawhub/…` and `hermes/…` as sources, ClawHub's verdict, and links for a repository's `.claude/skills` and `.gemini/skills` under the trust rule.~~ Built on 2026-10-03; §15.6 lists what of it is still not built or not run.
 - **Phase 0 item 6:** `policy.allow_implicit_invocation` as the way to keep a manual-only skill usable by name. Manual-only skills are simply not offered.
 - **Phase 0 item 1 in full:** one real skill from each of the five catalogues.
 - **No `puffin skill update`** (by design, §6.2) and no command for the glossary setting; it is a key in `puffin-skills.toml`.
@@ -405,3 +405,51 @@ No skill failed without the block, so by §5's own rule it does not ship on: it 
 - **`puffin-skills`** (51, `cargo test` in a copy of `puffin-rs/skills/`, or `-p puffin-skills` in the export): frontmatter of each dialect and the repair of an unquoted colon; the preflight on a made-up `PATH`; link creation, pruning, the untouched folder (same inode), planted folders, wrong-target and `..` links, a `from-` name that is a link or a file; the plan's discovery through `synced/` and Hermes's categories, hidden folders, collisions in the order of §7, a switched-off source, the budget drop from the last source, one file by two routes; `config.toml` entries added, rewritten whole, a table appended after them kept, a user's entry left alone, a config that cannot take them; `add`'s sources, one folder out of a tarball, escapes, outside links and the 50 MB limit refused, the origin record and later edits; `remove` only what `puffin` installed; `adopt`; the start-up pass's lines, each once; the glossary naming every tool of §1.
 - **Launcher** (`cargo test --release -p puffin-launcher`, 7 tests in `skills.rs`): `add` against a stand-in GitHub (the commit, then the tarball: two requests), the installed skill offered and counted as foreign, a second `add` refused, `remove`; nothing requested at `/airgapped on` for `add` or `search`, while a local folder still installs; `search` across both catalogues; no install without `--yes` and without a terminal; the local commands with GitHub unreachable; the budget window read from `model_catalog.json`; the entries through `updated_config` and back.
 - **Never in tests:** the real `~/.puffin`, `~/.claude`, `~/.agents`, or the network.
+
+### 15.6 Phase 3 (2026-10-03)
+
+**Built.**
+
+| Piece | Path |
+|---|---|
+| A trusted repository's `.claude/skills` and `.gemini/skills` as linked sources, `from-repo-claude` and `from-repo-gemini`; the trust check | `puffin-rs/skills/src/catalog.rs` (`Scope::Repository`, `is_trusted`), `links.rs` (`Source::AnyRepository`) |
+| `hermes/<category>/<name>`, and Hermes's catalogue in `search` | `puffin-rs/skills/src/install.rs` (`parse_source`, `catalogue_to_depth`), `puffin-rs/src/skills.rs` (`CATALOGUES`) |
+| `clawhub/<owner>/<slug>`: the lookup, the verdict, the download; ClawHub in `search` | `puffin-rs/src/skills.rs` (`clawhub_skill`, `clawhub_zip`, `clawhub_search`), `install.rs` (`unzip`) |
+| The version and the verdict in `.puffin-origin.toml` and in what `add` prints | `install.rs` (`Origin`), `report.rs` |
+
+- **Repository skills.** Looked for in every folder from the repository's root down to the working directory, as Codex looks for `.agents/skills`, and linked only when the repository is **trusted**: `[projects."<root>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, for the root or, in a linked worktree, for its main repository (the key Codex records). That is the code index's rule (`puffin-code-rs/src/config.rs`, §8.5), and nothing inside the repository can grant it. An untrusted repository's skills are not even read; `puffin skill list` names the repository and how to trust it. Their precedence is after `~/.agents/skills` and before `~/.claude/skills` (§7). `puffin skill source repo off` switches both folders off.
+- **Hermes.** `hermes/<path>` tries `skills/<path>`, then `optional-skills/<path>`, in `NousResearch/hermes-agent` at a resolved commit, through the same tarball path as every GitHub source, so the unpack rules of §6.2 apply unchanged. `search` lists every `SKILL.md` up to three folders below either (a `SKILL.md` inside another skill's folder is not listed).
+- **ClawHub.** `add` asks for the skill (its owner and latest version), then for the security verdict on that version, then downloads that version's zip and unpacks it under the rules of §6.2 (no path out of the folder, no link out of it, 50 MB, 5,000 files; a zip with no Unix modes gives readable files). The verdict decides:
+  - **malicious** (ClawHub's moderation blocks it as malware, says `malicious`, or the scan does): refused, whatever the flags (§8.7);
+  - **clean** (the scan says clean and moderation has not flagged it): installed like any other source;
+  - **anything else** (suspicious, or no scan result): installed only when a person confirms at a terminal; with `--yes` it is refused and nothing is downloaded.
+
+  What ClawHub said is printed in the summary (`ClawHub: suspicious: …`) and recorded in `.puffin-origin.toml` with the version. `search` shows ClawHub's skills from its own search (ranked by meaning, so every word need not appear), at most ten, and leaves out the skills.sh entries ClawHub also lists.
+
+**Phase 0 items 2 and 3, checked live and anonymously on 2026-10-03.**
+
+| Question | Answer |
+|---|---|
+| ClawHub's API | `https://clawhub.ai` (`/.well-known/clawhub.json`), documented in `docs/http-api.md` of `openclaw/clawhub`; public reads need no account. Download limit 1,200/min per IP |
+| Find a skill | `GET /api/v1/skills/{slug}?owner={handle}`: owner, `latestVersion.version`, and `moderation` (`isMalwareBlocked`, `isSuspicious`, `verdict`) when it is flagged. **A slug is unique per owner only**: `pdf` has at least five, and without `owner` ClawHub answers 409 `AMBIGUOUS_SKILL_SLUG` with the owners (`@owner/slug` and `owner/slug` in the path both 404). The `owner` query parameter is not in the documentation (ClawHub's own CLI sends the slug alone); it was found by trying, and it works for the skill, the verdict and the download, so it may change without notice |
+| The verdict | `GET /api/v1/skills/{slug}/verify?owner=&version=`: `ok`, `decision`, and `security.status` (`clean`, `suspicious`, `malicious`) with a one-sentence `summary`. Of the 60 newest skills, 48 were clean and 12 suspicious (for example "a stored key can be sent to the wrong service if the configured home changes"); none malicious. Moderation and scan can disagree: one skill had moderation `clean` and scan `suspicious`, which is why both are read |
+| The download | `GET /api/v1/download?slug=&owner=&version=`: a zip of the version's files plus ClawHub's `skill-card.md` (its generated summary) and `_meta.json`, which are installed as served |
+| Search | `GET /api/v1/search?q=&limit=`: ClawHub skills (`install.kind = clawhub`, `install.reference = owner/slug`) mixed with skills.sh entries |
+| Hermes's skills | `skills/<category>/<name>` (58) and `optional-skills/<category>/<name>` (152, eleven of them one category deeper, e.g. `optional-skills/mlops/training/axolotl`, and one, `yuanbao`, with no category), at `44533f1`. No symlinks in either. The repository's tarball is 79 MB (204 MB of files), against the 1.1 GB §15.2 gave for the repository |
+
+**Departures, each for a reason.**
+
+- **`from-repo-claude` and `from-repo-gemini`, not `from-repo-<hash>`** (§3). One repository's links exist at a time either way, and a fixed name is rebuilt like the other `from-` folders. A link left from the previous repository points into some other `.claude/skills`; the rebuild knows that shape (`Source::AnyRepository`) and removes it instead of quarantining it, so changing repository prints nothing. A link pointing anywhere else is quarantined as before.
+- **A repository trusted during a session is linked from the next start**: the launcher plans before Codex asks the trust question.
+- **A suspicious ClawHub skill can still be installed, by a person.** §8.7 asked only that a malicious one be refused. A fifth of the newest skills are rated suspicious, mostly for how they handle credentials; refusing them would cut off much of the catalogue, and installing them unattended would take ClawHub's warning as nothing. Confirmation at a terminal is the middle: the warning is on the screen when the question is asked.
+- **Hermes through the whole tarball**, not the git trees API plus one download per file. `search` needs every description, so it reads the tarball anyway, and `add` then shares the tested unpack path; the cost is 79 MB per `add` or `search`.
+
+**Not built, not run.**
+
+- **Not run against the live services through `puffin`.** The endpoints were probed with `curl`, and the client is tested against a stand-in answering as they did; no `puffin skill add hermes/…` or `clawhub/…` was run with a build carrying this code. `puffin` has to be rebuilt (`puffin-admin codex build`) first.
+- **How many skills a default Hermes install puts in `~/.hermes/skills`** (the rest of Phase 0 item 3): Hermes is not installed here.
+- **ClawHub's verdict of an installed skill is not checked again** later (`POST /api/v1/skills/-/security-verdicts` would do it in one request); a skill rated clean at install that is later flagged is not reported.
+- **`hermes/<name>` without its category** is not accepted; `search` gives the full path.
+- §11 question 2 is answered as proposed there (trusted repositories only); "always" and "never" are not offered as settings.
+
+**Tests.** `puffin-skills`: 56 (5 more): the repository's folders linked only once trusted, through the main repository of a linked worktree, never by a file in the repository, ahead of `~/.claude/skills`, and switched off by `source repo`; a `from-repo-` folder keeping only links into a repository; a ClawHub zip unpacked under the rules, with modes; Hermes's catalogue through its categories, nested skills left out. Launcher: two more, against the stand-in: a Hermes skill found under `optional-skills`, and ClawHub's three verdicts (clean installed with its version and verdict recorded; suspicious refused with `--yes` and malicious refused, neither downloaded), an ambiguous slug naming its owners, and nothing asked at `/airgapped on`; `search` across all four catalogues.

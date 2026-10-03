@@ -1,8 +1,8 @@
 //! `puffin skill add`, `remove` and `adopt`: getting a skill into `$CODEX_HOME/skills/<name>` and
 //! remembering where it came from (spec §6.2, §8.6).
 //!
-//! Nothing here downloads: the launcher hands over the bytes of a repository tarball, or names a
-//! local folder. A skill is unpacked into `skills/.staging/` (hidden, so Codex never scans it),
+//! Nothing here downloads: the launcher hands over the bytes of a repository tarball or of a
+//! ClawHub zip, or names a local folder. A skill is unpacked into `skills/.staging/` (hidden, so Codex never scans it),
 //! checked there, shown to the user, and only then moved into place. Nothing from a bundle is ever
 //! run.
 
@@ -31,9 +31,18 @@ pub enum Source {
     /// `.curated` and `.experimental`); `reference` is a branch, tag or commit, the default branch
     /// when absent.
     GitHub { owner: String, repo: String, reference: Option<String>, paths: Vec<String>, label: String },
+    /// A skill on ClawHub, `clawhub/<owner>/<slug>`. Slugs are unique per owner only, so without
+    /// one ClawHub may answer that the slug is ambiguous and name the owners.
+    ClawHub { owner: Option<String>, slug: String, label: String },
     /// A folder on this machine, copied.
     Local(PathBuf),
 }
+
+/// Hermes Agent's repository: its bundled skills under `skills/<category>/<name>`, its optional
+/// ones under `optional-skills/<category>/<name>` (read from the repository on 2026-10-03; a few
+/// sit one category deeper, `optional-skills/mlops/training/axolotl`).
+pub const HERMES_REPOSITORY: (&str, &str) = ("NousResearch", "hermes-agent");
+pub const HERMES_FOLDERS: [&str; 2] = ["skills", "optional-skills"];
 
 /// Reads the `<source>` argument of `puffin skill add` (spec §6.1).
 pub fn parse_source(text: &str, cwd: &Path) -> Result<Source, String> {
@@ -73,11 +82,21 @@ pub fn parse_source(text: &str, cwd: &Path) -> Result<Source, String> {
             paths: vec![format!("skills/{name}")],
             label: text.to_string(),
         }),
-        ["clawhub", ..] | ["hermes", ..] => Err(format!(
-            "{text}: installing from {} is not built yet; give the skill's GitHub path instead \
-             (puffin skill add <owner>/<repo>/<path>)",
-            if parts[0] == "clawhub" { "ClawHub" } else { "Hermes's catalogue" }
-        )),
+        ["hermes", path @ ..] if !path.is_empty() && path.iter().all(|part| plain_name(part)) => Ok(Source::GitHub {
+            owner: HERMES_REPOSITORY.0.to_string(),
+            repo: HERMES_REPOSITORY.1.to_string(),
+            reference: None,
+            paths: HERMES_FOLDERS.iter().map(|folder| format!("{folder}/{}", path.join("/"))).collect(),
+            label: text.to_string(),
+        }),
+        ["hermes", ..] => Err(format!("{text}: expected hermes/<category>/<name> (puffin skill search <words> finds it)")),
+        ["clawhub", owner, slug] if plain_name(owner.trim_start_matches('@')) && plain_name(slug) => Ok(Source::ClawHub {
+            owner: Some(owner.trim_start_matches('@').to_string()),
+            slug: slug.to_string(),
+            label: format!("clawhub/{}/{slug}", owner.trim_start_matches('@')),
+        }),
+        ["clawhub", slug] if plain_name(slug) => Ok(Source::ClawHub { owner: None, slug: slug.to_string(), label: text.to_string() }),
+        ["clawhub", ..] => Err(format!("{text}: expected clawhub/<owner>/<slug>")),
         [_, _, ..] if cwd.join(text).join("SKILL.md").is_file() => Ok(Source::Local(cwd.join(text))),
         [owner, repo, path @ ..] if !owner.is_empty() && !repo.is_empty() => Ok(Source::GitHub {
             owner: owner.to_string(),
@@ -88,10 +107,19 @@ pub fn parse_source(text: &str, cwd: &Path) -> Result<Source, String> {
         }),
         _ if cwd.join(text).is_dir() => Ok(Source::Local(cwd.join(text))),
         _ => Err(format!(
-            "{text}: not a source. Use openai/<name>, anthropic/<name>, <owner>/<repo>/<path>, \
-             a github.com URL or a folder"
+            "{text}: not a source. Use openai/<name>, anthropic/<name>, hermes/<category>/<name>, \
+             clawhub/<owner>/<slug>, <owner>/<repo>/<path>, a github.com URL or a folder"
         )),
     }
+}
+
+/// A name that can go into a URL path or a query as it is: letters, digits, `-`, `_` and `.`, not
+/// `.` or `..` alone.
+fn plain_name(part: &str) -> bool {
+    !part.is_empty()
+        && part != "."
+        && part != ".."
+        && part.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
 }
 
 /// `owner/repo`, `owner/repo/tree/<ref>/<path>` or `owner/repo/blob/<ref>/<path>/SKILL.md`.
@@ -221,6 +249,49 @@ pub fn unpack(tarball: impl Read, paths: &[String], destination: &Path) -> Resul
     }
 }
 
+/// Unpacks a skill's zip (as ClawHub serves it: the skill's files at the top) into `destination`,
+/// under the same rules as [`unpack`].
+pub fn unzip(bytes: &[u8], destination: &Path) -> Result<(), String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|error| format!("not a zip: {error}"))?;
+    if archive.len() > MAX_FILES {
+        return Err(format!("refused: more than {MAX_FILES} files"));
+    }
+    std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    let mut total = 0u64;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| format!("the download is damaged: {error}"))?;
+        let name = entry.name().to_string();
+        let relative =
+            safe_relative(Path::new(&name)).ok_or_else(|| format!("refused: {name} leaves the skill's folder"))?;
+        let target = destination.join(&relative);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        total += entry.size();
+        if total > MAX_BUNDLE_BYTES {
+            return Err(too_large());
+        }
+        let mut contents = Vec::new();
+        (&mut entry).take(MAX_BUNDLE_BYTES + 1).read_to_end(&mut contents).map_err(|error| error.to_string())?;
+        if entry.is_symlink() {
+            let link = PathBuf::from(String::from_utf8_lossy(&contents).into_owned());
+            if !link_stays_inside(&relative, &link) {
+                return Err(format!("refused: the link {} points outside the skill", relative.display()));
+            }
+            symlink(&link, &target).map_err(|error| error.to_string())?;
+            continue;
+        }
+        std::fs::write(&target, &contents).map_err(|error| error.to_string())?;
+        // Zips made off Unix carry no mode: readable, executable only where the zip says so.
+        set_mode(&target, 0o644 | (entry.unix_mode().unwrap_or(0) & 0o111));
+    }
+    Ok(())
+}
+
 /// A skill found in a catalogue's tarball.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
@@ -234,6 +305,13 @@ pub struct Found {
 /// `<folder>/<name>/SKILL.md` directly under one of `folders` (a path in the repository and the
 /// prefix its skills are installed by, e.g. `("skills/.curated", "openai")`).
 pub fn catalogue(tarball: impl Read, folders: &[(&str, &str)]) -> Result<Vec<Found>, String> {
+    catalogue_to_depth(tarball, folders, 1)
+}
+
+/// [`catalogue`] for a catalogue whose skills sit up to `depth` folders below one of `folders`, as
+/// Hermes keeps them under a category. A `SKILL.md` inside another skill's folder is not a skill
+/// of its own.
+pub fn catalogue_to_depth(tarball: impl Read, folders: &[(&str, &str)], depth: usize) -> Result<Vec<Found>, String> {
     const MAX_SKILL_MD_BYTES: u64 = 256 * 1024;
     let mut found = Vec::new();
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(tarball));
@@ -247,10 +325,11 @@ pub fn catalogue(tarball: impl Read, folders: &[(&str, &str)]) -> Result<Vec<Fou
             continue;
         };
         let parts: Vec<String> = relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
-        let [folder, file] = parts.as_slice() else { continue };
-        if file != "SKILL.md" || !entry.header().entry_type().is_file() {
+        let Some((file, dirs)) = parts.split_last() else { continue };
+        if file != "SKILL.md" || dirs.is_empty() || dirs.len() > depth || !entry.header().entry_type().is_file() {
             continue;
         }
+        let folder = dirs.join("/");
         let mut text = String::new();
         if (&mut entry).take(MAX_SKILL_MD_BYTES).read_to_string(&mut text).is_err() {
             continue;
@@ -258,13 +337,15 @@ pub fn catalogue(tarball: impl Read, folders: &[(&str, &str)]) -> Result<Vec<Fou
         if let Ok(frontmatter) = frontmatter::parse(&text) {
             found.push(Found {
                 source: format!("{prefix}/{folder}"),
-                name: frontmatter.name.unwrap_or_else(|| folder.clone()),
+                name: frontmatter.name.unwrap_or_else(|| dirs.last().cloned().unwrap_or_default()),
                 description: frontmatter.description,
             });
         }
     }
     found.sort_by(|a, b| a.source.cmp(&b.source));
     found.dedup_by(|a, b| a.source == b.source);
+    let sources: Vec<String> = found.iter().map(|skill| format!("{}/", skill.source)).collect();
+    found.retain(|skill| !sources.iter().any(|outer| skill.source.starts_with(outer.as_str())));
     Ok(found)
 }
 
@@ -427,6 +508,10 @@ pub struct Origin {
     pub repository: Option<String>,
     pub path: Option<String>,
     pub commit: Option<String>,
+    /// A catalogue's own version of the skill (ClawHub's), where there is no commit.
+    pub version: Option<String>,
+    /// What the catalogue's security check said at install (ClawHub's), in a few words.
+    pub verdict: Option<String>,
     /// The day it was installed, `YYYY-MM-DD`.
     pub installed: String,
     /// Relative path to SHA-256.
@@ -442,6 +527,8 @@ impl Origin {
             repository: text("repository"),
             path: text("path"),
             commit: text("commit"),
+            version: text("version"),
+            verdict: text("verdict"),
             installed: text("installed").unwrap_or_default(),
             files: table
                 .get("files")
@@ -464,6 +551,8 @@ impl Origin {
         set("repository", self.repository.as_ref());
         set("path", self.path.as_ref());
         set("commit", self.commit.as_ref());
+        set("version", self.version.as_ref());
+        set("verdict", self.verdict.as_ref());
         set("installed", Some(&self.installed));
         let files = self.files.iter().map(|(path, hash)| (path.clone(), toml::Value::String(hash.clone()))).collect();
         table.insert("files".to_string(), toml::Value::Table(files));
@@ -620,10 +709,90 @@ mod tests {
         assert!(matches!(parse_source("https://github.com/acme/skill", &cwd), Ok(Source::GitHub { paths, .. }) if paths == [""]));
         assert_eq!(parse_source("./local/skill", &cwd), Ok(Source::Local(cwd.join("./local/skill"))));
         assert_eq!(parse_source("local/skill", &cwd), Ok(Source::Local(cwd.join("local/skill"))));
-        for refused in ["", "clawhub/acme/x", "hermes/research/arxiv", "https://example.com/x", "./missing", "justaword"] {
+        assert!(matches!(
+            parse_source("hermes/research/arxiv", &cwd),
+            Ok(Source::GitHub { owner, repo, paths, .. }) if owner == "NousResearch" && repo == "hermes-agent"
+                && paths == ["skills/research/arxiv", "optional-skills/research/arxiv"]
+        ));
+        assert!(matches!(
+            parse_source("hermes/mlops/training/axolotl", &cwd),
+            Ok(Source::GitHub { paths, .. }) if paths[1] == "optional-skills/mlops/training/axolotl"
+        ));
+        assert_eq!(
+            parse_source("clawhub/@awspace/pdf", &cwd),
+            Ok(Source::ClawHub { owner: Some("awspace".into()), slug: "pdf".into(), label: "clawhub/awspace/pdf".into() })
+        );
+        assert_eq!(
+            parse_source("clawhub/gifgrep", &cwd),
+            Ok(Source::ClawHub { owner: None, slug: "gifgrep".into(), label: "clawhub/gifgrep".into() })
+        );
+        for refused in [
+            "",
+            "hermes",
+            "hermes/../etc",
+            "clawhub/a/b/c",
+            "clawhub/a%2F/x",
+            "clawhub/x?y",
+            "https://example.com/x",
+            "./missing",
+            "justaword",
+        ] {
             assert!(parse_source(refused, &cwd).is_err(), "{refused}");
         }
-        assert!(parse_source("clawhub/acme/x", &cwd).is_err_and(|error| error.contains("not built yet")));
+    }
+
+    fn zip_of(files: &[(&str, &[u8], Option<u32>)]) -> Vec<u8> {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, contents, mode) in files {
+            let mut options = zip::write::SimpleFileOptions::default();
+            if let Some(mode) = mode {
+                options = options.unix_permissions(*mode);
+            }
+            let _ = writer.start_file(*name, options);
+            let _ = writer.write_all(contents);
+        }
+        writer.finish().map(|cursor| cursor.into_inner()).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_clawhub_zip_is_unpacked_under_the_same_rules() {
+        let root = scratch("unzip");
+        let bytes = zip_of(&[
+            ("SKILL.md", SKILL.as_bytes(), None),
+            ("skill-card.md", b"card", None),
+            ("scripts/run.sh", b"#!/bin/sh\n", Some(0o755)),
+        ]);
+        let destination = root.join("ok");
+        assert_eq!(unzip(&bytes, &destination), Ok(()));
+        assert!(validate(&destination).is_ok());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &str| destination.join(path).metadata().map(|m| m.permissions().mode() & 0o777).unwrap_or(0);
+            assert_eq!(mode("SKILL.md"), 0o644, "a zip with no mode still gives a readable file");
+            assert_eq!(mode("scripts/run.sh"), 0o755);
+        }
+        for (name, bad) in [("escape", "../outside.md"), ("absolute", "/tmp/abs.md")] {
+            let bytes = zip_of(&[("SKILL.md", SKILL.as_bytes(), None), (bad, b"x", None)]);
+            assert!(unzip(&bytes, &root.join(name)).is_err_and(|error| error.contains("leaves")), "{bad}");
+        }
+        assert!(unzip(b"not a zip", &root.join("junk")).is_err_and(|error| error.contains("not a zip")));
+    }
+
+    #[test]
+    fn hermes_skills_are_listed_through_their_categories() {
+        let bytes = tarball(&[
+            ("hermes-abc/skills/research/arxiv/SKILL.md", "---\nname: arxiv\ndescription: Search arXiv.\n---\n", 0o644),
+            ("hermes-abc/skills/research/arxiv/templates/SKILL.md", "---\nname: inner\ndescription: x\n---\n", 0o644),
+            ("hermes-abc/optional-skills/mlops/training/axolotl/SKILL.md", "---\nname: axolotl\ndescription: Fine-tune.\n---\n", 0o644),
+            ("hermes-abc/optional-skills/yuanbao/SKILL.md", "---\nname: yuanbao\ndescription: Y.\n---\n", 0o644),
+            ("hermes-abc/skills/AGENTS.md", "not a skill", 0o644),
+        ]);
+        let found = catalogue_to_depth(bytes.as_slice(), &[("skills", "hermes"), ("optional-skills", "hermes")], 3)
+            .unwrap_or_default();
+        let sources: Vec<&str> = found.iter().map(|skill| skill.source.as_str()).collect();
+        assert_eq!(sources, vec!["hermes/mlops/training/axolotl", "hermes/research/arxiv", "hermes/yuanbao"]);
     }
 
     #[test]
@@ -731,7 +900,7 @@ mod tests {
             path: Some("skills/internal-comms".into()),
             commit: Some("abc123".into()),
             installed: "2026-10-02".into(),
-            files: BTreeMap::new(),
+            ..Origin::default()
         };
         let installed = commit(&staged, &skills, origin.clone()).unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(installed, skills.join("internal-comms"));
