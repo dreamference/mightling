@@ -1,6 +1,6 @@
 # Puffin Apps: Gmail and Google Drive through `/apps`, with no OpenAI sign-in
 
-**Status:** proposed (2026-10-03). Nothing here is built. §1 is read from the pinned Codex source (`rust-v0.158.0`); everything about running it is Phase 0 (§11).
+**Status:** proposed (2026-10-03). Nothing here is built. §1 is read from the pinned Codex source (`rust-v0.158.0`); Phase 0's source checks are done (§11.1), its live checks and the Drive scope test are not, and Phase 1 waits on the patch cap and §12's answers.
 **Goal:** the standard Codex `/apps` command works in `puffin` without a ChatGPT sign-in. It lists **Puffin's own apps** (Gmail, Google Drive), connects them through Puffin's local Google sign-in, switches them on and off, and hands their tools to the model. Nothing goes to `chatgpt.com`.
 **Builds on:**
 - [PUFFIN_GMAIL](./DREAMFERENCE_PUFFIN_GMAIL.md): the read-only Gmail service (`dreamference-gmail`, port 8767) and `puffin-admin gmail`;
@@ -195,6 +195,19 @@ Prerequisite: GOA §12's open item, a one-off sign-in confirming Google accepts 
 **Phase 2, Drive.** The service (§9), `/connect?app=drive`, `drive_search`/`drive_read`, the Drive row.
 
 **Phase 3, optional.** `$` mentions (§4.3): hook `app/installed` and map a mention of a Puffin app to a one-line nudge naming its tools. Only if Phase 1 shows users reaching for `$gmail`.
+
+### 11.1 Phase 0, read from the source (2026-10-03)
+
+Read from the pinned submodule, nothing compiled; the hooks were drafted in a scratch copy of the four files they touch, not added to `codex-patches/`.
+
+1. **H2's mapping holds, with one correction to §4.1.** The app-server's `AppInfo` in scope of `apps_processor.rs` is the connectors crate's (`connectors/src/app_info.rs:61`), the type `paginate_apps` takes and `app_info_to_api` converts; both it and the protocol's are `#[serde(rename_all = "camelCase")]`. So `list()` must emit **camelCase** keys (`installUrl`, `isAccessible`, `distributionChannel`, `isEnabled`), not the snake_case names of §4.1's table, and a missing `isEnabled` defaults to true. `paginate_apps`, `invalid_request` and `AppToolPolicyEvaluator` are all reachable from the hook's file without widening visibility; `app_info_to_api` passes `install_url` through unchanged. `Feature::Apps` (`apps`) is on by default and is **not** what the launcher's `enable_mcp_apps = false` switches off (that is `Feature::EnableMcpApps`, a different feature), so H1 needs no config change.
+2. **A `http://localhost` install URL opens.** An `/apps` row sends `OpenAppLink`, the view sends `OpenUrlInBrowser`, and that calls `webbrowser::open` with no check (`tui/src/app/history_ui.rs:280`). The https-and-`chatgpt.com` check, `validate_external_url`, guards only the elicitation and tool-suggestion links (`app_link_view.rs:99,111`; `bottom_pane/mod.rs:1909`). The refresh and the on/off switch are not exercised without a build: **live check owed**.
+3. **No browser:** `webbrowser::open` fails and the TUI prints `Failed to open browser for <url>: <err>`, so the URL is on screen to copy. On an SSH session `localhost:8767` is the remote machine's, so a browser elsewhere cannot reach it; this needs §5.2's paste-back path. **Live check owed.**
+4. **Parent pid.** A stdio MCP server is spawned with `Command::new` in a new process group (`rmcp-client/src/stdio_server_launcher.rs:287`), not detached, so its parent is the `puffin` process, as §8 needs. Under the app server (the desktop app) the parent is the app-server process instead; §8's seal lookup must accept that case if the desktop app goes through the app server.
+5. **The Drive scope test was not run:** it needs a person at Google's consent screen. Owed, and it gates Phase 2.
+6. **Patch size as drafted: 2,385 bytes** (H1, H2, a 10-line helper, two manifest lines), above §4.4's 1.5–2 KB estimate. With it the series would be 36,071 bytes against today's 33,750 cap. Not raised: that is the user's decision (§4.4).
+
+Also found: H1 also opens the `$` mention prefetch (`connector_mentions.rs:9`), which calls `app/installed`. Without a ChatGPT sign-in `runtime_enabled` is false there, so it never refreshes `codex_apps` and answers from the (empty) cached snapshot: no network call, and `$` stays empty as §4.3 intends. Confirm live with the first build.
 
 ### Tests
 
