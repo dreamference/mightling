@@ -101,18 +101,6 @@ Inspect the currently running main model by running sample prompts.
 |---|---|
 | `--deep` | Also report quantization map, KV geometry, sampling provenance, graph coverage and per-workload speculative acceptance (sends extra requests; slower) |
 
-### `puffin-admin diffusion-model`
-
-Diffusion model operations.
-
-#### `puffin-admin diffusion-model set`
-
-Set the diffusion model served beside the main one.
-
-| Option | Description |
-|---|---|
-| `model_name` | Name of the diffusion model to set. |
-
 ### `puffin-admin clear-tensorize-cache`
 
 Clear local tensorizer model cache only.
@@ -161,27 +149,22 @@ Launch local vLLM server optimized for GB10 unified memory.
 | `--guided-decoding-backend` | Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default. |
 | `--tensorize`, `--no-tensorize` | Save and load model in tensorize (.tensors) format (default: False) |
 | `--docker-image` | Docker image for vLLM. Unset uses the model's own docker_image recipe entry, then the pinned default. |
-| `--diffusion-model` | Diffusion model to serve beside the main one (default: the configured diffusion model, tiny-a2d-coder-0.5b-diffusion) |
-| `--diffusion-port` | Port for the diffusion sidecar's OpenAI endpoint. |
-| `--no-diffusion` | Skip starting the diffusion sidecar. |
 
 #### `puffin-admin server stop`
 
-Stop the running vLLM and diffusion Docker containers.
+Stop the running model server.
 
 | Option | Description |
 |---|---|
 | `--port` | Port of the server to stop. |
-| `--diffusion-port` | Port of the diffusion sidecar to stop. |
 
 #### `puffin-admin server remove`
 
-Remove the vLLM and diffusion Docker containers.
+Remove the model server's container.
 
 | Option | Description |
 |---|---|
 | `--port` | Port of the server to remove. |
-| `--diffusion-port` | Port of the diffusion sidecar to remove. |
 
 #### `puffin-admin server logs`
 
@@ -563,10 +546,6 @@ Add Google sign-in to the login page, keeping username/password.
 #### `puffin-admin puffin gmail`
 
 Connect Gmail and give the assistant a mailbox search tool.
-
-| Option | Description |
-|---|---|
-| `--refresh` | ==SUPPRESS==. |
 
 #### `puffin-admin puffin status`
 

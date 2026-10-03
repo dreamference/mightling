@@ -15,7 +15,6 @@ to tune by hand.
 | `qwen3.5-122b-a10b-nvfp4` | Qwen 3.5 122B-A10B | 122B (10B active) | NVFP4 | 78 – 120 GB | yes |
 | `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B | 35B (3B active) | NVFP4 | 25 – 60 GB | no |
 | `qwen3.5-122b-a10b-dflash-draft` | DFlash drafter for the 122B models (not served on its own) | 0.8B | BF16 | 1.5 – 2.5 GB | no |
-| `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D, a diffusion conversion of Qwen 2.5 Coder 0.5B | 0.6B | BF16 | 1.5 – 3 GB | no |
 
 List them, with their Hugging Face repositories, on your machine:
 
@@ -89,19 +88,10 @@ It was the default until 2026-09-29 and is the tested fallback: `puffin-admin ma
 qwen3.5-122b-a10b-hybrid-dflash`, then restart the server. `qwen3.5-122b-a10b-int4-dflash` stays
 behind it.
 
-## The diffusion model
-
-Beside the main model, `puffin-admin server start` also runs a small code-diffusion model,
-`tiny-a2d-coder-0.5b-diffusion`, on port 8001 with its own OpenAI-compatible endpoint. The main
-model server cannot serve diffusion models, so it runs in a separate container with a fixed 8 GB
-memory cap. If it ever runs away, only that container is stopped. It starts before the main model,
-so the main model's memory check already accounts for it.
-
 ## Changing models
 
 ```bash
 puffin-admin main-model set qwen3.6-35b-a3b-nvfp4       # pick the main model
-puffin-admin diffusion-model set <alias>                # pick the diffusion model
 puffin-admin model download --model <alias>             # fetch weights ahead of time
 puffin-admin server stop && puffin-admin server start   # restart with the new choice
 ```

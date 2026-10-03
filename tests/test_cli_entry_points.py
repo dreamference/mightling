@@ -45,7 +45,8 @@ def test_a_command_group_without_a_subcommand_prints_its_help(capsys):
     # puffin hit a NameError instead).
     import pytest
 
-    for group in ("server", "clear", "model", "main-model", "diffusion-model", "desktop", "puffin", "onyx"):
+    # `diffusion-model` is absent while diffusion is switched off (tests/test_diffusion_switched_off.py).
+    for group in ("server", "clear", "model", "main-model", "desktop", "puffin", "onyx"):
         with pytest.raises(SystemExit) as exit_info:
             DreamferenceCLIController.run_cli([group])
         assert exit_info.value.code == 1, group

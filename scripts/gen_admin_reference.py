@@ -40,6 +40,8 @@ def option_rows(parser: argparse.ArgumentParser) -> List[str]:
     for action in parser._actions:
         if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
             continue
+        if action.help == argparse.SUPPRESS:  # hidden from --help, so hidden here too
+            continue
         name = ", ".join(f"`{s}`" for s in action.option_strings) or f"`{action.dest}`"
         text = (action.help or "").replace("|", "\\|").replace("\n", " ").strip()
         if text and not text.endswith((".", ")")):

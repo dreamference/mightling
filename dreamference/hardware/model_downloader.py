@@ -504,7 +504,7 @@ class ModelDownloader:
         results: Dict[str, bool] = {}
         print("🚀 Pre-downloading all qualified NVIDIA GB10 LLM & Draft models...")
         for key, spec in ModelMatrixRegistry.MATRIX.items():
-            if spec.compatible_gb10:
+            if spec.compatible_gb10 and ModelMatrixRegistry.is_offered(key):
                 results[key] = cls.download_model(key, hf_token=hf_token, auto_tensorize=auto_tensorize)
         return results
 

@@ -50,8 +50,7 @@ starts only load the model.
     The default model runs on a custom vLLM image, `dreamference-vllm-dflash:0.23.0-aeon-dense5`,
     built in stages from `Dockerfile.dflash` and `Dockerfile.dense` in the repository. The headers
     of those files describe how. `server start` cannot build this image by itself yet, so build it
-    before the first start. Check with `docker image ls dreamference-vllm-dflash`. A small second model (a code-diffusion model)
-starts beside the main one; see [Models](models.md).
+    before the first start. Check with `docker image ls dreamference-vllm-dflash`.
 
 Check that it is answering:
 

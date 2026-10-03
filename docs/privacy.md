@@ -40,8 +40,7 @@ a URL, a mailbox read.
     upstream Codex's `~/.codex`, where a ChatGPT sign-in may be stored.
 - **Network exposure.** The web chat is published on `127.0.0.1` only (ports 80 and 3000), so its
   admin account is not reachable from other machines on your network; `configure` applies this.
-  OpenHands, if you use it, is published on `127.0.0.1:3001`, and the diffusion model's endpoint
-  listens on `127.0.0.1:8001`.
+  OpenHands, if you use it, is published on `127.0.0.1:3001`.
   **The main model server is the exception, by design:** Puffin assumes your local network is
   trusted. The model server listens on every interface at port 8000, with no API key, because the
   web chat and OpenHands run in Docker containers and reach it through the Docker bridge, which a
