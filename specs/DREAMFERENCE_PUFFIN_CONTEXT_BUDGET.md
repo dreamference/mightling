@@ -9,7 +9,7 @@
 **Question asked:** in the index arm of the benchmark, sympy-18211 made 216 calls with 247K characters of tool output against 86 and 66K without the index, compacted three times against none, and the summaries lost what had been found. Does the code index put too much noise into the context, could something like `rtk` make the output brief, and what fixes it?
 **Short answer:**
 - **The index's own output is not the main noise.** `code_*` tools are 23% of the index arm's tool output. Shell **file reads** (`sed -n`, `cat`, `head`) are the largest share in both arms: 41% with the index, 48% without. The index arm read *more* with the shell than the plain arm (1.07M against 0.85M characters), so the index added to reading instead of replacing it. It did replace some searching (grep and find fell from 346K to 252K).
-- **The lever that matches the problem is observation masking:** keep every command and every message, and replace the output of old tool calls with a short placeholder that names a saved copy, once the context is large. In replay it cuts compactions at the benchmark's limit by about half (21 → 11 with the index, 15 → 7 without) and to zero at the interactive limit, and saves about a third of the time spent compacting and re-prefilling (36 → 25 minutes over 14 instances in the index arm). The literature finds it matches LLM summarisation at half the cost. It needs one Codex hook.
+- **The lever that matches the problem is observation masking:** keep every command and every message, and replace the output of old tool calls with a short placeholder that names a saved copy, once the context is large. In replay it cuts compactions at the benchmark's limit by about half (21 → 12 with the index, 15 → 7 without) and to zero at the interactive limit, and saves a quarter to a third of the time spent compacting and re-prefilling (36 → 26 minutes over 14 instances in the index arm, 26 → 16.5 in the plain arm). The literature finds it matches LLM summarisation at half the cost. It needs one Codex hook.
 - **Second, `puffin-code`'s own format:** a 100-line window on `code_show` saves 16% of its output (2.7% of the total), and the nine tool schemas cost 2.1K tokens on every request.
 - **`rtk`-style filtering of shell output** is possible through Codex's `PreToolUse` hook (it can rewrite a command, not its output), but the filterable kinds (git, grep, tests) are only 20% of the index arm's output and 40% of the plain arm's. It is Phase 3, behind the other two.
 - **This is a problem of unattended work at a small budget,** the benchmark's 44K and Night Shift's 49K. At the interactive limit of 94K the same trajectories would compact 5 times in 4 instances, and not at all with masking.
@@ -183,17 +183,18 @@ Read from `rust-v0.158.0`:
 - Only `function_call_output` items are masked. Commands, the model's messages and the user's messages are kept whole.
 - **When.** The size of the view is the quantity auto-compaction compares with the limit `L`: the server's count for the last request plus Codex's estimate for the items recorded since (`get_total_token_usage()`, §1.9, §3). The hook makes a **move** when that size passes a **high mark** and has grown by at least a **minimum step** since the last move. Between moves nothing changes, so the prefix cache holds.
 - **A move.** Oldest first, skipping the **10** most recent outputs and every output under **600** characters, the hook masks outputs until the estimated saving (each output's bytes / 4, less its placeholder) covers the size minus a **low mark**. The estimator reads low (§1.9), so a move masks a little more than it must: the safe direction.
-- **Defaults**, relative to `L`: high mark **0.85·L**, low mark **0.50·L**, minimum step **16,000** tokens. At the benchmark's 44K that is 37.4K and 22K; at Night Shift's 49,152, 41.8K and 24.6K. Each move re-prefills about everything after the first masked item, whatever it masks (§1.7), so few large moves beat many small ones: in replay this policy makes 31 moves where v1's 0.82/0.55/8K made 48, for one compaction more (table below). v1's values stay as the comparison arm.
+- **Defaults**, relative to `L`: high mark **0.85·L**, low mark **0.50·L**, minimum step **16,000** tokens. At the benchmark's 44K that is 37.4K and 22K; at Night Shift's 49,152, 41.8K and 24.6K. Each move re-prefills about everything after the first masked item, whatever it masks (§1.7), so few large moves beat many small ones: in replay this policy makes 29 moves where v1's 0.82/0.55/8K made 48, and is the fastest of seven policies swept at both 44K and 49K, in the expected and the worst case. It compacts twice more at 44K (12 against 10) and once more at 49K. v1's values stay as the comparison arm.
+- **The low mark rarely binds.** Low marks of 0.45, 0.50 and 0.55 replay identically: the exemptions (the last 10, outputs under 600 characters) stop a move before it reaches any of them. The step and the high mark are what matter.
 - **Never masked:** the 10 most recent outputs (the published window), and any output under 600 characters. The exemption costs little, since 90% of the index arm's output characters are in outputs of 600 characters or more, and it keeps the short, dense outputs that carry results. The observation that decided sympy-18211, `ConditionSet(_gen, …)` from a `python -c`, was under 600 characters and would never have been masked.
 
-**The placeholder names a saved copy.** When a move first masks an output, the hook writes it to `$CODEX_HOME/masking/outputs/<call_id>.txt` (if the file is not already there), and the placeholder keeps the output's first line (the exit code) and its last **4** lines, so `FAILED (failures=2)` and a traceback's last line stay in view:
+**The placeholder names a saved copy, and stays under 200 characters.** When a move first masks an output, the hook writes it to `$CODEX_HOME/masking/outputs/<call_id>.txt` (if the file is not already there). The placeholder is the path, the output's first line (the exit code) and its last line cut to 80 characters, so `FAILED (failures=2)` or a traceback's exception stays in view:
 ```
-[puffin: output of call 87 (sed -n '996,1060p' sympy/solvers/inequalities.py) moved out of context, 2,302 chars.
- Full text: /home/u/.puffin/masking/outputs/call_ca1c38ae56a14f70ae27cdc6.txt; read it with sed -n or tail, do not re-run the command for it]
+[output moved out of context, 2,302 chars: /home/u/.puffin/masking/outputs/call_ca1c38ae56a14f70ae27cdc6.txt]
 Exit code: 0
-…
-<last 4 lines>
+… <last line, at most 80 characters>
 ```
+- **The size matters.** At 44K a 400-character placeholder (v1's four last lines plus a path) gives back most of the gain: 14 compactions instead of 12 in the index arm, 29.9 minutes instead of 26.2. At 200 characters the tables below hold. The command is not repeated: it is in the call item just above.
+- **How to use it is said once,** in one sentence the launcher adds to the instructions when masking is on ("an output moved out of context is in the file named; read it with `sed -n` or `tail`, do not re-run the command for it"), not in every placeholder. The instructions are at the head of the prompt and do not change within a session, so the sentence costs its few tokens once per request and nothing in the cache.
 - **Why not "run it again"** (v1's wording): re-running is wrong for anything that edited a file, installed something or ran a long test suite, and its answer may differ from what the model saw. Reading the saved copy is exact, cheap and has no side effects. This is Manus's restorable compression and Cursor's output-as-file (§2).
 - **Readable wherever commands run:** the read-only and workspace-write sandboxes leave the file system readable, and a SWE-bench container mounts its own `CODEX_HOME` (checked in Phase 1, §6).
 - **Size:** the copies are a subset of what the rollout already holds (the index arm's whole tool output was 2.6 MB over 14 instances). They are pruned with the boundary files (below).
@@ -207,7 +208,7 @@ Exit code: 0
 - Files older than 30 days are deleted at launch, with the outputs they name, as cave mode's session files are.
 - A sandboxed command started from the home folder can write `$CODEX_HOME` (AIRGAPPED §14.5), so it could edit or delete these files. The worst it can do is unmask outputs (the context grows and compacts sooner) or mask more (restorably). Nothing here is a security boundary.
 
-**Two output forms.** `exec_command` outputs are text that begins `Exit code: …`; MCP outputs (the `code_*` tools) are a list of content items whose first item is Codex's `Wall time: … Output:` header. The placeholder keeps the first line of the text in the first case and the tool's own first line (for `code_show`, the `show <symbol> (<path>:<a>-<b>)` header) in the second, followed by the last 4 lines either way; the saved copy of an MCP output is its text items joined.
+**Two output forms.** `exec_command` outputs are text that begins `Exit code: …`; MCP outputs (the `code_*` tools) are a list of content items whose first item is Codex's `Wall time: … Output:` header. The placeholder keeps the first line of the text in the first case and the tool's own first line (for `code_show`, the `show <symbol> (<path>:<a>-<b>)` header) in the second, followed by the last line either way; the saved copy of an MCP output is its text items joined.
 
 **Where.** At the end of `for_prompt_annotated`, before the items are returned: the size is read from `self` (`get_total_token_usage`) and passed with the items to `puffin_masking::apply`. The rule lives in a **leaf crate**, `puffin-rs/masking/` (`puffin-masking`), with no Codex or launcher dependency and its own tests, which `codex-rs/core` depends on through one `Cargo.toml` line, as patch `0020` does for `puffin-rs/tools` and `0019` for `puffin-rs/airgapped`: Codex's core must not depend on the launcher. The launcher, in the same process, sets the policy and `CODEX_HOME` once at start through a setter the leaf crate exposes, with `L` from the compaction limit it already computes (`puffin-rs/src/compaction.rs`); with no policy set, `apply` does nothing. The same hook serves every sampling request and the compaction request (§3), so a compaction also prefills the smaller, masked history.
 
@@ -219,8 +220,8 @@ Exit code: 0
 
 | Limit | Index arm: unmasked | 0.85/0.50/16K | 0.82/0.55/8K | Plain arm: unmasked | 0.85/0.50/16K | 0.82/0.55/8K |
 |---|---|---|---|---|---|---|
-| 44,000 (the benchmark) | 21 | **11** | 10 | 15 | **7** | 6 |
-| 49,152 (Night Shift's `task_context`) | 17 | **9** | 7 | 11 | **6** | 5 |
+| 44,000 (the benchmark) | 21 | **12** | 10 | 15 | **7** | 6 |
+| 49,152 (Night Shift's `task_context`) | 17 | **9** | 8 | 11 | **6** | 5 |
 | 65,536 | 11 | **3** | 3 | 6 | **2** | 2 |
 | 94,144 (interactive: 60% of the KV pool) | 5, in 4 instances | **0** | 0 | 2, in 2 instances | **0** | 0 |
 
@@ -231,19 +232,19 @@ The rows above 44K are **upper bounds**: the trajectories were recorded at 44K a
 | 14 instances at 44K | Compactions | Moves | Re-prefill | Compacting | **Total** |
 |---|---|---|---|---|---|
 | Index arm, unmasked | 21 | 0 | 0 | 36.4 min | **36.4 min** |
-| Index arm, 0.85/0.50/16K | 11 | 31 | 5.2–5.6 min | 19.1 min | **24.3–24.7 min** |
-| Index arm, 0.82/0.55/8K | 10 | 48 | 7.1–9.7 min | 17.3 min | 24.4–27.0 min |
+| Index arm, 0.85/0.50/16K | 12 | 29 | 5.1–5.4 min | 20.8 min | **25.9–26.2 min** |
+| Index arm, 0.82/0.55/8K | 10 | 48 | 7.1–9.8 min | 17.3 min | 24.4–27.1 min |
 | Plain arm, unmasked | 15 | 0 | 0 | 26.0 min | **26.0 min** |
-| Plain arm, 0.85/0.50/16K | 7 | 22 | 4.3–4.7 min | 12.1 min | **16.4–16.8 min** |
-| Plain arm, 0.82/0.55/8K | 6 | 37 | 6.3–8.8 min | 10.4 min | 16.7–19.2 min |
+| Plain arm, 0.85/0.50/16K | 7 | 21 | 4.2–4.4 min | 12.1 min | **16.3–16.5 min** |
+| Plain arm, 0.82/0.55/8K | 6 | 36 | 6.2–8.5 min | 10.4 min | 16.6–18.9 min |
 
-At Night Shift's 49,152 the index arm goes from 29.5 to 20.3–21.2 minutes and the plain arm from 19.1 to 15.0–15.9.
+At Night Shift's 49,152, with the default policy, the index arm goes from 29.5 to 20.2–21.1 minutes and the plain arm from 19.1 to 14.7–15.5 (v1's policy: 21.9–26.4 and 15.0–18.4).
 
-- **Masking saves about a third of the time** spent compacting and re-prefilling, before counting the re-reading that compactions cause (354K characters in the index arm, §1.4), which the replay cannot count and the A/B can. v1 found it "about even" only because it took a compaction at 24 s.
-- **The worst case still wins.** If under load no state survives before the first masked item, every move re-prefills from token 0, about 12K tokens (8 s) more per move: 31 moves add about 4 minutes, and the index arm's total is about 29 minutes against 36.
+- **Masking saves a quarter to a third of the time** spent compacting and re-prefilling, before counting the re-reading that compactions cause (354K characters in the index arm, §1.4), which the replay cannot count and the A/B can. v1 found it "about even" only because it took a compaction at 24 s.
+- **The worst case still wins.** If under load no state survives before the first masked item, every move re-prefills from token 0, about 12K tokens (8 s) more per move: the index arm's total becomes 30.4 minutes against 36.4 (v1's policy: 33.9) and the plain arm's 19.0 against 26.0 (23.2). Fewer moves is what keeps the worst case cheap.
 - **Without the minimum step** the same marks moved the boundary 256 times (v1's first replay) and cost 25 minutes of re-prefill: the step is what makes masking affordable on this server.
 
-**Masking old long commands too** (heredocs over 600 characters outside the last 10, which hold whole scripts and file contents the model wrote) takes the 44K row to **6** compactions with the index and **5** without, and the totals to 16.7–20.1 and 14.1–17.3 minutes (0.82/0.55/8K). The model loses the exact text it wrote, which the file still has, and with the saved copy the command's text is restorable too. It stays Phase 2, measured after Phase 1, because it changes what the model sees of its own actions, which the published results do not cover.
+**Masking old long commands too** (heredocs over 600 characters outside the last 10, which hold whole scripts and file contents the model wrote) takes the default policy's 44K row to **10** compactions with the index and **6** without, and the totals to 21.8–22.6 and 13.9–14.6 minutes; at 49K, to 6 and 5 compactions, 14.9–16.4 and 12.4–13.5 minutes. The model loses the exact text it wrote, which the file still has, and with the saved copy the command's text is restorable too. It stays Phase 2, measured after Phase 1, because it changes what the model sees of its own actions, which the published results do not cover.
 
 ### 4.2 Do: put a cap on a single tool output
 
@@ -301,7 +302,7 @@ The alternative is a small `puffin-filter` of our own with the three or four fil
 | 49,152 tokens | Night Shift's `task_context` | **the budget this spec is for** |
 | 94,144 tokens | interactive sessions (60% of the KV pool, COMPACTION §4.2) | replay: 5 compactions in 4 of 14 instances without masking, none with it |
 
-Interactive sessions are not the target, and nothing here should be read as a general `puffin` problem. Masking still applies there and costs nothing until the high mark is reached. Past it, at 94K, the replay removes the index arm's 5 compactions (8.7 minutes at 104 s each) with 13 moves (4.0–6.7 minutes of re-prefill), and the plain arm's 2 (3.5 minutes) with 8 moves (2.8–4.5 minutes): no worse on time, and nothing summarised away. One stream at a time compacts faster than the 104 s measured at three (§1.8), so on time the interactive case is about even; the gain there is what survives. Whether masking is on by default for interactive sessions is decided after Phase 1, not assumed.
+Interactive sessions are not the target, and nothing here should be read as a general `puffin` problem. Masking still applies there and costs nothing until the high mark is reached. Past it, at 94K, the replay removes the index arm's 5 compactions (8.7 minutes at 104 s each) with 13 moves (3.9–6.8 minutes of re-prefill), and the plain arm's 2 (3.5 minutes) with 8 moves (2.9–4.7 minutes): no worse on time, and nothing summarised away. One stream at a time compacts faster than the 104 s measured at three (§1.8), so on time the interactive case is about even; the gain there is what survives. Whether masking is on by default for interactive sessions is decided after Phase 1, not assumed.
 
 ---
 
@@ -314,7 +315,7 @@ Interactive sessions are not the target, and nothing here should be read as a ge
   - nothing is masked below the high mark, or before the minimum step since the last move;
   - a move masks oldest first until the estimated saving covers the size minus the low mark;
   - the 10 most recent outputs and outputs under 600 characters are never masked;
-  - the placeholder's first line, last 4 lines and saved-copy path, for both output forms;
+  - the placeholder's path, first line and last line, for both output forms, and its length under 200 characters;
   - the saved copy is written once and holds the output exactly;
   - the state round-trips through its file, a new segment key starts empty, and ids no longer in the history are ignored;
   - with no policy set, `apply` changes nothing.

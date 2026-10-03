@@ -29,12 +29,13 @@ PREFILL_TOKENS_PER_S: Final[int] = 1450
 # was one stream at a 14K context.
 COMPACTION_S: Final[int] = 104
 SUMMARY_TOKENS: Final[int] = 3000
-PLACEHOLDER_CHARS: Final[int] = 120
+# A placeholder of §4.1: one line naming the saved copy, the exit code and the last line.
+PLACEHOLDER_CHARS: Final[int] = 200
 KEEP_RECENT: Final[int] = 10
 MIN_MASKABLE_CHARS: Final[int] = 600
 MIN_STEP_TOKENS: Final[int] = 8000
-# (high, low, step): the spec's first policy and the one the sweep of §4.1 recommends.
-POLICIES: Final[Tuple[Tuple[float, float, int], ...]] = ((0.82, 0.55, 8000), (0.85, 0.50, 16000))
+# (high, low, step): the default of §4.1 first, then v1's policy, its comparison arm.
+POLICIES: Final[Tuple[Tuple[float, float, int], ...]] = ((0.85, 0.50, 16000), (0.82, 0.55, 8000))
 LIMITS: Final[Tuple[int, ...]] = (44000, 49152, 65536, 94144)
 
 
