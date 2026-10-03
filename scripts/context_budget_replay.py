@@ -8,6 +8,9 @@ rollouts a SWE-bench run leaves under its scratch directory and needs nothing ru
     context_budget_replay.py rereads RUN_DIR...   re-reads of file regions (§1.4)
     context_budget_replay.py mask    RUN_DIR...   compactions and mask moves under a
                                                   masking policy, per limit (§4.1)
+    context_budget_replay.py mask --policy HIGH,LOW,STEP RUN_DIR...
+                                                  the same for one policy (fractions of
+                                                  the limit, step in tokens), repeatable
 
 RUN_DIR is a run directory such as ~/.local/share/dreamference/swe-bench/runs/idx14b-on.
 """
@@ -19,13 +22,19 @@ import re
 import sys
 from typing import Dict, Final, Iterator, List, Optional, Tuple
 
-PREFILL_TOKENS_PER_S: Final[int] = 1700
-COMPACTION_S: Final[int] = 24
+# Prefill rate of Qwen3.8-27B on SGLang measured by the cache probe of §1.7 (idle server).
+PREFILL_TOKENS_PER_S: Final[int] = 1450
+# Median compaction request (96 s) plus the first request after it (8 s), measured from the
+# rollouts of idx14b-on/off at three instances at once (§1.8). The 24 s of COMPACTION §9.2
+# was one stream at a 14K context.
+COMPACTION_S: Final[int] = 104
 SUMMARY_TOKENS: Final[int] = 3000
 PLACEHOLDER_CHARS: Final[int] = 120
 KEEP_RECENT: Final[int] = 10
 MIN_MASKABLE_CHARS: Final[int] = 600
 MIN_STEP_TOKENS: Final[int] = 8000
+# (high, low, step): the spec's first policy and the one the sweep of §4.1 recommends.
+POLICIES: Final[Tuple[Tuple[float, float, int], ...]] = ((0.82, 0.55, 8000), (0.85, 0.50, 16000))
 LIMITS: Final[Tuple[int, ...]] = (44000, 49152, 65536, 94144)
 
 
@@ -221,11 +230,18 @@ def trajectory(path: str) -> Tuple[int, List[Tuple[str, int]], float]:
 
 
 def replay(first: int, items: List[Tuple[str, int]], ratio: float, limit: int,
-           high: Optional[int], low: Optional[int], mask_args: bool = False) -> Tuple[int, int, float]:
-    """Replays one trajectory; returns compactions, mask moves and re-prefill seconds."""
+           high: Optional[int], low: Optional[int], mask_args: bool = False,
+           step: int = MIN_STEP_TOKENS) -> Tuple[int, int, float, float]:
+    """Replays one trajectory; returns compactions, mask moves and two re-prefill estimates.
+
+    The first estimate re-prefills from the oldest item a move masks. The second, which
+    the cache probe of §1.7 supports, re-prefills from the first masked item of the
+    context: SGLang keeps the hybrid model's state at the branch point the first move
+    made and at request ends, none of which lies between it and a later move's items.
+    """
     context: List[List] = []
     compactions = moves = 0
-    refill = 0.0
+    refill_newest = refill_first = 0.0
     next_trigger = high
 
     def tokens(entry: List) -> float:
@@ -248,39 +264,60 @@ def replay(first: int, items: List[Tuple[str, int]], ratio: float, limit: int,
                 oldest = index if oldest is None else oldest
             if oldest is not None:
                 moves += 1
-                refill += sum(tokens(entry) for entry in context[oldest:]) / PREFILL_TOKENS_PER_S
-            next_trigger = max(high, size() + MIN_STEP_TOKENS)
+                refill_newest += sum(tokens(entry) for entry in context[oldest:]) / PREFILL_TOKENS_PER_S
+                first_masked = next(i for i, entry in enumerate(context) if entry[2])
+                refill_first += sum(tokens(entry) for entry in context[first_masked:]) / PREFILL_TOKENS_PER_S
+            next_trigger = max(high, size() + step)
         if size() > limit:
             compactions += 1
             context = [["msg", SUMMARY_TOKENS * ratio, False]]
             next_trigger = high
-    return compactions, moves, refill
+    return compactions, moves, refill_newest, refill_first
 
 
-def mask(run_dir: str) -> None:
-    """Prints compactions and mask moves per limit, unmasked and masked, for one run."""
+def mask(run_dir: str, policies: Tuple[Tuple[float, float, int], ...] = POLICIES) -> None:
+    """Prints compactions, mask moves and time per limit, unmasked and masked, for one run."""
     runs = [trajectory(path) for path in rollouts(run_dir)]
     print(f"== {run_dir}")
     for limit in LIMITS:
-        high, low = int(limit * 0.82), int(limit * 0.55)
-        for label, policy in (("unmasked", (None, None, False)), ("masked", (high, low, False)),
-                              ("masked + old commands", (high, low, True))):
-            results = [replay(*run, limit, *policy) for run in runs]
+        variants = [("unmasked", None, None, False, MIN_STEP_TOKENS)]
+        for high_share, low_share, step in policies:
+            name = f"masked {high_share:.2f}/{low_share:.2f}/{step // 1000}K"
+            variants.append((name, int(limit * high_share), int(limit * low_share), False, step))
+        first_high, first_low, first_step = policies[0]
+        variants.append((f"+ old commands {first_high:.2f}/{first_low:.2f}/{first_step // 1000}K",
+                         int(limit * first_high), int(limit * first_low), True, first_step))
+        for label, high, low, mask_args, step in variants:
+            results = [replay(*run, limit, high, low, mask_args, step) for run in runs]
             compactions = sum(result[0] for result in results)
             moves = sum(result[1] for result in results)
-            refill = sum(result[2] for result in results)
-            print(f"   limit {limit:6d} {label:22s} compactions {compactions:3d} in {sum(1 for r in results if r[0])} instances; "
-                  f"mask moves {moves:3d}; re-prefill {refill / 60:4.1f} min; compaction {compactions * COMPACTION_S / 60:4.1f} min")
+            newest = sum(result[2] for result in results) / 60
+            first_masked = sum(result[3] for result in results) / 60
+            compacting = compactions * COMPACTION_S / 60
+            print(f"   limit {limit:6d} {label:30s} compactions {compactions:3d} in "
+                  f"{sum(1 for r in results if r[0]):2d} instances; mask moves {moves:3d}; "
+                  f"re-prefill {newest:4.1f}-{first_masked:4.1f} min; compaction {compacting:4.1f} min; "
+                  f"total {compacting + newest:4.1f}-{compacting + first_masked:4.1f} min")
 
 
 def main() -> int:
     """Runs one of the three reports over the run directories given."""
     commands = {"kinds": kinds, "rereads": rereads, "mask": mask}
-    if len(sys.argv) < 3 or sys.argv[1] not in commands:
+    arguments = sys.argv[1:]
+    if len(arguments) < 2 or arguments[0] not in commands:
         print(__doc__)
         return 1
-    for run_dir in sys.argv[2:]:
-        commands[sys.argv[1]](run_dir.rstrip("/"))
+    command, rest = arguments[0], arguments[1:]
+    policies: List[Tuple[float, float, int]] = []
+    while command == "mask" and len(rest) >= 2 and rest[0] == "--policy":
+        high, low, step = rest[1].split(",")
+        policies.append((float(high), float(low), int(step)))
+        rest = rest[2:]
+    for run_dir in rest:
+        if policies:
+            mask(run_dir.rstrip("/"), tuple(policies))
+        else:
+            commands[command](run_dir.rstrip("/"))
     return 0
 
 
