@@ -38,6 +38,8 @@ All figures are from the session rollouts (`~/.local/share/dreamference/swe-benc
 
 All `code_*` tools together: 612K characters, **23%** of the index arm. Shell: 77%.
 
+A shell read averaged **2,005 characters** (about 50 lines) with the index and 1,758 without: the reads are already window-sized. A smaller window is not the lever; the number of reads is.
+
 Compactions: **27** in the index arm, **15** in the plain arm. Each arm compacted in 8 of its 14 instances.
 
 ### 1.2 sympy-18211, the instance that started this
@@ -132,9 +134,13 @@ Read from `rust-v0.158.0`:
   ```
 - The view is measured with Codex's own token estimator (the one its truncation uses), because the hook has no server count. Defaults, relative to the compaction limit `L`: high mark **0.82·L**, low mark **0.55·L**, minimum step **8,000** tokens. At the benchmark's 44K these are 36K and 24K.
 
-**Where.** One line at the end of `for_prompt_annotated`: `puffin_launcher::masking::apply(&mut items)`, with the rule in a module of the launcher crate (a leaf module with its own tests, like `airgapped`). The launcher sets the policy once at start from the compaction limit it already computes (`puffin-rs/src/compaction.rs`). The hook is stateless: whether an item is masked is decided from the history alone, so a resumed session and a subagent get the same view, and `prompt_debug` shows the masked view, which is what the model sees.
+**Where.** One line at the end of `for_prompt_annotated`: `puffin_masking::apply(&mut items)`. The rule lives in a **leaf crate**, `puffin-rs/masking/` (`puffin-masking`), with no Codex or launcher dependency and its own tests, which `codex-rs/core` depends on through one `Cargo.toml` line, as patch `0020` does for `puffin-rs/tools` and `0019` for `puffin-rs/airgapped`: Codex's core must not depend on the launcher. The launcher, in the same process, sets the policy once at start through a setter the leaf crate exposes, from the compaction limit it already computes (`puffin-rs/src/compaction.rs`); with no policy set, `apply` does nothing.
 
-**What it costs in the patch budget.** The series is 33,686 bytes against a cap of 33,750 in `test_the_patches_stay_small`. A hook of 300–500 bytes needs the cap raised explicitly, as every hook before it did.
+**Stateless by replay.** The minimum step makes the rule depend on the past ("grown by 8,000 since the last move"), so the hook does not remember anything: on every request it replays the rule over the whole item list from the first item, recomputing every move, and masks what the replay masked. That is linear in the history and cheap beside a request. Because nothing is stored, a resumed session and a subagent compute the same view from the same history, and `prompt_debug` shows the masked view, which is what the model sees. Storing the last trigger point instead would break resume.
+
+**Two output forms.** `exec_command` outputs are text that begins `Exit code: …`; MCP outputs (the `code_*` tools) are a list of content items whose first item is Codex's `Wall time: … Output:` header. The placeholder keeps the first line of the text in the first case and the tool's own first line (for `code_show`, the `show <symbol> (<path>:<a>-<b>)` header) in the second, followed by the last 4 lines either way.
+
+**What it costs in the patch budget.** The series is 33,686 bytes against a cap of 33,750 in `test_the_patches_stay_small`. The hook, the `Cargo.toml` line and their context come to about **500–1,000 bytes** (`0020`'s two hooks and its dependency line are about 1 KB), so the cap is raised explicitly, as for every hook before it.
 
 **Configuration.** `puffin_mask_tool_output = true` (default once Phase 1 passes), and the four numbers as keys under `[puffin_mask]` for measurement. Night Shift and SWE-bench take the same keys.
 
@@ -147,18 +153,20 @@ Read from `rust-v0.158.0`:
 | 65,536 | 11 | **3** | 6 | **2** |
 | 94,144 (interactive: 60% of the KV pool) | 5, in 4 instances | **0** | 2, in 2 instances | **0** |
 
-Masking old long commands too (heredocs over 600 characters outside the last 10, which hold whole scripts and file contents the model wrote) takes the 44K row to **6** and **3**. Its risk is that the model loses the exact text it wrote, which the file still has. It is Phase 2, optional.
+The rows above 44K are **upper bounds**: the trajectories were recorded at 44K and include the re-reading that followed each compaction there (354K characters in the index arm), which a run at a higher limit would not have made.
+
+Masking old long commands too (heredocs over 600 characters outside the last 10, which hold whole scripts and file contents the model wrote) takes the 44K row to **6** and **5**. Its risk is that the model loses the exact text it wrote, which the file still has. It is Phase 2, optional.
 
 **What it costs in time.** Each move of the boundary makes the model server prefill again from the oldest newly masked item to the end (prefill about 1,700 tokens per second). Compaction is taken at about 24 s each (COMPACTION §9.2), not counting the re-reading afterwards:
 
 | 14 instances at 44K | Compactions | Mask moves | Re-prefill | Compaction time | Total |
 |---|---|---|---|---|---|
 | Index arm, unmasked | 21 | 0 | 0 | 8.4 min | 8.4 min |
-| Index arm, masked | 10 | 49 | 6.2 min | 4.0 min | 10.2 min |
+| Index arm, masked | 10 | 48 | 6.0 min | 4.0 min | 10.0 min |
 | Plain arm, unmasked | 15 | 0 | 0 | 6.0 min | 6.0 min |
-| Plain arm, masked | 6 | 38 | 5.5 min | 2.4 min | 7.9 min |
+| Plain arm, masked | 6 | 37 | 5.4 min | 2.4 min | 7.8 min |
 
-On direct time masking is about even (1.8–1.9 minutes more over 14 instances, roughly 8 s per instance). Its gain is in what survives: half the compactions, and none of the summary's losses for the outputs it removes. The 354K characters of re-reading after compactions in the index arm (§1.4) are where any time is won back; the replay cannot count that, the A/B can. Without the minimum step the same rule moved the boundary 256 times and cost 25 minutes, which is why the step is part of the rule.
+On direct time masking is about even (1.6–1.8 minutes more over 14 instances, roughly 7 s per instance). Its gain is in what survives: half the compactions, and none of the summary's losses for the outputs it removes. The 354K characters of re-reading after compactions in the index arm (§1.4) are where any time is won back; the replay cannot count that, the A/B can. In an earlier replay without the minimum step, the same marks moved the boundary 256 times and cost 25 minutes of re-prefill, which is why the step is part of the rule.
 
 ### 4.2 Do: put a cap on a single tool output
 
@@ -212,13 +220,13 @@ The alternative is a small `puffin-filter` of our own with the three or four fil
 | 49,152 tokens | Night Shift's `task_context` | **the budget this spec is for** |
 | 94,144 tokens | interactive sessions (60% of the KV pool, COMPACTION §4.2) | replay: 5 compactions in 4 of 14 instances without masking, none with it |
 
-Interactive sessions are not the target, and nothing here should be read as a general `puffin` problem. Masking still applies there, and costs nothing until the high mark is reached.
+Interactive sessions are not the target, and nothing here should be read as a general `puffin` problem. Masking still applies there and costs nothing until the high mark is reached, but past it the trade is different: at 94K the replay removes 5 compactions (2.0 minutes) with 16 mask moves (4.1 minutes of re-prefill) in the index arm. Whether masking should be on for interactive sessions is decided by the A/B, not assumed.
 
 ---
 
 ## 6. Phases and tests
 
-**Phase 0, replay (done, 2026-10-03).** §1 and the tables of §4.1. The replay scripts read the rollout files and need nothing running; they become a `puffin-admin swe-bench report --context` section in Phase 1, so every later run reports its per-kind output, compactions and re-reads.
+**Phase 0, replay (done, 2026-10-03).** §1 and the tables of §4.1, reproducible with `scripts/context_budget_replay.py {kinds,rereads,mask} <run dir>…` (reads the rollout files, needs nothing running). In Phase 1 the same measurements become a `puffin-admin swe-bench report --context` section, so every later run reports its per-kind output, compactions and re-reads.
 
 **Phase 1, build.**
 - §4.1: the `masking` module in `puffin-rs` with unit tests: nothing masked below the high mark; masked down to the low mark; no new move before the minimum step; the last 10 and outputs under 600 characters never masked; the placeholder's first and last lines; the result depends on the history alone (the same input gives the same output, so a resumed session gets the same view). The patch, with the cap raised. A live check in a real session: `prompt_debug` before and after the high mark, and the server's prefix-cache hits between moves.
