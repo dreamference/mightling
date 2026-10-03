@@ -7,6 +7,12 @@ at risk. The runner, not the agent, commits: the agent's sandbox cannot write th
 `.git`, and nothing is merged, pushed or rebased. The runner's own test run executes code the agent
 wrote, so it goes through the same sandbox as the agent's commands (`puffin sandbox`), with a
 policy the runner fixes: nothing the agent wrote runs with the user's full rights.
+
+A task handed over by another node (`remote` in its record, specs/DREAMFERENCE_PUFFIN_NODE.md
+§13.5) runs every process inside bubblewrap as well: the node owner's home folder is an empty
+tmpfs, the task's worktree and its own `CODEX_HOME` are the only writable places, and the network
+namespace is the host's, because `puffin exec` reaches this node's model server on loopback. The
+agent's commands are confined by Codex's own sandbox inside that, as on any node.
 """
 
 import os
@@ -68,7 +74,7 @@ class NightShiftTaskRun:
 
     def __init__(self, night_dir: Path, task: Dict[str, Any], settings: NightShiftSettings,
                  puffin_bin: str, deadline: float, model_host: Optional[str] = None,
-                 context_budget: Optional[int] = None) -> None:
+                 context_budget: Optional[int] = None, model_node: Optional[str] = None) -> None:
         """
         Args:
             night_dir: The queue directory.
@@ -81,8 +87,16 @@ class NightShiftTaskRun:
                 the network for a node from a worktree (specs/DREAMFERENCE_PUFFIN_NODE.md §6.1).
             context_budget: The task's share of the KV pool (`NightShiftHost.task_budget`), passed to
                 every `puffin exec` as its compaction limit. None falls back to `[night] compact_at`.
+            model_node: The paired node whose model server `model_host` is, when it is not this
+                machine's (a replica lane); recorded in the result.
         """
         self.model_host = model_host
+        self.model_node = model_node
+        # The model server the scheduler counts this task against (set by the runner).
+        self.lane_host: Optional[str] = None
+        # A task another node handed over: sandboxed whole, with a CODEX_HOME of its own.
+        self.remote: Optional[Dict[str, Any]] = task.get("remote") if isinstance(task.get("remote"), dict) else None
+        self.author: Optional[Dict[str, Any]] = task.get("author") if isinstance(task.get("author"), dict) else None
         self.context_budget: Optional[int] = context_budget if context_budget is not None \
             else (settings.compact_at or None)
         self.night_dir = night_dir
@@ -102,6 +116,11 @@ class NightShiftTaskRun:
         self.worktree = night_dir / "worktrees" / self.task_id
         self.log_path = night_dir / "logs" / f"{self.task_id}.jsonl"
         self.last_message_path = night_dir / "logs" / f"{self.task_id}.last.txt"
+        if self.remote:
+            # Written by `puffin` from inside the sandbox, where only the task's own home is writable.
+            from dreamference.night_shift.night_shift_remote import NightShiftRemote
+            self.home = NightShiftRemote.task_home(self.task_id)
+            self.last_message_path = self.home / "last-message.txt"
         self.stop_event = threading.Event()
         self.in_model = False
         self.attempts: int = int(task.get("attempts") or 0)
@@ -136,8 +155,10 @@ class NightShiftTaskRun:
         problem = self._prepare_worktree()
         if problem:
             return self._finish("failed", note=problem)
+        # `[night] test` is the node owner's, for the owner's repositories; a task from another
+        # machine brings its own `--test` or the repository's own file.
         test_command, test_source = self.detect_test_command(
-            self.worktree, self.test_override, self.settings.test, self.repo)
+            self.worktree, self.test_override, None if self.remote else self.settings.test, self.repo)
         if self._cancelled():
             return self._cleanup_and_finish("cancelled")
         self._fix_level()
@@ -285,7 +306,12 @@ class NightShiftTaskRun:
     def _commit(self, test_command: Optional[str], test_source: str,
                 test_result: Optional[Dict[str, Any]]) -> str:
         first_line = (self.text.strip().splitlines() or ["task"])[0][:72]
-        code, output = self._git(self.worktree, "commit", "-q", "-m", f"night: {first_line}")
+        identity: List[str] = []
+        if self.author:
+            # A task from another machine is committed as its sender, in a job repository that has
+            # no identity of its own.
+            identity = ["-c", f"user.name={self.author.get('name')}", "-c", f"user.email={self.author.get('email')}"]
+        code, output = self._git(self.worktree, *identity, "commit", "-q", "-m", f"night: {first_line}")
         if code != 0:
             return self._finish("failed", note=f"git commit failed: {output.strip()[-300:]}",
                                 result=self._result(test_command, test_source, test_result))
@@ -340,8 +366,11 @@ class NightShiftTaskRun:
         return result
 
     def _timing(self) -> Dict[str, Any]:
-        return {"attempts": self.attempts, "nudges": self.nudges_used,
-                "wall_s": int(time.time() - self.started)}
+        timing: Dict[str, Any] = {"attempts": self.attempts, "nudges": self.nudges_used,
+                                  "wall_s": int(time.time() - self.started)}
+        if self.model_node:
+            timing["model_node"] = self.model_node
+        return timing
 
     # -- processes ---------------------------------------------------------------------------
 
@@ -380,6 +409,8 @@ class NightShiftTaskRun:
         if getattr(self.settings, "prompt", None):
             env[PROMPT_ENV] = self.settings.prompt
         env.update(extra_env or {})
+        if self.remote:
+            command = self.remote_sandbox(command, extra_env or {})
         limit = self.deadline if timeout is None else min(self.deadline, time.time() + timeout)
         with open(output, "ab" if append else "wb") as sink:
             process = subprocess.Popen(prefix + command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
@@ -417,6 +448,36 @@ class NightShiftTaskRun:
         result = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL, env=env)
         return result.returncode, result.stdout + result.stderr
+
+    def remote_sandbox(self, command: List[str], extra_env: Dict[str, str]) -> List[str]:
+        """
+        Wraps one process of a task from another machine in the job sandbox (§13.5).
+
+        Args:
+            command: The process's command line (`puffin exec …` or the test run).
+            extra_env: Variables set for this command only.
+
+        Returns:
+            List[str]: The bubblewrap command line.
+        """
+        from dreamference.node.node_job import NodeJob
+        self.home.mkdir(parents=True, exist_ok=True)
+        binaries = os.path.dirname(os.path.realpath(self.puffin_bin))
+        variables = {
+            "PATH": f"{binaries}:/usr/local/bin:/usr/bin:/bin", "CODEX_HOME": str(self.home),
+            NIGHT_RUN_ENV: "1", "GIT_TERMINAL_PROMPT": "0",
+            # Gmail is this node's owner's; a task from another machine is never told about it.
+            "DREAMFERENCE_PUFFIN_GMAIL": "false",
+        }
+        if self.model_host:
+            variables["DREAMFERENCE_VLLM_HOST"] = self.model_host
+        if self.airgapped:
+            variables[AIRGAPPED_ENV] = self.airgapped
+        variables.update(extra_env)
+        # The host's network namespace: `puffin` reaches this node's model server on loopback.
+        argv = NodeJob.sandbox_command(self.worktree, command, True, self.task_id, writable=[str(self.home)],
+                                       readable=[binaries], environment=variables)
+        return [os.path.realpath(self.puffin_bin) if word == self.puffin_bin else word for word in argv]
 
     # -- reads -------------------------------------------------------------------------------
 

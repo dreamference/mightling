@@ -379,3 +379,10 @@ One task, run for real on 2026-10-01 against the default model (Qwen3.8-27B on S
 - **Found, not fixed** (the code index's area): each task's systemd scope outlived its task, holding a `puffin-code supervise` process that the agent's session had started to index the worktree and that was still waiting for the index lock. The scopes used about 1 MiB each and were stopped by hand. Until `puffin-code session` takes its supervisor down with it, a night leaves one such scope per task.
 - **Index refresh as a cost.** With another index run holding the lock, the refresh before tasks spent its whole budget (half the remaining window, capped at `index_timeout`) waiting. On a shared machine `[night] index = false` saves that wait; the runs above that needed it used it after the refresh had been exercised once.
 - **Not provoked:** a stall and its nudges. No task announced work without doing it.
+
+### 11.5 Several nodes (2026-10-03)
+
+Two additions from [PUFFIN_NODE §18.8](./DREAMFERENCE_PUFFIN_NODE.md), both inactive on a machine with no paired node:
+- **Replica lanes.** A paired node serving the same model is a second model server for the run (`[night] nodes`, default `"paired"`). Tasks still run here; each lane holds as many as its own KV pool allows, and an open `puffin` session here holds up this machine's lane only. The report says which tasks used another node's server.
+- **`/night add --on <node>`.** The task is handed to that node at night, worked by that node's own runner against its own model inside the job sandbox, and its branch is fetched back; meanwhile it is `sent` here. Waiting for it does not hold the runner lock.
+

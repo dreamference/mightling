@@ -33,7 +33,7 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 - **Setup:** `init`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}`, `clear {model-cache,tensorize-cache}`
 - **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run}`
 - **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
-- **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,list,add,remove,set,start,stop}`
+- **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}`
 - **Web UI and desktop:** `puffin {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
 - **Agent tools:** `gmail {search,read,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `puffin-search` and `puffin-fetch` (§4.16), and so is the code index, `puffin-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
@@ -84,7 +84,7 @@ These options come before the subcommand (`puffin-admin --agent cline run "…"`
 | **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`; see §4.21 |
 | **`swe-bench …`** | Run `puffin` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `smoke`, `run`, `eval`, `report`, `status`, `clean`; see §4.23 |
 | **`audit egress`** | Trace one real `puffin` session and list every network destination and process, with a verdict | `[--prompt P] [--json]`; see §4.24 |
-| **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them | `enable [--no-web]`, `disable`, `status [NAME]`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`; see §4.25 |
+| **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them, copy a model to them and run jobs on them | `enable [--no-web]`, `disable`, `status [NAME]`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`, `sync-model NAME MODEL`, `run NAME … -- CMD`, `jobs`, `logs`, `cancel`, `fetch`; see §4.25 |
 | **`host …`** | The host settings a model load is refused without: report them, or apply them with sudo | `check`, `setup`; see §4.26 |
 | **`puffin …`** (`onyx …`) | Onyx Lite web UI lifecycle | see §4.19 |
 | **`desktop …`** | Tauri desktop window (`puffin-app`) | `install`, `run`, `build`, `status` |
@@ -443,6 +443,9 @@ puffin-admin node add NAME [--user USER] [--ssh-port 22]
 puffin-admin node remove NAME
 puffin-admin node set NAME --model MODEL
 puffin-admin node start NAME | stop NAME
+puffin-admin node sync-model NAME MODEL [--address ADDR]
+puffin-admin node run NAME [--memory 8G] [--time 90m] [--test CMD] [--setup CMD] [--out DIR] [--bind PATH]... -- COMMAND...
+puffin-admin node jobs [NAME] | logs JOB | cancel JOB | fetch JOB
 ```
 
 The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_PUFFIN_NODE.md`).
@@ -454,8 +457,11 @@ The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_PU
 - **`add`:** pairs with another node over SSH, once, so it can be managed from here. `NAME` is the node's name, address or id as `list` shows it. It makes a key used for nothing else, and the other node authorises it for one forced command only, with no terminal and no forwarding; the node's host key is pinned to its id.
 - **`remove`:** unpairs: removes the key on both sides.
 - **`set` / `start` / `stop`:** assign a model (a key of that node's model matrix) and start it there, or start or stop a paired node's model server. Each is carried out by that node's own `puffin-admin`, with its own host-safety checks.
+- **`list`** also shows each node's free memory, for this machine and for paired nodes (asked over the pairing; memory is not on the open model port).
+- **`sync-model`:** copies a model's Hugging Face cache folders (and its drafter's) to a paired node over the pairing, so it need not download them; `--address` uses another address of the same node, such as its QSFP link's. The node accepts only folders of a key of its own matrix, checks each weight file's checksum, and keeps files it already has.
+- **`run`:** runs a command on a paired node, in this repository at `HEAD`, in a sandboxed, memory-capped and time-limited unit there; its changes come back as the branch `job/<id>`. `--setup` builds an environment once per lock-file content and binds it read-only into later jobs; `--out` names a folder that comes back as files to `~/.puffin/jobs/received/<id>/`, never committed; `--bind` binds a path on the node read-only, if the node's `[node] bindable` allows it. `jobs`, `logs`, `cancel` and `fetch` follow a job; a finished job is pruned on the node a day after it was fetched, or 14 days after it finished.
 
-Two more subcommands are not typed by a person: `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model and unpair). There is no primary node: the machine `puffin-admin node …` is typed on is the one doing the managing. With one GB10 here, pairing was run against a scratch sshd on loopback, not against a second machine.
+Two more subcommands are not typed by a person: `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model, model-receive, unpair, the two git services for a job repository, and the job and night-task requests). There is no primary node: the machine `puffin-admin node …` is typed on is the one doing the managing. With one GB10 here, pairing was run against a scratch sshd on loopback, not against a second machine.
 
 The switches are kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory first. On a client the counterpart is `puffin node list|use|forget`, in the launcher.
 

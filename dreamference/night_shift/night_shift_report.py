@@ -53,6 +53,14 @@ class NightShiftReport:
         result = task.get("result") or {}
         first = (task.get("task", "").strip().splitlines() or [""])[0]
         lines = [f"### {task.get('id')} — {task.get('status')}", "", f"- Task: {first}"]
+        if task.get("on"):
+            target = (task.get("sent_to") or {}).get("name") or task["on"]
+            lines.append(f"- Ran on: {target}, by that node's own runner and model server"
+                         if result.get("node") else f"- Sent to: {target}")
+        elif result.get("model_node"):
+            lines.append(f"- Model server: {result['model_node']}'s (the task ran on this machine)")
+        if task.get("status") == "sent":
+            lines.append("- Not finished there yet: its branch comes back with a later run.")
         if result.get("branch"):
             lines.append(f"- Branch: `{result['branch']}`")
         if result.get("diff_stat"):
