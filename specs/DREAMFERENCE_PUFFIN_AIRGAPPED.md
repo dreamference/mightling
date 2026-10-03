@@ -126,7 +126,7 @@ Every command the agent runs goes through Codex's sandbox. Under `workspace-writ
 
 ### 5.2 What `on` switches off beside the sandbox
 
-- **`puffin update`** is refused at a configured `on`: it asks GitHub for the latest release.
+- **`puffin update`** keeps working at `on` (decided 2026-10-03). The level is about what a session's commands may reach; an update is the user replacing the binaries from a shell, outside any session and its sandbox, so it is not refused. `update` is one of the launcher's offline subcommands and reads no level. From inside a session at `on` it fails like any other command, since the sandbox has no network.
 - **The Gmail check at start** is skipped, and Gmail is not advertised (§3).
 - **`puffin-code session`** is unaffected: indexing already runs in a network-less sandbox.
 
@@ -350,7 +350,7 @@ All on 2026-10-01, with the rebuilt `puffin` (17 patches) against the default mo
 
 ### 14.4 Not built
 
-- **`puffin update` is not refused** at `on`, and **the Gmail check at start is not skipped** (§5.2): a session that starts at `on` still gets the Gmail section in its prompt, and the `on` fragment says Gmail is unavailable.
+- **The Gmail check at start is not skipped** (§5.2): a session that starts at `on` still gets the Gmail section in its prompt, and the `on` fragment says Gmail is unavailable. (`puffin update` is not refused at `on`, and that is now the design, §5.2.)
 - **A session switched to Full Access through `/permissions`** shows no warning; only the launch-time refusal exists. The status at `on` lists the uncovered cases as fixed text, not as a check of the current session.
 - **A tampered level takes effect at the next restart.** A seal lasts as long as the `puffin` process that wrote it. If a command rewrote the level's files while the session was held, a later `puffin resume` reads those files and starts at what they say. Keeping seals across restarts would close it, at the price of a session nobody can loosen without the TUI; left as it is.
 - **`writable_roots` the user adds** are not known to the exposure check, which looks at the working directory, `/tmp` and `$TMPDIR`. The seal does not depend on that check, so this only affects what `/airgapped` reports where there is no runtime directory.
