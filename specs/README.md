@@ -23,6 +23,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_PUFFIN_FLEET.md](./DREAMFERENCE_PUFFIN_FLEET.md) | *Proposed (2026-10-02), not built:* setting up more GB10s from an existing node. NVIDIA's first-boot wizard (a few minutes from a phone, per unit) stays in person; after it, `puffin-admin node provision <host>…` installs Puffin from a bundle of this machine, runs the root half (`node prepare`) with one `sudo` per machine, copies the model over the LAN, pairs and starts the node; re-run, it is the fleet update. Chosen over Ansible; NVIDIA's cloud-init zero-touch route researched and deferred |
 | [DREAMFERENCE_ARCHITECTURE.md](./DREAMFERENCE_ARCHITECTURE.md) | System overview: `puffin`, the Puffin web UI, `puffin-admin`, the twelve packages |
 | [DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md) | Source layout, class inventory, import conventions, the default model's full launch command |
+| [DREAMFERENCE_PYTHON_QUALITY.md](./DREAMFERENCE_PYTHON_QUALITY.md) | *Proposed (2026-10-03), not built:* a Stanford-grade Python standard (CS106A style, Ousterhout's CS 190 design red flags, PEP 8/257, Google docstrings), enforced by ruff and mypy through a ratchet test in the suite; baseline measured, phases from mechanical cleanup to the five most complex functions |
 | [DREAMFERENCE_SETUP.md](./DREAMFERENCE_SETUP.md) | Requirements, installation, helper scripts, troubleshooting |
 | [DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md) | `puffin-admin` command reference, configuration tiers, environment variables |
 
