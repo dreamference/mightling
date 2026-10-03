@@ -1,212 +1,177 @@
 # Self-Speeding — the drafter learns your code
 
-**Status:** proposed. Nothing in this spec is implemented yet.
-**Target:** the speculative drafter of the served model. For the default this is `z-lab/Qwen3.5-122B-A10B-DFlash`, drafting 12 tokens for `Intel/Qwen3.5-122B-A10B-int4-AutoRound`.
+**Status:** proposed, **nothing built** (revised 2026-10-03 for the Qwen3.8 / SGLang stack; the first version, written for the 122B on vLLM, is in git history). Published facts are cited in §11 with the date read; numbers measured on this machine say so; everything else is marked *(unverified)*.
+**Target:** the speculative drafter of the default model, `qwen3.8-27b-nvfp4-dflash2`: target `RadixArk/Qwen3.8-27B-NVFP4` on SGLang (the pinned `lmsysorg/sglang` v0.5.19 image), drafter `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal` (method `DFLASH`, 16 draft tokens, `quantization: modelopt_fp4`), all pinned by revision in the model matrix.
 **Builds on:**
-- `resolve_speculative_config()` and the `--draft-model` layering ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
-- the compile-cache signature (`_compile_cache_signature`), which already includes the draft model;
-- `ModelDeepInspector.profile_acceptance_by_workload()` behind `puffin-admin main-model inspect --deep`;
+- the registry's `speculative_config` and `resolve_speculative_config()` ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
+- SGLang's `/metrics` (`--enable-metrics` is in the recipe);
 - the session logs in `~/.puffin/sessions/`;
-- the overnight window of [PUFFIN_NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md).
+- the overnight window, runner lock and admission of [PUFFIN_NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md), and host safety ([INFERENCE](./DREAMFERENCE_INFERENCE.md), `check_host_safety`, the PSI watchdog).
 
 ---
 
 ## 1. Goal
 
-Make `puffin` faster on *this user's* work by retraining the drafter on the user's own sessions, overnight and on this machine. Nothing leaves the host, and the answers do not change.
+Make `puffin` faster on *this user's* work by fine-tuning the drafter on the user's own sessions, at night and on this machine. Nothing leaves the host, and the answers do not change.
 
-**Why it is safe to try.** Speculative decoding is lossless: the target model verifies every drafted token, so a better or worse drafter changes speed only, never output. The only risk is a slower machine, and §6 refuses to promote a drafter that is slower.
+**Why it is safe to try.** Speculative decoding is lossless: the target verifies every drafted token, so a better or worse drafter changes speed, not output. The risk is a slower machine, and §6 refuses to promote a drafter that is slower.
 
-**Why it is worth trying.**
-- **Speed is the complaint.** Single-stream speed is the number-one complaint about local agents on this hardware.
-- **Measured headroom here:**
-  - Since today's 14:18 restart, vLLM's counters show 2,306 accepted of 11,763 drafted tokens (19.6%), over the live slash-command suite and a few chats.
-  - The registry records 19–38% acceptance on prose, while structured output saturates the draft window. The spread between task types is what adaptation targets.
-- **Published results:**
-  - Retraining the drafter on real traffic raised acceptance by 0.1–0.65 and cut latency 1.42–2.17×.
-  - Domain-trained drafters gained 11–25%, and offline training beat online.
-  - About 2k samples sufficed for structured domains.
+**Why it might be worth it, and why it might not.**
+- **The drafter is where the speed is.** DFlash2 is why the default runs on SGLang at all: code 50.3 and JSON 87.0 tok/s here against 26.0 with no speculation (published single-Spark figure), and ~126 tok/s when copying (PUFFIN_FAST_TOOLS §1).
+- **One live reading.** On 2026-10-03, during tonight's SWE-bench run (agent traffic, several streams), `sglang:spec_accept_length` read **4.65** accepted tokens per verify with **16** drafted (`spec_accept_rate` 0.243). One sample of a gauge whose window is *(unverified)*; it is a starting point, not a baseline.
+- **Published:** the base drafter's card reports 4.39–5.46 accepted per verify on HumanEval, MBPP, GSM8K and MATH at its recommended block of **8** (7 draft tokens). The NVFP4 calibration recovered BF16's acceptance (3.60 against 3.71 per 8). Domain retraining of drafters is reported to help (first version of this spec, §1); none of those results is for DFlash2 on agent traffic.
+- **What could make it pointless:** if the user's sessions accept as well as the fixed probes (§3), there is little to adapt to, and Phase 0 says so before anything is trained.
 
-**Non-goals:**
-- **Changing the target model:** no fine-tuning of the model that answers.
-- **Training while serving:** vLLM must be stopped (§5).
-- **Sharing drafters:** their weights encode the user's code and mail, so they never leave the machine (§7).
+**Non-goals:** changing the target model; training while the target serves (§5.3); sharing drafters (§7).
 
 ---
 
 ## 2. Surface
 
-No slash command. Tuning stops the model server, which the `puffin` session asking for it depends on, so it cannot be triggered from inside an agent session. Everything is in `puffin-admin`:
+Everything is in `puffin-admin`; no slash command, because tuning stops the model server the asking session depends on.
 
 | Command | Effect |
 |---|---|
-| `puffin-admin drafter stats [--since 7d]` | Acceptance per workload class from the measurement log (§3), plus the live counters. |
-| `puffin-admin drafter collect` | Builds the training set from sessions (§4). Reports size, class mix and what was excluded. The server may keep running. |
-| `puffin-admin drafter tune [--budget 3h]` | Trains a candidate (§5). Refuses unless vLLM is stopped. Checkpoints, so it can stop at the budget or window end and resume. |
-| `puffin-admin drafter evaluate <id>` | A/B against the current drafter (§6). Starts vLLM with the candidate, measures, and restores the server as it was. |
-| `puffin-admin drafter promote <id>` | Makes the candidate the drafter (§6.3). |
-| `puffin-admin drafter rollback` | Returns to the previous drafter, or the registry's. |
-| `puffin-admin drafter list` | Candidates, with training data size, dates, evaluation results and which one is active. |
+| `puffin-admin drafter stats [--since 7d]` | Acceptance per workload class from the measurement log (§3), plus the live gauges |
+| `puffin-admin drafter depth [--try 8,12,16]` | Phase 0's depth sweep (§3.2): no training, a registry-level experiment |
+| `puffin-admin drafter collect` | Builds the training set (§4). The server keeps running |
+| `puffin-admin drafter generate [--budget 2h]` | Has the target re-answer collected prompts at temperature 0, for on-policy targets (§4.2). The server keeps running; admitted like a night task |
+| `puffin-admin drafter tune [--budget 3h]` | Trains a candidate (§5). Refuses unless the model server is stopped. Checkpoints, resumable |
+| `puffin-admin drafter evaluate <id>` | A/B against the current drafter (§6); restores the server as it found it |
+| `puffin-admin drafter promote <id>` / `rollback` / `list` | As in the first version: an explicit, reversible override of the registry's drafter |
 
-**Scheduling.** With Night Shift enabled, `drafter.auto = true` lets the night run take the tail of its window:
-1. once the task queue is empty, stop vLLM;
-2. `collect`, `tune` and `evaluate` within the remaining budget;
-3. restart vLLM with the drafter that serves best.
-
-Promotion is never automatic unless `drafter.auto_promote = true`. The morning report ([NIGHT_SHIFT §5.6](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md)) says what happened.
+**At night.** `[night] drafter = "off" | "collect" | "tune"` (default `off`):
+- `collect` runs `collect` and `generate` inside the night's normal admission, with the server up, after the queue is empty.
+- `tune` adds, in the window's tail, a **maintenance step**: stop the model server, `tune` and `evaluate` within the remaining budget, restart the server with the drafter that serves best. This is a deliberate exception to Night Shift's rule that the runner never starts or stops the model server (NIGHT_SHIFT §5.2), so it is opt-in, holds the runner lock throughout (SWE-bench and the queue are excluded, as today), refuses while any `puffin` session is open, and always ends with a health check of the restarted server. If the restart fails, the registry's drafter is restored and the morning report says so first.
+- Promotion is never automatic unless `[night] drafter_auto_promote = true`.
 
 ---
 
 ## 3. Phase 0 — measure before training
 
-A week of numbers comes before any training, because without them nothing in §6 can be judged.
+### 3.1 Acceptance per class
 
-**The problem.** vLLM's counters (`vllm:spec_decode_num_accepted_tokens_total`, `…num_draft_tokens_total` and the per-position counters) are engine-wide and cumulative. Per-request acceptance is not exposed, so attributing real traffic to task types is impossible while requests overlap.
+SGLang exposes, per server: `sglang:spec_accept_length` and `sglang:spec_accept_rate` (gauges), `sglang:spec_verify_calls_total` (counter), `sglang:spec_num_draft_tokens` (16) — read from this machine's `/metrics` on 2026-10-03. Per-request acceptance is not exposed *(unverified: whether a request-level field exists in the response's `meta_info`; if it does, attribution becomes exact and this section simplifies)*.
 
-**Idle sampling.** `drafter stats` takes readings with the delta method `profile_acceptance_by_workload()` already uses: snapshot, send one request, snapshot again. It uses two probe sets:
-- **fixed probes:** the existing `WORKLOAD_PROBES`, so readings are comparable over time;
-- **replayed prompts:** up to 50 prompts sampled from the user's recent sessions and classified (§4.2), sent one at a time at temperature 0 when vLLM has been idle for 10 minutes.
+`drafter stats` therefore samples when the server has been idle for 10 minutes: read the counters, send one request at temperature 0, read again. Two probe sets:
+- **fixed probes** (`WORKLOAD_PROBES`), comparable over time;
+- **replayed prompts:** up to 50 prompts sampled from the user's recent sessions and classified (§4.1).
 
-**The log.** Each reading appends a line to `~/.cache/dreamference/drafters/acceptance.jsonl`:
+Each reading appends to `~/.cache/dreamference/drafters/acceptance.jsonl`:
 
 ```json
-{"at": "…", "drafter": "z-lab/Qwen3.5-122B-A10B-DFlash", "class": "code", "accepted": 812, "drafted": 2940, "tau": 3.1, "tok_s": 47.6}
+{"at": "…", "drafter": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal@bd7a934", "depth": 16, "class": "code", "verify_calls": 212, "accept_length": 4.7, "tok_s": 49.8}
 ```
 
-This log is the baseline, and it is what shows whether the user's work differs from what the stock drafter was trained on. If replayed prompts accept as well as the fixed probes, there is little to gain, and `drafter stats` says so.
+### 3.2 Depth before training
+
+Puffin runs 16 draft tokens (the hasso5703 recipe); the base drafter's card recommends a block of 8. A depth that is too long wastes verify compute on positions that are rarely accepted; too short caps the gain on copy-heavy output. Sweeping 8, 12 and 16 on the same probes needs no training and only a server restart per depth (a cold torch.compile is ~7.5 minutes here; the SGLang compile cache's behaviour across depths is *(unverified)*). If a depth beats 16 by the §6.3 margin, that is a registry change made on its own, before any tuning, and it becomes the baseline for everything below.
+
+**Done when:** a week of readings exists; `drafter stats` shows acceptance per class for the stock drafter; the depth table is recorded here.
 
 ---
 
 ## 4. Training data
 
-### 4.1. Source
+### 4.1 Source and what it holds today
 
-The source is Codex rollout files under `~/.puffin/sessions/YYYY/MM/DD/*.jsonl`: each turn's full request context and the target model's response. Only sessions served by the **current target model** are used. A drafter learns one target's distribution, and sessions from other models teach it the wrong one.
+Codex rollout files under `~/.puffin/sessions/YYYY/MM/DD/*.jsonl`: each turn's context and the target's response, including tool calls. **Only sessions served by the current target** are used (the drafter learns one target's distribution).
 
-### 4.2. Selection
+Measured on 2026-10-03: 162 session files (17 MB), all dated on or after 2026-09-29, i.e. all from Qwen3.8; they hold 290 assistant messages (166K characters) and 897 tool calls (226K characters of arguments): **roughly 100K tokens of model-generated text** at four characters per token *(estimate)*. Many are tests (the live slash-command suite, audits, probes), so the user's own work is a fraction of that. This is far below the ~2k-turn, million-token scale published domain adaptations used *(unverified for DFlash2)*, which is why §4.2 exists.
 
-- **Classes:** each turn is classified as `code`, `structured`, `tool-call`, `prose` or `repetitive` by the same rules as the probes (code fences, JSON parse, tool-call markers).
-- **Balance:** the set is balanced toward classes where §3 shows the most headroom.
-- **Deduplication:** by response hash.
-- **Held out:** 10% of sessions, chosen by session and not by turn, so that no conversation is split between training and evaluation.
-- **Minimum size:** about 2k turns. Below it, `collect` refuses and says how many more are needed.
+SWE-bench runs (`~/.local/share/dreamference/swe-bench/runs/*/scratch/*/codex-home/sessions`) are also on-policy Qwen3.8 output on real repositories. They may be used for training but **never** for evaluation, and are reported separately so a gain is not credited to benchmark repositories.
 
-### 4.3. Exclusions
+### 4.2 On-policy generation at night
 
-These are dropped, and `collect` reports each count:
-- turns whose context contains Gmail results;
-- turns whose context contains `puffin-admin gmail read` output;
-- `.env`-like content, and matches of a credential pattern list;
-- sessions under paths listed in `drafter.exclude_paths`;
-- ephemeral sessions (`--ephemeral` writes none anyway).
+A DFlash drafter is trained to predict the target's own continuations, and SpecForge captures the target's features from the conversations it is given; it does not regenerate responses itself *(SpecForge training docs, 2026-10-03)*. Responses written by this target are on-policy already; to grow the set without waiting weeks, `drafter generate` replays collected *prompts* (user turns plus their context up to that point) and lets the target answer them at temperature 0, with the server up, admitted like a night task. At the measured ~50 tok/s single-stream code decode, an hour yields ~180K response tokens per stream *(estimate; the night's admission decides the stream count)*.
 
-The drafter will still learn from the user's code: that is the point. §7 is what keeps it on the machine.
+### 4.3 Selection and exclusions
+
+As in the first version: classes (`code`, `structured`, `tool-call`, `prose`, `repetitive`), balance toward the classes with the most headroom in §3, dedup by response hash, a 10% held-out split **by session**, and a minimum size (set from Phase 1, not fixed now). Dropped, with counts reported: turns whose context holds Gmail, Drive or Calendar tool output or `puffin-admin gmail read` output; `.env`-like content and credential-pattern matches; sessions under `drafter.exclude_paths`; ephemeral sessions.
 
 ---
 
 ## 5. Training
 
-**Framework: SpecForge** (MIT licence), which has DFlash training support.
-- z-lab's DFlash code is MIT, but its training recipe is only announced.
-- AdaFlash, which adapts DFlash drafters to the target's actual outputs (reported 1.69× against DFlash's 1.02× at concurrency 128), has public code with **no licence**. Its paper may be used; its code may not be copied.
+### 5.1 Framework and starting weights
 
-**The hard constraint.** DFlash drafters are trained on the target model's hidden states, so the target must be loaded in the training process.
-- The INT4 AutoRound checkpoint is about 71 GiB. That is possible only with vLLM stopped, when about 100 GB is available.
-- Whether SpecForge can load that checkpoint on SM121 is **unverified**, and it is the first thing to establish. Both routes below meet that constraint.
+- **SpecForge** (MIT) has DFlash2 support (online training since August 2026): DFlash2 is selected by a draft config whose architecture is `DFlash2DraftModel`, with `training.strategy: dflash`; warm start from existing weights with `model.draft_checkpoint_path`; export to a Hugging Face directory with `specforge export --to hf`.
+- **Start from the BF16 base drafter**, `incoai/Qwen3.8-27B-DFlash2` (Apache-2.0, 2B parameters, 3.53 GB): the served NVFP4 file is a post-training quantization of it and is not a training checkpoint. The licence question of the first version is answered: Apache-2.0 permits local derivatives.
+- AdaFlash's code still has no licence; its paper may be used, its code may not be copied.
 
-**Route A:** SpecForge online training, with the target model loaded in its own framework.
+### 5.2 Two routes, both on one GB10
 
-**Route B:** capture the hidden states first, then train the drafter alone.
-1. Run the training prompts through the target once, and store the hidden states the drafter conditions on (fp16, sharded, under `~/.cache/dreamference/drafters/<id>/states/`).
-2. Free the target.
-3. Train the drafter alone, in a few GiB.
+- **Online:** SpecForge drives a local SGLang server as the target-capture backend (`model.target_backend: sglang`). Its checked-in DFlash2 recipe owns **two GPUs**, one for capture and one for training; whether capture server and trainer can share GB10's single GPU and unified memory is *(unverified)* and is the first Phase 2 check.
+- **Offline (the fallback):** capture features once (`data.hidden_states_path`), stop the capture server, then train the drafter alone. Capture is a prefill pass: at the measured ~1,700 tok/s prefill, 1M tokens is ~10 minutes. Disk is the cost: hidden size × captured layers × 2 bytes per token; at a hidden size of 5,120 and 5 captured layers (both *unverified* for this target and drafter) that is ~51 KB per token, ~51 GB per million tokens, under `~/.cache/dreamference/drafters/<id>/states/`, deleted with the candidate.
 
-Route B separates the two memory peaks and lets training resume without reloading the target. Disk cost has to be measured; a first estimate is tens of GB for 2k turns.
+### 5.3 Memory, and why the server must stop
 
-**Starting point.** Training fine-tunes the current drafter's weights, not a fresh one, so a short budget still helps.
+Fine-tuning 2B parameters with Adam in mixed precision holds bf16 weights (4 GB), fp32 master weights (8 GB), two fp32 moments (16 GB) and gradients (4–8 GB): **~32–36 GB plus activations** *(estimate)*. While the default model serves, the host has ~38.7 GB available and earlyoom acts at ~6 GB: training beside the server would leave no margin, and host RAM and GPU exhaustion are indistinguishable on GB10. So `tune` refuses while the server runs, is admitted against available memory minus a reserve and the last recorded peak (PUFFIN_CODE_INDEX §6.4's rule), runs in a memory-capped systemd scope, and checkpoints so `--budget` or the window's end stops it cleanly. With the server stopped ~100 GB are available, enough for the online route's target (~20 GB of weights) and the trainer together, if the single-GPU question resolves.
 
-**Memory and time.** Admission as in [PUFFIN_CODE_INDEX §5.5](./DREAMFERENCE_PUFFIN_CODE_INDEX.md): available memory minus a reserve, checked against the last recorded peak for that step. A run that cannot fit is deferred, not attempted. Each step checkpoints, so `--budget` or the window's end stops it cleanly.
+Compute is not the constraint *(estimate)*: ~6 × 2B FLOPs per trained token is ~12 PFLOP per million tokens per epoch, minutes to tens of minutes on GB10.
 
-**Output.** `~/.cache/dreamference/drafters/<id>/` holds:
-- the weights in the drafter's original format, loadable by vLLM as a `--draft-model` path;
-- `meta.json`: target model, base drafter, data size, class mix, exclusions, training steps and time.
+### 5.4 Output
+
+`~/.cache/dreamference/drafters/<id>/`: the exported BF16 weights (loadable by SGLang as the speculative draft model), and `meta.json` (target and revision, base drafter and revision, data size, class mix, exclusions, steps, time, peak memory).
+
+**Served as BF16 first.** The NVFP4 calibration of the current drafter (round-to-nearest plus activation calibration on 460 on-policy conversations, scales `amax / (6·448)`, ModelOpt layout) saved 2.2 GB of VRAM and recovered BF16's acceptance. A tuned BF16 drafter costs those 2.2 GB of KV pool (today's pool is ~157K tokens beside the sidecars; the size of the loss is *(unverified)*); re-quantizing a tuned drafter the same way is Phase 3, once a BF16 candidate has shown a gain.
 
 ---
 
 ## 6. Evaluation and promotion
 
-### 6.1. Protocol
+### 6.1 Protocol
 
-`drafter evaluate <id>` starts vLLM with the candidate as the draft model. It measures, at temperature 0, with one request at a time:
-- the fixed probes;
-- the held-out session prompts, up to 200.
+`drafter evaluate <id>` starts the server with the candidate and measures, one request at a time at temperature 0: the fixed probes and up to 200 held-out session prompts (never SWE-bench ones). It repeats with the current drafter. Per run: accept length, accept rate, verify calls, output tok/s, per class.
 
-It then repeats the same measurement with the current drafter. Each run records:
-- acceptance;
-- mean acceptance length (τ);
-- per-position acceptance;
-- output tokens per second.
+**Swapping the drafter.** A restart with the candidate named in the speculative config is the baseline route. SGLang merged disk/IPC weight updates for DFlash draft runners on 2026-09-24 (sgl-project/sglang#40777), with the note that DFlash weight updates have no end-to-end coverage; whether the pinned v0.5.19 image contains it is *(unverified)*. A hot swap is Phase 3, behind a live test.
 
-### 6.2. Correctness check
+### 6.2 Correctness check
 
-Speculative decoding is lossless, so at temperature 0 the two runs' outputs must be byte-identical.
-- Any difference means a serving bug (a drafter or engine mismatch), not a quality change.
-- It fails the evaluation outright, and the differing prompts are kept for inspection.
+Lossless in principle, but the target is NVFP4 and batching can perturb numerics *(unverified on this stack)*. So the check is relative: the current drafter is run **twice** on the same prompts first; the candidate's rate of differing outputs against the current drafter must not exceed the current drafter's rate against itself. A larger rate fails the evaluation and keeps the differing prompts for inspection.
 
-### 6.3. Promotion
+### 6.3 Promotion
 
-**The candidate must win.**
-- Held-out tokens per second improve by at least `drafter.min_gain` (default 5%).
-- No class regresses by more than `drafter.max_regression` (default 3%).
-- The correctness check passes.
-
-**How it is applied.** The result is written as the configured `draft_model` path. `resolve_speculative_config()` already layers an explicit draft model onto a recipe that names an external drafter, keeping its method (`dflash`), depth and attention backend. Because the draft model is part of the compile-cache signature, the next start rebuilds the torch.compile cache: a one-time cold compile of 8–12 minutes, which the output announces.
-
-**Rollback.** `drafter rollback` removes the override. The last three candidates are kept, and older ones are deleted with their captured states.
-
-### 6.4. When the target model changes
-
-A promoted drafter is tied to its target model in `meta.json`. If the configured main model differs, the override is ignored with a one-line warning, and the recipe's drafter is used.
+The candidate must improve held-out tok/s by at least `drafter.min_gain` (5%), regress no class by more than `drafter.max_regression` (3%), and pass §6.2. Promotion writes an override of the registry entry's `speculative_config.model` (a local path, plus `quantization` removed for a BF16 drafter); `rollback` removes it. The last three candidates are kept. A promoted drafter is tied to its target and revision in `meta.json`; if the configured main model differs, the override is ignored with a one-line warning.
 
 ---
 
-## 7. Privacy
+## 7. Privacy and the air gap
 
-- **Training data:** sessions, the extracted training set and the captured states stay under `~/.cache/dreamference/drafters/`, mode `0700`.
-- **The drafter weights are derived from the user's data** and are treated like it. No command exports them, and the paper and docs publish only aggregate acceptance numbers.
-- **Network:** training runs with no network need beyond the already-cached base drafter and SpecForge's own installation. Once the egress airlock exists, `drafter tune` runs inside it.
-
----
-
-## 8. Tests
-
-- **Unit tests:**
-  - session parsing and classification;
-  - the exclusion rules, with a fixture session holding Gmail output and a fake credential;
-  - held-out split by session;
-  - admission refusal with vLLM running;
-  - promotion thresholds;
-  - rollback;
-  - target-mismatch handling;
-  - the draft-model override reaching `--speculative-config` JSON and the compile-cache signature.
-- **Evaluation with a fake server:** a scripted `/metrics` and chat endpoint. The comparison logic and the correctness check are tested with identical and with divergent outputs.
-- **Live smoke test (manual, needs a stopped server and time):** `collect` on this machine's sessions, then a 20-minute `tune --budget`, then `evaluate`. It proves the pipeline end to end; it does not have to win.
+- **Data:** sessions, the training set, captured states and candidates stay under `~/.cache/dreamference/drafters/`, mode `0700`. The drafter weights are derived from the user's data and are treated like it: no command exports them, and published numbers are aggregates.
+- **Network:** training needs nothing beyond the cached base drafter and SpecForge's installation. Installing SpecForge (pip) is the one step that needs the internet; `drafter tune` refuses to install anything at `/airgapped on` and says what to install first.
+- **Gmail, Drive and Calendar** tool output never enters the training set (§4.3).
 
 ---
 
-## 9. Acceptance criteria
+## 8. Phases and acceptance
 
-- **Phase 0:** a week of `acceptance.jsonl` readings exists, and `drafter stats` shows acceptance per class for the stock drafter.
-- **Pipeline:**
-  - `collect → tune → evaluate` completes on this machine within one six-hour window, without an earlyoom kill;
-  - the server ends in the state it started in.
-- **Correctness:** it holds on every evaluation.
-- **Promotion:** a promoted drafter shows the gain on held-out sessions in a later `drafter stats`, not only in its own evaluation.
+| Phase | Builds | Done when (measured) |
+|---|---|---|
+| **0** | `drafter stats`, `drafter depth` | A week of `acceptance.jsonl` readings; acceptance per class for the stock drafter; the 8/12/16 depth table recorded in §3.2, and the registry's depth changed only if one beats 16 by ≥ 5% held-out tok/s with no class regressing > 3% |
+| **1** | `collect`, `generate`, `[night] drafter = "collect"` | Two nights produce a training set with its exclusion report; its size in response tokens recorded here; no night task delayed by more than its admission allows |
+| **2** | `tune` (online if one GPU suffices, else offline), `evaluate`, `promote`/`rollback`, `[night] drafter = "tune"` | `collect → tune → evaluate` completes inside one 6-hour window; no earlyoom action and no watchdog trip; the server ends healthy with the drafter it started with or a promoted one; the result (gain or none) recorded here |
+| **3** | NVFP4 re-quantization of a winning candidate; hot swap if SGLang's draft-weight update works on the pinned image | The quantized candidate's acceptance within 3% of its BF16 form, and the KV pool restored to within 2% of today's; a live swap test passes §6.2 |
 
 ---
+
+## 9. Tests
+
+- **Unit:** session parsing and classification; exclusions (fixture sessions with Gmail and Drive tool output and a fake credential); held-out split by session; SWE-bench sessions kept out of evaluation; refusal of `tune` while the server runs and while a `puffin` session is open; promotion thresholds; the relative correctness check with identical, self-divergent and candidate-divergent fixtures; rollback; target mismatch; the override reaching the SGLang launch command.
+- **Fake server:** a scripted `/metrics` with SGLang's metric names and a chat endpoint.
+- **Live smoke (manual):** `collect`, a 20-minute `tune --budget`, `evaluate`; it proves the pipeline, not a gain.
 
 ## 10. Open questions
 
-- **Loading the target in SpecForge:** can it load `Intel/Qwen3.5-122B-A10B-int4-AutoRound` (AutoRound INT4, hybrid GDN layers) on SM121? This is the first thing to verify. If it cannot, Route B needs another way to capture states. For example, a vLLM hidden-state capture path, if the pinned image has one.
-- **Drafter licence:** the licence of the z-lab drafter weights, and whether fine-tuned derivatives may be kept locally, must be checked on its model card before §5 is built.
-- **Tuning depth:** `profile_acceptance_by_workload()` already suggests a window size per class. Should a tuned drafter also get a tuned `num_speculative_tokens`, or is that a separate, simpler experiment to run first?
+- Does SGLang return per-request acceptance (§3.1)? It would replace idle sampling.
+- Can SpecForge's capture server and trainer share GB10's one GPU (§5.2)?
+- Hidden size and captured layers of this target/drafter pair, for the offline route's disk cost (§5.2).
+- Is a 16-token depth right for agent traffic (§3.2)? Answered by Phase 0, before anything here is built further.
+
+## 11. Sources (read 2026-10-03)
+
+- [SpecForge](https://github.com/sgl-project/SpecForge) and its [training guide](https://github.com/sgl-project/SpecForge/blob/main/docs/sections/basic_usage/training.md): DFlash2 via `DFlash2DraftModel`, online and offline modes, `model.draft_checkpoint_path`, `specforge export`.
+- [incoai/Qwen3.8-27B-DFlash2](https://huggingface.co/incoai/Qwen3.8-27B-DFlash2): Apache-2.0, 2B BF16, block 8, acceptance per benchmark; no training recipe published.
+- [maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal](https://huggingface.co/maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal): derived from incoai's drafter, RTN + activation calibration on 460 on-policy conversations, 3.53 → 1.37 GB, 3.60 vs 3.71 accepted per 8.
+- [sgl-project/sglang#40777](https://github.com/sgl-project/sglang/pull/40777): disk/IPC weight updates for DFlash draft runners, merged 2026-09-24, no end-to-end coverage.
+- [NVIDIA NeMo AutoModel: train a DFlash drafter](https://docs.nvidia.com/nemo/automodel/recipes-e2e-examples/dflash-speculative-decoding) and [NVIDIA/Model-Optimizer#2216](https://github.com/NVIDIA/Model-Optimizer/pull/2216): alternative training paths, not evaluated here.

@@ -49,7 +49,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md) | The context engine (`puffin-admin index`, MCP `workspace_search_code`), with known gaps |
 | [DREAMFERENCE_PUFFIN_CODE_INDEX.md](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) | *Implemented (§14):* code index for `puffin`, the separate `puffin-code` binary (codebase-memory-mcp + SCIP) |
 | [DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md) | `/night`, an overnight task queue worked in git worktrees on the GB10 (implemented 2026-10-01; §11 records what was built) |
-| [DREAMFERENCE_SELF_SPEEDING.md](./DREAMFERENCE_SELF_SPEEDING.md) | *Proposed:* retraining the speculative drafter on your own sessions (`puffin-admin drafter`) |
+| [DREAMFERENCE_SELF_SPEEDING.md](./DREAMFERENCE_SELF_SPEEDING.md) | *Proposed, nothing built (revised 2026-10-03):* fine-tuning the DFlash2 drafter of Qwen3.8-27B on your own sessions with SpecForge, at night with the model server stopped (`puffin-admin drafter`); Phase 0 measures acceptance and the 16-token depth first |
 | [DREAMFERENCE_PUFFIN_EGRESS.md](./DREAMFERENCE_PUFFIN_EGRESS.md) | `puffin-admin audit egress` (implemented: `exec` sessions 2026-10-01, the interface with `--tui` and the audit after `codex build` 2026-10-02, §10); *proposed:* the airlock, now the `on` level of `/airgapped` |
 | [DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md](./DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md) | *Proposed (2026-10-03), not built:* what fills `puffin`'s context in unattended work, measured on the SWE-bench index pair: shell file reads are the largest share (41–48%), the index's own tools 23%; observation masking of old tool outputs (one hook in `for_prompt`) halves compactions in replay; a cap on one tool output; `code_show` paging and lighter tool schemas; `rtk`-style shell filtering as a later phase |
 | [DREAMFERENCE_PUFFIN_COMPACTION.md](./DREAMFERENCE_PUFFIN_COMPACTION.md) | *Partly implemented (2026-10-02):* the interactive limit follows the KV pool, the rule-built ledger hook (on by default), Night Shift's per-task limit (off: Phase 0 found it cost the task); proposed: when `puffin` compacts: a limit tied to the KV pool, a per-task limit for Night Shift, what a compaction keeps and drops, a rule-built ledger re-injected after it, and why the diffusion model is not used for it |
@@ -67,7 +67,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_ONYX.md](./DREAMFERENCE_ONYX.md) | Onyx Lite deployment, `configure`, branding, UI patches, voice, web search, telemetry |
 | [DREAMFERENCE_IMAGE_SEARCH.md](./DREAMFERENCE_IMAGE_SEARCH.md) | The image search sidecar and tool |
 | [DREAMFERENCE_GOA.md](./DREAMFERENCE_GOA.md) | Google auth through GNOME's OAuth client (Gmail implemented; Drive not) |
-| [DREAMFERENCE_PDF_SEARCH.md](./DREAMFERENCE_PDF_SEARCH.md) | *Draft, not implemented:* PDF search tool |
+| [DREAMFERENCE_PDF_SEARCH.md](./DREAMFERENCE_PDF_SEARCH.md) | *Proposed, nothing built (revised 2026-10-03):* one PDF text extractor for `puffin-fetch`/`web_fetch` (paged, no embeddings), the Drive app's `drive_read`, and an Onyx `pdf_search` tool (nomic on CPU, 2 GiB cap) |
 
 ---
 
