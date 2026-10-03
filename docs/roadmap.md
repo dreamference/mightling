@@ -2,28 +2,39 @@
 
 Work that is planned or designed but **not built yet**. Nothing here is a commitment to a date.
 
-## First release
+Already shipped and so no longer listed here: the first release (v1.3.0, published 2026-10-02,
+installed in place by `puffin update`) and the code index (`puffin-code`, offered to the agent as
+tools).
 
-The release pipeline builds the Python package, the desktop app (`.deb` and AppImage) and the
-`puffin` binaries for arm64, and attaches them to a GitHub release. Once the first release is
-published, `puffin update` installs new releases in place, after verifying their checksums.
+## Gmail, Google Drive and Calendar in `/apps`
 
-## Code index for the agent
+*Status: designed; the scopes tested with Google.*
 
-*Status: design proposed.*
+Codex's `/apps` without an OpenAI sign-in, listing Puffin's own apps: Gmail, Google Drive (My Drive
+and shared drives) and Google Calendar, all read-only, connected through the local Google sign-in so
+the tokens stay on your machine, and offered to the agent as tools rather than shell commands.
 
-Today the agent explores code with text search and file reads, one round at a time. On a large
-repository that is slow, costs many tokens, and misses calls made through traits, generics or
-re-exports. The design adds `puffin-code`, a command of its own beside `puffin`, backed by two layers:
+## A Codex-style desktop app
 
-- **A fast, always-current index for every language.** It is built on
-  [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (MIT): 158 languages,
-  call graphs, and search by meaning, all local.
-- **Compiler-exact references** from SCIP indexers (rust-analyzer, Pyright and others) wherever a
-  project builds.
+*Status: designed.*
 
-Every answer says whether it is exact or approximate. The agent is told to double-check before a
-rename or signature change whenever any part of the answer is approximate.
+Today's desktop window stays as **Chat**. A second window, **Work**, drives the terminal agent the
+way OpenAI's Codex app does: threads, approvals, diffs, review and worktrees, all on your GB10.
+
+## Keeping long tasks inside the context window
+
+*Status: designed and measured on recorded runs.*
+
+Unattended runs (Night Shift, benchmarks) fill the context mostly with old command output. Hiding
+outputs older than the last few, and capping any single output, roughly halves how often a session
+has to summarise itself.
+
+## Setting up more GB10s
+
+*Status: designed.*
+
+After NVIDIA's first-boot wizard, one command on an existing node installs Puffin on new units,
+applies the host settings, copies the model over the network and pairs them.
 
 ## Documents
 
