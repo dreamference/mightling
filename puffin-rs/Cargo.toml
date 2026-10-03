@@ -46,3 +46,4 @@ openssl-sys = { workspace = true, features = ["vendored"] }
 clap = { workspace = true, features = ["derive"] }
 tar = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+zip = { workspace = true }

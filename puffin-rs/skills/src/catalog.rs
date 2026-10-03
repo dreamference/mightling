@@ -17,6 +17,7 @@ use crate::install;
 use crate::install::Provenance;
 use crate::links::LINK_PREFIX;
 use crate::links::LinkSet;
+use crate::links::Source;
 use crate::preflight;
 use crate::preflight::Host;
 use crate::preflight::Verdict;
@@ -33,27 +34,86 @@ const FOREIGN_SCAN_DEPTH: usize = 3;
 pub struct Agent {
     /// `claude`: the name in `from-claude` and in `puffin skill source claude off`.
     pub id: &'static str,
-    /// Its skills folder, relative to the home folder.
+    /// Its skills folder, relative to the home folder, or to each folder from the repository's
+    /// root down to the working directory.
     pub folder: &'static str,
     /// What its owner is called, and the command that removes a skill there.
     pub product: &'static str,
     pub remove_hint: &'static str,
+    pub scope: Scope,
 }
 
+/// Where an agent's folder is looked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Home,
+    /// In the repository being worked in, and only when the user trusts it (spec §8.5).
+    Repository,
+}
+
+/// The id `puffin skill source` takes for both repository folders.
+pub const REPOSITORY_SOURCE: &str = "repo";
+
+const REPOSITORY_HINT: &str = "it is part of the repository; puffin skill source repo off stops linking it";
+
 pub const AGENTS: &[Agent] = &[
+    // A repository's `.claude/skills` and `.gemini/skills` come first among linked sources: they
+    // are about the code at hand (spec §7).
+    Agent {
+        id: "repo-claude",
+        folder: ".claude/skills",
+        product: "this repository's .claude/skills",
+        remove_hint: REPOSITORY_HINT,
+        scope: Scope::Repository,
+    },
+    Agent {
+        id: "repo-gemini",
+        folder: ".gemini/skills",
+        product: "this repository's .gemini/skills",
+        remove_hint: REPOSITORY_HINT,
+        scope: Scope::Repository,
+    },
     Agent {
         id: "claude",
         folder: ".claude/skills",
         product: "Claude Code",
         remove_hint: "delete its folder under ~/.claude/skills, or /plugin uninstall in Claude Code",
+        scope: Scope::Home,
     },
-    Agent { id: "gemini", folder: ".gemini/skills", product: "Gemini CLI", remove_hint: "gemini skills uninstall <name>" },
-    Agent { id: "openclaw", folder: ".openclaw/skills", product: "OpenClaw", remove_hint: "openclaw skills uninstall <name>" },
-    Agent { id: "hermes", folder: ".hermes/skills", product: "Hermes Agent", remove_hint: "hermes skills uninstall <name>" },
+    Agent {
+        id: "gemini",
+        folder: ".gemini/skills",
+        product: "Gemini CLI",
+        remove_hint: "gemini skills uninstall <name>",
+        scope: Scope::Home,
+    },
+    Agent {
+        id: "openclaw",
+        folder: ".openclaw/skills",
+        product: "OpenClaw",
+        remove_hint: "openclaw skills uninstall <name>",
+        scope: Scope::Home,
+    },
+    Agent {
+        id: "hermes",
+        folder: ".hermes/skills",
+        product: "Hermes Agent",
+        remove_hint: "hermes skills uninstall <name>",
+        scope: Scope::Home,
+    },
 ];
 
 pub fn agent(id: &str) -> Option<&'static Agent> {
     AGENTS.iter().find(|agent| agent.id == id)
+}
+
+/// The agents `puffin skill source <id>` switches: one, or both repository folders for `repo`.
+pub fn sources(id: &str) -> Vec<&'static Agent> {
+    if id == REPOSITORY_SOURCE {
+        AGENTS.iter().filter(|agent| agent.scope == Scope::Repository).collect()
+    } else {
+        agent(id).into_iter().collect()
+    }
 }
 
 /// Where a skill was found. The variants are in the order of precedence: for one name, the first
@@ -182,6 +242,15 @@ pub struct Plan {
     pub entries: Vec<Entry>,
     /// The catalogue budget in tokens, when the context window is known.
     pub limit: Option<usize>,
+    /// The repository being worked in, when it has a `.claude/skills` or `.gemini/skills`.
+    pub repository: Option<Repository>,
+}
+
+/// A repository with skill folders of other agents', and whether they may be linked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repository {
+    pub root: PathBuf,
+    pub trusted: bool,
 }
 
 impl Plan {
@@ -201,7 +270,10 @@ impl Plan {
             .iter()
             .map(|agent| LinkSet {
                 agent: agent.id.to_string(),
-                source: home.join(agent.folder),
+                source: match agent.scope {
+                    Scope::Home => Source::Folder(home.join(agent.folder)),
+                    Scope::Repository => Source::AnyRepository(agent.folder),
+                },
                 links: self
                     .offered()
                     .filter(|entry| entry.skill.origin == Origin::Linked(agent))
@@ -313,18 +385,72 @@ fn load(dir: &Path, origin: Origin) -> Skill {
     }
 }
 
-/// The repository skill roots Codex scans for `cwd`: `.agents/skills` and `.codex/skills` in every
-/// folder from the project root (the nearest one holding `.git`) down to `cwd`.
-fn repository_roots(cwd: &Path) -> Vec<PathBuf> {
+/// The folders from the project root (the nearest one holding `.git`) down to `cwd`, root first.
+fn project_dirs(cwd: &Path) -> Vec<&Path> {
     let Some(project) = cwd.ancestors().find(|dir| dir.join(".git").exists()) else {
         return Vec::new();
     };
     let mut dirs: Vec<&Path> = cwd.ancestors().take_while(|dir| dir.starts_with(project)).collect();
     dirs.reverse();
-    dirs.iter()
-        .flat_map(|dir| [dir.join(".agents/skills"), dir.join(".codex/skills")])
+    dirs
+}
+
+/// The skill folders `relative` names in each folder from the project root down to `cwd`, as
+/// Codex looks for `.agents/skills`.
+fn repository_folders(cwd: &Path, relative: &[&str]) -> Vec<PathBuf> {
+    project_dirs(cwd)
+        .iter()
+        .flat_map(|dir| relative.iter().map(|folder| dir.join(folder)))
         .filter(|root| root.is_dir())
         .collect()
+}
+
+/// The repository skill roots Codex scans for `cwd`: `.agents/skills` and `.codex/skills`.
+fn repository_roots(cwd: &Path) -> Vec<PathBuf> {
+    repository_folders(cwd, &[".agents/skills", ".codex/skills"])
+}
+
+/// The repository `cwd` is in, when another agent's skill folder is in it.
+fn foreign_repository(machine: &Machine) -> Option<Repository> {
+    let folders: Vec<&str> =
+        AGENTS.iter().filter(|agent| agent.scope == Scope::Repository).map(|agent| agent.folder).collect();
+    if repository_folders(&machine.cwd, &folders).is_empty() {
+        return None;
+    }
+    let root = project_dirs(&machine.cwd).first()?.to_path_buf();
+    let trusted = is_trusted(&machine.codex_home, &root);
+    Some(Repository { root, trusted })
+}
+
+/// Whether the user has trusted `root` in `puffin`: `[projects."<path>"] trust_level = "trusted"`
+/// in `$CODEX_HOME/config.toml`, for the repository or, in a linked worktree, for the repository
+/// it belongs to (which is the key Codex records). It is the code index's rule (spec §8.5):
+/// nothing inside the repository can grant it, since a clone or the agent could write it there.
+pub fn is_trusted(codex_home: &Path, root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(codex_home.join("config.toml")) else { return false };
+    let Ok(table) = text.parse::<toml::Table>() else { return false };
+    let Some(projects) = table.get("projects").and_then(toml::Value::as_table) else { return false };
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut roots = vec![canonical(root)];
+    if let Some(main) = main_worktree(root) {
+        roots.push(canonical(&main));
+    }
+    projects.iter().any(|(path, entry)| {
+        roots.contains(&canonical(Path::new(path)))
+            && entry.get("trust_level").and_then(toml::Value::as_str) == Some("trusted")
+    })
+}
+
+/// For a linked worktree, whose `.git` is a file saying `gitdir: <main>/.git/worktrees/<name>`,
+/// the main worktree's root.
+fn main_worktree(root: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(root.join(".git")).ok()?;
+    let gitdir = PathBuf::from(text.strip_prefix("gitdir:")?.trim());
+    let gitdir = if gitdir.is_absolute() { gitdir } else { root.join(gitdir) };
+    let worktrees = gitdir.parent()?;
+    (worktrees.file_name()? == "worktrees").then_some(())?;
+    let dot_git = worktrees.parent()?;
+    (dot_git.file_name()? == ".git").then(|| dot_git.parent().map(Path::to_path_buf))?
 }
 
 /// Finds every skill and decides which are offered.
@@ -348,8 +474,19 @@ pub fn plan(machine: &Machine, settings: &Settings) -> Plan {
         Origin::Installed,
     );
     add(skill_dirs(&machine.home.join(".agents/skills"), CODEX_SCAN_DEPTH), Origin::SharedAgents);
+    let repository = foreign_repository(machine);
     for agent in AGENTS {
-        add(skill_dirs(&machine.home.join(agent.folder), FOREIGN_SCAN_DEPTH), Origin::Linked(agent));
+        match agent.scope {
+            Scope::Home => add(skill_dirs(&machine.home.join(agent.folder), FOREIGN_SCAN_DEPTH), Origin::Linked(agent)),
+            // An untrusted repository's skills are not even read: the plan shows the folder as
+            // waiting for trust, not its skills.
+            Scope::Repository if repository.as_ref().is_some_and(|repository| repository.trusted) => {
+                for folder in repository_folders(&machine.cwd, &[agent.folder]) {
+                    add(skill_dirs(&folder, FOREIGN_SCAN_DEPTH), Origin::Linked(agent));
+                }
+            }
+            Scope::Repository => {}
+        }
     }
     add(skill_dirs(&skills_root.join(".system"), CODEX_SCAN_DEPTH), Origin::Bundled);
 
@@ -410,13 +547,14 @@ pub fn plan(machine: &Machine, settings: &Settings) -> Plan {
             }
         }
     }
-    Plan { entries, limit }
+    Plan { entries, limit, repository }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::Fixture;
+    use crate::testing::write_skill;
 
     #[test]
     fn skills_are_found_in_every_place_and_foreign_ones_through_their_categories() {
@@ -637,5 +775,75 @@ mod tests {
         assert!(!plan(&fixture.machine(), &Settings::default()).offers_foreign_skill());
         record("anthropic/pdf");
         assert!(plan(&fixture.machine(), &Settings::default()).offers_foreign_skill());
+    }
+
+    fn trust(fixture: &Fixture, root: &Path) {
+        let config = format!("[projects.\"{}\"]\ntrust_level = \"trusted\"\n", root.display());
+        std::fs::write(fixture.codex_home.join("config.toml"), config).unwrap_or_default();
+    }
+
+    #[test]
+    fn a_repositorys_claude_and_gemini_skills_are_linked_only_once_it_is_trusted() {
+        let fixture = Fixture::new("catalog-repository");
+        fixture.repository_skill(".claude/skills/release", "release");
+        fixture.repository_skill(".gemini/skills/review", "review");
+        fixture.repository_skill(".agents/skills/own", "own");
+        // The same name in the user's own Claude folder loses to the repository's.
+        fixture.skill(".claude/skills/release", "release", "");
+
+        let untrusted = plan(&fixture.machine(), &Settings::default());
+        assert_eq!(untrusted.repository, Some(Repository { root: fixture.cwd.clone(), trusted: false }));
+        assert!(untrusted.find("review").is_none(), "an untrusted repository's skills are not read");
+        assert_eq!(untrusted.find("release").map(|entry| entry.skill.origin.label()), Some("Claude Code".to_string()));
+        assert!(untrusted.link_sets(&fixture.home).iter().all(|set| !set.agent.starts_with("repo-") || set.links.is_empty()));
+
+        trust(&fixture, &fixture.cwd);
+        let trusted = plan(&fixture.machine(), &Settings::default());
+        assert_eq!(trusted.repository.as_ref().map(|repository| repository.trusted), Some(true));
+        let label = |name: &str| trusted.find(name).map(|entry| entry.skill.origin.label()).unwrap_or_default();
+        assert_eq!(label("release"), "this repository's .claude/skills");
+        assert_eq!(label("review"), "this repository's .gemini/skills");
+        assert_eq!(label("own"), "this repository");
+        let sets = trusted.link_sets(&fixture.home);
+        let links = |agent: &str| sets.iter().find(|set| set.agent == agent).map(|set| set.links.clone()).unwrap_or_default();
+        assert_eq!(links("repo-claude").get("release"), Some(&fixture.cwd.join(".claude/skills/release")));
+        assert_eq!(links("repo-gemini").get("review"), Some(&fixture.cwd.join(".gemini/skills/review")));
+        assert!(links("claude").is_empty(), "the user's own release is shadowed");
+        assert!(trusted.offers_foreign_skill());
+
+        // `puffin skill source repo off` switches both folders off.
+        let settings = Settings { sources_off: sources("repo").iter().map(|agent| agent.id.to_string()).collect(), ..Settings::default() };
+        let off = plan(&fixture.machine(), &settings);
+        assert_eq!(off.find("review").map(|entry| entry.status.clone()), Some(Status::SourceOff));
+        assert_eq!(off.find("release").map(|entry| entry.skill.origin.label()), Some("Claude Code".to_string()));
+    }
+
+    #[test]
+    fn a_linked_worktree_is_trusted_through_its_main_repository() {
+        let fixture = Fixture::new("catalog-worktree");
+        let main = fixture.cwd.join("main");
+        let tree = fixture.cwd.join("tree");
+        std::fs::create_dir_all(main.join(".git/worktrees/tree")).unwrap_or_default();
+        std::fs::create_dir_all(&tree).unwrap_or_default();
+        std::fs::write(tree.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/tree").display())).unwrap_or_default();
+        write_skill(&tree.join(".claude/skills/fmt"), "fmt", "");
+        let mut machine = fixture.machine();
+        machine.cwd = tree.clone();
+
+        assert!(plan(&machine, &Settings::default()).find("fmt").is_none());
+        trust(&fixture, &main);
+        assert_eq!(plan(&machine, &Settings::default()).find("fmt").map(|entry| entry.status.clone()), Some(Status::Offered));
+
+        // A repository's own files cannot grant trust: only `$CODEX_HOME/config.toml` is read.
+        let other = fixture.cwd.join("other");
+        std::fs::create_dir_all(other.join(".git")).unwrap_or_default();
+        write_skill(&other.join(".claude/skills/planted"), "planted", "");
+        let grant = format!("[projects.\"{}\"]\ntrust_level = \"trusted\"\n", other.display());
+        for file in ["config.toml", ".codex/config.toml", ".puffin/config.toml"] {
+            std::fs::create_dir_all(other.join(file).parent().unwrap_or(&other)).unwrap_or_default();
+            std::fs::write(other.join(file), &grant).unwrap_or_default();
+        }
+        machine.cwd = other;
+        assert!(plan(&machine, &Settings::default()).find("planted").is_none());
     }
 }

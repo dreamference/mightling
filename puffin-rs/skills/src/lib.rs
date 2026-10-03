@@ -45,13 +45,17 @@ Usage: puffin skill <command>
   list [--all]              what the model is offered, by source, and what it is not and why
   show <name>               one skill: what the model sees of it, its origin, licence and files
   add <source> [--yes]      install into ~/.puffin/skills/<name>
-                            <source>: openai/<name>, anthropic/<name>, <owner>/<repo>/<path>,
-                            https://github.com/<owner>/<repo>/tree/<ref>/<path>, or a folder
+                            <source>: openai/<name>, anthropic/<name>, hermes/<category>/<name>,
+                            clawhub/<owner>/<slug>, <owner>/<repo>/<path>,
+                            https://github.com/<owner>/<repo>/tree/<ref>/<path>, or a folder.
+                            A ClawHub skill its scan does not call clean needs a confirmation
+                            at a terminal; one it calls malicious is never installed
   remove <name>             delete a skill puffin installed
-  search <words>            search OpenAI's and Anthropic's catalogues
+  search <words>            search OpenAI's, Anthropic's and Hermes's catalogues and ClawHub
   enable <name>             offer a skill although it is unavailable, manual-only or shadowed
   disable <name>            never offer a skill
-  source <agent> on|off     link, or stop linking, the skills of claude, gemini, openclaw or hermes
+  source <agent> on|off     link, or stop linking, the skills of claude, gemini, openclaw or hermes,
+                            or (repo) a trusted repository's .claude/skills and .gemini/skills
   adopt <name>              record a hand-written or model-installed skill as known";
 
 /// What a `puffin skill …` command line asks for.
@@ -98,14 +102,20 @@ impl Request {
                 Request::Search(rest.iter().map(|word| word.to_lowercase()).collect())
             }
             ["search"] => Request::Usage("puffin skill search needs at least one word".to_string()),
-            ["source", agent, state @ ("on" | "off")] => match catalog::agent(agent) {
-                Some(agent) => Request::Source { agent: agent.id.to_string(), on: *state == "on" },
-                None => Request::Usage(format!("{agent}: not a source. The sources are claude, gemini, openclaw and hermes")),
-            },
-            ["source", ..] => Request::Usage("puffin skill source <claude|gemini|openclaw|hermes> on|off".to_string()),
+            ["source", agent, state @ ("on" | "off")] if *agent == catalog::REPOSITORY_SOURCE || is_home_agent(agent) => {
+                Request::Source { agent: agent.to_string(), on: *state == "on" }
+            }
+            ["source", agent, "on" | "off"] => Request::Usage(format!(
+                "{agent}: not a source. The sources are repo, claude, gemini, openclaw and hermes"
+            )),
+            ["source", ..] => Request::Usage("puffin skill source <repo|claude|gemini|openclaw|hermes> on|off".to_string()),
             [other, ..] => Request::Usage(format!("puffin skill {other}: no such command")),
         }
     }
+}
+
+fn is_home_agent(id: &str) -> bool {
+    catalog::agent(id).is_some_and(|agent| agent.scope == catalog::Scope::Home)
 }
 
 /// What the launcher prints and decides before a session opens.
@@ -303,6 +313,7 @@ fn key_for(plan: &Plan, entry: &catalog::Entry) -> String {
 
 fn source_id(entry: &catalog::Entry) -> &'static str {
     match entry.skill.origin {
+        Origin::Linked(agent) if agent.scope == catalog::Scope::Repository => catalog::REPOSITORY_SOURCE,
         Origin::Linked(agent) => agent.id,
         _ => "",
     }
@@ -310,14 +321,27 @@ fn source_id(entry: &catalog::Entry) -> &'static str {
 
 /// `puffin skill source <agent> on|off`.
 pub fn set_source(machine: &Machine, agent: &str, on: bool) -> Result<Vec<String>, String> {
-    let agent = catalog::agent(agent).ok_or_else(|| format!("{agent}: not a source"))?;
+    let agents = catalog::sources(agent);
+    if agents.is_empty() {
+        return Err(format!("{agent}: not a source"));
+    }
     let mut settings = Settings::load(&machine.codex_home);
-    if on {
-        settings.sources_off.remove(agent.id);
-    } else {
-        settings.sources_off.insert(agent.id.to_string());
+    for agent in &agents {
+        if on {
+            settings.sources_off.remove(agent.id);
+        } else {
+            settings.sources_off.insert(agent.id.to_string());
+        }
     }
     settings.save(&machine.codex_home).map_err(|error| error.to_string())?;
+    let agent = agents[0];
+    if agent.scope == catalog::Scope::Repository {
+        return Ok(vec![if on {
+            "A trusted repository's .claude/skills and .gemini/skills are linked from the next puffin start.".to_string()
+        } else {
+            "Repositories' .claude/skills and .gemini/skills are no longer linked from the next puffin start.".to_string()
+        }]);
+    }
     let folder = machine.home.join(agent.folder);
     Ok(vec![match (on, folder.is_dir()) {
         (true, true) => format!("{}'s skills (~/{}) are linked from the next puffin start.", agent.product, agent.folder),

@@ -8,6 +8,8 @@ use crate::catalog::Entry;
 use crate::catalog::Machine;
 use crate::catalog::Origin;
 use crate::catalog::Plan;
+use crate::catalog::REPOSITORY_SOURCE;
+use crate::catalog::Scope;
 use crate::catalog::Status;
 use crate::install;
 use crate::install::Provenance;
@@ -41,9 +43,10 @@ fn provenance_words(provenance: Option<&Provenance>) -> String {
 }
 
 fn origin_words(origin: &install::Origin) -> String {
-    match &origin.commit {
-        Some(commit) => format!("{}@{}", origin.source, &commit[..commit.len().min(7)]),
-        None => origin.source.clone(),
+    match (&origin.commit, &origin.version) {
+        (Some(commit), _) => format!("{}@{}", origin.source, &commit[..commit.len().min(7)]),
+        (None, Some(version)) => format!("{} {version}", origin.source),
+        (None, None) => origin.source.clone(),
     }
 }
 
@@ -68,7 +71,14 @@ pub fn list(plan: &Plan, machine: &Machine, settings: &Settings, all: bool) -> V
         (Origin::SharedAgents, "~/.agents/skills (shared with Gemini CLI and OpenClaw)".to_string()),
     ];
     for agent in AGENTS {
-        groups.push((Origin::Linked(agent), format!("{} (~/{}, linked as from-{})", agent.product, agent.folder, agent.id)));
+        let title = match agent.scope {
+            Scope::Home => format!("{} (~/{}, linked as from-{})", agent.product, agent.folder, agent.id),
+            Scope::Repository => {
+                let capitalised = agent.product.replacen("this", "This", 1);
+                format!("{capitalised} (linked as from-{}, because the repository is trusted)", agent.id)
+            }
+        };
+        groups.push((Origin::Linked(agent), title));
     }
     groups.push((Origin::Bundled, "Bundled with puffin".to_string()));
     for (origin, title) in groups {
@@ -132,21 +142,41 @@ pub fn list(plan: &Plan, machine: &Machine, settings: &Settings, all: bool) -> V
     }
 
     lines.push(String::new());
-    let sources: Vec<String> = AGENTS
-        .iter()
-        .map(|agent| {
-            let state = if settings.sources_off.contains(agent.id) {
-                "off"
-            } else if machine.home.join(agent.folder).is_dir() {
-                "on"
-            } else {
-                "on, no folder"
-            };
-            format!("{} {state}", agent.id)
-        })
-        .collect();
+    let mut sources = vec![format!("{REPOSITORY_SOURCE} {}", repository_state(plan, settings))];
+    sources.extend(AGENTS.iter().filter(|agent| agent.scope == Scope::Home).map(|agent| {
+        let state = if settings.sources_off.contains(agent.id) {
+            "off"
+        } else if machine.home.join(agent.folder).is_dir() {
+            "on"
+        } else {
+            "on, no folder"
+        };
+        format!("{} {state}", agent.id)
+    }));
     lines.push(format!("Linked sources: {} (puffin skill source <agent> on|off)", sources.join("; ")));
+    if let Some(repository) = plan.repository.as_ref().filter(|repository| !repository.trusted) {
+        lines.push(format!(
+            "{} has skills for other agents (.claude/skills or .gemini/skills); they are linked once you trust \
+             the repository in puffin (its trust prompt, or [projects.\"{}\"] trust_level = \"trusted\" in config.toml).",
+            short_path(&repository.root, &machine.home),
+            repository.root.display()
+        ));
+    }
     lines
+}
+
+/// `on`, `off`, `not trusted` or `on, no folder` for the repository's foreign skill folders.
+fn repository_state(plan: &Plan, settings: &Settings) -> &'static str {
+    let off = AGENTS
+        .iter()
+        .filter(|agent| agent.scope == Scope::Repository)
+        .all(|agent| settings.sources_off.contains(agent.id));
+    match &plan.repository {
+        _ if off => "off",
+        Some(repository) if repository.trusted => "on",
+        Some(_) => "on, not trusted",
+        None => "on, no folder",
+    }
 }
 
 /// `puffin skill show <name>`: what the model will see of one skill, and what it ships.
@@ -154,6 +184,12 @@ pub fn show(entry: &Entry, machine: &Machine) -> Vec<String> {
     let skill = &entry.skill;
     let mut lines = vec![format!("{}: {}", skill.name, entry.status.reason())];
     let place = match &skill.origin {
+        Origin::Linked(agent) if agent.scope == Scope::Repository => format!(
+            "{} ({}), linked as {}",
+            agent.product,
+            skill.dir.display(),
+            short_path(&machine.skills_root().join(format!("from-{}", agent.id)).join(&skill.name), &machine.home)
+        ),
         Origin::Linked(agent) => format!(
             "{} ({}), linked as {}",
             agent.product,
@@ -244,11 +280,15 @@ pub fn show(entry: &Entry, machine: &Machine) -> Vec<String> {
 /// ships, whether it can work here, and the catalogue budget after it.
 pub fn staged(staged: &install::Staged, origin: &install::Origin, plan: &Plan, machine: &Machine) -> Vec<String> {
     let frontmatter = &staged.frontmatter;
-    let from = match (&origin.repository, &origin.commit) {
-        (Some(repository), Some(commit)) => format!("{}, {repository}@{}", origin.source, &commit[..commit.len().min(7)]),
+    let from = match (&origin.repository, &origin.commit, &origin.version) {
+        (Some(repository), Some(commit), _) => format!("{}, {repository}@{}", origin.source, &commit[..commit.len().min(7)]),
+        (_, _, Some(version)) => format!("{}, version {version}", origin.source),
         _ => origin.source.clone(),
     };
     let mut lines = vec![format!("{}  ({from})", staged.name), format!("  Description: {}", frontmatter.description)];
+    if let Some(verdict) = &origin.verdict {
+        lines.push(format!("  ClawHub:     {verdict}"));
+    }
     lines.push(format!(
         "  Licence:     {}",
         install::licence_line(&staged.dir, frontmatter).unwrap_or_else(|| "none stated".to_string())
@@ -332,7 +372,7 @@ mod tests {
         assert!(text.contains("[needs SLACK_TOKEN]"), "{text}");
         assert!(text.contains("Not offered\n  imessage  Hermes Agent: unavailable: for macos only (puffin skill enable imessage)"), "{text}");
         assert!(text.contains("1 more shadowed or from a switched-off source: puffin skill list --all"), "{text}");
-        assert!(text.ends_with("Linked sources: claude on; gemini off; openclaw on, no folder; hermes on (puffin skill source <agent> on|off)"), "{text}");
+        assert!(text.ends_with("Linked sources: repo on, no folder; claude on; gemini off; openclaw on, no folder; hermes on (puffin skill source <agent> on|off)"), "{text}");
 
         let all = list(&plan, &machine, &settings, true).join("\n");
         assert!(all.contains("pdf       Claude Code: shadowed by puffin (~/.puffin/skills/pdf) (puffin skill enable pdf)"), "{all}");
