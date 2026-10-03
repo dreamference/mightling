@@ -525,7 +525,7 @@ Difference in resolved rate: +14.3 points, 95% interval −12.7 to +41.3, McNema
 - **The score is inside the noise.** Two arms with the tool unused differed on 4 of 24 instances (§13.5); here 4 of 14 differ, 3 one way and 1 the other. Two instances no earlier run had resolved were resolved here: `django-12774` in both arms (so more likely the write fix than the index) and `sympy-13031` only with the tools (without them it stopped at 140 s with an empty patch). That is one sample, an observation and not a finding.
 - **The cost is mixed.** With the tools: 23% fewer input tokens and 28% fewer output tokens, the first efficiency number for the index; but 14% more agent time, 16% more commands, and both of the pair's timeouts (one of them resolved on its partial patch). `code_show` (207 calls) mostly replaced `sed -n` reads, which is why commands did not fall.
 - **"Tests run after the last edit"** (a pattern match on the session's commands, not a measured behaviour): 9 of 14 with the tools, 8 without.
-- **What remains unmeasured**: the two `puffin-code` fixes (`93386d5`) and the launcher's grace (`6ffb18f`, not yet compiled), since the arm ran the installed builds. The next pair should run on a rebuilt `puffin` and `puffin-code`, on the full 24 validated instances, with the plain arm run twice so the floor is measured in the same session.
+- **What remains unmeasured**: the two `puffin-code` fixes (`93386d5`) and the launcher's grace (`6ffb18f`; compiled and installed in the build of `258c3b5` on 2026-10-03, after the arm), since the arm ran the installed builds. The next pair should run on a rebuilt `puffin` and `puffin-code`, on the full 24 validated instances, with the plain arm run twice so the floor is measured in the same session.
 
 ---
 

@@ -413,7 +413,12 @@ A check that the model follows `high-swe` and of what it does differently, not a
 
 **Tested:** 10 launcher tests (`cargo test --release -p puffin-launcher` in a scratch export: 131 passed, 1 ignored), among them that `default` composes byte for byte to what the launcher sent before, for the combinations of email, code block, glossary and `rg`; and the Python tests in `tests/test_puffin_prompt.py`, `tests/test_night_shift.py` and `tests/test_swe_bench.py`, among them that the shipped text is Appendix A with §6.4's two edits and nothing else.
 
-**Not run:** no `puffin` binary carrying this code has been built, so the stub-endpoint checks of §10 (a `high-swe` session's `instructions` field, a resumed session keeping its prompt) and `puffin prompt` from a shell are owed after the next `puffin-admin codex build`. Phase 0 (§6.1), the runs of §6.2, and Phase 2 (`/prompt` in the TUI, the live switch and its patch) are not built.
+**Run in the build of `258c3b5` (2026-10-03),** against the live model rather than a stub endpoint:
+- `DREAMFERENCE_PUFFIN_PROMPT=high-swe puffin exec …` recorded the `high-swe` text as the rollout's `base_instructions` (`You are Puffin, a coding agent. You work in a software repository through a shell, …`), and the launcher wrote `model_catalog.high-swe.json` beside `model_catalog.json`.
+- That session resumed with the variable unset (`puffin exec resume <id>`) and asked to quote the first two sentences of its instructions quoted `high-swe`'s; a fresh session under `default`, asked the same, quoted `default`'s (`… You and the user share one workspace, …`). So a resumed session keeps its prompt.
+- `puffin prompt list` from a shell listed `default` (chosen) and `high-swe`.
+
+**Not run:** Phase 0 (§6.1), the runs of §6.2, and Phase 2 (`/prompt` in the TUI, the live switch and its patch) are not built.
 
 ---
 
