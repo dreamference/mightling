@@ -2,6 +2,7 @@ import requests
 import pytest
 import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 from dreamference.vllm_server import VLLMServerManager, VLLMStartupMonitor, VLLMServerStatus
@@ -976,11 +977,30 @@ def test_watchdog_stops_retrying_cgroup_resolution(monkeypatch):
     from dreamference.vllm_server import psi_watchdog
 
     wd, docker_calls = _watchdog_with_readings(monkeypatch, [(0.0, 0.0)] * 500)
+    # The helper patches `subprocess.run` for the whole process, so a watchdog thread an earlier
+    # test left running also lands in `docker_calls`; only this watchdog's own calls count.
+    ours = []
+    fake_run = psi_watchdog.subprocess.run
+
+    def _run_recording_ours(cmd, **kw):
+        if threading.current_thread() is wd._thread:
+            ours.append(cmd)
+        return fake_run(cmd, **kw)
+
+    monkeypatch.setattr(psi_watchdog.subprocess, "run", _run_recording_ours)
+    count = lambda: sum(1 for c in ours if "inspect" in c)
     assert wd.start() is True
-    time.sleep(0.5)
+    # Wait for the cap rather than a fixed time: on a loaded machine (the full suite beside a
+    # build) half a second was not always enough samples to reach it. Then let the loop run on
+    # for as many samples again, so a retry past the cap would show.
+    deadline = time.monotonic() + 15
+    while count() < psi_watchdog.MAX_CGROUP_RESOLVE_ATTEMPTS and time.monotonic() < deadline:
+        time.sleep(0.02)
+    reached = time.monotonic()
+    while time.monotonic() - reached < 0.5:
+        time.sleep(0.02)
     wd.stop()
-    inspects = [c for c in docker_calls if "inspect" in c]
-    assert len(inspects) == psi_watchdog.MAX_CGROUP_RESOLVE_ATTEMPTS
+    assert count() == psi_watchdog.MAX_CGROUP_RESOLVE_ATTEMPTS
 
 def test_watchdog_survives_a_raising_sample(monkeypatch):
     # An exception must cost one reading, not the whole guard: a watchdog that has silently
