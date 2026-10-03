@@ -56,3 +56,7 @@ site/
 
 # Local builds of the standalone Rust crates (the builder uses ~/.cache/dreamference/*/target).
 /puffin-web-rs/target/
+
+# Tool caches (ruff, mypy)
+.ruff_cache/
+.mypy_cache/

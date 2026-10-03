@@ -1,6 +1,6 @@
 # Python Code Quality — a Stanford-grade standard for `dreamference/`, enforced by a ratchet
 
-**Status:** proposed (2026-10-03). Nothing here is built. §2's numbers were measured on `main` at `584f26e`; ruff and mypy are not installed here, so the baseline in §2 comes from flake8 7.3 (installed in `.venv`) and an AST script, and Phase 0 replaces it with ruff's own counts.
+**Status:** Phase 0 built (2026-10-03, §10): `pyproject.toml` with §3's rules, ruff 0.16.10 and mypy 2.4.0 pinned in setup.py's `dev` extra, and the real baseline measured (§10.1). The ratchet test and its baseline are written and pass, and are held back to land with Phase 1 (§10.2). §2's numbers were measured earlier on `main` at `584f26e` with flake8 7.3 and an AST script; §10.1 gives ruff's counts beside them.
 **Goal:** make the Python half of Puffin read like code written to a teaching standard: small, deep modules, one idea per function, names that make comments unnecessary for the *what* and comments that carry the *why*. The standard is checked by tools wherever a tool can decide, by a fixed review checklist where it cannot, and it may only get stricter over time.
 **Scope:** `dreamference/` and `tests/` (Python). Not the Rust crates (`puffin-rs/`, `puffin-web-rs/`, `puffin-code-rs/`, which have `cargo clippy`), not `desktop/`, not the `codex/` submodule (never modified), not `scratch/`.
 
@@ -195,6 +195,47 @@ The formatting commit touches nearly every file, so it is made **when no other b
 - **Refactoring host-safety code** (`start_server`). A change in the order of the pre-flight, the sidecar start and the watchdog can freeze the host (CLAUDE.md "Host-safety subsystem"). Mitigation: per-stage tests first, and no change to the order.
 - **Rules that do not fit.** `PLR2004` may be noisy against the registry's numeric tables, `T201` against the CLI's voice. Phase 0 decides with real counts, and a per-file ignore with a reason is an acceptable answer.
 - **Over-decomposition.** The limits of §3.4 can be met by splitting a function into shallow pieces, which §5 flags. The reviewer's checklist is part of the standard, not decoration.
+
+---
+
+## 10. Phase 0, as built (2026-10-03)
+
+- **`pyproject.toml`** holds tool settings only, with no `[build-system]` table, so pip and `python -m build` keep building from setup.py through setuptools' legacy backend. It selects §3's rules; `PLR1702` (nested blocks) is a ruff preview rule, turned on alone with `explicit-preview-rules`. The rules the formatter owns (`W191`, `E111`, `E114`, `E117`, `D206`, `D300`) are ignored so that `ruff format` and `ruff check` cannot disagree.
+- **Pinned** in setup.py: `extras_require={"dev": ["ruff==0.16.10", "mypy==2.4.0"]}`. The release workflow's test job installs `.[dev]`. `.ruff_cache/` and `.mypy_cache/` are ignored.
+- **Decided here, as §6 asked:**
+  - **Tests are exempt** from the docstring rules (`D100`–`D107`), `PLR2004`, `T201` and `ANN401`: a test's name is its documentation, and an assert compares literal expected values. All other rules apply to `tests/`.
+  - **`T201` (print) stays ratcheted, not ignored.** Its 502 findings sit in console-facing managers the CLI calls (`onyx_runner.py` 77, `swe_bench_command.py` 33, `vllm_server_manager.py` 31, …), which §3.9 allows. Phase 2 decides per module: a per-file ignore with a reason for the console-facing ones, `logging` for the long-running services.
+  - **`PLR2004` keeps strings in scope** (`allow-magic-value-types = []`), as §3.5 says; 127 of its 420 findings are in `run_cli`, which Phase 3 rewrites anyway.
+  - **The container-script exemption** from one-class-per-file is confirmed for `chat/image_search_service.py` (staged as one file into a `python:3-slim` container), `chat/gmail_search_service.py` and `vllm_server/diffusion_openai_service.py` (bind-mounted entrypoint). `cli/code_index_setup.py` (two classes) is not exempt.
+  - **mypy is measured, not yet in the suite.** A cold run takes 19 s, more than twice the suite, so `tests/test_typing.py` arrives with Phase 4 and uses mypy's incremental cache.
+
+### 10.1 The baseline, ruff beside §2's flake8
+
+ruff 0.16.10 over `dreamference/` and `tests/`, at `3624947`: **5,452 findings in 162 files** (5,014 in `dreamference/`, 438 in `tests/`). 2,766 have a safe automatic fix, 785 an unsafe one, 1,901 are manual. `ruff format --check`: 130 files would be reformatted, 38 already are. The ratchet's own project checks (§3.9) add 2: one second class (`cli/code_index_setup.py`) and one `__init__.py` without `__all__` (the top-level `dreamference/__init__.py`, which holds `__version__`); no module does work at import time.
+
+| Measure (`dreamference/`) | flake8 / AST (§2, `584f26e`) | ruff (`3624947`) | Note |
+|---|---|---|---|
+| Complexity above 10 (`C901`) | 44 | **40** | 13 above 15, 5 above 25: `run_cli` **213** (was 228), `GmailSearchService.serve` 33, `build_launch_command` 33, `SweBenchRunner.run` 29 (new since §2), `start_server` 27, `get_diagnostics_line` 25 |
+| Other decomposition limits | — | `PLR1702` nesting 105, `PLR0913` arguments 19, `PLR0911` returns 17, `PLR0912` branches 14, `PLR0915` statements 12 | new measures; nesting is the largest |
+| `except Exception` (`BLE001`) | 111 | 112 | plus `S110` try/except/pass 45, `SIM105` 23 |
+| bare `except:` (`E722`) | 2 | 2 | |
+| Lines over 120 (`E501`) | 216 | 219 | the 100–120 band is the formatter's job, not a finding |
+| Missing docstrings, public (`D100`–`D107`) | 56 functions | 34 (`D103` 17, `D100` 9, `D102` 6, `D101`, `D107`) | ruff counts what the Google convention requires; §2 counted every public function |
+| Docstring format (`D212`, `D205`) | not measured | 945, 270 | the house style puts the summary on the second line; `D212` is safe-fixable, so Phase 1 settles it |
+| Old typing syntax (`UP006`, `UP045`, `UP035`) | not measured | 1,349 in the `UP` family | `Dict`/`Optional` → `dict`/`X \| None`, safe-fixable in Phase 1 |
+| `os.path` (`PTH`) | not measured | 494 | §3.7 asks for `pathlib` in new code; the ratchet keeps old code's count from rising |
+| Magic values (`PLR2004`) | not measured | 420 | see above |
+| `Any` in a signature (`ANN401`) | 373 uses of `Any` anywhere | 48 in signatures | the rule covers signatures only |
+| Unused imports, empty f-strings, one-line `if` | 23, 10, 22 | 19, 10, 23 | |
+| Star imports (`F403`) | 7 | 7 | the dead shims |
+
+mypy 2.4.0, default strictness, `ignore_missing_imports`: **89 errors in 29 of 120 files**: `cli` 25, `chat` 17, `node` 14, `swe_bench` 12, `night_shift` 7, `vllm_server` 7, `mcp_server` 5, `runner` 5, `hardware` 2, `audit` 1. `config/` and `context_engine/` have none, which is where Phase 4 starts.
+
+### 10.2 The ratchet test, written and held for Phase 1
+
+`tests/test_code_quality.py` and `tests/quality_baseline.json` implement §4 as written: ruff's findings and the PQ checks of §3.9 (PQ001 one class per file, PQ002 `__init__.py` without `__all__`, PQ003 work at import time), counted per file and rule; a rise fails and names it; a new file counts from zero; a fall prints the update command; a ruff other than the pinned one fails with the install command; `--update-baseline` refuses to raise a count unless given `--allow-raise`. It runs in 0.7 s and passes against the tree it recorded.
+
+It is **on the branch `quality/phase0`, not on `main`**, because of what it would do to work in flight: new code written in today's house style (`Optional[...]`, the summary on a docstring's second line, `os.path`) fails it from its first commit, while CLAUDE.md tells every author to match the surrounding style. Checked against the branches open on 2026-10-03: `fleet/provision`'s new `node/fleet_session.py` would fail with 7 rule counts above zero (`D212` 15, `D205` 11, `UP045` 11, `UP006` 8, `PLR2004` 4, `UP035`, `PTH123`), and `swe/runtime-lzma` with one (`UP006` 2→3 in `swe_bench_runtime.py`); `ctx/budget` and `tests/watchdog-leak` would pass. Phase 1's safe-fix commit converts the tree to the style the rules ask for; the test lands right after it with a re-recorded baseline, which is §6's order anyway (step 4).
 
 ---
 
