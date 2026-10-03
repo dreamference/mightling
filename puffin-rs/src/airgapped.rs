@@ -325,7 +325,7 @@ fn startup_lines(resolved: &Resolved, exposed: bool, can_seal: bool) -> Vec<Stri
     )];
     lines.extend(guard_lines(Level::On, None, exposed, can_seal));
     lines.push(
-        "NOT ENFORCED for: a switch to Full Access with /permissions, a command you approve to run outside the sandbox, MCP servers you configured.".to_string(),
+        "NOT ENFORCED for: a command you approve to run outside the sandbox, MCP servers you configured.".to_string(),
     );
     lines.extend(resolved.invalid.iter().map(|note| format!("Note: {note}.")));
     lines
@@ -336,27 +336,179 @@ pub fn startup_lines_now(resolved: &Resolved) -> Vec<String> {
     startup_lines(resolved, puffin_airgapped::level_files_exposed(), puffin_airgapped::seal_dir().is_some())
 }
 
-/// The reason `puffin` must not start with these arguments at a configured `on`, if there is one:
-/// Full Access has no sandbox to take the network away, so the two contradict each other.
+/// Why `on` and Full Access are never had together; every refusal of one for the other says it.
+const INCOMPATIBLE: &str = "Full Access runs commands with no sandbox, and the sandbox is what takes their network away, so the two are incompatible";
+
+/// What the permissions picker says beside a disabled Full Access row.
+pub const FULL_ACCESS_DISABLED: &str = "/airgapped is on, and Full Access has no sandbox to keep commands off the network; run /airgapped off first";
+
+/// The id Codex gives its Full Access preset, and the permission profile and sandbox mode it selects.
+const FULL_ACCESS_PRESET: &str = "full-access";
+const FULL_ACCESS_PROFILE: &str = ":danger-full-access";
+const FULL_ACCESS_SANDBOX: &str = "danger-full-access";
+
+/// The reason `puffin` must not start with these arguments at a configured `on`, if there is one.
+/// Full Access is chosen by a flag, a `-c` override or a configuration file, so all three are read.
 pub fn full_access_conflict(user_args: &[String], level: Level) -> Option<String> {
     if level != Level::On {
         return None;
     }
-    let mut previous = "";
-    for arg in user_args {
-        let full_access = arg == "--dangerously-bypass-approvals-and-sandbox"
-            || arg == "--yolo"
-            || ((previous == "-s" || previous == "--sandbox") && arg == "danger-full-access")
-            || arg == "--sandbox=danger-full-access"
-            || arg == "-sdanger-full-access";
-        if full_access {
-            return Some(format!(
-                "airgapped is on, and {arg} runs commands with no sandbox, so nothing would keep them off the network. Drop one of the two (puffin airgapped default off, or {ENV_VAR}=off for one run)."
-            ));
+    let source = full_access_source(user_args, &config_layers())?;
+    Some(format!(
+        "airgapped is on, and {source} selects Full Access. {INCOMPATIBLE}. Choose one: another sandbox (-s workspace-write), or puffin airgapped default off ({ENV_VAR}=off for one run)."
+    ))
+}
+
+/// What selects Full Access for this launch, if anything does, following Codex's precedence: a
+/// sandbox flag, then `-c`, then the configuration files (the selected profile's keys before the
+/// top level's, a later file before an earlier one). `layers` are (name, table), lowest first.
+fn full_access_source(user_args: &[String], layers: &[(String, toml::Table)]) -> Option<String> {
+    let mut profile: Option<String> = None;
+    let mut cli_override: Option<(String, bool)> = None;
+    let mut args = user_args.iter().map(String::as_str);
+    while let Some(arg) = args.next() {
+        let sandbox = match arg {
+            "--dangerously-bypass-approvals-and-sandbox" | "--yolo" => return Some(arg.to_string()),
+            // A sandbox named on the command line overrides every configuration file.
+            "--full-auto" => return None,
+            "-s" | "--sandbox" => args.next(),
+            "-p" | "--profile" => {
+                profile = args.next().map(str::to_string);
+                None
+            }
+            "-c" | "--config" => {
+                if let Some(found) = args.next().and_then(config_override) {
+                    cli_override = Some(found);
+                }
+                None
+            }
+            _ => arg.strip_prefix("--sandbox=").or_else(|| {
+                arg.strip_prefix("-s")
+                    .filter(|mode| matches!(*mode, "read-only" | "workspace-write" | FULL_ACCESS_SANDBOX))
+            }),
+        };
+        if let Some(mode) = sandbox {
+            return (mode == FULL_ACCESS_SANDBOX).then(|| format!("--sandbox {mode}"));
         }
-        previous = arg;
+        if let Some(name) = arg.strip_prefix("--profile=") {
+            profile = Some(name.to_string());
+        }
+        if let Some(found) = arg.strip_prefix("--config=").and_then(config_override) {
+            cli_override = Some(found);
+        }
+    }
+    if let Some((text, full_access)) = cli_override {
+        return full_access.then(|| format!("-c {text}"));
+    }
+    let profile = profile.or_else(|| {
+        layers.iter().rev().find_map(|(_, table)| table.get("profile")?.as_str().map(str::to_string))
+    });
+    if let Some(name) = &profile {
+        for (file, table) in layers.iter().rev() {
+            let section = table.get("profiles").and_then(|profiles| profiles.get(name.as_str())).and_then(toml::Value::as_table);
+            if let Some((key, full_access)) = section.and_then(table_mode) {
+                return full_access.then(|| format!("{key} in profile \"{name}\" of {file}"));
+            }
+        }
+    }
+    for (file, table) in layers.iter().rev() {
+        if let Some((key, full_access)) = table_mode(table) {
+            return full_access.then(|| format!("{key} in {file}"));
+        }
     }
     None
+}
+
+/// Whether a configuration table selects Full Access, and by which key, if it says either way.
+fn table_mode(table: &toml::Table) -> Option<(&'static str, bool)> {
+    if let Some(value) = table.get("default_permissions").and_then(toml::Value::as_str) {
+        return Some(("default_permissions", value == FULL_ACCESS_PROFILE));
+    }
+    let value = table.get("sandbox_mode").and_then(toml::Value::as_str)?;
+    Some(("sandbox_mode", value == FULL_ACCESS_SANDBOX))
+}
+
+/// A `-c key=value` that decides the sandbox: the text and whether it selects Full Access. The value
+/// is read as TOML and, failing that, as a bare string, as Codex reads it.
+fn config_override(text: &str) -> Option<(String, bool)> {
+    let (key, value) = text.split_once('=')?;
+    let key = key.trim();
+    if key != "sandbox_mode" && key != "default_permissions" {
+        return None;
+    }
+    let parsed = toml::from_str::<toml::Table>(&format!("v = {value}"))
+        .ok()
+        .and_then(|table| table.get("v")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| value.trim().to_string());
+    let mut table = toml::Table::new();
+    table.insert(key.to_string(), toml::Value::String(parsed));
+    table_mode(&table).map(|(_, full_access)| (text.to_string(), full_access))
+}
+
+/// The configuration files Codex layers, lowest first: the system file, the user's, and the
+/// project's `.codex/config.toml` from the repository root down to the working directory. A project
+/// file counts even where Codex would not trust it: refusing is the safe side to be wrong on.
+fn config_layers() -> Vec<(String, toml::Table)> {
+    let mut files = vec![std::path::PathBuf::from("/etc/codex/config.toml")];
+    files.extend(puffin_airgapped::codex_home().map(|home| home.join("config.toml")));
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut project = Vec::new();
+        for dir in cwd.ancestors() {
+            project.push(dir.join(".codex").join("config.toml"));
+            if dir.join(".git").exists() {
+                break;
+            }
+        }
+        files.extend(project.into_iter().rev());
+    }
+    files
+        .into_iter()
+        .filter_map(|path| {
+            let table = std::fs::read_to_string(&path).ok()?.parse::<toml::Table>().ok()?;
+            Some((path.display().to_string(), table))
+        })
+        .collect()
+}
+
+/// Why the permissions picker offers Full Access disabled, if it does: this session is at `on`.
+/// The TUI asks for each built-in preset, by its id (patch 0019).
+pub fn full_access_refusal<T: std::fmt::Display>(thread_id: Option<T>, preset: &str) -> Option<String> {
+    if preset != FULL_ACCESS_PRESET {
+        return None;
+    }
+    let thread_id = thread_id.map(|id| id.to_string());
+    (resolve(thread_id.as_deref()).level == Level::On).then(|| FULL_ACCESS_DISABLED.to_string())
+}
+
+/// [`command`] inside a TUI session, which knows whether it runs in Full Access (`full_access`).
+/// There `/airgapped on` is refused, not claimed: the sandbox is what enforces it, and Full Access
+/// has none.
+pub fn session_command<T: std::fmt::Display>(thread_id: Option<T>, args: &str, full_access: bool) -> Vec<String> {
+    let thread_id = thread_id.map(|id| id.to_string());
+    if !full_access {
+        return command(thread_id, args);
+    }
+    let words: Vec<&str> = args.split_whitespace().collect();
+    let wanted = match words.as_slice() {
+        [name] => Level::parse(name),
+        [default, name] if default.eq_ignore_ascii_case("default") => Level::parse(name),
+        _ => None,
+    };
+    if wanted == Some(Level::On) {
+        return full_access_lines("Airgapped not changed: this session runs in Full Access.");
+    }
+    let mut lines = command(thread_id.as_deref(), args);
+    if words.is_empty() && resolve(thread_id.as_deref()).level == Level::On {
+        lines.extend(full_access_lines("NOT ENFORCED in this session: it runs in Full Access."));
+    }
+    lines
+}
+
+fn full_access_lines(first: &str) -> Vec<String> {
+    vec![
+        format!("{first} {INCOMPATIBLE}."),
+        "To air-gap it, choose another mode with /permissions first, then /airgapped on.".to_string(),
+    ]
 }
 
 /// What the section sends, given the level in force and what the model last saw.
@@ -480,7 +632,7 @@ mod tests {
         let on = Resolved { level: Level::On, source: puffin_airgapped::Source::Environment, invalid: vec![] };
         let lines = startup_lines(&on, false, true);
         assert_eq!(lines[0], format!("🔒 Airgapped: on ({ENV_VAR}). Enforced: sandboxed commands run with no network."));
-        assert!(lines[1].starts_with("NOT ENFORCED for: a switch to Full Access with /permissions"));
+        assert!(lines[1].starts_with("NOT ENFORCED for: a command you approve to run outside the sandbox"));
         assert_eq!(lines.len(), 2);
         // The machine's own hole is named between the two when there is no place for a seal.
         let exposed = startup_lines(&on, true, false);
@@ -509,7 +661,61 @@ mod tests {
         assert!(full_access_conflict(&args(&["--sandbox=danger-full-access"]), Level::On).is_some());
         assert_eq!(full_access_conflict(&args(&["-s", "workspace-write"]), Level::On), None);
         assert_eq!(full_access_conflict(&args(&["-s", "danger-full-access"]), Level::Off), None);
-        assert_eq!(full_access_conflict(&args(&["exec", "explain danger-full-access"]), Level::On), None);
+        let refusal = full_access_conflict(&args(&["--yolo"]), Level::On).unwrap_or_default();
+        assert!(refusal.contains("--yolo selects Full Access") && refusal.contains("incompatible"));
+    }
+
+    fn layers(files: &[(&str, &str)]) -> Vec<(String, toml::Table)> {
+        files.iter().map(|(name, text)| (name.to_string(), text.parse().unwrap_or_default())).collect()
+    }
+
+    #[test]
+    fn full_access_is_found_in_flags_overrides_and_configuration_files() {
+        let args = |words: &[&str]| words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+        let none = layers(&[]);
+        assert_eq!(full_access_source(&args(&["exec", "explain danger-full-access"]), &none), None);
+        assert_eq!(full_access_source(&args(&["-sdanger-full-access"]), &none).as_deref(), Some("--sandbox danger-full-access"));
+        assert_eq!(full_access_source(&args(&["-c", "sandbox_mode=danger-full-access"]), &none).as_deref(), Some("-c sandbox_mode=danger-full-access"));
+        assert_eq!(full_access_source(&args(&["--config=default_permissions=\":danger-full-access\""]), &none).as_deref(), Some("-c default_permissions=\":danger-full-access\""));
+        assert_eq!(full_access_source(&args(&["-c", "model=x"]), &none), None);
+
+        let user = layers(&[("user.toml", "sandbox_mode = \"danger-full-access\"\n")]);
+        assert_eq!(full_access_source(&args(&[]), &user).as_deref(), Some("sandbox_mode in user.toml"));
+        // A sandbox named on the command line, or by -c, overrides the file.
+        assert_eq!(full_access_source(&args(&["-s", "workspace-write"]), &user), None);
+        assert_eq!(full_access_source(&args(&["--full-auto"]), &user), None);
+        assert_eq!(full_access_source(&args(&["-c", "sandbox_mode=\"workspace-write\""]), &user), None);
+        // A later file overrides an earlier one.
+        let project = layers(&[
+            ("user.toml", "sandbox_mode = \"danger-full-access\"\n"),
+            ("project.toml", "default_permissions = \":workspace\"\n"),
+        ]);
+        assert_eq!(full_access_source(&args(&[]), &project), None);
+
+        // The selected profile's keys come before the top level's, whichever file selects it.
+        let profiled = layers(&[
+            ("user.toml", "sandbox_mode = \"workspace-write\"\n[profiles.wild]\nsandbox_mode = \"danger-full-access\"\n"),
+            ("project.toml", "profile = \"wild\"\n"),
+        ]);
+        assert_eq!(full_access_source(&args(&[]), &profiled).as_deref(), Some("sandbox_mode in profile \"wild\" of user.toml"));
+        assert_eq!(full_access_source(&args(&["-p", "tame"]), &profiled), None);
+        assert!(full_access_source(&args(&["--profile=wild"]), &profiled).is_some());
+    }
+
+    #[test]
+    fn full_access_and_on_are_refused_inside_a_session() {
+        assert_eq!(full_access_refusal(None::<String>, "auto"), None);
+        assert_eq!(full_access_refusal(None::<String>, "read-only"), None);
+        // In Full Access, `on` is refused for the session and as the default, with the reason.
+        for args in ["on", "ON", "default on"] {
+            let lines = session_command(None::<String>, args, true);
+            assert!(lines[0].starts_with("Airgapped not changed: this session runs in Full Access."), "{args}");
+            assert!(lines[0].contains("incompatible") && lines[1].contains("/permissions"), "{args}");
+        }
+        // Everything else is the ordinary command.
+        assert_eq!(session_command(None::<String>, "loud", true), vec![USAGE.to_string()]);
+        assert!(session_command(None::<String>, "off", true)[0].starts_with("No session yet"));
+        assert!(session_command(None::<String>, "on", false)[0].starts_with("No session yet"));
     }
 
     #[test]

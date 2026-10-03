@@ -135,7 +135,7 @@ Every command the agent runs goes through Codex's sandbox. Under `workspace-writ
 
 `/airgapped` reports each of these with its reason (`NOT ENFORCED:` for the ones that leave a way out), and the launcher's start-up line says the same when a session starts at `on`:
 
-- **Full Access.** With `-s danger-full-access` or `--dangerously-bypass-approvals-and-sandbox` there is no sandbox to take the network away. The launcher refuses to start a session at `on` with either: `on` and Full Access contradict each other, and the user must drop one. A session switched to Full Access later through `/permissions` shows the warning.
+- **Full Access.** With `-s danger-full-access` or `--dangerously-bypass-approvals-and-sandbox` there is no sandbox to take the network away, so `on` and Full Access are **incompatible and never allowed together** (§14.7). The launcher refuses to start a session at `on` with Full Access chosen by a flag, a `-c` override or a configuration file; inside a session, `/permissions` shows Full Access disabled while the level is `on`, and `/airgapped on` is refused while the session runs in Full Access. Each refusal says why.
 - **`$CODEX_HOME` inside a writable root.** The sandbox lets commands write the working directory, `/tmp` and `$TMPDIR`. `puffin` started in the home directory therefore makes `~/.puffin` and `~/.config/dreamference` writable, and a command could rewrite the session's level file or the user-level configuration file (measured, §14.5). The level is therefore **held outside those folders**: a session seen at `on` gets a seal, a file under the user's runtime directory (`$XDG_RUNTIME_DIR/puffin-airgapped/<thread-id>`), which the sandbox mounts read-only. While the seal exists the level is `on` whatever the files say. It is written by the `puffin` process (when the World State section sees `on`, before the turn's first command, and by `/airgapped on`), removed by `/airgapped off` or `/airgapped duckduckgo` typed by the user, and pruned at the next launch once the process that wrote it has exited. Where there is no runtime directory, the first design applies as a fallback: an exposed session file may tighten the configured level and not loosen it, and `/airgapped` reports the hole as `NOT ENFORCED`.
 - **A command the user approves to run outside the sandbox** has the network. The `on` fragment tells the model not to ask (§3), and the approval prompt is the user's own decision, but nothing stops it.
 - **MCP servers** the user configured run outside the command sandbox, with the network.
@@ -352,7 +352,7 @@ All on 2026-10-01, with the rebuilt `puffin` (17 patches) against the default mo
 ### 14.4 Not built
 
 - **The Gmail check at start is not skipped** (§5.2): a session that starts at `on` still gets the Gmail section in its prompt, and the `on` fragment says Gmail is unavailable. (`puffin update` is not refused at `on`, and that is now the design, §5.2.)
-- **A session switched to Full Access through `/permissions`** shows no warning; only the launch-time refusal exists. The status at `on` lists the uncovered cases as fixed text, not as a check of the current session.
+- ~~**A session switched to Full Access through `/permissions`** shows no warning.~~ Closed on 2026-10-03: the two are refused together (§14.7).
 - **A tampered level takes effect at the next restart.** A seal lasts as long as the `puffin` process that wrote it. If a command rewrote the level's files while the session was held, a later `puffin resume` reads those files and starts at what they say. Keeping seals across restarts would close it, at the price of a session nobody can loosen without the TUI; left as it is.
 - **`writable_roots` the user adds** are not known to the exposure check, which looks at the working directory, `/tmp` and `$TMPDIR`. The seal does not depend on that check, so this only affects what `/airgapped` reports where there is no runtime directory.
 - **The airlock** (§5.4, Phase 2), the 50-query DuckDuckGo measurement (Phase 0), and the strace of an `on` session (§11).
@@ -364,10 +364,10 @@ A session that starts at a configured `on` (environment or configuration file; t
 
 ```
 🔒 Airgapped: on (<source>). Enforced: sandboxed commands run with no network.
-NOT ENFORCED for: a switch to Full Access with /permissions, a command you approve to run outside the sandbox, MCP servers you configured.
+NOT ENFORCED for: a command you approve to run outside the sandbox, MCP servers you configured.
 ```
 
-with `/airgapped`'s `NOT ENFORCED against a command rewriting the level` between the two when the level files are inside a writable root and there is no runtime directory for a seal. Nothing is printed at `off`. Full Access at launch is not listed: it is refused before this line. It goes to stderr for `puffin exec` too. `startup_lines` in `puffin-rs/src/airgapped.rs`, unit-tested; not yet watched in a rebuilt `puffin`.
+with `/airgapped`'s `NOT ENFORCED against a command rewriting the level` between the two when the level files are inside a writable root and there is no runtime directory for a seal. Nothing is printed at `off`. Full Access is not listed: it is refused at launch and disabled in `/permissions` (§14.7). It goes to stderr for `puffin exec` too. `startup_lines` in `puffin-rs/src/airgapped.rs`, unit-tested; not yet watched in a rebuilt `puffin`.
 
 ### 14.5 Added on 2026-10-02: the three gaps of "not built"
 
@@ -390,3 +390,14 @@ DuckDuckGo answered SearXNG with a CAPTCHA when the level was first tried live (
 - **The web commands and the MCP server's `web_search`**: always `categories=<category>`; the DuckDuckGo-only error text is gone, and every-engine-failed errors carry the restart hint at `off`.
 - **Python** (`PUFFIN_AIRGAPPED_LEVELS`, `NodeJob.AIRGAP_LEVELS`): two levels. A node job from an older sender that still names `duckduckgo` counts as `on`, because `NodeJob.stricter` treats an unknown name as the strictest.
 - **Not changed:** SearXNG's own engine list, which still includes DuckDuckGo for `off`; and the installed `puffin`, which keeps the old resolver until the next `puffin-admin codex build`.
+
+### 14.7 Added on 2026-10-03: `on` and Full Access are refused together
+
+Full Access has no sandbox, and the sandbox is the only thing that enforces `on`, so a session is never allowed to hold both. Every way of choosing one while the other is in force is refused, and each refusal says that the two are incompatible:
+
+- **At launch** (`full_access_conflict`, `puffin-rs/src/airgapped.rs`), at a configured `on`: Full Access from `--yolo` / `--dangerously-bypass-approvals-and-sandbox`, `-s`/`--sandbox danger-full-access` in every spelling, a `-c sandbox_mode=…` or `-c default_permissions=":danger-full-access"` override, or a configuration file: `/etc/codex/config.toml`, `$CODEX_HOME/config.toml` and each project's `.codex/config.toml` from the repository root down to the working directory, with the selected profile's keys (`-p`, `--profile`, or `profile =`) before the top level's and a later file before an earlier one, as Codex layers them. A sandbox named on the command line (`-s workspace-write`, `--full-auto`) overrides the files, as in Codex. A project file counts even where Codex would not trust the project: refusing there is the safe side to be wrong on.
+- **In the permissions picker** (patch `0019`, two one-line hooks in `permissions_menu.rs` and `permission_popups.rs`): while the session's level is `on`, the Full Access row is shown disabled, `Full Access (disabled) … (disabled: /airgapped is on, and Full Access has no sandbox to keep commands off the network; run /airgapped off first)`, and cannot be chosen. This covers both of Codex's pickers (the legacy one and the permission-profile one); the keyboard shortcut that cycles modes never offered Full Access.
+- **`/airgapped on` and `/airgapped default on` in a Full Access session** (`session_command`; the TUI passes whether the session's permission profile is `Disabled`): refused with `Airgapped not changed: this session runs in Full Access. Full Access runs commands with no sandbox, and the sandbox is what takes their network away, so the two are incompatible.` and `To air-gap it, choose another mode with /permissions first, then /airgapped on.` Nothing is written and no seal is made.
+- **What remains possible**, and is reported, not refused: a session already in Full Access whose level turns `on` from outside it (another shell running `puffin airgapped default on`, or `puffin resume` of a session whose own level file says `on`, which the launch check, reading only the configured level, does not see). `/airgapped` in such a session adds `NOT ENFORCED in this session: it runs in Full Access.` with the same reason.
+
+Patch `0019` grew by 1,261 bytes (the series from 32,425 to 33,686; `test_the_patches_stay_small` raised to 33,750).
