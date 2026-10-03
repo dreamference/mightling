@@ -126,7 +126,7 @@ React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinne
 
 ### 4.6 Running OpenAI's app on `puffin` — rejected as the product
 
-`CODEX_CLI_PATH=~/.local/bin/puffin chatgpt` would, as read, start `puffin app-server` under OpenAI's window, and the local provider switches its sign-in gate off (measured: `requiresOpenaiAuth: false`). It is the most faithful option and must not be the product: the window carries its own Statsig and Sentry clients, its updater and apt repository, and passes `--analytics-default-enabled`; it cannot be shipped. It remains useful once, as the **reference run** of Phase 0 item 6, if the user allows installing the package (§14, question 5).
+`CODEX_CLI_PATH=~/.local/bin/puffin chatgpt` would, as read, start `puffin app-server` under OpenAI's window, and the local provider switches its sign-in gate off (measured: `requiresOpenaiAuth: false`). It is the most faithful option and must not be the product: the window carries its own Statsig and Sentry clients, its updater and apt repository, and passes `--analytics-default-enabled`; it cannot be shipped. It remains useful as the **reference run** of Phase 0 item 6 and for later screen-by-screen comparisons: the user chose to install the package and keep it (§14, question 5).
 
 ---
 
@@ -173,7 +173,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the s
 | Notifications when a turn ends or needs approval | client | **Same:** desktop notification, no bundled sounds | 2 |
 | Prevent sleep while a turn runs | client | **Same:** `systemd-inhibit`-style idle inhibitor while any turn is running | 2 |
 | Settings pages | `config/read`, `config/value/write`, `config/batchWrite` | **Same,** writing `~/.puffin/config.toml` | 1 |
-| Dark mode | client | Later, §14 question 3 | 3 |
+| Dark mode | client | Later: light only for now (§14 question 3, decided) | 3 |
 
 ### 6.2 Composer and turns
 
@@ -345,7 +345,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 3. Why `model/list` is empty with a catalog entry present.
 4. ~~`generate-ts --experimental`~~ — done (§5): plan mode, projects, queues, search, terminals.
 5. §8.2: which of the three places holds the air-gap check; measure that a `thread/start` with `sandbox: "danger-full-access"` at `on` is refused.
-6. The reference run (§4.6), only if the user allows installing OpenAI's package: OpenAI's app on `puffin app-server`, scratch `HOME`, network namespace reaching only the model server; record each screen and request.
+6. The reference run (§4.6), with OpenAI's package installed by the user (§14 question 5): OpenAI's app on `puffin app-server`, scratch `HOME`, network namespace reaching only the model server; record each screen and request.
 7. ~~A non-ephemeral thread appears in `puffin resume`, and a TUI session in `thread/list`~~ — done (§5).
 8. Memory of an idle and a busy app-server.
 9. `git.rs` against the worktree contract: does `codex-worktree` build as a path dependency of `desktop/` (without running cargo inside `codex/`, which rewrites its lock file)?
@@ -393,9 +393,9 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 
 1. ~~Fork CodexMonitor or start from scratch?~~ **Settled by the user's direction:** grow `desktop/` in place, CodexMonitor as a parts bin (§4).
 2. ~~Does Chat stay inside the app?~~ **Settled:** Chat is today's window, unchanged (§4.1).
-3. **Dark mode:** follow the system in Work (Chat would stay light: every Onyx override is `html:not(.dark)`-scoped)?
-4. **One app-server per app or per project?** Proposed: per app (§4.3); Phase 0 item 8 measures it.
-5. **Is installing OpenAI's package for the one reference run (§4.6) acceptable** on this machine? It adds OpenAI's apt repository unless removed.
+3. ~~Dark mode?~~ **Decided by the user (2026-10-03): light only for now.** Work stays light like Chat (`GTK_THEME=Adwaita:light` applies to both, §9); dark mode stays in Phase 3, as one change for both windows.
+4. ~~One app-server per app or per project?~~ **Decided (2026-10-03): one per app** (§4.3), as OpenAI's app does: one process, one place for the air-gap check of §8.2. Phase 0 item 8 still measures it, to record the cost, not to decide.
+5. ~~Installing OpenAI's package for the reference run?~~ **Decided (2026-10-03): yes, installed and kept** for reference comparisons beyond the one run of §4.6. The user runs `sudo apt install ~/Downloads/chatgpt_arm64.deb` from a terminal. Kept means OpenAI's apt repository (`/etc/apt/sources.list.d/chatgpt.sources`) and its updater stay, and the app's own `~/.codex` is separate from Puffin's `~/.puffin`. Every reference run still uses a scratch `HOME` and a network namespace reaching only the model server (§4.6, Phase 0 item 6), because the window carries OpenAI's telemetry clients and must not reach OpenAI while pointed at `puffin app-server`.
 
 ---
 
