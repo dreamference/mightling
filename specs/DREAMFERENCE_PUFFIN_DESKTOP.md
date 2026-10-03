@@ -148,7 +148,8 @@ The installed `puffin` (0.158.0, built 2 October) was driven over stdio by a scr
 | Does an open app-server hold a night run back? | **No:** `NON_INTERACTIVE` in `night_shift_host.py` lists `app-server` and `app`. §8.3 decides what it should do |
 | Terminal support | `command/exec` takes `tty` and an initial PTY size, with `write`, `resize` and `terminate`: terminal tabs need no PTY code of ours |
 | Git | No worktree, stage, commit, push or PR method; `gitDiffToRemote` only. The TUI's `/worktree` uses the `codex-worktree` crate inside the TUI, not the server. Git is the window's job (`git.rs`), as in OpenAI's app |
-| Plan mode | **Found:** `puffin app-server generate-ts --experimental` (772 v2 types against 637) gives `turn/start` a `collaborationMode` and adds `collaborationMode/list` |
+| Plan mode | **Found and called:** `puffin app-server generate-ts --experimental` (772 v2 types against 637) gives `turn/start` a `collaborationMode`; `collaborationMode/list` answered `Plan` (`mode: plan`, effort `medium`) and `Default` |
+| Projects and the thread list | `project/list` answered `{"data": []}` (no projects yet, a well-formed list); `thread/list` returned the TUI's own sessions, so TUI threads appear in Work's list (measured) |
 | What `--experimental` adds | `project/create|list|read|update|move|delete|import` (projects kept by the server), `thread/queue/add|list|update|reorder|delete|start` (queued follow-ups), `thread/search`, `thread/searchOccurrences`, `thread/timeline/list`, `thread/settings/update`, `turn/settings/update`, `process/spawn|writeStdin|resizePty|kill` and `thread/backgroundTerminals/*` (terminals), `memory/status|reset`, `thread/memoryMode/set`, `environment/*`, `plugin/search`, `server/diagnostics`; and, never to be sent from Puffin, `thread/realtime/*` (OpenAI's realtime voice), `remoteControl/*`, `userVerification/*`, `account/bedrock/*`. `turn/start` also gains `permissions`, `environments` and `runtimeWorkspaceRoots` |
 | Worktree layout | The `codex-worktree` crate implements "the existing Codex Desktop contract": a checkout at `$CODEX_HOME/worktrees/<4-hex bucket>/<repository name>`, created with `git worktree add --detach` (no branch until one is made), the owning thread recorded in `codex-thread.json` in the worktree's git directory, and the settings `[desktop] git-worktree-root`, `worktree-auto-cleanup-enabled` and `worktree-keep-count` in `config.toml`. The TUI's `/worktree` uses it |
 | `/app` in the TUI | Exists upstream: it opens `codex://threads/<id>`, and is compiled only on macOS and Windows (`slash_command.rs`) |
@@ -180,7 +181,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Puffin's** (the s
 |---|---|---|---|
 | Text, `@` file mentions | `turn/start`, `fuzzyFileSearch` | **Same** | 1 |
 | Images and attachments | `thread/attachment/*`, input items | **Same** for images (Qwen3.8 is text-only today: attachments are offered only when the served model's entry says `supports_vision`) | 2 |
-| Model and effort picker | `model/list`, `turn/start` `model`/`effort` | **Puffin's:** the served model from the launcher (§5); efforts the patched template accepts | 1 |
+| Model and effort picker | `model/list`, `turn/start` `model`/`effort` | **Puffin's:** `config/read`'s `model` (set by the launcher once Phase 0 item 2 ships; measured with `-c model`), with `$CODEX_HOME/model_catalog.json` as the fallback, while `model/list` is empty (§5); efforts the patched template accepts | 1 |
 | Personality (`/personality`) | `personality` | **Puffin's: cave mode** (`/cavemode`, PUFFIN_CAVE_MODE), not a second mechanism; `personality` is not sent | 2 |
 | Plan mode | `turn/start` `collaborationMode`, `collaborationMode/list` (experimental, §5) | **Same** | 2 |
 | Steer while running, queued follow-ups, stop | `turn/steer`, `thread/queue/*` (experimental), `turn/interrupt` | **Same** | 1 |
@@ -312,6 +313,8 @@ Where the check goes, decided in Phase 0 in this order:
 2. **The launcher's registered extension** (patch `0017`'s registry): if an extension can veto a thread or turn configuration, the rule moves there with no new patch.
 3. **One hook** where the app-server resolves a thread's or turn's permissions (`thread_processor.rs`, beside `has_permission_override`, and the turn path in `turn_processor.rs`), refusing Full Access when `puffin_airgapped::resolve` says `on`, with the same message as the launcher; and `permissionProfile/list` answering `allowed: false` with the reason at `on`, so every client's picker shows it.
 
+**The seal is a second target.** The seal's protection rests on `$XDG_RUNTIME_DIR` being read-only inside the sandbox (PUFFIN_AIRGAPPED §14.5). A client passing `runtimeWorkspaceRoots` (or a `permissions` profile, or `config`'s `sandbox_workspace_write.writable_roots`) that covers `$XDG_RUNTIME_DIR/puffin-airgapped` would make it writable, and a command could then delete the seal. The same check therefore also refuses, at `on`, any writable root that contains the seal's directory or the directory itself.
+
 Work also disables the Full Access row at `on`, but as a courtesy, not as the enforcement.
 
 ### 8.3 Sessions and Night Shift
@@ -343,7 +346,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 4. ~~`generate-ts --experimental`~~ — done (§5): plan mode, projects, queues, search, terminals.
 5. §8.2: which of the three places holds the air-gap check; measure that a `thread/start` with `sandbox: "danger-full-access"` at `on` is refused.
 6. The reference run (§4.6), only if the user allows installing OpenAI's package: OpenAI's app on `puffin app-server`, scratch `HOME`, network namespace reaching only the model server; record each screen and request.
-7. ~~A non-ephemeral thread appears in `puffin resume`~~ — done (§5). Still to see: a TUI session in `thread/list`.
+7. ~~A non-ephemeral thread appears in `puffin resume`, and a TUI session in `thread/list`~~ — done (§5).
 8. Memory of an idle and a busy app-server.
 9. `git.rs` against the worktree contract: does `codex-worktree` build as a path dependency of `desktop/` (without running cargo inside `codex/`, which rewrites its lock file)?
 
@@ -366,7 +369,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 - The launcher: `app-server` gets `-c model=…`; `app-server generate-ts` does not wait for a model server.
 - The generated protocol types match `generate-ts` of the pinned submodule.
 - The UI against a scripted app-server stand-in (as Night Shift's tests script `puffin`): a full turn with a command, a patch, an approval and an interrupt; Full Access disabled at `on`.
-- The air-gap rule against the real app-server binary: `thread/start` and `turn/start` asking for Full Access at `on` are refused.
+- The air-gap rule against the real app-server binary: `thread/start` and `turn/start` asking for Full Access at `on` are refused, and so is a `turn/start` whose `runtimeWorkspaceRoots` covers the seal's directory.
 - Night Shift: a live busy marker holds the run back; a stale one is pruned; an idle Work window does not hold it back.
 - `git.rs`: worktree create, hand-off, stage per hunk, commit, delete-keeping-branch, against scratch repositories.
 - The egress audit's `--app` fixture, as `--tui` has.
@@ -377,6 +380,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 ## 13. Risks
 
 - **The protocol moves.** Every Codex bump now has a desktop UI to re-check. Generated types make breakage a compile error.
+- **Experimental methods carry Phase 1.** The project sidebar uses `project/*` and queued follow-ups use `thread/queue/*`, both experimental, which change between releases without the v2 surface's stability (OpenAI's own client also sends `experimentalApi: true`). They are re-checked at every Codex bump, and Phase 1 keeps fallbacks: the sidebar groups `thread/list` by `cwd` if `project/*` goes, and follow-ups queue in the window if `thread/queue/*` does, so a removed method degrades a feature instead of breaking the app.
 - **CodexMonitor moves too,** and follows newer Codex. Parts taken from it are owned from then on.
 - **"Close to the Codex app" is a moving target.** The reference is the version recorded in §1–§2; parity with later versions is a decision each time.
 - **Trade dress.** Layout and interaction can follow OpenAI's; name, icon, colours, sounds and copy must not.
