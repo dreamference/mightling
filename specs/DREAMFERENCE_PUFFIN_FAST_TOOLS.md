@@ -1,6 +1,6 @@
 # Fast Tools — a diffusion model for Puffin's mundane work
 
-**Status:** proposed. Nothing in this spec is implemented yet.
+**Status:** proposed. Nothing in this spec is implemented yet. Since 2026-10-03 the diffusion slot it builds on is switched off (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`: no sidecar is started, downloaded or shown, the code is kept), so building this spec starts by switching it back on with a capable model in it.
 **Goal:** let `puffin` hand long, low-judgement outputs (file scaffolds, tests, docstrings, docs, commit and PR text, summaries of long tool output) to a fast diffusion model, so the main model spends its time on the decisions.
 **Builds on:**
 - the diffusion slot beside the main model (`DiffusionServerManager`, `diffusion-model set`, port 8001; [INFERENCE](./DREAMFERENCE_INFERENCE.md), CLAUDE.md "Every configuration names a diffusion model");
