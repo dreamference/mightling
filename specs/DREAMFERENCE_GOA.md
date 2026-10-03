@@ -47,10 +47,12 @@ Source: `gnome-online-accounts` build config (`meson_options.txt` / distro build
 ```
 openid email
 https://mail.google.com/
-https://www.googleapis.com/auth/drive.readonly
+https://www.googleapis.com/auth/drive
 ```
 
-Optional, same grant: `calendar.readonly`, `carddav`, `tasks`. Request only what a connector uses; Google narrows to the requested subset of the client's verified scopes.
+Optional, same grant: `https://www.googleapis.com/auth/calendar`, `carddav`, `tasks`. Request only what a connector uses.
+
+**Measured 2026-10-03: only the exact verified scopes work.** A consent for `drive.readonly` + `calendar.readonly` was refused ("This app is blocked — This app tried to access sensitive info"); one for `userinfo.email` + `…/auth/drive` + `…/auth/calendar`, the scopes GNOME (goa 3.50.4) itself requests, succeeded with the normal screen and a refresh token. Google does **not** narrow this client to a read-only subset, so Drive and Calendar tokens carry write permission; Puffin's services are read-only by construction (no write endpoints, as Gmail's IMAP service is) and the token is sealed like Gmail's (PUFFIN_APPS §10).
 
 ## 5. Flow
 
@@ -108,10 +110,10 @@ Tenant "Third-party app access = restricted/blocked" requires the admin to allow
 
 - No Dreamference-owned OAuth client, no CASA.
 - No Admin SDK scopes (`admin.directory.*`) on the GOA path; org-wide permission sync is DWD-only.
-- No Docs API, no Calendar/Tasks write scopes.
+- No Docs API. No Calendar or Tasks *write endpoints*: the Calendar scope granted is the full one (§4), so read-only is enforced by the service, not the scope.
 
 ## 12. Open items
 
 - [ ] Run the Gmail API probe with a GOA token; decide REST vs IMAP for Gmail.
-- [ ] Confirm `drive.readonly` is accepted as a narrowing of the client's `drive` scope (expected yes).
+- [x] Confirm `drive.readonly` is accepted as a narrowing of the client's `drive` scope. **Answered no (2026-10-03):** refused ("This app is blocked"); the full `…/auth/drive` and `…/auth/calendar` work (§4). Drive `files.list` worked for My Drive and `corpora=allDrives`; `calendarList` returned 2 calendars.
 - [ ] Draft the connect-screen copy and the paste-back UI.

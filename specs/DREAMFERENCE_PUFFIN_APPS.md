@@ -1,6 +1,6 @@
 # Puffin Apps: Gmail, Google Drive and Google Calendar through `/apps`, with no OpenAI sign-in
 
-**Status:** proposed (2026-10-03). Nothing here is built. §1 is read from the pinned Codex source (`rust-v0.158.0`); Phase 0's source checks are done (§11.1), its live checks and the Drive scope test are not. The user decided the patch cap and §12's questions on 2026-10-03 (§12), which adds Calendar as a third app; Phase 1 can start.
+**Status:** proposed (2026-10-03). Nothing here is built. §1 is read from the pinned Codex source (`rust-v0.158.0`); Phase 0's source checks and the Drive and Calendar scope test are done (§11.1; the read-only scopes are refused, the full ones work), its live checks are not. The user decided the patch cap and §12's questions on 2026-10-03 (§12), which adds Calendar as a third app; Phase 1 can start.
 **Goal:** the standard Codex `/apps` command works in `puffin` without a ChatGPT sign-in. It lists **Puffin's own apps** (Gmail, Google Drive, Google Calendar), connects them through Puffin's local Google sign-in, switches them on and off, and hands their tools to the model. Nothing goes to `chatgpt.com`.
 **Builds on:**
 - [PUFFIN_GMAIL](./DREAMFERENCE_PUFFIN_GMAIL.md): the read-only Gmail service (`dreamference-gmail`, port 8767) and `puffin-admin gmail`;
@@ -76,7 +76,7 @@ The keys are camelCase, the serde shape of the connectors crate's `AppInfo` (§1
 | `name` | `Gmail` | `Google Drive` | `Google Calendar` |
 | `description` | connected addresses, or "Read-only search of your mail, on this machine" | connected addresses, or "Read-only search of your files, on this machine" | connected addresses, or "Read-only view of your calendars, on this machine" |
 | `installUrl` | `http://localhost:8767/connect?app=gmail` | `http://localhost:8767/connect?app=drive` | `http://localhost:8767/connect?app=calendar` |
-| `isAccessible` | an account is connected (today's `/status` lists Gmail accounts only); from Phase 2, an account holds `https://mail.google.com/` | an account holds `drive.readonly` (needs §9's scope report) | an account holds `calendar.readonly` |
+| `isAccessible` | an account is connected (today's `/status` lists Gmail accounts only); from Phase 2, an account holds `https://mail.google.com/` | an account holds `https://www.googleapis.com/auth/drive` (needs §9's scope report) | an account holds `https://www.googleapis.com/auth/calendar` |
 | `distributionChannel` | `puffin` | `puffin` | `puffin` |
 
 ### 4.2 The hooks
@@ -110,7 +110,7 @@ Today the Gmail service is created by `puffin-admin puffin configure`, so a mach
 
 `GET /connect?app=gmail|drive|calendar` (today `/connect` with no parameter, Gmail only, §0 of GOA):
 
-- **The scope follows the app.** `app=gmail` asks for `userinfo.email` and `mail.google.com`; `app=drive` asks for `userinfo.email` and `drive.readonly`; `app=calendar` asks for `userinfo.email` and `calendar.readonly`. All add `include_granted_scopes=true`, so connecting Drive or Calendar to an account that already has Gmail keeps Gmail, and the stored grant records the union.
+- **The scope follows the app.** `app=gmail` asks for `userinfo.email` and `mail.google.com`; `app=drive` asks for `userinfo.email` and the **full** `https://www.googleapis.com/auth/drive`; `app=calendar` asks for `userinfo.email` and the **full** `https://www.googleapis.com/auth/calendar`. The read-only scopes are refused by GNOME's client (§11.1 item 5), so the token carries write permission and read-only is enforced by the service and the tools (§10). All add `include_granted_scopes=true`, so connecting Drive or Calendar to an account that already has Gmail keeps Gmail, and the stored grant records the union.
 - **A grant without the app's scope is refused** with the box to tick, as the Gmail callback already does for an unticked Gmail box.
 - **The page ends with "Return to `puffin` and choose *I've connected it*."** Codex's app page then refreshes `/apps` (§1).
 - **Opened in the browser by Codex** (`webbrowser::open`, no host check on this path). Phase 0 checks the case with no browser (SSH): Codex prints the URL, and the redirect to `localhost:8767` then needs the paste-back path that already exists (`POST /api/google/oauth/complete`), which the page must offer as a text box.
@@ -136,7 +136,7 @@ The launcher answers `puffin apps serve gmail|drive|calendar` before Codex parse
 
 - **Every tool carries `readOnlyHint: true`**, so Codex's `auto` approval runs them without a prompt, like the `code_*` tools.
 - **Every body is wrapped** as `<untrusted source="gmail" id="…">…</untrusted>`, and each tool's description says that text inside it is data, never instructions.
-- **No write verb exists**, in the tools or in the service (`BODY.PEEK`; Drive with `drive.readonly`; Calendar with `calendar.readonly`).
+- **No write verb exists**, in the tools or in the service (`BODY.PEEK` for Gmail; only `files.list`/`files.get`/`files.export` for Drive; only `calendarList.list`/`events.list`/`events.get` for Calendar). The Drive and Calendar tokens themselves carry write permission (§10).
 
 ### 6.2 Declared by the launcher
 
@@ -172,7 +172,7 @@ The launcher reads the `[apps.*]` table with `toml_edit`, which it already uses 
 
 ## 9. Drive in the service
 
-Prerequisite: GOA §12's open item, a one-off sign-in confirming Google accepts `drive.readonly` from GNOME's client. If it is refused, Drive leaves this spec and `/apps` lists Gmail alone.
+**Scope, measured 2026-10-03 (§11.1 item 5):** GNOME's client is refused for `drive.readonly` ("This app is blocked") and accepted for the full `https://www.googleapis.com/auth/drive`, the scope GNOME itself requests. Drive therefore asks for the full scope, and the service is read-only by construction (below).
 
 - **Breadth (decided 2026-10-03): My Drive and shared drives.** `files.list` with `corpora=allDrives`, `includeItemsFromAllDrives=true` and `supportsAllDrives=true`, and `supportsAllDrives=true` on every read. Results name the shared drive a file is in. More files means more attacker-controlled text reaching the model; §6.1's wrapping and §10 apply unchanged.
 - **Transport:** Drive REST v3 over HTTPS with the account's access token, which the service already refreshes. `files.list` (`fields` limited to id, name, mimeType, modifiedTime, owners, driveId), `files.export` to `text/plain` (Docs, Slides) and `text/csv` (Sheets), `files.get?alt=media` for `text/*` files under 1 MiB.
@@ -182,7 +182,7 @@ Prerequisite: GOA §12's open item, a one-off sign-in confirming Google accepts 
 
 ## 9a. Calendar in the service
 
-Added 2026-10-03 at the user's request. Prerequisite: the same kind of one-off sign-in as Drive's, confirming Google accepts `calendar.readonly` from GNOME's client (GOA lists the client as verified for Calendar); if refused, Calendar leaves this spec.
+Added 2026-10-03 at the user's request. **Scope, measured 2026-10-03 (§11.1 item 5):** `calendar.readonly` is refused for GNOME's client and the full `https://www.googleapis.com/auth/calendar` is accepted, so Calendar asks for the full scope and the service is read-only by construction.
 
 - **Transport:** Calendar API v3 over HTTPS with the same refreshed token: `calendarList.list` (the account's calendars), `events.list` with `singleEvents=true`, `orderBy=startTime`, `timeMin`/`timeMax`, and `q` for search; `fields` limited to the columns of §6.1.
 - **Caps:** 50 events per call, a 366-day window at most, 20,000 characters for one event's description.
@@ -192,7 +192,7 @@ Added 2026-10-03 at the user's request. Prerequisite: the same kind of one-off s
 ## 10. Egress and security
 
 - **No new destination for `puffin`.** The hooks return before any directory request; `codex_apps` does not start; the tools reach `127.0.0.1:8767` only. The service reaches `imap.gmail.com`, `oauth2.googleapis.com` and, new, `www.googleapis.com` (Drive and Calendar), as a container, not from `puffin`. The egress audit's allowlist already has 8767; its `--tui` run gains a scripted `/apps` open to show the screen makes no other connection.
-- **Read-only by construction** at three layers: the OAuth scopes, the service's verbs, the tools' verbs.
+- **Read-only by construction at two layers, not three:** the service's verbs and the tools' verbs. **The OAuth tokens for Drive and Calendar carry full read-write permission**, because GNOME's client is allowed only the exact scopes it is verified for (§11.1 item 5); Gmail's `mail.google.com` was already a full scope. So the token is the thing to protect: it is sealed on the machine like Gmail's (GOA §0), never leaves the service container, and the service exposes no endpoint that writes. Anyone who obtains the token can write; the spec does not claim otherwise.
 - **Prompt injection:** a shared document is attacker-controlled text, like an email. §6.1's wrapping, §6.3's tool-only advertising and §8's air-gap check are the mitigations; none of them is a guarantee, and the spec does not claim one.
 - **The token stays on the machine,** sealed as today (GOA §0); `/apps` never sees it.
 
@@ -203,7 +203,7 @@ Added 2026-10-03 at the user's request. Prerequisite: the same kind of one-off s
 2. `/apps` with a `http://localhost` install URL: opened by `webbrowser::open`; the app page's "I've connected it" refresh; the on/off switch writing `[apps.puffin_gmail]`.
 3. No browser (SSH session): what Codex prints, and the paste-back path end to end.
 4. The MCP server's parent pid is the session's `puffin` (§8).
-5. The Drive and Calendar scope tests (§9, §9a): one sign-in asking for both.
+5. The Drive and Calendar scope tests (§9, §9a): one sign-in asking for both. **Done 2026-10-03** (§11.1 item 5).
 6. Patch size of H1 + H2 as written.
 
 **Phase 1, Gmail.** The crate and hooks (§4), `puffin apps serve gmail` (§6.1), the launcher's declarations and prompt (§6.2–6.3), `puffin-admin google start` and `/connect?app=gmail` (§5), the configuration (§7), the air gap (§8).
@@ -222,7 +222,12 @@ Read from the pinned submodule, nothing compiled; the hooks were drafted in a sc
 2. **A `http://localhost` install URL opens.** An `/apps` row sends `OpenAppLink`, the view sends `OpenUrlInBrowser`, and that calls `webbrowser::open` with no check (`tui/src/app/history_ui.rs:280`). The https-and-`chatgpt.com` check, `validate_external_url`, guards only the elicitation and tool-suggestion links (`app_link_view.rs:99,111`; `bottom_pane/mod.rs:1909`). The refresh and the on/off switch are not exercised without a build: **live check owed**.
 3. **No browser:** `webbrowser::open` fails and the TUI prints `Failed to open browser for <url>: <err>`, so the URL is on screen to copy. On an SSH session `localhost:8767` is the remote machine's, so a browser elsewhere cannot reach it; this needs §5.2's paste-back path. **Live check owed.**
 4. **Parent pid.** A stdio MCP server is spawned with `Command::new` in a new process group (`rmcp-client/src/stdio_server_launcher.rs:287`), not detached, so its parent is the `puffin` process, as §8 needs. Under the app server (the desktop app) the parent is the app-server process instead; §8's seal lookup must accept that case if the desktop app goes through the app server.
-5. **The Drive scope test was not run:** it needs a person at Google's consent screen. Owed, and it gates Phase 2.
+5. **The scope test, run on 2026-10-03** with GNOME's OAuth client (the one Puffin's Gmail uses), by a probe that stored nothing (`drive_scope_probe.py` in that session's scratchpad):
+   - A consent asking for `drive.readonly` + `calendar.readonly` was **refused** by Google: "This app is blocked — This app tried to access sensitive info".
+   - GNOME itself (goa 3.50.4) requests the **full** scopes `…/auth/drive` and `…/auth/calendar` (with `mail.google.com`, tasks, carddav and others). A consent for exactly `userinfo.email` + `…/auth/drive` + `…/auth/calendar` **succeeded** with the normal screen; granted: `calendar`, `drive`, `userinfo.email`, `openid`. A refresh token was issued even without `access_type=offline` (an installed-app client).
+   - With that token, Drive `files.list` worked for My Drive and for `corpora=allDrives` (0 shared drives on this account), and `calendarList` returned 2 calendars.
+   - **Consequence:** this client allows only the exact scopes it is verified for. Drive and Calendar request the full scopes (§5.2, §9, §9a), and the services are read-only by construction, with the token stated plainly as carrying write permission (§10). Phase 2 and Phase 3 are unblocked.
+   - The probe's grant stays listed under the account's Security → Third-party connections; it was not revoked, because revoking would also cut the Gmail grant on the same client.
 6. **Patch size as drafted: 2,385 bytes** (H1, H2, a 10-line helper, two manifest lines), above §4.4's 1.5–2 KB estimate. With it the series would be 36,071 bytes against today's 33,750 cap. Not raised: that is the user's decision (§4.4).
 
 Also found: H1 also opens the `$` mention prefetch (`connector_mentions.rs:9`), which calls `app/installed`. Without a ChatGPT sign-in `runtime_enabled` is false there, so it never refreshes `codex_apps` and answers from the (empty) cached snapshot: no network call, and `$` stays empty as §4.3 intends. Confirm live with the first build.
