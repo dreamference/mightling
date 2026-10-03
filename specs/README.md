@@ -43,6 +43,7 @@ This directory holds the specification, split into focused documents. This page 
 | [DREAMFERENCE_PUFFIN_CODEX.md](./DREAMFERENCE_PUFFIN_CODEX.md) | **`puffin`**: the Codex fork, patch series, Rust launcher, build, `update`, `app`, `/usage` |
 | [DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md) | All agent runners: Codex (default), Cline, Continue, OpenHands |
 | [DREAMFERENCE_PUFFIN_GMAIL.md](./DREAMFERENCE_PUFFIN_GMAIL.md) | Read-only Gmail for the terminal agent (`puffin-admin gmail`) |
+| [DREAMFERENCE_PUFFIN_APPS.md](./DREAMFERENCE_PUFFIN_APPS.md) | *Proposed (2026-10-03), not built:* Codex's `/apps` without a ChatGPT sign-in, listing Puffin's own Gmail and Google Drive: two one-line hooks (the gate, the list), connecting through the local Google sign-in, tools served by `puffin apps serve` over MCP, off at `/airgapped on` |
 | [DREAMFERENCE_CODEX.md](./DREAMFERENCE_CODEX.md) | Superseded Codex page; what `CodexRunner`/`CodexInstaller` still do |
 | [DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md) | The context engine (`puffin-admin index`, MCP `workspace_search_code`), with known gaps |
 | [DREAMFERENCE_PUFFIN_CODE_INDEX.md](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) | *Implemented (§14):* code index for `puffin`, the separate `puffin-code` binary (codebase-memory-mcp + SCIP) |
