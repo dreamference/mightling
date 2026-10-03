@@ -30,8 +30,12 @@ from dreamference.swe_bench import swe_bench_settings
 # Where the runtime is mounted in every agent container.
 CONTAINER_MOUNT: Final[str] = "/opt/puffin"
 
-# The loader and the three libraries `ldd puffin` lists.
+# The three libraries `ldd puffin` always lists, besides the loader.
 RUNTIME_LIBRARIES: Final[tuple] = ("libc.so.6", "libm.so.6", "libgcc_s.so.1")
+
+# Libraries a build may also be linked against, copied when `ldd` names them: the build of
+# 2026-10-03 added liblzma (the skills' archive unpacking), and the runtime refused to build.
+OPTIONAL_RUNTIME_LIBRARIES: Final[tuple] = ("liblzma.so.5",)
 
 STAMP_NAME: Final[str] = "source-hash"
 
@@ -133,6 +137,7 @@ class SweBenchRuntime:
         """
         output = subprocess.run(["ldd", puffin_bin], capture_output=True, text=True, check=True).stdout
         loader: Optional[str] = None
+        names: List[str] = []
         libraries: List[str] = []
         for line in output.splitlines():
             words = line.split()
@@ -140,12 +145,13 @@ class SweBenchRuntime:
                 continue
             if "=>" in words:
                 name, path = words[0], words[words.index("=>") + 1]
-                if name not in RUNTIME_LIBRARIES:
+                if name not in RUNTIME_LIBRARIES + OPTIONAL_RUNTIME_LIBRARIES:
                     raise ValueError(f"puffin needs {name}, which the runtime does not carry")
+                names.append(name)
                 libraries.append(path)
             elif "ld-linux" in words[0]:
                 loader = words[0]
-        if loader is None or len(libraries) != len(RUNTIME_LIBRARIES):
+        if loader is None or not set(RUNTIME_LIBRARIES) <= set(names):
             raise ValueError(f"unexpected `ldd {puffin_bin}` output")
         return loader, libraries
 
