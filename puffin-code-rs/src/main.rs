@@ -69,8 +69,8 @@ enum Command {
         #[command(flatten)]
         page: PageArgs,
     },
-    /// One definition's source.
-    Show { name: String },
+    /// One definition's source, 100 lines at a time (`--offset` for the next).
+    Show { name: String, #[command(flatten)] page: PageArgs },
     /// The definitions of a file.
     Outline { file: String, #[command(flatten)] page: PageArgs },
     /// Definitions whose name or body matches the words.
@@ -220,7 +220,7 @@ fn answer(repo: Repo, settings: Settings, command: Command) -> anyhow::Result<Ex
     };
     let page_options = Page {
 
-        limit: page.limit.unwrap_or(limit_default),
+        limit: page.limit.unwrap_or(if body.is_some() { output::SHOW_LINES } else { limit_default }),
         offset: page.offset,
         cursor: page.cursor.clone(),
         path: page.path.as_deref().map(|path| output::repository_relative(path, &context.repo.root)),
@@ -256,9 +256,9 @@ fn compute(context: &Context, command: &Command) -> anyhow::Result<Computed> {
         }
         Command::Outline { file, page } => (context.outline(file)?, None, page.clone()),
         Command::Search { words, page } => (context.search(&words.join(" "))?, None, page.clone()),
-        Command::Show { name } => {
+        Command::Show { name, page } => {
             let (answer, body) = context.show(name)?;
-            (answer, body, PageArgs::default())
+            (answer, body, page.clone())
         }
         _ => unreachable!("handled in run"),
     })

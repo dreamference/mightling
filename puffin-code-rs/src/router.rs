@@ -963,6 +963,7 @@ impl Context {
             .take((end + 1 - start) as usize)
             .map(|(i, l)| format!("{:>5}  {l}", i + 1))
             .collect();
+        let body = if candidate.path.ends_with(".py") { crate::output::fold_docstring(body) } else { body };
         answer.query = format!("{}  ({}:{}-{})", candidate.display, candidate.path, start, end);
         if self.changed.contains(&candidate.path) {
             answer.notes.push(format!("{} changed since the snapshot; the lines above may have moved", candidate.path));

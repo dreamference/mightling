@@ -12,17 +12,20 @@ use crate::output::{self, Page};
 use crate::paths::Repo;
 use crate::router::Context;
 
+// Short, because every request carries them: the nine schemas were most of the index's 2.1K
+// tokens of fixed overhead (specs/DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md §4.3). When to use which
+// tool is the prompt block's job (prompt.rs).
 const TOOLS: &[(&str, &str, &str)] = &[
-    ("search", "words", "Find code by topic when you do not know its name: the functions, classes and methods whose name, documentation or body match the words. Start here for a bug report or a feature request, before grep."),
-    ("def", "name", "Where a function, class, method or type is defined. Use this instead of grep when you know a code name. Names may be qualified (Circle.area) or path:line."),
-    ("show", "name", "The source of one definition, with line numbers. Use this instead of sed or cat when you know the name."),
-    ("refs", "name", "Every use of a definition, tagged exact / heuristic / heuristic (text). Run it before renaming, deleting or changing a signature."),
-    ("callers", "name", "The functions and methods that call or use a definition."),
-    ("callees", "name", "What a definition's body calls and uses."),
+    ("search", "words", "Find definitions by topic when you know no name (a bug report); use before grep."),
+    ("def", "name", "Where a name is defined. Qualified (Circle.area) or path:line."),
+    ("show", "name", "A definition's source with line numbers, 100 lines a page (offset for more)."),
+    ("refs", "name", "Every use of a definition. Run before renaming or changing a signature."),
+    ("callers", "name", "What calls a definition."),
+    ("callees", "name", "What a definition calls."),
     ("impl", "name", "Implementations of a trait, interface or method."),
-    ("impact", "name", "What breaks if a definition changes: its references, then theirs, three levels deep."),
-    ("outline", "file", "The definitions in a file with their line ranges. Use it before reading a large file."),
-    ("status", "", "Which index layers exist, how fresh they are, and what is excluded."),
+    ("impact", "name", "What breaks if a definition changes, three levels deep."),
+    ("outline", "file", "A file's definitions and line ranges; use before reading a file."),
+    ("status", "", "Index layers, freshness and exclusions."),
 ];
 
 /// The answer to `tools/list`.
@@ -103,7 +106,7 @@ fn call(repo: &Repo, settings: &Settings, params: &Value) -> Result<String> {
         other => anyhow::bail!("unknown tool {other}"),
     };
     let page = Page {
-        limit: args["limit"].as_u64().map(|v| v as usize).unwrap_or(settings.row_limit),
+        limit: args["limit"].as_u64().map(|v| v as usize).unwrap_or(if body.is_some() { output::SHOW_LINES } else { settings.row_limit }),
         offset: args["offset"].as_u64().unwrap_or(0) as usize,
         path: args["path"].as_str().map(|path| output::repository_relative(path, &repo.root)),
         ..Page::default()

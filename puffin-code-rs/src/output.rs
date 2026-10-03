@@ -76,13 +76,87 @@ fn path_matches(path: &str, pattern: &str) -> bool {
     go(pattern.as_bytes(), path.as_bytes())
 }
 
+/// Lines of a definition `show` prints by default. SWE-agent measured a 100-line window as the
+/// best trade; 26 of the 207 `code_show` calls in the SWE-bench arm were longer, and the whole body
+/// cost 16% more of its output (specs/DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md §4.3).
+pub const SHOW_LINES: usize = 100;
+
+/// A docstring longer than this many lines is folded after them.
+pub const DOCSTRING_LINES: usize = 12;
+
+/// Folds a Python definition's docstring after [`DOCSTRING_LINES`] lines, in `show`'s numbered
+/// lines (`{:>5}  {source}`). The fold line names the lines it hides, so `sed -n` can still reach
+/// them. A body with no docstring, or a short one, comes back unchanged.
+pub fn fold_docstring(lines: Vec<String>) -> Vec<String> {
+    let source = |line: &str| line.get(7..).unwrap_or("").trim_start().to_string();
+    let opens = |text: &str| {
+        let text = text.trim_start_matches(['r', 'R', 'u', 'U', 'b', 'B']);
+        ["\"\"\"", "'''"].into_iter().find(|quote| text.starts_with(quote))
+    };
+    // The docstring is the first statement after the header, which ends at the first line ending
+    // in `:` (a signature may span lines); decorators and comments come before it.
+    let Some(header_end) = lines.iter().position(|line| source(line).trim_end().ends_with(':')) else { return lines };
+    let Some(first) = lines.iter().skip(header_end + 1).position(|line| !source(line).is_empty()).map(|i| i + header_end + 1) else {
+        return lines;
+    };
+    let Some(quote) = opens(&source(&lines[first])) else { return lines };
+    let after_open = source(&lines[first]);
+    let after_open = &after_open[after_open.find(quote).map_or(0, |at| at + quote.len())..];
+    let last = if after_open.contains(quote) {
+        first
+    } else {
+        match lines.iter().skip(first + 1).position(|line| source(line).contains(quote)) {
+            Some(i) => i + first + 1,
+            None => return lines,
+        }
+    };
+    let length = last + 1 - first;
+    if length <= DOCSTRING_LINES {
+        return lines;
+    }
+    let number = |line: &str| line.get(..5).unwrap_or("").trim().to_string();
+    let hidden_from = first + DOCSTRING_LINES;
+    let mut out: Vec<String> = lines[..hidden_from].to_vec();
+    let indent: String = lines[first].get(7..).unwrap_or("").chars().take_while(|c| c.is_whitespace()).collect();
+    out.push(format!(
+        "{:>5}  {indent}… {} docstring lines folded ({}-{})",
+        "",
+        last + 1 - hidden_from,
+        number(&lines[hidden_from]),
+        number(&lines[last])
+    ));
+    out.extend(lines[last + 1..].iter().cloned());
+    out
+}
+
+/// One page of `show`'s lines, and a last line naming the rest and the offset that shows it.
+fn show_page(body: &str, page: &Page) -> String {
+    let lines: Vec<&str> = body.lines().collect();
+    let limit = page.limit.max(1);
+    let start = page.offset.min(lines.len());
+    let end = (start + limit).min(lines.len());
+    let mut out = lines[start..end].join("\n");
+    if end < lines.len() {
+        let numbered = |line: &&str| line.get(..5).and_then(|n| n.trim().parse::<usize>().ok());
+        let first = lines[end..].iter().find_map(numbered);
+        let last = lines[end..].iter().rev().find_map(numbered);
+        let range = match (first, last) {
+            (Some(first), Some(last)) => format!("lines {first}-{last}"),
+            _ => format!("{} more lines", lines.len() - end),
+        };
+        out.push_str(&format!("\n… {range} not shown; next: offset {end}"));
+    }
+    out
+}
+
 /// Renders an answer as text.
 pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
     let mut out = Vec::new();
     let total = answer.rows.len();
     let limit = page.limit.clamp(1, 200);
     let files = per_file(&answer.rows);
-    let cut = total > page.offset + limit || page.offset > 0;
+    // `show` pages its body, not rows (see `show_page`).
+    let cut = body.is_none() && (total > page.offset + limit || page.offset > 0);
     let counts = if answer.tagged {
         let exact = answer.rows.iter().filter(|r| r.tag == Some(Tag::Exact)).count();
         format!("{total} results; {exact} exact, {} heuristic", total - exact)
@@ -138,7 +212,7 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
         out.push(line.trim_end().to_string());
     }
     if let Some(body) = body {
-        out.push(body.to_string());
+        out.push(show_page(body, page));
     }
     if answer.deleted_dropped > 0 {
         out.push(format!("dropped {} rows in files deleted since the snapshot", answer.deleted_dropped));
@@ -163,7 +237,47 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{path_matches, repository_relative};
+    use super::{fold_docstring, path_matches, render, repository_relative, Page, DOCSTRING_LINES, SHOW_LINES};
+    use crate::router::Answer;
+
+    fn numbered(source: &[&str], from: usize) -> Vec<String> {
+        source.iter().enumerate().map(|(i, l)| format!("{:>5}  {l}", i + from)).collect()
+    }
+
+    #[test]
+    fn a_long_docstring_folds_after_twelve_lines_and_names_what_it_hides() {
+        let mut source = vec!["def solveset(f, symbol=None,", "             domain=None):", "    r\"\"\"Solves a given inequality."];
+        let doc: Vec<String> = (0..33).map(|n| format!("    doc line {n}")).collect();
+        source.extend(doc.iter().map(String::as_str));
+        source.extend(["    \"\"\"", "    return f"]);
+        let folded = fold_docstring(numbered(&source, 1962));
+        assert_eq!(folded.len(), 2 + DOCSTRING_LINES + 1 + 1);
+        let fold = &folded[2 + DOCSTRING_LINES];
+        assert!(fold.ends_with("… 23 docstring lines folded (1976-1998)"), "{fold}");
+        assert!(folded.last().is_some_and(|l| l.ends_with("return f")));
+    }
+
+    #[test]
+    fn short_or_missing_docstrings_are_left_alone() {
+        let short = numbered(&["def f():", "    \"\"\"One line.\"\"\"", "    return 1"], 1);
+        assert_eq!(fold_docstring(short.clone()), short);
+        let none = numbered(&["def f():", "    x = 1", "    return x"], 1);
+        assert_eq!(fold_docstring(none.clone()), none);
+    }
+
+    #[test]
+    fn show_prints_a_hundred_lines_and_names_the_rest() {
+        let body = numbered(&vec!["    x = 1"; 165], 1962).join("\n");
+        let answer = Answer { op: "show".into(), query: "solveset  (sympy/solvers/solveset.py:1962-2126)".into(), ..Answer::default() };
+        let page = Page { limit: SHOW_LINES, ..Page::default() };
+        let text = render(&answer, &page, Some(&body));
+        assert!(text.starts_with("show solveset  (sympy/solvers/solveset.py:1962-2126)\n"), "{text}");
+        assert_eq!(text.lines().filter(|l| l.ends_with("x = 1")).count(), SHOW_LINES);
+        assert!(text.contains("… lines 2062-2126 not shown; next: offset 100"), "{text}");
+        let next = render(&answer, &Page { limit: SHOW_LINES, offset: 100, ..Page::default() }, Some(&body));
+        assert_eq!(next.lines().filter(|l| l.ends_with("x = 1")).count(), 65);
+        assert!(!next.contains("not shown") && !next.contains("results"));
+    }
 
     #[test]
     fn globs() {

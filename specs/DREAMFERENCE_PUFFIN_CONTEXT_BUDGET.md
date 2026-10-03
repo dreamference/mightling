@@ -1,6 +1,6 @@
 # Puffin Context Budget — what fills the context, and how to keep it small
 
-**Status:** proposed on 2026-10-03, revised the same day (v2). Nothing here is built. §1 is measured from the rollouts of the SWE-bench pair `idx14b-on` / `idx14b-off` (14 instances each, same `puffin` build `runtime_hash bd978d3ede04`, Qwen3.8-27B, compaction limit 44,000 tokens, three instances at once), plus a probe of the model server's prefix cache (§1.7). §3 is read from the pinned Codex source (`rust-v0.158.0`). §2 and the sources are published work. The effect figures in §4 come from replaying the recorded trajectories (§1.6), not from new runs.
+**Status:** proposed on 2026-10-03, revised the same day (v2). Phase 1's build is done (§8): masking, the per-output cap and `puffin-code`'s output; its live checks and the A/B are not. §1 is measured from the rollouts of the SWE-bench pair `idx14b-on` / `idx14b-off` (14 instances each, same `puffin` build `runtime_hash bd978d3ede04`, Qwen3.8-27B, compaction limit 44,000 tokens, three instances at once), plus a probe of the model server's prefix cache (§1.7). §3 is read from the pinned Codex source (`rust-v0.158.0`). §2 and the sources are published work. The effect figures in §4 come from replaying the recorded trajectories (§1.6), not from new runs.
 **What v2 changed, and why:**
 - **Compaction costs about 104 s here, not 24 s** (§1.8). The v1 time table used COMPACTION §9.2's single-stream 14K figure. With the measured cost, masking is a clear time win at 44K and 49K, not "about even".
 - **A masking move re-prefills from the first masked item,** not from the oldest newly masked one (§1.7). Every move costs about the whole tail, so moves should be rarer and larger: the defaults are now 0.85/0.50 of the limit with a 16,000-token step (§4.1).
@@ -346,6 +346,16 @@ Interactive sessions are not the target, and nothing here should be read as a ge
 5. **The interactive default.** At 94K masking is about even on time and keeps more than a summary does (§5). Whether interactive sessions mask by default is decided after Phase 1.
 
 ---
+
+## 8. As built (2026-10-03)
+
+Branch `ctx/budget`, on `main` at the merge of this spec's v2.
+
+- **§4.1, masking.** The leaf crate `puffin-rs/masking/` (`puffin-masking`, serde only) and patch `0021-observation-masking` (1,011 bytes: one dependency line in `codex-rs/core/Cargo.toml`, and four lines at the end of `for_prompt_annotated` that read `get_total_token_usage(false)` before normalising and pass it with the items to `puffin_masking::apply`; `false` is the session's default for `server_reasoning_included`, and this model sends no reasoning). The cap in `test_the_patches_stay_small` is raised to 34,750 (34,697 after). The rule is §4.1's: a move when the size passes the high mark and the size after the last move plus the step; oldest first, skipping the last 10 candidates and outputs under 600 characters, until the bytes/4 saving covers the size less the low mark; state at `$CODEX_HOME/masking/<first call_id>.json`, copies at `masking/outputs/<call_id>.txt`, written once; the placeholder within 200 characters (first line clipped to 60, last to 80, dropped before the limit is passed); segments older than 30 days pruned at launch with their copies. 11 unit tests, one per item of §6's list.
+- **The launcher** (`puffin-rs/src/mask.rs`): off by default, `DREAMFERENCE_PUFFIN_MASK` then `puffin_mask_tool_output`; `[puffin_mask]` takes `high_percent`, `low_percent`, `min_step`, `keep_recent`, `min_chars` (v1's arm is `82`/`55`/`8000`); `L` is the last `-c model_auto_compact_token_limit` on the command line, then `config.toml`, then the window. When on, one paragraph joins the prompt (`prompt::Parts::masking`) saying to read the named file with `sed -n` or `tail` and not to re-run the command. Launcher tests: 143 passed, 1 ignored. `codex-core` checks with `0021` applied.
+- **§4.2:** `truncation_policy.limit` is `min(8,000, window)` (`TOOL_OUTPUT_TOKEN_LIMIT`), with a test.
+- **§4.3, `puffin-code`:** `show` prints 100 lines a page (`SHOW_LINES`) with a last line `… lines A-B not shown; next: offset N`, in the tool and in the shell (`puffin-code show <name> --offset N`); a Python docstring longer than 12 lines folds after them with a line naming the folded range; the nine tool descriptions went from 964 to 543 characters (the per-tool argument schemas are unchanged: MCP gives each tool its own, so "one shared schema" is not available); both prompt blocks name `outline` before reading a file not yet seen. `cargo test --locked`: 128 passed.
+- **Not done:** the live checks of §6 (they need `codex build`, which no one ran on this branch) and the A/B.
 
 ## Sources
 
