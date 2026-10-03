@@ -82,7 +82,7 @@ pub struct RunEntry {
     pub peak_cap_bounded: bool,
     #[serde(default)]
     pub cap_mb: u64,
-    /// `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy`, `deferred: model-start`.
+    /// `ok`, `failed: <reason>`, `deferred: memory`, `deferred: busy`, `deferred: model-start`, `deferred: stopped`.
     pub status: String,
     /// The query store's file name in the scip directory, when `status` is `ok`.
     #[serde(default)]

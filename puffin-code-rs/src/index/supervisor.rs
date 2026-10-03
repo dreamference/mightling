@@ -138,16 +138,23 @@ fn execute_one(repo: &Repo, plan: &Plan, run: &Run, host: &dyn Host, probe: &dyn
     let duration = clock.elapsed().as_secs_f64();
     let peak = std::fs::read_to_string(&peak_file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(0);
     let bounded = peak > 0 && peak >= cap / 10 * 9;
+    keep_log(repo, run, &log);
+    // A scope stopped from outside (`systemctl --user stop`, which `server start` sends before its
+    // pre-flight) ends on SIGTERM: the run did nothing wrong and is retried, with no peak recorded.
+    if stopped_from_outside(&status) {
+        return Ok(Outcome::Deferred("stopped"));
+    }
     // Only a run killed by the kernel records its cap as a lower bound on its peak (§6.4); a run
     // that failed for any other reason keeps what it measured, or the next admission would ask
-    // for more than its ceiling and never start it again.
-    let killed = matches!(status.code(), Some(137) | None);
+    // for more than its ceiling and never start it again. A SIGKILL whose measured peak stayed
+    // well under the cap was not the cap's doing either.
+    let killed = matches!(status.code(), Some(137) | None) && (peak == 0 || bounded);
     let peak_mb = if killed { peak.max(cap) >> 20 } else { peak >> 20 };
-    keep_log(repo, run, &log);
     if !status.success() {
         let log_text = std::fs::read_to_string(&log).unwrap_or_default();
         let why = match status.code() {
-            Some(137) | None => "killed (memory cap reached?)".to_string(),
+            _ if killed => "killed (memory cap reached?)".to_string(),
+            Some(137) | None => "killed".to_string(),
             // scip-java runs the project's build tool: the wrapper's, or the installed one.
             _ if missing_build_tool(&log_text).is_some() => missing_build_tool(&log_text).unwrap_or_default(),
             // Nothing is fetched on an indexer's behalf (§9.1): a missing dependency is the
@@ -262,6 +269,13 @@ pub fn is_offline_failure(log: &str) -> bool {
     ]
         .iter()
         .any(|needle| log.contains(needle))
+}
+
+/// Whether a run ended because its scope was stopped from outside, not by the kernel or by
+/// itself: SIGTERM, seen directly or as the 143 a shell or bwrap reports for a child it took.
+fn stopped_from_outside(status: &std::process::ExitStatus) -> bool {
+    use std::os::unix::process::ExitStatusExt;
+    status.code() == Some(143) || status.signal() == Some(15)
 }
 
 /// `choom -n 1000 -- nice -n 10 ionice -c3 bwrap … -- sh -c '<run>; write the cgroup's peak'`.
@@ -443,6 +457,39 @@ mod tests {
         let probe = Script(std::cell::RefCell::new(vec![ModelState::Idle, ModelState::Busy, ModelState::Busy]));
         execute(&plan, &host, &probe, Duration::from_millis(40));
         assert!(host.actions.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_scope_stopped_from_outside_is_deferred_and_records_no_peak() {
+        let dir = tempfile::tempdir().unwrap();
+        for stand_in in ["exit 143", "kill -TERM $$"] {
+            let mut host = FakeHost::new(dir.path(), 100);
+            host.stand_in = vec!["sh".into(), "-c".into(), stand_in.into()];
+            let mut plan = repo_and_plan(dir.path(), Kind::Static, 1);
+            plan.runs[0].indexer = "scip-python".into();
+            plan.runs[0].root = "pkg".into();
+            let out = execute(&plan, &host, &FixedProbe(ModelState::Absent), Duration::from_millis(1));
+            assert_eq!(out[0].1, Outcome::Deferred("stopped"), "{stand_in}");
+            let repo = Repo { root: plan.repo_root.clone(), main_root: plan.main_root.clone(), is_git: false };
+            let entry = &crate::manifest::Manifest::load(&repo.scip_dir()).runs["scip-python:pkg"];
+            assert_eq!(entry.status, "deferred: stopped", "{stand_in}");
+            assert_eq!((entry.peak_rss_mb, entry.peak_cap_bounded), (0, false), "{stand_in}");
+        }
+    }
+
+    #[test]
+    fn a_kernel_kill_still_records_the_cap_as_the_peak() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = FakeHost::new(dir.path(), 100);
+        host.stand_in = vec!["sh".into(), "-c".into(), "exit 137".into()];
+        let mut plan = repo_and_plan(dir.path(), Kind::Static, 1);
+        plan.runs[0].indexer = "scip-python".into();
+        plan.runs[0].root = "pkg".into();
+        let out = execute(&plan, &host, &FixedProbe(ModelState::Absent), Duration::from_millis(1));
+        assert_eq!(out[0].1, Outcome::Failed("killed (memory cap reached?)".into()));
+        let repo = Repo { root: plan.repo_root.clone(), main_root: plan.main_root.clone(), is_git: false };
+        let entry = &crate::manifest::Manifest::load(&repo.scip_dir()).runs["scip-python:pkg"];
+        assert!(entry.peak_cap_bounded && entry.peak_rss_mb >= 1024, "{entry:?}");
     }
 
     #[test]

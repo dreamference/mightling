@@ -898,7 +898,7 @@ class VLLMServerManager:
         puffin-code runs its indexers in `puffin-index-*` scopes of the user's systemd
         (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §9.2) and stops them itself when it sees a load,
         but only after the load has begun; stopping them here keeps `check_host_safety()`'s view
-        of free memory true. A stopped run is recorded `deferred: model-start` and retried later.
+        of free memory true. A stopped run is recorded `deferred: stopped` (no peak is recorded for it) and retried later.
         Without a user systemd (a container, CI) there is nothing to stop.
         """
         try:
