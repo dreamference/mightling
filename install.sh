@@ -2,6 +2,7 @@
 # Installs Puffin from a release, with no checkout of the repository and nothing compiled.
 #
 #   ./install.sh [--role client|node] [--version X.Y.Z] [--no-advertise]
+#                [--from <dir>] [--no-host-setup]
 #
 # What it installs depends on the machine:
 #
@@ -24,6 +25,14 @@
 # PUFFIN_RELEASE_REPO names another repository (a fork), PUFFIN_RELEASE_API another API root (the
 # tests' stand-in server); PUFFIN_INSTALL_DIR and PUFFIN_VENV move the two directories.
 #
+# --from <dir> installs from a directory holding the same asset names and the same
+# `puffin-<target>.sha256sums` instead of a GitHub release, with no network for Puffin's own files
+# (`puffin-admin node provision` copies such a bundle from another node; specs/
+# DREAMFERENCE_PUFFIN_FLEET.md §7.2). The checksum checks are the same. A `VERSION` file in it
+# names the version, and a `wheelhouse/` folder in it, if present, holds the Python dependencies
+# so pip needs no index either. --no-host-setup skips the host settings (provisioning applies them
+# with `sudo puffin-admin node prepare` instead).
+#
 # For a development install from a checkout, use scripts/install_gb10.sh instead.
 set -euo pipefail
 
@@ -35,11 +44,13 @@ LINK_DIR="$HOME/.local/bin"
 ROLE=""
 VERSION=""
 ADVERTISE=1
+FROM=""
+HOST_SETUP=1
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -48,12 +59,22 @@ while [ $# -gt 0 ]; do
         --version)   VERSION="${2:-}"; shift 2 ;;
         --version=*) VERSION="${1#*=}"; shift ;;
         --no-advertise) ADVERTISE=0; shift ;;
+        --from)      FROM="${2:-}"; shift 2 ;;
+        --from=*)    FROM="${1#*=}"; shift ;;
+        --no-host-setup) HOST_SETUP=0; shift ;;
         -h|--help)   usage; exit 0 ;;
         *)           fail "unknown argument: $1 (see --help)" ;;
     esac
 done
 
-for tool in curl gzip awk; do
+if [ -n "$FROM" ]; then
+    [ -d "$FROM" ] || fail "--from: $FROM is not a directory."
+    FROM="$(cd "$FROM" && pwd)"
+    NEEDED="gzip awk"
+else
+    NEEDED="curl gzip awk"
+fi
+for tool in $NEEDED; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is needed and was not found."
 done
 if command -v sha256sum >/dev/null 2>&1; then
@@ -99,49 +120,64 @@ fi
 
 # -- the release -----------------------------------------------------------------------------
 
-TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-if [ -z "$TOKEN" ] && command -v gh >/dev/null 2>&1; then
-    TOKEN="$(gh auth token 2>/dev/null || true)"
-fi
-auth=()
-[ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
-
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-if [ -n "$VERSION" ]; then
-    release_url="$API/repos/$REPO/releases/tags/v${VERSION#v}"
+if [ -n "$FROM" ]; then
+    # A bundle: the asset names are the files in the folder, and "fetching" one copies it.
+    TAG="bundle"
+    [ -f "$FROM/VERSION" ] && TAG="$(head -n 1 "$FROM/VERSION")"
+    for file in "$FROM"/*; do
+        if [ -f "$file" ]; then printf '%s\t%s\n' "$(basename "$file")" "$file"; fi
+    done > "$WORK/assets.tsv"
+    asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
+    fetch() {  # fetch <asset name>: copies it into $WORK, or fails
+        local path; path="$(asset_url "$1")"
+        [ -n "$path" ] || return 1
+        cp "$path" "$WORK/$1"
+    }
 else
-    release_url="$API/repos/$REPO/releases/latest"
-fi
-if ! curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json"; then
-    say "❌ Could not read $release_url" >&2
-    if [ -z "$TOKEN" ]; then
-        say "   The repository is private: set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it," >&2
-        say "   or log in with \`gh auth login\`, and run this again." >&2
-    else
-        say "   Check that the token can read $REPO and that the release exists (drafts are not listed)." >&2
+    TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -z "$TOKEN" ] && command -v gh >/dev/null 2>&1; then
+        TOKEN="$(gh auth token 2>/dev/null || true)"
     fi
-    exit 1
+    auth=()
+    [ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
+
+    if [ -n "$VERSION" ]; then
+        release_url="$API/repos/$REPO/releases/tags/v${VERSION#v}"
+    else
+        release_url="$API/repos/$REPO/releases/latest"
+    fi
+    if ! curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json"; then
+        say "❌ Could not read $release_url" >&2
+        if [ -z "$TOKEN" ]; then
+            say "   The repository is private: set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it," >&2
+            say "   or log in with \`gh auth login\`, and run this again." >&2
+        else
+            say "   Check that the token can read $REPO and that the release exists (drafts are not listed)." >&2
+        fi
+        exit 1
+    fi
+
+    TAG="$(awk -F'"' '/^  "tag_name":/ {print $4; exit}' "$WORK/release.json")"
+    [ -n "$TAG" ] || fail "the release at $release_url has no tag."
+
+    # "name<TAB>API url" for every asset. GitHub prints an asset's own "url" before its "name"; the
+    # uploader's "url" in between is a user URL and is not taken.
+    awk -F'"' '
+        /"url": "[^"]*\/releases\/assets\/[0-9]+"/ { url = $4 }
+        /^      "name":/ && url != "" { print $4 "\t" url; url = "" }
+    ' "$WORK/release.json" > "$WORK/assets.tsv"
+
+    asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
+
+    fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
+        local url; url="$(asset_url "$1")"
+        [ -n "$url" ] || return 1
+        curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
+    }
 fi
-
-TAG="$(awk -F'"' '/^  "tag_name":/ {print $4; exit}' "$WORK/release.json")"
-[ -n "$TAG" ] || fail "the release at $release_url has no tag."
-
-# "name<TAB>API url" for every asset. GitHub prints an asset's own "url" before its "name"; the
-# uploader's "url" in between is a user URL and is not taken.
-awk -F'"' '
-    /"url": "[^"]*\/releases\/assets\/[0-9]+"/ { url = $4 }
-    /^      "name":/ && url != "" { print $4 "\t" url; url = "" }
-' "$WORK/release.json" > "$WORK/assets.tsv"
-
-asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
-
-fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
-    local url; url="$(asset_url "$1")"
-    [ -n "$url" ] || return 1
-    curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
-}
 
 say "🐧 Puffin $TAG for $TARGET, role: $ROLE"
 
@@ -185,6 +221,8 @@ for name in $INSTALLED; do
     # Codex looks for its Code Mode host beside its own executable, so that one needs no link.
     [ "$name" = "codex-code-mode-host" ] || link "$INSTALL_DIR/bin/$name" "$name"
 done
+# What was installed, for `node provision`'s state probe and drift report.
+printf '%s\n' "$TAG" > "$INSTALL_DIR/VERSION"
 say "✅ Installed$INSTALLED in $INSTALL_DIR/bin"
 
 # -- the node --------------------------------------------------------------------------------
@@ -204,8 +242,14 @@ if [ "$ROLE" = "node" ]; then
             || fail "python3 could not create a virtualenv (on Ubuntu: sudo apt install python3-venv)."
     fi
     say "📦 Installing puffin-admin and what it depends on (about 6 GB with PyTorch; a few minutes) ..."
-    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
-    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade "$WORK/$wheel"
+    pip_index=()
+    if [ -n "$FROM" ] && [ -d "$FROM/wheelhouse" ]; then
+        # Every dependency is in the bundle: no package index is asked.
+        pip_index=(--no-index --find-links "$FROM/wheelhouse")
+    else
+        "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
+    fi
+    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade ${pip_index[@]+"${pip_index[@]}"} "$WORK/$wheel"
     link "$VENV_DIR/bin/puffin-admin" puffin-admin
     say "✅ Installed puffin-admin $TAG in $VENV_DIR"
 
@@ -213,7 +257,9 @@ if [ "$ROLE" = "node" ]; then
     # folder, so the command prints each line before it runs and sudo asks on the terminal; when
     # this script has no terminal (piped into bash), it reads the keyboard through /dev/tty.
     say ""
-    if [ -t 0 ]; then
+    if [ "$HOST_SETUP" = 0 ]; then
+        say "⏭️  Host settings skipped (--no-host-setup)."
+    elif [ -t 0 ]; then
         "$VENV_DIR/bin/puffin-admin" host setup || true
     elif (exec < /dev/tty) 2>/dev/null; then
         "$VENV_DIR/bin/puffin-admin" host setup < /dev/tty || true

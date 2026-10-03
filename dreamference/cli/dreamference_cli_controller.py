@@ -1037,6 +1037,24 @@ class DreamferenceCLIController:
         node_sync_parser.add_argument("name", help="The paired node")
         node_sync_parser.add_argument("model", help="A key of the model matrix")
         node_sync_parser.add_argument("--address", default=None, help="Reach the node at this address instead, such as its QSFP link's")
+        node_provision_parser = node_subparsers.add_parser("provision", help="Set up new GB10s from this one: install Puffin, the root half, the model, pairing, start (FLEET spec); re-run on paired nodes, it is the fleet update")
+        node_provision_parser.add_argument("hosts", nargs="*", help="Host names, addresses or paired nodes; none lists unprovisioned GB10s on the network")
+        node_provision_parser.add_argument("--all", action="store_true", help="Every paired node: the fleet update")
+        node_provision_parser.add_argument("--user", default=None, help="The account on the machines (default: this user's name)")
+        node_provision_parser.add_argument("--model", default=None, help="The model each node is assigned (default: this machine's configured model)")
+        node_provision_parser.add_argument("--from", dest="source", default="this", help="What to install: this (default) or release[=X.Y.Z]")
+        node_provision_parser.add_argument("--per-host-password", action="store_true", help="With several hosts, ask each machine's password separately (default: one password for all)")
+        node_provision_parser.add_argument("--mesh", action="store_true", help="Also pair every node with every other (not built yet)")
+        node_provision_parser.add_argument("--web", action="store_true", help="Also install and configure the web UI there")
+        node_provision_parser.add_argument("--no-start", action="store_true", help="Leave the model server stopped")
+        node_provision_parser.add_argument("--restart", action="store_true", help="Restart a running model server")
+        node_provision_parser.add_argument("--os-update", action="store_true", help="NVIDIA's OS and firmware update first, with a reboot")
+        node_provision_parser.add_argument("--dry-run", action="store_true", help="Connect and read only, then print what each machine would change")
+        node_provision_parser.add_argument("--via", default=None, help="With one host: copy and install over this address instead (a QSFP link's)")
+        node_provision_parser.add_argument("--match", default=None, help="With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-")
+        node_provision_parser.add_argument("--start-timeout", type=int, default=None, help="Seconds to wait for a started model server (default 1200)")
+        node_subparsers.add_parser("prepare", help="(Run with sudo) the root steps of a node install, for the user who ran sudo, and nothing else")
+        node_subparsers.add_parser("askpass", help=argparse.SUPPRESS)
         node_job_exec_parser = node_subparsers.add_parser("job-exec", help="(Run inside a job's systemd unit) carry out one job")
         node_job_exec_parser.add_argument("job", help="The job id")
         node_subparsers.add_parser("authorize", help="(Run by `node add` on the other node) authorise a public key, read from standard input, for node operations only")
@@ -2309,6 +2327,18 @@ class DreamferenceCLIController:
                 if args.node_command == "fetch":
                     sys.exit(NodeJobSender.fetch(args.job))
                 sys.exit(NodeJob.execute(args.job))
+            if args.node_command == "provision":
+                from dreamference.node.node_provisioner import NodeProvisioner
+                options = {name: getattr(args, name) for name in (
+                    "all", "user", "model", "source", "per_host_password", "mesh", "web", "no_start",
+                    "restart", "os_update", "dry_run", "via", "match", "start_timeout")}
+                sys.exit(NodeProvisioner(args.hosts, options).run())
+            if args.node_command == "prepare":
+                from dreamference.node.node_prepare import NodePrepare
+                sys.exit(0 if NodePrepare.run() else 1)
+            if args.node_command == "askpass":
+                from dreamference.node.fleet_askpass import FleetAskpass
+                sys.exit(FleetAskpass.ask())
             if args.node_command == "authorize":
                 sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
             if args.node_command == "serve-job":

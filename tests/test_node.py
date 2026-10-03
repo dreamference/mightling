@@ -561,7 +561,12 @@ def test_pairing_checks_that_the_machine_that_answered_is_the_advertised_node(mo
     answers["info"] = json.dumps({"node": "9999-other"})
     assert NodePairing.add("spark-2", user="owner") is False
     assert NodePairing.paired() == []
-    assert NodePairing.add("spark-9") is False                     # not on the network
+    # Not on the network: pairing by address is tried instead (FLEET §7.6), over one login.
+    tried = []
+    monkeypatch.setattr(NodePairing, "add_by_login",
+                        classmethod(lambda cls, address, user, port: tried.append(address) or False))
+    assert NodePairing.add("spark-9") is False
+    assert tried == ["spark-9"]
 
 
 def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypatch):

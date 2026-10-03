@@ -59,6 +59,8 @@ def render(parser: argparse.ArgumentParser, path: List[str], depth: int, out: Li
         for name, sub in group.choices.items():
             if id(sub) in seen:  # aliases (e.g. `onyx` for `puffin`) point at the same parser
                 continue
+            if helps.get(name) == argparse.SUPPRESS:  # a hidden subcommand (`node askpass`)
+                continue
             seen.add(id(sub))
             aliases = [n for n, p in group.choices.items() if p is sub and n != name]
             full = path + [name]

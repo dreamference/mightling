@@ -488,6 +488,32 @@ Copy a model's files from this machine's cache to a paired node, so it need not 
 | `model` | A key of the model matrix. |
 | `--address` | Reach the node at this address instead, such as its QSFP link's. |
 
+#### `puffin-admin node provision`
+
+Set up new GB10s from this one: install Puffin, the root half, the model, pairing, start (FLEET spec); re-run on paired nodes, it is the fleet update.
+
+| Option | Description |
+|---|---|
+| `hosts` | Host names, addresses or paired nodes; none lists unprovisioned GB10s on the network. |
+| `--all` | Every paired node: the fleet update. |
+| `--user` | The account on the machines (default: this user's name) |
+| `--model` | The model each node is assigned (default: this machine's configured model) |
+| `--from` | What to install: this (default) or release[=X.Y.Z]. |
+| `--per-host-password` | With several hosts, ask each machine's password separately (default: one password for all) |
+| `--mesh` | Also pair every node with every other (not built yet) |
+| `--web` | Also install and configure the web UI there. |
+| `--no-start` | Leave the model server stopped. |
+| `--restart` | Restart a running model server. |
+| `--os-update` | NVIDIA's OS and firmware update first, with a reboot. |
+| `--dry-run` | Connect and read only, then print what each machine would change. |
+| `--via` | With one host: copy and install over this address instead (a QSFP link's) |
+| `--match` | With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-. |
+| `--start-timeout` | Seconds to wait for a started model server (default 1200) |
+
+#### `puffin-admin node prepare`
+
+(Run with sudo) the root steps of a node install, for the user who ran sudo, and nothing else.
+
 #### `puffin-admin node job-exec`
 
 (Run inside a job's systemd unit) carry out one job.

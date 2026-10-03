@@ -120,6 +120,10 @@ def _refuse_real_docker(monkeypatch):
             # start a unit of the user's own systemd.
             if os.path.basename(str(program)) in ("systemctl", "systemd-run") and _changes_systemd(argv):
                 raise AssertionError(f"a test tried to run a real systemd command: {argv!r}; mock it")
+            # Provisioning (specs/DREAMFERENCE_PUFFIN_FLEET.md §14): no test may reach another
+            # machine or become root.
+            if os.path.basename(str(program)) in ("ssh", "scp", "rsync", "sudo", "sg"):
+                raise AssertionError(f"a test tried to run a real {os.path.basename(str(program))}: {argv!r}; mock it")
             return original(*args, **kwargs)
         return run
 

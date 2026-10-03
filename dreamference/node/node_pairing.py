@@ -9,6 +9,7 @@ sets the key up once; the user never types an SSH command.
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
@@ -212,8 +213,9 @@ class NodePairing:
         import getpass
         target = cls.discover(name)
         if target is None:
-            print(f"❌ No node named {name} answers on this network (`puffin-admin node list`).")
-            return False
+            # Not advertised, or its multicast does not reach this machine: pair by address,
+            # reading the node's id over one login (specs/DREAMFERENCE_PUFFIN_FLEET.md §7.6).
+            return cls.add_by_login(name, user or getpass.getuser(), ssh_port)
         public_key = cls.ensure_key()
         if public_key is None:
             print("❌ ssh-keygen could not create the pairing key.")
@@ -242,6 +244,109 @@ class NodePairing:
         if info.get("linger") is False:
             print(f"⚠️  Lingering is off for {record['user']} on {record['name']}: a job would stop when its "
                   f"sender disconnects. On that node: loginctl enable-linger")
+        return True
+
+    @classmethod
+    def add_by_login(cls, address: str, user: str, ssh_port: int = 22) -> bool:
+        """
+        Pairs with a machine no browse shows, by name or address: one login (its password asked
+        once, by ssh), the node's id read through it, then the same pairing as through a browse.
+
+        Args:
+            address: The machine's host name or address.
+            user: The account there.
+            ssh_port: Its SSH port.
+
+        Returns:
+            bool: True once the node answers through the restricted key.
+        """
+        from dreamference.node.fleet_session import FleetSession
+        session = FleetSession(address, user, FleetSession.new_run_dir(), ssh_port=ssh_port)
+        print(f"🔑 {address} is not advertised here; pairing by address. Its password is asked once, by ssh.")
+        if not session.open():
+            print(f"❌ Could not log in to {user}@{address}.")
+            shutil.rmtree(session.run_dir, ignore_errors=True)
+            return False
+        try:
+            return cls.pair_over_session(session) is not None
+        finally:
+            session.close()
+            shutil.rmtree(session.run_dir, ignore_errors=True)
+
+    @classmethod
+    def pair_over_session(cls, session: Any) -> Optional[Dict[str, Any]]:
+        """
+        Pairs through an open provisioning session (`FleetSession`): the node's id and name are
+        read over it, `node authorize` runs through it (no second password), and the host key
+        the session accepted is the one pinned to the node id.
+
+        Args:
+            session: An open `FleetSession`.
+
+        Returns:
+            Optional[Dict[str, Any]]: The node's record once it answers through the new key; None
+            with the reason printed otherwise.
+        """
+        from dreamference.node.fleet_session import REMOTE_ADMIN
+        answer = session.run(f"{REMOTE_ADMIN} node id && hostname")
+        lines = answer.stdout.split()
+        if answer.returncode != 0 or len(lines) < 2:
+            print(f"❌ {session.host} did not report a node id (is Puffin installed there?).")
+            return None
+        record = {"node": lines[0], "name": lines[1], "address": session.host,
+                  "user": session.user, "ssh_port": session.ssh_port}
+        public_key = cls.ensure_key()
+        if public_key is None:
+            print("❌ ssh-keygen could not create the pairing key.")
+            return None
+        if not cls.pin_host_keys(record["node"], session.host_key_lines()):
+            return None
+        authorized = session.run(f"{REMOTE_ADMIN} node authorize", input_text=public_key + "\n")
+        if authorized.returncode != 0:
+            print(f"❌ {record['name']} did not authorise the key: {authorized.stderr.strip()[-200:]}")
+            return None
+        cls._save(record)
+        check = cls.run(record, "info")
+        try:
+            info = json.loads(check.stdout) if check.returncode == 0 else {}
+        except ValueError:
+            info = {}
+        if info.get("node") != record["node"]:
+            print(f"❌ {record['name']} did not answer through the new key; pairing removed.")
+            cls.record_path(record["node"]).unlink(missing_ok=True)
+            return None
+        print(f"✅ Paired with {record['name']}.")
+        return record
+
+    @classmethod
+    def pin_host_keys(cls, node_id: str, keys: List[str]) -> bool:
+        """
+        Stores a session's accepted host key under the node's alias. A different key already
+        pinned to that node id is refused: the machine answering is not the one paired before.
+
+        Args:
+            node_id: The node's id.
+            keys: `<type> <key>` lines from the session's known-hosts file.
+
+        Returns:
+            bool: True when the key is pinned (or already was).
+        """
+        if not keys:
+            print("❌ The provisioning session recorded no host key to pin.")
+            return False
+        alias = cls.host_alias(node_id)
+        path = cls.known_hosts()
+        existing = path.read_text().splitlines() if path.is_file() else []
+        pinned = {" ".join(line.split()[1:3]) for line in existing if line.split()[:1] == [alias]}
+        if pinned and not pinned & set(keys):
+            print(f"❌ The host key of {node_id[:8]}… differs from the one pinned at an earlier pairing; "
+                  f"refusing. If the machine was reinstalled, `puffin-admin node remove` it first.")
+            return False
+        if pinned:
+            return True
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as handle:
+            handle.writelines(f"{alias} {key}\n" for key in keys)
         return True
 
     @classmethod
