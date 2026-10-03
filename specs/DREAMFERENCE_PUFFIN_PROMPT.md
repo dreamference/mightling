@@ -309,6 +309,30 @@ A check that the model follows `high-swe` and of what it does differently, not a
 - Step 6 says "Delete scratch files"; arm B spent its last turns deleting scripts in `/tmp`, which is never collected. v2: "Remove anything you created inside the repository; scratch files in /tmp can stay."
 - Nothing says when verification is enough. v2 adds to step 5: "When your script shows the fix and the area's tests pass, stop: do not keep adding checks."
 
+### 6.5 First benchmark A/B (2026-10-03)
+
+Three arms of §6.2's A and B, one repetition each, run one after the other on the night of 2026-10-03 (18:44 to 23:54), interleaved so drift falls on both `default` arms: `ab-default-a`, `ab-highswe`, `ab-default-b`. Same 24 validated instances (the sample of SWE_BENCH §12.5, `sphinx-8056` excluded), same `puffin` build (`runtime_hash` `39b8a92b6775`, the build of `258c3b5`; `high-swe` is v2, compiled in), same `puffin-code` (`cd4d6b91…`), code index on (`--code-index universal`) in every arm, cave `ultra`, `task_context` 44,000 (the KV pool was 133,308 tokens), three at a time, 45-minute timeout, 8 GiB per container, two nudges, the writable `/testbed` of §6.1 item 1. No context masking: the build predates patch `0021`. The model server was shared: five times an instance waited for a request that was not the run's.
+
+| | `default` (a) | `default` (b) | `high-swe` |
+|---|---|---|---|
+| Resolved | **16** (66.7%) | **15** (62.5%) | **16** (66.7%) |
+| Timeouts / empty patches | 2 / 0 | 1 / 0 | 0 / 1 |
+| Agent time (without timeouts) | 5 h 9 min (3 h 39 min) | 4 h 25 min (3 h 41 min) | 4 h 9 min (4 h 10 min) |
+| Median wall per instance | 7 min 43 s | 7 min 29 s | 6 min 54 s |
+| Input / output tokens | 49.1 M / 289 K | 64.1 M / 296 K | 62.8 M / 357 K |
+| Commands | 2,503 | 2,665 | 2,364 |
+| Compactions (instances) | 29 (14) | 26 (11) | 27 (12) |
+| `puffin-code` calls (instances) | 328 (23) | 415 (24) | 334 (24) |
+
+**The noise floor, measured in the same session:** the two `default` arms differ on 3 of 24 instances (`django-15563` and `sympy-14711` only in a, `django-12774` only in b), McNemar p = 1.0. `high-swe` against a differs on 2 (`django-16454` only `high-swe`, `sympy-13031` only `default`), p = 1.0; against b on 5 (3 to 2 for `high-swe`), p = 1.0. Every difference is inside the floor.
+
+**Reading it by §6.3's rule:** one repetition per arm, so the rule cannot declare a winner. `high-swe` is **not worse** on outcome (16 against 15 and 16). On behaviour it is mixed:
+- **Better:** no timeout (the `default` arms had 2 and 1; `django-15563` timed out in a and resolved in 618 s under `high-swe`), the fewest commands, and the shortest median.
+- **Worse:** 21–23% more output tokens, about what §6.4 predicted from the extra verification, and the one empty patch of the night: `sympy-13031` stopped at 118 s with nothing written, the same failure the plain arm of SWE_BENCH §13.6 had on that instance. Without timeouts its agent time is the longest.
+- **Not distinguishable:** input tokens and compactions sit between the two `default` arms.
+
+**Not measured:** arms C and D, the three repetitions §6.2 asks for, and the per-class reading of §6.3 (the eleven-failure classes of §5.2 have too few members in 24 instances to count). **Context only, not a comparison:** `default` with the index resolved 13 of 24 on 2026-10-01 (SWE_BENCH §12.5) and 16 and 15 here; the binary, the tools, the `/testbed` fix and the timeout handling all changed in between.
+
 ---
 
 ## 7. Where else a prompt is chosen

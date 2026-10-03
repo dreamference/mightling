@@ -527,6 +527,16 @@ Difference in resolved rate: +14.3 points, 95% interval −12.7 to +41.3, McNema
 - **"Tests run after the last edit"** (a pattern match on the session's commands, not a measured behaviour): 9 of 14 with the tools, 8 without.
 - **What remains unmeasured**: the two `puffin-code` fixes (`93386d5`) and the launcher's grace (`6ffb18f`; compiled and installed in the build of `258c3b5` on 2026-10-03, after the arm), since the arm ran the installed builds. The next pair should run on a rebuilt `puffin` and `puffin-code`, on the full 24 validated instances, with the plain arm run twice so the floor is measured in the same session.
 
+### 13.7 Three arms on the full sample: the noise floor and the prompt (2026-10-03)
+
+Run on the night of 2026-10-03 for PUFFIN_PROMPT §6.5, which has the full table: `ab-default-a`, `ab-highswe`, `ab-default-b`, all with the code index, on the 24 validated instances of §12.5 and one build (`runtime_hash` `39b8a92b6775`, `puffin-code` `cd4d6b91…`), `task_context` 44,000, three at a time.
+
+- **Resolved: 16, 16 (`high-swe`), 15.** Two identical `default` arms differ on **3 of 24** instances in the same session (2 one way, 1 the other). With §13.5's 4 of 24 on another night, that is this benchmark's floor at 24 instances: a difference of up to about four instances between two arms is noise.
+- **The index is used everywhere now:** 328, 415 and 334 `puffin-code` calls, in 23, 24 and 24 of 24 instances. The one instance without a call (`sympy-13031` in `ab-default-a`) resolved anyway.
+- **Not an index result.** All three arms had the index; this night has no arm without it. The index-on against index-off comparison still rests on §13.6's 14-instance pair.
+- **Timeouts still cost:** 2, 1 and 0 per arm, 45 minutes each. Without them the three arms' agent times are 3 h 39 min, 3 h 41 min and 4 h 10 min.
+- **A runtime defect found and fixed on the way.** The build of 2026-10-03 links `liblzma.so.5`, which `SweBenchRuntime` refused ("puffin needs liblzma.so.5, which the runtime does not carry"), so no instance could start. It now copies optional libraries when `ldd` names them, and libc, libm and libgcc_s stay required (commit `7d5e6e8`, branch `swe/runtime-lzma`; the three arms ran from that branch's code). **Until it is merged, `puffin-admin swe-bench run` on `main` fails the same way against any build that links liblzma.**
+
 ---
 
 ## Sources
