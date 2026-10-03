@@ -87,7 +87,7 @@ python3 -m venv .venv
 .venv/bin/puffin-admin codex build           # builds puffin from codex/ + codex-patches/ + puffin-rs/,
                                              # also puffin-search, puffin-fetch and puffin-code; links them into
                                              # ~/.local/bin (first build: long; later: incremental)
-.venv/bin/puffin-admin server start          # model server (SGLang for the default) + diffusion sidecar; exits when healthy
+.venv/bin/puffin-admin server start          # model server (SGLang for the default); exits when healthy
 puffin                                       # the terminal agent
 ```
 

@@ -123,7 +123,7 @@ docker run --ipc=host --network host --restart unless-stopped \
 - it tracks load stages;
 - it polls `/v1/models` until healthy.
 
-**Shutdown:** `server stop` runs `docker stop`, and `server remove` runs `docker rm -f`. Both also cover the diffusion sidecar.
+**Shutdown:** `server stop` runs `docker stop`, and `server remove` runs `docker rm -f`. Both also remove a leftover diffusion sidecar (diffusion is switched off since 2026-10-03).
 
 ### 4.3. Volume Mounts
 
@@ -162,7 +162,7 @@ A recipe can pin its own image in `launch_overrides["docker_image"]`, and name i
 
 The DFlash vLLM chain begins at `Dockerfile.dflash`, `FROM ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`, which is the AEON sm121 vLLM the DGX Spark DFlash recipe is built on. The kvfix layers bake in KV page-size unification, mamba prefix alignment and block-table fixes. The dense layer adds the Entrpi dense-bandwidth patches. These images are ~41 GB each and are built by hand with `docker build -f Dockerfile.dense …`; nothing in the CLI builds them.
 
-The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAULT_VLLM_IMAGE`.
+The diffusion sidecar, when diffusion is switched on, runs in the **main model's** resolved image, not in `DEFAULT_VLLM_IMAGE`.
 
 ### 5.3. How images are acquired (`ensure_docker_image`)
 
@@ -176,7 +176,7 @@ The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAU
 ### 5.4. Container naming
 
 - vLLM: `dreamference-vllm-<port>`;
-- diffusion: `dreamference-diffusion-<port>`, default 8001.
+- diffusion: `dreamference-diffusion-<port>`, default 8001 (not created while diffusion is switched off).
 
 ---
 
@@ -184,7 +184,7 @@ The diffusion sidecar runs in the **main model's** resolved image, not in `DEFAU
 
 | Container | Started by | Notes |
 | --- | --- | --- |
-| `dreamference-diffusion-8001` | `server start`, before vLLM | `--memory=8g`, swap equal; `diffusion_openai_service.py` |
+| `dreamference-diffusion-8001` | `server start`, before vLLM, **only with `DIFFUSION_ENABLED` on** (off since 2026-10-03; a leftover is removed) | `--memory=8g`, swap equal; `diffusion_openai_service.py` |
 | `puffin-api_server-1`, `puffin-web_server-1`, `puffin-relational_db-1`, `puffin-nginx-1`, `puffin-code-interpreter-1` | `puffin-admin puffin start` (Onyx Lite via `onyx-cli`) | Container names pinned to `puffin-*` in the lite overlay |
 | `dreamference-gmail`, `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `puffin-admin puffin configure` | Sidecars **created on** Onyx's network (not joined afterwards, see below); published on loopback only (gmail 8767, image search 8768, stt 8100) |
 | `dreamference-searxng` | `puffin-admin searxng start` (`SearxngSidecar`) | `127.0.0.1:8888`; created on the project's own network `dreamference-sidecars`; `configure` joins it to Onyx's network, and first recreates one still on the default bridge |

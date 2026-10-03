@@ -34,7 +34,8 @@ Pre-download weights: main model, --draft-model, and the recipe's own drafter (D
     ↓
 Reset a stale torch.compile cache if the speculative signature changed
     ↓
-Start the diffusion sidecar (dreamference-diffusion-8001) first, unless --no-diffusion
+Diffusion sidecar: switched off since 2026-10-03, so a leftover dreamference-diffusion-8001 is removed
+(with DIFFUSION_ENABLED on: started first, unless --no-diffusion)
     ↓
 Build the docker run … vllm serve command (explicit args > recipe > module defaults)
     ↓
@@ -42,7 +43,7 @@ Run the container under the PSI MemoryPressureWatchdog
     ↓
 Stream logs and Docker memory; poll /v1/models until healthy
     ↓
-NVFP4 canary (nvfp4 aliases only); report diffusion sidecar state
+NVFP4 canary (nvfp4 aliases only); report diffusion sidecar state (when diffusion is on)
     ↓
 Exit; the containers keep running (--restart unless-stopped)
 ```
@@ -236,7 +237,7 @@ On GB10, host RAM and GPU memory are the same memory. A load that exhausts it ca
   2. a kill request over dockerd's unix socket;
   3. the `docker` CLI.
 
-The diffusion sidecar has no watchdog: its fixed `--memory=8g` limit (swap equal) contains the worst case. It starts before vLLM, so that vLLM's free-memory pre-flight sees it.
+The diffusion sidecar has no watchdog: its fixed `--memory=8g` limit (swap equal) contains the worst case. It starts before vLLM, so that vLLM's free-memory pre-flight sees it. Since 2026-10-03 diffusion is switched off (`DIFFUSION_ENABLED = False`), so no sidecar runs and none of this applies until the switch is turned back on.
 
 ---
 

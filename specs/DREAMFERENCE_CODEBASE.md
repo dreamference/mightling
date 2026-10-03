@@ -191,7 +191,7 @@ desktop/src-tauri/src/{main,discover,forwarder,node_locator}.rs   # Tauri shell 
 ### 3.3. `vllm_server/`
 
 - **`VLLMServerManager`:** builds the `docker run …` command (§5; for an `engine: sglang` recipe `SGLangLaunchBuilder` supplies what follows the image, and `ChatTemplatePatcher` the patched template), runs the host-safety pre-flight (`check_host_safety`), starts under `MemoryPressureWatchdog`, stops, removes, tails logs, and resets a stale torch.compile cache (`_reset_stale_compile_cache`).
-- **`DiffusionServerManager`:** runs the diffusion sidecar (`diffusion_openai_service.py`) in the main model's image before vLLM starts, capped at 8 GB.
+- **`DiffusionServerManager`:** runs the diffusion sidecar (`diffusion_openai_service.py`) in the main model's image before vLLM starts, capped at 8 GB. Switched off since 2026-10-03 (`ModelMatrixRegistry.diffusion_enabled()` is false): `server start` only calls `remove_leftover()` on a sidecar an older Puffin left behind.
 
 ### 3.4. `runner/`
 
