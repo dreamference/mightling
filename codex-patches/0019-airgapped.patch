@@ -35,17 +35,35 @@ index 8ef5165..6917a7e 100644
 +        *network = NetworkSandboxPolicy::Restricted;
 +    }
      let (file_system_sandbox_policy, network_sandbox_policy) =
+diff --git a/codex-rs/tui/src/chatwidget/permission_popups.rs b/codex-rs/tui/src/chatwidget/permission_popups.rs
+index fc98703..8ff3f28 100644
+--- a/codex-rs/tui/src/chatwidget/permission_popups.rs
++++ b/codex-rs/tui/src/chatwidget/permission_popups.rs
+@@ -93,3 +93,4 @@ impl ChatWidget {
+                 .clone()
+-                .or_else(|| guardian_disabled_reason(false));
++                .or_else(|| guardian_disabled_reason(false))
++                .or_else(|| puffin_launcher::airgapped::full_access_refusal(self.thread_id, preset.id));
+             let default_actions = self.permission_mode_actions(
+diff --git a/codex-rs/tui/src/chatwidget/permissions_menu.rs b/codex-rs/tui/src/chatwidget/permissions_menu.rs
+index 4fec70a..eb9fa2a 100644
+--- a/codex-rs/tui/src/chatwidget/permissions_menu.rs
++++ b/codex-rs/tui/src/chatwidget/permissions_menu.rs
+@@ -56,2 +56,3 @@ impl ChatWidget {
+     ) -> Option<String> {
++        if let Some(reason) = puffin_launcher::airgapped::full_access_refusal(self.thread_id, preset.id) { return Some(reason); }
+         self.config
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
-index 59f8446..df73ce4 100644
+index 59f8446..7c9565f 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -540,2 +540,3 @@ impl ChatWidget {
              SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::command(self.thread_id, "").into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::session_command(self.thread_id, "", matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Ide => {
 @@ -784,2 +785,3 @@ impl ChatWidget {
              SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::command(self.thread_id, trimmed).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::session_command(self.thread_id, trimmed, matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
 @@ -1211,2 +1213,3 @@ impl ChatWidget {
              | SlashCommand::Night
