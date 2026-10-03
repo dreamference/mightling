@@ -974,3 +974,14 @@ def test_status_and_clean_touch_only_the_benchmarks_own_things(bench, capsys):
     assert not (SweBenchRunStore("r1").directory / "scratch").exists()
     assert bench["docker"].present == set()
     assert ["ps", "-aq", "--filter", "label=puffin.swe-bench.run=r1"] in bench["docker"].calls
+
+
+def test_a_named_puffin_code_build_replaces_the_installed_one(tmp_path, monkeypatch):
+    from dreamference.swe_bench.swe_bench_code_index import PUFFIN_CODE_OVERRIDE_ENV
+    build = tmp_path / "puffin-code"
+    build.write_text("")
+    monkeypatch.setenv(PUFFIN_CODE_OVERRIDE_ENV, str(build))
+    assert SweBenchCodeIndex.host_binary() == str(build)
+    # A name that does not exist is not silently replaced by the installed binary.
+    monkeypatch.setenv(PUFFIN_CODE_OVERRIDE_ENV, str(tmp_path / "missing"))
+    assert SweBenchCodeIndex.host_binary() is None

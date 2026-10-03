@@ -19,6 +19,23 @@ pub struct Page {
     pub kind: Option<String>,
 }
 
+/// A `--path` as rows carry it: relative to the repository. The model often passes the absolute
+/// path it sees in its working directory (`/testbed/astropy`), which as a prefix matched no row and
+/// turned a search with results into "0 results" (measured in the SWE-bench arm, 2026-10-03).
+pub fn repository_relative(pattern: &str, root: &std::path::Path) -> String {
+    let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+    if !pattern.starts_with('/') {
+        return pattern.to_string();
+    }
+    let roots = [Some(root.to_path_buf()), root.canonicalize().ok()];
+    for root in roots.into_iter().flatten() {
+        if let Ok(rest) = std::path::Path::new(pattern).strip_prefix(&root) {
+            return rest.to_string_lossy().into_owned();
+        }
+    }
+    pattern.to_string()
+}
+
 /// Applies narrowing and paging in place, and checks the cursor.
 pub fn narrow(answer: &mut Answer, page: &Page) -> Result<()> {
     if let Some(cursor) = &page.cursor {
@@ -146,7 +163,7 @@ pub fn render(answer: &Answer, page: &Page, body: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::path_matches;
+    use super::{path_matches, repository_relative};
 
     #[test]
     fn globs() {
@@ -154,5 +171,17 @@ mod tests {
         assert!(path_matches("codex-rs/core/src/lib.rs", "codex-rs/**/*.rs"));
         assert!(path_matches("a/b.py", "a/*.py"));
         assert!(!path_matches("a/c/b.py", "a/*.py"));
+    }
+
+    #[test]
+    fn an_absolute_path_inside_the_repository_narrows_like_a_relative_one() {
+        let root = std::path::Path::new("/testbed");
+        assert_eq!(repository_relative("/testbed/astropy/io", root), "astropy/io");
+        assert_eq!(repository_relative("./astropy", root), "astropy");
+        assert_eq!(repository_relative("astropy", root), "astropy");
+        assert_eq!(repository_relative("/testbed", root), "");
+        assert!(path_matches("astropy/io/ascii/html.py", &repository_relative("/testbed/astropy", root)));
+        // Outside the repository nothing matches, as before.
+        assert_eq!(repository_relative("/elsewhere/x", root), "/elsewhere/x");
     }
 }

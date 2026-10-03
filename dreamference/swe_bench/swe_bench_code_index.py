@@ -35,6 +35,9 @@ from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 # The arms `--code-index` accepts.
 ARMS: Final[tuple] = ("off", "universal")
 
+# Names a `puffin-code` to use in place of the installed one (`host_binary`).
+PUFFIN_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_PUFFIN_CODE"
+
 # The MCP server's name in Codex's configuration, and the variables Codex must pass it; both as
 # the launcher has them (`puffin-rs/src/code_index.rs`, `MCP_SERVER` and `FORWARDED_ENV`).
 MCP_SERVER: Final[str] = "puffin_code"
@@ -64,8 +67,13 @@ class SweBenchCodeIndex:
     def host_binary(cls) -> Optional[str]:
         """
         Returns:
-            Optional[str]: The installed `puffin-code` (beside `puffin`), or None if absent.
+            Optional[str]: The installed `puffin-code` (beside `puffin`), or None if absent; or
+            the one `DREAMFERENCE_SWE_BENCH_PUFFIN_CODE` names, to measure a build of it that
+            is not installed (the arm then differs from the plain one in `puffin-code` alone).
         """
+        override = os.environ.get(PUFFIN_CODE_OVERRIDE_ENV)
+        if override:
+            return override if os.path.exists(override) else None
         puffin = SweBenchRuntime.installed_puffin()
         if not puffin:
             return None
