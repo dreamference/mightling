@@ -112,6 +112,8 @@ puffin-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST]
 
 ### 4.2. `puffin-admin main-model` / `diffusion-model`
 
+> **The diffusion model is switched off since 2026-10-03** (`DIFFUSION_ENABLED` in `hardware/model_matrix_registry.py`). While it is off, `diffusion-model` is not a command, `server start` starts no sidecar and removes a leftover one without a word, `server stop`/`remove` remove a leftover too, `endpoints` prints no diffusion URL, and `model list`/`model download` leave the diffusion model out. The `--diffusion-*` flags are accepted with their help suppressed. Everything about the sidecar in this document describes it switched on.
+
 ```bash
 puffin-admin main-model set MODEL [--no-onyx]
 puffin-admin main-model inspect [--deep]

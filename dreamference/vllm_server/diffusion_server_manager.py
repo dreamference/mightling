@@ -226,6 +226,21 @@ class DiffusionServerManager:
         subprocess.run(["docker", "stop", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"✅ Container {container_name} stopped.")
 
+    @classmethod
+    def remove_leftover(cls, port: int = DEFAULT_DIFFUSION_PORT) -> None:
+        """
+        Removes a sidecar container left from before diffusion was switched off, without a word.
+
+        The container runs with `--restart unless-stopped`, so one started by an older Puffin
+        would come back at every boot and hold memory for a model nothing uses. A missing
+        container is the normal case and is not an error.
+
+        Args:
+            port (int): Port the sidecar was started on.
+        """
+        subprocess.run(["docker", "rm", "-f", f"dreamference-diffusion-{port}"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     def remove_server(self, port: int = DEFAULT_DIFFUSION_PORT) -> None:
         """
         Removes the diffusion sidecar container.

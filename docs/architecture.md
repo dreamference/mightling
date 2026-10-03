@@ -13,9 +13,8 @@ flowchart LR
     D["puffin-app<br/>desktop window"]
     O["Web chat (Onyx Lite)<br/>:3000"]
     H["Helpers<br/>SearXNG · Whisper<br/>Gmail · Image search"]
-    subgraph models["Model servers"]
+    subgraph models["Model server"]
         V["vLLM, main model<br/>:8000"]
-        F["Diffusion model<br/>:8001"]
     end
     T --> V
     T -- "search, fetch, Gmail" --> H
@@ -28,7 +27,6 @@ flowchart LR
 | Part | What it is | Where it runs |
 |---|---|---|
 | Model server | vLLM serving the main model through an OpenAI-compatible API | Docker container, port 8000 |
-| Diffusion model | A small code-diffusion model with its own OpenAI-compatible API | Docker container, port 8001, capped at 8 GB |
 | `puffin` | The terminal agent, a patched build of the Codex CLI | A native binary, linked from `~/.local/bin` |
 | Web chat | Onyx Lite: web server, API server, PostgreSQL | Docker containers, port 3000 |
 | SearXNG | Metasearch: queries public search engines for web search | Docker container, reachable only from this machine |
@@ -77,6 +75,3 @@ that in two layers:
 2. **During a load.** A watchdog samples the kernel's memory-pressure signal (PSI) every
    second. If pressure spikes, or stays high, it kills the model container before the host stalls,
    through the fastest route the host can still take.
-
-The diffusion model uses a fixed memory cap instead. It is small enough that a contained
-out-of-memory kill is the worst case.

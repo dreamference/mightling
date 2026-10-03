@@ -28,6 +28,7 @@ from dreamference.hardware import detect_gb10_hardware, download_model, download
 from dreamference.vllm_server import VLLMServerManager, DiffusionServerManager, DEFAULT_VLLM_IMAGE, DEFAULT_DIFFUSION_PORT
 from dreamference.vllm_server.model_loading_monitor import create_model_loading_monitor
 from dreamference.mcp_server import main as run_mcp_server
+from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
 # Global Rich console instance for styled terminal outputs
 console: Final[Console] = Console()
@@ -833,11 +834,15 @@ class DreamferenceCLIController:
                  "and per-workload speculative acceptance (sends extra requests; slower)",
         )
 
-        # Command: puffin-admin diffusion-model
-        diffusion_model_parser = subparsers.add_parser("diffusion-model", help="Diffusion model operations")
-        diffusion_model_subparsers = diffusion_model_parser.add_subparsers(dest="diffusion_model_command", help="Diffusion model commands")
-        diffusion_model_set_parser = diffusion_model_subparsers.add_parser("set", help="Set the diffusion model served beside the main one")
-        diffusion_model_set_parser.add_argument("model_name", type=str, help="Name of the diffusion model to set")
+        # Command: puffin-admin diffusion-model. Absent while diffusion is switched off
+        # (DIFFUSION_ENABLED), so it is neither listed nor accepted.
+        diffusion_on = ModelMatrixRegistry.diffusion_enabled()
+        diffusion_model_parser = None
+        if diffusion_on:
+            diffusion_model_parser = subparsers.add_parser("diffusion-model", help="Diffusion model operations")
+            diffusion_model_subparsers = diffusion_model_parser.add_subparsers(dest="diffusion_model_command", help="Diffusion model commands")
+            diffusion_model_set_parser = diffusion_model_subparsers.add_parser("set", help="Set the diffusion model served beside the main one")
+            diffusion_model_set_parser.add_argument("model_name", type=str, help="Name of the diffusion model to set")
 
         # Command: puffin-admin model download
         # Command: puffin-admin model list
@@ -894,18 +899,22 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--guided-decoding-backend", default=None, help="Structured-outputs backend for deterministic JSON/tool calls (auto, xgrammar, guidance). Unset leaves vLLM's own default")
         start_server_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=None, help="Save and load model in tensorize (.tensors) format (default: False)")
         start_server_parser.add_argument("--docker-image", default=None, help="Docker image for vLLM. Unset uses the model's own docker_image recipe entry, then the pinned default")
-        start_server_parser.add_argument("--diffusion-model", default=None, help=f"Diffusion model to serve beside the main one (default: the configured diffusion model, {DEFAULT_DIFFUSION_MODEL})")
-        start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port for the diffusion sidecar's OpenAI endpoint")
-        start_server_parser.add_argument("--no-diffusion", action="store_true", help="Skip starting the diffusion sidecar")
+        # The diffusion flags stay accepted while diffusion is off, so an old script does not
+        # break, but their help is suppressed and they change nothing.
+        def diffusion_help(text: str) -> str:
+            return text if diffusion_on else argparse.SUPPRESS
+        start_server_parser.add_argument("--diffusion-model", default=None, help=diffusion_help(f"Diffusion model to serve beside the main one (default: the configured diffusion model, {DEFAULT_DIFFUSION_MODEL})"))
+        start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port for the diffusion sidecar's OpenAI endpoint"))
+        start_server_parser.add_argument("--no-diffusion", action="store_true", help=diffusion_help("Skip starting the diffusion sidecar"))
         # Command: puffin-admin server stop
-        stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM and diffusion Docker containers")
+        stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM and diffusion Docker containers" if diffusion_on else "Stop the running model server")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
-        stop_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port of the diffusion sidecar to stop")
+        stop_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port of the diffusion sidecar to stop"))
 
         # Command: puffin-admin server remove
-        remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM and diffusion Docker containers")
+        remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM and diffusion Docker containers" if diffusion_on else "Remove the model server's container")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
-        remove_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help="Port of the diffusion sidecar to remove")
+        remove_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port of the diffusion sidecar to remove"))
 
         # Command: puffin-admin server logs
         server_logs_parser = server_subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
@@ -1168,7 +1177,6 @@ class DreamferenceCLIController:
         parser.command_groups = {
             "model": (model_parser, "model_command"),
             "main-model": (main_model_parser, "main_model_command"),
-            "diffusion-model": (diffusion_model_parser, "diffusion_model_command"),
             "clear": (clear_parser, "clear_command"),
             "server": (server_parser, "server_command"),
             "puffin": (onyx_parser, "onyx_command"),
@@ -1176,6 +1184,8 @@ class DreamferenceCLIController:
             "desktop": (desktop_parser, "desktop_command"),
             "searxng": (searxng_parser, "searxng_command"),
         }
+        if diffusion_model_parser is not None:
+            parser.command_groups["diffusion-model"] = (diffusion_model_parser, "diffusion_model_command")
         return parser
 
     @classmethod
@@ -1257,14 +1267,14 @@ class DreamferenceCLIController:
         if args.command == "model":
             if args.model_command == "list":
                 cls.display_header()
-                from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
                 table = Table(title="Available Puffin Models")
                 table.add_column("Model Name", style="cyan", no_wrap=True)
                 table.add_column("HuggingFace Repo ID", style="magenta")
                 
                 for key, spec in ModelMatrixRegistry.MATRIX.items():
-                    table.add_row(key, spec.hf_repo_id)
+                    if ModelMatrixRegistry.is_offered(key):
+                        table.add_row(key, spec.hf_repo_id)
                 
                 console.print(table)
                 sys.exit(0)
@@ -1276,6 +1286,9 @@ class DreamferenceCLIController:
                     download_all_models(hf_token=config.hf_token, auto_tensorize=auto_t)
                 else:
                     target_model = args.model or config.model
+                    if target_model and not ModelMatrixRegistry.is_offered(target_model):
+                        print(f"❌ '{target_model}' is not a model Puffin offers.")
+                        sys.exit(1)
                     if target_model:
                         download_model(target_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                         if config.draft_model:
@@ -1314,6 +1327,9 @@ class DreamferenceCLIController:
                 # A diffusion checkpoint pointed at vLLM fails only at launch, with an error that
                 # never mentions the real problem. Refuse it here, where the fix is nameable.
                 from dreamference.hardware import model_is_diffusion
+                if not ModelMatrixRegistry.is_offered(args.model_name):
+                    out_console.print(f"[bold red]❌ '{args.model_name}' is not a model Puffin offers.[/bold red]")
+                    sys.exit(1)
                 if model_is_diffusion(args.model_name):
                     out_console.print(
                         f"[bold red]❌ '{args.model_name}' is a diffusion model and cannot be served "
@@ -2019,7 +2035,8 @@ class DreamferenceCLIController:
             cred_table.add_column("Value", style="white")
             cred_table.add_row("Base URL (localhost)", "http://localhost:8000/v1")
             cred_table.add_row("Base URL (LAN IP)", f"http://{local_ip}:8000/v1")
-            cred_table.add_row("Diffusion model URL", f"http://localhost:{DEFAULT_DIFFUSION_PORT}/v1")
+            if ModelMatrixRegistry.diffusion_enabled():
+                cred_table.add_row("Diffusion model URL", f"http://localhost:{DEFAULT_DIFFUSION_PORT}/v1")
             cred_table.add_row("API Key", "Optional (use --api-key on serve; otherwise not required)")
             cred_table.add_row("Auth Header", "Authorization: Bearer <key> (when enabled)")
             console.print(cred_table)
@@ -2044,7 +2061,11 @@ class DreamferenceCLIController:
                 # accounted for — the reverse order lets a marginal KV check pass and then lose
                 # the sidecar's memory mid-load. Its failure never blocks the main model.
                 diffusion_mgr = None
-                if not args.no_diffusion:
+                if not ModelMatrixRegistry.diffusion_enabled():
+                    # Switched off: a sidecar an older Puffin left running (it restarts at boot)
+                    # goes before the pre-flight reads free memory, and nothing is said.
+                    DiffusionServerManager.remove_leftover(args.diffusion_port)
+                elif not args.no_diffusion:
                     diffusion_model = args.diffusion_model or config.diffusion_model
                     diffusion_mgr = DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}")
                     try:
@@ -2194,14 +2215,20 @@ class DreamferenceCLIController:
                 vllm_mgr.stop_server(port=args.port)
                 from dreamference.node import NodeAdvertiser
                 NodeAdvertiser.on_server_stopped()
-                DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").stop_server(port=args.diffusion_port)
+                if ModelMatrixRegistry.diffusion_enabled():
+                    DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").stop_server(port=args.diffusion_port)
+                else:
+                    DiffusionServerManager.remove_leftover(args.diffusion_port)
             elif args.server_command == "remove":
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 vllm_mgr.remove_server(port=args.port)
                 from dreamference.node import NodeAdvertiser
                 NodeAdvertiser.on_server_stopped()
-                DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").remove_server(port=args.diffusion_port)
+                if ModelMatrixRegistry.diffusion_enabled():
+                    DiffusionServerManager(host=f"http://localhost:{args.diffusion_port}").remove_server(port=args.diffusion_port)
+                else:
+                    DiffusionServerManager.remove_leftover(args.diffusion_port)
             elif args.server_command == "logs":
                 cls.display_header()
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")

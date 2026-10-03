@@ -393,6 +393,8 @@ def test_a_start_that_fails_does_not_leave_the_node_saying_loading(monkeypatch):
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0", "ready"))
     monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
     monkeypatch.setattr(VLLMServerManager, "start_server", refused)
+    from dreamference.vllm_server import DiffusionServerManager
+    monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
     monkeypatch.setattr("sys.argv", ["puffin-admin", "server", "start", "--no-diffusion"])
     with pytest.raises(SystemExit):
         controller.main()

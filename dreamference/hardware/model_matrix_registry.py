@@ -34,6 +34,15 @@ DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.8-27b-nvfp4-dflash2"
 # start` launches both.
 DEFAULT_DIFFUSION_MODEL_ALIAS: Final[str] = "tiny-a2d-coder-0.5b-diffusion"
 
+# Whether Puffin uses a diffusion model at all. Off since 2026-10-03: the only one that fits beside
+# the main model (Tiny-A2D 0.5B) was measured unusable in every role tried (FAST_TOOLS §1,
+# COMPACTION §9.3), so it cost memory and a download for nothing. Off means it is never started
+# or downloaded, a leftover container is removed, and nothing names it to the user: no
+# `diffusion-model` command, no `server start` flags, no endpoint row, no entry in `model list`.
+# The code stays, for a capable diffusion model later (FAST_TOOLS §3); setting this to True
+# restores all of it.
+DIFFUSION_ENABLED: Final[bool] = False
+
 class ModelMatrixRegistry:
     """
     Registry holding qualified models for NVIDIA GB10 hardware and short alias resolution logic.
@@ -934,6 +943,35 @@ class ModelMatrixRegistry:
         """
         spec = cls.get_spec(model_key) if model_key else None
         return bool(spec and spec.is_diffusion)
+
+    @classmethod
+    def diffusion_enabled(cls) -> bool:
+        """
+        Reports whether Puffin serves, downloads and shows diffusion models at all.
+
+        Read through this method rather than the constant, at call time, so every caller sees
+        the same switch and a test can turn it on in one place.
+
+        Returns:
+            bool: The value of DIFFUSION_ENABLED.
+        """
+        return DIFFUSION_ENABLED
+
+    @classmethod
+    def is_offered(cls, model_key: str) -> bool:
+        """
+        Reports whether a model is offered to the user: listed, downloadable, selectable.
+
+        Every model is, except a diffusion model while diffusion is switched off. Unknown keys
+        are offered, because a raw HuggingFace repository may still be downloaded by name.
+
+        Args:
+            model_key (str): Short model alias, HF repo ID, or display name.
+
+        Returns:
+            bool: False only for a diffusion model with diffusion switched off.
+        """
+        return cls.diffusion_enabled() or not cls.is_diffusion(model_key)
 
     @classmethod
     def declares_own_quantization(cls, model_key: str) -> bool:

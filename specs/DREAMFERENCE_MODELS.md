@@ -28,7 +28,7 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 | `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B (NVFP4) | 35B (3B active) | NVFP4 | 25–60 | — | Small-model option |
 | `qwen3.8-27b-dflash2-draft` | Qwen 3.8 27B DFlash2 drafter (NVFP4) | 1B | NVFP4 | 1–2 | — | Drafter named by the default recipe's `speculative_config`; not served on its own |
 | `qwen3.5-122b-a10b-dflash-draft` | Qwen 3.5 122B-A10B DFlash drafter | 0.8B | BF16 | 1.5–2.5 | — | Drafter named by the DFlash recipes' `speculative_config`; not served on its own. Listed so memory gates and pre-download know its size |
-| `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion) | 0.6B | BF16 | 1.5–3 | — | **Default** diffusion model (`DEFAULT_DIFFUSION_MODEL_ALIAS`). `is_diffusion`: **not** servable by vLLM; runs in the diffusion sidecar |
+| `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion) | 0.6B | BF16 | 1.5–3 | — | **Default** diffusion model (`DEFAULT_DIFFUSION_MODEL_ALIAS`); **not offered while diffusion is switched off** (`DIFFUSION_ENABLED = False` since 2026-10-03: never started, downloaded or listed). `is_diffusion`: **not** servable by vLLM; runs in the diffusion sidecar |
 
 **HF repos:**
 - `RadixArk/Qwen3.8-27B-NVFP4`: the default, pinned to a revision;
