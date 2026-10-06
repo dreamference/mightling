@@ -1,8 +1,16 @@
 # Get started
 
-!!! info "Source access"
-    Puffin's source repository is not public yet, and no packaged release has been published.
-    These steps are for people with access to the repository.
+!!! tip "The quickest way: install a release"
+    Every [release](https://github.com/dgxcoder/dgxcoder/releases) carries `install.sh`, which
+    installs the prebuilt binaries and, on a GB10, `puffin-admin` and the host settings:
+
+    ```bash
+    curl -fsSLO https://github.com/dgxcoder/dgxcoder/releases/latest/download/install.sh
+    bash install.sh
+    ```
+
+    Then continue at [step 2](#2-start-the-model-server). The steps below install from a checkout,
+    which is what you want for changing Puffin itself.
 
 ## What you need
 
@@ -19,7 +27,7 @@
 ## 1. Install
 
 ```bash
-git clone --recurse-submodules <repository-url> puffin
+git clone --recurse-submodules https://github.com/dgxcoder/dgxcoder.git puffin
 cd puffin
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -46,11 +54,12 @@ puffin-admin server start
 The first start downloads the model weights, then loads the model. Expect several minutes. Later
 starts only load the model.
 
-!!! warning "The default model needs its own server image"
-    The default model runs on a custom vLLM image, `dreamference-vllm-dflash:0.23.0-aeon-dense5`,
-    built in stages from `Dockerfile.dflash` and `Dockerfile.dense` in the repository. The headers
-    of those files describe how. `server start` cannot build this image by itself yet, so build it
-    before the first start. Check with `docker image ls dreamference-vllm-dflash`.
+!!! note "The 122B fallbacks need their own server image"
+    The default model, Qwen3.8-27B, runs on a published SGLang image that `server start` pulls by
+    itself. The Qwen 3.5 122B fallbacks run on a custom vLLM image,
+    `dreamference-vllm-dflash:0.23.0-aeon-dense5`, built in stages from `Dockerfile.dflash` and
+    `Dockerfile.dense` in the repository (their headers describe how). `server start` cannot build
+    that image yet, so build it before choosing one of those models.
 
 Check that it is answering:
 

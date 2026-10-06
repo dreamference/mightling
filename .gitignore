@@ -64,3 +64,17 @@ site/
 # Tool caches (ruff, mypy)
 .ruff_cache/
 .mypy_cache/
+
+# Local tool files: editor and assistant settings, generated context maps, helper scripts
+.mcp.json
+.cursorrules
+.codesight/
+.neurr/
+.github/copilot-instructions.md
+/codex.md
+/do
+/pgy
+.cbmignore
+
+# A private checkout that is no longer a submodule of this repository
+/fano/

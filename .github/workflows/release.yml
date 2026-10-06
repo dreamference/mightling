@@ -146,19 +146,15 @@ jobs:
           node-version: "22"
       - name: Tauri CLI
         run: npm install --global "@tauri-apps/cli@^2"
-      # desktop/dist is gitignored, but the bundler insists on a frontend directory to copy even
-      # though every window loads the local Onyx server. This is the same placeholder a local
-      # checkout carries.
-      - name: Placeholder frontend
+      # The Work window's frontend (desktop/ui), which tauri.conf.json bundles as frontendDist; the
+      # Chat window still loads the local Onyx server directly. Its tests run first: they need no
+      # webview and no app-server.
+      - name: Work window frontend
+        working-directory: desktop/ui
         run: |
-          mkdir -p desktop/dist
-          cat > desktop/dist/index.html <<'EOF'
-          <!-- Placeholder only. Every window in tauri.conf.json loads the local Onyx server directly, but
-               the bundler still wants a frontend directory to copy. -->
-          <meta charset="utf-8">
-          <title>Puffin</title>
-          <p>Puffin is served from http://localhost:3000.</p>
-          EOF
+          npm ci
+          npm test
+          npm run build
       - name: Build bundles
         working-directory: desktop
         run: tauri build --config "{\"version\":\"$VERSION\"}"
@@ -220,6 +216,10 @@ jobs:
           gzip -9 -c "$bin/puffin-fetch" > "dist/puffin-fetch-$target.gz"
           # The router only: `puffin-admin code setup` fetches the indexers it runs.
           gzip -9 -c "$bin/puffin-code" > "dist/puffin-code-$target.gz"
+          # puffin is built from OpenAI's Codex (Apache 2.0), which asks that its licence and notice
+          # travel with the binaries.
+          cp codex/LICENSE dist/codex-LICENSE.txt
+          cp codex/NOTICE dist/codex-NOTICE.txt
           # `puffin update` checks every archive against this file before installing any.
           (cd dist && sha256sum "puffin-$target.gz" "codex-code-mode-host-$target.gz" \
             "puffin-search-$target.gz" "puffin-fetch-$target.gz" "puffin-code-$target.gz" \

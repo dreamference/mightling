@@ -10,8 +10,9 @@
 //! optional, because earlier releases do not carry them (v1.3.0 has the web commands and no
 //! `puffin-code`); the installed ones are then kept.
 //!
-//! The repository is private, so the GitHub API needs a token: `GH_TOKEN`, `GITHUB_TOKEN`, or
-//! whatever `gh auth token` prints.
+//! The repository is public, so no token is needed; one is sent when present (`GH_TOKEN`,
+//! `GITHUB_TOKEN`, or whatever `gh auth token` prints), which raises GitHub's rate limit and reads
+//! a private fork named by `PUFFIN_RELEASE_REPO`.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -156,9 +157,9 @@ pub async fn run() -> anyhow::Result<()> {
     .context("could not reach GitHub")?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         bail!(
-            "no published release found in {repo}. The repository is private, so this needs a \
-             token with access to it (GH_TOKEN, GITHUB_TOKEN or `gh auth login`); drafts and \
-             pre-releases are not offered as updates"
+            "no published release found in {repo}. Drafts and pre-releases are not offered as \
+             updates; a private repository needs a token with access to it (GH_TOKEN, \
+             GITHUB_TOKEN or `gh auth login`)"
         );
     }
     let release: serde_json::Value = response.error_for_status()?.json().await?;

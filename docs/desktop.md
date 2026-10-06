@@ -22,6 +22,28 @@ puffin app
 `puffin-admin desktop status` reports whether everything needed to build and run it is present.
 `puffin-admin desktop build` produces an installable `.deb` package and an AppImage.
 
+## The Work window
+
+A second window, **Work**, drives the terminal agent the way OpenAI's Codex app does, on your
+GB10. It talks to one `puffin app-server` of its own and needs no web chat:
+
+```bash
+puffin app --work               # open Work
+puffin app ~/my-project         # Work, with a new thread on that folder
+puffin app --thread <id>        # Work, on an existing thread
+```
+
+- **Threads grouped by project**, with replies, commands and their output, file changes and the
+  turn's diff as they stream.
+- **Approvals in the conversation**, Stop (or Esc), steering while a turn runs, and undo of the last
+  turn.
+- **Context use** with a Compress button, the served model and the `/airgapped` level.
+- **A permission picker** that greys out Full Access at `/airgapped on`; the server itself refuses
+  that combination for every client.
+
+Not there yet: review, git worktrees, settings pages and choosing a model (it is shown, not chosen).
+Night Shift holds back while a Work turn is running.
+
 ## Notes
 
 - **The web chat must be running.** If it is not answering, `puffin app` and

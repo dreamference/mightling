@@ -13,7 +13,7 @@ off.
 | Building `puffin` for the first time | Downloads of the Rust toolchain, build dependencies and a prebuilt V8 engine (checked against pinned checksums) | rustup, crates.io, GitHub |
 | The agent or web chat searches the web | The search query | Public search engines, through the SearXNG instance on your machine |
 | The agent fetches a page | A request for that URL | The website |
-| Gmail features, if you connect an account | IMAP reads of your mailbox | Google |
+| Gmail, Drive or Calendar, if you connect an account | Read-only requests for your mail, files or events | Google |
 | Signing in to the web chat with Google, if you enable it | The sign-in exchange | Google |
 | Image search, if you use it | The image query, then downloads of the matching images | Public search engines through SearXNG, then the sites hosting the images |
 | `puffin update` | A check for, and download of, the latest Puffin release | GitHub |
@@ -54,8 +54,19 @@ a URL, a mailbox read.
 ## The agent's sandbox
 
 `puffin` runs shell commands inside Codex's Linux sandbox, which limits what they can write. Network
-access from that sandbox is **on**, because the agent's web search and page fetching are shell
-commands. The sandbox controls where files can be written; it does not block network access.
+access from that sandbox is **on** by default, because the agent's web search and page fetching are
+shell commands.
+
+## Air-gapped sessions
+
+`/airgapped on` (or `puffin_airgapped = "on"` in `dreamference.toml`, or
+`DREAMFERENCE_PUFFIN_AIRGAPPED=on` for one run) gives every command the agent runs an empty network
+namespace: no search, no page fetch, no mail, no `curl`, `git fetch` or package install. Only the
+model server is reached. Full Access, which runs commands outside the sandbox, cannot be combined
+with it: Puffin refuses to start with both, greys Full Access out in `/permissions` and in the
+desktop app, and refuses `/airgapped on` in a Full Access session. `/airgapped` lists what the level
+does not cover, such as commands you approve to run outside the sandbox. See
+[Terminal agent](puffin.md#what-puffin-adds).
 
 ## Email is untrusted input
 

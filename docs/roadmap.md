@@ -2,32 +2,25 @@
 
 Work that is planned or designed but **not built yet**. Nothing here is a commitment to a date.
 
-Already shipped and so no longer listed here: the first release (v1.3.0, published 2026-10-02,
-installed in place by `puffin update`) and the code index (`puffin-code`, offered to the agent as
-tools).
+Already shipped and so no longer listed here: the code index (`puffin-code`, offered to the agent
+as tools), Gmail, Google Drive and Calendar in `/apps`, the desktop app's Work window, and
+observation masking with a per-output cap (built, off by default).
 
-## Gmail, Google Drive and Calendar in `/apps`
+## The Work window, continued
 
-*Status: designed; the scopes tested with Google.*
+*Status: Phase 1 built.*
 
-Codex's `/apps` without an OpenAI sign-in, listing Puffin's own apps: Gmail, Google Drive (My Drive
-and shared drives) and Google Calendar, all read-only, connected through the local Google sign-in so
-the tokens stay on your machine, and offered to the agent as tools rather than shell commands.
-
-## A Codex-style desktop app
-
-*Status: designed.*
-
-Today's desktop window stays as **Chat**. A second window, **Work**, drives the terminal agent the
-way OpenAI's Codex app does: threads, approvals, diffs, review and worktrees, all on your GB10.
+The desktop app's **Work** window drives `puffin` sessions: threads, approvals, diffs, Stop, steer
+and undo. Still to come: review, git worktrees, settings pages and choosing a model from the window.
 
 ## Keeping long tasks inside the context window
 
-*Status: designed and measured on recorded runs.*
+*Status: built, off by default; being measured.*
 
 Unattended runs (Night Shift, benchmarks) fill the context mostly with old command output. Hiding
 outputs older than the last few, and capping any single output, roughly halves how often a session
-has to summarise itself.
+has to summarise itself on recorded runs. It becomes the default once a benchmark shows it does not
+cost results.
 
 ## Setting up more GB10s
 

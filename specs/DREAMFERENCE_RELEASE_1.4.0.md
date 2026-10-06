@@ -1,13 +1,29 @@
-# Puffin 1.4.0 — release notes (draft)
+# Puffin 1.4.0 — release notes
 
-**Status:** draft, written 2026-10-03 from `git log v1.3.0..main` (126 commits, `v1.3.0` = `265ff75`, 2026-10-01). Not released, not tagged. It lives here rather than under `docs/` because everything in `docs/` is published to GitHub Pages on push. The release workflow writes GitHub's own notes (`--generate-notes`); this text is meant to be pasted over them.
+**Status:** the first public release. Drafted 2026-10-03 from `git log v1.3.0..main`, completed 2026-10-06 when `/apps`, the desktop Work window, observation masking and patch `0023` were merged. The text between the two rules is the GitHub release's description.
 
-**Version.** `dreamference.__version__` and setup.py still say `1.2.0`. That is expected: the release workflow stamps the tag's version into setup.py, `tauri.conf.json` and the `puffin` binary in its own checkout only, so the source is never bumped.
+**Version.** setup.py and `dreamference.__version__` say `1.4.0`; the release workflow still stamps the version it is given into setup.py, `tauri.conf.json` and the `puffin` binary in its own checkout.
 
 ---
 
+Puffin is OpenAI's Codex CLI running an open model on an NVIDIA GB10, with no cloud model, no OpenAI account and no phone-home, plus a browser chat assistant and a desktop app on the same local model. This is its first public release.
+
+**Install** on a GB10 (arm64 Ubuntu, Docker with the NVIDIA Container Toolkit):
+
+```bash
+curl -fsSLO https://github.com/dgxcoder/dgxcoder/releases/latest/download/install.sh
+bash install.sh
+puffin-admin server start
+cd ~/my-project && puffin
+```
+
+On any other Linux machine the same script installs the client only. Already on 1.3.0: `puffin update`.
+
 ## Highlights
 
+- **Gmail, Google Drive and Calendar in `/apps`.** Codex's `/apps` works without an OpenAI sign-in and lists Puffin's own three apps; Connect goes through a local Google sign-in, so tokens stay on your machine. Connected apps reach the model as read-only tools, each answer framed as untrusted text, and none is offered at `/airgapped on`.
+- **The desktop app has a Work window.** `puffin app --work` (or `puffin app <folder>`) drives `puffin` sessions: threads by project, streaming commands and diffs, approvals in the conversation, Stop, steer and undo, context use with Compress. The app server itself refuses Full Access at `/airgapped on`, for every client (patch `0023`).
+- **Long sessions can mask old tool output** (off by default). Past 85% of the context, older outputs are replaced by a placeholder naming a saved copy, and any one output is capped at 8,000 tokens.
 - **`/airgapped` is two levels and holds.** `off` or `on`; the DuckDuckGo-only level is gone (its engine answered with a CAPTCHA). At `on` a session is held by a seal outside the folders its commands can write, Full Access is refused together with `on` (at launch, in `/permissions`, and `/airgapped on` inside a Full Access session), Gmail is not offered, and `puffin update` keeps working from your own shell.
 - **The sandbox works outside the IDE.** Every `puffin-admin` run checks that bubblewrap can create its sandbox and offers to fix it: `puffin-admin host setup` installs an AppArmor profile that lets `/usr/bin/bwrap`, and nothing else, create user namespaces. Night Shift's timer, jobs over SSH and tasks sent to another node depend on it.
 - **The code index is actually used.** Its `code_*` tools now reach the local model (MCP tools are sent as plain functions), the prompt says when to use them, `search` reads function bodies, and the launcher waits up to 15 s for the index's server. On SWE-bench the agent went from 0 index queries in 24 instances to queries in 14 of 14.
@@ -55,32 +71,38 @@
 ### Egress audit
 - The result names the traced binary and its SHA-256, and credits patches only to a matching install. Both audits (`exec` and `--tui`) pass on the current build.
 
+### Desktop app
+- The Work window beside Chat, on `puffin app-server`; Chat is unchanged and `puffin app` alone still opens it.
+- Night Shift holds back while a Work turn is running.
+- Not yet: review, git worktrees, settings pages, choosing a model.
+
+### Apps
+- `puffin-admin google start|stop|status` runs the local Google service; `server start` starts it on a node.
+- Drive covers My Drive and shared drives (Docs and Slides as text, Sheets as CSV); Calendar covers every calendar.
+- The prompt names the connected apps' tools instead of the older Gmail shell commands.
+
+### Context budget
+- Observation masking (patch `0021`, leaf crate `puffin-rs/masking`) and the 8,000-token cap per tool output; `puffin-code show` pages at 100 lines and folds long docstrings.
+- `swe-bench run --mask on|off` measures it.
+
 ### Other
+- Start-up lines (air gap, skills, Night Shift, prompt) appear inside the TUI's history.
+- `puffin app-server` threads get the served model and Puffin's prompt, and the TUI's `/model` lists the local model without a ChatGPT sign-in.
+- SWE-bench's runtime carries `liblzma`, which `puffin` now links.
 - Night Shift holds the tasks of a night to the model server's KV pool.
 - The compaction ledger hook is on by default; the interactive compaction limit follows the KV pool.
 - Install from a release: `install.sh`, a package that works without a checkout, `puffin update` installs `puffin-code` too.
-
-## Specs added or reworked (no code yet)
-Puffin Apps (Gmail, Drive and Calendar through `/apps` with no OpenAI sign-in; scope test done), Puffin Desktop (a Codex-app-shaped Work window beside today's Chat), Context Budget (masking old tool outputs), Fleet (provisioning more GB10s, with the user's answers), Python Quality (a ratcheted code standard; Phase 0 built), Advisor node (on hold).
+- Release assets carry Codex's licence and notice beside the binaries built from it.
 
 ## Known issues
-- In the TUI, the start-up lines (`/airgapped on`'s and the skills line) are drawn under the first frame and not seen. A fix is in progress.
-- `puffin app-server` threads ignore the launcher's model and so run without Puffin's prompt. A fix is in progress; nothing in this release uses `app-server`.
-- Drive and Calendar need Google's full scopes with GNOME's client (the read-only scopes are blocked); Puffin's services will be read-only by construction.
+- Drive and Calendar need Google's full scopes with GNOME's client (the read-only scopes are refused); Puffin's services only ever read.
+- The Work window's links are not followable yet, and two windows opened separately run as two processes.
+- The default model's SGLang image is pulled by `server start`, but the 122B fallbacks need a custom vLLM image that it cannot yet build for you (`Dockerfile.dflash`, then `Dockerfile.dense`).
+
+## Licence
+Puffin is AGPL-3.0-or-later. `puffin` is built from OpenAI's Codex (Apache 2.0, `codex-LICENSE.txt` and `codex-NOTICE.txt` in the assets).
 
 ---
 
-## Before tagging
-
-Must land, then one `puffin-admin codex build`, both egress audits, and the full suite:
-
-1. **The start-up-line and app-server fixes** (worktree `quick-wins`, uncommitted at the time of writing) — or move them to Known issues as above.
-2. **`swe/runtime-lzma`** (unmerged branch) if it is meant for this release.
-3. **`tests/watchdog-leak`** (the test that leaves a watchdog thread running).
-4. **The overnight prompt A/B's spec results** (PROMPT §6, SWE-bench §13), so the notes can say what `high-swe` measured.
-
-Decide, not required:
-
-- **Context budget** (`ctx/budget`, masking off by default, and the revised spec on `spec/context-budget-v2`): ship off-by-default in 1.4.0, or wait for its benchmark and ship in 1.5.0. Recommended: 1.5.0, after the measurement.
-- **Apps Phase 1, the desktop Work window, Fleet provisioning**: in progress tonight, each needs a rebuild and live checks; recommended for 1.5.0.
-- **Python quality**: Phase 0 (tool settings, pinned dev tools) is in; the ratchet test lands with Phase 1, which needs no other branch open.
+## Specs added (no code yet)
+Fleet (provisioning more GB10s), Python Quality (a ratcheted code standard; Phase 0, the pinned tools, is in), PDF reading and self-speeding, and the Advisor node (on hold).
