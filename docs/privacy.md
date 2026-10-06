@@ -21,23 +21,24 @@ off.
 Apart from these, Puffin does not send your repositories, prompts or chats anywhere. The only content that leaves the machine is what these features need: a search query,
 a URL, a mailbox read.
 
-!!! note "Separate from upstream Codex"
-    `puffin` keeps its settings and sessions in `~/.puffin`, not in upstream Codex's `~/.codex`, so
-    a ChatGPT sign-in you made with OpenAI's `codex` is never visible to it. On first run it copies
-    your sessions, history and settings across, and never the sign-in. Codex's usage analytics are
-    switched off in the code itself, so no setting or sign-in can turn them back on.
+!!! note "A home of its own"
+    `puffin` keeps its settings and sessions in `~/.puffin`. It never reads `~/.codex`, so a cloud
+    sign-in stored there by another tool is never visible to it; on first run it copies sessions,
+    history and settings from there, and never the sign-in. Usage analytics are switched off in the
+    code itself, so no setting or sign-in can turn them back on.
 
 ## What Puffin switches off
 
 - **Web chat telemetry.** Onyx's anonymous usage reporting is disabled when you run `configure`.
-- **OpenAI services in the agent.**
-  - `login`/`logout` are refused.
-  - `cloud` and `remote-control` are hidden or refused.
-  - `/feedback`, which uploads logs to OpenAI, is removed.
-  - `/voice` and `/approve` are hidden.
-  - Codex's own update check is off.
-  - Codex's usage analytics are disabled in the code (patch `0013`), and `puffin` never reads
-    upstream Codex's `~/.codex`, where a ChatGPT sign-in may be stored.
+- **Cloud services in the agent.**
+  - `login`/`logout` are refused: there is no account.
+  - `cloud` and `remote-control`, which run or relay sessions on a vendor's servers, are hidden or
+    refused.
+  - `/feedback`, which uploaded session logs, is removed.
+  - `/voice` and `/approve`, which depend on cloud models, are hidden.
+  - The only update check is Puffin's own, `puffin update`.
+  - Usage analytics are disabled in the code (patch `0013`), and `puffin` never reads `~/.codex`,
+    where another tool may keep a cloud sign-in.
 - **Network exposure.** The web chat is published on `127.0.0.1` only (ports 80 and 3000), so its
   admin account is not reachable from other machines on your network; `configure` applies this.
   OpenHands, if you use it, is published on `127.0.0.1:3001`.
@@ -53,7 +54,7 @@ a URL, a mailbox read.
 
 ## The agent's sandbox
 
-`puffin` runs shell commands inside Codex's Linux sandbox, which limits what they can write. Network
+`puffin` runs shell commands inside its Linux sandbox, which limits what they can write. Network
 access from that sandbox is **on** by default, because the agent's web search and page fetching are
 shell commands.
 

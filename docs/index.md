@@ -8,36 +8,37 @@ hide:
 <div markdown>
 # Puffin
 
-A private AI assistant and coding agent that runs entirely on your NVIDIA GB10. The model, your
-code and your conversations stay on your machine.
+Your own AI coding agent. On your desk. Nothing leaves. Puffin turns an NVIDIA DGX Spark, or any
+GB10 machine, into a private AI that codes, searches and answers for you, with no cloud, no
+account, no API bill and no telemetry.
 </div>
 </div>
 
-Puffin serves a 122-billion-parameter model on a single NVIDIA GB10 workstation (128 GB of
-unified memory) and puts three things in front of it:
+Puffin serves a strong open model on one GB10 machine (128 GB of unified memory) and puts three
+things in front of it:
 
 <div class="puffin-cards" markdown>
 <div markdown>
 ### Terminal agent
 
-`puffin` reads your code, runs commands and makes changes in your repository. It is built on
-OpenAI's open-source Codex CLI, so its commands and flags will be familiar, but its model is the
-one on your machine.
+`puffin` reads your code, runs commands and tests, and makes changes in your repository, asking
+before anything risky. Its model is the one on your machine.
 
 [Terminal agent →](puffin.md)
 </div>
 <div markdown>
 ### Web chat
 
-A browser chat assistant with web search, voice input, image understanding and read-only access
-to your Gmail, all answered by the same local model.
+A browser chat assistant with web search, voice input and image understanding, all answered by the
+same local model.
 
 [Web chat →](web-chat.md)
 </div>
 <div markdown>
 ### Desktop app
 
-`puffin-app` puts the web chat in a window of its own, with its own launcher entry and icon.
+`puffin-app` puts the web chat in a window of its own, with a Work window (preview) that drives
+agent sessions with approvals, diffs and undo.
 
 [Desktop app →](desktop.md)
 </div>
@@ -45,18 +46,16 @@ to your Gmail, all answered by the same local model.
 
 ## Why Puffin
 
-- **Local by design.** Inference runs on your GB10. The coding agent sends its prompts to the model
-  you serve, not to a cloud model, and needs no OpenAI account. The web chat's telemetry is switched
-  off, and so are Codex's usage analytics. See [Privacy & security](privacy.md) for exactly what
-  does leave the machine.
-- **A strong model on one desk.** The default model is Qwen3.8-27B with speculative decoding.
-  On a GB10 it measures 25.5 tokens/s on prose, 50.3 on code and 87.0 on JSON, single-stream, with
-  a 262K-token context, and leaves most of the machine's memory free. See [Models](models.md).
-- **Built to keep the machine up.** On the GB10, the GPU and the operating system share one pool of
-  memory, so an oversized model load can freeze the whole machine. Puffin checks the host before
-  loading and watches memory pressure while it loads. See [Architecture](architecture.md).
-- **Familiar tools.** If you have used the Codex CLI, `puffin exec`, `puffin resume --last` and
-  `-c key=value` work the same way.
+- **Confidential, and you can prove it.** Inference runs on your GB10, nothing in Puffin phones
+  home, and `puffin-admin audit egress` traces a real session and lists every connection it made.
+  `/airgapped on` takes the network away from every command the agent runs. See
+  [Privacy & security](privacy.md) for exactly what can leave the machine, and when.
+- **Fast, with no rate limits.** The default model, Qwen3.8-27B with speculative decoding, measures
+  50 tokens/s on code, 87 on JSON and 25 on prose on a GB10, single-stream, with a 262K-token
+  context. Run several agents at once: there is no quota and no bill. See [Models](models.md).
+- **Easy.** One installer, no tuning, and the model load is guarded so it cannot freeze the
+  machine: on the GB10 the GPU and the system share one pool of memory, so Puffin checks the host
+  before loading and watches memory pressure while it loads. See [Architecture](architecture.md).
 
 ## Quick start
 

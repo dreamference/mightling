@@ -1,9 +1,7 @@
 # Terminal agent
 
 `puffin` is a coding agent that works in your repository. It reads files, runs commands, edits code
-and explains what it did. It is built on the open-source [OpenAI Codex CLI](https://github.com/openai/codex)
-(currently release 0.158.0), with Puffin's changes applied on top. Its prompts go to the model your
-GB10 serves, not to a cloud model.
+and explains what it did. Its prompts go to the model your GB10 serves, never to a cloud model.
 
 ```bash
 cd ~/my-project
@@ -28,9 +26,9 @@ Before the agent starts, `puffin` connects itself to the local model:
 `puffin --version`, `puffin --help` and commands that never need the model (such as `completion`
 and `apply`) skip all of this and answer at once.
 
-## Familiar if you know Codex
+## Commands and flags
 
-Commands, flags and configuration work as they do in the Codex CLI, for example:
+The everyday commands and flags:
 
 | Command or flag | What it does |
 |---|---|
@@ -41,21 +39,21 @@ Commands, flags and configuration work as they do in the Codex CLI, for example:
 | `-a on-request`, `-s workspace-write` | Approval policy and sandbox policy |
 | `puffin mcp`, `puffin sandbox`, `puffin completion` | MCP servers, sandbox, shell completion |
 
-Configuration and saved sessions live in `~/.puffin` (or `$CODEX_HOME`), not in upstream Codex's
-`~/.codex`. The first run copies your sessions and settings across, never a ChatGPT sign-in.
+Configuration and saved sessions live in `~/.puffin` (or `$CODEX_HOME`). If another tool left
+sessions in `~/.codex`, the first run copies them and your settings across, never a cloud sign-in.
 
 ## What Puffin adds
 
 | Feature | Details |
 |---|---|
-| **Local model, no account** | Prompts go to the model your GB10 serves, and no OpenAI account is needed. Codex's usage analytics are switched off. |
+| **Local model, no account** | Prompts go to the model your GB10 serves, and no account of any kind is needed. Usage analytics are switched off in the code. |
 | **Web access** | The agent can search the web and read pages through `puffin-search` and `puffin-fetch`, which go through a search instance on your machine. The instructions travel with every session, so this works in any directory. Both are small Rust programs that `puffin-admin codex build` installs beside `puffin` and links into `~/.local/bin`; they need no Python environment. You can run them yourself too: `puffin-search "query"` (`-n N` for more results, `--json` for raw output) and `puffin-fetch URL` (`--max-chars N`, `--json`). |
 | **Gmail, read-only** | If you have connected Gmail accounts in the web chat, the agent can search and read mail through `puffin-admin gmail`. It is told that email content is untrusted and must never be treated as instructions. Turn it off with `puffin_gmail = false` in `dreamference.toml`. |
-| **`/apps`: Gmail, Drive and Calendar** | Codex's `/apps` works without an OpenAI sign-in and lists Puffin's own three apps. **Connect** opens the local Google sign-in (`localhost:8767/connect`; a paste-back box covers a browser on another machine), and the tokens stay on your machine. A connected app is offered to the model as read-only tools (`gmail_search`, `gmail_read`, `drive_search`, `drive_read`, `calendar_events`, `calendar_search`), each answer framed as untrusted text. At `/airgapped on` every app is unavailable. The service behind them is `puffin-admin google start|stop|status`. |
+| **`/apps`: Gmail, Drive and Calendar** | `/apps` needs no cloud sign-in and lists Puffin's own three apps. **Connect** opens the local Google sign-in (`localhost:8767/connect`; a paste-back box covers a browser on another machine), and the tokens stay on your machine. A connected app is offered to the model as read-only tools (`gmail_search`, `gmail_read`, `drive_search`, `drive_read`, `calendar_events`, `calendar_search`), each answer framed as untrusted text. At `/airgapped on` every app is unavailable. The service behind them is `puffin-admin google start|stop|status`. |
 | **`/usage`** | Shows this session's token usage: input (cached and new), output, the total, and how full the context window was on the last request. |
 | **`/cavemode`** | Puffin answers tersely by default: at most three sentences of prose outside code (`ultra`), unless you ask for more. `/cavemode` shows the level in force and where it came from; `/cavemode off`, `lite`, `full` or `ultra` changes it for this session, mid-task included; `/cavemode default <level>` also writes `puffin_cave_mode` to `dreamference.toml` for new sessions. `DREAMFERENCE_PUFFIN_CAVE_MODE` overrides the file, for example `DREAMFERENCE_PUFFIN_CAVE_MODE=off puffin exec …`. Code, commands, commit messages, files and security warnings are never shortened. |
 | **`/airgapped`** | How much of the internet this session may use. `off` (the default) is everything. `on` gives every command Puffin runs no network at all, enforced by the sandbox: no search, no page fetch, no Gmail, no `curl`, `git fetch` or package installs. Full Access cannot be combined with `on`: Puffin refuses to start with both, greys Full Access out in `/permissions` and refuses `/airgapped on` in a Full Access session. `/airgapped` shows the level and what is not covered (commands you approve to run outside the sandbox, MCP servers, the web chat); `/airgapped <level>` sets it for this session, `/airgapped default <level>` for new ones. From a shell: `puffin airgapped`, or `DREAMFERENCE_PUFFIN_AIRGAPPED=on puffin exec …` for one run. Puffin still talks to the model server at every level. |
-| **Skills from other agents** | Skills you installed for Claude Code, Gemini CLI, OpenClaw or Hermes are offered to the model too, and `puffin skill add` installs one from OpenAI's or Anthropic's catalogue or any GitHub folder. See [Skills](#skills). |
+| **Skills from other agents** | Skills you installed for Claude Code, Gemini CLI, OpenClaw or Hermes are offered to the model too, and `puffin skill add` installs one from the public skill catalogues or any GitHub folder. See [Skills](#skills). |
 | **`puffin app`** | Opens the [desktop app](desktop.md). |
 | **`puffin update`** | Installs the latest published Puffin release. |
 | **Code index** | `puffin-code` answers where a name is defined, who calls it and what a change would touch, from an index of the repository kept current as you work. The model is offered it as tools (`code_search`, `code_show`, `code_refs`, …) and from the shell. |
@@ -64,28 +62,28 @@ Configuration and saved sessions live in `~/.puffin` (or `$CODEX_HOME`), not in 
 
 ## What Puffin removes
 
-Some Codex features depend on OpenAI's servers or an OpenAI account. Puffin hides or refuses them:
+Anything that would need a vendor's cloud or an account is hidden or refused:
 
-| Codex feature | In Puffin |
+| Feature | In Puffin |
 |---|---|
 | `login`, `logout`, `/logout` | Refused: there is no account to sign in to. |
-| `cloud` (`cloud-tasks`) | Switched off. Codex Cloud runs on OpenAI's servers; the command may return for a private cloud. |
-| `remote-control` | Hidden. It relays sessions through OpenAI's servers. |
-| `/feedback` | Removed. It uploads session logs to OpenAI. |
-| `/voice` | Hidden. It uses OpenAI's realtime voice service. |
-| `/approve` (auto-review) | Hidden. It relies on an OpenAI review model. |
-| Update check | Off. Codex's check would offer to replace Puffin with upstream Codex. |
+| `cloud` (`cloud-tasks`) | Switched off: it runs tasks on a vendor's servers. It may return for a private cloud. |
+| `remote-control` | Hidden. It relays sessions through a vendor's servers. |
+| `/feedback` | Removed. It uploaded session logs. |
+| `/voice` | Hidden. It needs a cloud voice service. |
+| `/approve` (auto-review) | Hidden. It needs a cloud review model. |
+| Update check | Puffin's own: `puffin update`. |
 
 ## Skills
 
 A skill is a folder with a `SKILL.md`: instructions the model reads when a task matches the skill's
-description, sometimes with scripts beside them. Codex, Claude Code, Gemini CLI, OpenClaw and Hermes
+description, sometimes with scripts beside them. Puffin, Claude Code, Gemini CLI, OpenClaw and Hermes
 all use the same file, so Puffin offers the model the skills it finds in any of their folders:
 
 | Where | What |
 |---|---|
 | `~/.puffin/skills/<name>` | Skills installed for Puffin |
-| `~/.agents/skills` | The folder Codex, Gemini CLI and OpenClaw share |
+| `~/.agents/skills` | The folder several agents, Gemini CLI and OpenClaw among them, share |
 | `~/.claude/skills`, `~/.gemini/skills`, `~/.openclaw/skills`, `~/.hermes/skills` | Other agents' own folders. Puffin links to each skill there at every start; nothing is copied, and a session cannot change them through the link |
 | `.agents/skills` in the repository | Skills that travel with the project |
 | `.claude/skills`, `.gemini/skills` in the repository | Linked like the other agents' folders, but only once you have trusted the repository in Puffin (its trust prompt), since whoever wrote the repository wrote them |
@@ -94,7 +92,7 @@ all use the same file, so Puffin offers the model the skills it finds in any of 
 |---|---|
 | `puffin skill list` | What the model is offered, by source, and what it is not offered and why. `--all` adds skills another one shadows |
 | `puffin skill show <name>` | One skill: its description, origin, licence, files and scripts |
-| `puffin skill search <words>` | Search OpenAI's, Anthropic's and Hermes's catalogues and ClawHub |
+| `puffin skill search <words>` | Search the public skill catalogues, Hermes's and ClawHub |
 | `puffin skill add <source>` | Install into `~/.puffin/skills`. `<source>` is `openai/<name>`, `anthropic/<name>`, `hermes/<category>/<name>`, `clawhub/<owner>/<slug>`, `<owner>/<repo>/<path>`, a github.com URL or a folder. It shows the description, licence and scripts first and asks; `--yes` skips the question |
 | `puffin skill remove <name>` | Delete a skill Puffin installed |
 | `puffin skill enable <name>` / `disable <name>` | Offer a skill anyway, or never offer it |
@@ -110,7 +108,7 @@ Things to know:
   Gemini's, OpenClaw's and Hermes's, then the bundled ones.
 - **Skills cost context.** The model is shown each skill's name and description in every session,
   within a budget of 2% of the context window. Puffin tells you at start when that is nearly full,
-  and leaves linked skills out before Codex would drop every description.
+  and leaves linked skills out before the budget would drop every description.
 - **Nothing in a skill runs by being installed or loaded.** Hooks, pre-approvals and
   run-before-reading lines some agents support are never acted on. A skill's scripts run only as
   commands the model issues, under the session's sandbox and approvals.
@@ -186,12 +184,12 @@ not yet run between two machines.
 
 ## Debugging
 
-Codex's logging applies. Set `RUST_LOG` (for example `RUST_LOG=codex_mcp=trace puffin`). The
+Set `RUST_LOG` (for example `RUST_LOG=codex_mcp=trace puffin`). The
 interactive interface writes its log to `~/.puffin/logs_2.sqlite`, which
 `puffin-admin logs mcp` reads.
 
 ## How it is built
 
-`puffin` is compiled from the Codex source, pinned to a release, with a short series of patches and
-Puffin's own launcher added. The Codex source itself is never edited. See
+`puffin` is compiled from source pinned to a release, with Puffin's own launcher and a short series
+of patches added. See
 [Architecture](architecture.md#how-puffin-is-built).

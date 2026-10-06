@@ -40,8 +40,8 @@ Search across PDFs, Word, PowerPoint and spreadsheet files as well as code:
 
 ## Returning features, locally
 
-Codex features that Puffin hides because they depend on OpenAI's servers, kept in the build so
-they can come back on local infrastructure:
+Features that Puffin hides because they depend on a vendor's cloud, kept in the build so they can
+come back on local infrastructure:
 
 - **`cloud`:** running tasks on a private cloud.
 - **`remote-control`:** driving sessions from another device through a relay you host.

@@ -59,13 +59,6 @@ puffin-admin server start
 The first start downloads the model weights, then loads the model. Expect several minutes. Later
 starts only load the model.
 
-!!! note "The 122B fallbacks need their own server image"
-    The default model, Qwen3.8-27B, runs on a published SGLang image that `server start` pulls by
-    itself. The Qwen 3.5 122B fallbacks run on a custom vLLM image,
-    `dreamference-vllm-dflash:0.23.0-aeon-dense5`, built in stages from `Dockerfile.dflash` and
-    `Dockerfile.dense` in the repository (their headers describe how). `server start` cannot build
-    that image yet, so build it before choosing one of those models.
-
 Check that it is answering:
 
 ```bash
@@ -78,7 +71,7 @@ puffin-admin endpoints
 puffin-admin codex build
 ```
 
-This compiles `puffin` from the Codex source in the repository plus Puffin's changes, installs it
+This compiles `puffin` from the source in the repository, installs it
 under `~/.local/share/dreamference/puffin/`, and links `~/.local/bin/puffin` to it. It installs a
 Rust toolchain if you have none. The first build compiles several hundred dependencies and takes a
 while; rebuilds after small changes take a few minutes.

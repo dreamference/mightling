@@ -24,7 +24,7 @@ puffin app
 
 ## The Work window
 
-A second window, **Work**, drives the terminal agent the way OpenAI's Codex app does, on your
+A second window, **Work**, drives the terminal agent from a desktop window, on your
 GB10. It talks to one `puffin app-server` of its own and needs no web chat:
 
 ```bash

@@ -26,8 +26,8 @@ flowchart LR
 
 | Part | What it is | Where it runs |
 |---|---|---|
-| Model server | vLLM serving the main model through an OpenAI-compatible API | Docker container, port 8000 |
-| `puffin` | The terminal agent, a patched build of the Codex CLI | A native binary, linked from `~/.local/bin` |
+| Model server | SGLang (or vLLM) serving the main model through the standard `/v1` chat API | Docker container, port 8000 |
+| `puffin` | The terminal agent | A native binary, linked from `~/.local/bin` |
 | Web chat | Onyx Lite: web server, API server, PostgreSQL | Docker containers, port 3000 |
 | SearXNG | Metasearch: queries public search engines for web search | Docker container, reachable only from this machine |
 | Whisper | Speech-to-text for the microphone button, on the CPU | Docker container |
@@ -43,21 +43,21 @@ shares the host's network while Onyx runs on Docker's default bridge. `configure
 
 ```mermaid
 flowchart LR
-    C[Codex source<br/>pinned release] --> E[exported copy]
+    C[Upstream source<br/>pinned release] --> E[exported copy]
     P[Puffin patches] --> E
     L[Puffin launcher<br/>Rust crate] --> E
     E --> X[cargo build] --> Y[puffin +<br/>codex-code-mode-host]
 ```
 
-- **Pinned source.** The Codex source sits in the repository pinned to a stable release, and is
-  never edited.
+- **Pinned source.** The source Puffin was forked from sits in the repository pinned to a stable
+  release, and is never edited in place.
 - **Built from a copy.** `puffin-admin codex build` exports that release to a scratch directory,
   adds Puffin's launcher crate, applies a short series of patches, and compiles.
   - The patches are small: the product name in the interface, and one-line hooks into the launcher.
   - The rest of Puffin's changes live in the launcher: finding the model, the prompt, and the
-    removed OpenAI-only commands.
-- **Easy to upgrade.** Moving to a newer Codex release is a change of pin plus refreshing whichever
-  patches stop applying.
+    removed cloud-only commands.
+- **Easy to upgrade.** Moving to a newer upstream release is a change of pin plus refreshing
+  whichever patches stop applying.
 - **Two programs.** The build produces `puffin` and `codex-code-mode-host`, the helper that runs
   the agent's Code Mode JavaScript in its own V8 engine. They are installed side by side.
 - **Rebuilt only when needed.** A build is recorded against the exact source, patches and launcher
