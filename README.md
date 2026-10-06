@@ -218,8 +218,8 @@ helps other GB10 owners find Puffin.
 
 ## Credits
 
-Puffin's terminal agent is built on the open-source [Codex CLI](https://github.com/openai/codex)
-(Apache 2.0), with its own launcher, sandbox rules and network hardening on top. It also stands on
+Puffin began as a fork of the open-source Codex CLI (Apache 2.0) and is growing into the world's
+leading confidential local AI software. It also stands on
 [SGLang](https://github.com/sgl-project/sglang), [vLLM](https://github.com/vllm-project/vllm),
 [Onyx](https://github.com/onyx-dot-app/onyx), [SearXNG](https://github.com/searxng/searxng) and the
 [Qwen](https://github.com/QwenLM) models. Thank you to all of them.
@@ -236,7 +236,7 @@ This covers Puffin's own code. The components it deploys keep their own licences
 2.0), SGLang and vLLM (Apache 2.0), Onyx (its own terms, including an `ee/` directory that is not
 free software and that Puffin leaves switched off), and each model under its own weights licence.
 
-NVIDIA, GB10, DGX and DGX Spark are trademarks of NVIDIA Corporation. OpenAI and Codex are
-trademarks of OpenAI. Qwen is a trademark of Alibaba Cloud. Puffin and Dreamference are not
+NVIDIA, GB10, DGX and DGX Spark are trademarks of NVIDIA Corporation. Qwen is a trademark of
+Alibaba Cloud. Other names are trademarks of their owners. Puffin and Dreamference are not
 affiliated with, sponsored by or endorsed by any of them; the names say only what Puffin runs on and
 is built from.
