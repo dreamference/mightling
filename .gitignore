@@ -76,8 +76,5 @@ site/
 /pgy
 .cbmignore
 
-# A private checkout that is no longer a submodule of this repository
-/fano/
-
 # The launch plan: private, kept out of the public repository (names press contacts and competitors)
 /puffin-launch/
