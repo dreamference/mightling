@@ -21,7 +21,7 @@
 
 ### 1.1. Hardware
 
-- **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU), in any of the eight machines built on it (§3.5): NVIDIA's DGX Spark and the Acer, ASUS, Dell, Gigabyte, HP, Lenovo and MSI boxes. Any host with ≥ 100 GB RAM also qualifies by the detection heuristic (§2), but the recipes and images target SM121.
+- **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU), in any of the eight machines built on it (§3.5): NVIDIA's DGX Spark and the Acer, ASUS, Dell, Gigabyte, HP, Lenovo and MSI boxes.
 - NVMe storage: the default model (~20 GB of weights, the SGLang image) fits a 1 TB drive, the smallest any GB10 machine ships with; the fallback's DFlash vLLM images are ~41 GB each, and SWE-bench keeps 100 GB free.
 
 ### 1.2. Operating System and Drivers
@@ -58,9 +58,10 @@
 ## 2. Hardware Identification
 
 `HardwareManager` reads `/proc/meminfo` and `nvidia-smi --query-gpu=name,driver_version,memory.total`. The machine qualifies as GB10 when:
-- the GPU name contains `GB10` or `BLACKWELL`; **or**
-- the PCI bus has the GB10's GPU, vendor `0x10de` device `0x2e12` (added 2026-10-06: a machine whose driver is not installed yet has no `nvidia-smi` to ask; `install.sh`'s `is_gb10` has the same fallback); **or**
-- total memory ≥ 100 GB. If no GPU name is available, it is reported as "NVIDIA GB10 (Simulated / Unified Memory Node)".
+- the GPU name contains `GB10`; **or**
+- the PCI bus has the GB10's GPU, vendor `0x10de` device `0x2e12` (added 2026-10-06: a machine whose driver is not installed yet has no `nvidia-smi` to ask; `install.sh`'s `is_gb10` has the same fallback).
+
+Nothing else qualifies. Until 2026-10-06 a GPU name containing `BLACKWELL` or total memory ≥ 100 GB did too, which counted an RTX PRO 6000 Blackwell workstation or any large x86 server as a GB10: `server start` then went on to SM121 recipes, and `node enable` advertised it.
 
 The vendor is never matched on: every GB10 machine names itself differently in DMI (`ASUSTeK COMPUTER INC.` / `GX10` here; the DGX Spark reports `NVIDIA` / `NVIDIA_DGX_Spark`). `puffin-admin status` shows it as **Machine** (DMI vendor and product) and **Operating System** (`DGX OS <version> (<Ubuntu>)` from `/etc/dgx-release`, or `/etc/os-release` alone), so a report says whose box it came from.
 

@@ -2,7 +2,7 @@
 NVIDIA GB10 Hardware Manager & Compatibility Verification.
 
 This module provides the HardwareManager class responsible for inspecting host physical
-RAM via /proc/meminfo, detecting Blackwell GPU specs via nvidia-smi, and evaluating
+RAM via /proc/meminfo, identifying a GB10 by nvidia-smi or its PCI id, and evaluating
 model memory budgets.
 """
 
@@ -96,18 +96,15 @@ class HardwareManager:
         sys_mem = cls.get_system_memory()
         total_mem_gb = sys_mem.total_gb
 
-        # Qualification logic: GB10 name check, the GB10's PCI id (a box whose driver is not
-        # installed yet has no nvidia-smi), or Unified Memory >= 100GB
-        if "GB10" in gpu_name.upper() or "BLACKWELL" in gpu_name.upper():
+        # Qualification: the GPU names itself GB10, or the GB10's PCI id is on the bus (a box whose
+        # driver is not installed yet has no nvidia-smi). Nothing else qualifies: "Blackwell" also
+        # names discrete cards (RTX PRO 6000 Blackwell), and a large x86 server has 100 GB of RAM.
+        if "GB10" in gpu_name.upper():
             is_gb10 = True
         elif cls.gb10_on_pci():
             is_gb10 = True
             if gpu_name == "N/A":
                 gpu_name = "NVIDIA GB10 (no driver answering: nvidia-smi is missing or failed)"
-        elif total_mem_gb >= 100.0:
-            is_gb10 = True
-            if gpu_name == "N/A":
-                gpu_name = "NVIDIA GB10 (Simulated / Unified Memory Node)"
 
         return HardwareTelemetry(
             is_gb10=is_gb10,

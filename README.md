@@ -96,7 +96,7 @@ Gmail alone can be switched off with `puffin_gmail = false`. Details:
 
 **You need** any GB10 machine with the operating system it ships with (DGX OS 7, or Ubuntu 24.04
 where the vendor offers it), Docker with the NVIDIA Container Toolkit, Python 3 and Git; on plain
-Ubuntu, `puffin-admin host check` says what DGX OS would have had. Expect about 70 GB of model weights on first start, an
+Ubuntu, `puffin-admin host check` says what DGX OS would have had. Expect about 20 GB of model weights on first start (the 122B fallback is about 70 GB), an
 8–12 minute kernel compile the first time the server loads, and a Rust build of `puffin` that takes
 a few minutes once its dependencies are cached, much longer the first time.
 

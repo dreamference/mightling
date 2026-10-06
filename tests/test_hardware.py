@@ -1,3 +1,5 @@
+import subprocess
+
 from dreamference.hardware import (
     detect_gb10_hardware,
     get_system_memory,
@@ -212,3 +214,17 @@ def test_every_gb10_machine_is_found_by_its_gpu_and_named_by_its_firmware(tmp_pa
     _write(tmp_path / "dgx-release", 'DGX_NAME="DGX Spark"\nDGX_SWBUILD_VERSION="7.2.3"\n\nDGX_OTA_VERSION="7.5.0"\n')
     assert HardwareManager.os_name() == "DGX OS 7.5.0 (Ubuntu 24.04.4 LTS)"
     assert HardwareManager.detect_gb10_hardware().os_name == "DGX OS 7.5.0 (Ubuntu 24.04.4 LTS)"
+
+
+def test_only_a_gb10_qualifies(monkeypatch, tmp_path):
+    # A discrete Blackwell card and a large server are not GB10s: the recipes target SM121's unified memory.
+    from dreamference.hardware import hardware_manager
+    from dreamference.hardware.hardware_manager import HardwareManager
+    monkeypatch.setattr(hardware_manager, "PCI_DEVICES_DIR", str(tmp_path / "pci"))
+    (tmp_path / "pci").mkdir()
+    monkeypatch.setattr(hardware_manager.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(HardwareManager, "get_system_memory",
+                        classmethod(lambda cls: hardware_manager.MemoryMetrics(total_gb=512.0, available_gb=400.0, used_gb=112.0)))
+    for name, expected in [("NVIDIA RTX PRO 6000 Blackwell Workstation Edition", False), ("NVIDIA GB10", True)]:
+        monkeypatch.setattr(hardware_manager.subprocess, "run", lambda *a, _n=name, **k: subprocess.CompletedProcess(a, 0, f"{_n}, 580.95, 0\n", ""))
+        assert HardwareManager.detect_gb10_hardware().is_gb10 is expected, name

@@ -1546,8 +1546,8 @@ class VLLMServerManager:
         hw = HardwareManager.detect_gb10_hardware()
         if not hw.is_gb10:
             raise RuntimeError(
-                "puffin-admin server start requires NVIDIA GB10 hardware (or ≥100 GB unified memory). "
-                "Current system does not meet the target specs."
+                "puffin-admin server start requires an NVIDIA GB10 machine (DGX Spark or one of its OEM "
+                "siblings): the model recipes and host-safety checks are written for its unified memory."
             )
 
         # The code index's runs must not share the machine with a model load: a frozen or running

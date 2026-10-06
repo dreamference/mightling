@@ -13,7 +13,7 @@ class HardwareTelemetry:
     Data model encapsulating hardware detection results and NVIDIA GB10 target qualification.
 
     Attributes:
-        is_gb10 (bool): True if host system qualifies as NVIDIA GB10 (>=100GB unified memory or Blackwell GPU).
+        is_gb10 (bool): True if the GPU names itself GB10 or the GB10's PCI id (10de:2e12) is on the bus.
         gpu_name (str): Full model name of detected GPU via nvidia-smi (e.g., 'NVIDIA GB10 Blackwell').
         driver_version (str): Active NVIDIA graphics driver version string.
         total_unified_memory_gb (float): Total unified LPDDR5X memory size in GB.
