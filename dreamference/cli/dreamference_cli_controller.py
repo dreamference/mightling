@@ -662,6 +662,10 @@ class DreamferenceCLIController:
 
         is_gb10_str = "[bold green]✅ Qualified (GB10 128GB Unified Memory Target)[/bold green]" if hw["is_gb10"] else "[yellow]⚠️ System running non-GB10 host[/yellow]"
         hw_table.add_row("System Target", is_gb10_str)
+        if hw.get("machine"):
+            hw_table.add_row("Machine", str(hw["machine"]))
+        if hw.get("os_name"):
+            hw_table.add_row("Operating System", str(hw["os_name"]))
         hw_table.add_row("GPU Hardware", str(hw["gpu_name"]))
         hw_table.add_row("Driver Version", str(hw["driver_version"]))
         hw_table.add_row("Total Unified Memory", f"{hw['total_unified_memory_gb']} GB")

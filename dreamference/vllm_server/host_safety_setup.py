@@ -16,6 +16,8 @@ Everything here changes the machine outside the user's home, so each command is 
 runs and sudo prompts on the terminal. Where sudo cannot prompt, the commands are only printed.
 """
 
+import getpass
+import grp
 import os
 import shutil
 import subprocess
@@ -34,6 +36,16 @@ SWAP_FILE: Final[str] = "/swap.img"
 SYSCTL_FILE: Final[str] = "/etc/sysctl.d/99-dreamference.conf"
 EARLYOOM_DEFAULTS: Final[str] = "/etc/default/earlyoom"
 FSTAB: Final[str] = "/etc/fstab"
+DOCKER_SOCKET: Final[str] = "/var/run/docker.sock"
+# Where NVIDIA documents installing the two things DGX OS ships and a plain Ubuntu does not. Every
+# GB10 machine ships DGX OS (HP and Lenovo also document Ubuntu 24.04), so these matter only to a
+# machine reinstalled with Ubuntu; none has been seen here (specs/DREAMFERENCE_SETUP.md §3.5).
+DOCKER_INSTALL_URL: Final[str] = "https://docs.docker.com/engine/install/ubuntu/"
+TOOLKIT_INSTALL_URL: Final[str] = (
+    "https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html")
+# Any one on PATH means the NVIDIA Container Toolkit is installed: `nvidia-ctk` since 1.12, the
+# hook and the CLI in every version.
+TOOLKIT_COMMANDS: Final[tuple] = ("nvidia-ctk", "nvidia-container-runtime-hook", "nvidia-container-cli")
 
 # Disk left free after the swap file is made: a root filesystem filled to the last block by its
 # own swap file is a worse machine than one with too little swap.
@@ -56,7 +68,7 @@ class HostSafetySetup:
         """
         found: List[Dict[str, Any]] = []
         for step in (cls._sysstat_step(), cls._oom_step(), cls._swap_step(), *cls._sysctl_steps(),
-                     cls._sandbox_step()):
+                     cls._container_step(), cls._sandbox_step()):
             if step is not None:
                 found.append(step)
         return found
@@ -166,7 +178,9 @@ class HostSafetySetup:
             "name": f"raise swap to {MIN_SWAP_GB:.0f} GB",
             "why": f"swap is {swap_gb:.1f} GB; with too little, the kernel stalls instead of shedding cold pages",
         }
-        areas = cls.swap_areas()
+        # zram is not counted (see `_swap_total_gb`), and it is no reason not to resize the swap
+        # file beside it: it stays as it is.
+        areas = [area for area in cls.swap_areas() if not os.path.basename(area["name"]).startswith("zram")]
         target = f"{MIN_SWAP_GB:.0f}G"
         make = [
             ["fallocate", "-l", target, SWAP_FILE],
@@ -232,6 +246,43 @@ class HostSafetySetup:
         return steps
 
     @classmethod
+    def _container_step(cls) -> Optional[Dict[str, Any]]:
+        """
+        The model server runs in Docker with `--gpus all`, which needs Docker, the NVIDIA Container
+        Toolkit, and a user who may talk to the daemon.
+
+        DGX OS ships all three, which is why `check_host_safety()` never had to ask; a GB10 machine
+        reinstalled with plain Ubuntu (HP and Lenovo document it) has none of them, and the first
+        sign used to be a `docker run` error from `server start`. Installing Docker and the toolkit
+        means adding a vendor's apt repository, so those two are explained, not done. Joining the
+        `docker` group is one command, and it is done.
+        """
+        if shutil.which("docker") is None:
+            return {
+                "name": "install Docker and the NVIDIA Container Toolkit",
+                "why": "the model server runs in a Docker container; DGX OS ships both, plain Ubuntu neither",
+                "manual": (f"Install Docker Engine ({DOCKER_INSTALL_URL}) and the NVIDIA Container "
+                           f"Toolkit ({TOOLKIT_INSTALL_URL}), then run this again."),
+            }
+        if not any(shutil.which(command) for command in TOOLKIT_COMMANDS):
+            return {
+                "name": "install the NVIDIA Container Toolkit",
+                "why": "without it `docker run --gpus all` fails, so no model server can start",
+                "manual": (f"Install it from NVIDIA's apt repository ({TOOLKIT_INSTALL_URL}), then "
+                           f"`sudo nvidia-ctk runtime configure --runtime=docker` and "
+                           f"`sudo systemctl restart docker` (which restarts every running container)."),
+            }
+        if cls._may_use_docker():
+            return None
+        user = cls._user()
+        return {
+            "name": f"let {user} use Docker",
+            "why": f"{user} is not in the docker group, so every docker command Puffin runs is refused; "
+                   f"it takes effect at your next login",
+            "commands": [["usermod", "-aG", "docker", user]],
+        }
+
+    @classmethod
     def _sandbox_step(cls) -> Optional[Dict[str, Any]]:
         """
         The one prerequisite here that is `puffin`'s, not the model server's: its command sandbox.
@@ -242,9 +293,19 @@ class HostSafetySetup:
         because every shell was a child of a snap-confined IDE; from a plain terminal, an SSH
         login or a systemd timer every sandboxed command failed (measured 2026-10-02).
         """
+        from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
+        if shutil.which("bwrap") is None:
+            # GNOME pulls bubblewrap in (WebKit and the desktop portal depend on it), so DGX OS has
+            # it; a machine installed as Ubuntu Server does not. Codex falls back to a bundled copy
+            # Puffin does not install, and Night Shift, node jobs and the code indexers call the
+            # system one, so it is installed, with the profile at the same time where it is needed.
+            return {
+                "name": "install bubblewrap",
+                "why": "`puffin`'s command sandbox, Night Shift tasks, node jobs and the code indexers all run in it",
+                "commands": [["apt-get", "install", "-y", "bubblewrap"], *(SandboxPrerequisite.fix_commands() or [])],
+            }
         if cls.sandbox_works() is not False:
             return None
-        from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
         step: Dict[str, Any] = {
             "name": "let bubblewrap create its sandbox",
             "why": "from an ordinary login `bwrap` is refused a user namespace, so every command "
@@ -288,6 +349,27 @@ class HostSafetySetup:
         if "bwrap:" in output:
             return False
         return True if result.returncode == 0 else None
+
+    @classmethod
+    def _may_use_docker(cls) -> bool:
+        """
+        Returns:
+            bool: True if this user can reach the Docker daemon: the socket is writable to this
+            process (root, an ACL, a rootless daemon elsewhere), or the user is listed in the
+            `docker` group, which counts before the next login makes it true for processes too.
+        """
+        if not os.path.exists(DOCKER_SOCKET) or os.access(DOCKER_SOCKET, os.W_OK):
+            return True
+        try:
+            return cls._user() in grp.getgrnam("docker").gr_mem
+        except KeyError:
+            return True           # no docker group to join: the socket is someone else's design
+        except OSError:
+            return True
+
+    @classmethod
+    def _user(cls) -> str:
+        return os.environ.get("SUDO_USER") or getpass.getuser()
 
     @classmethod
     def swap_areas(cls) -> List[Dict[str, Any]]:

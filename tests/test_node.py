@@ -1321,3 +1321,16 @@ def test_the_receiving_node_decides_what_lands_in_its_cache(tmp_path, monkeypatc
     from dreamference.node import NodeServe
     assert NodeServe.serve("model-receive not-a-model 10") == 2
     assert NodeServe.serve(f"model-receive {SYNC_KEY} lots") == 2
+
+
+def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypatch, capsys):
+    # A GB10 reinstalled as Ubuntu Server has no Avahi; DGX OS has it.
+    monkeypatch.setattr(NodeAdvertiser, "avahi_installed", classmethod(lambda cls: False))
+    asked = []
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged",
+                        classmethod(lambda cls, command, purpose: asked.append(command) or False))
+    assert NodeAdvertiser.enable() is False
+    assert asked == [["apt-get", "install", "-y", "avahi-daemon"]]
+    assert "PUFFIN_NODE" in capsys.readouterr().out
+    assert not NodeServiceFile.service_path.exists()
+

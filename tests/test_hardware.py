@@ -168,3 +168,47 @@ def test_qwen3_5_moe_entries_are_marked_vision_capable():
     assert model_supports_vision("llama-3.3-70b") is False
     assert model_supports_vision("qwen2.5-coder-32b") is False
     assert model_supports_vision("") is False
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_every_gb10_machine_is_found_by_its_gpu_and_named_by_its_firmware(tmp_path, monkeypatch):
+    # The eight GB10 machines share one GPU (PCI 10de:2e12) and differ in DMI and OS release;
+    # the GPU decides, and the rest is shown so a report says whose box it came from.
+    from dreamference.hardware import hardware_manager
+    from dreamference.hardware.hardware_manager import HardwareManager
+    monkeypatch.setattr(hardware_manager, "PCI_DEVICES_DIR", str(tmp_path / "pci"))
+    monkeypatch.setattr(hardware_manager, "DMI_DIR", str(tmp_path / "dmi"))
+    monkeypatch.setattr(hardware_manager, "DGX_RELEASE", str(tmp_path / "dgx-release"))
+    monkeypatch.setattr(hardware_manager, "OS_RELEASE", str(tmp_path / "os-release"))
+    monkeypatch.setattr(hardware_manager.shutil, "which", lambda name: None)      # no driver yet
+    monkeypatch.setattr(HardwareManager, "get_system_memory",
+                        classmethod(lambda cls: hardware_manager.MemoryMetrics(total_gb=16.0, available_gb=8.0, used_gb=8.0)))
+
+    (tmp_path / "pci").mkdir()
+    assert HardwareManager.gb10_on_pci() is False and HardwareManager.detect_gb10_hardware().is_gb10 is False
+    _write(tmp_path / "pci/0000:00:00.0/vendor", "0x10de\n")
+    _write(tmp_path / "pci/0000:00:00.0/device", "0x22ce\n")                     # a root port, not the GPU
+    assert HardwareManager.gb10_on_pci() is False
+    _write(tmp_path / "pci/000f:01:00.0/vendor", "0x10de\n")
+    _write(tmp_path / "pci/000f:01:00.0/device", "0x2e12\n")
+    hw = HardwareManager.detect_gb10_hardware()
+    assert hw.is_gb10 is True and "GB10" in hw.gpu_name
+
+    assert HardwareManager.machine_name() == "" and HardwareManager.os_name() == ""
+    _write(tmp_path / "dmi/sys_vendor", "ASUSTeK COMPUTER INC.\n")
+    _write(tmp_path / "dmi/product_name", "GX10\n")
+    assert HardwareManager.machine_name() == "ASUSTeK COMPUTER INC. GX10"
+    _write(tmp_path / "dmi/sys_vendor", "Dell Inc.\n")
+    # Not read from a Dell: the shape of a product name that already says whose it is.
+    _write(tmp_path / "dmi/product_name", "Dell Pro Max with GB10 FCM1253\n")
+    assert HardwareManager.machine_name() == "Dell Pro Max with GB10 FCM1253"
+
+    _write(tmp_path / "os-release", 'NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 24.04.4 LTS"\n')
+    assert HardwareManager.os_name() == "Ubuntu 24.04.4 LTS"
+    _write(tmp_path / "dgx-release", 'DGX_NAME="DGX Spark"\nDGX_SWBUILD_VERSION="7.2.3"\n\nDGX_OTA_VERSION="7.5.0"\n')
+    assert HardwareManager.os_name() == "DGX OS 7.5.0 (Ubuntu 24.04.4 LTS)"
+    assert HardwareManager.detect_gb10_hardware().os_name == "DGX OS 7.5.0 (Ubuntu 24.04.4 LTS)"
