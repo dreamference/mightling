@@ -923,6 +923,9 @@ def test_the_runtime_names_every_library_puffin_is_linked_against(monkeypatch):
                         if command[0] == "ldd" else real_run(command, **kw))
     loader, libraries = SweBenchRuntime.host_libraries("/x/puffin")
     assert loader == "/lib/ld-linux-aarch64.so.1" and len(libraries) == 3
+    ldd += "\tliblzma.so.5 => /lib/aarch64-linux-gnu/liblzma.so.5 (0x6)\n"
+    loader, libraries = SweBenchRuntime.host_libraries("/x/puffin")
+    assert "/lib/aarch64-linux-gnu/liblzma.so.5" in libraries and len(libraries) == 4
     ldd += "\tlibssl.so.3 => /lib/aarch64-linux-gnu/libssl.so.3 (0x5)\n"
     with pytest.raises(ValueError, match="libssl.so.3"):
         SweBenchRuntime.host_libraries("/x/puffin")
