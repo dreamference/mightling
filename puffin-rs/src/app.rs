@@ -5,6 +5,12 @@
 //! local Onyx web UI, so the launcher answers `app` itself before Codex parses the command line.
 //! It does what `puffin-admin desktop run` does before opening the window, minus building it:
 //! check Onyx is answering and empty the webview's HTTP cache.
+//!
+//! The window has a second half, Work: the coding agent on `puffin app-server`
+//! (specs/DREAMFERENCE_PUFFIN_DESKTOP.md). `puffin app --work`, `puffin app <folder>` and
+//! `puffin app --thread <id>` open it; `puffin app` alone still opens the chat, until Work passes
+//! its Phase 1 acceptance. Work does not need Onyx, and waits for the model server on its own
+//! start-up screen rather than refusing.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -26,17 +32,65 @@ const DESKTOP_ENTRY: &str = "puffin-app.desktop";
 const WEBVIEW_DATA_DIR: &str = "dev.dreamference.puffin";
 const WEBVIEW_CACHE_DIR: &str = "WebKitCache";
 
+/// Which window `puffin app` opens: Chat (the Onyx web UI), or Work with the arguments
+/// `puffin-app` takes for it (`--work`, `--cwd <folder>`, `--thread <id>`).
+#[derive(Debug, PartialEq)]
+pub enum Window {
+    Chat,
+    Work(Vec<String>),
+}
+
+/// Reads `puffin app`'s arguments. A folder must exist; it is passed on as an absolute path, since
+/// `puffin-app` starts in its own working directory.
+pub fn window(args: &[String]) -> Result<Window, String> {
+    let mut work = false;
+    let mut chat = false;
+    let mut forwarded = Vec::new();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--work" => work = true,
+            "--chat" => chat = true,
+            "--thread" => {
+                let id = rest.next().ok_or("--thread needs a thread id")?;
+                forwarded.extend(["--thread".to_string(), id.clone()]);
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown option {flag}")),
+            folder => {
+                let path = std::fs::canonicalize(folder).map_err(|error| format!("{folder}: {error}"))?;
+                if !path.is_dir() {
+                    return Err(format!("{folder} is not a folder"));
+                }
+                forwarded.extend(["--cwd".to_string(), path.display().to_string()]);
+            }
+        }
+    }
+    if chat && (work || !forwarded.is_empty()) {
+        return Err("--chat opens the chat window, which takes no folder or thread".to_string());
+    }
+    if work || !forwarded.is_empty() {
+        forwarded.insert(0, "--work".to_string());
+        return Ok(Window::Work(forwarded));
+    }
+    Ok(Window::Chat)
+}
+
 /// Handles `puffin app [args...]` and returns the process exit code.
 pub async fn open(args: &[String]) -> i32 {
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
-        println!("Open Puffin's desktop window (puffin-app) on the local Onyx web UI.\n");
-        println!("Usage: puffin app");
+        println!("Open Puffin's desktop window (puffin-app).\n");
+        println!("Usage: puffin app [--chat]               the chat, on the local Onyx web UI");
+        println!("       puffin app --work [<folder>]      the coding agent (Work), on a project folder");
+        println!("       puffin app --thread <id>          a thread in Work");
         return 0;
     }
-    if !args.is_empty() {
-        // Codex's `app` takes a workspace folder; the Puffin window is a chat, not an editor.
-        eprintln!("note: puffin-app opens the chat, not a folder; ignoring {}", args.join(" "));
-    }
+    let window = match window(args) {
+        Ok(window) => window,
+        Err(error) => {
+            eprintln!("❌ puffin app: {error}");
+            return 2;
+        }
+    };
 
     let Some(executable) = find_executable() else {
         eprintln!("❌ puffin-app is not installed.");
@@ -47,18 +101,24 @@ pub async fn open(args: &[String]) -> i32 {
     // error with no hint of what to start. On a client the web UI is the node's: `puffin-app`
     // finds it and forwards this address to it, and says in its own window when it cannot
     // (specs/DREAMFERENCE_PUFFIN_NODE.md §7), so there is nothing on this machine to check.
-    if puffin_node_locator::is_node() && !onyx_is_up(ONYX_WEB_URL).await {
-        eprintln!("❌ Puffin is not answering at {ONYX_WEB_URL}.");
-        eprintln!("💡 Start it first: puffin-admin puffin start");
-        return 1;
-    }
-    if let Some(home) = home_dir() {
-        let _ = std::fs::remove_dir_all(
-            home.join(".local/share").join(WEBVIEW_DATA_DIR).join(WEBVIEW_CACHE_DIR),
-        );
+    // Work needs neither Onyx nor its stylesheets.
+    if window == Window::Chat {
+        if puffin_node_locator::is_node() && !onyx_is_up(ONYX_WEB_URL).await {
+            eprintln!("❌ Puffin is not answering at {ONYX_WEB_URL}.");
+            eprintln!("💡 Start it first: puffin-admin puffin start");
+            return 1;
+        }
+        if let Some(home) = home_dir() {
+            let _ = std::fs::remove_dir_all(
+                home.join(".local/share").join(WEBVIEW_DATA_DIR).join(WEBVIEW_CACHE_DIR),
+            );
+        }
     }
 
     let mut command = Command::new(&executable);
+    if let Window::Work(forwarded) = &window {
+        command.args(forwarded);
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -148,5 +208,32 @@ mod tests {
         assert_eq!(exec_path(entry), Some(PathBuf::from("/opt/puffin/puffin-app")));
         assert_eq!(exec_path("Exec=\"/opt/puffin-app\"\n"), Some(PathBuf::from("/opt/puffin-app")));
         assert_eq!(exec_path("[Desktop Entry]\nName=x\n"), None);
+    }
+
+    fn args(text: &str) -> Vec<String> {
+        text.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn puffin_app_alone_still_opens_the_chat() {
+        assert_eq!(window(&[]), Ok(Window::Chat));
+        assert_eq!(window(&args("--chat")), Ok(Window::Chat));
+    }
+
+    #[test]
+    fn a_folder_or_a_thread_opens_work() {
+        assert_eq!(window(&args("--work")), Ok(Window::Work(args("--work"))));
+        assert_eq!(window(&args("--thread t1")), Ok(Window::Work(args("--work --thread t1"))));
+        let here = std::fs::canonicalize(".").map(|p| p.display().to_string()).unwrap_or_default();
+        assert_eq!(window(&args(". --work")), Ok(Window::Work(vec!["--work".into(), "--cwd".into(), here])));
+    }
+
+    #[test]
+    fn what_puffin_app_cannot_do_is_refused() {
+        assert!(window(&args("--thread")).is_err());
+        assert!(window(&args("--yolo")).is_err());
+        assert!(window(&args("/no/such/folder/anywhere")).is_err());
+        assert!(window(&args("--chat --work")).is_err());
+        assert!(window(&args("Cargo.toml")).is_err() || !std::path::Path::new("Cargo.toml").exists());
     }
 }

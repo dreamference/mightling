@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict, Final, List, Optional, Tuple
 
 from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR
+from dreamference.runner.codex_installer import CodexInstaller
 
 # Environment marker on every process a night run starts, so the run never mistakes its own
 # `puffin exec` sessions for someone working interactively.
@@ -29,6 +30,10 @@ NON_INTERACTIVE: Final[frozenset] = frozenset({
     "--version", "-V",
     "--help", "-h",
 })
+
+# Where `puffin-app` marks a `puffin app-server` that is running a turn, under `$CODEX_HOME/night`
+# (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §8.3); `desktop/src-tauri/src/bridge.rs` writes it.
+BUSY_DIR_NAME: Final[str] = "busy"
 
 GIB: Final[int] = 1024 ** 3
 
@@ -277,7 +282,57 @@ class NightShiftHost:
                 continue
             if cls.is_interactive(args[1:]):
                 pids.append(int(entry.name))
+        return pids + [pid for pid in cls.busy_app_server_pids(puffin_bin) if pid not in pids]
+
+    @classmethod
+    def busy_app_server_pids(cls, puffin_bin: str, codex_home: str | None = None) -> list[int]:
+        """Finds `puffin app-server` processes running a turn for the desktop app's Work window.
+
+        An app-server is not a session by its command line (`NON_INTERACTIVE`): an idle
+        window left open must not hold every night back. While a turn runs, `puffin-app` keeps a
+        marker named after the server's pid in `$CODEX_HOME/night/busy/`
+        (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §8.3). A marker counts when its pid is alive and is
+        the installed `puffin`; any other marker is left by a window killed hard, and is deleted.
+
+        Args:
+            puffin_bin: The installed `puffin` executable.
+            codex_home: `puffin`'s home folder; defaults to the one `puffin` resolves.
+
+        Returns:
+            list[int]: The busy servers' process ids.
+        """
+        busy_dir = Path(codex_home or CodexInstaller.home_dir()) / "night" / BUSY_DIR_NAME
+        try:
+            markers = list(busy_dir.iterdir())
+        except OSError:
+            return []
+        target = os.path.realpath(puffin_bin)
+        pids = []
+        for marker in markers:
+            pid = int(marker.name) if marker.name.isdigit() else 0
+            if pid > 0 and cls._process_alive(pid) and os.path.realpath(f"/proc/{pid}/exe") == target:
+                pids.append(pid)
+            else:
+                marker.unlink(missing_ok=True)
         return pids
+
+    @classmethod
+    def _process_alive(cls, pid: int) -> bool:
+        """Signal 0: whether a process exists, without touching it.
+
+        Args:
+            pid: The process id.
+
+        Returns:
+            bool: True when it exists, including one owned by another user.
+        """
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     @classmethod
     def is_interactive(cls, args: List[str]) -> bool:

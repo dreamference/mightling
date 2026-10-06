@@ -332,6 +332,44 @@ pub fn sealed_for_command() -> bool {
     resolve_for_command().level == Level::On
 }
 
+/// What Codex is told when it may not take a permission profile: the allowed set of its error.
+pub const FULL_ACCESS_ALLOWED: &str = "[read-only, workspace-write]: airgapped is on, and Full Access runs commands with no sandbox, which is what takes their network away";
+pub const SEAL_ROOT_ALLOWED: &str = "[folders that do not hold the air-gap seals]: a command that could write there could lift them";
+
+/// Why Codex may not take a permission profile, if it may not, as the `(field, candidate, allowed)`
+/// of the error it reports (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §8.2). Asked by Codex's config
+/// every time a profile is set (patch 0023), so it binds every client of the app server, not only
+/// the TUI's pickers and the launcher's argument check. The level here is the configured one: the
+/// config is resolved before a thread has an id, so a thread's own `/airgapped on` is not seen.
+pub fn permission_refusal(full_access: bool, writable_roots: &[PathBuf]) -> Option<(&'static str, String, String)> {
+    let seals = seal_dir();
+    let any_sealed = seals
+        .as_deref()
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .is_some_and(|mut entries| entries.next().is_some());
+    refusal(full_access, writable_roots, resolve(&[]).level == Level::On, seals.as_deref(), any_sealed)
+}
+
+/// [`permission_refusal`] on given facts. Full Access is refused at a configured `on`. A writable
+/// root holding the seals is refused while the level is `on` or any session is sealed; Full Access
+/// is not judged by that rule, since it has no roots and another session's choice is its own.
+pub fn refusal(
+    full_access: bool,
+    writable_roots: &[PathBuf],
+    configured_on: bool,
+    seals: Option<&Path>,
+    any_sealed: bool,
+) -> Option<(&'static str, String, String)> {
+    if full_access {
+        return configured_on.then(|| ("sandbox_mode", "danger-full-access".to_string(), FULL_ACCESS_ALLOWED.to_string()));
+    }
+    let seals = seals.filter(|_| configured_on || any_sealed)?;
+    writable_roots
+        .iter()
+        .find(|root| within(seals, std::slice::from_ref(*root)))
+        .map(|root| ("writable_roots", root.display().to_string(), SEAL_ROOT_ALLOWED.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,6 +480,29 @@ mod tests {
         assert_eq!((resolved.level, resolved.source), (Level::On, Source::Session));
         let resolved = resolve_guarded(Some("off"), None, &[], false, true);
         assert_eq!((resolved.level, resolved.source, resolved.invalid.len()), (Level::Off, Source::Session, 0));
+    }
+
+    #[test]
+    fn full_access_is_refused_only_at_a_configured_on() {
+        let refused = refusal(true, &[], true, None, false).unwrap_or_default();
+        assert_eq!((refused.0, refused.1.as_str()), ("sandbox_mode", "danger-full-access"));
+        assert_eq!(refusal(true, &[], false, None, true), None);
+        // Full Access is not judged by the seal rule: it has no roots to judge.
+        assert_eq!(refusal(true, &[PathBuf::from("/")], false, Some(Path::new("/run/user/1/puffin-airgapped")), true), None);
+    }
+
+    #[test]
+    fn a_writable_root_holding_the_seals_is_refused_while_anything_is_on() {
+        let seals = Path::new("/run/user/1/puffin-airgapped");
+        let run = [PathBuf::from("/run")];
+        let project = [PathBuf::from("/home/u/project"), PathBuf::from("/tmp")];
+        assert_eq!(refusal(false, &run, true, Some(seals), false).map(|r| r.1), Some("/run".to_string()));
+        assert_eq!(refusal(false, &run, false, Some(seals), true).map(|r| r.0), Some("writable_roots"));
+        assert_eq!(refusal(false, &[seals.to_path_buf()], true, Some(seals), false).map(|r| r.0), Some("writable_roots"));
+        // Nothing on, nothing sealed, or ordinary roots: allowed.
+        assert_eq!(refusal(false, &run, false, Some(seals), false), None);
+        assert_eq!(refusal(false, &project, true, Some(seals), true), None);
+        assert_eq!(refusal(false, &run, true, None, true), None);
     }
 
     #[test]

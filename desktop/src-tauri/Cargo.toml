@@ -12,6 +12,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 # Finds the Puffin node on the local network when this machine is not one (src/discover.rs).
 mdns-sd = { version = "0.21.4", default-features = false }
+# The Work window's bridge to `puffin app-server` (src/bridge.rs); its pure half is ../bridge.
+puffin-desktop-bridge = { path = "../bridge" }
+# The air-gap level, resolved as the sandbox helper and the launcher resolve it (§7, §8.2).
+puffin-airgapped = { path = "../../puffin-rs/airgapped" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 opt-level = "s"

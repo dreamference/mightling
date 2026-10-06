@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "dev.dreamference.puffin",
   "build": {
-    "frontendDist": "../dist"
+    "frontendDist": "../ui/dist"
   },
   "app": {
     "windows": [
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

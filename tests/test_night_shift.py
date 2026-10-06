@@ -466,6 +466,23 @@ def test_tui_command_lines_are_told_from_the_rest():
     assert not NightShiftHost.is_interactive(["night", "list"])
 
 
+def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_path):
+    busy = tmp_path / "night" / "busy"
+    busy.mkdir(parents=True)
+    # This test process stands in for `puffin app-server`: its marker counts while it lives.
+    (busy / str(os.getpid())).write_text('{"threads": ["t1"]}')
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    (busy / str(dead.pid)).write_text('{"threads": ["t2"]}')
+    (busy / "not-a-pid").write_text("{}")
+    assert NightShiftHost.busy_app_server_pids(sys.executable, str(tmp_path)) == [os.getpid()]
+    assert sorted(p.name for p in busy.iterdir()) == [str(os.getpid())]
+    # A live process that is not the installed `puffin` is not a session either.
+    assert NightShiftHost.busy_app_server_pids("/bin/true", str(tmp_path)) == []
+    # No markers, or no folder: an idle Work window holds nothing back.
+    assert NightShiftHost.busy_app_server_pids(sys.executable, str(tmp_path / "elsewhere")) == []
+
+
 def test_sizes_parse():
     assert NightShiftHost.parse_size("8G") == 8 * 1024 ** 3
     assert NightShiftHost.parse_size("512M") == 512 * 1024 ** 2
