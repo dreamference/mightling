@@ -22,9 +22,11 @@ $ cd ~/my-project && puffin        # and code with it
 model: RadixArk/Qwen3.8-27B-NVFP4
 ```
 
-Puffin, by **Dreamference**, is a local AI stack for the NVIDIA GB10. It gives you a
-terminal coding agent, a browser chat assistant and a desktop app, all answered by one model
-served on your own machine. Your code, your prompts and your conversations stay there.
+Puffin, by **Dreamference**, is a local AI stack for the NVIDIA GB10: NVIDIA's DGX Spark and the
+GB10 machines from Acer, ASUS, Dell, Gigabyte, HP, Lenovo and MSI, which share the chip, the
+128 GB of memory and DGX OS. It gives you a terminal coding agent, a browser chat assistant and a
+desktop app, all answered by one model served on your own machine. Your code, your prompts and
+your conversations stay there.
 
 ---
 
@@ -92,8 +94,9 @@ Gmail alone can be switched off with `puffin_gmail = false`. Details:
 
 ## Quick start
 
-**You need** an NVIDIA GB10 with 128 GB of unified memory running arm64 Ubuntu, Docker with the
-NVIDIA Container Toolkit, Python 3 and Git. Expect about 70 GB of model weights on first start, an
+**You need** any GB10 machine with the operating system it ships with (DGX OS 7, or Ubuntu 24.04
+where the vendor offers it), Docker with the NVIDIA Container Toolkit, Python 3 and Git; on plain
+Ubuntu, `puffin-admin host check` says what DGX OS would have had. Expect about 70 GB of model weights on first start, an
 8–12 minute kernel compile the first time the server loads, and a Rust build of `puffin` that takes
 a few minutes once its dependencies are cached, much longer the first time.
 

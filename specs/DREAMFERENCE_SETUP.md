@@ -21,13 +21,13 @@
 
 ### 1.1. Hardware
 
-- **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU). Any host with ≥ 100 GB RAM also qualifies by the detection heuristic (§2), but the recipes and images target SM121.
-- NVMe storage: the model caches plus the model-server images (the fallback's DFlash vLLM images are ~41 GB each) take hundreds of GB.
+- **NVIDIA GB10** (Blackwell SM121, 128 GB unified LPDDR5X, Arm `aarch64` CPU), in any of the eight machines built on it (§3.5): NVIDIA's DGX Spark and the Acer, ASUS, Dell, Gigabyte, HP, Lenovo and MSI boxes. Any host with ≥ 100 GB RAM also qualifies by the detection heuristic (§2), but the recipes and images target SM121.
+- NVMe storage: the default model (~20 GB of weights, the SGLang image) fits a 1 TB drive, the smallest any GB10 machine ships with; the fallback's DFlash vLLM images are ~41 GB each, and SWE-bench keeps 100 GB free.
 
 ### 1.2. Operating System and Drivers
 
-- Linux ARM64 (Ubuntu; this machine runs a 6.17 NVIDIA kernel).
-- The NVIDIA driver and the NVIDIA Container Toolkit, for `docker run --gpus all`.
+- Linux ARM64: DGX OS 7 (Ubuntu 24.04 underneath), which every GB10 machine ships with, or Ubuntu 24.04 with NVIDIA's packages where the vendor documents it (HP, Lenovo). This machine runs DGX OS 7.5.0 with the 6.17 NVIDIA kernel and driver 580.
+- The NVIDIA driver and the NVIDIA Container Toolkit, for `docker run --gpus all`. DGX OS ships both, Docker, Avahi and bubblewrap; on plain Ubuntu `puffin-admin host check` names what is missing (§3.3).
 - **Memory-safety prerequisites**, which `check_host_safety()` checks before a model load and aborts without: sysstat, 64 GB of swap, two raised sysctls, and `earlyoom` or `systemd-oomd` armed. `puffin-admin host setup` applies them (§3.3); `puffin-admin host check` only reports. See `DREAMFERENCE_INFERENCE.md` §7.
 
 ### 1.3. Software
@@ -59,7 +59,10 @@
 
 `HardwareManager` reads `/proc/meminfo` and `nvidia-smi --query-gpu=name,driver_version,memory.total`. The machine qualifies as GB10 when:
 - the GPU name contains `GB10` or `BLACKWELL`; **or**
+- the PCI bus has the GB10's GPU, vendor `0x10de` device `0x2e12` (added 2026-10-06: a machine whose driver is not installed yet has no `nvidia-smi` to ask; `install.sh`'s `is_gb10` has the same fallback); **or**
 - total memory ≥ 100 GB. If no GPU name is available, it is reported as "NVIDIA GB10 (Simulated / Unified Memory Node)".
+
+The vendor is never matched on: every GB10 machine names itself differently in DMI (`ASUSTeK COMPUTER INC.` / `GX10` here; the DGX Spark reports `NVIDIA` / `NVIDIA_DGX_Spark`). `puffin-admin status` shows it as **Machine** (DMI vendor and product) and **Operating System** (`DGX OS <version> (<Ubuntu>)` from `/etc/dgx-release`, or `/etc/os-release` alone), so a report says whose box it came from.
 
 There is no override variable. The `DREAMFERENCE_GB10_OVERRIDE` this document used to describe does not exist.
 
@@ -133,12 +136,16 @@ gh release download -R dgxcoder/dgxcoder -p install.sh && bash install.sh [--rol
 | `sar` missing | install sysstat, enable collection |
 | no OOM handler | install earlyoom, write `EARLYOOM_ARGS="-m 5,2 -s 100 -r 60"`, enable, restart |
 | earlyoom running with arguments that cannot fire here | rewrite the arguments, restart |
-| swap under 64 GB | resize `/swap.img` (or create it, with its fstab line) |
+| swap on disk under 64 GB (zram is not counted) | resize `/swap.img` (or create it, with its fstab line) |
 | `vm.min_free_kbytes`, `vm.watermark_scale_factor` too low | `sysctl -w`, and `/etc/sysctl.d/99-dreamference.conf` |
+| no `docker` | explained: Docker Engine and the NVIDIA Container Toolkit, with NVIDIA's and Docker's install pages |
+| no NVIDIA Container Toolkit (`nvidia-ctk`, its hook or `nvidia-container-cli`) | explained: install from NVIDIA's repository, `nvidia-ctk runtime configure --runtime=docker`, restart Docker |
+| the user cannot reach the Docker socket and is not in the `docker` group | `usermod -aG docker <user>` (effective at the next login) |
+| no `bwrap` | `apt-get install -y bubblewrap`, and the AppArmor profile below in the same step where the restriction is on |
 | `bwrap` refused a user namespace by AppArmor (from a transient user unit) | install `/etc/apparmor.d/puffin-bwrap`, `apparmor_parser -r` it |
 
 - Each command is printed, then run through `sudo`, which asks on the terminal. With no terminal nothing runs and the commands are printed.
-- **Swap is resized only when it is the single `/swap.img` Ubuntu sets up.** A partition, zram, or several areas are reported and left alone. So is a root filesystem without 64 GB and 20 GB to spare, and so is swap holding more than fits back into memory (`swapoff` would have to move it there).
+- **Swap is resized only when it is the single `/swap.img` Ubuntu sets up.** A partition or several areas are reported and left alone. zram is neither counted nor in the way (2026-10-06): its pages stay in the RAM a model load is short of, so `_swap_total_gb()` reads disk-backed areas from `/proc/swaps`, and a `/swap.img` beside zram is resized as if alone. So is a root filesystem without 64 GB and 20 GB to spare, and so is swap holding more than fits back into memory (`swapoff` would have to move it there).
 - A failed command stops its step; the host is read again at the end and what remains is listed.
 - On this machine the four model-load checks pass and no sudo runs.
 - **One more check, and its fix: bubblewrap's sandbox.** Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, and with no AppArmor profile exempting `/usr/bin/bwrap`, `bwrap` is refused a user namespace. Measured here on 2026-10-02: it works from the PyCharm terminal, whose processes carry the snap's AppArmor label, and fails from a systemd user unit (so also a plain terminal, an SSH login and the Night Shift timer) with `setting up uid map: Permission denied`; `puffin sandbox` fails there too. Every sandbox Puffin starts uses that `bwrap` (Codex prefers the system's bubblewrap on PATH; the code indexers and node jobs call it by name). `host check` tries `bwrap` from a transient user unit; `host setup` now fixes it by installing `/etc/apparmor.d/puffin-bwrap`, a profile for `/usr/bin/bwrap` alone in the shape of Ubuntu's own for sandboxing programs (`chrome`, `linux-sandbox`: `flags=(unconfined)` and `userns,`), and loading it with `apparmor_parser -r`. The sysctl set to 0 would also work, for every program on the machine, and is not offered. Where the restriction is not the cause (the sysctl is not 1), the step stays a manual one.
@@ -159,6 +166,38 @@ gh release download -R dgxcoder/dgxcoder -p install.sh && bash install.sh [--rol
 6. Tells you to run `puffin-admin server start`, then `puffin`.
 
 Until 2026-09-29 it defaulted to `qwen3.6-35b-a3b-nvfp4` and never built `puffin`.
+
+### 3.5. Every GB10 machine
+
+Puffin targets the chip, not a vendor's box. Eight machines carry it (researched 2026-10-06), all with 128 GB of unified LPDDR5x and the same GPU:
+
+| Machine | Storage | OS shipped | Verified here |
+|---|---|---|---|
+| NVIDIA DGX Spark (Founders Edition) | 4 TB, self-encrypting | DGX OS | no |
+| Acer Veriton GN100 (GN100-UD11) | up to 4 TB | DGX OS ("DGX Base OS") | no |
+| ASUS Ascent GX10 | 1 TB, 2 TB (Gen4) or 4 TB (Gen5) | DGX OS, the only one ASUS supports | **yes**: this machine, 1 TB (916 GB root), DGX OS 7.5.0 (7.2.3 as shipped), Ubuntu 24.04.4, kernel 6.17.0-1029-nvidia, driver 580.173.02 |
+| Dell Pro Max with GB10 (FCM1253) | 2 TB (QLC, Gen4) and up | DGX OS 7, lightly reskinned | no |
+| Gigabyte AI TOP ATOM (ATAGB10-9000) | 4 TB | DGX OS | no |
+| HP ZGX Nano G1n AI Station | 2 or 4 TB, self-encrypting | DGX OS 7, or Ubuntu 24.04 | no |
+| Lenovo ThinkStation PGX | 1 or 4 TB, self-encrypting | DGX OS, or Ubuntu Pro with NVIDIA's packages | no |
+| MSI EdgeXpert (MS-C931) | 1 or 4 TB | DGX OS | no |
+
+Sources: [itechguides, all eight compared](https://www.itechguides.com/all-nvidia-dgx-spark-versions-so-far-1-generation-8-official-systems/), [Phoronix on the Dell](https://www.phoronix.com/review/dell-pro-max-gb10-preview), [Jeff Geerling on the Dell](https://www.jeffgeerling.com/blog/2025/dells-version-dgx-spark-fixes-pain-points/), [NVIDIA's DGX OS 7 guide](https://docs.nvidia.com/dgx/dgx-os-7-user-guide), [NVIDIA forum, GB10 = 10de:2e12](https://forums.developer.nvidia.com/t/please-add-gb10-10de-2e12-to-the-signed-nvgrace-gpu-vfio-pci-in-the-dgx-spark-kernel/383780), [a plain-Ubuntu GB10 guide](https://github.com/timothystewart6/ubuntu-gb10).
+
+**What every machine shares, and so what Puffin relies on:**
+- `nvidia-smi` names the GPU `NVIDIA GB10` and reports `memory.total` as `[N/A]` (unified memory), which `detect_gb10_hardware()` already tolerates; the PCI id is `10de:2e12`.
+- DGX OS 7 is Ubuntu 24.04, so the apt package names (`sysstat`, `earlyoom`, `bubblewrap`, `avahi-daemon`, `libwebkit2gtk-4.1-dev`), the AppArmor user-namespace restriction and the systemd user session are the same on all of them.
+- The driver is 580 or later on every shipped image, which the CUDA 13 images (the SGLang default and the NGC vLLM base) need. Nothing checks the version; none older exists for this chip.
+- The default model, its pinned SGLang image (pulled, not built) and 64 GB of swap fit the smallest drive any of them ships, 1 TB.
+
+**What differs, and how each is handled:**
+- **DMI names.** Shown by `status`, never matched (§2). Only this ASUS's strings and the DGX Spark's published ones are known.
+- **Swap.** Not documented by any vendor; forum reports show DGX Sparks with 2 GiB and 16 GiB. `host setup` brings a single `/swap.img` (or none) to 64 GB itself; a partition, LVM or several areas are left for the owner, with what to do (§3.3). This ASUS has a 64 GB `/swap.img`, made by hand on 2026-08-14.
+- **OOM handler.** No vendor documents shipping earlyoom; systemd-oomd is installed on DGX OS but reported not enabled by default (inactive on this ASUS). Either way `host setup` installs and arms earlyoom (§3.3), and `check_host_safety()` accepts an active `systemd-oomd` instead.
+- **Plain Ubuntu instead of DGX OS** (HP and Lenovo document it; anyone can reinstall). DGX OS brings Docker, the NVIDIA Container Toolkit, Avahi and (through GNOME) bubblewrap, and this ASUS's first user is in the `docker` group; a server install has none of that. `host check` names each (§3.3), `host setup` installs bubblewrap and joins the `docker` group itself, and `node enable` installs `avahi-daemon` through sudo or publishes nothing and says how to reach the node by address. Docker and the toolkit come from vendor repositories and are left to the owner, with the links.
+- **The RTX Spark laptops** (GB10's Windows sibling, N1X, shipping from 2026-10) run Windows 11 on Arm and no Linux has been announced for them, so they cannot be a node: the model server needs Linux, Docker with the NVIDIA runtime, and the host-safety layer is Linux's. They are out of scope until NVIDIA ships Linux for them ([computingforgeeks](https://computingforgeeks.com/nvidia-rtx-spark-linux/)).
+
+**Not verified on hardware, so made to tolerate rather than assumed:** every machine but this ASUS; plain Ubuntu on any of them (the Docker, toolkit, `docker` group, bubblewrap and Avahi steps are covered by tests only); a swap layout other than a single `/swap.img`; zram; another vendor's DMI strings; the DGX Spark's 4 TB self-encrypting drive (nothing in Puffin touches disk encryption). The first owner of another machine should run `puffin-admin host check` and `puffin-admin status` and report both.
 
 ---
 

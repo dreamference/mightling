@@ -9,10 +9,22 @@ model memory budgets.
 import os
 import shutil
 import subprocess
-from typing import Tuple
+from typing import Dict, Final, Tuple
 from dreamference.hardware.memory_metrics import MemoryMetrics
 from dreamference.hardware.hardware_telemetry import HardwareTelemetry
 from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+
+# The GB10's GPU as the PCI bus lists it: the same chip in every GB10 machine (NVIDIA's DGX Spark
+# and the seven partner boxes), so it identifies one before a driver is installed, when there is
+# no `nvidia-smi` to ask. Read on an ASUS Ascent GX10 (`000f:01:00.0`, class 0x030000).
+GB10_PCI_VENDOR: Final[str] = "0x10de"
+GB10_PCI_DEVICE: Final[str] = "0x2e12"
+PCI_DEVICES_DIR: Final[str] = "/sys/bus/pci/devices"
+DMI_DIR: Final[str] = "/sys/class/dmi/id"
+# Present on DGX OS only; the partner boxes ship DGX OS too (HP and Lenovo also document plain
+# Ubuntu 24.04), and on this ASUS it says `DGX_PLATFORM="GX10"` beside the DGX Spark's name.
+DGX_RELEASE: Final[str] = "/etc/dgx-release"
+OS_RELEASE: Final[str] = "/etc/os-release"
 
 class HardwareManager:
     """
@@ -84,9 +96,14 @@ class HardwareManager:
         sys_mem = cls.get_system_memory()
         total_mem_gb = sys_mem.total_gb
 
-        # Qualification logic: GB10 name check or Unified Memory >= 100GB
+        # Qualification logic: GB10 name check, the GB10's PCI id (a box whose driver is not
+        # installed yet has no nvidia-smi), or Unified Memory >= 100GB
         if "GB10" in gpu_name.upper() or "BLACKWELL" in gpu_name.upper():
             is_gb10 = True
+        elif cls.gb10_on_pci():
+            is_gb10 = True
+            if gpu_name == "N/A":
+                gpu_name = "NVIDIA GB10 (no driver answering: nvidia-smi is missing or failed)"
         elif total_mem_gb >= 100.0:
             is_gb10 = True
             if gpu_name == "N/A":
@@ -100,8 +117,88 @@ class HardwareManager:
             available_memory_gb=sys_mem.available_gb,
             used_memory_gb=sys_mem.used_gb,
             vram_gb=vram_gb,
-            arch=os.uname().machine
+            arch=os.uname().machine,
+            machine=cls.machine_name(),
+            os_name=cls.os_name(),
         )
+
+    @classmethod
+    def gb10_on_pci(cls) -> bool:
+        """
+        Looks for the GB10's GPU on the PCI bus, without a driver.
+
+        Returns:
+            bool: True if a device with the GB10's vendor and device id is present.
+        """
+        try:
+            entries = os.listdir(PCI_DEVICES_DIR)
+        except OSError:
+            return False
+        for entry in entries:
+            device = os.path.join(PCI_DEVICES_DIR, entry)
+            if (cls._read_line(os.path.join(device, "vendor")) == GB10_PCI_VENDOR
+                    and cls._read_line(os.path.join(device, "device")) == GB10_PCI_DEVICE):
+                return True
+        return False
+
+    @classmethod
+    def machine_name(cls) -> str:
+        """
+        The vendor's name for this machine, from the firmware's DMI tables.
+
+        Every GB10 machine reports the same GPU, so this is the only reading that says whose box
+        Puffin is running on (an ASUS says `ASUSTeK COMPUTER INC.` and `GX10`; NVIDIA's own is
+        reported as `NVIDIA` and `NVIDIA_DGX_Spark`). It is shown, never matched on.
+
+        Returns:
+            str: Vendor and product joined, or whichever of the two exists; empty if neither.
+        """
+        vendor = cls._read_line(os.path.join(DMI_DIR, "sys_vendor"))
+        product = cls._read_line(os.path.join(DMI_DIR, "product_name"))
+        # "Dell Inc." and "Dell Pro Max ...": the product already names its maker.
+        if product and vendor and product.lower().startswith(vendor.split()[0].lower()):
+            return product
+        return " ".join(part for part in (vendor, product) if part)
+
+    @classmethod
+    def os_name(cls) -> str:
+        """
+        The operating system, naming the DGX OS release where there is one.
+
+        Returns:
+            str: e.g. `DGX OS 7.5.0 (Ubuntu 24.04.4 LTS)` or `Ubuntu 24.04.4 LTS`; empty if
+            neither file can be read.
+        """
+        ubuntu = cls._key_values(OS_RELEASE).get("PRETTY_NAME", "")
+        dgx = cls._key_values(DGX_RELEASE)
+        # The over-the-air version is the installed one; the build version is what the image
+        # shipped with and stays put after updates.
+        version = dgx.get("DGX_OTA_VERSION") or dgx.get("DGX_SWBUILD_VERSION")
+        if version:
+            return f"DGX OS {version} ({ubuntu})" if ubuntu else f"DGX OS {version}"
+        return ubuntu
+
+    @staticmethod
+    def _read_line(path: str) -> str:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                return handle.readline().strip()
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _key_values(path: str) -> Dict[str, str]:
+        """Reads a shell-style `KEY="value"` file such as /etc/os-release; empty if unreadable."""
+        values: Dict[str, str] = {}
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    key, sep, value = line.strip().partition("=")
+                    if sep and key and not key.startswith("#"):
+                        values[key] = value.strip().strip('"').strip("'")
+        except OSError:
+            pass
+        return values
 
     @classmethod
     def check_model_compatibility(cls, model_key: str) -> Tuple[bool, str]:

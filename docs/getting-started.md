@@ -14,9 +14,14 @@
 
 ## What you need
 
-- **An NVIDIA GB10 workstation** with 128 GB of unified memory, running a 64-bit ARM Linux
-  (Ubuntu). The default model needs about 72 GB of memory while it runs.
-- **Docker with the NVIDIA Container Toolkit.** The model server runs in a container.
+- **Any NVIDIA GB10 machine**: the DGX Spark, or the Acer Veriton GN100, ASUS Ascent GX10, Dell
+  Pro Max with GB10, Gigabyte AI TOP ATOM, HP ZGX Nano, Lenovo ThinkStation PGX or MSI EdgeXpert.
+  All have the same chip and 128 GB of unified memory, and ship DGX OS 7 (Ubuntu 24.04 underneath);
+  Puffin was developed on the ASUS. A 1 TB drive is enough. The RTX Spark laptops run Windows and
+  cannot be a Puffin node.
+- **Docker with the NVIDIA Container Toolkit.** The model server runs in a container. DGX OS
+  ships both; on a machine reinstalled with plain Ubuntu, `puffin-admin host check` lists them,
+  with bubblewrap and Avahi, among what to install.
 - **Python 3** (Puffin is developed on 3.12) and **Git**.
 - **Disk space for model weights.** The default model's weights are tens of gigabytes, downloaded
   from Hugging Face the first time the server starts.

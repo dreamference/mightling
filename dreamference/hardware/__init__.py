@@ -72,6 +72,8 @@ def detect_gb10_hardware() -> Dict[str, Any]:
         "used_memory_gb": hw.used_memory_gb,
         "vram_gb": hw.vram_gb,
         "arch": hw.arch,
+        "machine": hw.machine,
+        "os_name": hw.os_name,
     }
 
 def check_model_compatibility(model_key: str) -> Tuple[bool, str]:

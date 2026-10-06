@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -105,18 +106,28 @@ def release_server():
         server.close()
 
 
-def run_install(home, server, *args, token=None, uname_m="aarch64", gpu="Some Other GPU"):
-    """Runs install.sh with a `uname` and an `nvidia-smi` that report the machine the test wants,
-    whatever runs the tests."""
+def run_install(home, server, *args, token=None, uname_m="aarch64", gpu="Some Other GPU", pci=(),
+                nvidia_smi=True):
+    """Runs install.sh with a `uname`, an `nvidia-smi` and a PCI bus that report the machine the
+    test wants, whatever runs the tests (on a GB10 the real bus has the GB10's GPU on it)."""
     fake_bin = Path(home) / "fakebin"
     fake_bin.mkdir(exist_ok=True)
-    for name, script in (
-        ("uname", f'case "$1" in -s) echo Linux;; -m) echo {uname_m};; *) echo Linux;; esac'),
-        ("nvidia-smi", f'echo "{gpu}"'),
-    ):
+    # Without a driver nvidia-smi fails; it is never left out of the fake bin, where the real one
+    # in /usr/bin would answer for this machine's GPU.
+    tools = [("uname", f'case "$1" in -s) echo Linux;; -m) echo {uname_m};; *) echo Linux;; esac'),
+             ("nvidia-smi", f'echo "{gpu}"' if nvidia_smi else 'echo "NVIDIA-SMI has failed" >&2; exit 9')]
+    for name, script in tools:
         (fake_bin / name).write_text(f"#!/bin/sh\n{script}\n")
         (fake_bin / name).chmod(0o755)
-    env = {"HOME": str(home), "PATH": f"{fake_bin}:/usr/bin:/bin",
+    pci_dir = Path(home) / "fakepci"
+    shutil.rmtree(pci_dir, ignore_errors=True)
+    pci_dir.mkdir()
+    for number, (vendor, device) in enumerate(pci):
+        slot = pci_dir / f"0000:0{number}:00.0"
+        slot.mkdir()
+        (slot / "vendor").write_text(vendor + "\n")
+        (slot / "device").write_text(device + "\n")
+    env = {"HOME": str(home), "PATH": f"{fake_bin}:/usr/bin:/bin", "PUFFIN_PCI_DEVICES": str(pci_dir),
            "PUFFIN_RELEASE_API": server.url, "PUFFIN_RELEASE_REPO": "test/puffin"}
     if token:
         env["GH_TOKEN"] = token
@@ -224,6 +235,19 @@ def test_the_machine_decides_the_role(tmp_path, release_server):
     assert "no binaries for x86_64" in run_install(tmp_path, server, uname_m="x86_64", gpu="NVIDIA GB10").stderr
 
 
+def test_a_gb10_without_a_driver_is_still_found_by_its_pci_id(tmp_path, release_server):
+    # Every GB10 machine (DGX Spark, Acer, ASUS, Dell, Gigabyte, HP, Lenovo, MSI) has the same GPU,
+    # 10de:2e12; on a fresh Ubuntu install there is no nvidia-smi to ask yet.
+    server = release_server(binaries())
+    gb10 = [("0x10de", "0x22ce"), ("0x10de", "0x2e12")]
+    assert "role: node" in run_install(tmp_path, server, nvidia_smi=False, pci=gb10).stdout
+    # A driver that answers for another GPU is overruled by the bus only for the GB10's id.
+    assert "role: node" in run_install(tmp_path, server, gpu="Some Other GPU", pci=gb10).stdout
+    assert "role: client" in run_install(tmp_path, server, nvidia_smi=False,
+                                         pci=[("0x10de", "0x2e13"), ("0x8086", "0x2e12")]).stdout
+    assert "role: client" in run_install(tmp_path, server, nvidia_smi=False).stdout
+
+
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):
     # The binaries are placed first; a release with no wheel then stops the node half by name.
     result = run_install(tmp_path, release_server(binaries()), "--role", "node")
@@ -299,10 +323,14 @@ def host(monkeypatch):
     state = {"sar": True, "oom_problem": None, "earlyoom": ["earlyoom", "-m", "5,2", "-s", "100"],
              "swap_gb": 64.0, "areas": [{"name": "/swap.img", "type": "file", "size_gb": 64.0, "used_gb": 1.0}],
              "sysctl": {"vm.min_free_kbytes": 1_048_576, "vm.watermark_scale_factor": 200},
-             "disk_free_gb": 300.0, "mem_available_gb": 60.0, "swap_file_exists": True, "sandbox": True}
+             "disk_free_gb": 300.0, "mem_available_gb": 60.0, "swap_file_exists": True, "sandbox": True,
+             "missing": set(), "docker_access": True}
     monkeypatch.setattr(HostSafetySetup, "sandbox_works", classmethod(lambda cls: state["sandbox"]))
     monkeypatch.setattr(host_safety_setup.shutil, "which",
-                        lambda name: "/usr/bin/" + name if name != "sar" or state["sar"] else None)
+                        lambda name: None if name in state["missing"] or (name == "sar" and not state["sar"])
+                        else "/usr/bin/" + name)
+    monkeypatch.setattr(HostSafetySetup, "_may_use_docker", classmethod(lambda cls: state["docker_access"]))
+    monkeypatch.setattr(HostSafetySetup, "_user", classmethod(lambda cls: "someone"))
     monkeypatch.setattr(VLLMServerManager, "_oom_handler_problem", classmethod(lambda cls: state["oom_problem"]))
     monkeypatch.setattr(VLLMServerManager, "_process_argv", staticmethod(lambda name: state["earlyoom"]))
     monkeypatch.setattr(VLLMServerManager, "_swap_total_gb", staticmethod(lambda: state["swap_gb"]))
@@ -361,7 +389,8 @@ def test_no_swap_at_all_creates_the_file_without_a_swapoff(host):
 
 
 @pytest.mark.parametrize("change, said", [
-    ({"areas": [{"name": "/dev/zram0", "type": "partition", "size_gb": 8.0, "used_gb": 0.0}]}, "not resized automatically"),
+    ({"areas": [{"name": "/dev/zram0", "type": "partition", "size_gb": 8.0, "used_gb": 0.0},
+                {"name": "/dev/nvme0n1p3", "type": "partition", "size_gb": 8.0, "used_gb": 0.0}]}, "not resized automatically"),
     ({"areas": [{"name": "/swap.img", "type": "file", "size_gb": 8.0, "used_gb": 0.0},
                 {"name": "/dev/nvme0n1p3", "type": "partition", "size_gb": 8.0, "used_gb": 0.0}]}, "not resized automatically"),
     ({"areas": [], "swap_file_exists": True}, "exists but is not in use"),
@@ -374,6 +403,80 @@ def test_swap_that_is_not_safe_to_resize_is_explained_not_touched(host, change, 
     host.update(change)
     (step,) = HostSafetySetup.steps()
     assert "commands" not in step and said in step["manual"]
+
+
+def test_zram_is_neither_counted_nor_in_the_way_of_the_swap_file(host):
+    # zram keeps its pages in the RAM a model load is short of; a machine with it beside (or
+    # instead of) the swap file still gets the file.
+    zram = {"name": "/dev/zram0", "type": "partition", "size_gb": 8.0, "used_gb": 0.0}
+    host.update(swap_gb=8.0, areas=[{"name": "/swap.img", "type": "file", "size_gb": 8.0, "used_gb": 0.5}, zram])
+    (step,) = HostSafetySetup.steps()
+    assert commands_of(step)[:2] == ["swapoff /swap.img", "fallocate -l 64G /swap.img"]
+    host.update(swap_gb=0.0, areas=[zram], swap_file_exists=False)
+    (step,) = HostSafetySetup.steps()
+    assert commands_of(step)[0] == "fallocate -l 64G /swap.img"
+
+
+def test_the_swap_check_counts_only_swap_on_disk(tmp_path, monkeypatch):
+    real_open = open
+    (tmp_path / "swaps").write_text(
+        "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+        "/swap.img                               file\t\t67108860\t4334852\t\t-2\n"
+        "/dev/zram0                              partition\t67108860\t0\t\t100\n")
+    monkeypatch.setattr("builtins.open", lambda path, *a, **k: real_open(
+        tmp_path / "swaps" if path == "/proc/swaps" else path, *a, **k))
+    assert round(VLLMServerManager._swap_total_gb()) == 64          # not 128: zram is not counted
+
+
+def test_a_machine_installed_as_plain_ubuntu_is_told_what_dgx_os_would_have_had(host):
+    # DGX OS ships Docker and the NVIDIA Container Toolkit; Ubuntu does not, and installing either
+    # adds a vendor repository, so both are explained rather than done.
+    host["missing"] = {"docker"}
+    (step,) = HostSafetySetup.steps()
+    assert "commands" not in step and "docs.docker.com" in step["manual"] and "container-toolkit" in step["manual"]
+    host["missing"] = {"nvidia-ctk", "nvidia-container-runtime-hook", "nvidia-container-cli"}
+    (step,) = HostSafetySetup.steps()
+    assert step["name"] == "install the NVIDIA Container Toolkit" and "nvidia-ctk runtime configure" in step["manual"]
+    host["missing"] = {"nvidia-container-runtime-hook", "nvidia-container-cli"}     # nvidia-ctk alone is enough
+    assert HostSafetySetup.steps() == []
+
+
+def test_a_user_outside_the_docker_group_is_added_to_it(host):
+    host["docker_access"] = False
+    (step,) = HostSafetySetup.steps()
+    assert commands_of(step) == ["usermod -aG docker someone"] and "next login" in step["why"]
+
+
+def test_docker_access_is_read_from_the_socket_then_the_group(monkeypatch, tmp_path):
+    socket = tmp_path / "docker.sock"
+    socket.write_text("")
+    monkeypatch.setattr(host_safety_setup, "DOCKER_SOCKET", str(socket))
+    monkeypatch.setattr(HostSafetySetup, "_user", classmethod(lambda cls: "someone"))
+    monkeypatch.setattr(host_safety_setup.os, "access", lambda path, mode: False)
+    group = type("Group", (), {"gr_mem": ["other"]})
+    monkeypatch.setattr(host_safety_setup.grp, "getgrnam", lambda name: group)
+    assert HostSafetySetup._may_use_docker() is False
+    group.gr_mem = ["other", "someone"]
+    assert HostSafetySetup._may_use_docker() is True
+    monkeypatch.setattr(host_safety_setup.os, "access", lambda path, mode: True)
+    group.gr_mem = []
+    assert HostSafetySetup._may_use_docker() is True
+    monkeypatch.setattr(host_safety_setup, "DOCKER_SOCKET", str(tmp_path / "absent.sock"))
+    assert HostSafetySetup._may_use_docker() is True       # no daemon here: nothing to join
+
+
+def test_a_machine_without_bubblewrap_gets_it_and_its_profile(host, monkeypatch):
+    # Ubuntu Server has no bubblewrap (on DGX OS, GNOME brings it in).
+    host["missing"] = {"bwrap"}
+    host["sandbox"] = None
+    monkeypatch.setattr(SandboxPrerequisite, "_userns_restricted", classmethod(lambda cls: True))
+    (step,) = HostSafetySetup.steps()
+    commands = commands_of(step)
+    assert step["name"] == "install bubblewrap" and commands[0] == "apt-get install -y bubblewrap"
+    assert commands[1].endswith("/etc/apparmor.d/puffin-bwrap") and commands[2].startswith("apparmor_parser -r")
+    monkeypatch.setattr(SandboxPrerequisite, "_userns_restricted", classmethod(lambda cls: False))
+    (step,) = HostSafetySetup.steps()
+    assert commands_of(step) == ["apt-get install -y bubblewrap"]
 
 
 def test_a_sandbox_that_only_works_under_the_ide_is_fixed_with_an_apparmor_profile(host, monkeypatch, capsys):

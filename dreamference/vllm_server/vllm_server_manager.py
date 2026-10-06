@@ -1202,11 +1202,28 @@ class VLLMServerManager:
     @staticmethod
     def _swap_total_gb() -> float:
         """
-        Reads total configured swap in GB from /proc/meminfo.
+        Reads the swap that is backed by disk, in GB.
+
+        Compressed swap in memory (zram) is left out: on unified memory its pages are kept in the
+        same RAM the model is short of, so it cannot be where cold pages go to make room, which is
+        the whole point of the check. Ubuntu and DGX OS set up a swap file, not zram, but not
+        every GB10 machine has been seen (specs/DREAMFERENCE_SETUP.md §3.5).
 
         Returns:
-            float: Total swap in GB, or 0.0 if /proc/meminfo is unreadable.
+            float: Disk-backed swap in GB from /proc/swaps; where that cannot be read, SwapTotal
+            from /proc/meminfo; 0.0 if neither can.
         """
+        try:
+            with open("/proc/swaps", "r") as f:
+                lines = f.read().splitlines()[1:]
+            total_kb = 0
+            for line in lines:
+                fields = line.split()
+                if len(fields) >= 3 and not os.path.basename(fields[0]).startswith("zram"):
+                    total_kb += int(fields[2])
+            return total_kb / (1024 ** 2)
+        except (OSError, ValueError):
+            pass
         try:
             with open("/proc/meminfo", "r") as f:
                 for line in f:

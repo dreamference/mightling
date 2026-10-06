@@ -11,6 +11,7 @@ runs and sudo prompts on the terminal.
 
 import getpass
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -25,6 +26,8 @@ from dreamference.node.node_service_file import NodeServiceFile
 from dreamference.node.node_settings import LOOPBACK, NodeSettings
 
 WEB_PORT = 3000
+# Ubuntu puts the daemon in /usr/sbin, which is not on every user's PATH.
+AVAHI_DAEMON = "/usr/sbin/avahi-daemon"
 DEFAULT_MODEL_PORT = 8000
 
 SHARING_NOTICE = (
@@ -56,6 +59,13 @@ class NodeAdvertiser:
         if not cls.is_gb10():
             print("⚠️  This machine does not look like a GB10 (DGX Spark); a node on anything else is "
                   "untested.")
+        # DGX OS has Avahi (GNOME depends on it); a GB10 reinstalled as Ubuntu Server does not, and
+        # without the daemon there is neither a folder to put the file in nor anyone to publish it.
+        if not cls.avahi_installed() and not cls.run_privileged(
+                ["apt-get", "install", "-y", "avahi-daemon"], "install Avahi, which publishes the advertisement"):
+            print("❌ Avahi is not installed, so this node cannot be advertised: `sudo apt install avahi-daemon`, "
+                  "then run this again. Until then a client reaches it with PUFFIN_NODE=<this machine's address>.")
+            return False
         node_id = NodeIdentity.ensure()
         before = NodeSettings.load()
         NodeSettings.save(advertise=True, web=not no_web)
@@ -220,6 +230,14 @@ class NodeAdvertiser:
         if SidecarNetwork.network_mode(SEARXNG_CONTAINER_NAME):
             SearxngSidecar.start()
         return web_shared
+
+    @classmethod
+    def avahi_installed(cls) -> bool:
+        """
+        Returns:
+            bool: True if the Avahi daemon, which publishes the service file, is installed.
+        """
+        return shutil.which("avahi-daemon") is not None or os.path.exists(AVAHI_DAEMON)
 
     @classmethod
     def install_service_file(cls, text: str) -> bool:

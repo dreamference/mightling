@@ -21,6 +21,10 @@ class HardwareTelemetry:
         used_memory_gb (float): Currently used memory in GB.
         vram_gb (float): Dedicated GPU VRAM in GB reported by nvidia-smi.
         arch (str): Machine CPU architecture (e.g., 'aarch64', 'x86_64').
+        machine (str): The vendor's name for the box from DMI (e.g., 'ASUSTeK COMPUTER INC. GX10'),
+            empty where the firmware does not say. Eight GB10 machines exist; this tells them apart.
+        os_name (str): The operating system, with the DGX OS release where there is one (e.g.,
+            'DGX OS 7.5.0 (Ubuntu 24.04.4 LTS)'), empty where it cannot be read.
     """
     is_gb10: bool
     gpu_name: str
@@ -30,3 +34,5 @@ class HardwareTelemetry:
     used_memory_gb: float
     vram_gb: float
     arch: str
+    machine: str = ""
+    os_name: str = ""

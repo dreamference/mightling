@@ -79,12 +79,21 @@ case "$(uname -m)" in
 esac
 TARGET="$arch-$os"
 
-# A GB10 is an arm64 Linux machine whose GPU says so. (Its device tree has no model string, and
-# the DMI product name is the vendor's: "GX10" on an ASUS Ascent, so neither is used.)
+# A GB10 is an arm64 Linux machine whose GPU says so. Eight machines are GB10s (NVIDIA's DGX
+# Spark and the Acer, ASUS, Dell, Gigabyte, HP, Lenovo and MSI boxes) and each names itself
+# differently in DMI ("GX10" on an ASUS Ascent), so the GPU is asked, never the vendor: by
+# nvidia-smi, or, where no driver answers yet, by its PCI id (10de:2e12, the same chip in all).
 is_gb10() {
     [ "$TARGET" = "aarch64-unknown-linux-gnu" ] || return 1
-    command -v nvidia-smi >/dev/null 2>&1 || return 1
-    nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | grep -q "GB10"
+    if command -v nvidia-smi >/dev/null 2>&1 \
+        && nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | grep -q "GB10"; then
+        return 0
+    fi
+    for device in "${PUFFIN_PCI_DEVICES:-/sys/bus/pci/devices}"/*; do
+        [ "$(cat "$device/vendor" 2>/dev/null)" = "0x10de" ] \
+            && [ "$(cat "$device/device" 2>/dev/null)" = "0x2e12" ] && return 0
+    done
+    return 1
 }
 
 case "$ROLE" in

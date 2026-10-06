@@ -102,6 +102,8 @@ def _isolate_node_advert(tmp_path_factory, monkeypatch):
     scratch = tmp_path_factory.mktemp("avahi") / "puffin-node.service"
     monkeypatch.setattr(NodeServiceFile, "service_path", scratch)
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose: False))
+    # Whether this machine has Avahi must not decide a test (it does not on a CI runner).
+    monkeypatch.setattr(NodeAdvertiser, "avahi_installed", classmethod(lambda cls: True))
 
 
 @pytest.fixture(autouse=True)
