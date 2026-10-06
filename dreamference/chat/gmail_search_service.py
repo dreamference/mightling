@@ -62,6 +62,13 @@ from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Final, List, Optional, Tuple
 
+# Drive and Calendar for Puffin's apps. In the container this file runs as /config/service.py with
+# the reader staged beside it, so the plain import is the one that works there.
+try:
+    from dreamference.chat.google_workspace_reader import CALENDAR_SCOPE, DRIVE_SCOPE, GoogleWorkspaceReader
+except ImportError:  # pragma: no cover - the container's layout
+    from google_workspace_reader import CALENDAR_SCOPE, DRIVE_SCOPE, GoogleWorkspaceReader  # type: ignore
+
 # Inside the container the credentials directory is mounted here.
 CONFIG_DIR: Final[str] = os.environ.get("PUFFIN_GMAIL_CONFIG", "/config")
 CREDENTIALS_NAME: Final[str] = "credentials.json"
@@ -73,7 +80,22 @@ KEY_NAME: Final[str] = "credentials.key"
 GOOGLE_OAUTH_CLIENT_ID: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_ID", "44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com")
 GOOGLE_OAUTH_CLIENT_SECRET: Final[str] = os.environ.get("GOA_GOOGLE_CLIENT_SECRET", "-gMLuQyDiI0XrQS_vx_mhuYF")
 GMAIL_SCOPE: Final[str] = "https://mail.google.com/"
-GOOGLE_OAUTH_SCOPES: Final[str] = "https://www.googleapis.com/auth/userinfo.email " + GMAIL_SCOPE
+EMAIL_SCOPE: Final[str] = "https://www.googleapis.com/auth/userinfo.email"
+GOOGLE_OAUTH_SCOPES: Final[str] = EMAIL_SCOPE + " " + GMAIL_SCOPE
+
+# What each of Puffin's apps asks Google for (specs/DREAMFERENCE_PUFFIN_APPS.md §5.2). The full Drive
+# and Calendar scopes: GNOME's client is refused the read-only ones ("This app is blocked", measured
+# 2026-10-03), so read-only is enforced here, where no write request exists.
+APP_SCOPES: Final[dict[str, str]] = {
+    "gmail": GMAIL_SCOPE,
+    "drive": DRIVE_SCOPE,
+    "calendar": CALENDAR_SCOPE,
+}
+APP_NAMES: Final[dict[str, str]] = {
+    "gmail": "Gmail",
+    "drive": "Google Drive",
+    "calendar": "Google Calendar",
+}
 
 # Google's consent screen lets each permission be unticked. A grant without Gmail access still
 # signs in and still names the address, but IMAP refuses it as "Invalid credentials" -- so such a
@@ -81,6 +103,11 @@ GOOGLE_OAUTH_SCOPES: Final[str] = "https://www.googleapis.com/auth/userinfo.emai
 MISSING_GMAIL_SCOPE: Final[str] = (
     "Google did not grant Gmail access for {email}. Connect it again and leave the box "
     "\"Read, compose, send and permanently delete all your email from Gmail\" ticked."
+)
+# What Google grants an access token for when its reply does not say.
+TOKEN_LIFETIME_SECONDS: Final[int] = 3599
+MISSING_APP_SCOPE: Final[str] = (
+    "Google did not grant {app} access for {email}. Connect it again and leave the {app} box ticked."
 )
 OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
 
@@ -338,13 +365,14 @@ class GmailSearchService:
                         data = json.load(res)
                         if "access_token" in data:
                             cls.save_token(address, data["access_token"], data.get("expires_in", 3599), directory, refresh_token=refresh)
-                            valid.append({"email": address, "access_token": data["access_token"]})
+                            valid.append({"email": address, "access_token": data["access_token"],
+                                          "scopes": cls.account_scopes(acc)})
                 except Exception:
                     pass
             else:
                 token = cls._unseal(sealed, directory)
                 if token:
-                    valid.append({"email": address, "access_token": token})
+                    valid.append({"email": address, "access_token": token, "scopes": cls.account_scopes(acc)})
         return valid
 
 
@@ -366,17 +394,27 @@ class GmailSearchService:
         
     @classmethod
     def save_token(
-        cls, address: str, token: str, lifetime: int, directory: Optional[str] = None, refresh_token: Optional[str] = None
+        cls,
+        address: str,
+        token: str,
+        lifetime: int,
+        directory: str | None = None,
+        refresh_token: str | None = None,
+        scopes: list[str] | None = None,
     ) -> bool:
         path = os.path.join(directory or CONFIG_DIR, CREDENTIALS_NAME)
         stored = cls._raw(directory)
         accounts = stored.get("accounts", {})
         
         acc = accounts.get(address, {"email": address})
+        # What the account held before: a stored token without recorded scopes was a Gmail grant.
+        previous = cls.account_scopes(acc) if acc.get("access_token") else []
         acc["access_token"] = cls._seal(token, directory)
         acc["expires_at"] = time.time() + max(0, lifetime - 60)
         if refresh_token:
             acc["refresh_token"] = cls._seal(refresh_token, directory)
+        if scopes:
+            acc["scopes"] = sorted(set(previous) | set(scopes))
         accounts[address] = acc
         
         try:
@@ -444,11 +482,32 @@ class GmailSearchService:
         return True
 
     @classmethod
-    def status(cls) -> Dict[str, Any]:
+    def account_scopes(cls, account: dict[str, Any]) -> list[str]:
+        """Tells which scopes a stored account was granted.
+
+        Args:
+            account (dict[str, Any]): One entry of the credentials file.
+
+        Returns:
+            list[str]: The recorded scopes; an account saved before scopes were recorded was a
+                Gmail grant, the only kind there was.
+        """
+        return list(account.get("scopes") or [GMAIL_SCOPE])
+
+    @classmethod
+    def status(cls) -> dict[str, Any]:
+        """Says which accounts are connected and what each was granted. Unauthenticated: addresses
+        and scope names only, never mail or files.
+
+        Returns:
+            dict[str, Any]: `connected` and `email` (comma-separated, as the web UI reads them) and
+                `accounts`, each with its `scopes`, which `/apps` reads.
+        """
         creds = cls.credentials()
         connected = len(creds) > 0
         email = ", ".join(c["email"] for c in creds) if connected else None
-        return {"configured": connected, "connected": connected, "email": email}
+        accounts = [{"email": c["email"], "scopes": c.get("scopes") or [GMAIL_SCOPE]} for c in creds]
+        return {"configured": connected, "connected": connected, "email": email, "accounts": accounts}
 
     # ------------------------------------------------------------------ IMAP
 
@@ -517,6 +576,111 @@ class GmailSearchService:
         if not connections:
             return {}, "Could not connect to any Gmail accounts.", failures
         return connections, None, failures
+
+    @classmethod
+    def grants_scope(cls, token_response: dict[str, Any], scope: str) -> bool:
+        """Tells whether a token response carries a scope.
+
+        Args:
+            token_response (dict[str, Any]): Google's token endpoint reply.
+            scope (str): The scope the app needs.
+
+        Returns:
+            bool: True unless the reply lists its scopes and this one is not among them.
+        """
+        granted = token_response.get("scope")
+        return granted is None or scope in str(granted).split()
+
+    @classmethod
+    def granted_scopes(cls, token_response: dict[str, Any]) -> list[str]:
+        """Lists the scopes a token response names.
+
+        Args:
+            token_response (dict[str, Any]): Google's token endpoint reply.
+
+        Returns:
+            list[str]: Its scopes; Gmail's alone when the reply names none (the old behaviour).
+        """
+        return str(token_response.get("scope") or GMAIL_SCOPE).split()
+
+    @classmethod
+    def auth_url(cls, app: str, state: str, challenge: str) -> str:
+        """Builds Google's consent URL for one app.
+
+        Args:
+            app (str): `gmail`, `drive` or `calendar`; anything else means Gmail.
+            state (str): The OAuth state.
+            challenge (str): The PKCE challenge.
+
+        Returns:
+            str: The URL. `include_granted_scopes` keeps an account's earlier grants, so connecting
+                Drive to an account that has Gmail keeps Gmail.
+        """
+        scopes = EMAIL_SCOPE + " " + APP_SCOPES.get(app, GMAIL_SCOPE)
+        return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+            "client_id": GOOGLE_OAUTH_CLIENT_ID, "redirect_uri": HOST_ORIGIN + "/",
+            "response_type": "code", "scope": scopes, "access_type": "offline", "prompt": "consent",
+            "include_granted_scopes": "true", "code_challenge": challenge,
+            "code_challenge_method": "S256", "state": state,
+        })
+
+    @classmethod
+    def missing_scope_message(cls, app: str, address: str) -> str:
+        """Says which box to tick when Google returned a grant without the app's scope.
+
+        Args:
+            app (str): The app being connected.
+            address (str): The account.
+
+        Returns:
+            str: The message; Gmail's keeps its own wording.
+        """
+        if app == "gmail" or app not in APP_SCOPES:
+            return MISSING_GMAIL_SCOPE.format(email=address)
+        return MISSING_APP_SCOPE.format(app=APP_NAMES[app], email=address)
+
+    @classmethod
+    def accept_grant(cls, app: str, token_response: dict[str, Any], address: str) -> str | None:
+        """Checks a grant against the app it was asked for, and stores it if it fits.
+
+        Args:
+            app (str): `gmail`, `drive` or `calendar`.
+            token_response (dict[str, Any]): Google's token endpoint reply.
+            address (str): The account it is for.
+
+        Returns:
+            str | None: None when stored; otherwise the message naming the box to tick.
+        """
+        if not cls.grants_scope(token_response, APP_SCOPES.get(app, GMAIL_SCOPE)):
+            return cls.missing_scope_message(app, address)
+        cls.save_token(
+            address,
+            token_response["access_token"],
+            token_response.get("expires_in", TOKEN_LIFETIME_SECONDS),
+            refresh_token=token_response.get("refresh_token"),
+            scopes=cls.granted_scopes(token_response),
+        )
+        return None
+
+    @classmethod
+    def grant_page(cls, app: str, refused: str | None) -> str:
+        """Says, on the page Google redirects to, how connecting went.
+
+        Args:
+            app (str): The app connected.
+            refused (str | None): Why the grant was refused, or None when it was stored.
+
+        Returns:
+            str: The page's HTML body.
+        """
+        name = html.escape(APP_NAMES.get(app, "Gmail"))
+        if refused:
+            return f"<h2>{name} access was not granted</h2><p>{html.escape(refused)}</p>"
+        return (
+            f"<h2>{name} connected</h2><p>You can close this tab. In <code>puffin</code>, choose "
+            "<b>I've connected it</b> in <code>/apps</code>; the tools arrive when you restart it "
+            "or run <code>puffin resume</code>.</p>"
+        )
 
     @classmethod
     def grants_gmail(cls, token_response: Dict[str, Any]) -> bool:
@@ -752,6 +916,47 @@ class GmailSearchService:
         }
 
     @classmethod
+    def workspace(cls, path: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        """Answers the read-only Drive and Calendar endpoints (specs/DREAMFERENCE_PUFFIN_APPS.md §9,
+        §9a): `/drive/search`, `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>`.
+
+        Args:
+            path (str): The request path.
+            query (Dict[str, List[str]]): Its parsed query string.
+
+        Returns:
+            Dict[str, Any]: The reader's answer, or `error`.
+        """
+        def arg(name: str, default: str = "") -> str:
+            return (query.get(name) or [default])[0]
+
+        def number(name: str, default: int) -> int:
+            try:
+                return int(arg(name, str(default)))
+            except ValueError:
+                return default
+
+        accounts = cls.credentials()
+        if not accounts:
+            return {"error": NOT_CONNECTED_MESSAGE}
+        segments = [urllib.parse.unquote(part) for part in path.split("/")[2:]]
+        if path == "/drive/search":
+            terms = arg("q")
+            return GoogleWorkspaceReader.drive_search(accounts, terms, number("limit", 10)) if terms else {"error": "q is required"}
+        if path.startswith("/drive/file/") and len(segments) == 2:
+            return GoogleWorkspaceReader.drive_read(accounts, segments[1])
+        if path == "/calendar/events":
+            now = time.time()
+            start = arg("from") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+            end = arg("to") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + 7 * 86400))
+            return GoogleWorkspaceReader.calendar_events(
+                accounts, start, end, arg("calendar"), arg("q"), number("limit", 25),
+            )
+        if path.startswith("/calendar/event/") and len(segments) == 3:
+            return GoogleWorkspaceReader.calendar_event(accounts, segments[1], segments[2])
+        return {"error": "not found"}
+
+    @classmethod
     def message(cls, message_id: str) -> Dict[str, Any]:
         """Reads one message body."""
         if "|" in message_id:
@@ -930,24 +1135,48 @@ class GmailSearchService:
             def _page(self, message: str) -> None:
                 self._html(f"<h2>Puffin</h2><p>{message}</p>")
 
-            def _setup_page(self) -> None:
+            def _setup_page(self, app: str = "gmail") -> None:
                 """
-                Serves the HTML for Puffin's own Google OAuth flow.
+                Serves the HTML for Puffin's own Google OAuth flow, for one app.
+
+                Args:
+                    app (str): `gmail`, `drive` or `calendar`: which scope the consent asks for.
                 """
+                name = APP_NAMES[app]
+                full_access = "" if app == "gmail" else (
+                    f'<p class="note">ⓘ Google will describe {name} access as full access ("see, edit, create and '
+                    'delete"): GNOME\'s client may ask for nothing narrower. Puffin only reads; it has no way to '
+                    'change or delete anything.</p>'
+                )
                 self._html(
-                    """
-                    <h2>Connect Google</h2>
-                    <p>Puffin authenticates directly with Google. Your mail and files are read locally.</p>
+                    f"""
+                    <h2>Connect {name}</h2>
+                    <p>Puffin authenticates directly with Google. What it reads stays on this machine.</p>
                     <p class="note">ⓘ The consent screen will say <b style="display:inline">GNOME</b> — Puffin authenticates through the GNOME desktop's Google integration. No Puffin credentials are sent to Google.</p>
-                    
+                    {full_access}
                     <button id="start-btn" class="btn-primary">Authorize with Google</button>
-                    
+                    <div class="divider">
+                      <p class="muted">If Google's page ends at an address that does not load (a browser on
+                      another machine), paste that address here:</p>
+                      <input type="text" id="pasted" placeholder="http://localhost:8767/?state=…&amp;code=…">
+                      <button id="paste-btn" class="btn-secondary">Finish connecting</button>
+                      <p id="paste-result" class="muted"></p>
+                    </div>
+                    <p class="muted">Then return to <code>puffin</code> and choose <b>I've connected it</b>.</p>
                     <script>
-                        document.getElementById('start-btn').onclick = async () => {
-                            const res = await fetch('/api/google/oauth/start', { method: 'POST' });
+                        document.getElementById('start-btn').onclick = async () => {{
+                            const res = await fetch('/api/google/oauth/start?app={app}', {{ method: 'POST' }});
                             const data = await res.json();
                             if (data.auth_url) window.open(data.auth_url, '_blank');
-                        };
+                        }};
+                        document.getElementById('paste-btn').onclick = async () => {{
+                            const url = document.getElementById('pasted').value;
+                            const res = await fetch('/api/google/oauth/complete', {{
+                                method: 'POST', body: JSON.stringify({{ url }}) }});
+                            const data = await res.json();
+                            document.getElementById('paste-result').textContent =
+                                data.email ? 'Connected ' + data.email + '.' : (data.error || 'That did not work.');
+                        }};
                     </script>
                     """
                 )
@@ -965,14 +1194,13 @@ class GmailSearchService:
             def do_POST(self) -> None:
                 parsed = urllib.parse.urlparse(self.path)
                 if parsed.path == "/api/google/oauth/start":
-                    
+                    app = (urllib.parse.parse_qs(parsed.query).get("app") or ["gmail"])[0]
+                    app = app if app in APP_SCOPES else "gmail"
                     state = secrets.token_urlsafe(32)
                     verifier = secrets.token_urlsafe(32)
                     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
-                    OAUTH_STATES[state] = {"code_verifier": verifier, "time": time.time()}
-                    
-                    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_OAUTH_CLIENT_ID}&redirect_uri={urllib.parse.quote(HOST_ORIGIN + '/')}&response_type=code&scope={urllib.parse.quote(GOOGLE_OAUTH_SCOPES)}&access_type=offline&prompt=consent&code_challenge={challenge}&code_challenge_method=S256&state={state}"
-                    self._reply(200, {"auth_url": auth_url})
+                    OAUTH_STATES[state] = {"code_verifier": verifier, "time": time.time(), "app": app}
+                    self._reply(200, {"auth_url": cls.auth_url(app, state, challenge)})
                     return
                     
 
@@ -1020,12 +1248,13 @@ class GmailSearchService:
                                     user_data = json.load(res2)
                                     email_addr = user_data.get("email", "")
                                 
-                                if email_addr and not GmailSearchService.grants_gmail(tdata):
-                                    self._reply(400, {"error": MISSING_GMAIL_SCOPE.format(email=email_addr)})
-                                    return
+                                app = OAUTH_STATES[state].get("app", "gmail")
                                 if email_addr and "access_token" in tdata:
-                                    GmailSearchService.save_token(email_addr, tdata["access_token"], tdata.get("expires_in", 3599), refresh_token=tdata.get("refresh_token"))
-                                    self._reply(200, {"status": "ok", "email": email_addr})
+                                    refused = cls.accept_grant(app, tdata, email_addr)
+                                    if refused:
+                                        self._reply(400, {"error": refused})
+                                    else:
+                                        self._reply(200, {"status": "ok", "email": email_addr})
                                     return
                     except Exception as e:
                         self._reply(400, {"error": str(e)})
@@ -1063,12 +1292,9 @@ class GmailSearchService:
                                 user_data = json.load(res2)
                                 email_addr = user_data.get("email", "")
                             
-                            if email_addr and not GmailSearchService.grants_gmail(data):
-                                self._html(f"<h2>Gmail access was not granted</h2><p>{html.escape(MISSING_GMAIL_SCOPE.format(email=email_addr))}</p>")
-                                return
+                            app = OAUTH_STATES[state].get("app", "gmail")
                             if email_addr and "access_token" in data:
-                                GmailSearchService.save_token(email_addr, data["access_token"], data.get("expires_in", 3599), refresh_token=data.get("refresh_token"))
-                                self._html("<h2>Connected Successfully</h2><p>You can close this tab.</p>")
+                                self._html(cls.grant_page(app, cls.accept_grant(app, data, email_addr)))
                                 return
                         except Exception as e:
                             self._html(f"<h2>Error</h2><p>{html.escape(str(e))}</p>")
@@ -1085,7 +1311,8 @@ class GmailSearchService:
                     self._redirect(CONNECT_PATH)
                     return
                 if parsed.path == CONNECT_PATH:
-                    self._setup_page()
+                    app = (urllib.parse.parse_qs(parsed.query).get("app") or ["gmail"])[0]
+                    self._setup_page(app if app in APP_SCOPES else "gmail")
                     return
                 if expected and self.headers.get(AUTH_HEADER) != expected:
                     self._reply(401, {"error": "unauthorised"})
@@ -1102,6 +1329,9 @@ class GmailSearchService:
                     except ValueError:
                         limit = DEFAULT_RESULT_LIMIT
                     self._reply(200, cls.search(terms, limit))
+                    return
+                if parsed.path.startswith(("/drive/", "/calendar/")):
+                    self._reply(200, cls.workspace(parsed.path, query))
                     return
                 if parsed.path.startswith("/message/"):
                     # Decoded: a client may percent-encode the `@` and `|` in "<account>|<id>".

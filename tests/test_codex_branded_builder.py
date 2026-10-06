@@ -65,8 +65,10 @@ def test_the_patches_stay_small():
     # raised here only when each lands, by its size as written, with a line saying so. Raised to
     # 34,750 for 0021's observation masking (1,011 bytes: one dependency line, and four lines at the
     # end of `for_prompt_annotated` that read the size auto-compaction uses and hand it with the
-    # items to the leaf crate puffin-rs/masking); 34,697 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 34_750
+    # items to the leaf crate puffin-rs/masking); 34,697 after. Raised to 36,250 on 2026-10-06 for
+    # 0022's `/apps` hooks (1,371 bytes: the TUI's gate also opens when Puffin offers apps, and the
+    # app server answers `app/list` with Puffin's rows before any directory request); 36,068 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 36_250
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

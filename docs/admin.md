@@ -307,6 +307,7 @@ The agent phase: one puffin exec per instance, producing predictions.jsonl.
 | `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
 | `--code-index` | universal: index each instance's repository on the host and give the agent puffin-code (default off) One of: `off`, `universal`. |
 | `--prompt` | The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one) |
+| `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing) |
@@ -640,6 +641,22 @@ Manage the local SearXNG search container.
 #### `puffin-admin searxng start`
 
 Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge).
+
+### `puffin-admin google`
+
+Manage the local Google service (Gmail, Drive, Calendar).
+
+#### `puffin-admin google start`
+
+Start the Google service on 127.0.0.1:8767 (adopts the web UI's if it exists).
+
+#### `puffin-admin google stop`
+
+Remove the Google service container; connected accounts stay stored.
+
+#### `puffin-admin google status`
+
+Show whether it runs and which accounts hold which apps.
 
 ### `puffin-admin web`
 

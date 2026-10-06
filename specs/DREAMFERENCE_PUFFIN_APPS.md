@@ -1,6 +1,6 @@
 # Puffin Apps: Gmail, Google Drive and Google Calendar through `/apps`, with no OpenAI sign-in
 
-**Status:** proposed (2026-10-03). Nothing here is built. §1 is read from the pinned Codex source (`rust-v0.158.0`); Phase 0's source checks and the Drive and Calendar scope test are done (§11.1; the read-only scopes are refused, the full ones work), its live checks are not. The user decided the patch cap and §12's questions on 2026-10-03 (§12), which adds Calendar as a third app; Phase 1 can start.
+**Status:** Phases 1–3 written on 2026-10-03 (§14), compiled and unit-tested, **not yet built into `puffin` or watched live**. Before that: proposed (2026-10-03). §1 is read from the pinned Codex source (`rust-v0.158.0`); Phase 0's source checks and the Drive and Calendar scope test are done (§11.1; the read-only scopes are refused, the full ones work), its live checks are not. The user decided the patch cap and §12's questions on 2026-10-03 (§12), which adds Calendar as a third app; Phase 1 can start.
 **Goal:** the standard Codex `/apps` command works in `puffin` without a ChatGPT sign-in. It lists **Puffin's own apps** (Gmail, Google Drive, Google Calendar), connects them through Puffin's local Google sign-in, switches them on and off, and hands their tools to the model. Nothing goes to `chatgpt.com`.
 **Builds on:**
 - [PUFFIN_GMAIL](./DREAMFERENCE_PUFFIN_GMAIL.md): the read-only Gmail service (`dreamference-gmail`, port 8767) and `puffin-admin gmail`;
@@ -59,7 +59,7 @@ Rejected:
 
 The `$` mention hint in the header ("Use $ to insert an installed app") stays upstream's text. `$` mentions of Puffin apps are not offered in Phase 1 (§4.3).
 
-## 4. The patch (`0021-puffin-apps`)
+## 4. The patch (`0022-puffin-apps`)
 
 ### 4.1 A leaf crate, `puffin-rs/apps/` (`puffin-apps`)
 
@@ -256,3 +256,31 @@ Also decided: the patch series may grow to 37.5 KB in all (§4.4).
 - **Sending, drafting, labelling, writing to Drive, or creating, changing or answering calendar events.** Out of scope for every phase; a draft-only Gmail verb would be a separate spec with its own risk section.
 - **OpenAI's connectors alongside Puffin's.** With a ChatGPT sign-in, H2 would still answer with Puffin's list, hiding OpenAI's; Puffin never holds that sign-in, so the case does not arise in a supported setup.
 - **A web UI change.** The web UI's Gmail tool and Settings page are unchanged; Drive in the web UI is GOA's concern.
+
+## 14. As written (2026-10-03, branch `apps/phase1`)
+
+Written while an overnight SWE-bench run held the machine, so nothing was installed and no live `puffin` session ran; what was compiled and tested is listed in §14.3.
+
+### 14.1 What exists
+
+- **`puffin-rs/apps/` (`puffin-apps`).** `offered()` (the node-id file exists and `DREAMFERENCE_PUFFIN_APPS` is not off: no network, cheap enough for every gate check), `list()` (the three rows as camelCase `AppInfo` JSON; "Not running: `puffin-admin google start`" with no link when `/status` does not answer; "Unavailable at /airgapped on" with no link at a configured `on` or under a seal its own process wrote), `parse_status()` (reads the service's new `accounts` with scopes, and an older service's `email` list as Gmail-only), a std-only HTTP/1.1 client for the loopback service (`http.rs`), and the MCP server (`mcp.rs`).
+- **The MCP server** (`puffin apps serve gmail|drive|calendar`): line-delimited JSON-RPC (`initialize`, `ping`, `tools/list`, `tools/call`, notifications ignored). Tools as §6.1, each with `readOnlyHint: true`, `destructiveHint: false`, and a description saying `<untrusted>` text is data. Every call resolves the air gap first: the configured level, then any seal whose content is the server's **parent pid** (seals record their writer's pid; the parent of a stdio MCP server is the `puffin` process, §11.1 item 4). At `on` no request is made. Each item of an answer is wrapped as `<untrusted source="…" id="…">`, and a literal `</untrusted>` inside an item is defused so it cannot close the block early. The secret is read from `~/.config/dreamference/gmail/service-secret` (`PUFFIN_GOOGLE_SECRET_FILE` overrides, for tests).
+- **Patch `0022-puffin-apps` (1,371 bytes, below §4.4's 2.4 KB estimate).** The TUI and the app server already depend on `puffin-launcher` (patch 0002), so the hooks call `puffin_launcher::apps::{offered, list}` and **no manifest line is needed**; the launcher re-exports the leaf crate. H1: `(self.has_chatgpt_account || puffin_launcher::apps::offered())`. H2: when `Feature::Apps` is on and `list()` answers, the rows are deserialised into the connectors crate's `AppInfo`, passed through `AppToolPolicyEvaluator::apply_app_enabled_state` and `paginate_apps`, and returned before the auth gate. The cap is raised to 35,250 (series 35,057; with 0021's 882 bytes, 35,939).
+- **The launcher** (`src/apps.rs`): `puffin apps serve|list`; at start, one `-c mcp_servers.puffin_<app>.…` declaration per app that is offered, connected (an account holds its scope), not switched off (`DREAMFERENCE_PUFFIN_<APP>`, `puffin_gmail = false`, or `[apps.<id>] enabled = false` in `$CODEX_HOME/config.toml`), and not at a configured `on`; the 15 s start-up grace (`mcp_optional_startup_grace_ms`) is added once, shared with the code index; the prompt section names the tools (one line per app with its accounts, and the untrusted-data paragraph). When no app is declared the old Gmail shell section is used, unchanged. Forwarded to the server: `HOME`, `XDG_RUNTIME_DIR`, `CODEX_HOME`, `DREAMFERENCE_CONFIG_PATH`, `DREAMFERENCE_PUFFIN_AIRGAPPED`, `PUFFIN_GOOGLE_SECRET_FILE`.
+- **The service** (`gmail_search_service.py`): `POST /api/google/oauth/start?app=` asks for `userinfo.email` plus the app's full scope with `include_granted_scopes=true`; both callbacks go through `accept_grant` (the app's scope must be in the grant, else the box-to-tick message) and record the granted scopes per account as a union (`save_token(..., scopes=)`; an account stored before scopes were recorded counts as Gmail); `/status` adds `accounts: [{email, scopes}]`; `/connect?app=` names the app, warns that Google words Drive and Calendar as full access, and has a paste-back box for a browser on another machine (§5.2); `/drive/search`, `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>` behind the shared secret.
+- **`google_workspace_reader.py`** (new, stdlib only, staged into the container beside `service.py`): Drive `files.list` with `corpora=allDrives` (My Drive and shared drives), Docs/Slides exported as text and Sheets as CSV, `text/*` under 1 MiB downloaded, everything else refused with its type; Calendar `calendarList.list` and `events.list` (`singleEvents`, `orderBy=startTime`, `q`) merged earliest first, and `events.get`. Ids come back as `"<account>|<id>"` (calendars too), so a later read goes to the right account. A test asserts the module contains no write verb.
+- **`puffin-admin google start|stop|status`** (`google_service.py`): adopts an existing `dreamference-gmail` (the web UI's included), otherwise creates it on `dreamference-sidecars`, as the invoking user, published on `127.0.0.1:8767`; `server start` calls `ensure_on_node()` (only when a node id exists and no container does; never blocks the model). `configure` now also stages the reader.
+
+### 14.2 Departures
+
+- Patch number `0022` (masking holds `0021`) and no manifest lines (§4.2 planned two).
+- `offered()` means "this machine has a node id", not "the model server is local": the hook cannot know the session's host, and a client has no node id.
+- `list()` reads the configured level and the caller's own seal; a session switched to `on` mid-session sees the rows as available until `/apps` is reopened after the seal is written, but its tool calls refuse regardless.
+- `$` mentions stay off (§4.3), unchanged.
+
+### 14.3 Tested, and owed
+
+- `puffin-apps`: 19 unit tests (rows, status parsing, the HTTP client against a local socket, the MCP protocol, every tool's path, the air gap, untrusted wrapping), clippy clean; run standalone with `serde_json = "1"`.
+- In a scratch export of the pinned Codex with the whole series and patch 0022 applied (`git apply --check` clean): `cargo test -p puffin-launcher -p puffin-apps` passes (launcher 150, 1 ignored; apps 19), and `cargo check -p codex-tui -p codex-app-server` passes, so both hooks type-check against the real `AppInfo`, `AppToolPolicyEvaluator` and `paginate_apps`. Nothing was linked or installed.
+- Python: `tests/test_puffin_apps_service.py` (19); the full suite without the live slash-command file: 738 passed, 9 skipped.
+- **Owed, needing `puffin-admin codex build` and a free model server:** the `/apps` screen in tmux (three rows, Connect opening `localhost:8767/connect?app=…`, "I've connected it" refreshing, the on/off switch writing `[apps.puffin_gmail]`); the no-browser path over SSH; a session's first-turn `gmail_search`, `drive_search` and `calendar_events` calls against real accounts; the egress audit with `--tui` (expected: only 8000 and 8767 from `puffin`); `puffin-admin google start` on a machine without the web UI; the service restarted so `/status` reports scopes (until the running container is recreated, it answers the old shape, which `list()` reads as Gmail-only).

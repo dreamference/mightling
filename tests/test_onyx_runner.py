@@ -1390,7 +1390,8 @@ def test_the_service_holds_no_long_lived_credential(tmp_path):
     assert "ya29.tok" not in json.dumps(stored)
     assert account["expires_at"] > 0
     assert GmailSearchService.credentials(str(tmp_path)) == [
-        {"email": "me@gmail.com", "access_token": "ya29.tok"},
+        # Saved without scopes, as every token was before Puffin's apps: a Gmail grant.
+        {"email": "me@gmail.com", "access_token": "ya29.tok", "scopes": ["https://mail.google.com/"]},
     ]
 
 

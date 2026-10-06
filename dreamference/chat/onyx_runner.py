@@ -1237,7 +1237,7 @@ class OnyxRunner:
         """
         import shutil
 
-        from dreamference.chat import gmail_search_service
+        from dreamference.chat import gmail_search_service, google_workspace_reader
         from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
 
         network = self._onyx_network()
@@ -1248,6 +1248,11 @@ class OnyxRunner:
         try:
             shutil.copyfile(
                 gmail_search_service.__file__, os.path.join(CREDENTIALS_DIR, "service.py")
+            )
+            # Drive and Calendar for Puffin's apps; the service imports it from beside itself.
+            shutil.copyfile(
+                google_workspace_reader.__file__,
+                os.path.join(CREDENTIALS_DIR, "google_workspace_reader.py"),
             )
         except OSError as exc:
             print(f"⚠️  Could not stage the Gmail service: {exc}")
