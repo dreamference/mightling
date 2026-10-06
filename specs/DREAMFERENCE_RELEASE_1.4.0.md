@@ -21,8 +21,8 @@ On any other Linux machine the same script installs the client only. Already on 
 
 ## Highlights
 
-- **Gmail, Google Drive and Calendar in `/apps`.** Codex's `/apps` works without an OpenAI sign-in and lists Puffin's own three apps; Connect goes through a local Google sign-in, so tokens stay on your machine. Connected apps reach the model as read-only tools, each answer framed as untrusted text, and none is offered at `/airgapped on`.
-- **The desktop app has a Work window.** `puffin app --work` (or `puffin app <folder>`) drives `puffin` sessions: threads by project, streaming commands and diffs, approvals in the conversation, Stop, steer and undo, context use with Compress. The app server itself refuses Full Access at `/airgapped on`, for every client (patch `0023`).
+- **Preview: Gmail, Google Drive and Calendar in `/apps`.** Codex's `/apps` works without an OpenAI sign-in and lists Puffin's own three apps; Connect goes through a local Google sign-in, so tokens stay on your machine. Connected apps reach the model as read-only tools, each answer framed as untrusted text, and none is offered at `/airgapped on`.
+- **Preview: the desktop app has a Work window.** `puffin app --work` (or `puffin app <folder>`) drives `puffin` sessions: threads by project, streaming commands and diffs, approvals in the conversation, Stop, steer and undo, context use with Compress. The app server itself refuses Full Access at `/airgapped on`, for every client (patch `0023`).
 - **Long sessions can mask old tool output** (off by default). Past 85% of the context, older outputs are replaced by a placeholder naming a saved copy, and any one output is capped at 8,000 tokens.
 - **`/airgapped` is two levels and holds.** `off` or `on`; the DuckDuckGo-only level is gone (its engine answered with a CAPTCHA). At `on` a session is held by a seal outside the folders its commands can write, Full Access is refused together with `on` (at launch, in `/permissions`, and `/airgapped on` inside a Full Access session), Gmail is not offered, and `puffin update` keeps working from your own shell.
 - **The sandbox works outside the IDE.** Every `puffin-admin` run checks that bubblewrap can create its sandbox and offers to fix it: `puffin-admin host setup` installs an AppArmor profile that lets `/usr/bin/bwrap`, and nothing else, create user namespaces. Night Shift's timer, jobs over SSH and tasks sent to another node depend on it.
@@ -95,6 +95,7 @@ On any other Linux machine the same script installs the client only. Already on 
 - Release assets carry Codex's licence and notice beside the binaries built from it.
 
 ## Known issues
+- **Preview features.** `/apps` (patch `0022`), the Work window and the app server's refusal of Full Access at `on` (patch `0023`) are compiled, unit-tested and pass the egress audits (only loopback ports 8000 and 8767), but have not yet been exercised live: Connect, real searches, the Work window against a running app server, the refusal itself.
 - Drive and Calendar need Google's full scopes with GNOME's client (the read-only scopes are refused); Puffin's services only ever read.
 - The Work window's links are not followable yet, and two windows opened separately run as two processes.
 - The default model's SGLang image is pulled by `server start`, but the 122B fallbacks need a custom vLLM image that it cannot yet build for you (`Dockerfile.dflash`, then `Dockerfile.dense`).
