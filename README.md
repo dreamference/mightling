@@ -7,14 +7,22 @@
 
 ## Private AI on your DGX Spark. One command.
 
-A coding agent, a chat assistant and a desktop app, running entirely on your own GB10.<br>
-**No cloud. No account. No API bill. No telemetry.**
+**A fully local alternative to cloud coding agents.** A coding agent, a chat assistant and a desktop
+app, running entirely on your own GB10. No cloud. No account. No API bill. No telemetry.
+
+[**Install**](#install) · [**Try it**](#try-these-first) · [**Proof**](#-your-code-never-leaves-your-desk) · [**Docs**](docs/getting-started.md) · [**Releases**](https://github.com/dreamference/puffin/releases)
 
 [![Latest release](https://img.shields.io/github/v/release/dreamference/puffin?label=release&color=FF6B35)](https://github.com/dreamference/puffin/releases/latest)
 [![Telemetry: none](https://img.shields.io/badge/telemetry-none-242A32)](docs/privacy.md)
 [![Runs on any GB10](https://img.shields.io/badge/runs%20on-any%20GB10%20%C2%B7%20128%20GB-555555)](#runs-on-every-gb10)
 [![GitHub stars](https://img.shields.io/github/stars/dreamference/puffin?style=flat&color=FFB400)](https://github.com/dreamference/puffin/stargazers)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue)](LICENSE)
+
+<img src="images/puffin-hero.svg" alt="Install Puffin, start the model, run the agent, then audit what left the machine: every connection on 127.0.0.1, no DNS queries" width="760">
+
+| **0** | **87 tok/s** | **$0** | **262K** |
+|:---:|:---:|:---:|:---:|
+| phone-home connections, verified by `audit egress` | JSON on one GB10 | per token, forever | tokens of context |
 
 </div>
 
@@ -35,6 +43,12 @@ Works on the **NVIDIA DGX Spark** and every GB10 machine from Acer, ASUS, Dell, 
 and MSI. The script is short: it verifies every download against the release's checksums and prints
 each `sudo` command before running it. [Read it first](install.sh) if you like.
 
+Already using a coding agent? Paste this into it:
+
+```text
+Install Puffin on this GB10 from https://github.com/dreamference/puffin (one-line installer in the README), then run puffin-admin server start.
+```
+
 ## Try these first
 
 ```bash
@@ -51,6 +65,17 @@ Or queue work for tonight, inside a session:
 
 Puffin works through the queue while you sleep, each task on its own git branch. You review the
 branches over coffee.
+
+## Why switch
+
+| | Cloud coding agents | Puffin |
+|---|---|---|
+| Where your code goes | Their servers | Nowhere |
+| Account needed | Yes | No |
+| Cost per token | Metered | Zero |
+| Rate limits | Yes | No |
+| Works with the network unplugged | No | Yes |
+| You can verify what leaves | No | `puffin-admin audit egress` |
 
 ---
 
@@ -119,17 +144,6 @@ nothing to pay per token, ever.
 | 💬 **Web chat** | A browser assistant with web search, voice input and image understanding, on the same local model. [More →](docs/web-chat.md) |
 | 🪟 **Desktop app** | The chat in a window of its own, plus a Work window (preview) for agent sessions with approvals, diffs and undo. [More →](docs/desktop.md) |
 | 📬 **Gmail, Drive, Calendar** (preview) | Read-only, through a sign-in that stays on your machine. Switched off entirely at `/airgapped on`. |
-
-## Puffin and cloud coding agents
-
-| | Cloud coding agents | Puffin |
-|---|---|---|
-| Where your code goes | Their servers | Nowhere |
-| Account needed | Yes | No |
-| Cost per token | Metered | Zero |
-| Rate limits | Yes | No |
-| Works with the network unplugged | No | Yes |
-| You can verify what leaves | No | `puffin-admin audit egress` |
 
 ## Runs on every GB10
 
@@ -229,6 +243,10 @@ no GPU or Docker: `.venv/bin/python -m pytest tests/`. Design specs are in [`spe
 and [How it works](docs/architecture.md) explains the pieces.
 
 </details>
+
+## Star history
+
+<a href="https://star-history.com/#dreamference/puffin&Date"><img src="https://api.star-history.com/svg?repos=dreamference/puffin&type=Date" alt="Star history of dreamference/puffin" width="600"></a>
 
 ## Spread the word
 
