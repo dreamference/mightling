@@ -277,8 +277,16 @@ impl Context {
         if settings.exact_only() {
             // With no graph, the tracked source files no store covers are searched by text, as the
             // files an ignore rule keeps from the graph are (§4.1): none of them is a silent miss.
+            // Only in the languages the stores index, though: a Python name looked up in a
+            // repository's vendored C (astropy's `cextern/`) gave a thousand rows of noise. With no
+            // store at all, every source file.
+            let extension = |path: &str| path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+            let indexed: BTreeSet<String> = stores.iter().flat_map(|s| s.documents()).filter_map(|d| extension(&d)).collect();
             for file in git.all_files().clone() {
                 if is_state(&file) || !is_code_path(&file) || left_out.iter().any(|s| file == *s || file.starts_with(&format!("{s}/"))) {
+                    continue;
+                }
+                if !indexed.is_empty() && !extension(&file).is_some_and(|e| indexed.contains(&e)) {
                     continue;
                 }
                 if !stores.iter().any(|store| store.covers(&file)) {
