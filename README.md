@@ -4,9 +4,9 @@
 
 # Puffin
 
-**OpenAI's Codex CLI, running a 122-billion-parameter model on the desk in front of you.**
+**OpenAI's Codex CLI, running an open model on the desk in front of you.**
 
-No cloud model. No OpenAI account. No phone-home.
+No cloud model. No OpenAI account. No phone-home. An air-gapped mode when you want one.
 
 [![NVIDIA GB10 · arm64](https://img.shields.io/badge/NVIDIA%20GB10-arm64%20%C2%B7%20128%20GB%20unified-76B900?logo=nvidia&logoColor=white)](docs/getting-started.md)
 [![Built on Codex rust-v0.158.0](https://img.shields.io/badge/built%20on-Codex%20rust--v0.158.0-111111)](docs/puffin.md)
@@ -34,14 +34,14 @@ served on your own machine. Your code, your prompts and your conversations stay 
 |---|---|
 | **`puffin`, the terminal agent** | Reads your code, runs commands, edits your repository. It *is* the Codex CLI, so `puffin exec`, `puffin resume --last`, `-c key=value` and the slash commands work as you know them. [More →](docs/puffin.md) |
 | **Web chat** | A browser assistant with web search, voice input, image understanding and read-only Gmail, on the same local model. [More →](docs/web-chat.md) |
-| **`puffin-app`** | The web chat in a window of its own, with a launcher entry and icon. [More →](docs/desktop.md) |
+| **`puffin-app`** | The web chat in a window of its own, with a launcher entry and icon, and a Work window that drives `puffin` sessions with approvals, diffs and undo. [More →](docs/desktop.md) |
 
 ## Why it is interesting
 
 **A fork that edits almost nothing.** Codex lives in [`codex/`](codex) as a submodule pinned to the
 `rust-v0.158.0` release, and it is never modified. At build time Puffin exports that source, adds
-its launcher crate ([`puffin-rs/`](puffin-rs)) and applies **18 patches totalling 32 KB** from
-[`codex-patches/`](codex-patches), touching 20 of Codex's files. Most patches are a line or two: a
+its launcher crate ([`puffin-rs/`](puffin-rs)) and applies **21 patches totalling 37 KB** from
+[`codex-patches/`](codex-patches), touching 37 of Codex's files. Most patches are a line or two: a
 hook that calls Puffin's own code, or a switch that turns a cloud feature off. Moving to a new Codex
 release is a submodule bump plus whichever hunks stop applying.
 
@@ -81,11 +81,13 @@ things that reach the network, and each happens because you or the agent asked f
 | Installing, building, first model start | Container images, packages, model weights, the Rust toolchain | Docker registries, PyPI, crates.io, Hugging Face, GitHub |
 | The agent or chat searches the web | The search query | Search engines, through a SearXNG instance on your machine |
 | The agent fetches a page | A request for that URL | That website |
-| You connect Gmail | Read-only IMAP requests | Google |
+| You connect Gmail, Drive or Calendar | Read-only requests for your mail, files or events | Google |
 | You run `puffin update` | A release check and download | GitHub |
 
-Search queries are written by the model and can contain fragments of your context. Gmail can be
-switched off (`puffin_gmail = false`); web search cannot yet. Details:
+Search queries are written by the model and can contain fragments of your context. Type
+`/airgapped on` in a session (or set `puffin_airgapped = "on"`) and every command the agent runs
+gets an empty network namespace: no search, no fetch, no mail, only the model on your machine.
+Gmail alone can be switched off with `puffin_gmail = false`. Details:
 [Privacy & security](docs/privacy.md).
 
 ## Quick start
@@ -96,13 +98,13 @@ NVIDIA Container Toolkit, Python 3 and Git. Expect about 70 GB of model weights 
 a few minutes once its dependencies are cached, much longer the first time.
 
 **Install from a release** (no checkout, nothing compiled). [`install.sh`](install.sh) is attached
-to every release from the one after v1.3.0; it downloads that release's prebuilt binaries, checks
-them against the release's checksums, and on a GB10 also installs `puffin-admin` and applies the
-host settings a model load needs (it prints each `sudo` command before running it):
+to every release; it downloads that release's prebuilt binaries, checks them against the release's
+checksums, and on a GB10 also installs `puffin-admin` and applies the host settings a model load
+needs (it prints each `sudo` command before running it):
 
 ```bash
-export GH_TOKEN=...                  # while the repository is private: a token that can read it
-gh release download -R dgxcoder/dgxcoder -p install.sh && bash install.sh
+curl -fsSLO https://github.com/dgxcoder/dgxcoder/releases/latest/download/install.sh
+bash install.sh                      # read it first if you like: it is short
 puffin-admin server start            # checks the host, downloads and loads the model
 cd ~/my-project && puffin            # start coding
 ```
@@ -125,10 +127,11 @@ cd ~/my-project && puffin            # start coding
 ```
 
 `puffin-admin`, `puffin-search` and `puffin-fetch` have to be on the `PATH` the agent inherits: it reaches the web
-and Gmail by running `puffin-search`, `puffin-fetch` and `puffin-admin gmail` as shell commands. The default model also runs on a
-custom vLLM image, built in two stages from [`Dockerfile.dflash`](Dockerfile.dflash) and
-[`Dockerfile.dense`](Dockerfile.dense), which `server start` cannot build for you yet; the full
-walkthrough, including the web chat and desktop app, is in [Get started](docs/getting-started.md).
+and Gmail by running `puffin-search`, `puffin-fetch` and `puffin-admin gmail` as shell commands. The default model runs on a
+published SGLang image that `server start` pulls; the 122B fallbacks need a custom vLLM image, built
+in two stages from [`Dockerfile.dflash`](Dockerfile.dflash) and [`Dockerfile.dense`](Dockerfile.dense),
+which `server start` cannot build for you yet. The full walkthrough, including the web chat and
+desktop app, is in [Get started](docs/getting-started.md).
 
 ## Models
 

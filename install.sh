@@ -19,8 +19,9 @@
 # It downloads the same assets, by the same names and with the same checks, as `puffin update`
 # (puffin-rs/src/update.rs), so a machine installed this way is updated by that command.
 #
-# The repository is private at the time of writing, so GitHub wants a token that can read it:
-# GH_TOKEN, GITHUB_TOKEN, or a logged-in `gh`. With a public repository none is needed.
+# The repository is public, so no token is needed. One is used when present (GH_TOKEN,
+# GITHUB_TOKEN, or a logged-in `gh`): it raises GitHub's rate limit, and it is what reads a private
+# fork named by PUFFIN_RELEASE_REPO.
 # PUFFIN_RELEASE_REPO names another repository (a fork), PUFFIN_RELEASE_API another API root (the
 # tests' stand-in server); PUFFIN_INSTALL_DIR and PUFFIN_VENV move the two directories.
 #
@@ -117,8 +118,9 @@ fi
 if ! curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json"; then
     say "❌ Could not read $release_url" >&2
     if [ -z "$TOKEN" ]; then
-        say "   The repository is private: set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it," >&2
-        say "   or log in with \`gh auth login\`, and run this again." >&2
+        say "   Check the network and that $REPO has a published release. If the repository is" >&2
+        say "   private, set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it, or log in with" >&2
+        say "   \`gh auth login\`, and run this again." >&2
     else
         say "   Check that the token can read $REPO and that the release exists (drafts are not listed)." >&2
     fi
