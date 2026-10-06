@@ -1,6 +1,6 @@
 # Puffin 1.4.1 — release notes
 
-**Status:** drafted 2026-10-06 from `git log v1.4.0..main`. The text between the two rules is the GitHub release's description.
+**Status:** published 2026-10-07 as Latest (`v1.4.1`, workflow run 37540845556: every job passed). Drafted 2026-10-06 from `git log v1.4.0..main`. The text between the two rules is the GitHub release's description.
 
 **Version.** setup.py, `dreamference.__version__`, the MCP server's `serverInfo`, `tauri.conf.json` and `puffin-app`'s Cargo manifest say `1.4.1`; the release workflow stamps the version it is given into setup.py, `tauri.conf.json` and the `puffin` binary in its own checkout.
 
