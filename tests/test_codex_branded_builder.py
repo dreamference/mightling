@@ -68,7 +68,11 @@ def test_the_patches_stay_small():
     # items to the leaf crate puffin-rs/masking); 34,697 after. Raised to 36,250 on 2026-10-06 for
     # 0022's `/apps` hooks (1,371 bytes: the TUI's gate also opens when Puffin offers apps, and the
     # app server answers `app/list` with Puffin's rows before any directory request); 36,068 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 36_250
+    # On 2026-10-05 the user approved a ceiling of 38,500 for the Desktop Work window's hook. Raised
+    # to 37,500 on 2026-10-06 for 0023's air-gap check in the app server (1,220 bytes: a dependency
+    # line, and a validator on the config's permission constraint that refuses Full Access at `on`
+    # for every client of the app server); 37,288 after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 37_500
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
