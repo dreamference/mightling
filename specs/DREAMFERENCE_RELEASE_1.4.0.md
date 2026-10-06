@@ -1,6 +1,6 @@
 # Puffin 1.4.0 — release notes
 
-**Status:** the first public release. Drafted 2026-10-03 from `git log v1.3.0..main`, completed 2026-10-06 when `/apps`, the desktop Work window, observation masking and patch `0023` were merged. The text between the two rules is the GitHub release's description.
+**Status:** published 2026-10-06 as the first public release (`v1.4.0`, tag on `e2f5722`, workflow run 37463454928: every job passed). Drafted 2026-10-03 from `git log v1.3.0..main`, completed 2026-10-06 when `/apps`, the desktop Work window, observation masking and patch `0023` were merged. The text between the two rules is the GitHub release's description.
 
 **Version.** setup.py and `dreamference.__version__` say `1.4.0`; the release workflow still stamps the version it is given into setup.py, `tauri.conf.json` and the `puffin` binary in its own checkout.
 
