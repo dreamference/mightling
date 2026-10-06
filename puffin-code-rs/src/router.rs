@@ -30,6 +30,22 @@ use crate::textscan;
 
 /// Definitions `search` adds from body matches, after the graph's own ranking.
 const BODY_ROWS: usize = 30;
+/// Definitions `search` lists by name when the graph is off (`layers = exact`).
+const NAME_ROWS: usize = 20;
+/// Symbols read per query word for those name rows.
+const NAME_MATCHES_PER_WORD: usize = 300;
+
+/// What `outline` and `search` call a SCIP definition of this kind.
+fn kind_label(kind: scip_symbol::Kind) -> &'static str {
+    match kind {
+        scip_symbol::Kind::Type => "type",
+        scip_symbol::Kind::Method => "function",
+        scip_symbol::Kind::Term => "term",
+        scip_symbol::Kind::Namespace => "module",
+        scip_symbol::Kind::Macro => "macro",
+        _ => "symbol",
+    }
+}
 /// At most this many text matches are added to an answer the graph alone gave ([`Context::graph_gap_rows`]).
 const GRAPH_GAP_ROWS: usize = 100;
 
@@ -184,9 +200,14 @@ impl Context {
             .map(|p| format!("{}/", p.to_string_lossy()))
             .unwrap_or_else(|| "\0".to_string());
         let is_state = |path: &str| path.starts_with(&state_prefix);
-        let (graph, graph_error) = match GraphStore::open(&repo) {
-            Ok(graph) => (graph, None),
-            Err(error) => (None, Some(error.to_string())),
+        // At `layers = exact` the graph is never opened: not even a stale one answers.
+        let (graph, graph_error) = if settings.exact_only() {
+            (None, None)
+        } else {
+            match GraphStore::open(&repo) {
+                Ok(graph) => (graph, None),
+                Err(error) => (None, Some(error.to_string())),
+            }
         };
         let scip_dir = repo.scip_dir();
         let mut not_indexed_dirs = Vec::new();
@@ -251,6 +272,18 @@ impl Context {
                     store_changes.push(changes);
                 }
                 Err(error) => store_errors.push(format!("{key}: {error}")),
+            }
+        }
+        if settings.exact_only() {
+            // With no graph, the tracked source files no store covers are searched by text, as the
+            // files an ignore rule keeps from the graph are (§4.1): none of them is a silent miss.
+            for file in git.all_files().clone() {
+                if is_state(&file) || !is_code_path(&file) || left_out.iter().any(|s| file == *s || file.starts_with(&format!("{s}/"))) {
+                    continue;
+                }
+                if !stores.iter().any(|store| store.covers(&file)) {
+                    not_indexed_files.insert(file);
+                }
             }
         }
         let mut changed = BTreeSet::new();
@@ -360,7 +393,7 @@ impl Context {
         if let Some(line) = sources_line(stores) {
             out.push(line);
         }
-        out.push("heuristic = codebase-memory or text search".to_string());
+        out.push(if self.settings.exact_only() { "heuristic = text search (layers = exact)" } else { "heuristic = codebase-memory or text search" }.to_string());
         out
     }
 
@@ -504,6 +537,12 @@ impl Context {
         match candidates.len() {
             0 => {
                 answer.notes.push(format!("no definition named `{query}` in the index"));
+                if self.settings.exact_only() {
+                    answer.notes.push(format!(
+                        "layers = exact, so no graph stands in: `search {}` finds it by text",
+                        query_segments(query).last().cloned().unwrap_or_default()
+                    ));
+                }
                 Ok(None)
             }
             1 => Ok(candidates.pop()),
@@ -618,7 +657,16 @@ impl Context {
     }
 
     fn note_missing_layers(&self, answer: &mut Answer) {
-        if let Some(error) = &self.graph_error {
+        if self.settings.exact_only() {
+            if self.stores.is_empty() {
+                answer.notes.push("layers = exact and no SCIP index covers this repository yet: rows come from the text search alone".to_string());
+            } else if !self.not_indexed_files.is_empty() {
+                answer.notes.push(format!(
+                    "layers = exact: {} source files no SCIP index covers are searched by text",
+                    self.not_indexed_files.len()
+                ));
+            }
+        } else if let Some(error) = &self.graph_error {
             answer.notes.push(format!("universal layer unavailable: {error}"));
         } else if self.graph.is_none() {
             answer.notes.push("universal layer not built yet; run `puffin-code index`".to_string());
@@ -706,6 +754,9 @@ impl Context {
         // A definition written since the snapshots: a text hit on a line that defines the name.
         rows.extend(self.text_rows(&name, &mut answer, &|path, line| defines_on_line(&self.repo, path, line, &name)));
         answer.rows = dedup(rows);
+        if answer.rows.is_empty() && self.settings.exact_only() {
+            answer.notes.push(format!("no exact definition named `{name}`, and layers = exact, so no graph stands in: `search {name}` finds it by text"));
+        }
         self.request_reindex(&mut answer);
         Ok(answer)
     }
@@ -782,6 +833,8 @@ impl Context {
             let mut lines = vec![start];
             if let Some(graph) = &self.graph {
                 lines.extend(graph.outline(&path)?.into_iter().map(|n| n.start_line).filter(|l| *l > start && *l <= end));
+            } else if self.settings.exact_only() {
+                lines.extend(self.exact_outline(&path).into_iter().map(|(s, _, _)| s).filter(|l| *l > start && *l <= end));
             }
             for line in lines {
                 for candidate in self.resolve_location(&path, line)? {
@@ -976,6 +1029,18 @@ impl Context {
         let mut answer = self.new_answer("outline", file);
         answer.tagged = false;
         self.note_missing_layers(&mut answer);
+        if self.settings.exact_only() {
+            for (start, end, label) in self.exact_outline(file) {
+                answer.rows.push(Row { tag: None, path: file.to_string(), line: start, detail: format!("{label} (to {end})") });
+            }
+            if self.changed.contains(file) {
+                answer.notes.push(format!("{file} changed since the SCIP snapshot; lines may have moved"));
+            }
+            if answer.rows.is_empty() && self.not_indexed_files.contains(file) {
+                answer.notes.push(format!("no SCIP index covers {file}; read it, or `search` its words"));
+            }
+            return Ok(answer);
+        }
         let Some(graph) = &self.graph else { return Ok(answer) };
         for node in graph.outline(file)? {
             answer.rows.push(Row {
@@ -996,6 +1061,24 @@ impl Context {
         let mut answer = self.new_answer("search", text);
         answer.tagged = false;
         self.note_missing_layers(&mut answer);
+        if self.settings.exact_only() {
+            self.search_names_exact(text, &mut answer)?;
+            let mut files: BTreeSet<String> = self.stores.iter().flat_map(|s| s.documents()).collect();
+            files.extend(self.not_indexed_files.iter().cloned());
+            let files: Vec<(String, u64)> = files
+                .into_iter()
+                .filter(|f| is_code_path(f) && !self.deleted.contains(f))
+                .map(|f| {
+                    let size = std::fs::metadata(self.repo.abs(&f)).map(|m| m.len()).unwrap_or(0);
+                    (f, size)
+                })
+                .collect();
+            self.search_bodies(files, &|file| self.exact_outline(file), text, &mut answer);
+            if !self.changed.is_empty() {
+                answer.notes.push(format!("{} files changed since the SCIP snapshots: their bodies were read as they are now", self.changed.len()));
+            }
+            return Ok(answer);
+        }
         let Some(graph) = &self.graph else { return Ok(answer) };
         for node in graph.search(text, 200)? {
             answer.rows.push(Row {
@@ -1005,7 +1088,19 @@ impl Context {
                 detail: format!("{} {}", node.label.to_lowercase(), node.display(&graph.project)),
             });
         }
-        self.search_bodies(graph, text, &mut answer);
+        let files: Vec<(String, u64)> = match graph.file_hashes() {
+            Ok(hashes) => hashes.into_iter().filter(|(f, _)| is_code_path(f) && !self.deleted.contains(f)).map(|(f, stamp)| (f, stamp.size)).collect(),
+            Err(_) => Vec::new(),
+        };
+        let outline_of = |file: &str| -> Vec<(u32, u32, String)> {
+            graph
+                .outline(file)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|n| (n.start_line, n.end_line.max(n.start_line), format!("{} {}", n.label.to_lowercase(), n.display(&graph.project))))
+                .collect()
+        };
+        self.search_bodies(files, &outline_of, text, &mut answer);
         if !self.changed.is_empty() {
             answer.notes.push(format!("{} files changed since the graph's snapshot are ranked as they were then", self.changed.len()));
         }
@@ -1024,16 +1119,15 @@ impl Context {
     /// for one or two); it is ranked by the rarity of the words it holds, and a line holding all
     /// of them counts extra. Code comes first in the answer: the graph's code rows, these, then
     /// its documentation sections. Above the text bounds nothing is read and a note says so.
-    fn search_bodies(&self, graph: &GraphStore, text: &str, answer: &mut Answer) {
+    fn search_bodies(&self, files: Vec<(String, u64)>, outline_of: &dyn Fn(&str) -> Vec<(u32, u32, String)>, text: &str, answer: &mut Answer) {
         let mut words: Vec<String> = text.split_whitespace().map(str::to_lowercase).filter(|w| w.len() > 1).collect();
         words.sort();
         words.dedup();
         if words.is_empty() {
             return;
         }
-        let Ok(hashes) = graph.file_hashes() else { return };
-        let files: Vec<&String> = hashes.keys().filter(|f| is_code_path(f) && !self.deleted.contains(*f)).collect();
-        let bytes: u64 = files.iter().filter_map(|f| hashes.get(*f)).map(|stamp| stamp.size).sum();
+        let bytes: u64 = files.iter().map(|(_, size)| size).sum();
+        let files: Vec<String> = files.into_iter().map(|(f, _)| f).collect();
         if bytes > self.settings.scan_max_bytes {
             answer.notes.push(format!(
                 "bodies were not searched ({} MiB of code, above the {} MiB bound): rows are name and documentation matches only",
@@ -1058,7 +1152,7 @@ impl Context {
             if present.len() < needed {
                 continue;
             }
-            let outline = graph.outline(file).unwrap_or_default();
+            let outline = outline_of(file);
             let mut spans: BTreeMap<Option<usize>, (BTreeSet<usize>, Vec<(u32, Vec<usize>)>)> = BTreeMap::new();
             for (index, line) in lower.lines().enumerate() {
                 let hits: Vec<usize> = present.iter().copied().filter(|i| starts_a_word(line, &words[*i])).collect();
@@ -1069,8 +1163,8 @@ impl Context {
                 let innermost = outline
                     .iter()
                     .enumerate()
-                    .filter(|(_, n)| n.start_line <= number && number <= n.end_line.max(n.start_line))
-                    .min_by_key(|(_, n)| n.end_line.saturating_sub(n.start_line))
+                    .filter(|(_, (start, end, _))| *start <= number && number <= *end)
+                    .min_by_key(|(_, (start, end, _))| end.saturating_sub(*start))
                     .map(|(i, _)| i);
                 let entry = spans.entry(innermost).or_default();
                 entry.0.extend(hits.iter().copied());
@@ -1083,13 +1177,13 @@ impl Context {
                     continue;
                 }
                 let (line, detail) = match node {
-                    Some(i) => (outline[i].start_line, format!("{} {}", outline[i].label.to_lowercase(), outline[i].display(&graph.project))),
+                    Some(i) => (outline[i].0, outline[i].2.clone()),
                     None => (lines[0].0, "top level".to_string()),
                 };
-                if listed.contains(&((*file).clone(), line)) {
+                if listed.contains(&(file.clone(), line)) {
                     continue;
                 }
-                found.push((seen, lines, (*file).clone(), line, detail));
+                found.push((seen, lines, file.clone(), line, detail));
             }
         }
         // A word in few files says more than one in many; words that share a line say more than
@@ -1113,6 +1207,84 @@ impl Context {
         rows.extend(body);
         rows.extend(sections);
         answer.rows = rows;
+    }
+
+    /// A file's definitions from the SCIP stores that cover it, outermost first: `(start, end,
+    /// label)`. The outline when the graph is off (`layers = exact`).
+    fn exact_outline(&self, file: &str) -> Vec<(u32, u32, String)> {
+        let mut out: Vec<(u32, u32, String)> = Vec::new();
+        for store in self.stores.iter().filter(|s| s.covers(file)) {
+            for (start, end, symbol) in store.definitions_in(file).unwrap_or_default() {
+                let Some(name) = scip_symbol::parse(&symbol) else { continue };
+                if matches!(name.kind, scip_symbol::Kind::Parameter | scip_symbol::Kind::TypeParameter) {
+                    continue;
+                }
+                out.push((start, end, format!("{} {}", kind_label(name.kind), name.display())));
+            }
+        }
+        out.sort_by(|a, b| (a.0, std::cmp::Reverse(a.1)).cmp(&(b.0, std::cmp::Reverse(b.1))));
+        out.dedup();
+        out
+    }
+
+    /// `search`'s name rows when the graph is off: definitions whose name holds the query's
+    /// words, ranked by how many and how rare. One or two words must all be in the name; a
+    /// longer query (a sentence from a bug report) ranks names by the words they hold, since a
+    /// name rarely holds more than two.
+    fn search_names_exact(&self, text: &str, answer: &mut Answer) -> Result<()> {
+        let mut words: Vec<String> = text
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map(str::to_lowercase)
+            .filter(|w| w.len() > 2)
+            .collect();
+        words.sort();
+        words.dedup();
+        if words.is_empty() {
+            return Ok(());
+        }
+        let needed = if words.len() <= 2 { words.len() } else { 1 };
+        let mut hits: BTreeMap<(usize, i64), (String, BTreeSet<usize>)> = BTreeMap::new();
+        let mut per_word = vec![0usize; words.len()];
+        for (i, store) in self.stores.iter().enumerate() {
+            for (w, word) in words.iter().enumerate() {
+                let found = store.symbols_containing(word, NAME_MATCHES_PER_WORD)?;
+                per_word[w] += found.len();
+                for (id, symbol) in found {
+                    hits.entry((i, id)).or_insert_with(|| (symbol, BTreeSet::new())).1.insert(w);
+                }
+            }
+        }
+        let rarity = |w: usize| (1.0 + NAME_MATCHES_PER_WORD as f64 / per_word[w].max(1) as f64).ln();
+        let mut ranked: Vec<(f64, usize, i64, String)> = hits
+            .into_iter()
+            .filter(|(_, (_, held))| held.len() >= needed)
+            .filter_map(|((i, id), (symbol, held))| {
+                let name = scip_symbol::parse(&symbol)?;
+                if !matches!(name.kind, scip_symbol::Kind::Type | scip_symbol::Kind::Method | scip_symbol::Kind::Macro) {
+                    return None;
+                }
+                // A word that is the whole name says more than one inside a longer name.
+                let whole = held.iter().any(|w| name.name().eq_ignore_ascii_case(&words[*w]));
+                let mut score: f64 = held.iter().map(|w| rarity(*w)).sum();
+                if whole {
+                    score *= 1.5;
+                }
+                Some((score, i, id, symbol))
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.3.len().cmp(&b.3.len())));
+        let mut rows: Vec<Row> = Vec::new();
+        for (_, i, id, symbol) in ranked.into_iter().take(NAME_ROWS) {
+            let Some(name) = scip_symbol::parse(&symbol) else { continue };
+            for def in self.stores[i].definitions_of(id, &symbol, &name)? {
+                if self.deleted.contains(&def.path) {
+                    continue;
+                }
+                rows.push(Row { tag: None, path: def.path, line: def.line, detail: format!("{} {}", kind_label(name.kind), name.display()) });
+            }
+        }
+        answer.rows.extend(dedup(rows));
+        Ok(())
     }
 
     /// Lines of a graph edge's source: its recorded call-site line, or the whole-word matches of
@@ -1148,6 +1320,7 @@ impl Context {
                 self.graph_changes.as_ref().map(|c| c.changed.len() + c.deleted.len()).unwrap_or(0)
             )),
             (None, Some(error)) => lines.push(format!("universal: unavailable: {error}")),
+            (None, None) if self.settings.exact_only() => lines.push("universal: off (layers = exact)".to_string()),
             (None, None) => lines.push("universal: not built yet (`puffin-code index`)".to_string()),
         }
         if !self.changed.is_empty() || !self.deleted.is_empty() {

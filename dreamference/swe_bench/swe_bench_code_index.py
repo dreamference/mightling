@@ -14,10 +14,14 @@ host** before the agent starts, and the index is mounted read-only into the cont
   container needs only the `puffin-code` binary and four environment variables that tell it
   where the index is. A file the agent edits is then answered by text search, as on the host.
 
-Only the **universal** layer (codebase-memory) is built. The exact layer was measured on one
-sympy instance on 2026-10-02: 17 minutes, 1.6-1.7 GiB per directory, and the `sympy/` package
-itself died of Node's heap limit; at that cost it does not fit a run, and every instance is a
-different commit, so nothing is shared between them.
+Two arms index. `universal` builds the codebase-memory graph alone (the exact indexers are made
+"not installed"). `exact` builds the SCIP stores alone (scip-python, scip-typescript; the graph
+is off through `layers = exact`) and the agent's `puffin-code` answers from them, falling back
+to text search where they have nothing. The exact layer was measured on one sympy instance on
+2026-10-02: 17 minutes, 1.6-1.7 GiB per directory, and the `sympy/` package itself died of Node's
+heap limit, which was Node's own default; scip-python's heap is now sized to its run's memory
+cap, and the arm raises that cap. Every instance is a different commit, so nothing is shared
+between instances, but each store is cached by repository and commit and a re-run is free.
 """
 
 import json
@@ -33,7 +37,16 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 
 # The arms `--code-index` accepts.
-ARMS: Final[tuple] = ("off", "universal")
+ARMS: Final[tuple] = ("off", "universal", "exact")
+
+# The memory cap of one static exact run in the `exact` arm, MiB; puffin-code gives Node three
+# quarters of it as heap. Four times the default, for sympy's package (see the module docstring).
+EXACT_RUN_CEILING_MB: Final[int] = 16 << 10
+
+# Index attempts in the `exact` arm: a run the model kept busy past puffin-code's wait is deferred,
+# not failed, and the next attempt picks it up.
+EXACT_ATTEMPTS: Final[int] = 3
+EXACT_RETRY_PAUSE_S: Final[int] = 60
 
 # Names a `puffin-code` to use in place of the installed one (`host_binary`).
 PUFFIN_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_PUFFIN_CODE"
@@ -43,7 +56,7 @@ PUFFIN_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_PUFFIN_CODE"
 MCP_SERVER: Final[str] = "puffin_code"
 MCP_FORWARDED_ENV: Final[List[str]] = [
     "PUFFIN_CODE_ROOT", "PUFFIN_CODE_STATE_DIR", "PUFFIN_CODE_GRAPH_DB", "PUFFIN_CODE_PROJECT",
-    "PUFFIN_CODE_TOOLS_DIR", "PUFFIN_CODE_INDEXERS_DIR", "CODEX_HOME", "DREAMFERENCE_CONFIG_PATH",
+    "PUFFIN_CODE_TOOLS_DIR", "PUFFIN_CODE_INDEXERS_DIR", "PUFFIN_CODE_LAYERS", "CODEX_HOME", "DREAMFERENCE_CONFIG_PATH",
     "DREAMFERENCE_VLLM_HOST"]
 
 # Where the relocated `puffin-code` and the instance's index are mounted in the container.
@@ -88,8 +101,11 @@ class SweBenchCodeIndex:
         Returns:
             Path: The relocated `puffin-code`, kept apart from `puffin`'s runtime so that
             runtime's hash, which a run's manifest pins, does not change when this one appears.
+            A build named by `DREAMFERENCE_SWE_BENCH_PUFFIN_CODE` gets a directory of its own,
+            so preparing it never replaces the one a running arm has mounted.
         """
-        return swe_bench_settings.CACHE_DIR / "runtime-code"
+        name = "runtime-code-override" if os.environ.get(PUFFIN_CODE_OVERRIDE_ENV) else "runtime-code"
+        return swe_bench_settings.CACHE_DIR / name
 
     @classmethod
     def ensure_runtime(cls, patchelf: str) -> Optional[str]:
@@ -141,72 +157,101 @@ class SweBenchCodeIndex:
     # -- one instance's index ------------------------------------------------------------------
 
     @classmethod
-    def index_dir(cls, row: Dict[str, Any]) -> Path:
+    def index_dir(cls, row: Dict[str, Any], arm: str = "universal") -> Path:
         """
         Args:
             row: The instance's dataset row.
+            arm: `universal` or `exact`: each has a cache of its own.
 
         Returns:
-            Path: Where its index is cached, keyed by repository and base commit.
+            Path: Where its index is cached, keyed by arm, repository and base commit.
         """
         repo = str(row["repo"]).replace("/", "__")
-        return swe_bench_settings.CACHE_DIR / "index" / f"{repo}@{str(row['base_commit'])[:16]}"
+        return swe_bench_settings.CACHE_DIR / ("index-exact" if arm == "exact" else "index") \
+            / f"{repo}@{str(row['base_commit'])[:16]}"
 
     @classmethod
-    def record(cls, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def record(cls, row: Dict[str, Any], arm: str = "universal") -> Optional[Dict[str, Any]]:
         """
         Args:
             row: The instance's dataset row.
+            arm: `universal` or `exact`.
 
         Returns:
-            Optional[Dict[str, Any]]: The cached index's record (`seconds`, `layers`, `project`,
-            `graph_db`, `tool_hash`), or None when no usable index is cached.
+            Optional[Dict[str, Any]]: The cached index's record (`seconds`, `layers`, and for
+            `universal` `project` and `graph_db`, for `exact` `stores`, `failed` and `peak_mb`;
+            `tool_hash`), or None when no usable index is cached.
         """
-        directory = cls.index_dir(row)
+        directory = cls.index_dir(row, arm)
         try:
             record = json.loads((directory / RECORD_NAME).read_text())
         except (OSError, ValueError):
             return None
-        if not isinstance(record, dict) or not (directory / "cbm" / str(record.get("graph_db"))).is_file():
+        if not isinstance(record, dict):
+            return None
+        if arm == "exact":
+            return record if record.get("layers") == ["exact"] else None
+        if not (directory / "cbm" / str(record.get("graph_db"))).is_file():
             return None
         return record
 
     @classmethod
-    def ensure(cls, row: Dict[str, Any], image: str) -> Optional[Dict[str, Any]]:
+    def copy_testbed(cls, row: Dict[str, Any], image: str, checkout: Path) -> bool:
+        """
+        Copies the repository exactly as the agent will get it out of a container that never runs.
+
+        Args:
+            row: The instance's dataset row.
+            image: The instance image, already present locally.
+            checkout: Where the copy goes.
+
+        Returns:
+            bool: Whether it was copied (the reason is printed when not).
+        """
+        created = SweBenchDocker.run(["create", image], timeout=300)
+        container = created.stdout.strip()
+        if created.returncode != 0 or not container:
+            print(f"⚠️  {row['instance_id']}: could not create a container to copy /testbed from")
+            return False
+        copied = SweBenchDocker.run(["cp", "-q", f"{container}:/testbed", str(checkout)], timeout=900)
+        SweBenchDocker.run(["rm", "-f", container], timeout=120)
+        if copied.returncode != 0:
+            print(f"⚠️  {row['instance_id']}: could not copy /testbed out of {image}")
+            return False
+        return True
+
+    @classmethod
+    def ensure(cls, row: Dict[str, Any], image: str, arm: str = "universal") -> Optional[Dict[str, Any]]:
         """
         Builds the instance's index on the host unless one is cached.
 
         Args:
             row: The instance's dataset row.
             image: The instance image, already present locally.
+            arm: `universal` or `exact`.
 
         Returns:
             Optional[Dict[str, Any]]: The index's record, with `cached` saying whether it was
-            reused; None when it could not be built (the reason is printed).
+            reused; None when it could not be built (the reason is printed). An `exact` index
+            whose indexers failed still has a record, naming them: the agent then has the text
+            search alone, and the run says so rather than leaving the instance out.
         """
-        cached = cls.record(row)
+        cached = cls.record(row, arm)
         if cached is not None:
             return dict(cached, cached=True)
         binary = cls.host_binary()
         if binary is None:
             print("❌ puffin-code is not installed: run `puffin-admin codex build` first.")
             return None
+        if arm == "exact":
+            return cls.ensure_exact(row, image, binary)
         directory = cls.index_dir(row)
         shutil.rmtree(directory, ignore_errors=True)
         for sub in ("state", "cbm", "no-indexers"):
             (directory / sub).mkdir(parents=True)
         checkout = directory / "testbed"
         started = time.time()
-        # The repository exactly as the agent will get it, copied out of a container that never runs.
-        created = SweBenchDocker.run(["create", image], timeout=300)
-        container = created.stdout.strip()
-        if created.returncode != 0 or not container:
-            print(f"⚠️  {row['instance_id']}: could not create a container to copy /testbed from")
-            return None
-        copied = SweBenchDocker.run(["cp", "-q", f"{container}:/testbed", str(checkout)], timeout=900)
-        SweBenchDocker.run(["rm", "-f", container], timeout=120)
-        if copied.returncode != 0:
-            print(f"⚠️  {row['instance_id']}: could not copy /testbed out of {image}")
+        if not cls.copy_testbed(row, image, checkout):
             return None
         environment = dict(
             os.environ,
@@ -240,18 +285,107 @@ class SweBenchCodeIndex:
         return dict(record, cached=False)
 
     @classmethod
-    def container_arguments(cls, row: Dict[str, Any], record: Dict[str, Any]) -> Dict[str, Any]:
+    def ensure_exact(cls, row: Dict[str, Any], image: str, binary: str) -> Optional[Dict[str, Any]]:
+        """
+        Builds the SCIP stores of one instance on the host, with the graph off.
+
+        `puffin-code index --wait` runs each static indexer in turn under the machine's admission
+        rules; a run the model kept busy past its wait is deferred, and the next attempt picks it
+        up. The record names every store built and every indexer that did not finish.
+
+        Args:
+            row: The instance's dataset row.
+            image: The instance image, already present locally.
+            binary: The `puffin-code` that indexes.
+
+        Returns:
+            Optional[Dict[str, Any]]: The record; None only when /testbed could not be copied.
+        """
+        import hashlib
+        directory = cls.index_dir(row, "exact")
+        shutil.rmtree(directory, ignore_errors=True)
+        for sub in ("state", "cbm"):
+            (directory / sub).mkdir(parents=True)
+        settings = directory / "settings.toml"
+        settings.write_text(f'puffin_code_layers = "exact"\ncode_index_small_ceiling_mb = {EXACT_RUN_CEILING_MB}\n')
+        checkout = directory / "testbed"
+        started = time.time()
+        if not cls.copy_testbed(row, image, checkout):
+            return None
+        environment = dict(
+            os.environ,
+            PUFFIN_CODE_STATE_DIR=str(directory / "state"),
+            CBM_CACHE_DIR=str(directory / "cbm"),
+            PUFFIN_CODE_LAYERS="exact",
+            DREAMFERENCE_CONFIG_PATH=str(settings),
+        )
+        logs: List[str] = []
+        runs: Dict[str, Any] = {}
+        for attempt in range(1, EXACT_ATTEMPTS + 1):
+            try:
+                indexed = cls.execute([binary, "index", "--wait"], cwd=str(checkout), env=environment,
+                                      timeout=INDEX_TIMEOUT_S)
+                logs.append((indexed.stdout or "") + (indexed.stderr or ""))
+            except subprocess.TimeoutExpired:
+                logs.append("timed out")
+            try:
+                runs = json.loads((directory / "state" / "scip" / "manifest.json").read_text()).get("runs", {})
+            except (OSError, ValueError):
+                runs = {}
+            if not any(str(entry.get("status", "")).startswith("deferred") for entry in runs.values()):
+                break
+            if attempt < EXACT_ATTEMPTS:
+                cls.sleep(EXACT_RETRY_PAUSE_S)
+        (directory / "index.log").write_text("\n".join(f"--- attempt {i + 1}\n{log}" for i, log in enumerate(logs)))
+        shutil.rmtree(checkout, ignore_errors=True)  # queries read the container's own /testbed
+        stores = sorted(key for key, entry in runs.items()
+                        if entry.get("store") and (directory / "state" / "scip" / str(entry["store"])).is_file())
+        failed = {key: str(entry.get("status")) for key, entry in runs.items() if key not in stores}
+        record = {
+            "instance_id": row["instance_id"], "repo": row["repo"], "base_commit": row["base_commit"],
+            "layers": ["exact"], "stores": stores, "failed": failed,
+            "peak_mb": max((int(entry.get("peak_rss_mb") or 0) for entry in runs.values()), default=0),
+            "seconds": round(time.time() - started, 1),
+            "bytes": sum(path.stat().st_size for path in directory.rglob("*") if path.is_file()),
+            "tool_hash": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
+        }
+        if not stores:
+            print(f"⚠️  {row['instance_id']}: no SCIP store was built; the agent will have the text search alone "
+                  f"(see {directory / 'index.log'})")
+        elif failed:
+            print(f"⚠️  {row['instance_id']}: {len(failed)} indexer run(s) did not finish: {', '.join(sorted(failed))}")
+        (directory / RECORD_NAME).write_text(json.dumps(record, indent=2) + "\n")
+        return dict(record, cached=False)
+
+    # Seam: tests replace it so a retry does not wait.
+    sleep: Callable[[float], None] = staticmethod(time.sleep)
+
+    @classmethod
+    def container_arguments(cls, row: Dict[str, Any], record: Dict[str, Any], arm: str = "universal") -> Dict[str, Any]:
         """
         Says how a container is given the index.
 
         Args:
             row: The instance's dataset row.
             record: The index's record.
+            arm: `universal` or `exact`.
 
         Returns:
             Dict[str, Any]: `mounts` (`docker run -v` values, both read-only), `env` (what
             `puffin-code` and the launcher read) and `path` (the directory to put on `PATH`).
         """
+        if arm == "exact":
+            return {
+                "mounts": [f"{cls.runtime_dir()}:{CODE_MOUNT}:ro", f"{cls.index_dir(row, 'exact')}:{INDEX_MOUNT}:ro"],
+                "env": {
+                    "PUFFIN_CODE_BIN": f"{CODE_MOUNT}/bin/puffin-code",
+                    "PUFFIN_CODE_STATE_DIR": f"{INDEX_MOUNT}/state",
+                    # No graph: every answer comes from the SCIP stores or the text search.
+                    "PUFFIN_CODE_LAYERS": "exact",
+                },
+                "path": f"{CODE_MOUNT}/bin",
+                "config": cls.mcp_overrides(),
+            }
         return {
             "mounts": [f"{cls.runtime_dir()}:{CODE_MOUNT}:ro", f"{cls.index_dir(row)}:{INDEX_MOUNT}:ro"],
             "env": {

@@ -551,3 +551,13 @@ Fetched on 2026-10-01.
 - [princeton-nlp/SWE-bench_Verified](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified): 500 rows and the field list.
 - [OpenAI: Why SWE-bench Verified no longer measures frontier coding capabilities](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/): the contamination findings of §8.
 - [SWE-Bench Pro Verified (arXiv 2609.08149)](https://arxiv.org/pdf/2609.08149): the July 2026 withdrawal of the SWE-bench Pro recommendation and the estimate of about 30% broken tasks, as reported by a web search summary; the paper itself was not read.
+
+### 13.8 The exact arm: `--code-index exact` (2026-10-07)
+
+The third arm indexes each instance with the SCIP stores alone and runs the agent with `PUFFIN_CODE_LAYERS=exact` (code-index spec §16). Nothing in it comes from the graph.
+
+- **The index.** It is built on the host from the same copy of `/testbed` as the universal arm, with the real static indexers (scip-python; scip-typescript where a repository has TypeScript). It runs under the machine's own admission rules, with a 16 GiB memory cap per run, which gives Node a 12 GiB heap.
+- **A busy model.** A run the model kept busy past `puffin-code`'s wait is deferred, and the arm tries again, three attempts in all.
+- **Caching.** The stores are cached per repository and commit under `index-exact/`, apart from the universal cache.
+- **Failures.** An instance whose indexers did not all finish still runs. Its state records `stores`, `failed` and `peak_mb`, and the report counts such instances and those with no store at all.
+- **A `puffin-code` under test** (`DREAMFERENCE_SWE_BENCH_PUFFIN_CODE`) is relocated into a runtime directory of its own, so preparing it never replaces the one a running arm has mounted.

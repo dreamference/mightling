@@ -56,8 +56,9 @@ class SweBenchCommand:
         run.add_argument("--name", default=None, help="The run's name; an existing run of that name is resumed")
         run.add_argument("--eval", action="store_true", help="Grade the predictions when the agent phase ends")
         run.add_argument("--remove-images", action="store_true", help="With --eval: work one repository at a time and remove its images once it is graded")
-        run.add_argument("--code-index", default="off", choices=["off", "universal"],
-                         help="universal: index each instance's repository on the host and give the agent puffin-code (default off)")
+        run.add_argument("--code-index", default="off", choices=["off", "universal", "exact"],
+                         help="universal: index each instance's repository on the host and give the agent puffin-code (default off); "
+                              "exact: the same with the SCIP stores alone and no graph")
         run.add_argument("--prompt", default=None,
                          help="The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one)")
         run.add_argument("--mask", default="off", choices=["off", "on"],

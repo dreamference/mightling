@@ -156,7 +156,15 @@ class SweBenchReport:
         seconds = summary["index_seconds"]
         built = (f"indexes took {cls.duration(sum(seconds))} in all, median {cls.duration(statistics.median(seconds))}, "
                  "outside the agent's time") if seconds else "no index time recorded"
-        return (f"Code index          {summary['code_index']}: {built}; the agent called puffin-code "
+        arm = summary["code_index"]
+        if arm == "exact":
+            indexes = [state.get("index") or {} for state in summary["states"].values() if state.get("index")]
+            peak = max((int(index.get("peak_mb") or 0) for index in indexes), default=0)
+            partial = sum(1 for index in indexes if index.get("failed"))
+            bare = sum(1 for index in indexes if not index.get("stores"))
+            arm = (f"exact (SCIP stores only, no graph; peak {peak} MiB per indexer run; "
+                   f"{partial} instance(s) with an indexer that did not finish, {bare} with no store at all)")
+        return (f"Code index          {arm}: {built}; the agent called puffin-code "
                 f"{summary['puffin_code_calls']} time(s), in {summary['puffin_code_users']} of "
                 f"{summary['finished']} instance(s)")
 
