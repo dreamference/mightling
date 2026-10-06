@@ -8,7 +8,7 @@
 
 No cloud model. No OpenAI account. No phone-home. An air-gapped mode when you want one.
 
-[![NVIDIA GB10 · arm64](https://img.shields.io/badge/NVIDIA%20GB10-arm64%20%C2%B7%20128%20GB%20unified-76B900?logo=nvidia&logoColor=white)](docs/getting-started.md)
+[![NVIDIA GB10 · arm64](https://img.shields.io/badge/NVIDIA%20GB10-arm64%20%C2%B7%20128%20GB%20unified-555555)](docs/getting-started.md)
 [![Built on Codex rust-v0.158.0](https://img.shields.io/badge/built%20on-Codex%20rust--v0.158.0-111111)](docs/puffin.md)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue)](LICENSE)
 
@@ -220,6 +220,13 @@ This covers Puffin's own code. The components it deploys keep their own licences
 (Apache 2.0), vLLM (Apache 2.0), Onyx (its own terms, including an `ee/` directory that is *not*
 free software and which Puffin deliberately leaves switched off), and the models, each under
 the terms of its own weights licence.
+
+## Trademarks
+
+NVIDIA, GB10 and DGX are trademarks of NVIDIA Corporation. OpenAI and Codex are trademarks of
+OpenAI. Qwen is a trademark of Alibaba Cloud. Puffin and Dreamference are not affiliated with,
+sponsored by or endorsed by any of them; the names are used only to say what Puffin runs on and is
+built from.
 
 ## Contributing
 
