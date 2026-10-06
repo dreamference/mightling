@@ -405,7 +405,7 @@ Per binary, as today: `puffin-aarch64-pc-windows-msvc.gz` (holding `puffin.exe`)
 
 ### 16.4 `install.ps1`
 
-`irm https://github.com/dgxcoder/dgxcoder/releases/latest/download/install.ps1 | iex`:
+`irm https://github.com/dreamference/puffin/releases/latest/download/install.ps1 | iex`:
 1. Checks Windows 11 on Arm64 (`$env:PROCESSOR_ARCHITECTURE`, the OS build); otherwise names the client-only or unsupported case.
 2. Downloads the assets of §16.2, verifies them against the checksum file, and unpacks them into `%LOCALAPPDATA%\Programs\Puffin\bin`. No elevation.
 3. Adds that directory to the user's `PATH` (`HKCU\Environment`, broadcast `WM_SETTINGCHANGE`).

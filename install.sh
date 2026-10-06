@@ -28,7 +28,7 @@
 # For a development install from a checkout, use scripts/install_gb10.sh instead.
 set -euo pipefail
 
-REPO="${PUFFIN_RELEASE_REPO:-dgxcoder/dgxcoder}"
+REPO="${PUFFIN_RELEASE_REPO:-dreamference/puffin}"
 API="${PUFFIN_RELEASE_API:-https://api.github.com}"
 INSTALL_DIR="${PUFFIN_INSTALL_DIR:-$HOME/.local/share/dreamference/puffin}"
 VENV_DIR="${PUFFIN_VENV:-$HOME/.local/share/dreamference/venv}"

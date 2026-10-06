@@ -80,7 +80,7 @@ puffin-admin status        # "System Target" row
 ### 3.1. Recommended manual install
 
 ```bash
-git clone --recurse-submodules https://github.com/dgxcoder/dgxcoder.git
+git clone --recurse-submodules https://github.com/dreamference/puffin.git
 cd dgxcoder                      # the codex/ submodule is shallow; add --depth 1 on update if preferred
 
 python3 -m venv .venv
@@ -110,7 +110,7 @@ No checkout and nothing compiled. `install.sh` (repository root; attached to eve
 
 ```bash
 export GH_TOKEN=...          # while the repository is private; a logged-in `gh` also works
-gh release download -R dgxcoder/dgxcoder -p install.sh && bash install.sh [--role client|node] [--version X.Y.Z]
+gh release download -R dreamference/puffin -p install.sh && bash install.sh [--role client|node] [--version X.Y.Z]
 ```
 
 - **The machine decides the role.** A GB10 (arm64 Linux whose `nvidia-smi --query-gpu=name` says `GB10`) gets the **node**; everything else gets the **client**. `--role` overrides it. The device tree has no model string on this hardware and the DMI product name is the vendor's (`GX10` on the machine this was written on), so neither is used.

@@ -106,7 +106,7 @@ checksums, and on a GB10 also installs `puffin-admin` and applies the host setti
 needs (it prints each `sudo` command before running it):
 
 ```bash
-curl -fsSLO https://github.com/dgxcoder/dgxcoder/releases/latest/download/install.sh
+curl -fsSLO https://github.com/dreamference/puffin/releases/latest/download/install.sh
 bash install.sh                      # read it first if you like: it is short
 puffin-admin server start            # checks the host, downloads and loads the model
 cd ~/my-project && puffin            # start coding
@@ -118,7 +118,7 @@ Installed this way, `puffin update` moves to a newer release.
 **Or from a checkout**, which is what you want for changing Puffin itself:
 
 ```bash
-git clone --recurse-submodules https://github.com/dgxcoder/dgxcoder.git puffin
+git clone --recurse-submodules https://github.com/dreamference/puffin.git puffin
 cd puffin
 python3 -m venv .venv && .venv/bin/pip install -e .
 export PATH="$PWD/.venv/bin:$PATH"   # add to ~/.bashrc: the agent runs puffin-admin for web search
