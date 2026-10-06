@@ -235,7 +235,7 @@ The cheapest useful step, and testable on any Windows Arm PC with enough memory:
 | | **W1: native `llama-server`** | **W2: SGLang in a Puffin WSL2 distribution** |
 |---|---|---|
 | What runs | `llama-server.exe` built by Puffin's release for `aarch64-pc-windows-msvc` with CUDA 13.4 (`sm_121` to be confirmed on N1X), as a child of a Puffin engine supervisor | a WSL2 distribution `Puffin` (Ubuntu 24.04 arm64, imported from a tarball the release ships), Docker Engine inside it, and today's node: `puffin-admin server start` with the pinned `lmsysorg/sglang` image and the NVFP4 + DFlash2 recipe |
-| Model | GGUF: Qwen3.8-27B `Q4_K_M` (about 18 GB; Ollama and llama.cpp support the architecture) or an MoE such as Qwen3.6-35B-A3B, NemoClaw's choice on N1X | the registry's default entry, unchanged |
+| Model | GGUF: Qwen3.8-27B `Q4_K_M` (about 18 GB; Ollama and llama.cpp support the architecture). **Decided 2026-10-07: Qwen3.8-27B is the default on Windows too**, the same model as the node (§21, question 6) | the registry's default entry, unchanged |
 | Speed (expected, not measured) | dense 27B: bandwidth-bound, at most about 300 GB/s ÷ 18 GB ≈ 17 tok/s before speculation; an MoE with ~3 B active is several times faster | the GB10 numbers (prose 25.5, code 50.3, JSON 87.0 tok/s), if GPU paravirtualisation costs little; **unknown** |
 | GPU access | native WDDM; `cudaMalloc` as NVIDIA recommends (§1.2) | `/dev/dxg` paravirtualisation; CUDA on WSL lists limited UVM and "pinned system memory … availability is limited" (CUDA on WSL guide §5.1). NemoClaw's notes say its WSL path on N1X "still breaks" in QA |
 | Memory accounting | one Windows process: Job Object and DXGI budgets apply directly (§9) | two layers: the VM's RAM cap (`.wslconfig` `memory`, default 50%), and GPU allocations made through the host driver outside it. **To measure** |
@@ -488,7 +488,7 @@ Phases 1 and 2 need no RTX Spark and can be finished before the hardware arrives
 3. **Smart App Control** blocks unsigned builds (§16.3).
 4. **The `windows-11-arm` runner may be too slow** for Codex's release build (§16.1).
 5. **Upstream churn:** Codex's Windows sandbox is changing quickly (MXC, packaged service identities). `0024`'s two call sites in the elevated backends may move at the next Codex bump, and a third elevated entry point could appear without failing the patch. So the egress audit's `/airgapped on` case (§14, §18) must run after every bump; a moved call site already fails `git apply --check` loudly, as every patch here does.
-6. **Speed.** W1's dense 27B would be about a third of the GB10's code speed. Puffin's pitch on the DGX Spark is speed; on a laptop the MoE models may be the better default, which is a model choice the measurements make.
+6. **Speed.** W1's dense 27B would be about a third of the GB10's code speed. Puffin's pitch on the DGX Spark is speed; the user chose the same model everywhere over a faster MoE (§21, question 6), so the Windows engine's speed work (speculative decoding in W1, or W2's SGLang recipe) carries the weight.
 
 ---
 
@@ -499,7 +499,7 @@ Phases 1 and 2 need no RTX Spark and can be finished before the hardware arrives
 3. **Patch cap:** `0024` (an estimated 1.3–1.8 KB, plus about 0.3 KB if `0023`'s validator also learns the sandbox mode, §7.4) takes the series from 37,288 bytes to about 38,900–39,400, past the approved 38,500. Approve up to 39,500 for the Windows hooks?
 4. **Hardware:** which RTX Spark to buy for Phases 3 and 4: the Surface RTX Spark Dev Box (developer-focused, US only) or a 128 GB ASUS ProArt P16?
 5. **x86-64 Windows:** add it in Phase 1 (one more matrix row, no more code), or leave it out until asked?
-6. **Default local model on Windows:** dense Qwen3.8-27B (the same model as the node, slower without DFlash2) or an MoE (faster, a different model from the node's)? This spec leaves it to Phase 4's measurements.
+6. **Default local model on Windows:** **decided 2026-10-07: Qwen3.8-27B**, the same model as the node. Phase 4 measures how fast it runs on each engine; it no longer chooses the model.
 
 ---
 
