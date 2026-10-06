@@ -5,37 +5,66 @@
   <img src="images/puffin-logo-light-outlined.svg" alt="Puffin" width="320">
 </picture>
 
-### Your own AI coding agent. On your desk. Nothing leaves.
+## Private AI on your DGX Spark. One command.
 
-Puffin turns an NVIDIA DGX Spark, or any GB10 machine, into a private AI that codes, searches and
-answers for you, with no cloud, no account, no API bill and no telemetry.<br>
-**Don't take our word for it: one command traces every packet and shows you.**
+A coding agent, a chat assistant and a desktop app, running entirely on your own GB10.<br>
+**No cloud. No account. No API bill. No telemetry.**
 
 [![Latest release](https://img.shields.io/github/v/release/dreamference/puffin?label=release&color=FF6B35)](https://github.com/dreamference/puffin/releases/latest)
 [![Telemetry: none](https://img.shields.io/badge/telemetry-none-242A32)](docs/privacy.md)
-[![Runs on GB10](https://img.shields.io/badge/runs%20on-any%20GB10%20%C2%B7%20128%20GB-555555)](docs/getting-started.md)
+[![Runs on any GB10](https://img.shields.io/badge/runs%20on-any%20GB10%20%C2%B7%20128%20GB-555555)](#runs-on-every-gb10)
+[![GitHub stars](https://img.shields.io/github/stars/dreamference/puffin?style=flat&color=FFB400)](https://github.com/dreamference/puffin/stargazers)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue)](LICENSE)
 
 </div>
 
+## Install
+
 ```bash
-curl -fsSLO https://github.com/dreamference/puffin/releases/latest/download/install.sh && bash install.sh
-puffin-admin server start
-cd ~/my-project && puffin "find out why the login test is flaky and fix it"
+curl -fsSL https://github.com/dreamference/puffin/releases/latest/download/install.sh | bash
 ```
 
-Three commands. Your code, your prompts and your answers never leave the machine they're on.
+Then start the model and point Puffin at a project:
+
+```bash
+puffin-admin server start      # downloads the model once (~20 GB), then serves it
+cd ~/your-project && puffin    # that's it
+```
+
+Works on the **NVIDIA DGX Spark** and every GB10 machine from Acer, ASUS, Dell, Gigabyte, HP, Lenovo
+and MSI. The script is short: it verifies every download against the release's checksums and prints
+each `sudo` command before running it. [Read it first](install.sh) if you like.
+
+## Try these first
+
+```bash
+puffin "explain this repository to me like I'm new on the team"
+puffin "the tests are failing: find out why and fix them"
+puffin "add input validation to the signup form, with tests"
+```
+
+Or queue work for tonight, inside a session:
+
+```text
+/night add upgrade every dependency and fix whatever breaks
+```
+
+Puffin works through the queue while you sleep, each task on its own git branch. You review the
+branches over coffee.
 
 ---
 
-## 🔒 Confidential, and you can prove it
+## Why Puffin
 
-Cloud coding agents send your source code to someone else's servers on every keystroke that
-matters. Puffin sends it nowhere: the model runs on your GB10, and nothing in Puffin phones home.
-No usage analytics, no metrics, no sign-in, no "anonymous" crash reports.
+### 🔒 Your code never leaves your desk
 
-Every claim on this page is checkable. This command runs a real Puffin session under `strace` and
-lists every network connection it made:
+Cloud coding agents send your source code to someone else's servers. Puffin sends it nowhere: the
+model runs on your GB10, and nothing in Puffin phones home. No usage analytics, no metrics, no
+sign-in, no "anonymous" crash reports. That makes it usable for code you're not allowed to upload:
+client work, regulated data, unreleased products.
+
+**And you can prove it.** One command runs a real Puffin session under `strace` and lists every
+network connection it made:
 
 ```console
 $ puffin-admin audit egress
@@ -49,12 +78,11 @@ Networked git commands: none
 
 Everything stayed on `127.0.0.1`. Not one DNS lookup.
 
-**Need a hard guarantee?** Type `/airgapped on` and every command the agent runs gets an empty
-network namespace from the Linux kernel. It's not a polite instruction to the model: there is
-simply no network to reach. Full Access, which would bypass the sandbox, is refused at the same
-time. [Privacy & security →](docs/privacy.md)
+Need a hard guarantee? Type `/airgapped on` and every command the agent runs gets an empty network
+namespace from the Linux kernel. It isn't a polite request to the model: there is simply no network
+to reach. [Privacy & security →](docs/privacy.md)
 
-## ⚡ Fast, with no rate limits
+### ⚡ Fast, with no rate limits and no bill
 
 | Single stream on a GB10 | |
 |---|---|
@@ -64,22 +92,19 @@ time. [Privacy & security →](docs/privacy.md)
 | Reading your code (prefill) | **~1,700 tokens/s** |
 | Context window | **262K tokens** |
 
-A small drafter model proposes 16 tokens at a time and the main model checks them in one pass,
-which is why code and structured output come out fastest. Run four agents at once and they all keep
-going: no quota, no "please wait", no bill at the end of the month. The model is Qwen3.8-27B in
-NVIDIA's 4-bit NVFP4 format, tuned for the GB10's Blackwell GPU. [Models →](docs/models.md)
+A small drafter proposes 16 tokens at a time and the model checks them in one pass, which is why
+code comes out fastest. Run four agents at once and they all keep going: no quota, no "please wait",
+nothing to pay per token, ever.
 
-## ✨ Easy, from first install to the hundredth session
+### ✨ Nothing to configure
 
-- **One installer.** It picks the right role for the machine, checks every download against the
-  release's checksums, and prints each `sudo` command before running it.
-- **No tuning.** Picking a model picks its whole server recipe: context length, memory share,
-  kernels, speculative decoding.
-- **It won't freeze your machine.** On a GB10 the GPU and the system share one pool of memory, and
-  an oversized model load can lock up the whole box. Puffin checks the host before loading and
-  watches memory pressure during the load, killing the container before the machine stalls.
-- **Your laptop finds it.** Run `puffin-admin node enable` on the GB10, install the client on any
-  Linux machine on the same network, and `puffin` finds the GB10 by itself. No IP addresses to type.
+- **No tuning.** The model, its context length, memory share, kernels and speculative decoding are
+  chosen for the GB10 already.
+- **It won't freeze your machine.** On a GB10 the GPU and the system share one pool of memory, and an
+  oversized model load can lock up the whole box. Puffin checks the host first and watches memory
+  pressure during the load, stopping it before the machine stalls.
+- **Your other machines find it.** Run `puffin-admin node enable` on the GB10, install the same
+  script on another arm64 Linux machine on your network, and `puffin` there finds the GB10 by itself.
 - **Updates are one command:** `puffin update`.
 
 ## What you get
@@ -87,13 +112,13 @@ NVIDIA's 4-bit NVFP4 format, tuned for the GB10's Blackwell GPU. [Models →](do
 | | |
 |---|---|
 | 🖥️ **`puffin`, the terminal agent** | Reads your repository, runs commands and tests, edits code, and asks before anything risky. [More →](docs/puffin.md) |
-| 🌙 **Night Shift** | Queue tasks with `/night add` before bed. Puffin works through them overnight, each on its own git branch, and you review the branches over coffee. |
-| 🔎 **Web search and fetch** | Through a private SearXNG on your own machine, so no search engine sees an account or an API key. |
+| 🌙 **Night Shift** | `/night add <task>` before bed; each task done on its own git branch by morning. Nothing is merged or pushed without you. |
+| 🔎 **Web search and fetch** | Through a private SearXNG on your own machine: no search account, no API key. |
 | 🧭 **A code index** | Definitions, callers and impact across your repository, so the agent finds code instead of grepping for it. |
-| 🧩 **Your existing skills** | Skills you already wrote for Claude Code, Gemini CLI, OpenClaw or Hermes work in Puffin with no changes. |
+| 🧩 **Your existing skills** | Skills you already wrote for Claude Code, Gemini CLI, OpenClaw or Hermes work in Puffin unchanged. |
 | 💬 **Web chat** | A browser assistant with web search, voice input and image understanding, on the same local model. [More →](docs/web-chat.md) |
-| 🪟 **Desktop app** | The chat in a window of its own, plus a Work window (preview) that drives agent sessions with approvals, diffs and undo. [More →](docs/desktop.md) |
-| 📬 **Gmail, Drive, Calendar** (preview) | Read-only, connected through a sign-in that stays on your machine. Switched off entirely at `/airgapped on`. |
+| 🪟 **Desktop app** | The chat in a window of its own, plus a Work window (preview) for agent sessions with approvals, diffs and undo. [More →](docs/desktop.md) |
+| 📬 **Gmail, Drive, Calendar** (preview) | Read-only, through a sign-in that stays on your machine. Switched off entirely at `/airgapped on`. |
 
 ## Puffin and cloud coding agents
 
@@ -104,7 +129,7 @@ NVIDIA's 4-bit NVFP4 format, tuned for the GB10's Blackwell GPU. [Models →](do
 | Cost per token | Metered | Zero |
 | Rate limits | Yes | No |
 | Works with the network unplugged | No | Yes |
-| Can you verify what leaves | No | `puffin-admin audit egress` |
+| You can verify what leaves | No | `puffin-admin audit egress` |
 
 ## Runs on every GB10
 
@@ -113,25 +138,25 @@ ATOM · HP ZGX Nano · Lenovo ThinkStation PGX · MSI EdgeXpert
 
 They share the chip, the 128 GB of unified memory and DGX OS 7, so one installer covers them all.
 Puffin is developed and tested daily on the ASUS Ascent GX10; the others are covered by tests.
-Windows on Arm laptops (RTX Spark) are planned: [the spec](specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md).
 
-## Quick start
+## FAQ
 
-**You need** a GB10 machine with the OS it ships with (DGX OS 7, or Ubuntu 24.04 where the vendor
-offers it), Docker with the NVIDIA Container Toolkit, Python 3 and Git. On plain Ubuntu,
-`puffin-admin host check` tells you what's missing. The first start downloads about 20 GB of model
-weights.
+**Do I need a GB10?** Yes, to run the model. Another arm64 Linux machine on your network can use it
+as a client: the same install command sets that up automatically. Clients for x86 Linux, macOS and
+Windows on Arm (the RTX Spark laptops) are planned.
 
-```bash
-curl -fsSLO https://github.com/dreamference/puffin/releases/latest/download/install.sh
-bash install.sh                      # it's short, read it first if you like
-puffin-admin server start            # checks the host, downloads and loads the model
-cd ~/my-project && puffin            # start working
-```
+**Is it really free?** Yes. Puffin is open source under the AGPL, and the model's weights are free.
+Your only running cost is the electricity.
 
-On any other Linux machine the same script installs the client, which uses your GB10 over the
-network. The full walkthrough, including the web chat and the desktop app, is in
-[Get started](docs/getting-started.md).
+**What do I need besides the machine?** The OS it ships with (DGX OS 7, or Ubuntu 24.04 where the
+vendor offers it), Docker with the NVIDIA Container Toolkit, Python 3 and Git. On plain Ubuntu,
+`puffin-admin host check` tells you what's missing.
+
+**Does anything ever reach the internet?** Only what you or the agent asks for, such as a web search.
+The full list is below, and `/airgapped on` turns all of it off.
+
+**I found a bug, or something the egress audit flagged.** Please [open an issue](https://github.com/dreamference/puffin/issues).
+Reports from the audit are the most valuable ones we get.
 
 <details>
 <summary><b>What does reach the network, and when</b></summary>
@@ -153,18 +178,12 @@ A search query is written by the model and can contain fragments of your context
 </details>
 
 <details>
-<summary><b>Models</b></summary>
+<summary><b>The model</b></summary>
 
-| Alias | Model | Precision | Memory |
-|---|---|---|---|
-| **`qwen3.8-27b-nvfp4-dflash2`** (default) | Qwen3.8-27B with DFlash2 speculative decoding, served by SGLang | NVFP4 | 20 – 70 GB |
-| `qwen3.5-122b-a10b-hybrid-dflash` | Qwen 3.5 122B-A10B with DFlash speculative decoding | INT4 + FP8 | 71.5 – 120 GB |
-| `qwen3.5-122b-a10b-int4-dflash` | Qwen 3.5 122B-A10B with DFlash | INT4 | 71.5 – 120 GB |
-| `qwen3.5-122b-a10b-nvfp4` | Qwen 3.5 122B-A10B | NVFP4 | 78 – 120 GB |
-| `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B | NVFP4 | 25 – 60 GB |
-
-The 122B models need a custom vLLM image built from [`Dockerfile.dflash`](Dockerfile.dflash) and
-[`Dockerfile.dense`](Dockerfile.dense). [All models →](docs/models.md)
+Puffin serves one model, chosen and tuned for the GB10: **Qwen3.8-27B** in NVIDIA's 4-bit NVFP4
+format (`qwen3.8-27b-nvfp4-dflash2`), served by SGLang with the DFlash2 drafter, a 262K-token
+context and about 20 GB of weights. While it serves, roughly 38 GB of the machine's memory stays
+free. [More about the model →](docs/models.md)
 
 </details>
 
@@ -184,7 +203,8 @@ puffin_gmail = false        # never offer Gmail to the agent
 ```
 
 The same model server also drives Cline, Continue and OpenHands:
-`puffin-admin run --agent cline "add type hints to utils.py"`.
+`puffin-admin run --agent cline "add type hints to utils.py"`. The web chat and the desktop app are
+set up in [Get started](docs/getting-started.md).
 
 </details>
 
@@ -210,11 +230,15 @@ and [How it works](docs/architecture.md) explains the pieces.
 
 </details>
 
-## Contributing
+## Spread the word
 
-Issues and pull requests are welcome, especially recipes for new models on the GB10 and anything
-the egress audit turns up. **If you believe your code should stay on your desk, star the repo:** it
-helps other GB10 owners find Puffin.
+Know someone with a DGX Spark? Send them this page. If you believe code should stay on the desk
+it was written on, **[star the repo](https://github.com/dreamference/puffin/stargazers)**: it's how
+other GB10 owners find Puffin.
+[Share on X](https://x.com/intent/post?text=Private%20AI%20coding%20agent%20that%20runs%20entirely%20on%20my%20DGX%20Spark.%20No%20cloud%2C%20no%20account%2C%20no%20telemetry.&url=https%3A%2F%2Fgithub.com%2Fdreamference%2Fpuffin)
+· [Share on LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fdreamference%2Fpuffin)
+
+Issues and pull requests are welcome, especially anything the egress audit turns up.
 
 ## Credits
 
@@ -234,7 +258,7 @@ Puffin and let people use it **over a network**, you must offer them its source.
 
 This covers Puffin's own code. The components it deploys keep their own licences: Codex (Apache
 2.0), SGLang and vLLM (Apache 2.0), Onyx (its own terms, including an `ee/` directory that is not
-free software and that Puffin leaves switched off), and each model under its own weights licence.
+free software and that Puffin leaves switched off), and the model under its own weights licence.
 
 NVIDIA, GB10, DGX and DGX Spark are trademarks of NVIDIA Corporation. Qwen is a trademark of
 Alibaba Cloud. Other names are trademarks of their owners. Puffin and Dreamference are not
