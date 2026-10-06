@@ -159,6 +159,14 @@ What each part of Puffin needs on Windows, with the phase that delivers it (§19
 
 `install.ps1 -Role client|local` overrides the detection, as `install.sh --role` does.
 
+`install.ps1` must run under **Windows PowerShell 5.1**, the only PowerShell a standard Windows 11
+machine has (an RTX Spark laptop such as the ASUS ProArt P16), not only under PowerShell 7: no `??`,
+`?.`, ternaries, `&&`/`||` between commands or `-Parallel`, and `Invoke-WebRequest -UseBasicParsing`.
+The Surface RTX Spark Dev Box ships PowerShell 7 as its default shell, with Developer Mode on, so a
+check run only there would hide both a 5.1 incompatibility and anything that needs Developer Mode
+(symbolic links, which is why skills use junctions, §15). Phase 1's checks run the installer under
+5.1 on a machine with Developer Mode off (added 2026-10-07).
+
 The resolution tiers need one change: today "a node → loopback" means a machine with `~/.config/dreamference/node-id`. A Windows local install writes no node id (it is not advertised), so the tiers gain a *local engine* entry: `%USERPROFILE%\.config\dreamference\engine.json`, naming the loopback URL of the engine Puffin manages. It is tried before the remembered node and is never advertised.
 
 ---
