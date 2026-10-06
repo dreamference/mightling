@@ -9,8 +9,10 @@ pulls an image, installs a package or reaches the network.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -294,6 +296,8 @@ def bench(tmp_path, monkeypatch):
     monkeypatch.setattr(SweBenchRunner, "host", FakeHost)
     monkeypatch.setattr(SweBenchRunner, "sleep", staticmethod(lambda seconds: time.sleep(0.01)))
     monkeypatch.setattr(QuietMachine, "refuse", None)
+    # The disk reserve is judged against 2 TiB free, not the disk of the machine running the suite.
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: types.SimpleNamespace(total=4 << 40, used=2 << 40, free=2 << 40))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
     assert str(swe_bench_settings.CACHE_DIR).startswith(os.environ["HOME"]), "the suite must not see the real cache"
     python = Path(SweBenchHarness.tool("python"))  # "installed": the version query is the stand-in's
