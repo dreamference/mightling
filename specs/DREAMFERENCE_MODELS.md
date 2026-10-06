@@ -4,6 +4,8 @@
 > **Subject:** NVIDIA GB10 Model Matrix & Default Model Selection
 > **Checked against the code:** 2026-10-01 (`dreamference/hardware/model_matrix_registry.py`: every alias, repo, memory range and recipe value below was compared with `MATRIX`)
 
+> **2026-10-07: four models removed.** `qwen3.5-122b-a10b-hybrid-dflash`, `qwen3.5-122b-a10b-int4-dflash`, `qwen3.5-122b-a10b-nvfp4`, `qwen3.6-35b-a3b-nvfp4` and the 122B drafter `qwen3.5-122b-a10b-dflash-draft` are no longer in `MATRIX`, and `Dockerfile.dflash`, `Dockerfile.dense` and `runtime/` went with them. The registry serves `qwen3.8-27b-nvfp4-dflash2` alone (with its drafter). Sections below that describe the removed entries are history.
+
 ---
 
 ## Table of Contents

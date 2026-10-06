@@ -20,9 +20,8 @@ def test_detect_gb10_hardware():
     assert "total_unified_memory_gb" in hw
 
 def test_check_model_compatibility():
-    # qwen3.6-35b stands in for the removed qwen2.5-coder fixtures (dropped from the matrix
-    # 2026-08-24); any registered, GB10-compatible alias serves the purpose.
-    valid, msg = check_model_compatibility("qwen3.6-35b-a3b-nvfp4")
+    # Any registered, GB10-compatible alias serves the purpose; the default is the only one.
+    valid, msg = check_model_compatibility("qwen3.8-27b-nvfp4-dflash2")
     assert isinstance(valid, bool)
     assert isinstance(msg, str)
 
@@ -43,7 +42,7 @@ def test_check_speculative_compatibility(monkeypatch):
         classmethod(lambda cls: SimpleNamespace(total_unified_memory_gb=128.0)),
     )
     valid, msg = check_speculative_compatibility(
-        "qwen3.5-122b-a10b-int4-dflash", "qwen3.5-122b-a10b-dflash-draft")
+        "qwen3.8-27b-nvfp4-dflash2", "qwen3.8-27b-dflash2-draft")
     assert valid is True
     assert "Speculative Decoding Qualified" in msg or "Compatible" in msg
 
@@ -53,7 +52,7 @@ def test_default_model_is_registered_and_gb10_compatible():
     assert spec.compatible_gb10 is True
     assert spec.hf_repo_id == "RadixArk/Qwen3.8-27B-NVFP4"
 
-def test_default_model_speculates_against_a_downloadable_drafter():
+def test_default_model_speculates_against_a_downloadable_drafter(vllm_recipes):
     # The DFlash drafter is named inside the recipe rather than passed as an argument, which is
     # the only reason start_server can see it at all: it has to be fetched before the load and
     # counted against memory alongside the target. A recipe that names a drafter the registry
@@ -72,7 +71,7 @@ def test_default_model_speculates_against_a_downloadable_drafter():
     spec = MODEL_MATRIX[DEFAULT_MODEL_ALIAS]
     assert spec.launch_overrides["speculative_config"]["method"].lower() == "dflash"  # SGLang spells it DFLASH
     # Self-speculating and non-speculating models must not report a separate drafter.
-    assert get_speculative_draft_repo("qwen3.6-35b-a3b-nvfp4") is None
+    assert get_speculative_draft_repo("test-vllm-nvfp4") is None
     assert get_speculative_draft_repo("qwen2.5-coder-32b") is None
     assert get_speculative_draft_repo("some/unknown-repo") is None
 
@@ -105,7 +104,7 @@ def test_launch_overrides_are_isolated_per_call():
 
 def test_declares_own_quantization():
     from dreamference.hardware import model_declares_own_quantization
-    assert model_declares_own_quantization("qwen3.6-35b-a3b-nvfp4") is True
+    assert model_declares_own_quantization("qwen3.8-27b-nvfp4-dflash2") is True
     assert model_declares_own_quantization("qwen2.5-coder-72b") is False
     assert model_declares_own_quantization("some/unknown-repo") is False
 
@@ -114,24 +113,24 @@ def test_flexible_model_alias_resolution():
     from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 
     aliases = [
-        "qwen3.6-35b-a3b-nvfp4",
-        "nvidia/Qwen3.6-35B-A3B-NVFP4",
-        "NVIDIA Qwen3.6-35B-A3B-NVFP4",
-        "qwen 3.6 35b-a3b (nvfp4)",
+        "qwen3.8-27b-nvfp4-dflash2",
+        "RadixArk/Qwen3.8-27B-NVFP4",
+        "Qwen 3.8 27B (NVFP4 + DFlash2, SGLang)",
+        "qwen 3.8 27b (nvfp4 + dflash2, sglang)",
     ]
     for name in aliases:
         spec = ModelMatrixRegistry.get_spec(name)
         assert spec is not None, f"Failed to get spec for {name}"
-        assert spec.hf_repo_id == "nvidia/Qwen3.6-35B-A3B-NVFP4"
-        assert resolve_model_hf_repo(name) == "nvidia/Qwen3.6-35B-A3B-NVFP4"
-        assert get_model_launch_overrides(name).get("max_model_len") == 32768
+        assert spec.hf_repo_id == "RadixArk/Qwen3.8-27B-NVFP4"
+        assert resolve_model_hf_repo(name) == "RadixArk/Qwen3.8-27B-NVFP4"
+        assert get_model_launch_overrides(name).get("max_model_len") == 262144
         assert model_declares_own_quantization(name) is True
 
 def test_download_model_functions():
     from dreamference.hardware import is_model_downloaded, download_model, resolve_model_hf_repo
-    repo = resolve_model_hf_repo("qwen3.6-35b-a3b-nvfp4")
-    assert repo == "nvidia/Qwen3.6-35B-A3B-NVFP4"
-    is_dl = is_model_downloaded("qwen3.6-35b-a3b-nvfp4")
+    repo = resolve_model_hf_repo("qwen3.8-27b-nvfp4-dflash2")
+    assert repo == "RadixArk/Qwen3.8-27B-NVFP4"
+    is_dl = is_model_downloaded("qwen3.8-27b-nvfp4-dflash2")
     assert isinstance(is_dl, bool)
 
 def test_tensorizer_functions(tmp_path, monkeypatch):
@@ -158,15 +157,13 @@ def test_tensorizer_functions(tmp_path, monkeypatch):
 
 
 
-def test_qwen3_5_moe_entries_are_marked_vision_capable():
-    # Both checkpoints are Qwen3_5MoeForConditionalGeneration with a vision_config, verified
-    # against their own config.json. Clients gate image upload on this, so a wrong value here is
-    # the difference between an upload working and the UI refusing it.
+def test_the_default_model_is_marked_vision_capable():
+    # Clients gate image upload on this, so a wrong value here is the difference between an
+    # upload working and the UI refusing it.
     from dreamference.hardware import model_supports_vision
 
-    assert model_supports_vision("qwen3.5-122b-a10b-int4-dflash") is True
-    assert model_supports_vision("qwen3.5-122b-a10b-nvfp4") is True
-    assert model_supports_vision("Intel/Qwen3.5-122B-A10B-int4-AutoRound") is True
+    assert model_supports_vision("qwen3.8-27b-nvfp4-dflash2") is True
+    assert model_supports_vision("RadixArk/Qwen3.8-27B-NVFP4") is True
     assert model_supports_vision("llama-3.3-70b") is False
     assert model_supports_vision("qwen2.5-coder-32b") is False
     assert model_supports_vision("") is False

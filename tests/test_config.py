@@ -3,7 +3,7 @@ from dreamference.config import DreamferenceConfig
 
 def test_tool_call_parser_follows_the_model():
     assert DreamferenceConfig(model="qwen2.5-coder-32b").resolve_tool_call_parser() == "hermes"
-    assert DreamferenceConfig(model="qwen3.6-35b-a3b-nvfp4").resolve_tool_call_parser() == "qwen3_xml"
+    assert DreamferenceConfig(model="qwen3.8-27b-nvfp4-dflash2").resolve_tool_call_parser() == "qwen3_coder"
 
 def test_load_custom_config_file(tmp_path):
     cfg_file = tmp_path / "custom_config.yaml"

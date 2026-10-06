@@ -1479,7 +1479,7 @@ def test_a_search_returns_the_messages_it_finds():
     }]}
 
 
-def test_onyx_is_registered_with_the_model_actually_served(monkeypatch, tmp_path):
+def test_onyx_is_registered_with_the_model_actually_served(monkeypatch, tmp_path, vllm_recipes):
     # `server start --model X` with X not the configured model left Onyx asking for the old id,
     # and every web-chat answer came back empty (the SGLang switch, 2026-09-29).
     import io
@@ -1490,9 +1490,13 @@ def test_onyx_is_registered_with_the_model_actually_served(monkeypatch, tmp_path
     from dreamference.config import DreamferenceConfig
 
     from conftest import REAL_SERVED_MODEL_KEY
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+    # Two recipes for one checkpoint, as the 122B's hybrid and INT4 recipes were.
+    monkeypatch.setitem(ModelMatrixRegistry.MATRIX, "test-vllm-dflash-b",
+                        ModelMatrixRegistry.MATRIX["test-vllm-dflash"])
     monkeypatch.setattr(OnyxRunner, "served_model_key", REAL_SERVED_MODEL_KEY)
     runner = OnyxRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml"),
-                                                  model="qwen3.5-122b-a10b-hybrid-dflash"))
+                                                  model="test-vllm-dflash-b"))
 
     def serving(model_id):
         body = json.dumps({"data": [{"id": model_id}]}).encode()
@@ -1500,10 +1504,10 @@ def test_onyx_is_registered_with_the_model_actually_served(monkeypatch, tmp_path
 
     serving("RadixArk/Qwen3.8-27B-NVFP4")
     assert runner.served_model_key() == "qwen3.8-27b-nvfp4-dflash2"
-    serving("Intel/Qwen3.5-122B-A10B-int4-AutoRound")  # shared by two recipes: the configured wins
-    assert runner.served_model_key() == "qwen3.5-122b-a10b-hybrid-dflash"
+    serving("example/vllm-dflash-int4-AutoRound")  # shared by two recipes: the configured wins
+    assert runner.served_model_key() == "test-vllm-dflash-b"
 
     def down(*a, **k):
         raise OSError("connection refused")
     monkeypatch.setattr(urllib.request, "urlopen", down)
-    assert runner.served_model_key() == "qwen3.5-122b-a10b-hybrid-dflash"
+    assert runner.served_model_key() == "test-vllm-dflash-b"

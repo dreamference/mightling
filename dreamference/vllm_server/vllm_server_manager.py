@@ -360,15 +360,12 @@ class VLLMServerManager:
         dockerfile_path = project_root / "Dockerfile"
 
         # The plain Dockerfile produces DEFAULT_VLLM_IMAGE and nothing else. A recipe that pins
-        # another local tag (the DFlash `dreamference-vllm-dflash:…-dense*` images) is built by
-        # hand from Dockerfile.dflash and Dockerfile.dense; building the plain Dockerfile under
-        # that name used to hand vLLM the wrong engine with the right label.
+        # another local tag has to be built by hand under that tag; building the plain Dockerfile
+        # under its name used to hand vLLM the wrong engine with the right label.
         if docker_image != DEFAULT_VLLM_IMAGE:
             print(f"❌ Docker image '{docker_image}' is not present, and it is not the image "
                   f"the project Dockerfile builds ({DEFAULT_VLLM_IMAGE}).")
-            print("💡 The DFlash recipes' images are built by hand from Dockerfile.dflash (the "
-                  "kvfix base) and then Dockerfile.dense, tagged as the recipe pins them. See the "
-                  "comments at the top of each file and specs/DREAMFERENCE_DOCKER.md.")
+            print("💡 Build that image by hand and tag it as the recipe pins it.")
             return False
 
         if dockerfile_path.is_file():

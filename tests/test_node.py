@@ -536,9 +536,9 @@ def test_managing_a_node_needs_the_pairing_and_sends_one_operation(monkeypatch, 
         return subprocess.CompletedProcess([], 0, "", "")
 
     monkeypatch.setattr(NodePairing, "run", classmethod(run))
-    assert NodeRemote.set_model("spark-2", "qwen3.5-122b-a10b-hybrid-dflash") == 0
+    assert NodeRemote.set_model("spark-2", "qwen3.8-27b-nvfp4-dflash2") == 0
     assert NodeRemote.stop("spark-2") == 0 and NodeRemote.start("spark-2") == 0 and NodeRemote.status("spark-2") == 0
-    assert sent == [("spark-2", "set-model qwen3.5-122b-a10b-hybrid-dflash", False), ("spark-2", "stop", False),
+    assert sent == [("spark-2", "set-model qwen3.8-27b-nvfp4-dflash2", False), ("spark-2", "stop", False),
                     ("spark-2", "start", False), ("spark-2", "status", False)]
 
 

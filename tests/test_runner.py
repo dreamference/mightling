@@ -10,23 +10,23 @@ def test_cline_runner_clinerules_creation(tmp_path):
     orig_cwd = os.getcwd()
     try:
         os.chdir(tmp_path)
-        config = DreamferenceConfig(agent_runner="cline", model="qwen3.6-35b-a3b-nvfp4")
+        config = DreamferenceConfig(agent_runner="cline", model="qwen3.8-27b-nvfp4-dflash2")
         cline_runner = ClineRunner(config=config)
         rules_file = cline_runner.ensure_clinerules()
         assert rules_file.exists()
         content = rules_file.read_text(encoding="utf-8")
         assert "OpenAI Compatible" in content
-        assert "nvidia/Qwen3.6-35B-A3B-NVFP4" in content
+        assert "RadixArk/Qwen3.8-27B-NVFP4" in content
     finally:
         os.chdir(orig_cwd)
 
 def test_continue_runner_config_creation():
-    config = DreamferenceConfig(agent_runner="continue", model="qwen3.6-35b-a3b-nvfp4")
+    config = DreamferenceConfig(agent_runner="continue", model="qwen3.8-27b-nvfp4-dflash2")
     continue_runner = ContinueRunner(config=config)
     cfg_file = continue_runner.ensure_continue_config()
     assert cfg_file.exists()
     content = cfg_file.read_text(encoding="utf-8")
-    assert "nvidia/Qwen3.6-35B-A3B-NVFP4" in content
+    assert "RadixArk/Qwen3.8-27B-NVFP4" in content
 
 def test_agent_runner_choices():
     for agent in ["codex", "cline", "continue", "openhands"]:
@@ -87,8 +87,8 @@ def test_agents_only_name_the_model_the_server_serves(tmp_path):
     from dreamference.config import DreamferenceConfig
     from dreamference.hardware import resolve_model_hf_repo
 
-    config = DreamferenceConfig(config_file=str(tmp_path / "d.toml"), model="qwen3.6-35b-a3b-nvfp4",
-                                draft_model="qwen3.5-122b-a10b-dflash-draft")
+    config = DreamferenceConfig(config_file=str(tmp_path / "d.toml"), model="qwen3.8-27b-nvfp4-dflash2",
+                                draft_model="qwen3.8-27b-dflash2-draft")
     served = resolve_model_hf_repo(config.model)
 
     cont = json.loads(ContinueRunner(config=config).ensure_continue_config().read_text())

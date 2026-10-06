@@ -225,3 +225,66 @@ def _under_real_home(value) -> bool:
     if text == CHECKOUT or text.startswith(CHECKOUT + os.sep):
         return False
     return text == REAL_HOME or text.startswith(REAL_HOME + os.sep)
+
+
+# Test-only vLLM recipes. The registry serves one model, on SGLang, so the vLLM launcher's generic
+# machinery (a recipe's speculative config, a pinned image, the KV dtype, self-speculation, env
+# vars across the container boundary) is exercised against these instead. Their shapes are those
+# of the Qwen 3.5 122B and Qwen 3.6 35B recipes the registry carried until 2026-10-07.
+VLLM_TEST_RECIPES = {
+    "test-vllm-dflash": dict(
+        name="Test vLLM recipe (INT4 AutoRound + external drafter)", params_b=122.0,
+        supported_precisions=["AUTOROUND-INT4"], min_memory_gb=71.5, max_memory_gb=120.0,
+        compatible_gb10=True, notes="Test only.", hf_repo_id="example/vllm-dflash-int4-AutoRound",
+        supports_vision=True,
+        launch_overrides={
+            "attention_backend": "flash_attn",
+            "docker_image": "example-vllm-dflash:1",
+            "enable_prefix_caching": True,
+            "env": {"VLLM_MARLIN_USE_ATOMIC_ADD": "1"},
+            "extra_args": ["--max-num-seqs", "8", "--tensor-parallel-size", "1", "--dtype", "auto",
+                           "--default-chat-template-kwargs", '{"enable_thinking": false}'],
+            "gpu_memory_utilization": 0.7,
+            "kv_cache_dtype": "auto",
+            "max_model_len": 32768,
+            "max_num_batched_tokens": 9048,
+            "reasoning_parser": "qwen3",
+            "speculative_config": {"attention_backend": "FLASH_ATTN", "method": "dflash",
+                                   "model": "example/vllm-dflash-drafter", "num_speculative_tokens": 12},
+            "tool_call_parser": "qwen3_xml",
+        },
+    ),
+    "test-vllm-nvfp4": dict(
+        name="Test vLLM recipe (NVFP4 + self-speculation)", params_b=35.0,
+        supported_precisions=["NVFP4"], min_memory_gb=25.0, max_memory_gb=60.0,
+        compatible_gb10=True, notes="Test only.", hf_repo_id="example/vllm-moe-NVFP4",
+        launch_overrides={
+            "attention_backend": "flashinfer",
+            "env": {"VLLM_MARLIN_USE_ATOMIC_ADD": "1"},
+            "extra_args": ["--max-num-seqs", "4", "--tensor-parallel-size", "1", "--dtype", "auto"],
+            "gpu_memory_utilization": 0.3,
+            "kv_cache_dtype": "fp8",
+            "max_model_len": 32768,
+            "max_num_batched_tokens": 8192,
+            "reasoning_parser": "qwen3",
+            "speculative_config": {"method": "mtp", "moe_backend": "triton", "num_speculative_tokens": 3},
+            "tool_call_parser": "qwen3_xml",
+        },
+    ),
+    "test-vllm-dflash-draft": dict(
+        name="Test drafter", params_b=0.8, supported_precisions=["BF16"], min_memory_gb=1.5,
+        max_memory_gb=2.5, compatible_gb10=True, notes="Test only.",
+        hf_repo_id="example/vllm-dflash-drafter",
+    ),
+}
+
+
+@pytest.fixture
+def vllm_recipes(monkeypatch):
+    """Adds the test-only vLLM recipes to the model registry for one test."""
+    from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
+    from dreamference.hardware.model_spec import ModelSpec
+
+    for key, fields in VLLM_TEST_RECIPES.items():
+        monkeypatch.setitem(ModelMatrixRegistry.MATRIX, key, ModelSpec(**fields))
+    return VLLM_TEST_RECIPES

@@ -30,9 +30,9 @@ def test_vllm_build_launch_command_default():
     idx = cmd.index("--tool-call-parser")
     assert cmd[idx + 1] == "hermes"
 
-def test_nvfp4_model_applies_registry_launch_recipe():
+def test_nvfp4_model_applies_registry_launch_recipe(vllm_recipes):
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    cmd = mgr.build_launch_command(model="test-vllm-nvfp4")
     assert cmd[cmd.index("--max-model-len") + 1] == "32768"
     assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.3"
     assert cmd[cmd.index("--kv-cache-dtype") + 1] == "fp8"
@@ -45,29 +45,29 @@ def test_nvfp4_model_applies_registry_launch_recipe():
     spec_config = json.loads(spec_config_json)
     assert spec_config["num_speculative_tokens"] == 3
 
-def test_nvfp4_recipe_env_crosses_container_boundary():
+def test_nvfp4_recipe_env_crosses_container_boundary(vllm_recipes):
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    cmd = mgr.build_launch_command(model="test-vllm-nvfp4")
     assert "VLLM_MARLIN_USE_ATOMIC_ADD=1" in cmd
     # -e must precede the image name, or docker treats it as a container argument
     for var in ("VLLM_MARLIN_USE_ATOMIC_ADD=1",):
         assert cmd[cmd.index(var) - 1] == "-e"
         assert cmd.index(var) < cmd.index(DEFAULT_VLLM_IMAGE)
 
-def test_nvfp4_recipe_emits_self_speculation_and_extra_args():
+def test_nvfp4_recipe_emits_self_speculation_and_extra_args(vllm_recipes):
     import json
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    cmd = mgr.build_launch_command(model="test-vllm-nvfp4")
     spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
     assert spec["method"] == "mtp"
     assert spec["moe_backend"] == "triton"
     assert "--speculative-model" not in cmd
     assert cmd[cmd.index("--max-num-seqs") + 1] == "4"
 
-def test_dflash_recipe_emits_drafter_speculative_config():
+def test_dflash_recipe_emits_drafter_speculative_config(vllm_recipes):
     import json
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    cmd = mgr.build_launch_command(model="test-vllm-dflash")
     assert cmd[cmd.index("--max-model-len") + 1] == "32768"
     assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.7"
     assert cmd[cmd.index("--attention-backend") + 1] == "flash_attn"
@@ -84,22 +84,22 @@ def test_dflash_recipe_emits_drafter_speculative_config():
     # --speculative-model pair, which is reserved for a drafter the caller named.
     spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
     assert spec["method"] == "dflash"
-    assert spec["model"] == "z-lab/Qwen3.5-122B-A10B-DFlash"
+    assert spec["model"] == "example/vllm-dflash-drafter"
     assert spec["num_speculative_tokens"] == 12
     assert spec["attention_backend"] == "FLASH_ATTN"
     assert "--speculative-model" not in cmd
 
-def test_dflash_recipe_disables_thinking():
+def test_dflash_recipe_disables_thinking(vllm_recipes):
     # Not cosmetic: this checkpoint's chat_template.jinja prefills '<think>\n' into every
     # assistant turn unless enable_thinking is explicitly false, so leaving the flag off makes the
     # model reason before every tool call. The JSON has to survive as one argv element.
     import json
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    cmd = mgr.build_launch_command(model="test-vllm-dflash")
     payload = cmd[cmd.index("--default-chat-template-kwargs") + 1]
     assert json.loads(payload) == {"enable_thinking": False}
 
-def test_dflash_recipes_state_prefix_caching_explicitly():
+def test_dflash_recipes_state_prefix_caching_explicitly(vllm_recipes):
     # Stating it matters as much as the value. vLLM's own default for this model is OFF --
     # ModelConfig.is_prefix_caching_supported() returns False for hybrid attention -- and that
     # default is consulted only when the flag is absent. Both recipes turn it ON, and both can:
@@ -110,7 +110,7 @@ def test_dflash_recipes_state_prefix_caching_explicitly():
     # off again.
     mgr = VLLMServerManager()
 
-    for model in ("qwen3.5-122b-a10b-hybrid-dflash", "qwen3.5-122b-a10b-int4-dflash"):
+    for model in ("test-vllm-dflash",):
         cmd = mgr.build_launch_command(model=model)
         assert "--enable-prefix-caching" in cmd, model
         assert "--no-enable-prefix-caching" not in cmd, model
@@ -170,13 +170,13 @@ def test_optional_arguments_default_to_unset_not_to_a_value():
     cmd = mgr.build_launch_command(model="qwen2.5-coder-32b")
     assert cmd[cmd.index("--max-num-batched-tokens") + 1] == "8192"
 
-def test_vllm_cache_root_is_mounted_for_every_model():
+def test_vllm_cache_root_is_mounted_for_every_model(vllm_recipes):
     # Without this the torch.compile cache lives in the container's own layer and dies with it, so
     # every restart pays the full compile again. It has to land inside a mounted volume, and no
     # model's recipe env may take it over -- a per-model cache root would defeat the sharing.
     from dreamference.vllm_server.vllm_server_manager import CONTAINER_VLLM_CACHE_ROOT
     mgr = VLLMServerManager()
-    for model in ("qwen3.5-122b-a10b-int4-dflash", "qwen3.6-35b-a3b-nvfp4", "qwen2.5-coder-32b"):
+    for model in ("test-vllm-dflash", "test-vllm-nvfp4", "qwen2.5-coder-32b"):
         cmd = mgr.build_launch_command(model=model)
         var = f"VLLM_CACHE_ROOT={CONTAINER_VLLM_CACHE_ROOT}"
         assert var in cmd, model
@@ -189,7 +189,7 @@ def test_vllm_cache_root_is_mounted_for_every_model():
         mounts = [cmd[i + 1].split(":")[1] for i, a in enumerate(cmd) if a == "-v"]
         assert any(CONTAINER_VLLM_CACHE_ROOT.startswith(m) for m in mounts), mounts
 
-def test_compile_cache_signature_tracks_speculative_depth():
+def test_compile_cache_signature_tracks_speculative_depth(vllm_recipes):
     # vLLM's own compile cache key omits num_speculative_tokens, so this signature is the only
     # thing standing between a retuned n and a stale compiled graph.
     from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
@@ -197,10 +197,10 @@ def test_compile_cache_signature_tracks_speculative_depth():
     import copy
 
     sig = VLLMServerManager._compile_cache_signature
-    baseline = sig("qwen3.5-122b-a10b-int4-dflash")
+    baseline = sig("test-vllm-dflash")
     assert "dflash" in baseline and baseline.endswith("|12")
 
-    spec = ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"]
+    spec = ModelMatrixRegistry.MATRIX["test-vllm-dflash"]
     retuned = copy.deepcopy(spec.launch_overrides)
     retuned["speculative_config"]["num_speculative_tokens"] = 8
     patched = ModelSpec(
@@ -214,12 +214,12 @@ def test_compile_cache_signature_tracks_speculative_depth():
         hf_repo_id=spec.hf_repo_id,
         launch_overrides=retuned,
     )
-    original = ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"]
+    original = ModelMatrixRegistry.MATRIX["test-vllm-dflash"]
     try:
-        ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"] = patched
-        assert sig("qwen3.5-122b-a10b-int4-dflash") != baseline
+        ModelMatrixRegistry.MATRIX["test-vllm-dflash"] = patched
+        assert sig("test-vllm-dflash") != baseline
     finally:
-        ModelMatrixRegistry.MATRIX["qwen3.5-122b-a10b-int4-dflash"] = original
+        ModelMatrixRegistry.MATRIX["test-vllm-dflash"] = original
 
     # A model that does not speculate still gets a stable, non-empty signature.
     assert sig("qwen2.5-coder-32b") == sig("qwen2.5-coder-32b")
@@ -245,7 +245,7 @@ def test_preflight_gate_scores_the_utilization_that_will_actually_launch():
         )
         assert launched == gated, model
 
-def test_config_defaults_do_not_outrank_the_model_recipe():
+def test_config_defaults_do_not_outrank_the_model_recipe(vllm_recipes):
     # The CLI hands config values to start_server as explicit caller arguments, which by design
     # outrank the registry recipe. Any concrete default in the config layer is therefore an
     # override of every model's recipe, not a fallback. kv_cache_dtype defaulted to 'fp8' and so
@@ -261,9 +261,8 @@ def test_config_defaults_do_not_outrank_the_model_recipe():
 
     mgr = VLLMServerManager()
     expected = {
-        "qwen3.5-122b-a10b-int4-dflash": "auto",
-        "qwen3.5-122b-a10b-nvfp4": "fp8",
-        "qwen3.6-35b-a3b-nvfp4": "fp8",
+        "test-vllm-dflash": "auto",
+        "test-vllm-nvfp4": "fp8",
     }
     for model, dtype in expected.items():
         cmd = mgr.build_launch_command(model=model, kv_cache_dtype=config_value)
@@ -280,7 +279,7 @@ def test_flash_attn_is_never_paired_with_fp8_kv_cache():
         if backend == "FLASH_ATTN":
             assert recipe.get("kv_cache_dtype", "auto") != "fp8", alias
 
-def test_each_model_may_pin_its_own_vllm_image():
+def test_each_model_may_pin_its_own_vllm_image(vllm_recipes):
     # The engine is part of a recipe, not a global: a checkpoint whose KV geometry needs a patch
     # its own upstream ships cannot run on the image the rest of the matrix uses.
     from dreamference.vllm_server.vllm_server_manager import DEFAULT_VLLM_IMAGE
@@ -292,17 +291,17 @@ def test_each_model_may_pin_its_own_vllm_image():
     assert sig.parameters["docker_image"].default is None
 
     mgr = VLLMServerManager()
-    pinned = MODEL_MATRIX["qwen3.5-122b-a10b-int4-dflash"].launch_overrides["docker_image"]
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    pinned = MODEL_MATRIX["test-vllm-dflash"].launch_overrides["docker_image"]
+    cmd = mgr.build_launch_command(model="test-vllm-dflash")
     assert cmd[cmd.index("--entrypoint") + 2] == pinned
 
     # A model with no pin still gets the project default...
-    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    cmd = mgr.build_launch_command(model="test-vllm-nvfp4")
     assert cmd[cmd.index("--entrypoint") + 2] == DEFAULT_VLLM_IMAGE
 
     # ...and an explicit caller argument still outranks the recipe.
     cmd = mgr.build_launch_command(
-        model="qwen3.5-122b-a10b-int4-dflash", docker_image="someone/else:tag"
+        model="test-vllm-dflash", docker_image="someone/else:tag"
     )
     assert cmd[cmd.index("--entrypoint") + 2] == "someone/else:tag"
 
@@ -319,11 +318,11 @@ def test_registry_images_are_pulled_not_built(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    mgr.ensure_docker_image("ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix")
+    mgr.ensure_docker_image("ghcr.io/example/vllm:1")
     assert calls and calls[0][:2] == ["docker", "pull"]
     assert not any("build" in c for c in calls[0])
 
-def test_building_a_command_never_fetches_an_image(monkeypatch):
+def test_building_a_command_never_fetches_an_image(monkeypatch, vllm_recipes):
     # probe_image used to call ensure_docker_image, so once recipes could pin a registry image and
     # ensure_docker_image learned to pull, merely building a command for a model whose image was
     # not on disk started a multi-gigabyte download -- in tests, too.
@@ -333,9 +332,9 @@ def test_building_a_command_never_fetches_an_image(monkeypatch):
         mgr, "ensure_docker_image",
         lambda img: pytest.fail(f"build_launch_command tried to fetch {img}"),
     )
-    mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    mgr.build_launch_command(model="test-vllm-dflash")
 
-def test_every_model_serves_deterministic_sampling_by_default():
+def test_every_model_serves_deterministic_sampling_by_default(vllm_recipes):
     # An OpenAI-compatible request that omits `temperature` asks for the *server's* default, and
     # the served checkpoint ships 0.6 / top_p 0.95 / top_k 20. Codex has no sampling setting at
     # all, so it can never ask for zero -- 52 of its requests were measured at 0.6 before this.
@@ -343,7 +342,7 @@ def test_every_model_serves_deterministic_sampling_by_default():
     from dreamference.vllm_server.vllm_server_manager import DEFAULT_GENERATION_OVERRIDES
 
     mgr = VLLMServerManager()
-    for model in ("qwen3.5-122b-a10b-int4-dflash", "qwen3.6-35b-a3b-nvfp4", "qwen2.5-coder-32b"):
+    for model in ("test-vllm-dflash", "test-vllm-nvfp4", "qwen2.5-coder-32b"):
         cmd = mgr.build_launch_command(model=model)
         payload = json.loads(cmd[cmd.index("--override-generation-config") + 1])
         assert payload == DEFAULT_GENERATION_OVERRIDES, model
@@ -370,17 +369,17 @@ def test_a_recipe_can_opt_out_of_the_sampling_override(monkeypatch):
     cmd = VLLMServerManager().build_launch_command(model="qwen2.5-coder-32b")
     assert "--override-generation-config" not in cmd
 
-def test_autoround_checkpoint_gets_no_quantization_flag():
+def test_autoround_checkpoint_gets_no_quantization_flag(vllm_recipes):
     # AutoRound declares quant_method in its own config.json, so an inferred --quantization would
     # override vLLM's detection with a guess derived from the model name.
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash")
+    cmd = mgr.build_launch_command(model="test-vllm-dflash")
     assert "--quantization" not in cmd
 
-def test_explicit_arguments_win_over_registry_recipe():
+def test_explicit_arguments_win_over_registry_recipe(vllm_recipes):
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(
-        model="qwen3.6-35b-a3b-nvfp4",
+        model="test-vllm-nvfp4",
         max_model_len=8192,
         tool_call_parser="hermes",
         moe_backend="marlin",
@@ -401,18 +400,18 @@ def test_model_without_recipe_keeps_global_defaults():
     assert "--speculative-config" not in cmd
     assert "CUTE_DSL_ARCH=sm_121a" in cmd
 
-def test_self_declaring_quantization_is_not_overridden():
+def test_self_declaring_quantization_is_not_overridden(vllm_recipes):
     mgr = VLLMServerManager()
     # The name contains no 70b/72b marker, but the guard must hold for any self-declaring checkpoint.
-    assert "--quantization" not in mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    assert "--quantization" not in mgr.build_launch_command(model="test-vllm-nvfp4")
 
-def test_nvfp4_model_opts_out_of_tensorizer(monkeypatch):
+def test_nvfp4_model_opts_out_of_tensorizer(monkeypatch, vllm_recipes):
     from dreamference.hardware.model_downloader import ModelDownloader
     mgr = VLLMServerManager()
     monkeypatch.setattr(mgr, "image_has_tensorizer", lambda img: True)
     monkeypatch.setattr(ModelDownloader, "is_model_tensorized", lambda key: True)
     monkeypatch.setattr(ModelDownloader, "get_tensorized_path", lambda key: "/tmp/model.tensors")
-    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4")
+    cmd = mgr.build_launch_command(model="test-vllm-nvfp4")
     assert "--load-format" not in cmd
 
 def test_vllm_build_launch_command_auto_tool_call_parser_llama():
@@ -422,49 +421,49 @@ def test_vllm_build_launch_command_auto_tool_call_parser_llama():
     idx = cmd.index("--tool-call-parser")
     assert cmd[idx + 1] == "hermes"
 
-def test_vllm_build_launch_command_speculative():
+def test_vllm_build_launch_command_speculative(vllm_recipes):
 
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(
-        model="qwen3.6-35b-a3b-nvfp4",
-        draft_model="qwen3.5-122b-a10b-dflash-draft",
+        model="test-vllm-nvfp4",
+        draft_model="test-vllm-dflash-draft",
         num_speculative_tokens=5
     )
     # vLLM 0.2x has no --speculative-model / --num-speculative-tokens flags; only the JSON config.
     import json
     assert "--speculative-model" not in cmd and "--num-speculative-tokens" not in cmd
     spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
-    assert spec["model"] == "z-lab/Qwen3.5-122B-A10B-DFlash"
+    assert spec["model"] == "example/vllm-dflash-drafter"
     assert spec["num_speculative_tokens"] == 5
 
-def test_an_unknown_speculative_depth_is_omitted_not_stringified():
+def test_an_unknown_speculative_depth_is_omitted_not_stringified(vllm_recipes):
     # `server start --draft-model X` without `--num-speculative-tokens` used to launch vLLM with
     # "--num-speculative-tokens None".
     import json
     mgr = VLLMServerManager()
     cmd = mgr.build_launch_command(
-        model="qwen3.6-35b-a3b-nvfp4",
-        draft_model="qwen3.5-122b-a10b-dflash-draft",
+        model="test-vllm-nvfp4",
+        draft_model="test-vllm-dflash-draft",
         num_speculative_tokens=None,
     )
     assert "None" not in cmd
     spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
-    assert spec["model"] == "z-lab/Qwen3.5-122B-A10B-DFlash" and "num_speculative_tokens" not in spec
+    assert spec["model"] == "example/vllm-dflash-drafter" and "num_speculative_tokens" not in spec
 
 
-def test_a_draft_model_keeps_the_recipes_speculative_settings():
+def test_a_draft_model_keeps_the_recipes_speculative_settings(vllm_recipes):
     # --draft-model used to replace the recipe's config wholesale, dropping its method and the
     # drafter's attention backend.
     import json
     mgr = VLLMServerManager()
-    cmd = mgr.build_launch_command(model="qwen3.5-122b-a10b-int4-dflash",
-                                   draft_model="qwen3.5-122b-a10b-dflash-draft", num_speculative_tokens=8)
+    cmd = mgr.build_launch_command(model="test-vllm-dflash",
+                                   draft_model="test-vllm-dflash-draft", num_speculative_tokens=8)
     spec = json.loads(cmd[cmd.index("--speculative-config") + 1])
     assert spec["method"] == "dflash" and spec["attention_backend"] == "FLASH_ATTN"
     assert spec["num_speculative_tokens"] == 8
     # and the compile-cache signature follows the launched depth, not the recipe's 12
     assert VLLMServerManager._compile_cache_signature(
-        "qwen3.5-122b-a10b-int4-dflash", "qwen3.5-122b-a10b-dflash-draft", 8).endswith("|8")
+        "test-vllm-dflash", "test-vllm-dflash-draft", 8).endswith("|8")
 
 def test_vllm_build_launch_command_auto_fp8_for_70b():
     mgr = VLLMServerManager()
@@ -487,17 +486,17 @@ def test_vllm_build_launch_command_attention_and_kv_cache():
     kv_idx = cmd.index("--kv-cache-dtype")
     assert cmd[kv_idx + 1] == "fp8"
 
-def test_vllm_build_launch_command_docker(monkeypatch):
+def test_vllm_build_launch_command_docker(monkeypatch, vllm_recipes):
     mgr = VLLMServerManager()
     monkeypatch.setattr("shutil.which", lambda name: None)
     monkeypatch.setattr(mgr, "is_vllm_installed", lambda: False)
     monkeypatch.setattr(mgr, "is_docker_available", lambda: True)
-    cmd = mgr.build_launch_command(model="qwen3.6-35b-a3b-nvfp4", port=8000)
+    cmd = mgr.build_launch_command(model="test-vllm-nvfp4", port=8000)
     assert "docker" in cmd
     assert DEFAULT_VLLM_IMAGE in cmd
     img_idx = cmd.index(DEFAULT_VLLM_IMAGE)
     assert cmd[img_idx + 1] == "serve"
-    assert cmd[img_idx + 2] == "nvidia/Qwen3.6-35B-A3B-NVFP4"
+    assert cmd[img_idx + 2] == "example/vllm-moe-NVFP4"
 
 def test_vllm_environment_checks_real():
     mgr = VLLMServerManager()
@@ -783,7 +782,7 @@ def test_a_missing_recipe_image_is_not_built_from_the_wrong_dockerfile(monkeypat
     monkeypatch.setattr(mgr, "is_image_present", lambda img: False)
     calls = []
     monkeypatch.setattr("subprocess.run", lambda cmd, **k: calls.append(cmd))
-    assert mgr.ensure_docker_image("dreamference-vllm-dflash:0.23.0-aeon-dense5") is False
+    assert mgr.ensure_docker_image("example-vllm-dflash:1") is False
     assert calls == []
 
 # --- memory pressure watchdog ---
