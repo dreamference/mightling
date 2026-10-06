@@ -1260,6 +1260,8 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
     checkout = Path(__file__).resolve().parent.parent
     receiver = [sys.executable, "-c", "import sys; from dreamference.node.node_model_sync import NodeModelSync; "
                 f"sys.exit(NodeModelSync.receive({SYNC_KEY!r}, 0))"]
+    # The receiver checks the real disk; a CI runner has less free than the copy's margin.
+    receiver[2] = PLENTY_OF_DISK + receiver[2]
     environment = dict(os.environ, HF_HUB_CACHE=str(there), PYTHONPATH=str(checkout))
     monkeypatch.setattr(NodePairing, "ssh_command", classmethod(
         lambda cls, record, request: ["env", *[f"{k}={v}" for k, v in environment.items()], *receiver]))
@@ -1276,11 +1278,17 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
     assert NodeModelSync.sync("spark-2", SYNC_KEY) == 1
 
 
+# What a receiver sees in place of the real disk: 2 TiB free, whatever the machine running the suite has.
+PLENTY_OF_DISK = "import shutil, types; shutil.disk_usage = lambda path: types.SimpleNamespace(total=4 << 40, used=2 << 40, free=2 << 40); "
+
 def receive(monkeypatch, hub, members, size=0):
     import io
+    import shutil
     import sys
     import tarfile
+    import types
     from dreamference.node import NodeModelSync
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: types.SimpleNamespace(total=4 << 40, used=2 << 40, free=2 << 40))
     monkeypatch.setenv("HF_HUB_CACHE", str(hub))
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:

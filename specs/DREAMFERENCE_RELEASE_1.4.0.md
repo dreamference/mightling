@@ -95,7 +95,7 @@ On any other Linux machine the same script installs the client only. Already on 
 - Release assets carry Codex's licence and notice beside the binaries built from it.
 
 ## Known issues
-- **Preview features.** `/apps` (patch `0022`), the Work window and the app server's refusal of Full Access at `on` (patch `0023`) are compiled, unit-tested and pass the egress audits (only loopback ports 8000 and 8767), but have not yet been exercised live: Connect, real searches, the Work window against a running app server, the refusal itself.
+- **Preview features.** `/apps` (patch `0022`) and the Work window are compiled, unit-tested and pass the egress audits (only loopback ports 8000 and 8767). Live so far: `/apps` lists its three rows and its Connect page works, and the app server lists the model; not yet exercised: searches against real Drive and Calendar accounts, and the Work window against a running app server. The app server's refusal of Full Access at `on` (patch `0023`) was checked live: refused with its reason at `on`, accepted at `off`.
 - Drive and Calendar need Google's full scopes with GNOME's client (the read-only scopes are refused); Puffin's services only ever read.
 - The Work window's links are not followable yet, and two windows opened separately run as two processes.
 - The default model's SGLang image is pulled by `server start`, but the 122B fallbacks need a custom vLLM image that it cannot yet build for you (`Dockerfile.dflash`, then `Dockerfile.dense`).
