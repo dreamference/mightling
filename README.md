@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="docs/assets/puffin.svg" alt="Puffin" width="96">
-
-# Puffin
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/puffin-logo-dark-outlined.svg">
+  <img src="images/puffin-logo-light-outlined.svg" alt="Puffin" width="320">
+</picture>
 
 **OpenAI's Codex CLI, running an open model on the desk in front of you.**
 
