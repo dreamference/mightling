@@ -811,7 +811,7 @@ mod tests {
         assert_eq!(command(None::<String>, "default"), vec![USAGE.to_string()]);
         assert_eq!(command(None::<String>, "default loud"), vec![USAGE.to_string()]);
         assert_eq!(command(None::<String>, "on off"), vec![USAGE.to_string()]);
-        assert!(command(None::<String>, "on")[0].starts_with("No session yet"));
+        assert!(command(None::<String>, "on")[0].starts_with(&first_line_of_on_without_a_session()));
         assert!(command(None::<String>, "OFF")[0].starts_with("No session yet"));
         // The removed level is an unknown word.
         assert_eq!(command(None::<String>, "duckduckgo"), vec![USAGE.to_string()]);
@@ -997,7 +997,15 @@ mod tests {
         // Everything else is the ordinary command.
         assert_eq!(session_command(None::<String>, "loud", true), vec![USAGE.to_string()]);
         assert!(session_command(None::<String>, "off", true)[0].starts_with("No session yet"));
-        assert!(session_command(None::<String>, "on", false)[0].starts_with("No session yet"));
+        assert!(session_command(None::<String>, "on", false)[0].starts_with(&first_line_of_on_without_a_session()));
+    }
+
+    /// What `/airgapped on` says first with no session yet. On Windows, without the elevated
+    /// sandbox selected and set up on the machine running the tests, the refusal comes first
+    /// (§7.4); `at_on_only_the_elevated_sandbox_set_up_is_accepted` covers its wording.
+    fn first_line_of_on_without_a_session() -> String {
+        let refusal = if cfg!(windows) { windows_on_refusal(windows_sandbox_of(&[], &config_layers()), windows_sandbox_set_up_now()) } else { None };
+        refusal.map_or_else(|| "No session yet".to_string(), |lines| lines[0].clone())
     }
 
     #[test]

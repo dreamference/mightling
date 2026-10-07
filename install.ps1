@@ -188,7 +188,7 @@ if ($NoSandbox) {
     Say "Skipped the Windows sandbox (-NoSandbox): commands will run without one."
 } elseif (-not (Test-Path (Join-Path $InstallDir "codex-windows-sandbox-setup.exe"))) {
     Say ""
-    Say "Release $Tag carries no sandbox setup for $Target: commands will run without a sandbox."
+    Say "Release $Tag carries no sandbox setup for ${Target}: commands will run without a sandbox."
 } else {
     # Named now, as the user who ran this: with an administrator's credentials typed over the
     # shoulder of a standard user, the elevated process runs as that administrator instead.
