@@ -182,6 +182,7 @@ ling docs add ~/Documents/contracts --name contracts
 ling docs search "notice period acme" [--collection contracts] [--k 8] [--json]
 ling docs read <doc-id> [--page 7 | --lines 120-180]
 ling docs status
+ling docs remove <name>
 ```
 
 ### 8.2 Tools for the model
@@ -279,7 +280,14 @@ they land.
 
 ## 14. Open questions for the user
 
-1. Default collections: none (the user adds folders), or offer `~/Documents` at install?
+1. ~~Default collections~~ **Decided 2026-10-07:** `~/Documents` and `~/Downloads` are collections by
+   default (named `documents` and `downloads`), created at install or on the first `ling-docs` run
+   when the folders exist; the user adds other folders with `ling docs add` and can remove either
+   default with `ling docs remove`. Removing one is remembered, so it is never re-added. Every
+   rule of §5 still applies to them (the secret-file exclusions, size and type limits, the
+   sandboxed reading). `~/Downloads` in particular holds installers, archives and disk images:
+   files of types the index doesn't read are skipped without being opened, and the first index
+   of both runs in the background under the shared memory budget.
 2. Should a collection be searchable from every session, or only from sessions in chosen folders?
 3. Is OCR (Phase 3) wanted early, i.e. are scanned documents a common case?
 4. Languages: English-only embeddings are smaller and faster; a multilingual model costs speed.
