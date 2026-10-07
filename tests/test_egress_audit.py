@@ -57,7 +57,7 @@ def test_the_channels_the_patches_closed_fail_the_verdict_by_name():
                    "104.18.32.47:443 (1x): not on this machine", "[2606:4700:4400::6812:202f]:443"):
         assert needle in report, needle
     # The launcher's redirect of the ChatGPT backend is loopback, and still a finding.
-    assert "127.0.0.1:9 (1x): a ChatGPT-backend call that no patch closes" in report
+    assert "127.0.0.1:9 (1x): a call to the upstream vendor's backend that no patch closes" in report
     # A leak is a failure whether or not the session answered.
     assert EgressAudit.judge(trace, ALLOWED, replied=False).status == FAIL
 

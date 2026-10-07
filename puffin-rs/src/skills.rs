@@ -420,7 +420,7 @@ async fn search(github: &GitHub, words: &[String]) -> Result<Vec<String>, String
         })
         .collect();
     lines.push(match found.len() {
-        0 => format!("No skill in OpenAI's, Anthropic's or Hermes's catalogue or on ClawHub matches {}.", words.join(" ")),
+        0 => format!("No skill in the public skill catalogues or on ClawHub matches {}.", words.join(" ")),
         1 => "1 skill matches. Install it with puffin skill add <name>.".to_string(),
         count => format!("{count} skills match. Install one with puffin skill add <name>."),
     });

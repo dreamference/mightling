@@ -205,7 +205,7 @@ Currently, vLLM's prefix caching is **100% automatic and global**. Every sequenc
 
 **How it would be implemented:**
 No low-level CUDA kernels need to be altered. The implementation requires three straightforward Python-layer changes:
-1. **API Layer:** Modify the OpenAI-compatible API (`vllm/entrypoints/openai/`) to accept a custom request flag (e.g., `"enable_cache": false`).
+1. **API Layer:** Modify the standard /v1 API (`vllm/entrypoints/openai/`) to accept a custom request flag (e.g., `"enable_cache": false`).
 2. **Engine Layer:** Pass this boolean down to the `SequenceGroup` object.
 3. **Allocator Layer (The Switch):** Inside the `BlockAllocator`, modify the block-freeing logic. Currently, if a block has a hash, it is sent to the LRU Prefix queue. The logic would change to: `if block.has_hash and sequence.enable_cache:`. If the flag is false, the block bypasses the LRU pool entirely and its memory is instantly zeroized/reclaimed for new active requests.
 

@@ -717,7 +717,7 @@ class DreamferenceCLIController:
         agent_table.add_row("Cline Extension Runtime", cline_str)
         agent_table.add_row("Continue IDE Runtime", continue_str)
         agent_table.add_row("OpenHands Docker Runtime", openhands_str)
-        agent_table.add_row("Codex CLI Runtime", codex_str)
+        agent_table.add_row("puffin agent", codex_str)
         # With no config file anywhere, the resolver names where one *would* be written (the
         # current directory), which read as though settings were being loaded from there.
         config_path = str(config.config_file_path)
@@ -837,7 +837,7 @@ class DreamferenceCLIController:
         """
         parser = argparse.ArgumentParser(
             prog="puffin-admin",
-            description="Puffin by Dreamference: autonomous local agentic coding engine powered by Codex, Cline, Continue, OpenHands & NVIDIA GB10"
+            description="Puffin by Dreamference: private AI on your NVIDIA GB10. Runs the model server, the puffin agent, the web chat and the desktop app; also drives Cline, Continue and OpenHands"
         )
         agent_choices = ["codex", "cline", "continue", "openhands"]
 
@@ -931,7 +931,7 @@ class DreamferenceCLIController:
         clear_subparsers.add_parser("tensorize-cache", help="Clear local tensorizer model cache only")
 
         # Command: puffin-admin endpoints
-        subparsers.add_parser("endpoints", help="Print all available vLLM/OpenAI-compatible endpoints and credentials")
+        subparsers.add_parser("endpoints", help="Print the model server's endpoints (the standard /v1 API) and credentials")
 
         # Command: puffin-admin server
         server_parser = subparsers.add_parser("server", help="Manage the vLLM server container (start, stop, remove)")
@@ -946,7 +946,7 @@ class DreamferenceCLIController:
         # `server start` launched another -- found live, when a recipe switch started the old
         # checkpoint on the old image and only the /v1/models listing told the truth.
         start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
-        start_server_parser.add_argument("--port", type=int, default=8000, help="Port to expose OpenAI API endpoint")
+        start_server_parser.add_argument("--port", type=int, default=8000, help="Port for the model server's /v1 API")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
         start_server_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
@@ -954,7 +954,7 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--num-scheduler-steps", type=int, default=None, help="Multi-step scheduling iterations per step")
         start_server_parser.add_argument("--attention-backend", default=None, help="Attention backend (FLASHINFER, FLASH_ATTN, auto)")
         start_server_parser.add_argument("--kv-cache-dtype", default=None, help="KV cache precision (auto, fp8)")
-        start_server_parser.add_argument("--api-key", default=None, help="OpenAI-compatible API key (optional; not set by default)")
+        start_server_parser.add_argument("--api-key", default=None, help="API key for the model server's /v1 API (optional; not set by default)")
         start_server_parser.add_argument("--enable-auto-tool-choice", action="store_true", default=True, help="Enable automatic tool choice for function calling (default: enabled)")
         start_server_parser.add_argument("--tool-call-parser", default=None, help="Tool call parser name (default: from the model's registry recipe, e.g. hermes, qwen3_xml)")
         start_server_parser.add_argument("--reasoning-parser", default=None, help="Reasoning-channel parser for models that emit separate thinking output (e.g. qwen3)")
@@ -968,7 +968,7 @@ class DreamferenceCLIController:
         def diffusion_help(text: str) -> str:
             return text if diffusion_on else argparse.SUPPRESS
         start_server_parser.add_argument("--diffusion-model", default=None, help=diffusion_help(f"Diffusion model to serve beside the main one (default: the configured diffusion model, {DEFAULT_DIFFUSION_MODEL})"))
-        start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port for the diffusion sidecar's OpenAI endpoint"))
+        start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port for the diffusion sidecar's /v1 API"))
         start_server_parser.add_argument("--no-diffusion", action="store_true", help=diffusion_help("Skip starting the diffusion sidecar"))
         # Command: puffin-admin server stop
         stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM and diffusion Docker containers" if diffusion_on else "Stop the running model server")
@@ -987,22 +987,22 @@ class DreamferenceCLIController:
         # Command: puffin-admin logs
         logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         logs_parser.add_argument("target", nargs="?", choices=["server", "mcp"],
-                                 help="server: vLLM container logs. mcp: Codex MCP server lifecycle, "
+                                 help="server: vLLM container logs. mcp: the agent's MCP server lifecycle, "
                                       "read from ~/.puffin/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file)")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
         # Command: puffin-admin codex
         codex_parser = subparsers.add_parser("codex", help="Build puffin and manage its app-server daemon")
-        codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Codex commands")
+        codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Build, run and test puffin")
         codex_build_parser = codex_subparsers.add_parser(
-            "build", help="Build the Puffin-branded Codex from the codex submodule and codex-patches/"
+            "build", help="Build puffin from the pinned upstream source in codex/ and the patches in codex-patches/"
         )
         codex_build_parser.add_argument("--force", action="store_true", help="Rebuild even if the installed build is current")
         codex_build_parser.add_argument("--no-audit", action="store_true", help="Do not trace the new build's network use afterwards (`puffin-admin audit egress`)")
         codex_subparsers.add_parser("start", help="Start puffin's app-server daemon in the background")
         codex_subparsers.add_parser("stop", help="Stop puffin's app-server daemon")
         codex_test_parser = codex_subparsers.add_parser(
-            "test", help="Run Codex's own tests on puffin's patched tree, except those in codex-tests/puffin-skips.toml"
+            "test", help="Run the upstream test suite on puffin's patched tree, except the tests in codex-tests/puffin-skips.toml"
         )
         codex_test_parser.add_argument("-E", "--filter", default=None, help="nextest filterset to narrow the run to")
         codex_test_parser.add_argument("--test-threads", type=int, default=8, help="Tests run at once (default 8)")
@@ -1954,7 +1954,7 @@ class DreamferenceCLIController:
             cls.display_header()
             db = os.path.join(CodexInstaller.home_dir(), "logs_2.sqlite")
             if not os.path.exists(db):
-                print(f"❌ No Codex log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace puffin` first.")
+                print(f"❌ No puffin log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace puffin` first.")
                 sys.exit(1)
             try:
                 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -1983,11 +1983,11 @@ class DreamferenceCLIController:
             if not seen:
                 print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace puffin` to record some.")
             else:
-                print("[bold]Codex MCP server lifecycle (most recent first)[/bold]\n")
+                print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:
                     icon = "✅" if marker == "Service initialized as client" else "⚠️ "
                     print(f"   {icon} {name:16} {marker}")
-                print("\nNote: a server can initialize and then be cancelled — Codex still reports")
+                print("\nNote: a server can initialize and then be cancelled — puffin still reports")
                 print("      it as 'not initialized' in its startup banner.")
             sys.exit(0)
 
@@ -2093,12 +2093,12 @@ class DreamferenceCLIController:
             sys.exit(0 if clear_tensorizer_cache() else 1)
         elif args.command == "endpoints":
             cls.display_header()
-            table = Table(title="Available Endpoints (OpenAI-compatible)", show_header=True, header_style="bold magenta")
+            table = Table(title="Available Endpoints (standard /v1 API)", show_header=True, header_style="bold magenta")
             table.add_column("Endpoint", style="cyan")
             table.add_column("Method", style="green")
             table.add_column("Description")
             table.add_row("/v1/models", "GET", "List available models")
-            table.add_row("/v1/chat/completions", "POST", "Chat completions (OpenAI format)")
+            table.add_row("/v1/chat/completions", "POST", "Chat completions")
             table.add_row("/v1/completions", "POST", "Legacy text completions")
             table.add_row("/v1/embeddings", "POST", "Text embeddings (if supported)")
             table.add_row("/health", "GET", "vLLM server health (if enabled)")
@@ -2125,7 +2125,7 @@ class DreamferenceCLIController:
             cred_table.add_row("API Key", "Optional (use --api-key on serve; otherwise not required)")
             cred_table.add_row("Auth Header", "Authorization: Bearer <key> (when enabled)")
             console.print(cred_table)
-            print("\n💡 Use with any OpenAI-compatible client by pointing base_url to the endpoint above.")
+            print("\n💡 Use with any client that speaks the standard /v1 chat-completions API: point its base_url at the endpoint above.")
 
         elif args.command == "server":
 
@@ -2460,18 +2460,18 @@ class DreamferenceCLIController:
                 sys.exit(1)
             codex_bin = CodexInstaller.get_codex_executable()
             if args.codex_command == "start":
-                print("🚀 Starting Puffin Codex app-server daemon...")
+                print("🚀 Starting puffin's app-server daemon...")
                 subprocess.Popen(
                     [codex_bin, "app-server", "daemon", "start"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-                print("✅ Codex app-server daemon started.")
+                print("✅ puffin's app-server daemon started.")
             elif args.codex_command == "stop":
-                print("🛑 Stopping Puffin Codex app-server daemon...")
+                print("🛑 Stopping puffin's app-server daemon...")
                 subprocess.call([codex_bin, "app-server", "daemon", "stop"])
-                print("✅ Codex app-server daemon stopped.")
+                print("✅ puffin's app-server daemon stopped.")
 
         elif args.command == "logs":
             cls.display_header()

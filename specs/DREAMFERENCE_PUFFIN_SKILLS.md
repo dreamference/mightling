@@ -1,4 +1,4 @@
-# Puffin Skills — skills from OpenAI, Claude, Gemini, OpenClaw and Hermes
+# Puffin Skills — skills from the upstream vendor, Claude, Gemini, OpenClaw and Hermes
 
 **Status:** Phases 1 and 2 implemented on 2026-10-02: the crate `puffin-rs/skills/` and the launcher module `puffin-rs/src/skills.rs`. Phase 3 (ClawHub and Hermes as install sources, a trusted repository's `.claude/skills` and `.gemini/skills`) implemented on 2026-10-03 (§15.6). §15 records what was built, where it departs from the design below, and what was measured; the sections before it are the design as specified, with §2 being what was measured on 2026-10-01 before any code.
 **Goal:** a skill written for Codex, Claude Code, Gemini CLI, OpenClaw or Hermes Agent can be installed into `puffin` with one command and used by the local model, without the user knowing which ecosystem it came from.
@@ -18,7 +18,7 @@
 
 Read from each project's documentation on 2026-10-01, except the Codex column, which is read from the pinned source. "Standard" means the Agent Skills specification: a folder with `SKILL.md`, YAML frontmatter with `name` (≤64 characters, lowercase and hyphens, equal to the folder name) and `description` (≤1,024 characters), optional `license`, `compatibility`, `metadata` and the experimental `allowed-tools`, and optional `scripts/`, `references/`, `assets/`.
 
-| | Codex (OpenAI) | Claude Code (Anthropic) | Gemini CLI (Google) | OpenClaw | Hermes Agent (Nous) |
+| | Codex (the upstream vendor) | Claude Code (Anthropic) | Gemini CLI (Google) | OpenClaw | Hermes Agent (Nous) |
 |---|---|---|---|---|---|
 | Follows the standard | yes | yes (Anthropic wrote it) | yes, by its own statement | yes ("AgentSkills spec") | yes, by its own statement |
 | User skills on disk | `$CODEX_HOME/skills` (deprecated), `~/.agents/skills` | `~/.claude/skills/<name>` | `~/.gemini/skills`, `~/.agents/skills` | `~/.agents/skills`, `~/.openclaw/skills` (`--global`), `<state-dir>/skills` | `~/.hermes/skills/<category>/<name>` |
@@ -64,7 +64,7 @@ Gemini contributes no catalogue: its part of this is the `~/.agents/skills` and 
 | Under `-s workspace-write`, `touch` through a symlink in the writable workspace to a folder outside it (under `~/.cache`) | "Read-only file system"; the same `touch` on a plain file in the workspace succeeded. (Writes under the repository's `.agents/` were refused too; the cause was not looked into) |
 | `-c 'skills.config=[{name="claude-probe",enabled=false}]'` | the skill is gone from the model's list; the others remain. The `name` selector was tested, the `path` selector was not |
 
-Also on this machine: `~/.puffin/skills` holds `pdf` and `jupyter-notebook` from OpenAI's catalogue (installed on 2026-10-01 by another task), `~/.claude/skills` holds only `synced/`, and there is no `~/.gemini`, `~/.hermes` or `~/.openclaw`. The nine installed skills' descriptions total about 620 characters against a budget of about 21,000; each catalogue line also carries the name and a path, which this figure leaves out.
+Also on this machine: `~/.puffin/skills` holds `pdf` and `jupyter-notebook` from the upstream vendor's catalogue (installed on 2026-10-01 by another task), `~/.claude/skills` holds only `synced/`, and there is no `~/.gemini`, `~/.hermes` or `~/.openclaw`. The nine installed skills' descriptions total about 620 characters against a budget of about 21,000; each catalogue line also carries the name and a path, which this figure leaves out.
 
 **One real foreign skill.** `internal-comms` from `github.com/anthropics/skills` (Apache 2.0, unmodified) was copied into the scratch repository and the model was asked for a "3P update" with three facts. It chose the skill from its description, read `SKILL.md`, then read `examples/3p-updates.md` as the skill directs, and wrote the update in that file's Progress/Plans/Problems format. One run, one skill, and a skill that names no Claude tool.
 
@@ -163,7 +163,7 @@ About 190 tokens, in the cached prompt prefix. §2.2 found most of Anthropic's c
 
 ## 6. Installing: `puffin skill`
 
-A launcher subcommand, intercepted before Codex parses its arguments like `puffin night`: no patch, works from a shell and from scripts. (Codex's own `puffin plugin` is a different thing, its plugin marketplace, whose OpenAI calls patch `0015` closed.)
+A launcher subcommand, intercepted before Codex parses its arguments like `puffin night`: no patch, works from a shell and from scripts. (Codex's own `puffin plugin` is a different thing, its plugin marketplace, whose the upstream vendor calls patch `0015` closed.)
 
 ```text
 puffin skill list [--all]             what the model will be offered, by source, with the unavailable ones and why
@@ -210,7 +210,7 @@ It stays: it is compiled into the binary and already installs from any GitHub pa
 
 ## 7. Names and the catalogue budget
 
-**Collisions.** `pdf` exists in OpenAI's and Anthropic's catalogues, and Hermes ships its own. Codex keeps both when two skills share a name (read from `name_counts.rs`, not run), and the model then has to choose between two catalogue lines. `puffin` avoids offering duplicates: for one name, the launcher keeps the first in this order; a foreign loser gets no link, and a loser in `~/.agents/skills` gets a `[[skills.config]]` entry:
+**Collisions.** `pdf` exists in the upstream vendor's and Anthropic's catalogues, and Hermes ships its own. Codex keeps both when two skills share a name (read from `name_counts.rs`, not run), and the model then has to choose between two catalogue lines. `puffin` avoids offering duplicates: for one name, the launcher keeps the first in this order; a foreign loser gets no link, and a loser in `~/.agents/skills` gets a `[[skills.config]]` entry:
 
 1. the repository's `.agents/skills` and `.codex/skills`;
 2. `~/.puffin/skills/<name>` (installed for `puffin`);
@@ -263,7 +263,7 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 **Phase 0, before any code**
 
-1. One real skill from each catalogue, installed by hand and run against the local model on a task it is meant for: OpenAI `pdf`, an Anthropic skill that does name Claude's tools (`mcp-builder` or `skill-creator`; `internal-comms`, which names none, already passed once), one ClawHub skill, one Hermes optional skill, and one skill a Gemini CLI user published. For each: does the model choose it, read it, follow it, and finish. Then the same five with the §5 glossary added by hand. This decides whether the glossary earns its 190 tokens, and it is the only evidence of fitness on Qwen3.8; today's evidence is one code-word probe.
+1. One real skill from each catalogue, installed by hand and run against the local model on a task it is meant for: the upstream catalogue's `pdf`, an Anthropic skill that does name Claude's tools (`mcp-builder` or `skill-creator`; `internal-comms`, which names none, already passed once), one ClawHub skill, one Hermes optional skill, and one skill a Gemini CLI user published. For each: does the model choose it, read it, follow it, and finish. Then the same five with the §5 glossary added by hand. This decides whether the glossary earns its 190 tokens, and it is the only evidence of fitness on Qwen3.8; today's evidence is one code-word probe.
 2. ClawHub: the unauthenticated download and verdict endpoints. *(Done 2026-10-03, §15.6.)*
 3. Hermes: where optional skills live in its repository, and how many skills a default install puts in `~/.hermes/skills` (the budget question of §7). *(The first half done 2026-10-03, §15.6; the second needs Hermes installed.)*
 4. The read-only link target of §3, repeated with the real writable root `~/.puffin/skills` in a scratch home (measured so far from a workspace).
@@ -289,7 +289,7 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 1. Should linked sources default to on (seamless, §8.4's cost) or off until `puffin skill source <agent> on`?
 2. Repository `.claude/skills`: link only for trusted repositories (proposed), always, or never?
-3. Should `puffin` ship a default set (say OpenAI's `pdf` and Anthropic's Apache-licensed ones) in its release? Licences allow the Apache and MIT ones with their notices; not the Figma, Notion or Anthropic document skills without reading their terms.
+3. Should `puffin` ship a default set (say the upstream vendor's `pdf` and Anthropic's Apache-licensed ones) in its release? Licences allow the Apache and MIT ones with their notices; not the Figma, Notion or Anthropic document skills without reading their terms.
 4. `disable-model-invocation` skills are switched off (§4). Is a manual path wanted, e.g. `puffin exec --skill <name> …`, which would put the skill's body into the prompt?
 5. Should the catalogue budget be raised with `skills.max_context_tokens` (up to 10,000) on this model, given the system prompt is about 11,000 tokens already?
 6. Night Shift and SWE-bench runs: same skills as interactive sessions, or none? Proposed: none for SWE-bench (a skill is an uncontrolled variable in an A/B measurement), the user's set for Night Shift.
@@ -339,7 +339,7 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 The on-disk half is a crate of its own with no dependency on Codex or the network, like `puffin-rs/airgapped/`, so its 51 tests run in seconds in a copy of the folder (`cargo test`) without compiling the Codex workspace. Its dependency versions are the workspace's, so building inside the workspace adds no second copy of a crate. No Codex patch was needed; the series is unchanged.
 
-Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `search`, `enable`, `disable`, `source`, `adopt`. `add` takes `openai/<name>`, `anthropic/<name>`, `<owner>/<repo>/<path>`, a `github.com` URL with or without `/tree/<ref>/<path>`, and a local folder; `clawhub/…` and `hermes/…` answered that they were not built until Phase 3 (§15.6). `search` reads OpenAI's `.curated` and `.experimental` folders and Anthropic's `skills/` from each repository's tarball and matches every word against name and description; since Phase 3 also Hermes's catalogue and ClawHub's own search.
+Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `search`, `enable`, `disable`, `source`, `adopt`. `add` takes `openai/<name>`, `anthropic/<name>`, `<owner>/<repo>/<path>`, a `github.com` URL with or without `/tree/<ref>/<path>`, and a local folder; `clawhub/…` and `hermes/…` answered that they were not built until Phase 3 (§15.6). `search` reads the upstream vendor's `.curated` and `.experimental` folders and Anthropic's `skills/` from each repository's tarball and matches every word against name and description; since Phase 3 also Hermes's catalogue and ClawHub's own search.
 
 ### 15.2 Departures from the design, each for a reason
 

@@ -10,9 +10,9 @@
 
 ## 1. Executive Summary
 
-**Puffin** (by Dreamference) is a local agentic coding platform for a single NVIDIA GB10: inference runs on the machine and no code or prompt goes to a cloud model. It is not air-gapped by default, because the agent's web search, page fetch and Gmail tools use the internet; `/airgapped on` switches those off and takes the network away from the agent's sandboxed commands, with the holes `DREAMFERENCE_PUFFIN_AIRGAPPED.md` lists (see also `DREAMFERENCE_PUFFIN_EGRESS.md`). It serves open models in Docker (SGLang for the default model, vLLM for the others), and puts three front ends on the same local OpenAI-compatible endpoint:
+**Puffin** (by Dreamference) is a local agentic coding platform for a single NVIDIA GB10: inference runs on the machine and no code or prompt goes to a cloud model. It is not air-gapped by default, because the agent's web search, page fetch and Gmail tools use the internet; `/airgapped on` switches those off and takes the network away from the agent's sandboxed commands, with the holes `DREAMFERENCE_PUFFIN_AIRGAPPED.md` lists (see also `DREAMFERENCE_PUFFIN_EGRESS.md`). It serves open models in Docker (SGLang for the default model, vLLM for the others), and puts three front ends on the same local standard /v1 endpoint:
 
-- **`puffin`:** the terminal coding agent, and the default. It is a Puffin-branded build of OpenAI's Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`puffin-rs/`).
+- **`puffin`:** the terminal coding agent, and the default. It is a Puffin-branded build of Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`puffin-rs/`).
 - **Puffin web UI:** Onyx Lite, deployed and patched by `puffin-admin puffin …`. It is a browser chat with web search, image search, voice and Gmail, and it is also shown as a desktop window by the Tauri shell `puffin-app`.
 - **Other agents:** Cline, Continue and OpenHands, through `puffin-admin run --agent …`.
 
@@ -26,7 +26,7 @@ Since 2026-10-02 the GB10 can also be offered to the local network as a **node**
 |   puffin (Rust, Codex fork)   Puffin web UI (Onyx Lite) / puffin-app   IDEs (MCP)  |
 |   puffin-admin run --agent cline|continue|openhands                                |
 +-----------------------+--------------------------------+---------------------------+
-                        | OpenAI-compatible HTTP          | stdio MCP (puffin-admin mcp)
+                        | Standard /v1 HTTP          | stdio MCP (puffin-admin mcp)
 +-----------------------v--------------------------------v---------------------------+
 |  dreamference/ (Python)                                                            |
 |   config  hardware  vllm_server  runner  chat  context_engine  mcp_server          |

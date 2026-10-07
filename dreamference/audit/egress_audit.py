@@ -96,7 +96,7 @@ class EgressAudit:
             if not StraceParser.is_loopback(address):
                 problems.append(f"connected to {target} ({count}x): not on this machine")
             elif int(port) == CHATGPT_BLACKHOLE_PORT:
-                problems.append(f"connected to {target} ({count}x): a ChatGPT-backend call that no patch closes "
+                problems.append(f"connected to {target} ({count}x): a call to the upstream vendor's backend that no patch closes "
                                 "(it failed here only because the launcher redirects that URL)")
             elif int(port) not in allowed:
                 problems.append(f"connected to {target} ({count}x): a local port that is not on the allowlist")

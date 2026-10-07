@@ -25,7 +25,7 @@ filter = """
 
 # tui-feedback: 5 tests
 [[test]]
-reason = """Patch 0009 removes /feedback, which uploads logs to OpenAI, and with it the interrupted-turn hint `Something went wrong? Hit /feedback to report the issue.` these snapshots contain."""
+reason = """Patch 0009 removes /feedback, which uploads logs to the upstream vendor, and with it the interrupted-turn hint `Something went wrong? Hit /feedback to report the issue.` these snapshots contain."""
 filter = """
   (binary_id(codex-tui) & test(=app::tests::math_interruption_tests::unicode_math_termination_preserves_source_through_mode_and_resize))
 | (binary_id(codex-tui) & test(=chatwidget::tests::composer_submission::output_free_ctrl_c_interrupt_keeps_prompt_and_opens_blank_composer))
@@ -65,7 +65,7 @@ filter = """
 
 # tui-usage: 22 tests
 [[test]]
-reason = """Patch 0011 makes /usage this session's token counts. Upstream's /usage is the ChatGPT account's usage menu (analytics, rate-limit resets), fetched from OpenAI's backend; these tests drive that menu or its ChatGPT sign-in requirement."""
+reason = """Patch 0011 makes /usage this session's token counts. Upstream's /usage is the ChatGPT account's usage menu (analytics, rate-limit resets), fetched from the upstream vendor's backend; these tests drive that menu or its ChatGPT sign-in requirement."""
 filter = """
   (binary_id(codex-tui) & test(=app::composer_hints::tests::usage_notice_preserves_composer_geometry_on_recovery))
 | (binary_id(codex-tui) & test(=app::tests::local_command_scroll_tests::usage_picker_opens_analytics_without_moving_the_background_transcript))
@@ -93,7 +93,7 @@ filter = """
 
 # tui-pets: 6 tests
 [[test]]
-reason = """Patch 0010 hides /pet and /pets, whose art is fetched from OpenAI's CDN, so the popup has no match and the commands do not dispatch."""
+reason = """Patch 0010 hides /pet and /pets, whose art is fetched from the upstream vendor's CDN, so the popup has no match and the commands do not dispatch."""
 filter = """
   (binary_id(codex-tui) & test(=bottom_pane::chat_composer::tests::slash_popup_pets_for_pet_logic))
 | (binary_id(codex-tui) & test(=bottom_pane::chat_composer::tests::slash_popup_pets_for_pet_ui))
@@ -105,7 +105,7 @@ filter = """
 
 # cli-refused: 8 tests
 [[test]]
-reason = """`puffin login`, `logout` and `cloud` are refused before Codex parses its arguments (the launcher's REMOVED_COMMANDS, with patches 0005 and 0006): Puffin has no OpenAI account. These tests run those commands."""
+reason = """`puffin login`, `logout` and `cloud` are refused before Codex parses its arguments (the launcher's REMOVED_COMMANDS, with patches 0005 and 0006): Puffin has no a cloud account. These tests run those commands."""
 filter = """
   (binary_id(codex-cli::cloud_auth) & test(=cloud_list_only_allows_trusted_credential_destinations))
 | (binary_id(codex-cli::features) & test(=strict_config_is_not_supported_for_cloud_command))
@@ -126,7 +126,7 @@ filter = """
 
 # cli-doctor: 2 tests
 [[test]]
-reason = """Patch 0016 switches off `doctor`'s reachability, sign-in and update checks, which contact OpenAI and GitHub; these tests read the provider-reachability result those checks produce."""
+reason = """Patch 0016 switches off `doctor`'s reachability, sign-in and update checks, which contact the upstream vendor and GitHub; these tests read the provider-reachability result those checks produce."""
 filter = """
   (binary_id(codex-cli::doctor_enterprise_network) & test(=invalid_custom_ca_falls_back_to_system_roots))
 | (binary_id(codex-cli::doctor_path_safety) & test(=non_interactive_dumb_terminal_preserves_other_doctor_failures))
@@ -242,7 +242,7 @@ filter = """
 
 # network-channels: 8 tests
 [[test]]
-reason = """Patch 0015 closes the channels to OpenAI and GitHub that need no login: Statsig/OTEL metrics, the featured-plugins request, the startup `git ls-remote` of openai/plugins and the announcement tip. These tests wait for one of those requests, or for a plugin catalog that arrives through it. Checked on 2026-10-01: all pass on the same tree with 0015 left out."""
+reason = """Patch 0015 closes the channels to the upstream vendor and GitHub that need no login: Statsig/OTEL metrics, the featured-plugins request, the startup `git ls-remote` of openai/plugins and the announcement tip. These tests wait for one of those requests, or for a plugin catalog that arrives through it. Checked on 2026-10-01: all pass on the same tree with 0015 left out."""
 filter = """
   (binary_id(codex-app-server::all) & test(=suite::v2::curated_mcp_sync::existing_thread_loads_api_curated_mcp_after_auth_switch_sync))
 | (binary_id(codex-app-server::all) & test(=suite::v2::plugin_list::plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled::configured_product_sku))
@@ -278,7 +278,7 @@ filter = """
 
 # env-v8: 1 tests
 [[test]]
-reason = """The V8 Puffin links is OpenAI's pointer-compression-and-sandbox build (the only one published for aarch64 Linux), while a workspace build leaves the proof-of-concept crate's `sandbox` feature off, so 'feature matches linked V8' is false. Fails identically on unmodified Codex here."""
+reason = """The V8 Puffin links is the upstream vendor's pointer-compression-and-sandbox build (the only one published for aarch64 Linux), while a workspace build leaves the proof-of-concept crate's `sandbox` feature off, so 'feature matches linked V8' is false. Fails identically on unmodified Codex here."""
 filter = """
   (binary_id(codex-v8-poc) & test(=tests::sandbox_feature_matches_linked_v8))
 """

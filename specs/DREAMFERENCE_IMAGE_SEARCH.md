@@ -51,7 +51,7 @@ Hamming ≤ 8 merges to the first representative
 RANK-AND-FILTER ─┬─ SPECULATIVE PREFETCH (concurrent)
    (vision)      │   hardened full downloads of every FRESH shortlist candidate begin when
                  │   the rank call is dispatched; cached candidates prefetch nothing
-  one OpenAI-compatible vision call to the served vLLM model: shortlist thumbnails + query →
+  one standard /v1 vision call to the served vLLM model: shortlist thumbnails + query →
   strict-JSON array of the MATCHING indices, best first. A successful verdict is a FILTER:
   indices it leaves out stay out (an empty array is a valid answer), and only a transport or
   parse failure falls back to the unfiltered order. Even a single candidate is judged — one

@@ -285,7 +285,7 @@ The five ids are fixed in the code, chosen in Phase 0 from instances that valida
 
 Printed in short form on every report, and to be repeated wherever a figure from this command is quoted:
 
-1. **The benchmark is contaminated.** OpenAI stopped reporting SWE-bench Verified in early 2026: frontier models could reproduce gold patches verbatim, and many of the hardest unsolved tasks had flawed tests. Its replacement recommendation, SWE-bench Pro, was itself withdrawn in July 2026 after an audit estimated about 30% of its tasks broken. An open-weights model has very likely seen these repositories and their fixes.
+1. **The benchmark is contaminated.** the upstream vendor stopped reporting SWE-bench Verified in early 2026: frontier models could reproduce gold patches verbatim, and many of the hardest unsolved tasks had flawed tests. Its replacement recommendation, SWE-bench Pro, was itself withdrawn in July 2026 after an audit estimated about 30% of its tasks broken. An open-weights model has very likely seen these repositories and their fixes.
 2. **The images are not the leaderboard's.** Scores elsewhere are graded in the official x86_64 images. These are arm64 images built locally or by a third party, and a subset: the denominator is what validates here, not 500.
 3. **The agent is restricted** in ways others may not be (no network), and the model is a quantised build (NVFP4) with a speculative drafter.
 4. **One run is one sample.**
@@ -549,5 +549,5 @@ Fetched on 2026-10-01.
 - [SWE-bench pull request 521](https://github.com/SWE-bench/SWE-bench/pull/521) and [issue 520](https://github.com/SWE-bench/SWE-bench/issues/520): arm64 support, closed unmerged on 2026-08-12, and the x86 assumptions it listed.
 - [`greynewell/swe-bench-arm64` on Docker Hub](https://hub.docker.com/r/greynewell/swe-bench-arm64), with its author's [write-up](https://greynewell.com/blog/swe-bench-arm64-native-containers-6x-faster/) and [data](https://gist.github.com/greynewell/497005bb33641503f1a5874f16578088): 1,798 of 2,294 instances native on arm64, 11 instances compared against x86, about six times faster than emulation. These are the author's figures, not checked here.
 - [princeton-nlp/SWE-bench_Verified](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified): 500 rows and the field list.
-- [OpenAI: Why SWE-bench Verified no longer measures frontier coding capabilities](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/): the contamination findings of §8.
+- [the upstream vendor: Why SWE-bench Verified no longer measures frontier coding capabilities](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/): the contamination findings of §8.
 - [SWE-Bench Pro Verified (arXiv 2609.08149)](https://arxiv.org/pdf/2609.08149): the July 2026 withdrawal of the SWE-bench Pro recommendation and the estimate of about 30% broken tasks, as reported by a web search summary; the paper itself was not read.

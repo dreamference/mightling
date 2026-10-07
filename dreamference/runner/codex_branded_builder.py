@@ -30,6 +30,7 @@ binaries count as current, since there is nothing here they could be rebuilt fro
 
 import hashlib
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -215,6 +216,7 @@ class CodexBrandedBuilder:
             return None
         digest = hashlib.sha256()
         digest.update(repr(sorted(RELEASE_PROFILE_OVERRIDES.items())).encode())
+        digest.update(f"version={cls.puffin_version()}".encode())
         for patch in cls.patches():
             digest.update(os.path.basename(patch).encode())
             with open(patch, "rb") as handle:
@@ -323,6 +325,47 @@ class CodexBrandedBuilder:
                 print(f"💡 The patches are written against {CODEX_RELEASE_TAG}; refresh them after a submodule bump.")
                 return False
             subprocess.run(["git", "apply", patch], cwd=source_dir, check=True)
+        return cls.stamp_version(os.path.join(source_dir, "codex-rs", "Cargo.toml"), cls.puffin_version())
+
+    @classmethod
+    def puffin_version(cls) -> str:
+        """
+        The version `puffin` reports: the release being built (`PUFFIN_VERSION`, which the release
+        workflow sets), else this package's own version.
+
+        Returns:
+            str: A version such as `1.4.1`.
+        """
+        from dreamference import __version__
+        return os.environ.get("PUFFIN_VERSION") or __version__
+
+    @classmethod
+    def stamp_version(cls, manifest: str, version: str) -> bool:
+        """
+        Sets the exported workspace's version, so that every place the binaries read
+        `CARGO_PKG_VERSION` -- `--version`, the session header, the status card, `exec`'s banner,
+        `doctor` -- reports Puffin's release rather than the upstream tag it was forked from. The
+        export is edited, never the submodule, and no patch is needed.
+
+        Args:
+            manifest (str): The exported `codex-rs/Cargo.toml`.
+            version (str): The version to stamp.
+
+        Returns:
+            bool: True if the manifest's `[workspace.package]` version was set.
+        """
+        if not re.fullmatch(r"\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?", version):
+            print(f"❌ {version!r} is not a version Cargo accepts (for example 1.4.1).")
+            return False
+        with open(manifest) as handle:
+            text = handle.read()
+        section = re.search(r"^\[workspace\.package\]\n(?:(?!\[).*\n)*?version = \"[^\"]*\"", text, re.M)
+        if section is None:
+            print(f"❌ No [workspace.package] version in {manifest}.")
+            return False
+        stamped = section.group(0)[:section.group(0).rindex("version = ")] + f'version = "{version}"'
+        with open(manifest, "w") as handle:
+            handle.write(text[:section.start()] + stamped + text[section.end():])
         return True
 
     @classmethod
@@ -529,9 +572,9 @@ class CodexBrandedBuilder:
             "-p", "codex-cli", "--bin", CARGO_BIN_NAME,
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
-        print(f"🔨 Building Puffin-branded Codex ({CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
+        print(f"🔨 Building puffin (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
         if subprocess.call(command, cwd=os.path.join(source_dir, "codex-rs"), env=environment) != 0:
-            print("❌ The Codex build failed; see the cargo output above.")
+            print("❌ The puffin build failed; see the cargo output above.")
             return False
 
         release_dir = os.path.join(BUILD_CACHE_DIR, "target", "release")
