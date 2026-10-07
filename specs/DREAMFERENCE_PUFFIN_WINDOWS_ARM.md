@@ -10,6 +10,31 @@
 - the desktop app ([PUFFIN_DESKTOP](./DREAMFERENCE_PUFFIN_DESKTOP.md));
 - the model server and its host-safety layer ([INFERENCE](./DREAMFERENCE_INFERENCE.md)).
 
+**Decided by the user, 2026-10-07** (these override anything below that reads otherwise; §21 has
+the questions as asked):
+
+- **No WSL.** The local engine is **W1 only**, a native `llama-server` (llama.cpp) that Puffin
+  builds and manages. W2 (SGLang in a WSL2 distribution) is **not built**; every W2 passage below is
+  kept as the record of the option considered. It is revisited only if W1 measures clearly too slow
+  on the test machine. vLLM and SGLang have no Windows build in any case, and on Windows on Arm
+  there is no CUDA PyTorch for them to run on.
+- **Model: Qwen3.8-27B everywhere**, the node's model, as GGUF `Q4_K_M` for W1. It runs locally on
+  **every machine where it fits at all** (about 24 GB of GPU budget and up), with the context sized
+  to what is left; below that the machine is a client of a node.
+- **A lone laptop (no node on the LAN) gets, natively:** web search (SearXNG has no Windows build,
+  so a native search backend, §10), **Night Shift** in Rust (§13), and the **Chat window** of
+  `puffin-app` without Onyx's Linux containers (§11). `/apps` (Gmail, Drive, Calendar) stays
+  node-only on Windows.
+- **Unsigned for now.** Windows releases ship unsigned and are marked **preview**; the release notes
+  say that Smart App Control must be off to run them (§16.3). Signing is revisited before Windows
+  leaves preview.
+- **x86-64 Windows from the start:** `x86_64-pc-windows-msvc` is built in Phase 1 beside Arm64.
+- **Patch budget up to 39,500 bytes** for `0024` (§7.4); the cap in `test_the_patches_stay_small`
+  is still raised only when the patch lands, by its size as written.
+- **Test machine: an ASUS ProArt P16 (H7607, NVIDIA RTX Spark) with 128 GB** for Phases 3 and 4.
+  Not the H7606, which is an AMD + RTX 5090 laptop.
+- **Phases 0 and 1 start now.**
+
 **Decisions proposed here, stated first because each could be read the other way:**
 
 1. **Native Windows, not WSL, for everything a person types.** This keeps PUFFIN_NODE §15.1 (2026-10-02): `puffin`, `puffin-code`, `puffin-search`, `puffin-fetch` and `puffin-app` are Windows executables. WSL appears in this spec only as optional plumbing *inside* the local-engine profile (§8.3), the way Docker Desktop uses it. Whether even that is acceptable is question 1 in §21.
@@ -238,7 +263,7 @@ The cheapest useful step, and testable on any Windows Arm PC with enough memory:
 - detection at start of Ollama (11434), LM Studio (1234) and `llama-server` (8080) on loopback, offered once ("found Ollama at 127.0.0.1:11434 serving qwen3.8:27b; use it? `puffin node use local:ollama`"), never adopted silently (PUFFIN_NODE §6.1's rule);
 - a start-up line naming what is unmeasured: tool calls on a template Puffin did not patch.
 
-### 8.3 Phase 4: a Puffin-managed engine, W1 or W2
+### 8.3 Phase 4: a Puffin-managed engine, W1 (W2 not built: no WSL, decided 2026-10-07)
 
 | | **W1: native `llama-server`** | **W2: SGLang in a Puffin WSL2 distribution** |
 |---|---|---|
@@ -260,7 +285,7 @@ The cheapest useful step, and testable on any Windows Arm PC with enough memory:
 4. four concurrent `puffin` tasks;
 5. the memory test of §9.4.
 
-**Proposed default before measuring:** W1 for every local install, because it has no WSL, no images and no second memory layer; W2 as an opt-in "full node on this laptop" (`-Role local -Engine wsl`) for people who want the GB10 recipe, Chat and Night Shift. If W2 turns out within 10% of the GB10's speed and passes §9.4, the default is revisited: speed is the product.
+**Decided 2026-10-07:** W1 for every local install; W2 is not built. (Proposed before the decision: W1 for every local install, because it has no WSL, no images and no second memory layer; W2 as an opt-in "full node on this laptop" (`-Role local -Engine wsl`) for people who want the GB10 recipe, Chat and Night Shift. If W2 turns out within 10% of the GB10's speed and passes §9.4, the default is revisited: speed is the product.)
 
 ### 8.4 Which model on which machine
 
@@ -409,7 +434,7 @@ Per binary, as today: `puffin-aarch64-pc-windows-msvc.gz` (holding `puffin.exe`)
 
 - **Why reopen it:** PUFFIN_NODE §15.1 decided to document the warning rather than sign. On Windows 11, Smart App Control "outright blocks any unknown, unsigned … apps"; GitHub issues show installers that cannot be run at all, with no "Run anyway". It is on or in evaluation on clean installs, which describes every new RTX Spark laptop. Without signing, a share of the target audience cannot run `puffin.exe`.
 - **What it costs:** Azure Artifact Signing is about $9.99 a month (5,000 signatures), with no hardware token, open to organisations in the EU and UK (individuals only in the US and Canada). A signed binary still starts without SmartScreen reputation, but Smart App Control evaluates the signature, and reputation accrues to the certificate across releases.
-- **Proposed:** Dreamference applies for Artifact Signing as an organisation, and the release workflow signs every Windows `.exe` with `signtool` through the Azure action. Until then, the Windows release is marked preview, and the README says how to switch Smart App Control off, which Windows 11 now allows without a reinstall.
+- **Decided 2026-10-07: unsigned for now.** Windows releases are marked preview, and their notes say Smart App Control must be off to run them; signing is revisited before Windows leaves preview. (Proposed before the decision: Dreamference applies for Artifact Signing as an organisation, and the release workflow signs every Windows `.exe` with `signtool` through the Azure action. Until then, the Windows release is marked preview, and the README says how to switch Smart App Control off, which Windows 11 now allows without a reinstall.)
 
 ### 16.4 `install.ps1`
 
@@ -473,17 +498,39 @@ Uninstall is `puffin uninstall`. It removes the install directory, the PATH entr
 
 ---
 
+## 18a. Linux on RTX Spark laptops (watch, not build)
+
+Reimaging an RTX Spark laptop with Linux is not possible yet (checked 2026-10-07):
+- NVIDIA has not announced Linux for RTX Spark and would not comment.
+- The public open GPU driver (615.71.09) lists GB10 but not the N1X (`10de:2e03`).
+- No laptop maker has said how the firmware describes the hardware (ACPI or a device tree, which
+  Snapdragon laptops needed per model), and no distribution publishes an image.
+
+NVIDIA's NemoClaw tracker shows an internal Ubuntu 24.04 image, "N1x FastOS" (kernel 7.0, driver
+615, CUDA 13.4), so a release is likely. Its issues also show a vLLM load running out of memory and
+leaving the host unresponsive: the freeze Puffin's host-safety layer exists for.
+
+When NVIDIA ships Linux for N1X, Puffin on such a laptop is the node stack almost unchanged:
+- GB10 detection learns the N1X's PCI id (`hardware_manager.py`, `install.sh`);
+- the default model is sized to the machine's memory, as on Windows;
+- battery, sleep and thermals are added to the host checks.
+
+Customers stay on Windows; this is a faster path for people who choose Linux, and for the test
+laptop.
+
+---
+
 ## 19. Phases
 
 | Phase | Delivers | Needs | Gate |
 |---|---|---|---|
 | 0 | the fixes of §15 and §16.1 that are portable, with their Linux tests; `.gitattributes`; `cargo check` of the std-only crates for the Windows target | nothing new | Linux suite green |
-| 1 | the Windows client: release job on `windows-11-arm`, `install.ps1`, `update`, junction skills, client against a LAN node | a Windows Arm PC (Snapdragon is enough) | §18's client checks |
+| 1 | the Windows client: release jobs on `windows-11-arm` and x86-64 Windows (unsigned, preview), `install.ps1`, `update`, junction skills, client against a LAN node | a Windows Arm PC (Snapdragon is enough) | §18's client checks |
 | 2 | sandbox at install, patch `0024`, the refusals, `puffin audit egress` over ETW | the same PC | the audit passes; `on` blocks |
 | 3 | bring-your-own local server (§8.2) | an RTX Spark, or any Arm PC with a small model for function only | tool calls and efforts pass the slash-command suite on llama-server and Ollama |
-| 4 | the managed engine (W1, W2 behind a flag), the watchdog, the `local` profile | an RTX Spark with 128 GB | §8.3's measurements and §9.4 |
+| 4 | the managed engine (W1), the watchdog, the `local` profile | the ASUS ProArt P16 (H7607) with 128 GB | §8.3's measurements and §9.4 |
 | 5 | `puffin-app` on Windows, the code index's static layer, scip built for Windows | Phase 1 | Work and Chat (node) open; `code_def` answers exactly |
-| 6 | Night Shift in Rust, executing indexers under the offline account, `/apps` on a lone laptop, x86-64 Windows if wanted | Phase 4 | per feature |
+| 6 | Night Shift in Rust, executing indexers under the offline account, the lone laptop's native web search and Chat window | Phase 4 | per feature |
 
 Phases 1 and 2 need no RTX Spark and can be finished before the hardware arrives. Phases 3 and 4 need one; the Surface RTX Spark Dev Box (Microsoft.com, US) or an ASUS ProArt P16 with 128 GB are the candidates.
 
@@ -502,11 +549,11 @@ Phases 1 and 2 need no RTX Spark and can be finished before the hardware arrives
 
 ## 21. Questions for the user
 
-1. **WSL as plumbing:** PUFFIN_NODE §15.1 chose native Windows and "WSL is not a supported install path". Does that also rule out W2 (WSL hidden inside the local-engine profile), or was it about the client only? This spec assumes the client only.
-2. **Signing:** buy Azure Artifact Signing (about $9.99 a month, organisation in the EU) so Windows builds are not blocked by Smart App Control?
-3. **Patch cap:** `0024` (an estimated 1.3–1.8 KB, plus about 0.3 KB if `0023`'s validator also learns the sandbox mode, §7.4) takes the series from 37,288 bytes to about 38,900–39,400, past the approved 38,500. Approve up to 39,500 for the Windows hooks?
-4. **Hardware:** which RTX Spark to buy for Phases 3 and 4: the Surface RTX Spark Dev Box (developer-focused, US only) or a 128 GB ASUS ProArt P16?
-5. **x86-64 Windows:** add it in Phase 1 (one more matrix row, no more code), or leave it out until asked?
+1. **WSL as plumbing:** **decided 2026-10-07: no WSL.** W1 only; W2 is not built, and is revisited only if W1 measures clearly too slow.
+2. **Signing:** **decided 2026-10-07: unsigned for now,** marked preview; revisited before Windows leaves preview.
+3. **Patch cap:** **decided 2026-10-07: up to 39,500 bytes** for `0024`.
+4. **Hardware:** **decided 2026-10-07: an ASUS ProArt P16 (H7607, RTX Spark) with 128 GB.**
+5. **x86-64 Windows:** **decided 2026-10-07: from the start,** in Phase 1.
 6. **Default local model on Windows:** **decided 2026-10-07: Qwen3.8-27B**, the same model as the node. Phase 4 measures how fast it runs on each engine; it no longer chooses the model.
 
 ---
