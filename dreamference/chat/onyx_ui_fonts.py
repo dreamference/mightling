@@ -16,12 +16,12 @@ served CSS still says `Hanken Grotesk` everywhere and renders Roboto, so greppin
 Roboto is fetched once from google/fonts, converted from its variable TTF to WOFF2 on the host,
 and cached under `~/.cache/dreamference/fonts`. It is then served by Onyx itself out of
 `/app/public/fonts`, next to the KH Teka files Onyx already ships there -- so the deployment makes
-no request to a font CDN at page load, and a machine that has run `puffin-admin puffin configure` once
+no request to a font CDN at page load, and a machine that has run `mling-admin chat configure` once
 never needs the network for this again. Both faces are variable (`wght` 100-900 and 100-700),
 which is what lets one file stand in for a `font-weight: 100 900` face.
 
 Like the logos, these are writes into a running container's filesystem: an image upgrade or a
-`deploy install --force` restores Onyx's own typefaces, and re-running `puffin-admin puffin configure`
+`deploy install --force` restores Onyx's own typefaces, and re-running `mling-admin chat configure`
 puts Roboto back.
 """
 

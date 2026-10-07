@@ -1,7 +1,7 @@
 """
-The node half of Puffin: the GB10 that serves the model, advertised on the local network as
-`_puffin-node._tcp` so that clients find it with no address typed
-(specs/DREAMFERENCE_PUFFIN_NODE.md).
+The node half of Mightling: the GB10 that serves the model, advertised on the local network as
+`_mightling-node._tcp` so that clients find it with no address typed
+(specs/DREAMFERENCE_MIGHTLING_NODE.md).
 """
 
 from dreamference.node.node_advertiser import NodeAdvertiser

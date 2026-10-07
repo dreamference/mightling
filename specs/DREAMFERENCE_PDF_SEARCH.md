@@ -1,7 +1,7 @@
-# Puffin PDF Search Tool — Technical Specification
+# Mightling PDF Search Tool — Technical Specification
 
 **Status:** Draft v1: **not implemented.** Nothing in `dreamference/` implements PDF search, as of 2026-09-28. The facts below about existing infrastructure (container names, tool registration, SearXNG, Infinity) were corrected against the code on that date; the design itself is unchanged.
-**Target:** Puffin (sidecar ecosystem)
+**Target:** Mightling (sidecar ecosystem)
 **Estimated effort:** ~4-5 days (sidecar app, SearXNG integration, PDF parsing, text embedding, semantic chunking, SSRF hardened downloader)
 
 ---
@@ -10,7 +10,7 @@
 
 Add a built-in `PDF Search` tool that lets the LLM search the internet for PDF documents, download them on the fly, extract their text, and return the most relevant excerpts. 
 
-Built on Puffin's sidecar architecture (like the Image Search and Gmail tools), this tool would run as an independent container (`dreamference-pdf-search`; the deployment names its sidecars `dreamference-*`). It registers dynamically via Onyx's Custom Tool REST API. 
+Built on Mightling's sidecar architecture (like the Image Search and Gmail tools), this tool would run as an independent container (`dreamference-pdf-search`; the deployment names its sidecars `dreamference-*`). It registers dynamically via Onyx's Custom Tool REST API. 
 
 The tool queries the deployment's SearXNG instance with `filetype:pdf` filters, downloads the candidate PDFs with strict SSRF guards, extracts text using PyMuPDF, chunks the text, and runs it through the local Infinity embedding sidecar. The top-K most semantically relevant chunks are returned to the LLM as text along with source URLs and page numbers, enabling accurate, on-the-fly research without bloating the LLM's context window.
 
@@ -68,8 +68,8 @@ The sidecar would run on port `8769`. The existing sidecars (Gmail, image search
 Onyx's custom-tool API takes an **OpenAPI document**, not a `custom_tool_url`. Registration should mirror `enable_image_search()` / `enable_gmail_search()`:
 - `openapi_definition()` in the service module, with one `pdf_search` POST operation;
 - sent to `POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate;
-- a `custom_headers` shared secret (e.g. `X-Puffin-PDF-Token`) generated once into the data directory;
-- a `--no-pdf-search` opt-out on `puffin-admin puffin configure`, like the other tools.
+- a `custom_headers` shared secret (e.g. `X-Mightling-PDF-Token`) generated once into the data directory;
+- a `--no-pdf-search` opt-out on `mling-admin chat configure`, like the other tools.
 
 ### 3.2 PDF Parsing and Chunking
 The sidecar uses `pymupdf` (fitz) to extract text. 
@@ -116,7 +116,7 @@ Because the tool fetches arbitrary PDFs from the internet and parses them locall
 - Hardened downloader SSRF assertions.
 
 **Integration:**
-- `puffin-admin puffin configure` successfully registers the tool.
+- `mling-admin chat configure` successfully registers the tool.
 - End-to-end local test against a mock SearXNG instance returning a test PDF. 
 - Verify the tool extracts text, embeds it, and returns the top chunk.
 - Verify memory is freed (no PDF files left on disk).

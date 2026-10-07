@@ -1,7 +1,7 @@
 """
-`puffin-admin swe-bench run`: the agent phase (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §5, §12).
+`mling-admin swe-bench run`: the agent phase (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5, §12).
 
-One `puffin exec` per instance, in the instance's own container, several at once when the model
+One `mling exec` per instance, in the instance's own container, several at once when the model
 server's KV pool and the host's memory admit it. The run measures whatever model is being served
 and never starts, stops or loads it. Admission, the runner lock and the start checks are Night
 Shift's, imported, not copied: a benchmark run and a night run exclude each other.
@@ -38,7 +38,7 @@ POLL_S: Final[float] = 5.0
 # What the lock file says while a benchmark run holds Night Shift's runner lock.
 LOCK_HOLDER: Final[str] = "a SWE-bench run"
 
-# The prompts compiled into `puffin` (puffin-rs/src/prompt.rs); any other name is a file in
+# The prompts compiled into `mling` (mling-rs/src/prompt.rs); any other name is a file in
 # `$CODEX_HOME/system-prompts/`. A run's manifest without a prompt ran the default.
 BUILT_IN_PROMPTS: Final[tuple] = ("default", "high-swe")
 DEFAULT_RUN_PROMPT: Final[str] = "default"
@@ -124,7 +124,7 @@ class SweBenchRunner:
             served_model: The served model's id.
 
         Returns:
-            str: `puffin-<codex tag>-<patch series hash, 8 hex>/<served model id>`.
+            str: `mightling-<codex tag>-<patch series hash, 8 hex>/<served model id>`.
         """
         from dreamference.runner.codex_branded_builder import CODEX_RELEASE_TAG, CodexBrandedBuilder
         digest = hashlib.sha256()
@@ -132,12 +132,12 @@ class SweBenchRunner:
             with open(patch, "rb") as handle:
                 digest.update(handle.read())
         tag = CODEX_RELEASE_TAG.removeprefix("rust-v")
-        return f"puffin-{tag}-{digest.hexdigest()[:8]}/{served_model}"
+        return f"mightling-{tag}-{digest.hexdigest()[:8]}/{served_model}"
 
     @classmethod
     def build_manifest(cls, name: str, dataset: str, selected: List[str], excluded: Dict[str, str],
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
-                       runtime_hash: str, puffin_bin: str, parallel: int,
+                       runtime_hash: str, mightling_bin: str, parallel: int,
                        code_index: str = "off", prompt: Optional[str] = None,
                        mask: str = "off") -> Dict[str, Any]:
         """
@@ -174,12 +174,12 @@ class SweBenchRunner:
             "served_model": served_id,
             "served_context": context,
             "model_alias": alias,
-            "puffin_version": cls._output([puffin_bin, "--version"]),
+            "puffin_version": cls._output([mightling_bin, "--version"]),
             "codex_tag": CODEX_RELEASE_TAG,
             "runtime_hash": runtime_hash,
-            "cave_mode": config.puffin_cave_mode,
-            "prompt": prompt or config.puffin_prompt,
-            "prompt_sha256": cls.prompt_digest(prompt or config.puffin_prompt),
+            "cave_mode": config.mightling_cave_mode,
+            "prompt": prompt or config.mightling_prompt,
+            "prompt_sha256": cls.prompt_digest(prompt or config.mightling_prompt),
             "airgapped": "off (the container has no network; see the spec's §12)",
             "code_index": code_index,
             "masking": mask,
@@ -256,12 +256,12 @@ class SweBenchRunner:
             evaluate: Grade the predictions when the agent phase ends.
             until: `HH:MM` after which no new instance starts; running ones finish.
             idle_minutes: Minutes the model must have been idle first; defaults to the setting.
-            ignore_sessions: Do not wait for open `puffin` sessions (for testing beside one).
+            ignore_sessions: Do not wait for open `mling` sessions (for testing beside one).
             keep_images: With `evaluate`, False works one repository at a time and removes its
                 images once it is graded, to make room for the next repository's.
             require_smoke: Refuse to run unless a smoke has passed on this machine.
             code_index: `off`, or `universal` to index each instance's repository on the host
-                and give the agent `puffin-code` (a new run only; a resumed run keeps its arm).
+                and give the agent `mling-code` (a new run only; a resumed run keeps its arm).
             prompt: The system prompt the agent starts with (prompt spec §6.2); None takes the
                 configured one. A new run only, like `code_index`.
             mask: `on` masks old tool outputs in the agent's requests (context budget spec
@@ -288,14 +288,14 @@ class SweBenchRunner:
                 return 1
         if require_smoke and not cls.smoke_passed():
             print("❌ No smoke has passed on this machine with this harness version: "
-                  "run `puffin-admin swe-bench smoke` first.")
+                  "run `mling-admin swe-bench smoke` first.")
             return 1
         if not SweBenchHarness.rows(dataset):
-            print("❌ The dataset is not downloaded: run `puffin-admin swe-bench setup` first.")
+            print("❌ The dataset is not downloaded: run `mling-admin swe-bench setup` first.")
             return 1
-        puffin_bin = SweBenchRuntime.installed_puffin()
-        if not puffin_bin:
-            print("❌ puffin is not built: run `puffin-admin codex build` first.")
+        mightling_bin = SweBenchRuntime.installed_mightling()
+        if not mightling_bin:
+            print("❌ mling is not built: run `mling-admin codex build` first.")
             return 1
         from dreamference.config import DreamferenceConfig
         vllm_host = DreamferenceConfig().vllm_host
@@ -308,7 +308,7 @@ class SweBenchRunner:
                 return 1
             cls.admission.ignore_sessions = ignore_sessions
             idle = settings.idle_minutes if idle_minutes is None else idle_minutes
-            reason = cls.admission.admit(vllm_host, puffin_bin, idle, end or datetime.now().astimezone() + timedelta(days=365))
+            reason = cls.admission.admit(vllm_host, mightling_bin, idle, end or datetime.now().astimezone() + timedelta(days=365))
             reason = reason or SweBenchEvaluator.disk_problem(settings)
             if reason:
                 print(f"⚠️  Not run: {reason}.")
@@ -319,7 +319,7 @@ class SweBenchRunner:
                 return 1
             metrics = cls.host.metrics(vllm_host) or {}
             parallel = cls.host.parallelism(settings.max_parallel, metrics.get("kv_pool", 0.0), settings.task_context)
-            runtime_hash = SweBenchRuntime.ensure(puffin_bin, SweBenchHarness.tool("patchelf"))
+            runtime_hash = SweBenchRuntime.ensure(mightling_bin, SweBenchHarness.tool("patchelf"))
             if runtime_hash is None:
                 return 1
 
@@ -335,11 +335,11 @@ class SweBenchRunner:
                 problems = SweBenchEvaluator.validate(dataset, selected, settings)
                 excluded = {i: problem for i, problem in problems.items() if problem}
                 manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
-                                              served, runtime_hash, puffin_bin, parallel, code_index,
+                                              served, runtime_hash, mightling_bin, parallel, code_index,
                                               prompt, mask)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
-                print(f"❌ Run {store.name} was started with another puffin build or model "
+                print(f"❌ Run {store.name} was started with another mling build or model "
                       f"({manifest.get('served_model')}); a run measures one configuration. Use a new --name.")
                 return 1
 
@@ -354,11 +354,11 @@ class SweBenchRunner:
             relays = cls.open_relays(gateway, lanes[1:])
             for note in lane_notes:
                 print(f"   {note}")
-            extra_env = {"DREAMFERENCE_PUFFIN_CAVE_MODE": str(manifest.get("cave_mode") or "ultra"),
-                         "DREAMFERENCE_PUFFIN_AIRGAPPED": "off",
-                         "DREAMFERENCE_PUFFIN_PROMPT": run_prompt,
+            extra_env = {"DREAMFERENCE_MIGHTLING_CAVE_MODE": str(manifest.get("cave_mode") or "ultra"),
+                         "DREAMFERENCE_MIGHTLING_AIRGAPPED": "off",
+                         "DREAMFERENCE_MIGHTLING_PROMPT": run_prompt,
                          # A run made before masking existed has no key: it ran unmasked.
-                         "DREAMFERENCE_PUFFIN_MASK": str(manifest.get("masking") or "off")}
+                         "DREAMFERENCE_MIGHTLING_MASK": str(manifest.get("masking") or "off")}
             # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
             # the text a later session of the same instance would start from.
             custom_prompt = cls.prompt_file(run_prompt)
@@ -375,9 +375,9 @@ class SweBenchRunner:
                 code_hash = SweBenchCodeIndex.ensure_runtime(SweBenchHarness.tool("patchelf"))
                 if code_hash is None:
                     return 1
-                # Which `puffin-code` answered, beside the manifest, which is never edited: a
+                # Which `mling-code` answered, beside the manifest, which is never edited: a
                 # resumed run may use another build, so each start appends its own line.
-                with open(store.directory / "puffin-code.sha256", "a") as record:
+                with open(store.directory / "mling-code.sha256", "a") as record:
                     record.write(f"{code_hash}  {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
                 print(f"🗂️  Indexing {len(pending)} repositories on the host (universal layer)...", flush=True)
                 for instance_id in pending:
@@ -405,7 +405,7 @@ class SweBenchRunner:
                 groups = cls.by_repository(pending, rows) if cycling else {None: pending}
                 for repo, group in groups.items():
                     stopped = cls.schedule(store, group, rows, manifest, settings, runtime_hash,
-                                           model_url, vllm_host, puffin_bin, parallel, end, extra_env,
+                                           model_url, vllm_host, mightling_bin, parallel, end, extra_env,
                                            indexes, extra_mounts, lanes=lanes)
                     if evaluate:
                         graded_now = [i for i in manifest["instances"] if repo is None or rows[i]["repo"] == repo]
@@ -438,7 +438,7 @@ class SweBenchRunner:
               parallel: int) -> Any:
         """
         This machine's model server and every paired node serving the same model
-        (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3). The containers all run here; a replica only
+        (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3). The containers all run here; a replica only
         answers some of their model requests, each lane holding as many instances as its own KV
         pool allows.
 
@@ -486,7 +486,7 @@ class SweBenchRunner:
     @classmethod
     def schedule(cls, store: SweBenchRunStore, pending: List[str], rows: Dict[str, Dict[str, Any]],
                  manifest: Dict[str, Any], settings: "swe_bench_settings.SweBenchSettings",
-                 runtime_hash: str, model_url: str, vllm_host: str, puffin_bin: str, parallel: int,
+                 runtime_hash: str, model_url: str, vllm_host: str, mightling_bin: str, parallel: int,
                  end: Optional[datetime], extra_env: Dict[str, str],
                  indexes: Optional[Dict[str, Dict[str, Any]]] = None,
                  extra_mounts: Optional[List[str]] = None,
@@ -522,9 +522,9 @@ class SweBenchRunner:
                 if queue and free:
                     reason, lane = None, None
                     for candidate in free:
-                        blocked = cls.admission.start_blocker(candidate["host"], puffin_bin, active, settings) \
+                        blocked = cls.admission.start_blocker(candidate["host"], mightling_bin, active, settings) \
                             if candidate.get("node") is None else \
-                            cls.admission.start_blocker(candidate["host"], puffin_bin, active, settings, local=False)
+                            cls.admission.start_blocker(candidate["host"], mightling_bin, active, settings, local=False)
                         if blocked is None:
                             reason, lane = None, candidate
                             break

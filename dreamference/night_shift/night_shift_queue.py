@@ -1,10 +1,10 @@
 """
-The Night Shift queue on disk, as the `puffin` launcher writes it.
+The Night Shift queue on disk, as the `mling` launcher writes it.
 
-The launcher (`puffin-rs/src/night.rs`) adds, lists and drops tasks; the night run reads them and
+The launcher (`mling-rs/src/night.rs`) adds, lists and drops tasks; the night run reads them and
 records what happened. Both sides change a task only under `tasks/<id>.lock` (flock on both sides)
 and replace its JSON file whole, so a `/night drop` and a status change never overwrite each other.
-See specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §4.
+See specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §4.
 """
 
 import fcntl
@@ -31,9 +31,9 @@ class NightShiftQueue:
         Resolves the queue directory the way the launcher does.
 
         Returns:
-            Path: `$CODEX_HOME/night`, with `CODEX_HOME` defaulting to `~/.puffin`.
+            Path: `$CODEX_HOME/night`, with `CODEX_HOME` defaulting to `~/.mightling`.
         """
-        codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.puffin")
+        codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.mightling")
         return Path(codex_home) / "night"
 
     @classmethod
@@ -198,7 +198,7 @@ class NightShiftQueue:
         """
         Tells whether a night run holds `runner.lock` right now.
 
-        `puffin-admin index`, `codex build` and `server start` ask this and refuse while it is
+        `mling-admin index`, `codex build` and `server start` ask this and refuse while it is
         true (spec §6.2): each of them is heavy enough to put the model server at risk.
 
         Args:

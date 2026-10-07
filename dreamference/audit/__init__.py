@@ -1,6 +1,6 @@
 """
-Audits of what Puffin does on the network: `puffin-admin audit egress` traces one real `puffin`
-session and judges where it connected (specs/DREAMFERENCE_PUFFIN_EGRESS.md).
+Audits of what Mightling does on the network: `mling-admin audit egress` traces one real `mling`
+session and judges where it connected (specs/DREAMFERENCE_MIGHTLING_EGRESS.md).
 """
 
 from dreamference.audit.egress_audit import EgressAudit

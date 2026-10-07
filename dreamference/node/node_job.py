@@ -1,6 +1,6 @@
 """
 A job sent to this node, from its record to its result branch
-(specs/DREAMFERENCE_PUFFIN_NODE.md §13).
+(specs/DREAMFERENCE_MIGHTLING_NODE.md §13).
 
 The job model is Night Shift's, pointed at another machine: the sender pushes a commit, the job
 runs in a worktree of it here, and what `git status` shows afterwards is committed on `job/<id>`
@@ -15,7 +15,7 @@ for the sender to fetch. Three things differ from a night task on one's own mach
   are not allowed for now (decided 2026-10-02).
 
 The job is a systemd user unit, not a child of the sender's SSH connection, so closing the laptop
-does not stop it (with lingering on; `puffin-admin node add` says when it is off).
+does not stop it (with lingering on; `mling-admin node add` says when it is off).
 
 A worktree on another machine has no virtualenv, so a job that needs one says how to build it
 (`--setup`, or `[night] setup` in the repository's `dreamference.toml`); the result is kept per
@@ -84,9 +84,9 @@ class NodeJob:
     def jobs_dir(cls) -> Path:
         """
         Returns:
-            Path: `$CODEX_HOME/jobs` (`~/.puffin/jobs`): the job repositories and one folder per job.
+            Path: `$CODEX_HOME/jobs` (`~/.mightling/jobs`): the job repositories and one folder per job.
         """
-        codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.puffin")
+        codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.mightling")
         return Path(codex_home) / "jobs"
 
     @classmethod
@@ -130,7 +130,7 @@ class NodeJob:
         Returns:
             str: The systemd user unit the job runs as.
         """
-        return f"puffin-job-{job_id}"
+        return f"mightling-job-{job_id}"
 
     # -- the record ------------------------------------------------------------------------------
 
@@ -198,8 +198,8 @@ class NodeJob:
             "time_s": seconds, "test": test or None, "setup": setup or None,
             "out": out.strip("/") if out else None, "binds": binds,
             "airgapped": cls.stricter(str(request.get("airgapped") or "off"), cls.node_airgap_level()),
-            "author": {"name": str(author.get("name") or "Puffin Job")[:100],
-                       "email": str(author.get("email") or "puffin-job@localhost")[:200]},
+            "author": {"name": str(author.get("name") or "Mightling Job")[:100],
+                       "email": str(author.get("email") or "mightling-job@localhost")[:200]},
             "sender": str(request.get("sender") or "")[:100],
             "status": "queued", "submitted": cls.now(), "branch": None, "exit_code": None, "note": None,
         }
@@ -271,7 +271,7 @@ class NodeJob:
         """
         from dreamference.config import DreamferenceConfig
         try:
-            return DreamferenceConfig().puffin_airgapped
+            return DreamferenceConfig().mightling_airgapped
         except Exception:
             return "on"
 
@@ -334,7 +334,7 @@ class NodeJob:
 
         Args:
             record: The job's record.
-            admin: This node's `puffin-admin`, by absolute path.
+            admin: This node's `mling-admin`, by absolute path.
 
         Returns:
             List[str]: The `systemd-run` argv.
@@ -351,7 +351,7 @@ class NodeJob:
 
         Args:
             request: What the sender asked for.
-            admin: This node's `puffin-admin`, by absolute path.
+            admin: This node's `mling-admin`, by absolute path.
 
         Returns:
             Dict[str, Any]: The record as started.
@@ -471,10 +471,10 @@ class NodeJob:
             tree: The job's worktree, writable.
             command: The job's command.
             network: False removes the network (the `/airgapped` level `on`).
-            job_id: The job's id, given to the command as `PUFFIN_JOB`.
+            job_id: The job's id, given to the command as `MIGHTLING_JOB`.
             writable: Other folders bound read-write (the environment while setup builds it).
             readable: Folders bound read-only (a built environment, the node's allowed data).
-            environment: Variables set on top of the fixed ones (`PUFFIN_ENV`, a longer `PATH`).
+            environment: Variables set on top of the fixed ones (`MIGHTLING_ENV`, a longer `PATH`).
 
         Returns:
             List[str]: The argv. Every tmpfs comes before the binds, because bubblewrap hides
@@ -497,7 +497,7 @@ class NodeJob:
         argv.append("--clearenv")
         variables = {
             "PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": home, "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "TERM": "dumb", "PUFFIN_JOB": job_id, "GIT_TERMINAL_PROMPT": "0",
+            "TERM": "dumb", "MIGHTLING_JOB": job_id, "GIT_TERMINAL_PROMPT": "0",
             # CPU-only: a job that reached CUDA would be outside its memory cap.
             "CUDA_VISIBLE_DEVICES": "", "NVIDIA_VISIBLE_DEVICES": "none",
         }
@@ -510,7 +510,7 @@ class NodeJob:
     def execute(cls, job_id: str) -> int:
         """
         Runs a job: worktree, command, test, commit. Called inside the job's unit by
-        `puffin-admin node job-exec`.
+        `mling-admin node job-exec`.
 
         Args:
             job_id: The job's id.
@@ -620,11 +620,11 @@ class NodeJob:
             env_dir: The job's built environment, or None.
 
         Returns:
-            Dict[str, str]: `PUFFIN_ENV`, and `PATH` with the environment's `bin` first.
+            Dict[str, str]: `MIGHTLING_ENV`, and `PATH` with the environment's `bin` first.
         """
         if not env_dir:
             return {}
-        return {"PUFFIN_ENV": str(env_dir), "VIRTUAL_ENV": str(env_dir),
+        return {"MIGHTLING_ENV": str(env_dir), "VIRTUAL_ENV": str(env_dir),
                 "PATH": f"{env_dir}/bin:/usr/local/bin:/usr/bin:/bin"}
 
     @classmethod

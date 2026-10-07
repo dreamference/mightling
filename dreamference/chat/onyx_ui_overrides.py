@@ -216,7 +216,7 @@ MODEL_SELECTOR_CSS: Final[str] = (
 # The sidebar's Agents section, hidden.
 #
 # Hidden rather than removed: nothing is taken out of Onyx's bundle, and dropping this one constant
-# from `UI_OVERRIDES` brings the section back on the next `puffin-admin puffin configure`.
+# from `UI_OVERRIDES` brings the section back on the next `mling-admin chat configure`.
 #
 # The section wrapper is a bare `flex flex-col` with no handle of its own, so it is selected by
 # what it *contains* -- `:has()` on the More Agents entry, which does carry a test id. That reads
@@ -274,7 +274,7 @@ SIDEBAR_TEXT_CSS: Final[str] = (
     "{--interactive-foreground:#000}"
 )
 
-# The sidebar header -- New, Search and the Puffin wordmark -- at the section-title colour.
+# The sidebar header -- New, Search and the Mightling wordmark -- at the section-title colour.
 #
 # `--text-02` is what "Recents" is drawn in, so this is less a colour choice than pointing the
 # header at the token the section titles already use: navigation chrome recedes, the chat titles
@@ -392,7 +392,7 @@ SETTINGS_SECTIONS_CSS: Final[str] = (
 )
 
 # The Accounts & Access tab in Settings, hidden. Password and MFA management is surplus on a
-# single-user appliance where `puffin-admin puffin configure` owns the one account. The tab renders as a
+# single-user appliance where `mling-admin chat configure` owns the one account. The tab renders as a
 # div stack with no href in the DOM (the route lives only in the router data), so the anchor is
 # the nav's own test id plus the label the span carries verbatim in its `title` attribute; the
 # `.relative` wrapper is the per-tab row, so hiding it removes the hover target and the row's
@@ -404,7 +404,7 @@ ACCOUNTS_ACCESS_CSS: Final[str] = (
 )
 
 # The app shell, stripped inside the settings modal. `onyx_ui_scripts.py` opens Settings in an
-# iframe and a framed document marks its own <html> with `data-puffin-framed`; without this the
+# iframe and a framed document marks its own <html> with `data-mightling-framed`; without this the
 # modal would contain a miniature copy of the whole app, sidebar and all. Keyed on the attribute
 # rather than on being an iframe because CSS cannot ask.
 #
@@ -417,21 +417,21 @@ ACCOUNTS_ACCESS_CSS: Final[str] = (
 # and is excluded from that, and the row's other child is the pane that scrolls. If Onyx renames
 # the test id the rules stop matching and the page scrolls whole again -- visible, not silent.
 SETTINGS_MODAL_SHELL_CSS: Final[str] = (
-    "html[data-puffin-framed] .opal-sidebar-root__column"
+    "html[data-mightling-framed] .opal-sidebar-root__column"
     "{display:none}"
-    "html[data-puffin-framed],html[data-puffin-framed] body"
+    "html[data-mightling-framed],html[data-mightling-framed] body"
     "{height:100%;overflow:hidden}"
-    "html[data-puffin-framed] body "
+    "html[data-mightling-framed] body "
     '*:has([data-testid="settings-left-tab-navigation"])'
     ':not(:has(>[data-testid="settings-left-tab-navigation"]))'
     "{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:hidden}"
-    "html[data-puffin-framed] "
+    "html[data-mightling-framed] "
     'div:has(>[data-testid="settings-left-tab-navigation"])'
     "{flex:1 1 auto;min-height:0;overflow:hidden}"
     # `justify-content:flex-start` undoes the pane's own `justify-center`, which is harmless at
     # natural height but centers overflowing content once the height is constrained -- flexbox
     # puts the excess *above the scroll start*, where no amount of scrolling reaches it.
-    "html[data-puffin-framed] "
+    "html[data-mightling-framed] "
     'div:has(>[data-testid="settings-left-tab-navigation"])'
     '>:not([data-testid="settings-left-tab-navigation"])'
     "{overflow-y:auto;min-height:0;justify-content:flex-start}"
@@ -441,14 +441,14 @@ SETTINGS_MODAL_SHELL_CSS: Final[str] = (
     # `height:auto` undoes the sections' own `h-full`, which resolves to nothing while the pane
     # is natural-height but inflates every section to one full pane-height once it is
     # constrained, centering each section's content in its own empty viewport.
-    "html[data-puffin-framed] "
+    "html[data-mightling-framed] "
     'div:has(>[data-testid="settings-left-tab-navigation"])'
     '>:not([data-testid="settings-left-tab-navigation"])>*'
     "{flex-shrink:0;height:auto}"
 )
 
 # Chat Preferences sections promoted to settings tabs -- the styling half; the tabs themselves
-# and the `data-puffin-section` marker are `onyx_ui_scripts.py`'s work (`SYNTHETIC_TABS`). The
+# and the `data-mightling-section` marker are `onyx_ui_scripts.py`'s work (`SYNTHETIC_TABS`). The
 # page is recognised by the textarea its Personal Preferences section carries -- the same
 # signature `SETTINGS_SECTIONS_CSS` leans on. Sections are pinned by position from the *front*
 # of the pane -- the hidden Chats placeholder is child 1, Personal Preferences child 2, Prompt
@@ -464,29 +464,29 @@ SETTINGS_MODAL_SHELL_CSS: Final[str] = (
 # stale chunk cannot resurrect it -- while the route itself stays reachable by URL as a
 # fallback.
 SYNTHETIC_TABS_CSS: Final[str] = (
-    "html:not([data-puffin-section]) "
+    "html:not([data-mightling-section]) "
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
     ">*:nth-child(n+3)"
     "{display:none}"
-    "html[data-puffin-section] "
+    "html[data-mightling-section] "
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
     ">*"
     "{display:none}"
-    'html[data-puffin-section="chat"] '
+    'html[data-mightling-section="chat"] '
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
     ">*:nth-child(2)"
     "{display:flex}"
-    'html[data-puffin-section="shortcuts"] '
+    'html[data-mightling-section="shortcuts"] '
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
     ">*:nth-child(3)"
     "{display:flex}"
-    'html[data-puffin-section="voice"] '
+    'html[data-mightling-section="voice"] '
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
     ">*:nth-child(4)"
     "{display:flex}"
-    'html[data-puffin-section="gmail"] '
+    'html[data-mightling-section="gmail"] '
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
-    ">#puffin-connect-google-head"
+    ">#mightling-connect-google-head"
     "{display:block}"
     # Margin zeroing: the card and button carry their own margins for the connectors-page
     # fallback, which has no flex gap; in this pane the 32px gap is the rhythm every native
@@ -495,38 +495,38 @@ SYNTHETIC_TABS_CSS: Final[str] = (
     # unbeatable from here without !important), so only the button's stylesheet margin is
     # neutralised below; the card pulls itself up 20px in this pane so the heading sits 12px
     # above it, the .75rem a native section gives its title.
-    'html[data-puffin-section="gmail"] '
+    'html[data-mightling-section="gmail"] '
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
-    ">#puffin-connect-google-card"
+    ">#mightling-connect-google-card"
     "{display:block}"
-    'html[data-puffin-section="gmail"] '
+    'html[data-mightling-section="gmail"] '
     'div:has(>[data-testid="settings-left-tab-navigation"])>:not([data-testid="settings-left-tab-navigation"]):has(textarea)'
-    ">#puffin-connect-google"
+    ">#mightling-connect-google"
     "{display:inline-block;margin-top:0}"
-    "html[data-puffin-section] "
+    "html[data-mightling-section] "
     '[data-testid="settings-left-tab-navigation"] '
-    '.interactive-container[data-interactive-state="selected"]:not([id^="puffin-tab-"] *)'
+    '.interactive-container[data-interactive-state="selected"]:not([id^="mightling-tab-"] *)'
     "{background-color:transparent}"
-    "html[data-puffin-section] "
+    "html[data-mightling-section] "
     '[data-testid="settings-left-tab-navigation"] '
-    '.interactive-container[data-interactive-state="selected"]:not([id^="puffin-tab-"] *) span'
+    '.interactive-container[data-interactive-state="selected"]:not([id^="mightling-tab-"] *) span'
     "{color:#4b5563}"
-    'html[data-puffin-section] [id^="puffin-tab-"] '
+    'html[data-mightling-section] [id^="mightling-tab-"] '
     '.interactive-container[data-interactive-state="selected"]'
     "{background-color:" + TIFFANY_BLUE + "}"
-    'html[data-puffin-section] [id^="puffin-tab-"] '
+    'html[data-mightling-section] [id^="mightling-tab-"] '
     '.interactive-container[data-interactive-state="selected"] span'
     "{color:#fff}"
     '[data-testid="settings-left-tab-navigation"] '
-    '.relative:has(span[title="General"]):not(#puffin-tab-general),'
+    '.relative:has(span[title="General"]):not(#mightling-tab-general),'
     '[data-testid="settings-left-tab-navigation"] '
-    '.relative:has(span[title="Chat Preferences"]):not(#puffin-tab-chat),'
+    '.relative:has(span[title="Chat Preferences"]):not(#mightling-tab-chat),'
     '[data-testid="settings-left-tab-navigation"] '
-    '.relative:has(span[title="Gmail Accounts"]):not(#puffin-tab-gmail),'
+    '.relative:has(span[title="Gmail Accounts"]):not(#mightling-tab-gmail),'
     '[data-testid="settings-left-tab-navigation"] '
-    '.relative:has(span[title="Google"]):not(#puffin-tab-gmail),'
+    '.relative:has(span[title="Google"]):not(#mightling-tab-gmail),'
     '[data-testid="settings-left-tab-navigation"] '
-    '.relative:has(span[title="Connectors"]):not(#puffin-tab-gmail)'
+    '.relative:has(span[title="Connectors"]):not(#mightling-tab-gmail)'
     "{display:none}"
 )
 
@@ -550,7 +550,7 @@ SETTINGS_HEADER_ICON_CSS: Final[str] = (
 # a user-requested count -- switch to aspect-preserving masonry columns, because object-fit
 # crops behead portraits at tile size. Source badges sit bottom-right per tile and hide
 # themselves while empty (the metadata fetch fills them asynchronously).
-GALLERY_CSS: Final[str] = 'img[src*="/puffin-images/"]{display:none}[data-puffin-gallery] img,#puffin-lightbox img{display:block}p:has(>img[src*="/puffin-images/"]){display:none}[data-puffin-gallery]{display:grid;gap:8px;margin:12px 0;max-width:720px;grid-template-columns:repeat(2,1fr)}[data-puffin-gallery] .puffin-tile{position:relative;overflow:hidden;border-radius:12px;cursor:pointer}[data-puffin-gallery] .puffin-tile img{width:100%;height:100%;object-fit:cover;margin:0;transition:transform .2s}[data-puffin-gallery] .puffin-tile:hover img{transform:scale(1.03)}[data-puffin-gallery] .puffin-badge{position:absolute;right:8px;bottom:8px;background:rgba(17,24,39,.65);color:#fff;font-size:11px;padding:2px 8px;border-radius:8px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}[data-puffin-gallery] .puffin-badge:empty{display:none}[data-puffin-gallery][data-count="1"]{grid-template-columns:1fr;max-width:480px}[data-puffin-gallery][data-count="1"] .puffin-tile img{height:auto;object-fit:contain}[data-puffin-gallery][data-count="2"] .puffin-tile img{aspect-ratio:4/3}[data-puffin-gallery][data-count="3"],[data-puffin-gallery][data-count="4"]{grid-template-columns:2fr 1fr}[data-puffin-gallery][data-count="3"]{grid-auto-rows:150px}[data-puffin-gallery][data-count="3"] .puffin-tile:first-child{grid-row:1/span 2}[data-puffin-gallery][data-count="4"]{grid-auto-rows:110px}[data-puffin-gallery][data-count="4"] .puffin-tile:first-child{grid-row:1/span 3}[data-puffin-gallery][data-large]{display:block;columns:3 180px;column-gap:8px}[data-puffin-gallery][data-large] .puffin-tile{break-inside:avoid;margin-bottom:8px}[data-puffin-gallery][data-large] .puffin-tile img{height:auto;object-fit:unset}#puffin-img-progress{margin:10px 0 4px;max-width:420px}#puffin-img-progress .lbl{font-size:12px;color:#6b7280;margin-bottom:6px}#puffin-img-progress .track{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden}#puffin-img-progress .bar{height:100%;width:35%;border-radius:3px;background:#0ABAB5;animation:puffin-slide 1.2s ease-in-out infinite}@keyframes puffin-slide{0%{transform:translateX(-120%)}100%{transform:translateX(400%)}}'
+GALLERY_CSS: Final[str] = 'img[src*="/puffin-images/"]{display:none}[data-mightling-gallery] img,#mightling-lightbox img{display:block}p:has(>img[src*="/puffin-images/"]){display:none}[data-mightling-gallery]{display:grid;gap:8px;margin:12px 0;max-width:720px;grid-template-columns:repeat(2,1fr)}[data-mightling-gallery] .mightling-tile{position:relative;overflow:hidden;border-radius:12px;cursor:pointer}[data-mightling-gallery] .mightling-tile img{width:100%;height:100%;object-fit:cover;margin:0;transition:transform .2s}[data-mightling-gallery] .mightling-tile:hover img{transform:scale(1.03)}[data-mightling-gallery] .mightling-badge{position:absolute;right:8px;bottom:8px;background:rgba(17,24,39,.65);color:#fff;font-size:11px;padding:2px 8px;border-radius:8px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}[data-mightling-gallery] .mightling-badge:empty{display:none}[data-mightling-gallery][data-count="1"]{grid-template-columns:1fr;max-width:480px}[data-mightling-gallery][data-count="1"] .mightling-tile img{height:auto;object-fit:contain}[data-mightling-gallery][data-count="2"] .mightling-tile img{aspect-ratio:4/3}[data-mightling-gallery][data-count="3"],[data-mightling-gallery][data-count="4"]{grid-template-columns:2fr 1fr}[data-mightling-gallery][data-count="3"]{grid-auto-rows:150px}[data-mightling-gallery][data-count="3"] .mightling-tile:first-child{grid-row:1/span 2}[data-mightling-gallery][data-count="4"]{grid-auto-rows:110px}[data-mightling-gallery][data-count="4"] .mightling-tile:first-child{grid-row:1/span 3}[data-mightling-gallery][data-large]{display:block;columns:3 180px;column-gap:8px}[data-mightling-gallery][data-large] .mightling-tile{break-inside:avoid;margin-bottom:8px}[data-mightling-gallery][data-large] .mightling-tile img{height:auto;object-fit:unset}#mightling-img-progress{margin:10px 0 4px;max-width:420px}#mightling-img-progress .lbl{font-size:12px;color:#6b7280;margin-bottom:6px}#mightling-img-progress .track{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden}#mightling-img-progress .bar{height:100%;width:35%;border-radius:3px;background:#0ABAB5;animation:mightling-slide 1.2s ease-in-out infinite}@keyframes mightling-slide{0%{transform:translateX(-120%)}100%{transform:translateX(400%)}}'
 
 
 # Log Out below the separator in the account menu, not above it.
@@ -711,9 +711,9 @@ SIDEBAR_SCROLLBAR_THUMB: Final[str] = "rgba(0,0,0,.125)"
 SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     ".opal-sidebar-body__scroll"
     f"{{scrollbar-width:thin;scrollbar-color:{SIDEBAR_SCROLLBAR_THUMB} var(--background-tint-00)}}"
-    'html[data-puffin-engine="blink"] .opal-sidebar-body__scroll'
+    'html[data-mightling-engine="blink"] .opal-sidebar-body__scroll'
     "{scrollbar-color:transparent var(--background-tint-00)}"
-    'html[data-puffin-engine="blink"] .opal-sidebar-body__scroll:hover'
+    'html[data-mightling-engine="blink"] .opal-sidebar-body__scroll:hover'
     f"{{scrollbar-color:{SIDEBAR_SCROLLBAR_THUMB} var(--background-tint-00)}}"
     ".opal-sidebar-body__scroll::-webkit-scrollbar"
     "{width:8px;background-color:var(--background-tint-00);border:0;box-shadow:none}"
@@ -728,7 +728,7 @@ SIDEBAR_SCROLLBAR_CSS: Final[str] = (
     # screen. Nothing in CSS reaches that trough -- the track colour, borders and box-shadow above
     # all leave it drawn -- so the only remedy the engine honours is to not draw a scrollbar at all.
     # The list still scrolls by wheel, trackpad and keyboard; it simply has no visible bar.
-    'html[data-puffin-engine="webkit"] .opal-sidebar-body__scroll'
+    'html[data-mightling-engine="webkit"] .opal-sidebar-body__scroll'
     "{scrollbar-width:none}"
 )
 
@@ -757,11 +757,11 @@ CONNECT_BUTTON_CSS: Final[str] = (
     # Styled as the standard primary action -- the near-black pill Onyx's own dialogs use
     # (the share sheet's "Create Share Link") -- rather than the brand teal, which read as
     # louder than any control Onyx ships on this page.
-    "#puffin-connect-google"
+    "#mightling-connect-google"
     "{align-self:flex-start;margin-top:12px;padding:10px 18px;border-radius:12px;"
     "background-color:#111827;color:#fff;text-decoration:none;white-space:nowrap;"
     "font-size:.875rem;font-weight:600}"
-    "#puffin-connect-google:hover"
+    "#mightling-connect-google:hover"
     "{background-color:#1f2937}"
 )
 
@@ -786,10 +786,10 @@ STREAMING_CURSOR_CSS: Final[str] = (
 # the script flips it per update, so a page where the script never ran shows nothing rather than a
 # stray mispositioned bar. The hover shade gives the thumb drag affordance the flat colour lacks.
 CUSTOM_SCROLLBAR_CSS: Final[str] = (
-    "#puffin-scrollbar"
+    "#mightling-scrollbar"
     f"{{position:fixed;width:6px;border-radius:3px;z-index:50;display:none;"
     f"background-color:{SIDEBAR_SCROLLBAR_THUMB}}}"
-    "#puffin-scrollbar:hover,#puffin-scrollbar:active"
+    "#mightling-scrollbar:hover,#mightling-scrollbar:active"
     "{background-color:rgba(0,0,0,.3)}"
 )
 

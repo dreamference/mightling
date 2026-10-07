@@ -30,9 +30,9 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "puffin-admin=dreamference.cli:main",
-            # `puffin-search` and `puffin-fetch` are not console scripts: they are Rust binaries
-            # (puffin-web-rs/) that `puffin-admin codex build` installs beside `puffin`.
+            "mling-admin=dreamference.cli:main",
+            # `mling-search` and `mling-fetch` are not console scripts: they are Rust binaries
+            # (mling-web-rs/) that `mling-admin codex build` installs beside `mling`.
         ],
     },
 )

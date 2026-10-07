@@ -1,10 +1,10 @@
 """
-Night tasks worked by another node (specs/DREAMFERENCE_PUFFIN_NODE.md §13.3, §13.5, §13.7).
+Night tasks worked by another node (specs/DREAMFERENCE_MIGHTLING_NODE.md §13.3, §13.5, §13.7).
 
 `/night add --on <node>` records the node with the task. At night this machine's runner does not
 run it: it pushes the task's base commit to that node's job repository over the pairing and asks
 the node to queue the task in its own Night Shift queue. The node's own runner then works it with
-its own `puffin exec` against its own model server over loopback, inside a sandbox that hides the
+its own `mling exec` against its own model server over loopback, inside a sandbox that hides the
 node owner's home folder and gives the task a `CODEX_HOME` of its own. When the node has finished
 it, the branch `night/<id>` is fetched back here and the morning report lists the task with the
 node it ran on.
@@ -83,7 +83,7 @@ class NightShiftRemote:
                 NightShiftQueue.transition(night_dir, task["id"], "failed",
                                            note=f"{task['on']} is not a paired node",
                                            result={"last_message": f"{task['on']} is not a paired node: pair once "
-                                                                   f"with `puffin-admin node add {task['on']}`, then "
+                                                                   f"with `mling-admin node add {task['on']}`, then "
                                                                    f"queue the task again."})
                 continue
             repo = task["repo"]
@@ -333,8 +333,8 @@ class NightShiftRemote:
             "history": [{"at": now, "status": "queued", "note": f"from {str(request.get('sender_name') or '?')[:80]}"}],
             "attempts": 0, "nudges": 0, "session": None, "result": None,
             "airgapped": NodeJob.stricter(str(request.get("airgapped") or "off"), NodeJob.node_airgap_level()),
-            "author": {"name": str(author.get("name") or "Puffin Night Shift")[:100],
-                       "email": str(author.get("email") or "puffin-night@localhost")[:200]},
+            "author": {"name": str(author.get("name") or "Mightling Night Shift")[:100],
+                       "email": str(author.get("email") or "mightling-night@localhost")[:200]},
             "remote": {"sender": str(request.get("sender") or "")[:100],
                        "sender_name": str(request.get("sender_name") or "")[:100]},
         }
@@ -361,7 +361,7 @@ class NightShiftRemote:
         from dreamference.night_shift.night_shift_scheduler import NightShiftScheduler, UNIT
         from dreamference.night_shift.night_shift_settings import NightShiftSettings
         if not (NightShiftScheduler.unit_dir() / f"{UNIT}.timer").exists():
-            return ("Night Shift is not enabled on this node (`puffin-admin night enable` there), so the task "
+            return ("Night Shift is not enabled on this node (`mling-admin night enable` there), so the task "
                     "waits until a night run is started there")
         if NightShiftQueue.runner_active():
             return f"{NightShiftQueue.runner_holder() or 'a run'} is in progress there; the task waits for the next night"
@@ -406,8 +406,8 @@ class NightShiftRemote:
             task_id: A task from another machine.
 
         Returns:
-            Path: Its own `CODEX_HOME` on this node, `~/.puffin/jobs/<id>/home`: the only part of
-            the home folder its `puffin exec` sees, kept across the nudges and nights of the task.
+            Path: Its own `CODEX_HOME` on this node, `~/.mightling/jobs/<id>/home`: the only part of
+            the home folder its `mling exec` sees, kept across the nudges and nights of the task.
         """
         from dreamference.node.node_job import NodeJob
         return NodeJob.job_dir(task_id) / "home"

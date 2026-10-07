@@ -1,5 +1,5 @@
 """
-Puffin Image Search Service.
+Mightling Image Search Service.
 
 Implements ``specs/DREAMFERENCE_IMAGE_SEARCH.md``: a standalone sidecar (the
 ``dreamference-image-search`` container) that lets the assistant search the web for images and
@@ -73,14 +73,14 @@ GC_MAX_VOLUME_BYTES: Final[int] = 2 * 1024 * 1024 * 1024
 # The one SSRF exemption the funnel needs: SearXNG returns `thumbnail_src` as its own relative
 # `/image_proxy?url=...` route, which resolves to a private container address. Thumbnails may
 # therefore fetch from the SearXNG host alone; full-size downloads get no exemptions at all.
-AUTH_HEADER: Final[str] = "X-Puffin-Image-Token"
+AUTH_HEADER: Final[str] = "X-Mightling-Image-Token"
 
-SEARXNG_URL_ENV: Final[str] = "PUFFIN_SEARXNG_URL"
-SIGLIP_URL_ENV: Final[str] = "PUFFIN_SIGLIP_URL"
-VISION_URL_ENV: Final[str] = "PUFFIN_VISION_URL"
-VISION_MODEL_ENV: Final[str] = "PUFFIN_VISION_MODEL"
-DATA_DIR_ENV: Final[str] = "PUFFIN_DATA_DIR"
-SECRET_ENV: Final[str] = "PUFFIN_IMAGE_SECRET"
+SEARXNG_URL_ENV: Final[str] = "MIGHTLING_SEARXNG_URL"
+SIGLIP_URL_ENV: Final[str] = "MIGHTLING_SIGLIP_URL"
+VISION_URL_ENV: Final[str] = "MIGHTLING_VISION_URL"
+VISION_MODEL_ENV: Final[str] = "MIGHTLING_VISION_MODEL"
+DATA_DIR_ENV: Final[str] = "MIGHTLING_DATA_DIR"
+SECRET_ENV: Final[str] = "MIGHTLING_IMAGE_SECRET"
 
 # Magic bytes accepted from the network. Sniffing the payload rather than trusting Content-Type
 # is what keeps an attacker-controlled URL from handing the pipeline an HTML page or worse.

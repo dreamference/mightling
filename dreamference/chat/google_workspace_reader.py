@@ -1,9 +1,9 @@
-"""Read-only Google Drive and Google Calendar for Puffin's apps.
+"""Read-only Google Drive and Google Calendar for Mightling's apps.
 
-Specified in specs/DREAMFERENCE_PUFFIN_APPS.md §9 and §9a.
+Specified in specs/DREAMFERENCE_MIGHTLING_APPS.md §9 and §9a.
 
 The Google service (`gmail_search_service.py`, container `dreamference-gmail`) calls this with
-the accounts it holds tokens for; `puffin apps serve drive|calendar` reaches it through the
+the accounts it holds tokens for; `mling apps serve drive|calendar` reaches it through the
 service's `/drive/…` and `/calendar/…` endpoints. It is staged into the container beside the
 service, so it imports nothing but the standard library.
 
@@ -224,7 +224,7 @@ class GoogleWorkspaceReader:
         else:
             return {
                 "error": f"{meta.get('name', 'The file')} is {mime or 'a binary file'} "
-                f"({meta.get('size', '?')} bytes), which Puffin does not read as text."
+                f"({meta.get('size', '?')} bytes), which Mightling does not read as text."
             }
         status, body = cls._get(url, token, raw=True)
         if status != HTTP_OK:

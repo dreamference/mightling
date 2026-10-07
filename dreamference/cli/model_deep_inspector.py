@@ -1,7 +1,7 @@
 """
-Deep model inspection for Puffin.
+Deep model inspection for Mightling.
 
-`puffin-admin main-model inspect` answers "is the server up and behaving"; this answers "what is actually
+`mling-admin main-model inspect` answers "is the server up and behaving"; this answers "what is actually
 running, and are its parameters the right ones". The two are separated because everything here
 costs real time — the workload profile sends live requests, and the rest reads the checkpoint and
 the container's startup log.

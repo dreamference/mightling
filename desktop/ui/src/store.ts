@@ -1,5 +1,5 @@
 // What the Work window shows, as a pure function of what the server said
-// (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §6.1–§6.3). No I/O here: App.tsx feeds the reducer the
+// (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §6.1–§6.3). No I/O here: App.tsx feeds the reducer the
 // bridge's events and the answers to its requests, and the tests feed it a scripted session.
 
 import type { RequestId } from "./protocol/RequestId";

@@ -1,6 +1,6 @@
 # Models
 
-Every model Puffin can serve is listed in its model registry, together with the exact server
+Every model Mightling can serve is listed in its model registry, together with the exact server
 settings it runs with on a GB10. Choosing a model chooses all of its settings, so there is nothing
 to tune by hand.
 
@@ -14,7 +14,7 @@ to tune by hand.
 List them, with their Hugging Face repositories, on your machine:
 
 ```bash
-puffin-admin model list
+mling-admin model list
 ```
 
 ## The default model
@@ -35,7 +35,7 @@ Measured on a GB10, single-stream:
 
 It reads images, holds a 262K-token context (a fact planted in the middle of a 116K-token prompt was
 found), and while serving leaves about 38 GB of memory free, so several agents can work at once:
-four `puffin` tasks in parallel finished in 23 seconds.
+four `mling` tasks in parallel finished in 23 seconds.
 
 Server settings it runs with (from the registry):
 
@@ -48,18 +48,18 @@ Server settings it runs with (from the registry):
 | Memory fraction | 0.50 |
 | Speculative decoding | DFlash2, `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`, 16 tokens |
 | Tool calls / reasoning parsers | `qwen3_coder` / `qwen3` |
-| Thinking | `puffin` asks for none; chat thinks at medium effort unless told otherwise |
+| Thinking | `mling` asks for none; chat thinks at medium effort unless told otherwise |
 
 ## Changing models
 
 ```bash
-puffin-admin main-model set <alias>                     # pick the main model
-puffin-admin model download --model <alias>             # fetch weights ahead of time
-puffin-admin server stop && puffin-admin server start   # restart with the new choice
+mling-admin main-model set <alias>                     # pick the main model
+mling-admin model download --model <alias>             # fetch weights ahead of time
+mling-admin server stop && mling-admin server start   # restart with the new choice
 ```
 
 `main-model set` also points a running web chat at the new model (`--no-onyx` skips that). The
 terminal agent needs no change: it asks the server which model it serves each time it starts.
 
-`puffin-admin main-model inspect` runs sample prompts against the running model and reports how it
+`mling-admin main-model inspect` runs sample prompts against the running model and reports how it
 was launched.

@@ -22,7 +22,7 @@ index 301de2e..bf335d8 100644
              SlashCommand::Copy => !cfg!(target_os = "android"),
              SlashCommand::App => cfg!(any(target_os = "macos", target_os = "windows")),
              SlashCommand::Voice => true,
-+            // Puffin: no OpenAI account to sign out of.
++            // Mightling: no OpenAI account to sign out of.
 +            SlashCommand::Logout => false,
              SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),
              _ => true,

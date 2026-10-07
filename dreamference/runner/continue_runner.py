@@ -53,7 +53,7 @@ class ContinueRunner:
         config_data: Dict[str, Any] = {
             "models": [
                 {
-                    "title": f"Puffin local ({self.config.model})",
+                    "title": f"Mightling local ({self.config.model})",
                     "provider": "openai",
                     "model": hf_model,
                     "apiBase": f"{self.config.vllm_host.rstrip('/')}/v1/",
@@ -61,7 +61,7 @@ class ContinueRunner:
                 }
             ],
             "tabAutocompleteModel": {
-                "title": "Puffin Tab Autocomplete",
+                "title": "Mightling Tab Autocomplete",
                 "provider": "openai",
                 "model": tab_model,
                 "apiBase": f"{self.config.vllm_host.rstrip('/')}/v1/",

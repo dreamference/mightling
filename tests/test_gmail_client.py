@@ -1,4 +1,4 @@
-"""`puffin-admin gmail`: the puffin agent's read-only client for the Gmail service the web UI runs."""
+"""`mling-admin gmail`: the Mightling agent's read-only client for the Gmail service the web UI runs."""
 
 import io
 import json
@@ -35,7 +35,7 @@ def test_search_sends_the_secret_encodes_the_query_and_clamps_the_limit(tmp_path
             patch("urllib.request.urlopen", _serve({"messages": []}, seen)):
         GmailClient.search("from:alice invoice", limit=500)
     (request,) = seen
-    assert request.get_header("X-puffin-gmail-token") == "s3cret"
+    assert request.get_header("X-mightling-gmail-token") == "s3cret"
     assert "query=from%3Aalice+invoice" in request.full_url
     assert "limit=20" in request.full_url
 
@@ -110,7 +110,7 @@ def test_read_frames_the_body_as_untrusted(capsys):
 
 def test_service_errors_exit_non_zero_with_the_hint(capsys):
     code, out = _gmail(["search", "x"], dict(NOT_RUNNING_ERROR), capsys)
-    assert code == 1 and "❌ Gmail service is not running." in out and "puffin-admin puffin start" in out
+    assert code == 1 and "❌ Gmail service is not running." in out and "mling-admin chat start" in out
 
 
 def test_the_service_reports_a_failing_account_next_to_the_others_results():
@@ -134,10 +134,10 @@ def test_the_service_reports_a_failing_account_next_to_the_others_results():
 def test_the_prompt_opt_out_follows_the_four_tier_config(tmp_path, monkeypatch, env, expected):
     from dreamference.config import DreamferenceConfig
 
-    monkeypatch.setenv("DREAMFERENCE_PUFFIN_GMAIL", env)
-    assert DreamferenceConfig(config_file=str(tmp_path / "d.toml")).puffin_gmail is expected
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_GMAIL")
-    assert DreamferenceConfig(config_file=str(tmp_path / "d.toml")).puffin_gmail is True
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_GMAIL", env)
+    assert DreamferenceConfig(config_file=str(tmp_path / "d.toml")).mightling_gmail is expected
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_GMAIL")
+    assert DreamferenceConfig(config_file=str(tmp_path / "d.toml")).mightling_gmail is True
 
 
 def test_a_grant_without_gmail_access_is_recognised():

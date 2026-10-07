@@ -316,7 +316,7 @@ def build_handler(runner: "DiffusionModelRunner") -> type:
     """
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "PuffinDiffusion/1.0"
+        server_version = "MightlingDiffusion/1.0"
 
         def log_message(self, fmt: str, *args: Any) -> None:  # noqa: N802
             print(f"[diffusion] {self.address_string()} {fmt % args}", flush=True)

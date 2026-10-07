@@ -1,4 +1,4 @@
-# Puffin — Google Auth via GOA Client
+# Mightling — Google Auth via GOA Client
 
 **Status:** partly implemented (Gmail only) · **Owner:** Owner · **Scope:** Gmail + Drive connectors, single-user and multi-account
 
@@ -21,7 +21,7 @@ The Gmail half of this design is implemented inside the **Gmail service containe
 
 ## 1. Summary
 
-Puffin authenticates Google users with the OAuth client shipped in GNOME Online Accounts (GOA). The client is verified by Google for `mail.google.com` and `drive`, so users see a normal consent screen — no "unverified app" interstitial, no 100-user cap, no 7-day token expiry — and Dreamference never submits its own app for CASA review. Puffin's backend performs the OAuth flow directly; GNOME is not installed or run anywhere.
+Mightling authenticates Google users with the OAuth client shipped in GNOME Online Accounts (GOA). The client is verified by Google for `mail.google.com` and `drive`, so users see a normal consent screen — no "unverified app" interstitial, no 100-user cap, no 7-day token expiry — and Dreamference never submits its own app for CASA review. Mightling's backend performs the OAuth flow directly; GNOME is not installed or run anywhere.
 
 ## 2. Auth ladder
 
@@ -52,19 +52,19 @@ https://www.googleapis.com/auth/drive
 
 Optional, same grant: `https://www.googleapis.com/auth/calendar`, `carddav`, `tasks`. Request only what a connector uses.
 
-**Measured 2026-10-03: only the exact verified scopes work.** A consent for `drive.readonly` + `calendar.readonly` was refused ("This app is blocked — This app tried to access sensitive info"); one for `userinfo.email` + `…/auth/drive` + `…/auth/calendar`, the scopes GNOME (goa 3.50.4) itself requests, succeeded with the normal screen and a refresh token. Google does **not** narrow this client to a read-only subset, so Drive and Calendar tokens carry write permission; Puffin's services are read-only by construction (no write endpoints, as Gmail's IMAP service is) and the token is sealed like Gmail's (PUFFIN_APPS §10).
+**Measured 2026-10-03: only the exact verified scopes work.** A consent for `drive.readonly` + `calendar.readonly` was refused ("This app is blocked — This app tried to access sensitive info"); one for `userinfo.email` + `…/auth/drive` + `…/auth/calendar`, the scopes GNOME (goa 3.50.4) itself requests, succeeded with the normal screen and a refresh token. Google does **not** narrow this client to a read-only subset, so Drive and Calendar tokens carry write permission; Mightling's services are read-only by construction (no write endpoints, as Gmail's IMAP service is) and the token is sealed like Gmail's (MIGHTLING_APPS §10).
 
 ## 5. Flow
 
 1. **Start.** `POST /api/google/oauth/start` → backend creates `state`, PKCE `code_verifier`, picks a free loopback port `P`, returns the auth URL:
    `https://accounts.google.com/o/oauth2/v2/auth?client_id=…&redirect_uri=http://localhost:P&response_type=code&scope=…&access_type=offline&prompt=select_account%20consent&code_challenge=…&code_challenge_method=S256&state=…`
-2. **Consent.** Browser shows the Google picker and a consent screen titled "GNOME". Puffin's UI states beforehand: *"The consent screen will say GNOME — Puffin authenticates through the GNOME desktop's Google integration."*
+2. **Consent.** Browser shows the Google picker and a consent screen titled "GNOME". Mightling's UI states beforehand: *"The consent screen will say GNOME — Mightling authenticates through the GNOME desktop's Google integration."*
 3. **Redirect.** Google sends the browser to `http://localhost:P/?code=…&state=…`.
    - **Same host:** backend listener on `P` captures the code; tab shows "Connected".
-   - **Different host (common):** browser shows "localhost refused to connect". Puffin panel instructs: *"Copy the full URL from the address bar and paste it here."* `POST /api/google/oauth/complete {url}` extracts `code`, validates `state`.
+   - **Different host (common):** browser shows "localhost refused to connect". Mightling panel instructs: *"Copy the full URL from the address bar and paste it here."* `POST /api/google/oauth/complete {url}` extracts `code`, validates `state`.
 4. **Exchange.** Backend POSTs `code`, `code_verifier`, client id/secret, `redirect_uri` to `https://oauth2.googleapis.com/token`. Stores `refresh_token`, `access_token`, `expires_at`.
 5. **Identify.** `GET https://www.googleapis.com/oauth2/v3/userinfo` → `email`. Never trust a user-typed address.
-6. **Persist.** One credential row per `(puffin_user_id, google_email)`; upsert on repeat.
+6. **Persist.** One credential row per `(mightling_user_id, google_email)`; upsert on repeat.
 
 Listener on `P` is bound to `127.0.0.1`, accepts one request, times out after 10 min.
 
@@ -88,9 +88,9 @@ Listener on `P` is bound to `127.0.0.1`, accepts one request, times out after 10
 
 ## 8. Multi-account
 
-- N Google accounts per Puffin user; each a separate credential + connector + sync cursor.
+- N Google accounts per Mightling user; each a separate credential + connector + sync cursor.
 - Documents tagged `source_account=<google_email>` for provenance, filtering and per-account disconnect.
-- Same Google account under two Puffin users → two independent credentials; no cross-user dedupe.
+- Same Google account under two Mightling users → two independent credentials; no cross-user dedupe.
 - `login_hint=<email>` on reconnect.
 
 ## 9. Workspace admin constraints
@@ -103,7 +103,7 @@ Tenant "Third-party app access = restricted/blocked" requires the admin to allow
 |---|---|---|---|
 | GNOME rotates or Google revokes the client | Low, non-zero (KDE precedent) | All GOA installs lose Google access at once | `invalid_client` detection → alert + automatic fallback UI; BYO client and IMAP app-password paths stay shipped |
 | Gmail REST API not enabled in GNOME's project | Unknown until tested | Gmail on IMAP only (no `history.list`, no snippets) | One-line probe at install; IMAP adapter behind the same interface |
-| Policy: reusing another app's credentials violates Google OAuth policy | Certain | Revocation trigger if Puffin traffic becomes noticeable in GNOME's project | Credentials not committed; per-install override; disclose on connect screen; keep volume per user modest (scoped queries, no full-archive crawls by default) |
+| Policy: reusing another app's credentials violates Google OAuth policy | Certain | Revocation trigger if Mightling traffic becomes noticeable in GNOME's project | Credentials not committed; per-install override; disclose on connect screen; keep volume per user modest (scoped queries, no full-archive crawls by default) |
 | Consent screen says "GNOME" | Certain | User confusion / phishing suspicion | One-line explanation before the redirect |
 
 ## 11. Non-goals

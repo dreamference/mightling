@@ -118,7 +118,7 @@ GMAIL_TOOL_NAME: Final[str] = "Gmail"
 GMAIL_TOOL_DESCRIPTION: Final[str] = "Search and read the user's Gmail mailbox."
 
 # Kept in step with the service module, which enforces it.
-GMAIL_AUTH_HEADER: Final[str] = "X-Puffin-Gmail-Token"
+GMAIL_AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
 SEARXNG_CONTAINER_URL: Final[str] = f"http://{SEARXNG_CONTAINER_NAME}:8080"
 
 # Onyx ships first-class SearXNG support as a web *search provider*, which is why this module
@@ -137,21 +137,24 @@ ONYX_SEARCH_PROVIDER_NAME: Final[str] = "dreamference-searxng"
 # not switch that on. What the community edition does allow is a company name, a custom assistant,
 # and retiring the stock one, which is what this applies. The window title, favicon and the logo in
 # the top-left stay Onyx's.
-PUFFIN_COMPANY_NAME: Final[str] = "Puffin"
-PUFFIN_COMPANY_DESCRIPTION: Final[str] = (
+MIGHTLING_COMPANY_NAME: Final[str] = "Mightling"
+MIGHTLING_COMPANY_DESCRIPTION: Final[str] = (
     "Local, air-gapped pair programming on NVIDIA GB10."
 )
-PUFFIN_ASSISTANT_NAME: Final[str] = "Puffin"
+MIGHTLING_ASSISTANT_NAME: Final[str] = "Mightling"
+# The same assistant's name before the product became Mightling. `configure` renames that persona
+# (the PATCH below carries the new name) rather than creating a second assistant beside it.
+LEGACY_ASSISTANT_NAME: Final[str] = "Puffin"
 # Empty on purpose. Onyx prints the assistant's description under the composer on the new-chat
 # screen, where a sentence of deployment trivia is noise rather than orientation -- the greeting
 # above it already says what this is.
-PUFFIN_ASSISTANT_DESCRIPTION: Final[str] = ""
+MIGHTLING_ASSISTANT_DESCRIPTION: Final[str] = ""
 
 # What the assistant is told about itself.
 #
 # Without this the model answers "what is your name?" from its own pretraining -- "I'm an AI
-# assistant" -- because nothing in the request mentions Puffin. Onyx's persona name is a label in
-# the UI; it is not sent to the model. This is, and it goes on the Puffin persona rather than
+# assistant" -- because nothing in the request mentions Mightling. Onyx's persona name is a label in
+# the UI; it is not sent to the model. This is, and it goes on the Mightling persona rather than
 # through Onyx's one global prompt hook (`user_preferences`, capped at 500 characters) so that
 # assistants the user creates themselves keep their own identity.
 #
@@ -163,10 +166,10 @@ PUFFIN_ASSISTANT_DESCRIPTION: Final[str] = ""
 # `replace_base_system_prompt` stays false, so this is appended to Onyx's base prompt rather than
 # replacing it -- the base prompt is what tells the model how to use the search and Python tools,
 # and dropping it to introduce a name would be a poor trade.
-PUFFIN_ASSISTANT_INSTRUCTIONS: Final[str] = (
-    "You are Puffin, an AI assistant served by a model running on this machine's own NVIDIA GB10 "
+MIGHTLING_ASSISTANT_INSTRUCTIONS: Final[str] = (
+    "You are Mightling, an AI assistant served by a model running on this machine's own NVIDIA GB10 "
     "hardware. When you are asked your name, who you are, or what you are, say that you are "
-    "Puffin. Do not describe yourself as a generic assistant and do not answer with the name of "
+    "Mightling. Do not describe yourself as a generic assistant and do not answer with the name of "
     "the model you are served from. You can reach the live web through your search tool: use it "
     "for anything current, and never tell the user you have no internet access. When the user "
     "asks to see a picture, photo, or image of something, call the image_search tool and place "
@@ -174,10 +177,10 @@ PUFFIN_ASSISTANT_INSTRUCTIONS: Final[str] = (
     "this way, so never answer that you are unable to embed or show them."
 )
 
-# Onyx's agentic coding tool, left off the Puffin assistant deliberately: Dreamference's own
+# Onyx's agentic coding tool, left off the Mightling assistant deliberately: Dreamference's own
 # terminal agents cover that ground with the same model, and enabling both invites the two to
 # edit the same tree from different directions.
-PUFFIN_EXCLUDED_TOOLS: Final[frozenset] = frozenset({"coding_agent"})
+MIGHTLING_EXCLUDED_TOOLS: Final[frozenset] = frozenset({"coding_agent"})
 
 # Speech-to-text. Onyx has a complete voice subsystem and shows no microphone button until an STT
 # provider is registered, so the button is a configuration question, not a missing feature.
@@ -225,7 +228,7 @@ SIGLIP_PORT: Final[int] = 9100
 SIGLIP_CONTAINER_URL: Final[str] = f"http://{SIGLIP_CONTAINER_NAME}:{SIGLIP_PORT}"
 
 # The nginx route, injected into the host-side template the deployment's own entrypoint runs
-# envsubst over ($puffin_img and $1 are not in its whitelist, so both survive templating). The
+# envsubst over ($mightling_img and $1 are not in its whitelist, so both survive templating). The
 # deferred-resolution form is load-bearing: a literal proxy_pass hostname is resolved at config
 # load, and if the sidecar is absent nginx refuses to start AT ALL -- the whole UI dies, not
 # just images. With a resolver directive and a variable target, a missing sidecar is a 502 on
@@ -240,9 +243,9 @@ NGINX_IMAGE_ROUTE: Final[str] = (
     f"    {NGINX_IMAGE_ROUTE_BEGIN}\n"
     "    location /puffin-images/ {\n"
     "        resolver 127.0.0.11 valid=10s;\n"
-    f"        set $puffin_img {IMAGE_SEARCH_CONTAINER_URL};\n"
+    f"        set $mightling_img {IMAGE_SEARCH_CONTAINER_URL};\n"
     "        rewrite ^/puffin-images/(.*)$ /images/$1 break;\n"
-    "        proxy_pass $puffin_img;\n"
+    "        proxy_pass $mightling_img;\n"
     "    }\n"
     f"    {NGINX_IMAGE_ROUTE_END}"
 )
@@ -373,17 +376,17 @@ class OnyxRunner:
 
         if not self.vllm_manager.check_health():
             print("⚠️  Local vLLM is not answering yet — Onyx will start, but its model provider")
-            print("   will not respond until `puffin-admin server start` has the model serving.")
+            print("   will not respond until `mling-admin server start` has the model serving.")
 
         print("🚀 Deploying Onyx Lite (API server + web server + PostgreSQL)...")
         returncode = subprocess.call(command)
         if returncode != 0:
-            print("❌ Onyx Lite deployment failed. See the output above, or run: puffin-admin puffin logs")
+            print("❌ Onyx Lite deployment failed. See the output above, or run: mling-admin chat logs")
             return returncode
 
         print(f"✅ Onyx Lite is up — open {DEFAULT_ONYX_WEB_URL}")
         print("💡 The first account to sign up becomes the admin.")
-        print("💡 Then run `puffin-admin puffin configure` to point Onyx at the local vLLM model.")
+        print("💡 Then run `mling-admin chat configure` to point Onyx at the local vLLM model.")
         return 0
 
     def stop(self) -> int:
@@ -474,7 +477,7 @@ class OnyxRunner:
             password (str): Admin account password.
             web_url (str): Base URL of the Onyx deployment.
             enable_web (bool): Whether to also give the default assistant SearXNG web access.
-            brand (bool): Whether to rebrand the deployment as Puffin.
+            brand (bool): Whether to rebrand the deployment as Mightling.
             enable_voice (bool): Whether to run a local Whisper server and enable the microphone.
             enable_gmail (bool): Whether to run the Gmail service and register its search tool.
             enable_image_search (bool): Whether to run the image search sidecar and its tool.
@@ -589,7 +592,7 @@ class OnyxRunner:
         if enable_web:
             self.enable_web_search(api, cookie)
 
-        # Registered here rather than only from `puffin-admin puffin gmail`, because the Connect button that
+        # Registered here rather than only from `mling-admin chat gmail`, because the Connect button that
         # obtains the Google credentials lives in the UI this tool belongs to. Waiting for consent
         # would mean a fresh install has no Gmail tool until someone had already finished a flow
         # they can only start from a page the tool is listed on.
@@ -758,10 +761,10 @@ class OnyxRunner:
 
     def apply_branding(self, api: str, cookie: str) -> bool:
         """
-        Rebrands the Onyx deployment as Puffin as far as the community edition permits.
+        Rebrands the Onyx deployment as Mightling as far as the community edition permits.
 
-        Three changes, all of them free-tier: the company name, a `Puffin` assistant carrying the
-        tools this deployment actually has, and retiring Onyx's stock assistant so the Puffin one
+        Three changes, all of them free-tier: the company name, a `Mightling` assistant carrying the
+        tools this deployment actually has, and retiring Onyx's stock assistant so the Mightling one
         is what a user lands on.
 
         What is deliberately *not* done: Onyx's whitelabelling -- the application name in the
@@ -776,7 +779,7 @@ class OnyxRunner:
         Returns:
             bool: True if the branding was applied.
         """
-        persona_id = self._upsert_puffin_assistant(api, cookie)
+        persona_id = self._upsert_mightling_assistant(api, cookie)
 
         settings = self._get_json(f"{api}/settings", cookie)
         if settings is None:
@@ -784,13 +787,13 @@ class OnyxRunner:
             return False
 
         payload = dict(settings)
-        payload["company_name"] = PUFFIN_COMPANY_NAME
-        payload["company_description"] = PUFFIN_COMPANY_DESCRIPTION
-        # Only retire the stock assistant once there is a Puffin one to land on instead.
+        payload["company_name"] = MIGHTLING_COMPANY_NAME
+        payload["company_description"] = MIGHTLING_COMPANY_DESCRIPTION
+        # Only retire the stock assistant once there is a Mightling one to land on instead.
         payload["disable_default_assistant"] = persona_id is not None
         _, error = self._request(f"{api}/admin/settings", payload, cookie, method="PUT")
         if error:
-            print(f"⚠️  Could not apply Puffin branding: {error}")
+            print(f"⚠️  Could not apply Mightling branding: {error}")
             return False
 
         # The logos are static files the web server hands out, not an Enterprise setting, so they
@@ -808,9 +811,9 @@ class OnyxRunner:
         OnyxUILabels.install()
         OnyxUIScripts.install()
 
-        print(f"✨ Rebranded as {PUFFIN_COMPANY_NAME}"
-              + (" with a Puffin assistant" if persona_id is not None else "")
-              + (" and Puffin logos." if logos else ".")
+        print(f"✨ Rebranded as {MIGHTLING_COMPANY_NAME}"
+              + (" with a Mightling assistant" if persona_id is not None else "")
+              + (" and Mightling logos." if logos else ".")
               + (" Telegram typography applied." if fonts else ""))
         if not logos:
             print("💡 Logos unchanged — Onyx's own are still in place.")
@@ -818,9 +821,9 @@ class OnyxRunner:
             print("💡 Fonts unchanged — Onyx's own typefaces are still in place.")
         return True
 
-    def _upsert_puffin_assistant(self, api: str, cookie: str) -> Optional[int]:
+    def _upsert_mightling_assistant(self, api: str, cookie: str) -> Optional[int]:
         """
-        Creates or updates the Puffin assistant and puts it in front of the user.
+        Creates or updates the Mightling assistant and puts it in front of the user.
 
         Onyx's own assistant cannot be renamed -- it is a builtin persona and the API refuses to
         modify one -- so branding it means creating a second, non-builtin assistant and retiring
@@ -836,14 +839,14 @@ class OnyxRunner:
             Optional[int]: The assistant's persona id, or None if it could not be created.
         """
         tools = self._get_json(f"{api}/tool", cookie) or []
-        tool_ids = [t["id"] for t in tools if t.get("name") not in PUFFIN_EXCLUDED_TOOLS]
+        tool_ids = [t["id"] for t in tools if t.get("name") not in MIGHTLING_EXCLUDED_TOOLS]
 
         payload = {
-            "name": PUFFIN_ASSISTANT_NAME,
-            "description": PUFFIN_ASSISTANT_DESCRIPTION,
+            "name": MIGHTLING_ASSISTANT_NAME,
+            "description": MIGHTLING_ASSISTANT_DESCRIPTION,
             "document_set_ids": [],
             "tool_ids": tool_ids,
-            "system_prompt": PUFFIN_ASSISTANT_INSTRUCTIONS,
+            "system_prompt": MIGHTLING_ASSISTANT_INSTRUCTIONS,
             "task_prompt": "",
             "datetime_aware": True,
             "is_public": True,
@@ -851,22 +854,23 @@ class OnyxRunner:
         }
 
         existing = None
-        for persona in self._get_json(f"{api}/persona", cookie) or []:
-            if persona.get("name") == PUFFIN_ASSISTANT_NAME and not persona.get("builtin_persona"):
-                existing = persona["id"]
+        personas = [p for p in self._get_json(f"{api}/persona", cookie) or [] if not p.get("builtin_persona")]
+        for name in (MIGHTLING_ASSISTANT_NAME, LEGACY_ASSISTANT_NAME):
+            existing = next((p["id"] for p in personas if p.get("name") == name), None)
+            if existing is not None:
                 break
 
         if existing is None:
             created, error = self._request(f"{api}/persona", payload, cookie)
             if error:
-                print(f"⚠️  Could not create the Puffin assistant: {error}")
+                print(f"⚠️  Could not create the Mightling assistant: {error}")
                 return None
             persona_id = (created or {}).get("id")
         else:
             persona_id = existing
             _, error = self._request(f"{api}/persona/{persona_id}", payload, cookie, method="PATCH")
             if error:
-                print(f"⚠️  Could not update the Puffin assistant: {error}")
+                print(f"⚠️  Could not update the Mightling assistant: {error}")
                 return None
 
         if persona_id is not None:
@@ -946,7 +950,7 @@ class OnyxRunner:
     def bind_to_loopback(self) -> bool:
         """
         Publishes the web UI on 127.0.0.1 only, instead of on every network interface, unless
-        this node is advertised and shares it (`puffin-admin node enable`), in which case port
+        this node is advertised and shares it (`mling-admin node enable`), in which case port
         3000 is published to the local network and port 80 stays on loopback.
 
         Does nothing when already in place, since applying it recreates the nginx container and
@@ -968,7 +972,7 @@ class OnyxRunner:
             print("🔒 Restricting the web UI to this machine (127.0.0.1)...")
         else:
             print("📡 Publishing the web UI to the local network (port 3000): this node is advertised "
-                  "(`puffin-admin node enable`).")
+                  "(`mling-admin node enable`).")
         return self._recreate_service("nginx", wait_healthy=False)
 
     @classmethod
@@ -977,7 +981,7 @@ class OnyxRunner:
         The web UI's two published ports, as Onyx's `.env` takes them.
 
         Port 3000 is published on every interface only on a node that is advertised and shares
-        its web UI (specs/DREAMFERENCE_PUFFIN_NODE.md §4); port 80 never leaves loopback.
+        its web UI (specs/DREAMFERENCE_MIGHTLING_NODE.md §4); port 80 never leaves loopback.
 
         Returns:
             dict: `HOST_PORT_80` and `HOST_PORT`.
@@ -1123,7 +1127,7 @@ class OnyxRunner:
             return False
         if not self.enable_gmail_search(api, cookie):
             return False
-        self._upsert_puffin_assistant(api, cookie)
+        self._upsert_mightling_assistant(api, cookie)
         print("✅ Gmail search is available to the assistant.")
         return True
 
@@ -1249,7 +1253,7 @@ class OnyxRunner:
             shutil.copyfile(
                 gmail_search_service.__file__, os.path.join(CREDENTIALS_DIR, "service.py")
             )
-            # Drive and Calendar for Puffin's apps; the service imports it from beside itself.
+            # Drive and Calendar for Mightling's apps; the service imports it from beside itself.
             shutil.copyfile(
                 google_workspace_reader.__file__,
                 os.path.join(CREDENTIALS_DIR, "google_workspace_reader.py"),
@@ -1277,7 +1281,7 @@ class OnyxRunner:
              # network -- the browser asking whether Gmail is connected, and Google redirecting
              # back after consent.
              "-p", f"127.0.0.1:{GMAIL_HOST_PORT}:8000",
-             "-e", f"PUFFIN_GMAIL_SECRET={secret}",
+             "-e", f"MIGHTLING_GMAIL_SECRET={secret}",
              GMAIL_SERVICE_IMAGE, "python3", "/config/service.py"],
             capture_output=True, text=True, timeout=300, check=False,
         )
@@ -1460,13 +1464,13 @@ class OnyxRunner:
              "--user", f"{os.getuid()}:{os.getgid()}",
              "-v", f"{IMAGE_SEARCH_DATA_DIR}:/config",
              "-p", f"127.0.0.1:{IMAGE_SEARCH_HOST_PORT}:8768",
-             "-e", f"PUFFIN_IMAGE_SECRET={secret}",
-             "-e", f"PUFFIN_SEARXNG_URL={SEARXNG_CONTAINER_URL}",
-             "-e", f"PUFFIN_SIGLIP_URL={SIGLIP_CONTAINER_URL}",
-             "-e", "PUFFIN_VISION_URL="
+             "-e", f"MIGHTLING_IMAGE_SECRET={secret}",
+             "-e", f"MIGHTLING_SEARXNG_URL={SEARXNG_CONTAINER_URL}",
+             "-e", f"MIGHTLING_SIGLIP_URL={SIGLIP_CONTAINER_URL}",
+             "-e", "MIGHTLING_VISION_URL="
                    f"{self.resolve_container_vllm_url(self.config.vllm_host)}",
-             "-e", f"PUFFIN_VISION_MODEL={resolve_model_hf_repo(self.served_model_key())}",
-             "-e", "PUFFIN_DATA_DIR=/config/data",
+             "-e", f"MIGHTLING_VISION_MODEL={resolve_model_hf_repo(self.served_model_key())}",
+             "-e", "MIGHTLING_DATA_DIR=/config/data",
              IMAGE_SEARCH_SERVICE_IMAGE, "sh", "-c", boot],
             capture_output=True, text=True, timeout=300, check=False,
         )
@@ -1596,7 +1600,7 @@ class OnyxRunner:
         """
         if not self._attach_searxng():
             print("⚠️  SearXNG is not running or could not join Onyx's network — skipping web setup.")
-            print("💡 Start it, then re-run: puffin-admin puffin configure")
+            print("💡 Start it, then re-run: mling-admin chat configure")
             return False
 
         payload = {
@@ -1775,7 +1779,7 @@ class OnyxRunner:
         if error:
             print(f"❌ Could not register an Onyx account: {error}")
             print("💡 If an account already exists, pass its credentials:")
-            print("   puffin-admin puffin configure --email you@example.com --password ...")
+            print("   mling-admin chat configure --email you@example.com --password ...")
             return None
 
         cookie = self._login(api, email, password)

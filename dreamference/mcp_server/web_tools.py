@@ -1,5 +1,5 @@
 """
-Web access tools for Puffin's MCP server.
+Web access tools for Mightling's MCP server.
 
 A deliberate departure from the project's air-gapped premise, and worth being explicit about: with
 these registered, the agent can reach the public internet. They exist because Codex cannot get web
@@ -23,8 +23,8 @@ Fetching needs no service at all: `requests` plus `bs4`, both already required. 
 stays inspectable and removable — delete the two entries from MCPToolRegistry and the agent is
 offline again.
 
-Both tools follow the air-gap level (specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md §7), resolved on every
-call the way `puffin-search` and `puffin-fetch` resolve it for a command with no session: at `on`
+Both tools follow the air-gap level (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §7), resolved on every
+call the way `mling-search` and `mling-fetch` resolve it for a command with no session: at `on`
 nothing is sent, at `off` nothing changes.
 """
 
@@ -48,7 +48,7 @@ SEARXNG_URL: Final[str] = os.getenv("DREAMFERENCE_SEARXNG_URL", "http://127.0.0.
 # alternative is an agent that quietly believes the web does not exist.
 # The command, not a `docker run` line: a container started by hand lands on Docker's default
 # bridge, whose DNS is a copy taken at start (dreamference/chat/sidecar_network.py).
-SEARXNG_START_HINT: Final[str] = "puffin-admin searxng start"
+SEARXNG_START_HINT: Final[str] = "mling-admin searxng start"
 REQUEST_TIMEOUT_S: Final[float] = 25.0
 # Hard ceiling on what a single fetch will pull down, before any text extraction. A model cannot
 # use more than this anyway, and without it one link to a large binary stalls the whole session.
@@ -61,8 +61,8 @@ MAX_CHARS_CEILING: Final[int] = 100_000
 # Returned, with nothing sent, when the configured air-gap level is `on`. The web commands' text
 # names `/airgapped`, a slash command an IDE's MCP client does not have, so this names the setting.
 AIRGAPPED_ON_MESSAGE: Final[str] = (
-    "Web access is off on this machine (puffin_airgapped = on). Only the user can change that, "
-    "with `puffin airgapped default off` or DREAMFERENCE_PUFFIN_AIRGAPPED."
+    "Web access is off on this machine (mightling_airgapped = on). Only the user can change that, "
+    "with `mling airgapped default off` or DREAMFERENCE_MIGHTLING_AIRGAPPED."
 )
 _NON_CONTENT_TAGS: Final[tuple] = (
     "script", "style", "noscript", "svg", "canvas", "template", "iframe", "form",

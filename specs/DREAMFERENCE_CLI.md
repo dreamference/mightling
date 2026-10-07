@@ -1,4 +1,4 @@
-# Puffin CLI Reference
+# Mightling CLI Reference
 
 > **Version:** 1.2.0 (`setup.py`)
 > **Subject:** Command Suite, Subcommands, Configuration, Environment Variables
@@ -21,10 +21,10 @@
 
 **Entry points** (`setup.py` `console_scripts`):
 
-- `puffin-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
-- `puffin`: **not** a Python entry point. It is the Rust binary built by `puffin-admin codex build`: Codex with Puffin's branding and launcher compiled in, linked at `~/.local/bin/puffin`. It takes Codex's command line, plus five subcommands the launcher answers itself before Codex parses anything (`puffin app`, `puffin night …`, `puffin airgapped [default <level>]`, `puffin node list|use|forget`, `puffin prompt [list|show [<name>]|use <name>]`, which chooses the system prompt new sessions get: `default` or `high-swe`, `DREAMFERENCE_PUFFIN_PROMPT` or `puffin_prompt`, see `DREAMFERENCE_PUFFIN_PROMPT.md`) and `puffin update`, a subcommand patch `0008` adds to Codex's own parser. See `DREAMFERENCE_PUFFIN_CODEX.md`.
+- `mling-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
+- `mling`: **not** a Python entry point. It is the Rust binary built by `mling-admin codex build`: Codex with Mightling's branding and launcher compiled in, linked at `~/.local/bin/mling`. It takes Codex's command line, plus five subcommands the launcher answers itself before Codex parses anything (`mling app`, `mling night …`, `mling airgapped [default <level>]`, `mling node list|use|forget`, `mling prompt [list|show [<name>]|use <name>]`, which chooses the system prompt new sessions get: `default` or `high-swe`, `DREAMFERENCE_MIGHTLING_PROMPT` or `mightling_prompt`, see `DREAMFERENCE_MIGHTLING_PROMPT.md`) and `mling update`, a subcommand patch `0008` adds to Codex's own parser. See `DREAMFERENCE_MIGHTLING_CODEX.md`.
 
-There is no `chat` subcommand any more (removed 2026-09-28). The interactive agent is `puffin`. The other agents (Cline, Continue, OpenHands) are reachable through `puffin-admin run "…" --agent …`.
+There is no `chat` subcommand any more (removed 2026-09-28). The interactive agent is `mling`. The other agents (Cline, Continue, OpenHands) are reachable through `mling-admin run "…" --agent …`.
 
 **Framework:** argparse + Rich terminal UI. Parsing is strict: every command rejects unknown arguments.
 
@@ -34,19 +34,19 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 - **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run}`
 - **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}` (plus `authorize`, `serve-job` and `job-exec`, which a person does not type, §4.25)
-- **Web UI and desktop:** `puffin {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
-- **Agent tools:** `gmail {search,read,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `puffin-search` and `puffin-fetch` (§4.16), and so is the code index, `puffin-code` (§4.22)
+- **Web UI and desktop:** `mling {start,configure,google-auth,gmail,status,logs,stop,uninstall}` (alias `onyx`), `desktop {install,run,build,status}`
+- **Agent tools:** `gmail {search,read,status}`, `searxng start`, `code setup`; search and fetch are commands of their own, `mling-search` and `mling-fetch` (§4.16), and so is the code index, `mling-code` (§4.22)
 - **Context and IDE:** `index`, `mcp`, `web`, `status`
 
 ---
 
 ## 2. Global Options
 
-These options come before the subcommand (`puffin-admin --agent cline run "…"`). `init` and `run` also accept most of them after the subcommand.
+These options come before the subcommand (`mling-admin --agent cline run "…"`). `init` and `run` also accept most of them after the subcommand.
 
 | Flag | Type | Description |
 | :--- | :--- | :--- |
-| `--config PATH` | Path | Custom Puffin config file |
+| `--config PATH` | Path | Custom Mightling config file |
 | `--agent {codex,cline,continue,openhands}` | Choice | Agent runner (default `codex`) |
 | `--hf-token TOKEN` | String | HuggingFace token (else `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN`) |
 
@@ -75,19 +75,19 @@ These options come before the subcommand (`puffin-admin --agent cline run "…"`
 | **`server start`** | Launch vLLM, plus the diffusion sidecar | many; see §4.6 |
 | **`server stop` / `remove`** | Stop / remove the vLLM and diffusion containers | `[--port 8000] [--diffusion-port 8001]` |
 | **`server logs`** / **`logs [server]`** | Tail the vLLM container | `[--port 8000]` |
-| **`logs mcp`** | Codex MCP lifecycle lines from `~/.puffin/logs_2.sqlite` (or `$CODEX_HOME`) | — |
+| **`logs mcp`** | Codex MCP lifecycle lines from `~/.mightling/logs_2.sqlite` (or `$CODEX_HOME`) | — |
 | **`benchmark_server`** | `vllm bench serve` on the Sonnet dataset | `[--port] [--model] [--dataset-path] [--num-prompts 8] [--max-concurrency 1]` |
-| **`codex build`** | Build `puffin` from the `codex/` submodule and `codex-patches/` | `[--force]` |
-| **`codex start` / `stop`** | Start / stop the Codex app-server daemon using `puffin` | — |
-| **`codex test`** | Run Codex's own test suite on Puffin's patched tree, except the tests in `codex-tests/puffin-skips.toml` | `[-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]` |
-| **`code setup`** | Install the pinned tools the code index (`puffin-code`) runs | — |
+| **`codex build`** | Build `mling` from the `codex/` submodule and `codex-patches/` | `[--force]` |
+| **`codex start` / `stop`** | Start / stop the Codex app-server daemon using `mling` | — |
+| **`codex test`** | Run Codex's own test suite on Mightling's patched tree, except the tests in `codex-tests/mightling-skips.toml` | `[-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]` |
+| **`code setup`** | Install the pinned tools the code index (`mling-code`) runs | — |
 | **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`; see §4.21 |
-| **`swe-bench …`** | Run `puffin` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `smoke`, `run`, `eval`, `report`, `status`, `clean`; see §4.23 |
-| **`audit egress`** | Trace one real `puffin` session and list every network destination and process, with a verdict | `[--prompt P] [--json]`; see §4.24 |
+| **`swe-bench …`** | Run `mling` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `smoke`, `run`, `eval`, `report`, `status`, `clean`; see §4.23 |
+| **`audit egress`** | Trace one real `mling` session and list every network destination and process, with a verdict | `[--prompt P] [--json]`; see §4.24 |
 | **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them, copy a model to them and run jobs on them | `enable [--no-web]`, `disable`, `status [NAME]`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`, `sync-model NAME MODEL`, `run NAME … -- CMD`, `jobs`, `logs`, `cancel`, `fetch`; see §4.25 |
 | **`host …`** | The host settings a model load is refused without: report them, or apply them with sudo | `check`, `setup`; see §4.26 |
-| **`puffin …`** (`onyx …`) | Onyx Lite web UI lifecycle | see §4.19 |
-| **`desktop …`** | Tauri desktop window (`puffin-app`) | `install`, `run`, `build`, `status` |
+| **`mling …`** (`onyx …`) | Onyx Lite web UI lifecycle | see §4.19 |
+| **`desktop …`** | Tauri desktop window (`mling-app`) | `install`, `run`, `build`, `status` |
 | **`searxng start`** | Start the SearXNG container on `127.0.0.1:8888`, on the network `dreamference-sidecars`; replaces one made on Docker's default bridge ([DOCKER §6](./DREAMFERENCE_DOCKER.md)) | — |
 | **`gmail …`** | Read-only Gmail search and read | `search QUERY [-n 10] [--json]`, `read ID [--max-chars 8000] [--json]`, `status [--json]` |
 
@@ -97,10 +97,10 @@ A top-level `clear-tensorize-cache` subcommand is the older spelling of `clear t
 
 ## 4. Detailed Command Reference
 
-### 4.1. `puffin-admin init`
+### 4.1. `mling-admin init`
 
 ```bash
-puffin-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--agent …] [--hf-token …]
+mling-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST] [--agent …] [--hf-token …]
 ```
 
 **Behaviour:**
@@ -110,14 +110,14 @@ puffin-admin init [--model MODEL] [--draft-model DRAFT_MODEL] [--vllm-host HOST]
 
 ---
 
-### 4.2. `puffin-admin main-model` / `diffusion-model`
+### 4.2. `mling-admin main-model` / `diffusion-model`
 
 > **The diffusion model is switched off since 2026-10-03** (`DIFFUSION_ENABLED` in `hardware/model_matrix_registry.py`). While it is off, `diffusion-model` is not a command, `server start` starts no sidecar and removes a leftover one without a word, `server stop`/`remove` remove a leftover too, `endpoints` prints no diffusion URL, and `model list`/`model download` leave the diffusion model out. The `--diffusion-*` flags are accepted with their help suppressed. Everything about the sidecar in this document describes it switched on.
 
 ```bash
-puffin-admin main-model set MODEL [--no-onyx]
-puffin-admin main-model inspect [--deep]
-puffin-admin diffusion-model set MODEL
+mling-admin main-model set MODEL [--no-onyx]
+mling-admin main-model inspect [--deep]
+mling-admin diffusion-model set MODEL
 ```
 
 - **`main-model set`:** writes the model to `dreamference.toml`, which pins it. Unless `--no-onyx` is given, it also re-registers the model with a running Onyx deployment. It refuses a diffusion checkpoint.
@@ -126,17 +126,17 @@ puffin-admin diffusion-model set MODEL
 
 ---
 
-### 4.3. `puffin-admin run`
+### 4.3. `mling-admin run`
 
 ```bash
-puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--hf-token …] [--debug] [--cave]
+mling-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent …] [--hf-token …] [--debug] [--cave]
 ```
 
 **Behaviour:** dispatches on `config.agent_runner` to one of `CodexRunner` (also for any unrecognised value), `ClineRunner`, `ContinueRunner` or `OpenHandsRunner`, then calls `run_session(prompt=…, debug=…)`.
 
 - **Codex (default):**
-  - builds `puffin` if it is missing or stale;
-  - runs `puffin "PROMPT"`, passing the vLLM host as `DREAMFERENCE_VLLM_HOST`;
+  - builds `mling` if it is missing or stale;
+  - runs `mling "PROMPT"`, passing the vLLM host as `DREAMFERENCE_VLLM_HOST`;
   - with `--debug`, sets `RUST_LOG=codex_mcp=trace,codex_core=debug,codex_app_server=debug,info`.
 - **Cline:** prints the prompt and opens VS Code.
 - **Continue / OpenHands:** launch their UI; the prompt is unused.
@@ -144,7 +144,7 @@ puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent �
 
 ---
 
-### 4.4. `puffin-admin status`
+### 4.4. `mling-admin status`
 
 **Panels:**
 
@@ -155,25 +155,25 @@ puffin-admin run "PROMPT" [--model MODEL] [--draft-model DRAFT_MODEL] [--agent �
    - HF token presence;
    - prefix caching / chunked prefill, multi-step scheduling, KV cache dtype (`from model recipe` unless overridden), tool-call parser;
    - install state of each agent (Cline, Continue, OpenHands, Codex);
-   - the Puffin config path.
+   - the Mightling config path.
 3. **Context Engine Index Status:** indexed files, AST symbols, index path, SQLite store path. Shown only when an index exists.
 
 ---
 
-### 4.5. `puffin-admin index`
+### 4.5. `mling-admin index`
 
 ```bash
-puffin-admin index [--dir PATH] [--force]
+mling-admin index [--dir PATH] [--force]
 ```
 
 Indexes the workspace, the current directory unless `--dir` is given, with Python `ast` symbols, FTS5, TF-IDF and `nomic-embed-text-v1.5` embeddings. It writes `.dreamference/context_index.json` and `.dreamference/context.db` (SQLite: FTS5, and the embeddings as plain float32 blobs; sqlite-vec is not used). It refuses to run while a Night Shift run holds its lock. See `DREAMFERENCE_CONTEXT.md`.
 
 ---
 
-### 4.6. `puffin-admin server start`
+### 4.6. `mling-admin server start`
 
 ```bash
-puffin-admin server start [--model MODEL] [--port 8000] [--quantization Q] [--draft-model D] [--num-speculative-tokens N]
+mling-admin server start [--model MODEL] [--port 8000] [--quantization Q] [--draft-model D] [--num-speculative-tokens N]
   [--hf-token T] [--num-scheduler-steps N] [--attention-backend B] [--kv-cache-dtype D] [--api-key K]
   [--enable-auto-tool-choice] [--tool-call-parser P] [--reasoning-parser P] [--moe-backend B]
   [--max-num-batched-tokens N] [--guided-decoding-backend B] [--tensorize/--no-tensorize]
@@ -207,11 +207,11 @@ The container's memory limit is derived from the model's `gpu_memory_utilization
 
 ---
 
-### 4.7. `puffin-admin server stop` / `remove`
+### 4.7. `mling-admin server stop` / `remove`
 
 ```bash
-puffin-admin server stop   [--port 8000] [--diffusion-port 8001]
-puffin-admin server remove [--port 8000] [--diffusion-port 8001]
+mling-admin server stop   [--port 8000] [--diffusion-port 8001]
+mling-admin server remove [--port 8000] [--diffusion-port 8001]
 ```
 
 - `stop` runs `docker stop` on both `dreamference-vllm-<port>` and `dreamference-diffusion-<diffusion-port>`.
@@ -221,29 +221,29 @@ Both are safe no-ops when the containers don't exist.
 
 ---
 
-### 4.8. `puffin-admin logs` / `server logs`
+### 4.8. `mling-admin logs` / `server logs`
 
 ```bash
-puffin-admin logs [server|mcp] [--port 8000]
-puffin-admin server logs [--port 8000]
+mling-admin logs [server|mcp] [--port 8000]
+mling-admin server logs [--port 8000]
 ```
 
 - **`logs`, `logs server` and `server logs`:** tail `dreamference-vllm-<port>` (`show_request_logs`).
-- **`logs mcp`:** reads the Codex TUI's tracing database `~/.puffin/logs_2.sqlite` (`$CODEX_HOME` if set; not upstream Codex's `~/.codex`) read-only, and prints MCP server lifecycle lines. The TUI logs there, not to a file. Record them with `RUST_LOG=codex_mcp=trace puffin`.
+- **`logs mcp`:** reads the Codex TUI's tracing database `~/.mightling/logs_2.sqlite` (`$CODEX_HOME` if set; not upstream Codex's `~/.codex`) read-only, and prints MCP server lifecycle lines. The TUI logs there, not to a file. Record them with `RUST_LOG=codex_mcp=trace mling`.
 
 ---
 
-### 4.9. `puffin-admin benchmark_server`
+### 4.9. `mling-admin benchmark_server`
 
 ```bash
-puffin-admin benchmark_server [--port 8000] [--model qwen3.8-27b-nvfp4-dflash2] [--dataset-path P] [--num-prompts 8] [--max-concurrency 1]
+mling-admin benchmark_server [--port 8000] [--model qwen3.8-27b-nvfp4-dflash2] [--dataset-path P] [--num-prompts 8] [--max-concurrency 1]
 ```
 
 Runs vLLM's serving benchmark inside the running container, on the Sonnet dataset. The dataset is embedded in `sonnet_dataset.py` and staged at `/tmp/dreamference-sonnet.txt`. When `--dataset-path` is unset, the known in-image locations are probed first.
 
 ---
 
-### 4.10. `puffin-admin mcp`
+### 4.10. `mling-admin mcp`
 
 stdio JSON-RPC MCP server (`serverInfo.name` `dreamference-mcp-server`) for JetBrains and VS Code. Its tools (`mcp_tool_registry.py`):
 
@@ -260,11 +260,11 @@ Protocol handling:
 
 Until 2026-09-29 `notifications/initialized` drew a `-32601` reply, and a failing tool was reported as a parse error with no id, so the client never got its answer.
 
-It is **not** registered with `puffin`; see `DREAMFERENCE_PUFFIN_CODEX.md` for why.
+It is **not** registered with `mling`; see `DREAMFERENCE_MIGHTLING_CODEX.md` for why.
 
 ---
 
-### 4.11. `puffin-admin endpoints`
+### 4.11. `mling-admin endpoints`
 
 It prints two tables:
 
@@ -284,24 +284,24 @@ Clients address the model by its full HF repo id (e.g. `RadixArk/Qwen3.8-27B-NVF
 
 ---
 
-### 4.12. `puffin-admin web`
+### 4.12. `mling-admin web`
 
 ```bash
-puffin-admin web [--port 8501]
+mling-admin web [--port 8501]
 ```
 
 Serves the Web Canvas page (`web_canvas.py`) on `127.0.0.1:<port>` (until 2026-09-29, `0.0.0.0`) with `socketserver.TCPServer`: a status page with a live unified-memory gauge fed by `GET /api/status` (`{hardware, vllm, context}`).
 
 ---
 
-### 4.13. `puffin-admin model list`
+### 4.13. `mling-admin model list`
 
 Lists `ModelMatrixRegistry.MATRIX`: names, HF repos, compatibility.
 
-### 4.14. `puffin-admin model download`
+### 4.14. `mling-admin model download`
 
 ```bash
-puffin-admin model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
+mling-admin model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 ```
 
 - **Without `--all`:** downloads `--model` or the configured model, plus its draft model if any.
@@ -310,113 +310,113 @@ puffin-admin model download [--model MODEL] [--all] [--tensorize/--no-tensorize]
 
 ---
 
-### 4.15. `puffin-admin codex`
+### 4.15. `mling-admin codex`
 
 ```bash
-puffin-admin codex build [--force]
-puffin-admin codex start
-puffin-admin codex stop
-puffin-admin codex test [-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]
+mling-admin codex build [--force]
+mling-admin codex start
+mling-admin codex stop
+mling-admin codex test [-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]
 ```
 
-- **`build`:** builds `puffin` and `codex-code-mode-host` with `CodexBrandedBuilder`, the web commands (`puffin-search`, `puffin-fetch`) and `puffin-code`, and links them into `~/.local/bin`. It refuses while a Night Shift run holds its lock. It skips the build when the recorded build key is current, unless `--force`. See `DREAMFERENCE_PUFFIN_CODEX.md`.
-- **`start` / `stop`:** run `puffin app-server daemon start|stop`, building `puffin` first if it is missing. The parser's help text calls this the "Codex comic server"; that is a typo in the help, and the command drives the app-server daemon.
-- **`test`:** runs Codex's own tests with `cargo-nextest` on the patched export, inside a memory-capped scope (`--memory-max`). `-E`/`--filter` takes a nextest filterset; `--accept-snapshots` rewrites the selected TUI snapshots and keeps those that differ from upstream's by the name alone. See `DREAMFERENCE_PUFFIN_CODEX.md`.
+- **`build`:** builds `mling` and `codex-code-mode-host` with `CodexBrandedBuilder`, the web commands (`mling-search`, `mling-fetch`) and `mling-code`, and links them into `~/.local/bin`. It refuses while a Night Shift run holds its lock. It skips the build when the recorded build key is current, unless `--force`. See `DREAMFERENCE_MIGHTLING_CODEX.md`.
+- **`start` / `stop`:** run `mling app-server daemon start|stop`, building `mling` first if it is missing. The parser's help text calls this the "Codex comic server"; that is a typo in the help, and the command drives the app-server daemon.
+- **`test`:** runs Codex's own tests with `cargo-nextest` on the patched export, inside a memory-capped scope (`--memory-max`). `-E`/`--filter` takes a nextest filterset; `--accept-snapshots` rewrites the selected TUI snapshots and keeps those that differ from upstream's by the name alone. See `DREAMFERENCE_MIGHTLING_CODEX.md`.
 
 ---
 
-### 4.16. `puffin-search`, `puffin-fetch`, `gmail`
+### 4.16. `mling-search`, `mling-fetch`, `gmail`
 
-These are the commands the `puffin` agent is told to use in its prompt.
+These are the commands the `mling` agent is told to use in its prompt.
 
 ```bash
-puffin-search "QUERY" [-n 5] [--json]                # local SearXNG
-puffin-fetch URL [--max-chars 8000] [--json]         # readable text of one page
-puffin-admin gmail search "GMAIL QUERY" [-n|--max-results 10] [--json]   # at most 20
-puffin-admin gmail read MESSAGE_ID [--max-chars 8000] [--json]
-puffin-admin gmail status [--json]
+mling-search "QUERY" [-n 5] [--json]                # local SearXNG
+mling-fetch URL [--max-chars 8000] [--json]         # readable text of one page
+mling-admin gmail search "GMAIL QUERY" [-n|--max-results 10] [--json]   # at most 20
+mling-admin gmail read MESSAGE_ID [--max-chars 8000] [--json]
+mling-admin gmail status [--json]
 ```
 
-`gmail` talks to the `dreamference-gmail` service that the web UI already runs, and is read-only. See `DREAMFERENCE_PUFFIN_GMAIL.md`.
+`gmail` talks to the `dreamference-gmail` service that the web UI already runs, and is read-only. See `DREAMFERENCE_MIGHTLING_GMAIL.md`.
 
-Search and fetch are programs of their own rather than `puffin-admin` subcommands: they are the agent's most frequent commands, and `puffin-admin` administers the machine. Both are Rust binaries from `puffin-web-rs/` (`DREAMFERENCE_PUFFIN_CODEX.md` §4.1), not console scripts, so they work from a shell with no virtualenv; `puffin-admin codex build` installs them beside `puffin` and links them into `~/.local/bin`. They were `puffin-admin search` and `puffin-admin fetch` until 2026-09-30; both subcommands are gone rather than aliased.
+Search and fetch are programs of their own rather than `mling-admin` subcommands: they are the agent's most frequent commands, and `mling-admin` administers the machine. Both are Rust binaries from `mling-web-rs/` (`DREAMFERENCE_MIGHTLING_CODEX.md` §4.1), not console scripts, so they work from a shell with no virtualenv; `mling-admin codex build` installs them beside `mling` and links them into `~/.local/bin`. They were `mling-admin search` and `mling-admin fetch` until 2026-09-30; both subcommands are gone rather than aliased.
 
 ---
 
-### 4.17. `puffin-admin clear model-cache`
+### 4.17. `mling-admin clear model-cache`
 
-`ModelDownloader.clear_cache()` removes exactly two directories: the HuggingFace hub (`~/.cache/huggingface/hub`, or `$HF_HOME/hub`) and the tensorizer cache (`~/.cache/dreamference/tensorizer`). Their parents are left alone: `~/.cache/huggingface` holds the HuggingFace login token, and `~/.cache/dreamference` holds vLLM's torch.compile cache, the `puffin` build cache (`puffin-codex/`), fonts and test logs. Until 2026-09-29 it deleted both parents.
+`ModelDownloader.clear_cache()` removes exactly two directories: the HuggingFace hub (`~/.cache/huggingface/hub`, or `$HF_HOME/hub`) and the tensorizer cache (`~/.cache/dreamference/tensorizer`). Their parents are left alone: `~/.cache/huggingface` holds the HuggingFace login token, and `~/.cache/dreamference` holds vLLM's torch.compile cache, the `mling` build cache (`mightling-codex/`), fonts and test logs. Until 2026-09-29 it deleted both parents.
 
 Containers write parts of these caches as root, which `rmtree` cannot remove as the user. When a directory survives, the command says so, prints the `sudo rm -rf` that would finish the job, and exits 1 rather than reporting success.
 
-### 4.18. `puffin-admin clear tensorize-cache`
+### 4.18. `mling-admin clear tensorize-cache`
 
-`ModelDownloader.clear_tensorizer_cache()` removes `~/.cache/dreamference/tensorizer` only, with the same report-and-exit-1 behaviour for root-owned leftovers. Until 2026-09-29 it removed the parent, all of `~/.cache/dreamference`, including vLLM's compile cache (a cold recompile costs 8–12 minutes) and the `puffin` build cache.
+`ModelDownloader.clear_tensorizer_cache()` removes `~/.cache/dreamference/tensorizer` only, with the same report-and-exit-1 behaviour for root-owned leftovers. Until 2026-09-29 it removed the parent, all of `~/.cache/dreamference`, including vLLM's compile cache (a cold recompile costs 8–12 minutes) and the `mling` build cache.
 
 ---
 
-### 4.19. `puffin-admin puffin` (alias `onyx`)
+### 4.19. `mling-admin chat` (alias `onyx`)
 
 ```bash
-puffin-admin puffin start [--no-wait]
-puffin-admin puffin configure [--email E] [--password P] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]
-puffin-admin puffin google-auth [--client-id ID] [--client-secret S]
-puffin-admin puffin gmail                 # (re-)register the Gmail tool; accounts are connected in the UI
-puffin-admin puffin status | logs [-f|--follow] | stop | uninstall
+mling-admin chat start [--no-wait]
+mling-admin chat configure [--email E] [--password P] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]
+mling-admin chat google-auth [--client-id ID] [--client-secret S]
+mling-admin chat gmail                 # (re-)register the Gmail tool; accounts are connected in the UI
+mling-admin chat status | logs [-f|--follow] | stop | uninstall
 ```
 
 This manages the Onyx Lite deployment (web chat UI) in front of the same vLLM model. `configure`:
 - registers the vLLM provider;
-- applies Puffin branding, fonts and UI patches;
+- applies Mightling branding, fonts and UI patches;
 - sets up SearXNG web search, Whisper voice, the Gmail tool and the image-search tool.
 
 Each piece has its own opt-out. See `DREAMFERENCE_ONYX.md`.
 
-### 4.20. `puffin-admin desktop`
+### 4.20. `mling-admin desktop`
 
-`install`, `run`, `build`, `status` for the Tauri desktop window (binary `puffin-app`). `puffin app` opens the same window. See `CLAUDE.md` ("The desktop app is a window, not a second frontend").
+`install`, `run`, `build`, `status` for the Tauri desktop window (binary `mling-app`). `mling app` opens the same window. See `CLAUDE.md` ("The desktop app is a window, not a second frontend").
 
-### 4.21. `puffin-admin night`
+### 4.21. `mling-admin night`
 
 ```bash
-puffin-admin night enable [--window HH:MM-HH:MM]     # default: [night] window, 01:00-07:00
-puffin-admin night disable
-puffin-admin night status
-puffin-admin night run [--until HH:MM] [--minutes N] [--idle-minutes N] [--ignore-open-sessions]
+mling-admin night enable [--window HH:MM-HH:MM]     # default: [night] window, 01:00-07:00
+mling-admin night disable
+mling-admin night status
+mling-admin night run [--until HH:MM] [--minutes N] [--idle-minutes N] [--ignore-open-sessions]
 ```
 
-Night Shift (`dreamference/night_shift/`, `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`). Tasks are queued from `puffin` with `/night add` (or `puffin night add …` from a shell); these commands run them.
+Night Shift (`dreamference/night_shift/`, `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md`). Tasks are queued from `mling` with `/night add` (or `mling night add …` from a shell); these commands run them.
 
-- **`enable` / `disable`:** install or remove the systemd user timer `puffin-night.timer` that starts `night run` at the window's start.
+- **`enable` / `disable`:** install or remove the systemd user timer `mightling-night.timer` that starts `night run` at the window's start.
 - **`status`:** the timer, the window and the queue of every repository.
-- **`run`:** works through the queue now, until the window ends (`--until`, or `--minutes` from now). It waits for the model server to have been idle for `--idle-minutes` (default 10). `--ignore-open-sessions` skips the wait for open `puffin` sessions; it is for testing.
+- **`run`:** works through the queue now, until the window ends (`--until`, or `--minutes` from now). It waits for the model server to have been idle for `--idle-minutes` (default 10). `--ignore-open-sessions` skips the wait for open `mling` sessions; it is for testing.
 
 While a night run holds its lock, `server start`, `codex build` and `index` refuse to run. A SWE-bench run takes the same lock (§4.23), so the two exclude each other and the refusal names whichever holds it.
 
-### 4.22. `puffin-admin code setup`, `puffin-admin searxng start`
+### 4.22. `mling-admin code setup`, `mling-admin searxng start`
 
-- **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+, and Maven and Gradle when installed) the optional indexers need. The index itself is the Rust binary `puffin-code`, built and linked by `codex build`. See `DREAMFERENCE_PUFFIN_CODE_INDEX.md`.
+- **`code setup`:** installs the pinned, checksum-verified tools the code index runs, and records the toolchains (Go, JDK 17+, .NET SDK 8+, and Maven and Gradle when installed) the optional indexers need. The index itself is the Rust binary `mling-code`, built and linked by `codex build`. See `DREAMFERENCE_MIGHTLING_CODE_INDEX.md`.
 - **`searxng start`:** creates the SearXNG container on the project network `dreamference-sidecars`, published on `127.0.0.1:8888` only. A container found on Docker's default bridge is replaced. See `DREAMFERENCE_DOCKER.md` §6. On a node that `node enable` advertised (§4.25) it is published beyond loopback instead.
 
-### 4.23. `puffin-admin swe-bench`
+### 4.23. `mling-admin swe-bench`
 
 ```bash
-puffin-admin swe-bench setup [--dataset verified|lite|full|<HF id>] [--validate [--instances IDS] [--limit N] [--force]]
-puffin-admin swe-bench smoke [--idle-minutes N] [--ignore-open-sessions]
-puffin-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limit N] [--name NAME]
+mling-admin swe-bench setup [--dataset verified|lite|full|<HF id>] [--validate [--instances IDS] [--limit N] [--force]]
+mling-admin swe-bench smoke [--idle-minutes N] [--ignore-open-sessions]
+mling-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limit N] [--name NAME]
                            [--eval [--remove-images]] [--code-index off|universal] [--prompt <name>]
                            [--until HH:MM] [--idle-minutes N] [--ignore-open-sessions]
-puffin-admin swe-bench eval [RUN]
-puffin-admin swe-bench report [RUN] [--against RUN]
-puffin-admin swe-bench status
-puffin-admin swe-bench clean [RUN] [--images]
+mling-admin swe-bench eval [RUN]
+mling-admin swe-bench report [RUN] [--against RUN]
+mling-admin swe-bench status
+mling-admin swe-bench clean [RUN] [--images]
 ```
 
-SWE-bench on this machine (`dreamference/swe_bench/`, `DREAMFERENCE_PUFFIN_SWE_BENCH.md`). `RUN` defaults to the latest run.
+SWE-bench on this machine (`dreamference/swe_bench/`, `DREAMFERENCE_MIGHTLING_SWE_BENCH.md`). `RUN` defaults to the latest run.
 
-- **`setup`:** installs the upstream harness (`swebench` 5.0.2) in a virtualenv of its own, downloads the dataset and builds the relocated copy of `puffin` that starts inside the instance images. `--validate` also checks which instances grade correctly here (the reference patch resolves, a no-op patch does not), which pulls their images.
+- **`setup`:** installs the upstream harness (`swebench` 5.0.2) in a virtualenv of its own, downloads the dataset and builds the relocated copy of `mling` that starts inside the instance images. `--validate` also checks which instances grade correctly here (the reference patch resolves, a no-op patch does not), which pulls their images.
 - **`smoke`:** proves the whole pipeline on five fixed instances. `run` refuses until a smoke has passed with the installed harness version.
-- **`run`:** the agent phase. One `puffin exec` per instance, each inside that instance's own container on the internal Docker network `puffin-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `puffin-code` (default `off`). `--prompt <name>` starts the agent under that system prompt (`default`, `high-swe`, or a custom one from `$CODEX_HOME/system-prompts/`, mounted read-only); without it the configured one. The manifest records it, with the custom file's SHA-256, and `report --against` names it when two runs differ.
+- **`run`:** the agent phase. One `mling exec` per instance, each inside that instance's own container on the internal Docker network `mightling-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `mling-code` (default `off`). `--prompt <name>` starts the agent under that system prompt (`default`, `high-swe`, or a custom one from `$CODEX_HOME/system-prompts/`, mounted read-only); without it the configured one. The manifest records it, with the custom file's SHA-256, and `report --against` names it when two runs differ.
 - **`eval`:** the grading phase: the upstream harness applies each patch and runs the tests. It needs no model.
 - **`report`:** the resolved rate and what it was measured with; `--against` compares two runs instance by instance.
 - **`status`:** runs, their progress, the images present and free disk.
@@ -424,55 +424,55 @@ SWE-bench on this machine (`dreamference/swe_bench/`, `DREAMFERENCE_PUFFIN_SWE_B
 
 Files: the harness, dataset, runtime and validation results under `~/.cache/dreamference/swe-bench/`; one directory per run under `~/.local/share/dreamference/swe-bench/runs/`. Settings come from the `[swe_bench]` table (§5.1). `run` and `smoke` use Night Shift's admission (idle model, memory) and its runner lock.
 
-### 4.24. `puffin-admin audit egress`
+### 4.24. `mling-admin audit egress`
 
 ```bash
-puffin-admin audit egress [--prompt PROMPT] [--json]
+mling-admin audit egress [--prompt PROMPT] [--json]
 ```
 
-Runs one real `puffin exec` session under `strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked of a resolver and every process the session started, with a verdict (`dreamference/audit/`, `DREAMFERENCE_PUFFIN_EGRESS.md`). `--prompt` replaces the default prompt (a one-word reply); `--json` also writes the full result to `$CODEX_HOME/audit/<timestamp>.json`. Exit status: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
+Runs one real `mling exec` session under `strace`, in a throwaway repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked of a resolver and every process the session started, with a verdict (`dreamference/audit/`, `DREAMFERENCE_MIGHTLING_EGRESS.md`). `--prompt` replaces the default prompt (a one-word reply); `--json` also writes the full result to `$CODEX_HOME/audit/<timestamp>.json`. Exit status: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
 
-### 4.25. `puffin-admin node`
+### 4.25. `mling-admin node`
 
 ```bash
-puffin-admin node enable [--no-web]
-puffin-admin node disable
-puffin-admin node status [NAME]
-puffin-admin node list
-puffin-admin node add NAME [--user USER] [--ssh-port 22]
-puffin-admin node remove NAME
-puffin-admin node set NAME --model MODEL
-puffin-admin node start NAME | stop NAME
-puffin-admin node sync-model NAME MODEL [--address ADDR]
-puffin-admin node run NAME [--memory 8G] [--time 90m] [--test CMD] [--setup CMD] [--out DIR] [--bind PATH]... -- COMMAND...
-puffin-admin node jobs [NAME] | logs JOB | cancel JOB | fetch JOB
+mling-admin node enable [--no-web]
+mling-admin node disable
+mling-admin node status [NAME]
+mling-admin node list
+mling-admin node add NAME [--user USER] [--ssh-port 22]
+mling-admin node remove NAME
+mling-admin node set NAME --model MODEL
+mling-admin node start NAME | stop NAME
+mling-admin node sync-model NAME MODEL [--address ADDR]
+mling-admin node run NAME [--memory 8G] [--time 90m] [--test CMD] [--setup CMD] [--out DIR] [--bind PATH]... -- COMMAND...
+mling-admin node jobs [NAME] | logs JOB | cancel JOB | fetch JOB
 ```
 
-The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_PUFFIN_NODE.md`).
+The node half of the client/server split (`dreamference/node/`, `DREAMFERENCE_MIGHTLING_NODE.md`).
 
-- **`enable`:** installs the Avahi service file that advertises this machine as `_puffin-node._tcp`, publishes the web UI and SearXNG beyond loopback, and records that it did, so a later `puffin configure` or `searxng start` keeps those addresses. `--no-web` keeps the web UI on this machine; clients then get `puffin` and web search only. Root is needed once, for the file under `/etc/avahi`: the command is printed and `sudo` prompts on the terminal. If the file cannot be installed, nothing is published. It prints that anyone on the local network can then use the node, with nothing encrypted or authenticated, and that the web UI's one account (and its Gmail tool) is shared.
+- **`enable`:** installs the Avahi service file that advertises this machine as `_mightling-node._tcp`, publishes the web UI and SearXNG beyond loopback, and records that it did, so a later `mling configure` or `searxng start` keeps those addresses. `--no-web` keeps the web UI on this machine; clients then get `mling` and web search only. Root is needed once, for the file under `/etc/avahi`: the command is printed and `sudo` prompts on the terminal. If the file cannot be installed, nothing is published. It prints that anyone on the local network can then use the node, with nothing encrypted or authenticated, and that the web UI's one account (and its Gmail tool) is shared.
 - **`disable`:** stops advertising and puts the web UI and web search back on this machine only.
 - **`status`:** the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status.
 - **`list`:** every node on the local network, with its model, its load and whether it is paired. It needs no pairing: those figures come from each node's open model port.
 - **`add`:** pairs with another node over SSH, once, so it can be managed from here. `NAME` is the node's name, address or id as `list` shows it. It makes a key used for nothing else, and the other node authorises it for one forced command only, with no terminal and no forwarding; the node's host key is pinned to its id.
 - **`remove`:** unpairs: removes the key on both sides.
-- **`set` / `start` / `stop`:** assign a model (a key of that node's model matrix) and start it there, or start or stop a paired node's model server. Each is carried out by that node's own `puffin-admin`, with its own host-safety checks.
+- **`set` / `start` / `stop`:** assign a model (a key of that node's model matrix) and start it there, or start or stop a paired node's model server. Each is carried out by that node's own `mling-admin`, with its own host-safety checks.
 - **`list`** also shows each node's free memory, for this machine and for paired nodes (asked over the pairing; memory is not on the open model port).
 - **`sync-model`:** copies a model's Hugging Face cache folders (and its drafter's) to a paired node over the pairing, so it need not download them; `--address` uses another address of the same node, such as its QSFP link's. The node accepts only folders of a key of its own matrix, checks each weight file's checksum, and keeps files it already has.
-- **`run`:** runs a command on a paired node, in this repository at `HEAD`, in a sandboxed, memory-capped and time-limited unit there; its changes come back as the branch `job/<id>`. `--setup` builds an environment once per lock-file content and binds it read-only into later jobs; `--out` names a folder that comes back as files to `~/.puffin/jobs/received/<id>/`, never committed; `--bind` binds a path on the node read-only, if the node's `[node] bindable` allows it. `jobs`, `logs`, `cancel` and `fetch` follow a job; a finished job is pruned on the node a day after it was fetched, or 14 days after it finished.
+- **`run`:** runs a command on a paired node, in this repository at `HEAD`, in a sandboxed, memory-capped and time-limited unit there; its changes come back as the branch `job/<id>`. `--setup` builds an environment once per lock-file content and binds it read-only into later jobs; `--out` names a folder that comes back as files to `~/.mightling/jobs/received/<id>/`, never committed; `--bind` binds a path on the node read-only, if the node's `[node] bindable` allows it. `jobs`, `logs`, `cancel` and `fetch` follow a job; a finished job is pruned on the node a day after it was fetched, or 14 days after it finished.
 
-Three more subcommands are not typed by a person: `node job-exec <job>` (run inside a job's systemd unit to carry out that job), `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model, model-receive, unpair, the two git services for a job repository, and the job and night-task requests). There is no primary node: the machine `puffin-admin node …` is typed on is the one doing the managing. With one GB10 here, pairing was run against a scratch sshd on loopback, not against a second machine.
+Three more subcommands are not typed by a person: `node job-exec <job>` (run inside a job's systemd unit to carry out that job), `node authorize` (run by `node add` on the other node; it reads a public key on standard input) and `node serve-job [--key TAG]` (the forced command sshd starts for a paired key; it refuses anything but info, status, start, stop, set-model, model-receive, unpair, the two git services for a job repository, and the job and night-task requests). There is no primary node: the machine `mling-admin node …` is typed on is the one doing the managing. With one GB10 here, pairing was run against a scratch sshd on loopback, not against a second machine.
 
-The switches are kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory first. On a client the counterpart is `puffin node list|use|forget`, in the launcher.
+The switches are kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`, because that file is resolved from the working directory first. On a client the counterpart is `mling node list|use|forget`, in the launcher.
 
-### 4.26. `puffin-admin host`
+### 4.26. `mling-admin host`
 
 ```bash
-puffin-admin host check     # what `server start` would refuse over; changes nothing; exit 1 if anything is listed
-puffin-admin host setup     # applies it: each command printed, then run through sudo
+mling-admin host check     # what `server start` would refuse over; changes nothing; exit 1 if anything is listed
+mling-admin host setup     # applies it: each command printed, then run through sudo
 ```
 
-`HostSafetySetup` applies what `check_host_safety()` (§4.6) only prints: sysstat, an armed earlyoom, 64 GB of swap, and the two sysctls. It also covers the agent's prerequisite: on Ubuntu (`kernel.apparmor_restrict_unprivileged_userns = 1`) it installs `/etc/apparmor.d/puffin-bwrap`, a profile granting `userns` to `/usr/bin/bwrap` alone, so Codex's sandbox works from a systemd unit, the Night Shift timer or an SSH job, not only from a terminal (`sandbox_prerequisite.py`). Every other `puffin-admin` run checks that sandbox from a throwaway user unit (~25 ms) and, when it fails, offers to fix it, to turn Night Shift off, or to ask again later; `mcp`, `host` and `node serve-job` never ask. Loaded and verified on this machine on 2026-10-03. The cases it reports instead of acting on, and what was verified, are in [SETUP §3.3](./DREAMFERENCE_SETUP.md). `install.sh` and `scripts/install_gb10.sh` both run `host setup`.
+`HostSafetySetup` applies what `check_host_safety()` (§4.6) only prints: sysstat, an armed earlyoom, 64 GB of swap, and the two sysctls. It also covers the agent's prerequisite: on Ubuntu (`kernel.apparmor_restrict_unprivileged_userns = 1`) it installs `/etc/apparmor.d/puffin-bwrap`, a profile granting `userns` to `/usr/bin/bwrap` alone, so Codex's sandbox works from a systemd unit, the Night Shift timer or an SSH job, not only from a terminal (`sandbox_prerequisite.py`). Every other `mling-admin` run checks that sandbox from a throwaway user unit (~25 ms) and, when it fails, offers to fix it, to turn Night Shift off, or to ask again later; `mcp`, `host` and `node serve-job` never ask. Loaded and verified on this machine on 2026-10-03. The cases it reports instead of acting on, and what was verified, are in [SETUP §3.3](./DREAMFERENCE_SETUP.md). `install.sh` and `scripts/install_gb10.sh` both run `host setup`.
 
 **On a release install** (no checkout; [SETUP §3.2](./DREAMFERENCE_SETUP.md)) `codex build` builds nothing: it reports the installed release binaries and refreshes the links, or says how to install them; `desktop build` and `desktop install` point at the release's `.deb` and AppImage.
 
@@ -506,15 +506,15 @@ enable_chunked_prefill = true
 num_scheduler_steps = 8
 attention_backend = "auto"
 # kv_cache_dtype unset = use the model recipe's value
-puffin_gmail = true
-puffin_cave_mode = "ultra"
-puffin_airgapped = "off"     # off | on
-puffin_compaction_ledger = true    # hand the agent a rule-built ledger after each compaction
+mightling_gmail = true
+mightling_cave_mode = "ultra"
+mightling_airgapped = "off"     # off | on
+mightling_compaction_ledger = true    # hand the agent a rule-built ledger after each compaction
 
-[night]                      # Night Shift, read by `puffin-admin night` (NightShiftSettings)
+[night]                      # Night Shift, read by `mling-admin night` (NightShiftSettings)
 window = "01:00-07:00"
 
-[swe_bench]                  # read by `puffin-admin swe-bench` (SweBenchSettings)
+[swe_bench]                  # read by `mling-admin swe-bench` (SweBenchSettings)
 max_parallel = 3
 ```
 
@@ -524,7 +524,7 @@ The tables take these keys, each with a built-in default:
 
 A `sandbox = …` line left in an older file is ignored: the option was removed on 2026-10-01.
 
-**Fixed 2026-10-01: `save_config()` used to drop the `[night]` table.** It rewrote the file from `DreamferenceConfig`'s flat fields, so `puffin-admin main-model set`, `diffusion-model set` and `init` removed Night Shift's settings. `ConfigFileStorageManager.save_config_dict()` now carries over every table already in the file that the saved keys do not name; `test_saving_keeps_tables_other_readers_own` covers it.
+**Fixed 2026-10-01: `save_config()` used to drop the `[night]` table.** It rewrote the file from `DreamferenceConfig`'s flat fields, so `mling-admin main-model set`, `diffusion-model set` and `init` removed Night Shift's settings. `ConfigFileStorageManager.save_config_dict()` now carries over every table already in the file that the saved keys do not name; `test_saving_keeps_tables_other_readers_own` covers it.
 
 `save_config()` deliberately writes only values that differ from the defaults, so a round trip does not fossilise defaults into the TOML. Until 2026-10-02 `vllm_host` and `agent_runner` were the exception, written whatever their value; they now follow the rule (`test_a_default_host_and_agent_are_not_fossilised_into_the_config`). A file saved before that keeps its two lines until the next save.
 
@@ -535,26 +535,26 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `DREAMFERENCE_CONFIG_PATH` | (resolver order, §5) | Config file path |
-| `DREAMFERENCE_VLLM_HOST` | `http://localhost:8000` | vLLM endpoint. Also read by `puffin`'s launcher. |
+| `DREAMFERENCE_VLLM_HOST` | `http://localhost:8000` | vLLM endpoint. Also read by `mling`'s launcher. |
 | `DREAMFERENCE_MODEL` | `qwen3.8-27b-nvfp4-dflash2` | Main model alias |
 | `DREAMFERENCE_DIFFUSION_MODEL` | `tiny-a2d-coder-0.5b-diffusion` | Diffusion sidecar model |
 | `DREAMFERENCE_DRAFT_MODEL` | (unset) | Draft model alias |
 | `DREAMFERENCE_SPECULATIVE_TOKENS` | `8` | Speculative token count |
 | `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | `codex` | Agent runner (`codex`, `cline`, `continue`, `openhands`) |
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
-| `DREAMFERENCE_PUFFIN_GMAIL` | `true` | Add the Gmail section to `puffin`'s prompt when an account is connected |
-| `DREAMFERENCE_PUFFIN_CAVE_MODE` | `ultra` | Cave-mode level for new `puffin` sessions (`off`, `lite`, `full`, `ultra`); also the config key `puffin_cave_mode` |
-| `DREAMFERENCE_PUFFIN_PROMPT` | `default` | System prompt for new `puffin` sessions (`default`, `high-swe`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `puffin_prompt`, which `puffin prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |
-| `DREAMFERENCE_PUFFIN_AIRGAPPED` | `off` | How much of the internet a `puffin` session may use (`off`, `on`); also the config key `puffin_airgapped` |
-| `DREAMFERENCE_PUFFIN_COMPACTION_LEDGER` | `true` | Register `puffin ledger` as the hook that runs after each compaction of a `puffin` session ([PUFFIN_COMPACTION §11](./DREAMFERENCE_PUFFIN_COMPACTION.md)); also the config key `puffin_compaction_ledger` |
-| `DREAMFERENCE_SEARXNG_URL` | `http://127.0.0.1:8888` | SearXNG instance used by `puffin-search` and the MCP server's `web_search` |
-| `CODEX_HOME` | `~/.puffin` | `puffin`'s home folder: sessions, config, skills (`skills/`), the Night Shift queue (`night/`), audit results (`audit/`) |
-| `PUFFIN_NODE` | (unset) | On a client: the node one `puffin` command uses, by name, address or id, instead of the remembered one |
-| `PUFFIN_RELEASE_REPO` | `dreamference/dgx-lunny` | Where `puffin update` looks for releases, e.g. a fork |
+| `DREAMFERENCE_MIGHTLING_GMAIL` | `true` | Add the Gmail section to `mling`'s prompt when an account is connected |
+| `DREAMFERENCE_MIGHTLING_CAVE_MODE` | `ultra` | Cave-mode level for new `mling` sessions (`off`, `lite`, `full`, `ultra`); also the config key `mightling_cave_mode` |
+| `DREAMFERENCE_MIGHTLING_PROMPT` | `default` | System prompt for new `mling` sessions (`default`, `high-swe`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `mightling_prompt`, which `mling prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |
+| `DREAMFERENCE_MIGHTLING_AIRGAPPED` | `off` | How much of the internet a `mling` session may use (`off`, `on`); also the config key `mightling_airgapped` |
+| `DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER` | `true` | Register `mling ledger` as the hook that runs after each compaction of a `mling` session ([MIGHTLING_COMPACTION §11](./DREAMFERENCE_MIGHTLING_COMPACTION.md)); also the config key `mightling_compaction_ledger` |
+| `DREAMFERENCE_SEARXNG_URL` | `http://127.0.0.1:8888` | SearXNG instance used by `mling-search` and the MCP server's `web_search` |
+| `CODEX_HOME` | `~/.mightling` | `mling`'s home folder: sessions, config, skills (`skills/`), the Night Shift queue (`night/`), audit results (`audit/`) |
+| `MIGHTLING_NODE` | (unset) | On a client: the node one `mling` command uses, by name, address or id, instead of the remembered one |
+| `MIGHTLING_RELEASE_REPO` | `dreamference/mightling` | Where `mling update` looks for releases, e.g. a fork |
 | `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN` | (unset) | HuggingFace token |
 | `HF_HOME` | `~/.cache/huggingface` | HF cache root (the hub cache is `$HF_HOME/hub`) |
 
-The table lists what a user sets. Left out on purpose are the variables one component sets for another (`PUFFIN_NIGHT_RUN`, `PUFFIN_UPSTREAM_TESTS`, the `PUFFIN_CODE_*` paths the launcher, the indexers and the SWE-bench runner pass along, the `PUFFIN_GMAIL_*`, `PUFFIN_IMAGE_*`, `PUFFIN_SIGLIP_URL` and `PUFFIN_VISION_*` settings of the sidecar containers, `DREAMFERENCE_DIFFUSION_PORT` and `DREAMFERENCE_DIFFUSION_MODEL_ID` inside the diffusion container), the build-time `PUFFIN_VERSION` the release workflow sets, and test seams (`PUFFIN_NIGHT_PUFFIN_BIN`, `PUFFIN_TEST_NODE_ID`). Each is described in the module that reads it.
+The table lists what a user sets. Left out on purpose are the variables one component sets for another (`MIGHTLING_NIGHT_RUN`, `MIGHTLING_UPSTREAM_TESTS`, the `MIGHTLING_CODE_*` paths the launcher, the indexers and the SWE-bench runner pass along, the `MIGHTLING_GMAIL_*`, `MIGHTLING_IMAGE_*`, `MIGHTLING_SIGLIP_URL` and `MIGHTLING_VISION_*` settings of the sidecar containers, `DREAMFERENCE_DIFFUSION_PORT` and `DREAMFERENCE_DIFFUSION_MODEL_ID` inside the diffusion container), the build-time `MIGHTLING_VERSION` the release workflow sets, and test seams (`MIGHTLING_NIGHT_MIGHTLING_BIN`, `MIGHTLING_TEST_NODE_ID`). Each is described in the module that reads it.
 
 **Tuning keys** (config file or CLI only, no environment variable):
 - `enable_prefix_caching`;
@@ -571,6 +571,6 @@ The table lists what a user sets. Left out on purpose are the variables one comp
 ## See Also
 
 - **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent runners
-- **[DREAMFERENCE_PUFFIN_CODEX.md](./DREAMFERENCE_PUFFIN_CODEX.md):** the `puffin` binary
+- **[DREAMFERENCE_MIGHTLING_CODEX.md](./DREAMFERENCE_MIGHTLING_CODEX.md):** the `mling` binary
 - **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM configuration
 - **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md):** model caching and Docker management

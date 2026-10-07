@@ -1,14 +1,14 @@
 """
-Puffin-Branded Codex Builder for Dreamference.
+Mightling-Branded Codex Builder for Dreamference.
 
 This module provides the CodexBrandedBuilder class, which turns the pinned `codex/` submodule (a
-fork of openai/codex at a stable release tag) into `puffin`, the terminal agent. It is Codex with
-Puffin's branding and with the launcher in `puffin-rs/` compiled in, so it finds the local model
+fork of openai/codex at a stable release tag) into `mling`, the terminal agent. It is Codex with
+Mightling's branding and with the launcher in `mling-rs/` compiled in, so it finds the local model
 server and configures itself with no Python involved.
 
 The submodule is never modified. Each build exports the pinned commit with `git archive` into a
 scratch tree, applies the patch series in `codex-patches/` there with `git apply`, and compiles that
-tree, after copying `puffin-rs/` in beside the workspace crates as `codex-rs/puffin` -- so the fork
+tree, after copying `mling-rs/` in beside the workspace crates as `codex-rs/mling` -- so the fork
 stays byte-identical to upstream and moving to a newer release is a submodule
 bump plus whatever patch hunks stop applying. Only `codex-rs/` is exported: it is the whole Rust
 workspace, and the rest of the repository (the npm wrapper, Bazel files, SDKs) plays no part in a
@@ -18,9 +18,9 @@ The compiled output is keyed by the source commit, the patch contents and the la
 not rebuilt, and Cargo's target directory is kept across builds so a patch edit recompiles only the
 crates it touches rather than the several hundred dependencies beneath them.
 
-The agent's web commands, `puffin-search` and `puffin-fetch`, are built here too, from the
-standalone crate `puffin-web-rs/`: a separate Cargo build with its own lockfile, target directory
-and stamp, installed beside `puffin`, so either can be rebuilt without the other.
+The agent's web commands, `mling-search` and `mling-fetch`, are built here too, from the
+standalone crate `mling-web-rs/`: a separate Cargo build with its own lockfile, target directory
+and stamp, installed beside `mling`, so either can be rebuilt without the other.
 
 All of that needs a checkout. A machine installed from a release (`install.sh`) has the package
 from a wheel and the binaries from the release's assets, with no `codex/`, `codex-patches/` or
@@ -47,8 +47,8 @@ CODEX_PATCH_DIR: Final[str] = os.path.join(REPO_ROOT, "codex-patches")
 
 # The launcher crate. It is Dreamference's own Rust, so it lives here as source rather than inside a
 # patch, and is copied into the exported tree where patch 0002's dependency line expects it.
-PUFFIN_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "puffin-rs")
-PUFFIN_CRATE_DEST: Final[str] = os.path.join("codex-rs", "puffin")
+MIGHTLING_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "mling-rs")
+MIGHTLING_CRATE_DEST: Final[str] = os.path.join("codex-rs", "mling")
 
 # The release the patches are written against. The submodule is pinned to this tag's commit; the
 # constant exists so a mismatch can be reported by name rather than as a hunk that fails to apply.
@@ -57,50 +57,50 @@ CODEX_RELEASE_TAG: Final[str] = "rust-v0.158.0"
 # The cache keeps its original name: Cargo's target directory inside it holds several hundred
 # compiled dependencies, and renaming it would throw them away.
 BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-codex")
-INSTALL_DIR: Final[str] = os.path.expanduser("~/.local/share/dreamference/puffin")
+INSTALL_DIR: Final[str] = os.path.expanduser("~/.local/share/dreamference/mightling")
 
 # Cargo still builds the binary as `codex` -- renaming the [[bin]] and `default-run` would be two
 # more patch hunks for a name the builder can simply give the file when it installs it. Codex's
-# own help and --version already say `puffin` (patch 0001 sets clap's name and bin_name).
+# own help and --version already say `mling` (patch 0001 sets clap's name and bin_name).
 CARGO_BIN_NAME: Final[str] = "codex"
-BRANDED_EXECUTABLE_NAME: Final[str] = "puffin"
+BRANDED_EXECUTABLE_NAME: Final[str] = "mling"
 
-# Where the user types `puffin`. A symlink rather than a copy, because Codex finds
+# Where the user types `mling`. A symlink rather than a copy, because Codex finds
 # codex-code-mode-host next to its own executable, and it resolves that through the link.
-PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin")
+PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling")
 
-# Where `puffin-admin` and the web commands become reachable from any shell -- including the one
-# `puffin` runs the model's commands in. The prompt tells the model to use `puffin-search`,
-# `puffin-fetch` and `puffin-admin gmail` for web and mail access, but the commands only existed
+# Where `mling-admin` and the web commands become reachable from any shell -- including the one
+# `mling` runs the model's commands in. The prompt tells the model to use `mling-search`,
+# `mling-fetch` and `mling-admin gmail` for web and mail access, but the commands only existed
 # inside the repository's virtualenv, so every such call ended in "command not found" (exit 127).
-ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-admin")
-SEARCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-search")
-FETCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-fetch")
+ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-admin")
+SEARCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-search")
+FETCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-fetch")
 
-# The agent's web commands, `puffin-search` and `puffin-fetch`: a small Rust crate of its own rather
+# The agent's web commands, `mling-search` and `mling-fetch`: a small Rust crate of its own rather
 # than part of the launcher, so changing them never relinks Codex, and a static binary rather than
 # a console script, so they do not depend on this virtualenv. Built with its own lockfile into its
-# own target directory, installed beside `puffin`, and stamped separately from the Codex build.
-WEB_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "puffin-web-rs")
+# own target directory, installed beside `mling`, and stamped separately from the Codex build.
+WEB_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "mling-web-rs")
 WEB_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-web")
 WEB_BUILD_STAMP_NAME: Final[str] = "web-build-key"
-WEB_BIN_NAMES: Final[tuple] = ("puffin-search", "puffin-fetch")
+WEB_BIN_NAMES: Final[tuple] = ("mling-search", "mling-fetch")
 
-# The code index router, `puffin-code` (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §4.2): a crate of
+# The code index router, `mling-code` (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §4.2): a crate of
 # its own for the same reasons as the web commands, built the same way. The prompt tells the model
 # to run it, so it is linked onto PATH beside the others.
-CODE_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "puffin-code-rs")
+CODE_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "mling-code-rs")
 CODE_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-code-build")
 CODE_BUILD_STAMP_NAME: Final[str] = "code-build-key"
-CODE_BIN_NAMES: Final[tuple] = ("puffin-code",)
-CODE_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/puffin-code")
+CODE_BIN_NAMES: Final[tuple] = ("mling-code",)
+CODE_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-code")
 
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
 CODE_MODE_HOST_NAME: Final[str] = "codex-code-mode-host"
 
 # Upstream's release profile keeps line tables (`debug = "line-tables-only"`, `strip = false`) so
-# its CI can archive symbols, and strips only when it packages. Built as-is, puffin-codex is 1.4 GB
+# its CI can archive symbols, and strips only when it packages. Built as-is, mightling-codex is 1.4 GB
 # rather than ~315 MB -- and the runner reads the whole file on every launch to recover its system
 # prompt. Overridden through Cargo's environment rather than a patch, so it touches no Codex source,
 # and applied at compile time, which also spares generating debug info that would be thrown away.
@@ -123,7 +123,7 @@ RUSTY_V8_PROFILE: Final[str] = "ptrcomp_sandbox_release"
 
 class CodexBrandedBuilder:
     """
-    Builds and installs the Puffin-branded Codex from the submodule plus the patch series.
+    Builds and installs the Mightling-branded Codex from the submodule plus the patch series.
     """
 
     @classmethod
@@ -132,7 +132,7 @@ class CodexBrandedBuilder:
         Returns where the branded executable is installed.
 
         Returns:
-            str: Absolute path to `puffin-codex`, whether or not it has been built yet.
+            str: Absolute path to `mightling-codex`, whether or not it has been built yet.
         """
         return os.path.join(INSTALL_DIR, "bin", BRANDED_EXECUTABLE_NAME)
 
@@ -141,15 +141,15 @@ class CodexBrandedBuilder:
         """
         Tells a checkout from a release install.
 
-        Until 2026-10-02 a release install was treated as a stale build: `puffin-admin run` and
+        Until 2026-10-02 a release install was treated as a stale build: `mling-admin run` and
         `codex build` installed rustup and then died with FileNotFoundError on the missing
-        `puffin-web-rs/` (measured with the v1.3.0 wheel in a scratch home).
+        `mling-web-rs/` (measured with the v1.3.0 wheel in a scratch home).
 
         Returns:
             bool: True if the patch series and the launcher crate are beside the package, i.e.
-            `puffin` can be built here.
+            `mling` can be built here.
         """
-        return os.path.isdir(CODEX_PATCH_DIR) and os.path.isdir(PUFFIN_CRATE_DIR)
+        return os.path.isdir(CODEX_PATCH_DIR) and os.path.isdir(MIGHTLING_CRATE_DIR)
 
     @classmethod
     def binaries_installed(cls, names: tuple) -> bool:
@@ -216,13 +216,13 @@ class CodexBrandedBuilder:
             return None
         digest = hashlib.sha256()
         digest.update(repr(sorted(RELEASE_PROFILE_OVERRIDES.items())).encode())
-        digest.update(f"version={cls.puffin_version()}".encode())
+        digest.update(f"version={cls.mightling_version()}".encode())
         for patch in cls.patches():
             digest.update(os.path.basename(patch).encode())
             with open(patch, "rb") as handle:
                 digest.update(handle.read())
         for path in cls.launcher_files():
-            digest.update(os.path.relpath(path, PUFFIN_CRATE_DIR).encode())
+            digest.update(os.path.relpath(path, MIGHTLING_CRATE_DIR).encode())
             with open(path, "rb") as handle:
                 digest.update(handle.read())
         return f"{commit[:12]}-{digest.hexdigest()[:12]}"
@@ -233,9 +233,9 @@ class CodexBrandedBuilder:
         Lists the launcher crate's source files, in a stable order.
 
         Returns:
-            List[str]: Absolute paths under `puffin-rs/`, excluding any local build output.
+            List[str]: Absolute paths under `mling-rs/`, excluding any local build output.
         """
-        return cls.crate_files(PUFFIN_CRATE_DIR)
+        return cls.crate_files(MIGHTLING_CRATE_DIR)
 
     @classmethod
     def crate_files(cls, crate_dir: str) -> List[str]:
@@ -311,8 +311,8 @@ class CodexBrandedBuilder:
         # build, so a file carrying its original, older mtime can be taken as already compiled even
         # though its content changed -- and the stale launcher gets linked in.
         shutil.copytree(
-            PUFFIN_CRATE_DIR,
-            os.path.join(source_dir, PUFFIN_CRATE_DEST),
+            MIGHTLING_CRATE_DIR,
+            os.path.join(source_dir, MIGHTLING_CRATE_DEST),
             ignore=shutil.ignore_patterns("target"),
             copy_function=shutil.copy,
         )
@@ -325,26 +325,26 @@ class CodexBrandedBuilder:
                 print(f"💡 The patches are written against {CODEX_RELEASE_TAG}; refresh them after a submodule bump.")
                 return False
             subprocess.run(["git", "apply", patch], cwd=source_dir, check=True)
-        return cls.stamp_version(os.path.join(source_dir, "codex-rs", "Cargo.toml"), cls.puffin_version())
+        return cls.stamp_version(os.path.join(source_dir, "codex-rs", "Cargo.toml"), cls.mightling_version())
 
     @classmethod
-    def puffin_version(cls) -> str:
+    def mightling_version(cls) -> str:
         """
-        The version `puffin` reports: the release being built (`PUFFIN_VERSION`, which the release
+        The version `mling` reports: the release being built (`MIGHTLING_VERSION`, which the release
         workflow sets), else this package's own version.
 
         Returns:
             str: A version such as `1.4.1`.
         """
         from dreamference import __version__
-        return os.environ.get("PUFFIN_VERSION") or __version__
+        return os.environ.get("MIGHTLING_VERSION") or __version__
 
     @classmethod
     def stamp_version(cls, manifest: str, version: str) -> bool:
         """
         Sets the exported workspace's version, so that every place the binaries read
         `CARGO_PKG_VERSION` -- `--version`, the session header, the status card, `exec`'s banner,
-        `doctor` -- reports Puffin's release rather than the upstream tag it was forked from. The
+        `doctor` -- reports Mightling's release rather than the upstream tag it was forked from. The
         export is edited, never the submodule, and no patch is needed.
 
         Args:
@@ -478,7 +478,7 @@ class CodexBrandedBuilder:
             force (bool): Rebuild even if the installed binaries match the current inputs.
 
         Returns:
-            bool: True if an up-to-date `puffin` and its web commands are installed afterwards.
+            bool: True if an up-to-date `mling` and its web commands are installed afterwards.
         """
         if not cls.has_source():
             return cls._release_install_report()
@@ -494,16 +494,16 @@ class CodexBrandedBuilder:
         What `build()` does where there is nothing to build from: says so, and refreshes the links.
 
         Returns:
-            bool: True if the release's `puffin` is installed.
+            bool: True if the release's `mling` is installed.
         """
         if cls.is_current():
             cls.link_onto_path()
-            print(f"✅ puffin is installed from a release ({cls.executable_path()}); there is no "
-                  "source here to build it from. `puffin update` installs a newer release.")
+            print(f"✅ mling is installed from a release ({cls.executable_path()}); there is no "
+                  "source here to build it from. `mling update` installs a newer release.")
             return True
-        print("❌ puffin is not installed, and this is not a checkout, so it cannot be built here.")
+        print("❌ mling is not installed, and this is not a checkout, so it cannot be built here.")
         print("💡 Install the release's binaries with install.sh (see the README), or clone the "
-              "repository and run `puffin-admin codex build` there.")
+              "repository and run `mling-admin codex build` there.")
         return False
 
     @classmethod
@@ -515,7 +515,7 @@ class CodexBrandedBuilder:
             force (bool): Rebuild even if the installed binaries match the current inputs.
 
         Returns:
-            bool: True if an up-to-date `puffin` is installed afterwards.
+            bool: True if an up-to-date `mling` is installed afterwards.
         """
         if not force and cls.is_current():
             # Cheap and idempotent, so an install that predates a link still gets it.
@@ -532,7 +532,7 @@ class CodexBrandedBuilder:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                print("⏳ Another puffin build is running; waiting for it to finish...")
+                print("⏳ Another mling build is running; waiting for it to finish...")
                 fcntl.flock(lock, fcntl.LOCK_EX)
             if not force and cls.is_current():
                 return True
@@ -544,7 +544,7 @@ class CodexBrandedBuilder:
         The build itself; `build()` holds the lock around it.
 
         Returns:
-            bool: True if an up-to-date `puffin` is installed afterwards.
+            bool: True if an up-to-date `mling` is installed afterwards.
         """
         # The toolchain version itself is pinned by codex-rs/rust-toolchain.toml; rustup fetches it
         # on the first cargo invocation, so only rustup has to exist beforehand.
@@ -572,9 +572,9 @@ class CodexBrandedBuilder:
             "-p", "codex-cli", "--bin", CARGO_BIN_NAME,
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
-        print(f"🔨 Building puffin (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
+        print(f"🔨 Building mling (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
         if subprocess.call(command, cwd=os.path.join(source_dir, "codex-rs"), env=environment) != 0:
-            print("❌ The puffin build failed; see the cargo output above.")
+            print("❌ The mling build failed; see the cargo output above.")
             return False
 
         release_dir = os.path.join(BUILD_CACHE_DIR, "target", "release")
@@ -642,7 +642,7 @@ class CodexBrandedBuilder:
         cls, crate_dir: str, cache_dir: str, stamp_name: str, bin_names: tuple, force: bool = False
     ) -> bool:
         """
-        Builds a standalone crate of Puffin's commands and installs its binaries beside `puffin`.
+        Builds a standalone crate of Mightling's commands and installs its binaries beside `mling`.
 
         Unlike the Codex build this compiles the crate in place, with `--locked` against its own
         committed lockfile, into its own target directory: it is Dreamference's source, not an
@@ -688,7 +688,7 @@ class CodexBrandedBuilder:
     @classmethod
     def web_tools_are_current(cls) -> bool:
         """
-        Checks that `puffin-search` and `puffin-fetch` are installed and built from current source.
+        Checks that `mling-search` and `mling-fetch` are installed and built from current source.
 
         Returns:
             bool: True if no rebuild is needed.
@@ -698,7 +698,7 @@ class CodexBrandedBuilder:
     @classmethod
     def build_web_tools(cls, force: bool = False) -> bool:
         """
-        Builds `puffin-search` and `puffin-fetch` from `puffin-web-rs/` unless they are current.
+        Builds `mling-search` and `mling-fetch` from `mling-web-rs/` unless they are current.
 
         Args:
             force (bool): Rebuild even if the installed binaries match the source.
@@ -713,7 +713,7 @@ class CodexBrandedBuilder:
     @classmethod
     def build_code_index(cls, force: bool = False) -> bool:
         """
-        Builds `puffin-code` from `puffin-code-rs/` unless it is current.
+        Builds `mling-code` from `mling-code-rs/` unless it is current.
 
         Args:
             force (bool): Rebuild even if the installed binary matches the source.
@@ -731,7 +731,7 @@ class CodexBrandedBuilder:
         Returns a console script of the Python environment running this code, if it has one.
 
         Args:
-            name (str): The script's name, e.g. `puffin-admin`.
+            name (str): The script's name, e.g. `mling-admin`.
 
         Returns:
             Optional[str]: Absolute path of the console script beside this interpreter, or None.
@@ -742,21 +742,21 @@ class CodexBrandedBuilder:
     @classmethod
     def link_onto_path(cls) -> None:
         """
-        Points `~/.local/bin/puffin`, `puffin-admin`, `puffin-search`, `puffin-fetch` and
-        `puffin-code` at their executables.
+        Points `~/.local/bin/mling`, `mling-admin`, `mling-search`, `mling-fetch` and
+        `mling-code` at their executables.
 
-        `puffin` so it works from any shell; the others so the model can run the web and mail
-        commands its prompt names from the shell `puffin` gives it. A web command is linked only
+        `mling` so it works from any shell; the others so the model can run the web and mail
+        commands its prompt names from the shell `mling` gives it. A web command is linked only
         once its binary is installed, so a link never dangles.
         """
         cls._link(cls.executable_path(), PATH_LINK)
-        script = cls.console_script_path("puffin-admin")
+        script = cls.console_script_path("mling-admin")
         if script:
             cls._link(script, ADMIN_PATH_LINK)
         for name, link in (
-            ("puffin-search", SEARCH_PATH_LINK),
-            ("puffin-fetch", FETCH_PATH_LINK),
-            ("puffin-code", CODE_PATH_LINK),
+            ("mling-search", SEARCH_PATH_LINK),
+            ("mling-fetch", FETCH_PATH_LINK),
+            ("mling-code", CODE_PATH_LINK),
         ):
             binary = os.path.join(INSTALL_DIR, "bin", name)
             if os.access(binary, os.X_OK):

@@ -1,6 +1,6 @@
 """
-The SearXNG container behind `puffin-search`, the MCP server's web search and Onyx's web search:
-`puffin-admin searxng start`.
+The SearXNG container behind `mling-search`, the MCP server's web search and Onyx's web search:
+`mling-admin searxng start`.
 
 Until 2026-10-01 it was started by hand, from a `docker run` line in an error message, which put
 it on Docker's default bridge and gave it a copy of the host's DNS servers taken at start
@@ -41,7 +41,7 @@ class SearxngSidecar:
 
         Returns:
             List[str]: The argv. The port is published on loopback only, unless this node is
-            advertised (`puffin-admin node enable`), when `puffin-search` on other machines needs
+            advertised (`mling-admin node enable`), when `mling-search` on other machines needs
             it; the container is created on the sidecar network so its name lookups follow the
             host's resolver.
         """

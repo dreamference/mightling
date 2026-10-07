@@ -1,13 +1,13 @@
 """
-`puffin-admin night run`: works through the Night Shift queue inside a window
-(specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §5).
+`mling-admin night run`: works through the Night Shift queue inside a window
+(specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5).
 
 It never starts, stops or loads the model server, and gives way to anyone working interactively.
 Admission (§5.2) decides whether the night runs at all; after that a scheduling loop starts tasks
 while the window is open, the machine is quiet and memory admits one more, and stops them when
 the window closes.
 
-A paired node serving the same model is a second *lane* (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3):
+A paired node serving the same model is a second *lane* (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3):
 the tasks still run here, but some of them send their model requests to that node, each lane
 holding as many tasks as its own KV pool allows. A task queued with `--on <node>` is not run here
 at all: it is handed to that node, whose own runner works it (`NightShiftRemote`).
@@ -49,7 +49,7 @@ class NightShiftRunner:
     @classmethod
     def run(cls, until: Optional[str] = None, minutes: Optional[float] = None,
             idle_minutes: Optional[float] = None, night_dir: Optional[Path] = None,
-            puffin_bin: Optional[str] = None, vllm_host: Optional[str] = None,
+            mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None,
             settings: Optional[NightShiftSettings] = None, ignore_sessions: bool = False) -> int:
         """
         Runs the queue until the window closes or nothing is left.
@@ -60,10 +60,10 @@ class NightShiftRunner:
             idle_minutes: How long the model server must have been idle before starting;
                 defaults to `[night] idle_minutes` (10).
             night_dir: The queue directory; defaults to `$CODEX_HOME/night`.
-            puffin_bin: The `puffin` executable; defaults to the installed branded build.
+            mightling_bin: The `mling` executable; defaults to the installed branded build.
             vllm_host: The model server; defaults to the configured host.
             settings: Night Shift settings; defaults to the config file's.
-            ignore_sessions: Do not wait for open `puffin` TUI sessions (for testing beside one;
+            ignore_sessions: Do not wait for open `mling` TUI sessions (for testing beside one;
                 requests from them still block a start).
 
         Returns:
@@ -73,11 +73,11 @@ class NightShiftRunner:
         night_dir = night_dir or NightShiftQueue.night_dir()
         started = datetime.now().astimezone()
         end = cls.window_end(started, until, minutes, settings.window)
-        if puffin_bin is None:
+        if mightling_bin is None:
             from dreamference.runner.codex_installer import CodexInstaller
-            puffin_bin = os.environ.get("PUFFIN_NIGHT_PUFFIN_BIN") or CodexInstaller.get_codex_executable()
-        if not puffin_bin:
-            print("❌ puffin is not built: run `puffin-admin codex build` first.")
+            mightling_bin = os.environ.get("MIGHTLING_NIGHT_MIGHTLING_BIN") or CodexInstaller.get_codex_executable()
+        if not mightling_bin:
+            print("❌ mling is not built: run `mling-admin codex build` first.")
             return 1
         if vllm_host is None:
             from dreamference.config import DreamferenceConfig
@@ -102,7 +102,7 @@ class NightShiftRunner:
             if local_tasks:
                 idle = settings.idle_minutes if idle_minutes is None else idle_minutes
                 cls.ignore_sessions = ignore_sessions
-                reason = cls.admit(vllm_host, puffin_bin, idle, end)
+                reason = cls.admit(vllm_host, mightling_bin, idle, end)
                 if reason:
                     notes.append(f"Not run: {reason}. The tasks stay queued for the next night.")
                     print(f"⚠️  {reason}")
@@ -114,7 +114,7 @@ class NightShiftRunner:
                 notes.append(cls.budget_note(local["parallel"], local["budget"], local["kv_pool"], settings))
                 notes.extend(lane_notes)
                 cls.refresh_indexes(local_tasks, settings, end, notes)
-                cls.schedule(night_dir, local_tasks, settings, puffin_bin, vllm_host, end, local["parallel"],
+                cls.schedule(night_dir, local_tasks, settings, mightling_bin, vllm_host, end, local["parallel"],
                              notes, context_budget=local["budget"], lanes=lanes)
             cls.remote.collect(night_dir, sent, end, notes, wait=False)
         # Waiting for other nodes uses nothing of this machine's, so it does not hold the runner
@@ -161,7 +161,7 @@ class NightShiftRunner:
         return lanes, [NodeLanes.describe(lane) for lane in lanes[1:]] + skipped
 
     @classmethod
-    def admit(cls, vllm_host: str, puffin_bin: str, idle_minutes: float, end: datetime) -> Optional[str]:
+    def admit(cls, vllm_host: str, mightling_bin: str, idle_minutes: float, end: datetime) -> Optional[str]:
         """
         The admission checks of §5.2, in order; the first failure is the reason the night does
         not run.
@@ -172,17 +172,17 @@ class NightShiftRunner:
         if cls.host.served_model(vllm_host) is None:
             return f"the model server at {vllm_host} is not answering (the night run never starts it)"
         if not cls.host.host_safety_ok():
-            return "the host-safety checks failed (see `puffin-admin server start` for the details)"
+            return "the host-safety checks failed (see `mling-admin server start` for the details)"
         available = cls.host.mem_available_bytes()
         if available < MEMORY_RESERVE:
             return f"only {available / GIB:.1f} GiB of memory is available; a night run needs {MEMORY_RESERVE // GIB}"
         heavy = cls.host.heavy_jobs()
         if heavy:
             return "; ".join(heavy)
-        return cls.wait_for_idle(vllm_host, puffin_bin, idle_minutes, end)
+        return cls.wait_for_idle(vllm_host, mightling_bin, idle_minutes, end)
 
     @classmethod
-    def wait_for_idle(cls, vllm_host: str, puffin_bin: str, idle_minutes: float,
+    def wait_for_idle(cls, vllm_host: str, mightling_bin: str, idle_minutes: float,
                       end: datetime) -> Optional[str]:
         """
         Waits until nobody has used the model for `idle_minutes`: no TUI session, no running or
@@ -196,8 +196,8 @@ class NightShiftRunner:
         last_served: Optional[float] = None
         while True:
             now = time.time()
-            if not cls.ignore_sessions and cls.host.interactive_puffin_pids(puffin_bin):
-                return "a puffin session is open (interactive use wins)"
+            if not cls.ignore_sessions and cls.host.interactive_mightling_pids(mightling_bin):
+                return "a Mightling session is open (interactive use wins)"
             metrics = cls.host.metrics(vllm_host)
             if metrics is None:
                 return "the model server's /metrics does not answer"
@@ -216,7 +216,7 @@ class NightShiftRunner:
                         end: datetime, notes: List[str]) -> None:
         """
         Refreshes the code index of every repository with queued tasks, one at a time, before any
-        task starts, so each begins with a fresh index (code-index spec §6.3). `puffin-code` admits
+        task starts, so each begins with a fresh index (code-index spec §6.3). `mling-code` admits
         and sandboxes its own runs; a refresh that does not finish leaves the index as it was,
         which the router's answers already account for.
 
@@ -276,7 +276,7 @@ class NightShiftRunner:
 
     @classmethod
     def schedule(cls, night_dir: Path, pending: List[Dict[str, Any]], settings: NightShiftSettings,
-                 puffin_bin: str, vllm_host: str, end: datetime, parallel: int, notes: List[str],
+                 mightling_bin: str, vllm_host: str, end: datetime, parallel: int, notes: List[str],
                  context_budget: Optional[int] = None, lanes: Optional[List[Dict[str, Any]]] = None) -> None:
         """
         Starts tasks while the window is open, the machine is quiet and memory admits one more;
@@ -310,9 +310,9 @@ class NightShiftRunner:
                 for candidate in free:
                     # This machine's lane is asked exactly as before lanes existed; a replica's
                     # says it is not this machine's, so a session open here does not hold it up.
-                    blocked = cls.start_blocker(candidate["host"], puffin_bin, active, settings) \
+                    blocked = cls.start_blocker(candidate["host"], mightling_bin, active, settings) \
                         if candidate.get("node") is None else \
-                        cls.start_blocker(candidate["host"], puffin_bin, active, settings, local=False)
+                        cls.start_blocker(candidate["host"], mightling_bin, active, settings, local=False)
                     if blocked is None:
                         reason, lane = None, candidate
                         break
@@ -320,7 +320,7 @@ class NightShiftRunner:
                 if lane is not None:
                     task = queue.pop(0)
                     deadline = min(end_ts, time.time() + settings.task_timeout_s)
-                    run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline, model_host=lane["host"],
+                    run = NightShiftTaskRun(night_dir, task, settings, mightling_bin, deadline, model_host=lane["host"],
                                             context_budget=lane["budget"],
                                             model_node=lane["name"] if lane.get("node") else None)
                     run.lane_host = lane["host"]
@@ -363,7 +363,7 @@ class NightShiftRunner:
         return getattr(run, "lane_host", None) or default
 
     @classmethod
-    def start_blocker(cls, vllm_host: str, puffin_bin: str, active: List[tuple],
+    def start_blocker(cls, vllm_host: str, mightling_bin: str, active: List[tuple],
                       settings: NightShiftSettings, local: bool = True) -> Optional[str]:
         """
         Whether another task may start now (§5.5 and memory).
@@ -373,18 +373,18 @@ class NightShiftRunner:
 
         Args:
             vllm_host: The model server the task would use.
-            puffin_bin: The `puffin` executable.
+            mightling_bin: The `mling` executable.
             active: The running tasks.
             settings: Night Shift settings.
-            local: Whether that server is this machine's. An open `puffin` session here uses this
+            local: Whether that server is this machine's. An open `mling` session here uses this
                 machine's server, so it blocks this machine's lane and no other; a replica's own
                 users show up as its outside requests.
 
         Returns:
             Optional[str]: What blocks a start, or None.
         """
-        if local and not cls.ignore_sessions and cls.host.interactive_puffin_pids(puffin_bin):
-            return "a puffin session is open"
+        if local and not cls.ignore_sessions and cls.host.interactive_mightling_pids(mightling_bin):
+            return "a Mightling session is open"
         metrics = cls.host.metrics(vllm_host)
         if metrics is None:
             return "the model server's /metrics does not answer"

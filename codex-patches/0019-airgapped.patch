@@ -3,16 +3,16 @@ index c1c205d..7f99585 100644
 --- a/codex-rs/app-server/src/extensions.rs
 +++ b/codex-rs/app-server/src/extensions.rs
 @@ -96,2 +96,3 @@ pub(crate) fn thread_extensions(
-     puffin_launcher::cave::install(&mut builder);
-+    puffin_launcher::airgapped::install(&mut builder);
+     mling_launcher::cave::install(&mut builder);
++    mling_launcher::airgapped::install(&mut builder);
      codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);
 diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
 index 1ef016e..ac8d572 100644
 --- a/codex-rs/cli/src/main.rs
 +++ b/codex-rs/cli/src/main.rs
 @@ -2052,2 +2052,3 @@ async fn run_debug_prompt_input_command(
-     puffin_launcher::cave::install(&mut extensions);
-+    puffin_launcher::airgapped::install(&mut extensions);
+     mling_launcher::cave::install(&mut extensions);
++    mling_launcher::airgapped::install(&mut extensions);
      codex_skills_extension::install(&mut extensions, |config: &Config| {
 diff --git a/codex-rs/linux-sandbox/Cargo.toml b/codex-rs/linux-sandbox/Cargo.toml
 index 17b3fa1..8993fa1 100644
@@ -20,7 +20,7 @@ index 17b3fa1..8993fa1 100644
 +++ b/codex-rs/linux-sandbox/Cargo.toml
 @@ -21,2 +21,3 @@ clap = { workspace = true, features = ["derive"] }
  codex-install-context = { workspace = true }
-+puffin-airgapped = { path = "../puffin/airgapped" }
++mling-airgapped = { path = "../mling/airgapped" }
  codex-network-proxy = { workspace = true }
 diff --git a/codex-rs/linux-sandbox/src/linux_run_main.rs b/codex-rs/linux-sandbox/src/linux_run_main.rs
 index 8ef5165..6917a7e 100644
@@ -31,7 +31,7 @@ index 8ef5165..6917a7e 100644
 -    let permission_profile =
 +    let mut permission_profile =
          permission_profile.ok_or(ResolvePermissionProfileError::MissingConfiguration)?;
-+    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut permission_profile && puffin_airgapped::sealed_for_command() {
++    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut permission_profile && mling_airgapped::sealed_for_command() {
 +        *network = NetworkSandboxPolicy::Restricted;
 +    }
      let (file_system_sandbox_policy, network_sandbox_policy) =
@@ -43,7 +43,7 @@ index fc98703..8ff3f28 100644
                  .clone()
 -                .or_else(|| guardian_disabled_reason(false));
 +                .or_else(|| guardian_disabled_reason(false))
-+                .or_else(|| puffin_launcher::airgapped::full_access_refusal(self.thread_id, preset.id));
++                .or_else(|| mling_launcher::airgapped::full_access_refusal(self.thread_id, preset.id));
              let default_actions = self.permission_mode_actions(
 diff --git a/codex-rs/tui/src/chatwidget/permissions_menu.rs b/codex-rs/tui/src/chatwidget/permissions_menu.rs
 index 4fec70a..eb9fa2a 100644
@@ -51,19 +51,19 @@ index 4fec70a..eb9fa2a 100644
 +++ b/codex-rs/tui/src/chatwidget/permissions_menu.rs
 @@ -56,2 +56,3 @@ impl ChatWidget {
      ) -> Option<String> {
-+        if let Some(reason) = puffin_launcher::airgapped::full_access_refusal(self.thread_id, preset.id) { return Some(reason); }
++        if let Some(reason) = mling_launcher::airgapped::full_access_refusal(self.thread_id, preset.id) { return Some(reason); }
          self.config
 diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 index 59f8446..7c9565f 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -540,2 +540,3 @@ impl ChatWidget {
-             SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::session_command(self.thread_id, "", matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Night => self.add_plain_history_lines(mling_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(mling_launcher::airgapped::session_command(self.thread_id, "", matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Ide => {
 @@ -784,2 +785,3 @@ impl ChatWidget {
-             SlashCommand::Night => self.add_plain_history_lines(puffin_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Airgapped => self.add_plain_history_lines(puffin_launcher::airgapped::session_command(self.thread_id, trimmed, matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Night => self.add_plain_history_lines(mling_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Airgapped => self.add_plain_history_lines(mling_launcher::airgapped::session_command(self.thread_id, trimmed, matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
 @@ -1211,2 +1213,3 @@ impl ChatWidget {
              | SlashCommand::Night

@@ -1,7 +1,7 @@
 [package]
-name = "puffin-app"
+name = "mling-app"
 version = "1.4.1"
-description = "Desktop window onto the local Puffin deployment"
+description = "Desktop window onto the local Mightling deployment"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -10,12 +10,12 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-# Finds the Puffin node on the local network when this machine is not one (src/discover.rs).
+# Finds the Mightling node on the local network when this machine is not one (src/discover.rs).
 mdns-sd = { version = "0.21.4", default-features = false }
-# The Work window's bridge to `puffin app-server` (src/bridge.rs); its pure half is ../bridge.
-puffin-desktop-bridge = { path = "../bridge" }
+# The Work window's bridge to `mling app-server` (src/bridge.rs); its pure half is ../bridge.
+mightling-desktop-bridge = { path = "../bridge" }
 # The air-gap level, resolved as the sandbox helper and the launcher resolve it (§7, §8.2).
-puffin-airgapped = { path = "../../puffin-rs/airgapped" }
+mling-airgapped = { path = "../../mling-rs/airgapped" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

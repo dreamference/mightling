@@ -1,4 +1,4 @@
-"""The agent's web commands are Rust binaries (puffin-web-rs/), not console scripts of this virtualenv."""
+"""The agent's web commands are Rust binaries (mling-web-rs/), not console scripts of this virtualenv."""
 
 import os
 
@@ -11,7 +11,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.mark.parametrize("retired", [["search", "q"], ["fetch", "https://example.com"]])
-def test_puffin_admin_no_longer_has_the_web_subcommands(retired):
+def test_mightling_admin_no_longer_has_the_web_subcommands(retired):
     with pytest.raises(SystemExit):
         DreamferenceCLIController.build_parser().parse_args(retired)
 
@@ -22,11 +22,11 @@ def test_the_web_commands_are_not_console_scripts():
     # instead of the binary the builder installs.
     with open(os.path.join(REPO_ROOT, "setup.py")) as handle:
         setup = handle.read()
-    assert "puffin-search=" not in setup and "puffin-fetch=" not in setup
+    assert "mling-search=" not in setup and "mling-fetch=" not in setup
 
 
 def test_the_builder_installs_both_web_commands():
-    assert builder_module.WEB_BIN_NAMES == ("puffin-search", "puffin-fetch")
+    assert builder_module.WEB_BIN_NAMES == ("mling-search", "mling-fetch")
     with open(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.toml")) as handle:
         manifest = handle.read()
     for name in builder_module.WEB_BIN_NAMES:

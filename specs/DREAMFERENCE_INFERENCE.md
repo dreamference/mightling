@@ -1,4 +1,4 @@
-# Puffin GB10 Inference Stack
+# Mightling GB10 Inference Stack
 
 > **Version:** 1.2.0
 > **Subject:** vLLM Launch Engine, Auto-Configuration, & Performance Optimization
@@ -21,10 +21,10 @@
 
 ## 1. GB10 Inference Stack Overview
 
-The server is started only by `puffin-admin server start`. Agents never start it: they wait for it (`DREAMFERENCE_AGENTS.md` §6, or `puffin`'s launcher).
+The server is started only by `mling-admin server start`. Agents never start it: they wait for it (`DREAMFERENCE_AGENTS.md` §6, or `mling`'s launcher).
 
 ```
-puffin-admin server start [--model <alias>]
+mling-admin server start [--model <alias>]
     ↓
 Resolve alias → HF repo, recipe (launch_overrides), Docker image
     ↓
@@ -81,7 +81,7 @@ It is passed to the container as `-e HF_TOKEN=…`. When none is set, `huggingfa
 ### 3.2. Speculative token count
 
 - **With a recipe:** its `speculative_config` carries the count. The DFlash entries use 12.
-- **With an explicit draft:** `puffin-admin server start` passes the config's resolved `num_speculative_tokens` — `--num-speculative-tokens` > `DREAMFERENCE_SPECULATIVE_TOKENS` > file > `DEFAULT_SPECULATIVE_TOKENS = 8` — so a draft without the flag gets 8, not the recipe's 12. `start_server()` / `build_launch_command()` default to 5 only when called directly from Python.
+- **With an explicit draft:** `mling-admin server start` passes the config's resolved `num_speculative_tokens` — `--num-speculative-tokens` > `DREAMFERENCE_SPECULATIVE_TOKENS` > file > `DEFAULT_SPECULATIVE_TOKENS = 8` — so a draft without the flag gets 8, not the recipe's 12. `start_server()` / `build_launch_command()` default to 5 only when called directly from Python.
 - **Without a draft**, the depth argument is ignored and the recipe's config is passed exactly.
 
 Until 2026-09-29 the raw flag was passed, and an omitted `--num-speculative-tokens` reached the command line as `None`.
@@ -174,8 +174,8 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 
 **Four things found on the first launches, each now handled in code:**
 - **Revisions.** SGLang drops `--revision` on some offline config lookups, which then resolve through `refs/main`; a download by commit writes none, and the first launch failed in a restart loop. Pinned checkpoints are passed as their snapshot directories.
-- **The chat template.** Qwen3.8's own template answered HTTP 400 to the reasoning efforts `high`/`minimal` that Codex offers, and refused a system message after the first. `ChatTemplatePatcher` writes a patched copy under `~/.cache/dreamference/sglang/chat-templates` before launch (`high`/`max` → `xhigh`, `minimal` → `low`, a late system message becomes a `<system-reminder>`), and the start stops if an anchor no longer matches. The default effort also drops from `xhigh` to `medium`: the recipe's author measured `xhigh` at 3.19× the thinking tokens and a lower HumanEval (93.9% against 98.2%). puffin sends `none` and is unaffected.
-- **The sampler.** FlashInfer's kernel for *untruncated* sampling (top_p 1 and no top_k, which is what the completions endpoint does by default, since only the chat path applies the checkpoint's generation defaults) returned token 0, `!`, for 16 of 16 sampled completions requests on this GB10. Any top_p < 1 or any top_k was clean, and so was greedy decoding, which is why chat and puffin never showed it. The NVFP4 canary in `server start`, which samples with defaults on purpose, caught it. The recipe passes `--sampling-backend pytorch`: 0 of 16 corrupted, no measurable speed cost.
+- **The chat template.** Qwen3.8's own template answered HTTP 400 to the reasoning efforts `high`/`minimal` that Codex offers, and refused a system message after the first. `ChatTemplatePatcher` writes a patched copy under `~/.cache/dreamference/sglang/chat-templates` before launch (`high`/`max` → `xhigh`, `minimal` → `low`, a late system message becomes a `<system-reminder>`), and the start stops if an anchor no longer matches. The default effort also drops from `xhigh` to `medium`: the recipe's author measured `xhigh` at 3.19× the thinking tokens and a lower HumanEval (93.9% against 98.2%). mling sends `none` and is unaffected.
+- **The sampler.** FlashInfer's kernel for *untruncated* sampling (top_p 1 and no top_k, which is what the completions endpoint does by default, since only the chat path applies the checkpoint's generation defaults) returned token 0, `!`, for 16 of 16 sampled completions requests on this GB10. Any top_p < 1 or any top_k was clean, and so was greedy decoding, which is why chat and mling never showed it. The NVFP4 canary in `server start`, which samples with defaults on purpose, caught it. The recipe passes `--sampling-backend pytorch`: 0 of 16 corrupted, no measurable speed cost.
 - **The compile cache.** vLLM's signature-based reset is skipped for SGLang, whose torch.compile output lives under `~/.cache/dreamference/sglang/inductor`.
 
 **Measured on this GB10 (2026-09-29):** single stream, temperature 0, thinking off, median of three after a warm-up, decode net of time to first token:
@@ -188,7 +188,7 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 | Prefill, 13K fresh tokens | 1,688 tok/s | not measured |
 | Prefill, 116K fresh tokens (needle retrieved) | 1,004 tok/s | beyond its 32K window |
 | Image input | correct ("Red; 42") | — |
-| 4 puffin tasks at once | all pass, 23 s wall, ≥39.8 GB available | not measured |
+| 4 mling tasks at once | all pass, 23 s wall, ≥39.8 GB available | not measured |
 | Host memory available while serving | ~38.7 GB | ~10 GB |
 | Live slash-command suite | 75 pass, 2 skip (651 s with the fixed harness; 1,101 s before) | 75 pass, 2 skip (807 s, old harness) |
 
@@ -231,7 +231,7 @@ Every current matrix entry sets its own context length and utilisation.
 
 On GB10, host RAM and GPU memory are the same memory. A load that exhausts it can freeze the whole machine rather than OOM the container. There are two layers, both of which must be kept when touching `start_server()`:
 
-- **Before the load:** `check_host_safety()` inspects swap (at least 64 GB, `MIN_SWAP_GB`), `sysctl` values (`vm.min_free_kbytes` ≥ 1,048,576 and `vm.watermark_scale_factor` ≥ 200) and whether `earlyoom` or `systemd-oomd` is present and configured (earlyoom's memory threshold at most 6%, `MAX_EARLYOOM_MEM_PCT`; the suggested setting is `-m 5,2 -s 100 -r 60`). `puffin-admin server start` also refuses while a Night Shift run holds its lock, and stops running `puffin-index-*` scopes first. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. Either one aborts with an explanation rather than risking a lockup.
+- **Before the load:** `check_host_safety()` inspects swap (at least 64 GB, `MIN_SWAP_GB`), `sysctl` values (`vm.min_free_kbytes` ≥ 1,048,576 and `vm.watermark_scale_factor` ≥ 200) and whether `earlyoom` or `systemd-oomd` is present and configured (earlyoom's memory threshold at most 6%, `MAX_EARLYOOM_MEM_PCT`; the suggested setting is `-m 5,2 -s 100 -r 60`). `mling-admin server start` also refuses while a Night Shift run holds its lock, and stops running `mightling-index-*` scopes first. `start_server()` then checks that the weights plus drafters fit the arena (`total × gpu_memory_utilization`), that at least `HOST_MEMORY_RESERVE_GB` (12 GB) stays outside it, and that the arena plus transient load overhead fits in currently free memory. Either one aborts with an explanation rather than risking a lockup.
 - **During the load, `MemoryPressureWatchdog` (`psi_watchdog.py`):** it samples `/proc/pressure/memory` once a second and resolves the container's cgroup. It trips when `full avg10` ≥ 60% holds for 5 s (`PSI_FULL_LIMIT_PCT`, `PSI_TRIP_DURATION_S`), or at once when `full avg60` ≥ 25% (`PSI_SUSTAINED_AVG60_PCT`). The kill paths, in order:
   1. direct `SIGKILL` to the cgroup's PIDs, if permitted;
   2. a kill request over dockerd's unix socket;
@@ -246,7 +246,7 @@ The diffusion sidecar has no watchdog: its fixed `--memory=8g` limit (swap equal
 - `ModelLoadingMonitor` pipes the container's logs to stdout and prints `[HH:MM:SS] 📊 Reserved memory (Docker): …` every 10 seconds. It tracks loading stages and polls `/v1/models` until healthy.
 - `VLLMStartupMonitor` adds memory-growth tracking and stall detection with progress percentages.
 - `server start` exits once healthy, and the server keeps running.
-- Ctrl+C during the wait prints `⏹️  Shutting down server...` and terminates the monitored `docker run` process: `terminate`, then `kill` after 5 s. Follow it with `puffin-admin server stop` to be certain the container is gone.
+- Ctrl+C during the wait prints `⏹️  Shutting down server...` and terminates the monitored `docker run` process: `terminate`, then `kill` after 5 s. Follow it with `mling-admin server stop` to be certain the container is gone.
 
 ---
 

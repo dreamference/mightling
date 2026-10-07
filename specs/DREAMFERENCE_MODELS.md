@@ -1,4 +1,4 @@
-# Puffin Supported Models & Hardware
+# Mightling Supported Models & Hardware
 
 > **Version:** 1.2.0
 > **Subject:** NVIDIA GB10 Model Matrix & Default Model Selection
@@ -49,7 +49,7 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 
 **Aliases outside the matrix:** a name that is not a matrix key (e.g. `qwen2.5-coder-32b`) still resolves to a tool-call parser by name guess (`hermes` / `mistral`), but has no recipe. The Qwen 2.5 Coder, DeepSeek-R1-Distill, Llama 3.3, StarCoder2 and DeepSeek-V3 entries this document used to list are no longer in the registry.
 
-**Vision:** `supports_vision` is recorded per checkpoint from its `config.json`, never inferred from the alias. `puffin-admin puffin configure` sends it to Onyx as `supports_image_input`, and registers the default vision model.
+**Vision:** `supports_vision` is recorded per checkpoint from its `config.json`, never inferred from the alias. `mling-admin chat configure` sends it to Onyx as `supports_image_input`, and registers the default vision model.
 
 ---
 
@@ -57,7 +57,7 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 
 Decode speed on GB10 is bounded by memory bandwidth, not compute. That favours mixture-of-experts models, whose speed tracks *active* parameters, and speculative decoding, which turns one bandwidth-bound step into several accepted tokens.
 
-**`qwen3.8-27b-nvfp4-dflash2`**, the default since 2026-09-29, is Qwen3.8-27B in NVFP4 with the DFlash2 drafter. DFlash2 runs only in SGLang, which is why this entry names its engine. Measured single-stream, greedy, on this machine: prose 25.5, code 50.3, JSON 87.0 tok/s; prefill about 1,700 tok/s (about 1,000 at 116K tokens); about 38.7 GB of host memory still free; four `puffin` tasks at once finished in 23 s. It matches the 122B's decode speed with a 262k context where the 122B has 32k, and leaves the host far more memory. `DREAMFERENCE_INFERENCE.md` records the four traps its recipe handles.
+**`qwen3.8-27b-nvfp4-dflash2`**, the default since 2026-09-29, is Qwen3.8-27B in NVFP4 with the DFlash2 drafter. DFlash2 runs only in SGLang, which is why this entry names its engine. Measured single-stream, greedy, on this machine: prose 25.5, code 50.3, JSON 87.0 tok/s; prefill about 1,700 tok/s (about 1,000 at 116K tokens); about 38.7 GB of host memory still free; four `mling` tasks at once finished in 23 s. It matches the 122B's decode speed with a 262k context where the 122B has 32k, and leaves the host far more memory. `DREAMFERENCE_INFERENCE.md` records the four traps its recipe handles.
 
 **`qwen3.5-122b-a10b-hybrid-dflash`**, the fallback, combines:
 - Qwen 3.5 122B-A10B as Intel's AutoRound INT4 checkpoint;
@@ -74,7 +74,7 @@ Two upstream defaults are deliberately **not** used:
 
 The NVFP4 entries only work on an SM121-safe kernel path. The CUTLASS FP4 kernels are compiled for the SM120 ISA, and on GB10 they run without erroring while producing corrupt output. The recognisable symptom is a response made only of `!` characters. The recipes pin the FlashInfer b12x path, which needs vLLM with the May 2026 SM12x backends.
 
-**Post-launch canary:** `puffin-admin server start` runs one completion (`"Hello"`, 10 tokens) after the server is ready, **only when the alias contains `nvfp4`** (the default's does). It prints `✅ NVFP4 Canary Passed` or `❌ NVFP4 Canary Failed: Output corrupted (all '!')`. It does **not** switch models or relaunch; recovery is manual. `puffin-admin main-model inspect` runs a broader correctness canary on any model.
+**Post-launch canary:** `mling-admin server start` runs one completion (`"Hello"`, 10 tokens) after the server is ready, **only when the alias contains `nvfp4`** (the default's does). It prints `✅ NVFP4 Canary Passed` or `❌ NVFP4 Canary Failed: Output corrupted (all '!')`. It does **not** switch models or relaunch; recovery is manual. `mling-admin main-model inspect` runs a broader correctness canary on any model.
 
 ---
 

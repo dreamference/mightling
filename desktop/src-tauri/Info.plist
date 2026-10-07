@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Merged into the macOS bundle by Tauri. macOS 15 and later gate local-network access per
-     application: without these two keys the browse for a Puffin node and the forwarder's
-     connection to it fail silently, with no prompt (specs/DREAMFERENCE_PUFFIN_NODE.md §8.2). -->
+     application: without these two keys the browse for a Mightling node and the forwarder's
+     connection to it fail silently, with no prompt (specs/DREAMFERENCE_MIGHTLING_NODE.md §8.2). -->
 <plist version="1.0">
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Puffin looks for the Puffin node on your local network and shows its web UI.</string>
+  <string>Mightling looks for the Mightling node on your local network and shows its web UI.</string>
   <key>NSBonjourServices</key>
   <array>
-    <string>_puffin-node._tcp</string>
+    <string>_mightling-node._tcp</string>
   </array>
 </dict>
 </plist>

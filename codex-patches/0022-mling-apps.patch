@@ -1,0 +1,21 @@
+diff --git a/codex-rs/app-server/src/request_processors/apps_processor.rs b/codex-rs/app-server/src/request_processors/apps_processor.rs
+index be74a8f..bdbcd7b 100644
+--- a/codex-rs/app-server/src/request_processors/apps_processor.rs
++++ b/codex-rs/app-server/src/request_processors/apps_processor.rs
+@@ -72,2 +72,7 @@ impl AppsRequestProcessor {
+ 
++        if config.features.enabled(Feature::Apps) && let Some(apps) = mling_launcher::apps::list() {
++            let apps = AppToolPolicyEvaluator::new(&config.config_layer_stack).apply_app_enabled_state(serde_json::from_value(apps).unwrap_or_default());
++            let start = params.cursor.as_deref().and_then(|cursor| cursor.parse().ok()).unwrap_or(0);
++            return paginate_apps(&apps, start, params.limit).map(Some);
++        }
+         let auth = self.auth_manager.auth().await;
+diff --git a/codex-rs/tui/src/chatwidget/connectors.rs b/codex-rs/tui/src/chatwidget/connectors.rs
+index eaa2c26..0167bac 100644
+--- a/codex-rs/tui/src/chatwidget/connectors.rs
++++ b/codex-rs/tui/src/chatwidget/connectors.rs
+@@ -150,3 +150,3 @@ impl ChatWidget {
+     pub(super) fn connectors_enabled(&self) -> bool {
+-        self.config.features.enabled(Feature::Apps) && self.has_chatgpt_account
++        self.config.features.enabled(Feature::Apps) && (self.has_chatgpt_account || mling_launcher::apps::offered())
+     }

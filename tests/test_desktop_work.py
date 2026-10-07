@@ -1,4 +1,4 @@
-"""The desktop app's Work window (specs/DREAMFERENCE_PUFFIN_DESKTOP.md).
+"""The desktop app's Work window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md).
 
 Chat stays exactly as it was, Chat gets no IPC, the bridge only sends methods the pinned Codex
 has, and the committed protocol types are the ones the pinned Codex would generate.
@@ -22,8 +22,8 @@ NPM = "/usr/bin/npm"
 # The Chat window as it was before Work existed (tauri.conf.json at 2026-10-03). Any difference is
 # a change to what every current user sees.
 CHAT_WINDOW = {
-    "label": "puffin",
-    "title": "Puffin",
+    "label": "mling",
+    "title": "Mightling",
     "url": "http://localhost:3000/app",
     "width": 1280,
     "height": 860,
@@ -49,7 +49,7 @@ def test_the_chat_window_is_exactly_as_it_was():
     assert tauri_config()["app"]["windows"] == [CHAT_WINDOW]
     main = (TAURI / "src" / "main.rs").read_text(encoding="utf-8")
     # Its sign-in script and the forwarder's port rewrite still reach it, and only it.
-    assert 'const CHAT_LABEL: &str = "puffin";' in main
+    assert 'const CHAT_LABEL: &str = "mling";' in main
     assert "webview.label() == CHAT_LABEL && payload.event()" in main
     assert ".filter(|w| w.label == CHAT_LABEL)" in main
     assert 'format!("http://localhost:{port}/app")' in main
@@ -62,7 +62,7 @@ def test_chat_has_no_ipc_and_work_only_its_own():
     # window but Work. Onyx's page must never reach the agent (§4.2, §8.1).
     for path in (TAURI / "capabilities").iterdir():
         capability = json.loads(path.read_text(encoding="utf-8"))
-        assert "puffin" not in capability.get("windows", []), path.name
+        assert "mling" not in capability.get("windows", []), path.name
         assert "remote" not in capability, path.name
     bridge = (TAURI / "src" / "bridge.rs").read_text(encoding="utf-8")
     commands = re.findall(r"#\[tauri::command\]\npub fn (\w+)\(", bridge)
@@ -123,6 +123,6 @@ def test_no_npm_means_no_build():
 
 @pytest.mark.skipif(not DesktopProtocolTypes.has_source(), reason="needs the Codex submodule and zstd")
 def test_the_committed_protocol_types_are_the_pinned_codexs():
-    # `puffin app-server generate-ts --experimental` writes exactly these: a Codex bump that moves
+    # `mling app-server generate-ts --experimental` writes exactly these: a Codex bump that moves
     # the protocol must regenerate them (DesktopProtocolTypes.write()) and fix what stops compiling.
     assert DesktopProtocolTypes.drift() == []

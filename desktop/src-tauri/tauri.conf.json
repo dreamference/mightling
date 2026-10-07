@@ -1,16 +1,16 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Puffin",
+  "productName": "Mightling",
   "version": "1.4.1",
-  "identifier": "dev.dreamference.puffin",
+  "identifier": "dev.dreamference.mightling",
   "build": {
     "frontendDist": "../ui/dist"
   },
   "app": {
     "windows": [
       {
-        "label": "puffin",
-        "title": "Puffin",
+        "label": "mling",
+        "title": "Mightling",
         "url": "http://localhost:3000/app",
         "width": 1280,
         "height": 860,
@@ -38,7 +38,13 @@
       "icons/icon.png"
     ],
     "category": "Productivity",
-    "shortDescription": "Puffin \u2014 local AI assistant",
-    "longDescription": "Desktop window onto Puffin, the local Onyx deployment served from this machine."
+    "shortDescription": "Mightling \u2014 local AI assistant",
+    "longDescription": "Desktop window onto Mightling, the local Onyx deployment served from this machine.",
+    "linux": {
+      "deb": {
+        "conflicts": ["puffin"],
+        "replaces": ["puffin"]
+      }
+    }
   }
 }

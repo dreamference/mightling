@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measures what a masking move costs the model server's prefix cache.
 
-This is the probe of specs/DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md §1.7. It sends a synthetic
+This is the probe of specs/DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md §1.7. It sends a synthetic
 conversation to the local model server's `/v1/responses` endpoint, one request per turn,
 then three masking moves that replace the oldest turns with one-line placeholders, and
 prints the input and cached tokens the server reports for each request. Every request

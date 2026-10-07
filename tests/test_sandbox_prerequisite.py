@@ -1,4 +1,4 @@
-"""The check `puffin-admin` makes on every run: can bubblewrap sandbox from an ordinary login?
+"""The check `mling-admin` makes on every run: can bubblewrap sandbox from an ordinary login?
 
 Nothing here runs sudo, `systemd-run` or `apparmor_parser -r`: the probe, the root commands and
 the Night Shift timer are replaced, and the decision file lives in the test's home.
@@ -64,7 +64,7 @@ def test_protocol_and_host_commands_are_never_asked(machine, command, subcommand
     assert SandboxPrerequisite.gate(command, subcommand) is True
 
 
-def test_a_command_puffin_runs_is_never_asked(machine, monkeypatch):
+def test_a_command_mightling_runs_is_never_asked(machine, monkeypatch):
     monkeypatch.setenv("CODEX_THREAD_ID", "019a-test")
     assert SandboxPrerequisite.gate("night", "run") is True
 
@@ -134,7 +134,7 @@ def test_no_profile_is_offered_when_apparmor_is_not_the_cause(machine, monkeypat
     assert machine["root"] == [] and "other than" in capsys.readouterr().out
 
 
-def test_every_run_of_puffin_admin_passes_through_the_check(monkeypatch):
+def test_every_run_of_mightling_admin_passes_through_the_check(monkeypatch):
     seen = []
     monkeypatch.setattr(SandboxPrerequisite, "gate",
                         classmethod(lambda cls, command, subcommand: seen.append((command, subcommand)) or False))

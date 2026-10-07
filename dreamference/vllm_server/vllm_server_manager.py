@@ -386,7 +386,7 @@ class VLLMServerManager:
         elif not dockerfile_path.is_file():
             # A release install has the package but not the repository's Dockerfile beside it.
             print(f"❌ Docker image '{docker_image}' is not present, and it is built from the "
-                  "Dockerfile in Puffin's repository, which a release install does not have.")
+                  "Dockerfile in Mightling's repository, which a release install does not have.")
             print("💡 Clone the repository and run `docker build -t "
                   f"{docker_image} .` there, or use a model whose recipe pulls its image "
                   "(the default model does).")
@@ -890,17 +890,17 @@ class VLLMServerManager:
     @classmethod
     def _stop_index_scopes(cls) -> None:
         """
-        Stops every running `puffin-code` index run before a model loads.
+        Stops every running `mling-code` index run before a model loads.
 
-        puffin-code runs its indexers in `puffin-index-*` scopes of the user's systemd
-        (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §9.2) and stops them itself when it sees a load,
+        mling-code runs its indexers in `mightling-index-*` scopes of the user's systemd
+        (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §9.2) and stops them itself when it sees a load,
         but only after the load has begun; stopping them here keeps `check_host_safety()`'s view
         of free memory true. A stopped run is recorded `deferred: stopped` (no peak is recorded for it) and retried later.
         Without a user systemd (a container, CI) there is nothing to stop.
         """
         try:
             subprocess.run(
-                ["systemctl", "--user", "stop", "puffin-index-*"],
+                ["systemctl", "--user", "stop", "mightling-index-*"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=30,
@@ -999,7 +999,7 @@ class VLLMServerManager:
                 f"{listed}\n\n"
                 f"These guard against the freeze mode this hardware is prone to: unreclaimable\n"
                 f"driver-pinned pages starving the host with no OOM kill to end it.\n\n"
-                f"💡 `puffin-admin host setup` applies these for you (sudo asks for your password).\n"
+                f"💡 `mling-admin host setup` applies these for you (sudo asks for your password).\n"
             )
             sys.exit(1)
 
@@ -1543,7 +1543,7 @@ class VLLMServerManager:
         hw = HardwareManager.detect_gb10_hardware()
         if not hw.is_gb10:
             raise RuntimeError(
-                "puffin-admin server start requires an NVIDIA GB10 machine (DGX Spark or one of its OEM "
+                "mling-admin server start requires an NVIDIA GB10 machine (DGX Spark or one of its OEM "
                 "siblings): the model recipes and host-safety checks are written for its unified memory."
             )
 

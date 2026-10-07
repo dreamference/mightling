@@ -14,7 +14,7 @@ the torch + transformers build for this architecture — with
 
 No PSI watchdog and no host-safety gate: the container runs under a fixed memory cap small
 enough that its worst case sits below any pressure threshold, which is the hardening a 0.6B
-model needs. `puffin-admin server start` starts the sidecar *before* the vLLM launch on purpose —
+model needs. `mling-admin server start` starts the sidecar *before* the vLLM launch on purpose —
 vLLM's pre-flight reads current free memory, so a sidecar already resident is accounted for,
 where the reverse order lets a marginal KV check pass and then lose the sidecar's memory
 mid-load.
@@ -231,7 +231,7 @@ class DiffusionServerManager:
         """
         Removes a sidecar container left from before diffusion was switched off, without a word.
 
-        The container runs with `--restart unless-stopped`, so one started by an older Puffin
+        The container runs with `--restart unless-stopped`, so one started by an older Mightling
         would come back at every boot and hold memory for a model nothing uses. A missing
         container is the normal case and is not an error.
 

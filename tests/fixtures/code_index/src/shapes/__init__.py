@@ -1,4 +1,4 @@
-"""A tiny package with known references, recorded by puffin-code's tests."""
+"""A tiny package with known references, recorded by mling-code's tests."""
 
 from shapes.geometry import Circle, Square, make_circle
 

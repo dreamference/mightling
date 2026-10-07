@@ -1,11 +1,11 @@
 """
 Refreshing a repository's code index before its night tasks start
-(specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §6.3).
+(specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §6.3).
 
-A night task's `puffin exec` starts `puffin-code session`, which re-indexes while the task is
-already working. Running `puffin-code index --exact --wait` first means the task begins with a
+A night task's `mling exec` starts `mling-code session`, which re-indexes while the task is
+already working. Running `mling-code index --exact --wait` first means the task begins with a
 fresh index, and it is the one moment the executing indexers (Rust, Java, .NET, in a trusted
-repository) are worth their minutes: nobody is waiting. `puffin-code` does its own admission
+repository) are worth their minutes: nobody is waiting. `mling-code` does its own admission
 against the host-wide memory budget and runs every indexer in its sandbox, so nothing here
 decides whether a run fits.
 """
@@ -19,24 +19,24 @@ from typing import Dict, Final, List, Optional
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.runner.codex_branded_builder import INSTALL_DIR
 
-# The slice every index scope runs in (`puffin-code-rs/src/index/host.rs`).
-INDEX_SLICE: Final[str] = "puffin-index.slice"
+# The slice every index scope runs in (`mling-code-rs/src/index/host.rs`).
+INDEX_SLICE: Final[str] = "mightling-index.slice"
 
 KILL_GRACE_S: Final[int] = 20
 
 
 class NightShiftIndex:
-    """Runs `puffin-code index` for the night run."""
+    """Runs `mling-code index` for the night run."""
 
     @classmethod
     def executable(cls) -> Optional[str]:
         """
-        Locates the installed `puffin-code`, in Puffin's own install directory only.
+        Locates the installed `mling-code`, in Mightling's own install directory only.
 
         Returns:
             Optional[str]: Absolute path to the binary, or None if it has not been built.
         """
-        path = os.path.join(INSTALL_DIR, "bin", "puffin-code")
+        path = os.path.join(INSTALL_DIR, "bin", "mling-code")
         return path if os.path.isfile(path) and os.access(path, os.X_OK) else None
 
     @classmethod
@@ -45,7 +45,7 @@ class NightShiftIndex:
         Re-indexes one repository in the foreground and says what happened.
 
         Args:
-            binary: The `puffin-code` executable.
+            binary: The `mling-code` executable.
             repo: The repository's main checkout.
             timeout_s: Seconds the run may take; past it the run is stopped.
 
@@ -73,7 +73,7 @@ class NightShiftIndex:
     @classmethod
     def summarise(cls, output: str) -> str:
         """
-        Condenses `puffin-code index --wait` output: one `<unit>: <status>` line per run, and
+        Condenses `mling-code index --wait` output: one `<unit>: <status>` line per run, and
         `skipped: <why>` lines.
 
         Args:

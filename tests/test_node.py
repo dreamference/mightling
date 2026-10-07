@@ -1,4 +1,4 @@
-"""The node half of the client/server split (specs/DREAMFERENCE_PUFFIN_NODE.md §4, §5, §16).
+"""The node half of the client/server split (specs/DREAMFERENCE_MIGHTLING_NODE.md §4, §5, §16).
 
 Nothing here writes /etc, runs sudo or touches a container: conftest points the service file at a
 scratch folder and refuses sudo, and the two binds are checked through the commands and the
@@ -30,11 +30,11 @@ def test_the_service_file_is_exactly_this_text():
                                   web_port=3000, search_port=8888, main=True)
     assert text == """<?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<!-- Written by `puffin-admin node enable`; rewritten by `puffin-admin server start|stop`. -->
+<!-- Written by `mling-admin node enable`; rewritten by `mling-admin server start|stop`. -->
 <service-group>
   <name replace-wildcards="yes">%h</name>
   <service>
-    <type>_puffin-node._tcp</type>
+    <type>_mightling-node._tcp</type>
     <port>8000</port>
     <txt-record>proto=1</txt-record>
     <txt-record>node=7c1e0c7a-58a4-4b0c-9a7e-0d7a54f6b001</txt-record>
@@ -98,7 +98,7 @@ def test_a_file_this_user_cannot_write_is_reported_not_ignored(capsys, monkeypat
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0"))
     monkeypatch.setattr(NodeServiceFile, "write", classmethod(lambda cls, text: False))
     NodeAdvertiser.on_server_ready()
-    assert "puffin-admin node enable` again" in capsys.readouterr().out
+    assert "mling-admin node enable` again" in capsys.readouterr().out
 
 
 # -- identity and settings -------------------------------------------------------------------------
@@ -225,7 +225,7 @@ def machine(monkeypatch):
 def test_enable_without_root_publishes_nothing_and_prints_the_file(machine, capsys):
     assert NodeAdvertiser.enable() is False           # sudo cannot prompt here: nothing is installed
     out = capsys.readouterr().out
-    assert "<type>_puffin-node._tcp</type>" in out and "save the following as" in out
+    assert "<type>_mightling-node._tcp</type>" in out and "save the following as" in out
     assert "Nothing was published" in out
     # A web UI on the LAN that nobody can find would be the worst of both states: no bind moved.
     assert NodeSettings.load() == {"advertise": False, "web": False}
@@ -293,11 +293,11 @@ def test_status_says_what_clients_see(machine, monkeypatch):
 
 def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
     output = "\n".join([
-        '+;wlP9s9;IPv4;gx10-1a2b;_puffin-node._tcp;local',
-        '=;br-8544a6cf391a;IPv4;gx10-1a2b;_puffin-node._tcp;local;gx10-1a2b.local;172.20.0.1;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
-        '=;vethb68d363;IPv6;gx10-1a2b;_puffin-node._tcp;local;gx10-1a2b.local;fe80::1;8000;"state=ready" "node=abc" "proto=1"',
-        '=;wlP9s9;IPv4;gx10-1a2b;_puffin-node._tcp;local;gx10-1a2b.local;192.168.50.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
-        '=;wlP9s9;IPv4;gx10-1a2b;_puffin-node._tcp;local;gx10-1a2b.local;192.168.50.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
+        '+;wlP9s9;IPv4;gx10-1a2b;_mightling-node._tcp;local',
+        '=;br-8544a6cf391a;IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;172.20.0.1;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
+        '=;vethb68d363;IPv6;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;fe80::1;8000;"state=ready" "node=abc" "proto=1"',
+        '=;wlP9s9;IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;192.168.50.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
+        '=;wlP9s9;IPv4;gx10-1a2b;_mightling-node._tcp;local;gx10-1a2b.local;192.168.50.105;8000;"main=1" "state=ready" "version=1.3.0" "node=abc" "proto=1"',
         '=;wlP9s9;IPv4;other;_ssh._tcp;local;other.local;192.168.50.9;22;""',
     ])
     assert NodeBrowser.parse(output) == [{
@@ -308,13 +308,13 @@ def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
 # -- the locator crate ------------------------------------------------------------------------------
 
 def test_the_web_crates_locator_is_a_byte_identical_copy():
-    # puffin-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a
-    # launcher and a `puffin-search` that read node.json differently would talk to two machines.
+    # mling-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a
+    # launcher and a `mling-search` that read node.json differently would talk to two machines.
     from pathlib import Path
     repo = Path(__file__).resolve().parent.parent
-    leaf = repo / "puffin-rs" / "node-locator" / "src" / "lib.rs"
-    assert (repo / "puffin-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
-    # puffin-app is a third build of its own (Tauri), with a third copy.
+    leaf = repo / "mling-rs" / "node-locator" / "src" / "lib.rs"
+    assert (repo / "mling-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
+    # mling-app is a third build of its own (Tauri), with a third copy.
     assert (repo / "desktop" / "src-tauri" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
     # ...and it agrees with the node about the service type and the contract's version.
     from dreamference.node import PROTO, SERVICE_TYPE
@@ -333,7 +333,7 @@ def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):
     monkeypatch.setattr(NodeAdvertiser, "enable", classmethod(lambda cls, no_web=False: calls.append(("enable", no_web)) or True))
     monkeypatch.setattr(NodeAdvertiser, "disable", classmethod(lambda cls: calls.append(("disable",)) or True))
     for argv, code in ((["node", "enable", "--no-web"], 0), (["node", "disable"], 0), (["node", "status"], 0), (["node"], 2)):
-        monkeypatch.setattr("sys.argv", ["puffin-admin", *argv])
+        monkeypatch.setattr("sys.argv", ["mling-admin", *argv])
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == code
@@ -341,21 +341,21 @@ def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):
     assert "Node id:" in capsys.readouterr().out
 
 
-def test_puffin_node_is_not_an_open_session_to_night_shift():
+def test_mightling_node_is_not_an_open_session_to_night_shift():
     from dreamference.night_shift import NightShiftHost
     assert NightShiftHost.is_interactive(["node", "list"]) is False
 
 
-# -- callers that run `puffin` name the model server, so the launcher never browses for a node -----
+# -- callers that run `mling` name the model server, so the launcher never browses for a node -----
 
-def test_a_night_task_names_its_model_server_to_puffin(tmp_path, monkeypatch):
+def test_a_night_task_names_its_model_server_to_mightling(tmp_path, monkeypatch):
     import time
     from dreamference.night_shift import NightShiftSettings, NightShiftTaskRun
     monkeypatch.setattr(NightShiftTaskRun, "USE_SCOPE", False)
     monkeypatch.delenv("DREAMFERENCE_VLLM_HOST", raising=False)
     task = {"id": "20261002-0100-abc", "repo": str(tmp_path), "base": "0" * 40, "task": "x"}
     output = tmp_path / "out.txt"
-    run = NightShiftTaskRun(tmp_path / "night", task, NightShiftSettings({}), "puffin",
+    run = NightShiftTaskRun(tmp_path / "night", task, NightShiftSettings({}), "mling",
                             deadline=time.time() + 30, model_host="http://localhost:8000")
     assert run._run_capped(["bash", "-c", "echo host=$DREAMFERENCE_VLLM_HOST"], tmp_path, output, timeout=20) == 0
     assert output.read_text().strip() == "host=http://localhost:8000"
@@ -395,7 +395,7 @@ def test_a_start_that_fails_does_not_leave_the_node_saying_loading(monkeypatch):
     monkeypatch.setattr(VLLMServerManager, "start_server", refused)
     from dreamference.vllm_server import DiffusionServerManager
     monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
-    monkeypatch.setattr("sys.argv", ["puffin-admin", "server", "start", "--no-diffusion"])
+    monkeypatch.setattr("sys.argv", ["mling-admin", "server", "start", "--no-diffusion"])
     with pytest.raises(SystemExit):
         controller.main()
     assert NodeServiceFile.read()["state"] == "stopped"
@@ -408,11 +408,11 @@ PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyBodyForTestsOnly000000
 
 def test_the_authorised_line_forces_one_command_and_forbids_the_rest():
     from dreamference.node import NodePairing
-    line = NodePairing.authorized_line(PUBLIC_KEY, "/home/u/.local/bin/puffin-admin node serve-job --key abc")
-    assert line.startswith('command="/home/u/.local/bin/puffin-admin node serve-job --key abc",')
+    line = NodePairing.authorized_line(PUBLIC_KEY, "/home/u/.local/bin/mling-admin node serve-job --key abc")
+    assert line.startswith('command="/home/u/.local/bin/mling-admin node serve-job --key abc",')
     for restriction in ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding", "no-user-rc"):
         assert restriction in line.split(" ssh-ed25519 ")[0]
-    assert line.endswith(" puffin-node")                       # the sender's own comment is not kept
+    assert line.endswith(" mightling-node")                       # the sender's own comment is not kept
     assert "owner@laptop" not in line
     for bad in ("", "not a key", PUBLIC_KEY + "\nssh-ed25519 AAAA second", "rm -rf /"):
         with pytest.raises(ValueError):
@@ -450,10 +450,10 @@ def test_serve_job_refuses_everything_that_is_not_an_operation(monkeypatch, caps
                     "info --all", "'unterminated"):
         assert NodeServe.serve(request) == 2, request
     assert ran == []
-    assert "may only ask for Puffin node operations" in capsys.readouterr().err
+    assert "may only ask for Mightling node operations" in capsys.readouterr().err
 
 
-def test_serve_job_runs_this_nodes_own_puffin_admin(monkeypatch, capsys):
+def test_serve_job_runs_this_nodes_own_mightling_admin(monkeypatch, capsys):
     from dreamference.node import NodeServe
     ran = []
     monkeypatch.setattr(NodeServe, "run_admin", classmethod(lambda cls, arguments: ran.append(arguments) or 0))
@@ -506,7 +506,7 @@ def test_every_connection_uses_the_pairing_key_and_the_pinned_host_key(monkeypat
     options = " ".join(command)
     assert f"-i {NodePairing.key_path()}" in options and "IdentitiesOnly=yes" in options
     assert "BatchMode=yes" in options                           # never a password prompt mid-command
-    assert "StrictHostKeyChecking=yes" in options and "HostKeyAlias=puffin-node-2222-bbbb" in options
+    assert "StrictHostKeyChecking=yes" in options and "HostKeyAlias=mightling-node-2222-bbbb" in options
     assert f"UserKnownHostsFile={NodePairing.known_hosts()}" in options
     assert "accept-new" in " ".join(NodePairing.ssh_options(record, accept_new=True))
     for name in ("spark-2", "SPARK-2", "192.168.50.106", "2222-bbbb", "2222"):
@@ -527,7 +527,7 @@ def test_managing_a_node_needs_the_pairing_and_sends_one_operation(monkeypatch, 
     from dreamference.node import NodePairing, NodeRemote
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     assert NodeRemote.status("spark-2") == 1
-    assert "puffin-admin node add spark-2" in capsys.readouterr().out
+    assert "mling-admin node add spark-2" in capsys.readouterr().out
     paired_record()
     sent = []
 
@@ -579,12 +579,12 @@ def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypat
     monkeypatch.setattr(NightShiftHost, "mem_total_bytes", classmethod(lambda cls: 120 * 1024 ** 3))
     lines = NodeRemote.list_lines()
     assert lines[0] == ("spark-1  http://192.168.50.105:8000/v1  RadixArk/Qwen3.8-27B-NVFP4 (262144 tokens), "
-                        "2 request(s) running, KV pool 156907 tokens, 40.0 of 120.0 GiB free  Puffin 1.3.0  (this machine)")
+                        "2 request(s) running, KV pool 156907 tokens, 40.0 of 120.0 GiB free  Mightling 1.3.0  (this machine)")
     # Memory is not on the open model port: an unpaired node shows none.
-    assert lines[1] == ("spark-2  http://192.168.50.106:8000/v1  model server stopped  Puffin 1.3.0  "
-                        "(not paired: `puffin-admin node add spark-2` to manage it; not a coding model)")
+    assert lines[1] == ("spark-2  http://192.168.50.106:8000/v1  model server stopped  Mightling 1.3.0  "
+                        "(not paired: `mling-admin node add spark-2` to manage it; not a coding model)")
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
-    assert "No Puffin node answers" in NodeRemote.list_lines()[0]
+    assert "No Mightling node answers" in NodeRemote.list_lines()[0]
 
 
 def test_a_paired_nodes_memory_is_asked_over_the_pairing(monkeypatch):
@@ -601,12 +601,12 @@ def test_a_paired_nodes_memory_is_asked_over_the_pairing(monkeypatch):
         lambda cls, record, request, capture=True, input_text=None:
         asked.append(request) or subprocess.CompletedProcess([], 0, json.dumps(info) + "\n", "")))
     assert NodeRemote.list_lines() == ["spark-2  http://192.168.50.106:8000/v1  model server stopped, "
-                                       "60.0 of 120.0 GiB free  Puffin 1.3.0  (paired)"]
+                                       "60.0 of 120.0 GiB free  Mightling 1.3.0  (paired)"]
     assert asked == ["info"]
     # A paired node that does not answer is listed without memory, not left out.
     monkeypatch.setattr(NodePairing, "run", classmethod(
         lambda cls, record, request, capture=True, input_text=None: subprocess.CompletedProcess([], 255, "", "timeout")))
-    assert NodeRemote.list_lines() == ["spark-2  http://192.168.50.106:8000/v1  model server stopped  Puffin 1.3.0  (paired)"]
+    assert NodeRemote.list_lines() == ["spark-2  http://192.168.50.106:8000/v1  model server stopped  Mightling 1.3.0  (paired)"]
 
 
 def test_info_says_what_a_lane_and_the_list_need(monkeypatch, capsys):
@@ -704,7 +704,7 @@ def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(
     # The environment is built from nothing, and CUDA sees no device.
     assert "--clearenv" in argv
     environment = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
-    assert environment["CUDA_VISIBLE_DEVICES"] == "" and environment["PUFFIN_JOB"] == "20261002-1200-abc"
+    assert environment["CUDA_VISIBLE_DEVICES"] == "" and environment["MIGHTLING_JOB"] == "20261002-1200-abc"
     assert "SSH_AUTH_SOCK" not in environment
     # A script at `on` has no network at all; otherwise it keeps it.
     assert "--unshare-net" not in argv
@@ -714,13 +714,13 @@ def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(
 def test_a_job_is_a_capped_unit_of_its_own_not_a_child_of_the_connection():
     from dreamference.node import NodeJob
     record = NodeJob.validate(job_request(memory="16G", time="2h"))
-    argv = NodeJob.unit_command(record, "/home/u/.local/bin/puffin-admin")
+    argv = NodeJob.unit_command(record, "/home/u/.local/bin/mling-admin")
     assert argv[:2] == ["systemd-run", "--user"] and "--scope" not in argv
-    assert "--unit=puffin-job-20261002-1200-abc" in argv
+    assert "--unit=mightling-job-20261002-1200-abc" in argv
     properties = [argv[i + 1] for i, word in enumerate(argv) if word == "-p"]
     assert f"MemoryMax={16 * 1024 ** 3}" in properties and "MemorySwapMax=0" in properties
     assert "RuntimeMaxSec=7200" in properties
-    assert argv[-4:] == ["/home/u/.local/bin/puffin-admin", "node", "job-exec", "20261002-1200-abc"]
+    assert argv[-4:] == ["/home/u/.local/bin/mling-admin", "node", "job-exec", "20261002-1200-abc"]
 
 
 @pytest.fixture
@@ -755,7 +755,7 @@ def job_node(tmp_path, monkeypatch):
 def test_a_job_runs_in_a_worktree_and_its_changes_come_back_as_a_branch(job_node, capsys):
     from dreamference.node import NodeJob
     record = NodeJob.submit(job_request(commit=job_node["commit"], command=["bash", "-c", "echo hello; echo two >> data.txt; echo new > out.txt"],
-                                        test="grep -q two data.txt", author={"name": "Owner", "email": "s@example.org"}), "/x/puffin-admin")
+                                        test="grep -q two data.txt", author={"name": "Owner", "email": "s@example.org"}), "/x/mling-admin")
     assert NodeJob.execute(record["id"]) == 0
     done = NodeJob.read(record["id"])
     assert (done["status"], done["exit_code"], done["test_exit_code"], done["branch"]) == ("done", 0, 0, "job/20261002-1200-abc")
@@ -769,7 +769,7 @@ def test_a_job_runs_in_a_worktree_and_its_changes_come_back_as_a_branch(job_node
     assert NodeJob.follow(record["id"]) == 0
     assert "hello" in capsys.readouterr().out
     with pytest.raises(ValueError, match="already exists"):
-        NodeJob.submit(job_request(commit=job_node["commit"]), "/x/puffin-admin")
+        NodeJob.submit(job_request(commit=job_node["commit"]), "/x/mling-admin")
 
 
 def test_a_failing_job_and_a_job_that_changes_nothing(job_node, capsys):
@@ -797,7 +797,7 @@ def test_the_working_node_decides_whether_it_can_take_the_job(job_node, monkeypa
     with pytest.raises(ValueError, match="10.0 GiB of memory available"):
         NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
     monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 64 * 1024 ** 3))
-    monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: ["a puffin build holds the build lock"]))
+    monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: ["a mling build holds the build lock"]))
     with pytest.raises(ValueError, match="build lock"):
         NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
     monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: []))
@@ -840,7 +840,7 @@ def test_only_a_job_repository_can_be_pushed_to_or_fetched_from(monkeypatch, cap
     from dreamference.node import NodeJob, NodeServe
     ran = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **_: ran.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
-    for path in ("/home/user/mightling", "jobs/../../.ssh.git", "jobs/a/b.git", "jobs/x", "/etc/passwd", "~/.puffin"):
+    for path in ("/home/user/mightling", "jobs/../../.ssh.git", "jobs/a/b.git", "jobs/x", "/etc/passwd", "~/.mightling"):
         assert NodeServe.serve(f"git-receive-pack '{path}'") == 2, path
         assert NodeServe.serve(f"git-upload-pack '{path}'") == 2, path
     assert ran == []
@@ -871,8 +871,8 @@ def test_job_requests_through_serve_job(job_node, monkeypatch, capsys):
 
 def test_a_jobs_environment_is_built_once_per_lock_file_content_and_bound_read_only(job_node, capsys):
     from dreamference.node import NodeJob
-    setup = ('mkdir -p "$PUFFIN_ENV/bin" && printf "#!/bin/sh\\necho from-the-env\\n" > "$PUFFIN_ENV/bin/tool" '
-             '&& chmod +x "$PUFFIN_ENV/bin/tool" && echo built >> "$PUFFIN_ENV/../builds"')
+    setup = ('mkdir -p "$MIGHTLING_ENV/bin" && printf "#!/bin/sh\\necho from-the-env\\n" > "$MIGHTLING_ENV/bin/tool" '
+             '&& chmod +x "$MIGHTLING_ENV/bin/tool" && echo built >> "$MIGHTLING_ENV/../builds"')
     first = NodeJob.submit(job_request(id="20261002-1300-aaa", commit=job_node["commit"], command=["tool"], setup=setup), "/x")
     assert NodeJob.execute(first["id"]) == 0
     record = NodeJob.read(first["id"])
@@ -890,7 +890,7 @@ def test_a_jobs_environment_is_built_once_per_lock_file_content_and_bound_read_o
     assert [argv[i + 1] for i, word in enumerate(argv) if word == "--bind"] == [str(tree)]
     assert [argv[i + 1] for i, word in enumerate(argv) if word == "--ro-bind"] == ["/", str(env_dir)]
     variables = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
-    assert variables["PATH"].startswith(f"{env_dir}/bin:") and variables["PUFFIN_ENV"] == str(env_dir)
+    assert variables["PATH"].startswith(f"{env_dir}/bin:") and variables["MIGHTLING_ENV"] == str(env_dir)
 
 
 def test_a_changed_lock_file_or_setup_command_is_a_new_environment(tmp_path):
@@ -1059,7 +1059,7 @@ def test_the_sender_always_sends_caps_and_reaches_the_node_through_the_pairing(t
     assert NodeJobSender.git_url(record, "calc-0123456789") == "ssh://owner@192.168.50.106:22/jobs/calc-0123456789.git"
     assert NodeJobSender.git_url(dict(record, address="fd00::6", ssh_port=2222), "r") == "ssh://owner@[fd00::6]:2222/jobs/r.git"
     ssh = NodeJobSender.git_environment(record)["GIT_SSH_COMMAND"]
-    assert ssh.startswith("ssh -i ") and "HostKeyAlias=puffin-node-2222-bbbb" in ssh and "StrictHostKeyChecking=yes" in ssh
+    assert ssh.startswith("ssh -i ") and "HostKeyAlias=mightling-node-2222-bbbb" in ssh and "StrictHostKeyChecking=yes" in ssh
     assert " -p " not in ssh                                                    # the URL carries the port
 
 
@@ -1091,11 +1091,11 @@ def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_
     assert NodeJobSender.logs("20261002-1200-abc") == 1 and NodeJobSender.fetch("../x") == 1
 
 
-# -- puffin-app's one-time sign-in (§7) -------------------------------------------------------------
+# -- mling-app's one-time sign-in (§7) -------------------------------------------------------------
 
 SIGN_IN_HARNESS = r"""
 const script = require("fs").readFileSync(process.argv[2], "utf8")
-  .replace("__PUFFIN_EMAIL__", "admin@dreamference.dev").replace("__PUFFIN_PASSWORD__", "dreamference");
+  .replace("__MIGHTLING_EMAIL__", "admin@dreamference.dev").replace("__MIGHTLING_PASSWORD__", "dreamference");
 const scenario = JSON.parse(process.argv[3]);
 const store = {};
 const calls = [];
@@ -1161,7 +1161,7 @@ def test_the_window_uses_the_account_configure_creates():
 def test_node_id_prints_the_id_and_writes_it_once(monkeypatch, capsys):
     from dreamference.cli import main
     for _ in range(2):
-        monkeypatch.setattr("sys.argv", ["puffin-admin", "node", "id"])
+        monkeypatch.setattr("sys.argv", ["mling-admin", "node", "id"])
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == 0
@@ -1173,9 +1173,9 @@ def test_the_installer_makes_a_gb10_a_node_and_offers_it_to_the_network():
     # §9: a GB10 gets both halves, its node id, and `node enable`; --no-advertise skips the last.
     from pathlib import Path
     script = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
-    node_id = script.index('puffin-admin" node id')
-    enable = script.index('puffin-admin" node enable')
-    assert script.index('puffin-admin" host setup') < node_id < enable
+    node_id = script.index('mling-admin" node id')
+    enable = script.index('mling-admin" node enable')
+    assert script.index('mling-admin" host setup') < node_id < enable
     assert "--no-advertise) ADVERTISE=0" in script
     # Never without a terminal: the command opens the machine to the LAN and asks for a password.
     assert '[ -t 0 ]' in script[enable - 200:enable] or "/dev/tty" in script[enable - 200:enable]
@@ -1214,7 +1214,7 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
                   "--bind", "/data/b", "--", "python3", "x.py", "--epochs", "3"],
                  ["jobs"], ["logs", job], ["cancel", job], ["fetch", job], ["job-exec", job],
                  ["serve-job", "--key", "abc"], ["sync-model", "spark-2", "m", "--address", "10.0.0.2"]):
-        monkeypatch.setattr("sys.argv", ["puffin-admin", "node", *argv])
+        monkeypatch.setattr("sys.argv", ["mling-admin", "node", *argv])
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == 0, argv
@@ -1271,8 +1271,8 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
         assert (folder / "snapshots" / "rev1" / "config.json").read_bytes() == b"{}"
         assert (folder / "snapshots" / "rev1" / "model.safetensors").is_symlink()
         assert (folder / "refs" / "main").read_text() == "rev1"
-    assert not list(there.glob(".puffin-sync-*"))
-    assert "Serve it there with: puffin-admin node set spark-2" in capsys.readouterr().out
+    assert not list(there.glob(".mightling-sync-*"))
+    assert "Serve it there with: mling-admin node set spark-2" in capsys.readouterr().out
     # A model this machine does not have is not sent.
     monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty"))
     assert NodeModelSync.sync("spark-2", SYNC_KEY) == 1
@@ -1311,7 +1311,7 @@ def test_the_receiving_node_decides_what_lands_in_its_cache(tmp_path, monkeypatc
     assert "does not match its checksum" in capsys.readouterr().err and not (hub / folder).exists()
     assert receive(monkeypatch, hub, [("models--someone--else/blobs/x", good)]) == 1          # another model
     assert receive(monkeypatch, hub, [(f"{folder}/../../escape", good)]) == 1                  # out of the folder
-    assert not (tmp_path / "escape").exists() and not list(hub.glob(".puffin-sync-*"))
+    assert not (tmp_path / "escape").exists() and not list(hub.glob(".mightling-sync-*"))
     assert receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)], size=10 ** 18) == 2   # no room
     assert receive(monkeypatch, hub, [(f"{folder}/blobs/{digest}", good)]) == 0
     assert (hub / folder / "blobs" / digest).read_bytes() == good
@@ -1331,6 +1331,6 @@ def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypa
                         classmethod(lambda cls, command, purpose: asked.append(command) or False))
     assert NodeAdvertiser.enable() is False
     assert asked == [["apt-get", "install", "-y", "avahi-daemon"]]
-    assert "PUFFIN_NODE" in capsys.readouterr().out
+    assert "MIGHTLING_NODE" in capsys.readouterr().out
     assert not NodeServiceFile.service_path.exists()
 

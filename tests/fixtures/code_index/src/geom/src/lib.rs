@@ -1,4 +1,4 @@
-//! A tiny crate with known references, recorded by puffin-code's tests.
+//! A tiny crate with known references, recorded by mling-code's tests.
 
 pub mod shapes;
 

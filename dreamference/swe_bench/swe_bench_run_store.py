@@ -1,10 +1,10 @@
 """
-One run's files (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §4):
+One run's files (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4):
 
 ```text
 runs/<run>/manifest.json       what was measured; written once
 runs/<run>/instances/<id>.json one instance's state, replaced whole
-runs/<run>/logs/<id>.jsonl     puffin exec's events
+runs/<run>/logs/<id>.jsonl     mling exec's events
 runs/<run>/predictions.jsonl   appended, one line per finished instance
 runs/<run>/eval/<n>/           grading n: the harness's logs, and what it was graded with
 runs/<run>/report.md           written by `report`
@@ -26,13 +26,13 @@ FINISHED_STATUSES: Final[tuple] = ("done", "empty", "stalled", "timeout", "error
 _PREDICTIONS_LOCK: Final[threading.Lock] = threading.Lock()
 
 # A command that asks the index something. Naming the binary is not enough: in the first run
-# with the index, the one command that mentioned it was `ls /opt/puffin-code/bin`.
-PUFFIN_CODE_QUERY: Final[re.Pattern] = re.compile(
-    r"\bpuffin-code\s+(def|refs|callers|callees|impl|impact|show|outline|search|status)\b")
+# with the index, the one command that mentioned it was `ls /opt/mling-code/bin`.
+MIGHTLING_CODE_QUERY: Final[re.Pattern] = re.compile(
+    r"\bmling-code\s+(def|refs|callers|callees|impl|impact|show|outline|search|status)\b")
 
 # The same questions asked through the tools the launcher gives the model since 2026-10-02
-# (`code_def`, `code_search`, … served by `puffin-code mcp`).
-PUFFIN_CODE_TOOL: Final[re.Pattern] = re.compile(
+# (`code_def`, `code_search`, … served by `mling-code mcp`).
+MIGHTLING_CODE_TOOL: Final[re.Pattern] = re.compile(
     r"^code_(def|refs|callers|callees|impl|impact|show|outline|search|status)$")
 
 
@@ -149,14 +149,14 @@ class SweBenchRunStore:
             instance_id: The instance.
 
         Returns:
-            Path: Where `puffin exec`'s events for it are appended.
+            Path: Where `mling exec`'s events for it are appended.
         """
         return self.directory / "logs" / f"{instance_id}.jsonl"
 
     def log_stats(self, instance_id: str) -> Dict[str, int]:
         """
-        Counts what the agent did, from `puffin exec`'s events: its commands and tool calls, how
-        many of them asked `puffin-code` something (as a shell command or as a `code_*` tool),
+        Counts what the agent did, from `mling exec`'s events: its commands and tool calls, how
+        many of them asked `mling-code` something (as a shell command or as a `code_*` tool),
         and the tokens of every turn.
 
         Args:
@@ -182,12 +182,12 @@ class SweBenchRunStore:
             item = event.get("item") or {}
             if event.get("type") == "item.completed" and item.get("type") == "command_execution":
                 stats["commands"] += 1
-                if PUFFIN_CODE_QUERY.search(str(item.get("command", ""))):
+                if MIGHTLING_CODE_QUERY.search(str(item.get("command", ""))):
                     stats["puffin_code_calls"] += 1
             elif event.get("type") == "item.completed" and item.get("type") == "mcp_tool_call":
                 # A tool call is something the agent did, like a command, and counts as one.
                 stats["commands"] += 1
-                if PUFFIN_CODE_TOOL.match(str(item.get("tool", ""))):
+                if MIGHTLING_CODE_TOOL.match(str(item.get("tool", ""))):
                     stats["puffin_code_calls"] += 1
             elif event.get("type") == "turn.completed":
                 usage = event.get("usage") or {}

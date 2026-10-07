@@ -1,16 +1,16 @@
-# What the desktop app's Work window may say to `puffin app-server`, and what it hears back
-# (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §4.3, §8.3): the method allow-list, the thread fields that
+# What the desktop app's Work window may say to `mling app-server`, and what it hears back
+# (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §4.3, §8.3): the method allow-list, the thread fields that
 # are never sent, the framing of what the server writes, and the busy marker Night Shift reads.
 # Kept out of the Tauri crate so its tests run without building a webview: `cargo test` here.
 [package]
-name = "puffin-desktop-bridge"
+name = "mightling-desktop-bridge"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 publish = false
 
 [lib]
-name = "puffin_desktop_bridge"
+name = "mling_desktop_bridge"
 path = "src/lib.rs"
 
 [dependencies]

@@ -144,7 +144,7 @@ class HardwareManager:
         The vendor's name for this machine, from the firmware's DMI tables.
 
         Every GB10 machine reports the same GPU, so this is the only reading that says whose box
-        Puffin is running on (an ASUS says `ASUSTeK COMPUTER INC.` and `GX10`; NVIDIA's own is
+        Mightling is running on (an ASUS says `ASUSTeK COMPUTER INC.` and `GX10`; NVIDIA's own is
         reported as `NVIDIA` and `NVIDIA_DGX_Spark`). It is shown, never matched on.
 
         Returns:

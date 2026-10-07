@@ -1,6 +1,6 @@
-// The Work window (specs/DREAMFERENCE_PUFFIN_DESKTOP.md, Phase 1): projects and threads on the
+// The Work window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, Phase 1): projects and threads on the
 // left, the selected thread's turns streaming in the middle, approvals inline, and a composer that
-// starts a turn, steers a running one, or stops it. Everything goes through `puffin app-server`.
+// starts a turn, steers a running one, or stops it. Everything goes through `mling app-server`.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
@@ -16,7 +16,7 @@ import {
   type PendingRequest, type ThreadView, type TurnView,
 } from "./store";
 
-const CLIENT_INFO = { name: "puffin_desktop", title: "Puffin Desktop", version: "0.1.0" };
+const CLIENT_INFO = { name: "mightling_desktop", title: "Mightling Desktop", version: "0.1.0" };
 
 /** Server requests this window answers by asking the user; the rest are answered without asking. */
 const ASKED = new Set<ServerRequest["method"]>([
@@ -48,7 +48,7 @@ export function App() {
       case "mcpServer/elicitation/request":
         return client.respond(request.id, { action: "decline", content: null, _meta: null });
       default:
-        return client.respondError(request.id, -32601, `Puffin's Work window does not handle ${request.method}`);
+        return client.respondError(request.id, -32601, `Mightling's Work window does not handle ${request.method}`);
     }
   }, [client]);
 
@@ -195,7 +195,7 @@ export function App() {
 
       <main className="thread-pane">
         <header className="bar">
-          <span className="title">{selected ? selected.thread.name || selected.thread.preview || "New thread" : "Puffin"}</span>
+          <span className="title">{selected ? selected.thread.name || selected.thread.preview || "New thread" : "Mightling"}</span>
           {selected ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />
           {servedModel ? <span className="chip" title="The model the launcher serves">{servedModel}</span> : null}
@@ -229,7 +229,7 @@ export function App() {
         {selected ? (
           <footer className="composer">
             <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={3}
-              placeholder={selected.activeTurnId ? "Steer the running turn…" : "Ask Puffin…"}
+              placeholder={selected.activeTurnId ? "Steer the running turn…" : "Ask Mightling…"}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); }
                 if (event.key === "Escape" && selected.activeTurnId) stop();
@@ -255,10 +255,10 @@ export function App() {
 function StartupScreen(props: { state: string; stderr: string[]; protocolErrors: string[]; notices: string[]; onRetry: () => void }) {
   return (
     <div className="startup">
-      <h1>{props.state === "exited" ? "The agent's server stopped" : "Starting Puffin…"}</h1>
+      <h1>{props.state === "exited" ? "The agent's server stopped" : "Starting Mightling…"}</h1>
       <p>{props.state === "exited"
-        ? "puffin app-server exited. Its last messages are below."
-        : "puffin app-server is waiting for the model server. A cold load takes a few minutes; `puffin-admin server start` starts it if it is stopped."}</p>
+        ? "mling app-server exited. Its last messages are below."
+        : "mling app-server is waiting for the model server. A cold load takes a few minutes; `mling-admin server start` starts it if it is stopped."}</p>
       <pre className="log">{[...props.stderr, ...props.protocolErrors, ...props.notices].join("\n") || "…"}</pre>
       {props.state === "exited" ? <button className="primary" onClick={props.onRetry}>Start again</button> : null}
     </div>

@@ -2,6 +2,6 @@
 source: tui/src/app/thread_title_tests.rs
 expression: normalize_snapshot_paths(popup)
 ---
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-5.2 default · /tmp/project · Keep this title

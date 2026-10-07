@@ -1,4 +1,4 @@
-# Puffin Code Indexing & Context Engine
+# Mightling Code Indexing & Context Engine
 
 > **Version:** 1.2.0
 > **Subject:** AST Extraction, Hybrid Search, SQLite/FTS5 Indexing, Testing
@@ -16,11 +16,11 @@
 - [6. Tests Architecture](#6-tests-architecture)
 
 **Who uses this index:**
-- the MCP tool `workspace_search_code` (`puffin-admin mcp`, for JetBrains and VS Code);
-- the web canvas (`puffin-admin web`);
+- the MCP tool `workspace_search_code` (`mling-admin mcp`, for JetBrains and VS Code);
+- the web canvas (`mling-admin web`);
 - `status`, which shows the counts.
 
-The `puffin` agent does **not** use it: it searches with `rg`/`ast-grep` through its shell. A code index for `puffin` is proposed separately in `DREAMFERENCE_PUFFIN_CODE_INDEX.md`.
+The `mling` agent does **not** use it: it searches with `rg`/`ast-grep` through its shell. A code index for `mling` is proposed separately in `DREAMFERENCE_MIGHTLING_CODE_INDEX.md`.
 
 ---
 
@@ -28,8 +28,8 @@ The `puffin` agent does **not** use it: it searches with `rg`/`ast-grep` through
 
 ### 1.1. Entry Points
 
-- **`puffin-admin init`:** always forces a full re-index (`ContextEngine().index_workspace(force_reindex=True)`) of the current directory.
-- **`puffin-admin index [--dir PATH] [--force]`:** indexes `--dir`, or the current directory. Without `--force`, an existing index is reused (§4).
+- **`mling-admin init`:** always forces a full re-index (`ContextEngine().index_workspace(force_reindex=True)`) of the current directory.
+- **`mling-admin index [--dir PATH] [--force]`:** indexes `--dir`, or the current directory. Without `--force`, an existing index is reused (§4).
 
 ### 1.2. Steps (`index_workspace`)
 
@@ -41,7 +41,7 @@ The `puffin` agent does **not** use it: it searches with `rg`/`ast-grep` through
    - **Both paths skip `IGNORE_EXTENSIONS`:** `.pyc .pyo .so .o .a .exe .dll .dylib .png .jpg .jpeg .gif .ico .pdf .zip .tar .gz`.
    - **Symlinks are skipped.**
    - **A file is skipped if it is larger than `MAX_FILE_BYTES` (1 MiB), or has a NUL byte in its first 8 KiB (binary).** Everything else is decoded as UTF-8, with errors ignored.
-   - **Why:** until 2026-09-29 discovery was the walk alone, with no size cap. On this repository it collected 11,565 files and 2.3 GB, 2.2 GB of it a Tauri `target/`, against 223 files and 2.4 MB now. Holding that beside a resident vLLM pushed the host under earlyoom's 5% line, and earlyoom killed vLLM's EngineCore. `puffin-admin mcp` indexes on its first query, so any workspace with a Rust build tree was exposed.
+   - **Why:** until 2026-09-29 discovery was the walk alone, with no size cap. On this repository it collected 11,565 files and 2.3 GB, 2.2 GB of it a Tauri `target/`, against 223 files and 2.4 MB now. Holding that beside a resident vLLM pushed the host under earlyoom's 5% line, and earlyoom killed vLLM's EngineCore. `mling-admin mcp` indexes on its first query, so any workspace with a Rust build tree was exposed.
 2. **Reset the database:** it clears `files`, `symbols` and `fts_context`.
 3. **Parse in parallel:** `ProcessPoolExecutor(max_workers=max(1, min(8, cpu_count, files // 32 + 1)))`. The pool is sized to the work, because each worker is a fork of a parent that has imported torch. Results are consumed as they arrive, inside the pool's `with`. Each worker reads the file, tokenizes it (`TFIDFCalculator.tokenize`), and extracts symbols from **`.py` files only** (`ASTSymbolExtractor`).
 4. **Persist to `.dreamference/context.db`:**
@@ -131,35 +131,35 @@ These are recorded here because the spec used to promise otherwise.
 | `test_vllm_server.py` | Launch command and recipe layering, host safety, compile-cache reset |
 | `test_diffusion_server.py` | Diffusion sidecar |
 | `test_runner.py` | Agent runners, the Codex hand-off |
-| `test_codex_branded_builder.py` | `puffin` build: patches apply, submodule untouched, build key, size limit |
-| `test_puffin_slash_commands.py` | Every `puffin` slash command and subcommand on a pseudo-terminal (live cases skip without vLLM) |
-| `test_cli_entry_points.py` | `puffin-admin` entry point, no Python `puffin`, strict parsing |
+| `test_codex_branded_builder.py` | `mling` build: patches apply, submodule untouched, build key, size limit |
+| `test_mightling_slash_commands.py` | Every `mling` slash command and subcommand on a pseudo-terminal (live cases skip without vLLM) |
+| `test_cli_entry_points.py` | `mling-admin` entry point, no Python `mling`, strict parsing |
 | `test_mcp_server.py` | MCP tools and IDE state |
 | `test_onyx_runner.py` | Onyx deployment, configure, branding, UI patches, Gmail service |
 | `test_onyx_ui_scripts.py` | Injected UI JavaScript, run under node against a stub DOM |
-| `test_gmail_client.py` | `puffin-admin gmail` client |
+| `test_gmail_client.py` | `mling-admin gmail` client |
 | `test_image_search_service.py` | Image search sidecar |
-| `test_desktop.py` | Desktop window (`puffin-app`) install and launch |
-| `test_codex_test_runner.py` | `puffin-admin codex test`: Codex's own tests on the patched export, the skip list |
-| `test_puffin_privacy.py` | No usage analytics or the upstream vendor channels from `puffin` |
-| `test_web_commands.py` | `puffin-search` and `puffin-fetch` are Rust binaries, not console scripts |
+| `test_desktop.py` | Desktop window (`mling-app`) install and launch |
+| `test_codex_test_runner.py` | `mling-admin codex test`: Codex's own tests on the patched export, the skip list |
+| `test_mightling_privacy.py` | No usage analytics or the upstream vendor channels from `mling` |
+| `test_web_commands.py` | `mling-search` and `mling-fetch` are Rust binaries, not console scripts |
 | `test_cave_mode.py` | Cave mode's Python side: the setting, and the level texts matching the benchmark's |
-| `test_code_index.py` | `puffin-admin code setup`, and `server start` stopping index runs before a load |
-| `test_night_shift.py` | Night Shift's runner, with a scripted stand-in for `puffin` |
-| `test_swe_bench.py` | `puffin-admin swe-bench`, with a stand-in for `docker` and a scripted `puffin exec` |
-| `test_egress_audit.py` | `puffin-admin audit egress`: the strace parser and the verdict, on a recorded trace |
+| `test_code_index.py` | `mling-admin code setup`, and `server start` stopping index runs before a load |
+| `test_night_shift.py` | Night Shift's runner, with a scripted stand-in for `mling` |
+| `test_swe_bench.py` | `mling-admin swe-bench`, with a stand-in for `docker` and a scripted `mling exec` |
+| `test_egress_audit.py` | `mling-admin audit egress`: the strace parser and the verdict, on a recorded trace |
 | `test_airgapped.py` | `/airgapped`: the Python side of the setting, and the default level and the resolver that Python, the launcher and the web commands share |
 | `test_node.py` | The node half of the client/server split: the service file, the node id, the published addresses; nothing writes `/etc` or runs `sudo` |
 | `test_sidecar_network.py` | Sidecars are created on a user-defined network, never Docker's default bridge |
-| `test_cache_clearing.py` | `puffin-admin clear` removes weights only |
+| `test_cache_clearing.py` | `mling-admin clear` removes weights only |
 | `test_admin_reference.py` | `docs/admin.md` is generated from the CLI and in step with it |
 
-The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p puffin-launcher` (`DREAMFERENCE_PUFFIN_CODEX.md`); `puffin-web-rs/` and `puffin-code-rs/` are tested with `cargo test --locked` in their own directories.
+The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p mling-launcher` (`DREAMFERENCE_MIGHTLING_CODEX.md`); `mling-web-rs/` and `mling-code-rs/` are tested with `cargo test --locked` in their own directories.
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_PUFFIN_CODE_INDEX.md](./DREAMFERENCE_PUFFIN_CODE_INDEX.md):** the code index for `puffin` (`puffin-code`, implemented 2026-10-01)
+- **[DREAMFERENCE_MIGHTLING_CODE_INDEX.md](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md):** the code index for `mling` (`mling-code`, implemented 2026-10-01)
 - **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent integration
 - **[DREAMFERENCE_CODEBASE.md](./DREAMFERENCE_CODEBASE.md):** source layout

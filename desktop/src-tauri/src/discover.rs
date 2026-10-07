@@ -1,10 +1,10 @@
-// Where the window's web UI is (specs/DREAMFERENCE_PUFFIN_NODE.md §6.1, §7).
+// Where the window's web UI is (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1, §7).
 //
 // On a node the window loads the local web UI, as it always has. On any other machine the web UI
 // is the node's, and `forwarder.rs` brings it to `localhost`. This decides which, with the same
-// rules as the `puffin` launcher: the node remembered in `node.json` is looked for by its id, a
+// rules as the `mling` launcher: the node remembered in `node.json` is looked for by its id, a
 // single node found is used, and with several and none remembered the app does not guess: it
-// says how to choose (`puffin node use <name>`). The app reads `node.json` and never writes it;
+// says how to choose (`mling node use <name>`). The app reads `node.json` and never writes it;
 // the launcher is the one that remembers a node.
 
 use std::net::IpAddr;
@@ -18,9 +18,9 @@ use crate::node_locator::Node;
 const BROWSE_TIMEOUT: Duration = Duration::from_secs(2);
 const SETTLE: Duration = Duration::from_millis(400);
 
-pub const NONE_FOUND: &str = "No Puffin node found on this network.\n\
-Start one on a GB10: puffin-admin server start, then puffin-admin node enable.\n\
-Or name one by its address, in a terminal: puffin node use <address>";
+pub const NONE_FOUND: &str = "No Mightling node found on this network.\n\
+Start one on a GB10: mling-admin server start, then mling-admin node enable.\n\
+Or name one by its address, in a terminal: mling node use <address>";
 
 /// What the forwarder should do, or `None` on a node, where there is nothing to forward.
 pub fn upstream() -> Option<Upstream> {
@@ -62,7 +62,7 @@ pub fn decide(remembered: Option<Node>, found: Vec<Node>) -> Upstream {
         several => {
             let names: Vec<String> = several.iter().map(|node| format!("{} ({})", label(node), node.address)).collect();
             Upstream::Message(format!(
-                "Several Puffin nodes are on this network: {}.\nChoose one in a terminal: puffin node use <name>",
+                "Several Mightling nodes are on this network: {}.\nChoose one in a terminal: mling node use <name>",
                 names.join(", ")
             ))
         }
@@ -73,7 +73,7 @@ fn web_ui(node: &Node) -> Upstream {
     match node.web_port {
         Some(port) => Upstream::Node(format!("{}:{port}", locator::url_host(&node.address))),
         None => Upstream::Message(format!(
-            "The Puffin node {} does not share its web UI.\nOn the node: puffin-admin node enable (without --no-web)",
+            "The Mightling node {} does not share its web UI.\nOn the node: mling-admin node enable (without --no-web)",
             label(node)
         )),
     }
@@ -83,7 +83,7 @@ fn label(node: &Node) -> &str {
     if node.name.is_empty() { &node.address } else { &node.name }
 }
 
-/// Browses `_puffin-node._tcp`, as the launcher does (`puffin-rs/src/node.rs`).
+/// Browses `_mightling-node._tcp`, as the launcher does (`mling-rs/src/node.rs`).
 fn browse(wanted: Option<&str>) -> Vec<Node> {
     let Ok(daemon) = mdns_sd::ServiceDaemon::new() else {
         return Vec::new();
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(decide(None, vec![one.clone()]), Upstream::Node("192.168.50.105:3000".to_string()));
         assert_eq!(decide(None, vec![two.clone()]), Upstream::Node("[fd00::6]:3000".to_string()));
         let Upstream::Message(text) = decide(None, vec![one, two]) else { panic!("guessed a node") };
-        assert!(text.contains("spark-1 (192.168.50.105), spark-2 (fd00::6)") && text.contains("puffin node use <name>"));
+        assert!(text.contains("spark-1 (192.168.50.105), spark-2 (fd00::6)") && text.contains("mling node use <name>"));
         assert_eq!(decide(None, Vec::new()), Upstream::Message(NONE_FOUND.to_string()));
     }
 
@@ -194,6 +194,6 @@ mod tests {
     fn a_node_that_keeps_its_web_ui_to_itself_is_said_not_forwarded_to() {
         let unshared = Node { web_port: None, ..node("spark-1", "1111", "192.168.50.105") };
         let Upstream::Message(text) = decide(None, vec![unshared]) else { panic!("forwarded to nothing") };
-        assert!(text.contains("spark-1 does not share its web UI") && text.contains("puffin-admin node enable"));
+        assert!(text.contains("spark-1 does not share its web UI") && text.contains("mling-admin node enable"));
     }
 }

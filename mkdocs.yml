@@ -1,11 +1,11 @@
-site_name: Puffin
+site_name: Mightling
 site_description: A private AI assistant and coding agent that runs entirely on your NVIDIA GB10.
-copyright: Puffin by Dreamference · licensed AGPL-3.0-or-later.
+copyright: Mightling by Dreamference · licensed AGPL-3.0-or-later.
 
 theme:
   name: material
-  logo: assets/puffin.svg
-  favicon: assets/puffin.svg
+  logo: assets/mling.svg
+  favicon: assets/mling.svg
   # System fonts: a privacy-first product should not send every visitor to a font CDN.
   font: false
   palette:
@@ -41,12 +41,12 @@ extra_css:
 nav:
   - Home: index.md
   - Get started: getting-started.md
-  - Use Puffin:
-      - Terminal agent: puffin.md
+  - Use Mightling:
+      - Terminal agent: mling.md
       - Web chat: web-chat.md
       - Desktop app: desktop.md
   - Reference:
-      - puffin-admin: admin.md
+      - mling-admin: admin.md
       - Models: models.md
   - How it works:
       - Architecture: architecture.md

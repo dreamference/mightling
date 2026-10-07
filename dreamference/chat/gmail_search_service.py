@@ -62,7 +62,7 @@ from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Final, List, Optional, Tuple
 
-# Drive and Calendar for Puffin's apps. In the container this file runs as /config/service.py with
+# Drive and Calendar for Mightling's apps. In the container this file runs as /config/service.py with
 # the reader staged beside it, so the plain import is the one that works there.
 try:
     from dreamference.chat.google_workspace_reader import CALENDAR_SCOPE, DRIVE_SCOPE, GoogleWorkspaceReader
@@ -70,7 +70,7 @@ except ImportError:  # pragma: no cover - the container's layout
     from google_workspace_reader import CALENDAR_SCOPE, DRIVE_SCOPE, GoogleWorkspaceReader  # type: ignore
 
 # Inside the container the credentials directory is mounted here.
-CONFIG_DIR: Final[str] = os.environ.get("PUFFIN_GMAIL_CONFIG", "/config")
+CONFIG_DIR: Final[str] = os.environ.get("MIGHTLING_GMAIL_CONFIG", "/config")
 CREDENTIALS_NAME: Final[str] = "credentials.json"
 
 # The key the stored token is sealed with. See `_seal`: this is obfuscation with a clear threat
@@ -83,7 +83,7 @@ GMAIL_SCOPE: Final[str] = "https://mail.google.com/"
 EMAIL_SCOPE: Final[str] = "https://www.googleapis.com/auth/userinfo.email"
 GOOGLE_OAUTH_SCOPES: Final[str] = EMAIL_SCOPE + " " + GMAIL_SCOPE
 
-# What each of Puffin's apps asks Google for (specs/DREAMFERENCE_PUFFIN_APPS.md §5.2). The full Drive
+# What each of Mightling's apps asks Google for (specs/DREAMFERENCE_MIGHTLING_APPS.md §5.2). The full Drive
 # and Calendar scopes: GNOME's client is refused the read-only ones ("This app is blocked", measured
 # 2026-10-03), so read-only is enforced here, where no write request exists.
 APP_SCOPES: Final[dict[str, str]] = {
@@ -120,7 +120,7 @@ GNOME_HINT_NAME: Final[str] = "gnome-accounts.json"
 # Onyx sends this with every tool call. The service is on a private Docker network, but so is
 # everything else Onyx runs, and a private network is not an authorisation boundary -- the shared
 # secret is what distinguishes Onyx from everything else.
-AUTH_HEADER: Final[str] = "X-Puffin-Gmail-Token"
+AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
 
 IMAP_HOST: Final[str] = "imap.gmail.com"
 IMAP_PORT: Final[int] = 993
@@ -172,10 +172,10 @@ GNOME_SETTINGS_URI: Final[str] = "gnome-control-center://online-accounts"
 # What an unconnected search answers with. It names the place the user can act rather than a
 # command they would have to leave the app to run -- the model reads this and relays it.
 NOT_CONNECTED_MESSAGE: Final[str] = (
-    "Gmail is not connected. Open Settings -> Gmail Accounts in Puffin and choose Connect to Google."
+    "Gmail is not connected. Open Settings -> Gmail Accounts in Mightling and choose Connect to Google."
 )
 
-# Enough styling that the setup page reads as part of Puffin rather than as a server error. It is
+# Enough styling that the setup page reads as part of Mightling rather than as a server error. It is
 # the only page this project serves directly, and the user arrives at it from a polished UI.
 PAGE_STYLE: Final[str] = (
     # The same neutral idiom as the patched Onyx UI (the share sheet, the connector card):
@@ -677,9 +677,9 @@ class GmailSearchService:
         if refused:
             return f"<h2>{name} access was not granted</h2><p>{html.escape(refused)}</p>"
         return (
-            f"<h2>{name} connected</h2><p>You can close this tab. In <code>puffin</code>, choose "
+            f"<h2>{name} connected</h2><p>You can close this tab. In <code>mling</code>, choose "
             "<b>I've connected it</b> in <code>/apps</code>; the tools arrive when you restart it "
-            "or run <code>puffin resume</code>.</p>"
+            "or run <code>mling resume</code>.</p>"
         )
 
     @classmethod
@@ -917,7 +917,7 @@ class GmailSearchService:
 
     @classmethod
     def workspace(cls, path: str, query: dict[str, list[str]]) -> dict[str, Any]:
-        """Answers the read-only Drive and Calendar endpoints (specs/DREAMFERENCE_PUFFIN_APPS.md §9,
+        """Answers the read-only Drive and Calendar endpoints (specs/DREAMFERENCE_MIGHTLING_APPS.md §9,
         §9a): `/drive/search`, `/drive/file/<id>`, `/calendar/events`, `/calendar/event/<calendar>/<id>`.
 
         Args:
@@ -1090,7 +1090,7 @@ class GmailSearchService:
             secret (Optional[str]): Required value of the shared-secret header. Taken from the
                 environment when not given.
         """
-        expected = secret or os.environ.get("PUFFIN_GMAIL_SECRET", "")
+        expected = secret or os.environ.get("MIGHTLING_GMAIL_SECRET", "")
 
         class Handler(BaseHTTPRequestHandler):
             def _reply(self, status: int, body: Dict[str, Any]) -> None:
@@ -1114,15 +1114,15 @@ class GmailSearchService:
                 # paragraph with no chrome to return from.
                 body = (
                     '<!doctype html><html><head><meta charset="utf-8">'
-                    '<title>Puffin</title><meta name="viewport" '
+                    '<title>Mightling</title><meta name="viewport" '
                     'content="width=device-width,initial-scale=1">'
                     f"<style>{PAGE_STYLE}</style></head><body><main>"
                     f"{inner}"
-                    f'<p><a href="{ONYX_ORIGIN}/app">Back to Puffin</a></p>'
+                    f'<p><a href="{ONYX_ORIGIN}/app">Back to Mightling</a></p>'
                     # Framed (in the connect modal) the link is surplus -- the modal has its own
-                    # close, and navigating the iframe to the app would nest Puffin inside itself.
+                    # close, and navigating the iframe to the app would nest Mightling inside itself.
                     "<script>if(window.top!==window.self){var L=document.querySelectorAll('a');"
-                    "for(var i=0;i<L.length;i++){if(L[i].textContent==='Back to Puffin')"
+                    "for(var i=0;i<L.length;i++){if(L[i].textContent==='Back to Mightling')"
                     "L[i].style.display='none';}}</script>"
                     "</main></body></html>"
                 ).encode()
@@ -1133,11 +1133,11 @@ class GmailSearchService:
                 self.wfile.write(body)
 
             def _page(self, message: str) -> None:
-                self._html(f"<h2>Puffin</h2><p>{message}</p>")
+                self._html(f"<h2>Mightling</h2><p>{message}</p>")
 
             def _setup_page(self, app: str = "gmail") -> None:
                 """
-                Serves the HTML for Puffin's own Google OAuth flow, for one app.
+                Serves the HTML for Mightling's own Google OAuth flow, for one app.
 
                 Args:
                     app (str): `gmail`, `drive` or `calendar`: which scope the consent asks for.
@@ -1145,14 +1145,14 @@ class GmailSearchService:
                 name = APP_NAMES[app]
                 full_access = "" if app == "gmail" else (
                     f'<p class="note">ⓘ Google will describe {name} access as full access ("see, edit, create and '
-                    'delete"): GNOME\'s client may ask for nothing narrower. Puffin only reads; it has no way to '
+                    'delete"): GNOME\'s client may ask for nothing narrower. Mightling only reads; it has no way to '
                     'change or delete anything.</p>'
                 )
                 self._html(
                     f"""
                     <h2>Connect {name}</h2>
-                    <p>Puffin authenticates directly with Google. What it reads stays on this machine.</p>
-                    <p class="note">ⓘ The consent screen will say <b style="display:inline">GNOME</b> — Puffin authenticates through the GNOME desktop's Google integration. No Puffin credentials are sent to Google.</p>
+                    <p>Mightling authenticates directly with Google. What it reads stays on this machine.</p>
+                    <p class="note">ⓘ The consent screen will say <b style="display:inline">GNOME</b> — Mightling authenticates through the GNOME desktop's Google integration. No Mightling credentials are sent to Google.</p>
                     {full_access}
                     <button id="start-btn" class="btn-primary">Authorize with Google</button>
                     <div class="divider">
@@ -1162,7 +1162,7 @@ class GmailSearchService:
                       <button id="paste-btn" class="btn-secondary">Finish connecting</button>
                       <p id="paste-result" class="muted"></p>
                     </div>
-                    <p class="muted">Then return to <code>puffin</code> and choose <b>I've connected it</b>.</p>
+                    <p class="muted">Then return to <code>mling</code> and choose <b>I've connected it</b>.</p>
                     <script>
                         document.getElementById('start-btn').onclick = async () => {{
                             const res = await fetch('/api/google/oauth/start?app={app}', {{ method: 'POST' }});

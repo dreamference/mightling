@@ -1,10 +1,10 @@
-394830 execve("/home/user/.local/bin/puffin", ["puffin", "exec", "--skip-git-repo-check", "-o", "/tmp/puffin-audit-fixture/last.txt", "Reply with exactly: pong"], 0xfffff7deaa08 /* 113 vars */) = 0
+394830 execve("/home/user/.local/bin/mling", ["mling", "exec", "--skip-git-repo-check", "-o", "/tmp/mightling-audit-fixture/last.txt", "Reply with exactly: pong"], 0xfffff7deaa08 /* 113 vars */) = 0
 394852 connect(9, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
 394852 connect(9, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
 394831 connect(9, {sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
 394831 connect(9, {sa_family=AF_INET, sin_port=htons(8767), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
-394854 execve("/home/user/.local/share/dreamference/puffin/bin/puffin-code", ["/home/user/.local/share/dreamference/puffin/bin/puffin-code", "session", "--parent-pid", "394830"], 0xffffecec5170 /* 113 vars */) = 0
-394855 execve("/home/user/.local/share/dreamference/puffin/bin/puffin-code", ["/home/user/.local/share/dreamference/puffin/bin/puffin-code", "prompt-block"], 0xffffecec5170 /* 113 vars */) = 0
+394854 execve("/home/user/.local/share/dreamference/mightling/bin/mling-code", ["/home/user/.local/share/dreamference/mightling/bin/mling-code", "session", "--parent-pid", "394830"], 0xffffecec5170 /* 113 vars */) = 0
+394855 execve("/home/user/.local/share/dreamference/mightling/bin/mling-code", ["/home/user/.local/share/dreamference/mightling/bin/mling-code", "prompt-block"], 0xffffecec5170 /* 113 vars */) = 0
 394856 execve("/home/user/mightling/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394856 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
 394856 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xb97ebcd86fb0 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -341,7 +341,7 @@
 394912 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394940, si_uid=1000, si_status=0, si_utime=0, si_stime=1 /* 0.01 s */} ---
 394832 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394912, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394832 sendto(7, "\1", 1, MSG_NOSIGNAL, NULL, 0) = 1
-394953 execve("/bin/bash", ["/bin/bash", "-c", "set -e; . \"/tmp/puffin-audit-fixture/home/shell_snapshots/01a0f924-3bc9-7a61-a6fa-27301de95ece.tmp-1790886296537793650\""], 0xee194c00f120 /* 113 vars */) = 0
+394953 execve("/bin/bash", ["/bin/bash", "-c", "set -e; . \"/tmp/mightling-audit-fixture/home/shell_snapshots/01a0f924-3bc9-7a61-a6fa-27301de95ece.tmp-1790886296537793650\""], 0xee194c00f120 /* 113 vars */) = 0
 394952 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=394953, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
 394952 sendto(7, "\1", 1, MSG_NOSIGNAL, NULL, 0) = 1
 394832 connect(44, {sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)

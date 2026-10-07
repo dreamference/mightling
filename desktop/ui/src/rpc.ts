@@ -1,4 +1,4 @@
-// The Work window's JSON-RPC client for `puffin app-server` (specs/DREAMFERENCE_PUFFIN_DESKTOP.md
+// The Work window's JSON-RPC client for `mling app-server` (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md
 // §4.3). Codex's app-server speaks JSON-RPC without the `"jsonrpc"` field, one object per line;
 // the bridge in src-tauri/src/bridge.rs carries the lines, and this matches answers to requests.
 // Types come from src/protocol, generated from the pinned Codex (dreamference/chat/

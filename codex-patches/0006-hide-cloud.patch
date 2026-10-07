@@ -7,7 +7,7 @@ index 4d7984d..5567ad0 100644
  
      /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
 -    #[clap(name = "cloud", alias = "cloud-tasks")]
-+    // Puffin: hidden, not removed -- kept runnable for a future private cloud.
++    // Mightling: hidden, not removed -- kept runnable for a future private cloud.
 +    #[clap(name = "cloud", alias = "cloud-tasks", hide = true)]
      Cloud(CloudTasksCli),
  

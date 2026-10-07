@@ -4,6 +4,6 @@ index 93c12fc..09820e8 100644
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -313,2 +313,4 @@ impl SlashCommand {
              SlashCommand::Feedback => false,
-+            // Puffin: hidden, not removed -- auto-review defaults to OpenAI's codex-auto-review model, which puffin lacks.
++            // Mightling: hidden, not removed -- auto-review defaults to OpenAI's codex-auto-review model, which mling lacks.
 +            SlashCommand::AutoReview => false,
              SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),

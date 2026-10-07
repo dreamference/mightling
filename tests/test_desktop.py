@@ -8,14 +8,14 @@ from dreamference.chat.desktop_runner import DESKTOP_PROJECT_DIR
 
 def test_window_points_at_the_local_deployment_rather_than_a_bundled_copy():
     # The desktop app and the browser render the same server, which is what keeps every patch
-    # `puffin-admin puffin configure` applies showing up in both without being ported.
+    # `mling-admin chat configure` applies showing up in both without being ported.
     with open(os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "tauri.conf.json")) as handle:
         config = json.load(handle)
 
     window = config["app"]["windows"][0]
     assert window["url"].startswith("http://localhost:3000")
-    assert config["productName"] == "Puffin"
-    assert config["identifier"] == "dev.dreamference.puffin"
+    assert config["productName"] == "Mightling"
+    assert config["identifier"] == "dev.dreamference.mightling"
 
 
 def test_bundle_icons_exist_at_the_sizes_tauri_names():
@@ -136,30 +136,30 @@ def test_desktop_entry_matches_the_window_class_gnome_sees():
     # unnamed generic icon in the dock, which is what it was doing.
     from dreamference.chat.desktop_runner import DESKTOP_ENTRY_NAME, WINDOW_CLASS
 
-    assert WINDOW_CLASS == "Puffin-app"
+    assert WINDOW_CLASS == "Mightling-app"
     # Tao derives the class from the binary name, so the file is named after the instance too.
-    assert DESKTOP_ENTRY_NAME == "puffin-app.desktop"
+    assert DESKTOP_ENTRY_NAME == "mling-app.desktop"
 
 
 def test_registration_removes_launchers_left_by_earlier_binary_names(tmp_path):
-    # The binary was puffin-desktop, then puffin-ui; their entries would otherwise sit beside the
-    # new one in the applications grid, launching a binary that no longer builds.
+    # The binary was puffin-desktop, then puffin-ui, then puffin-app; their entries would otherwise sit
+    # beside the new one in the applications grid, launching a binary that no longer builds.
     from dreamference.chat import desktop_runner
 
     entries, icons = tmp_path / "applications", tmp_path / "icons"
     entries.mkdir()
     icons.mkdir()
-    for legacy in ("puffin-desktop", "puffin-ui"):
+    for legacy in ("puffin-desktop", "puffin-ui", "puffin-app"):
         (entries / f"{legacy}.desktop").write_text("[Desktop Entry]\n")
         (icons / f"{legacy}.png").write_bytes(b"")
     with patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(entries)), \
          patch.object(desktop_runner, "ICON_DIR", str(icons)), \
-         patch.object(DesktopRunner, "binary_path", return_value="/opt/puffin-app"), \
+         patch.object(DesktopRunner, "binary_path", return_value="/opt/mling-app"), \
          patch("dreamference.chat.onyx_brand_assets.OnyxBrandAssets.render_app_icon"), \
          patch("subprocess.run"):
         assert DesktopRunner.install_desktop_entry() is True
 
-    assert sorted(p.name for p in entries.iterdir()) == ["puffin-app.desktop"]
+    assert sorted(p.name for p in entries.iterdir()) == ["mling-app.desktop"]
     assert list(icons.iterdir()) == []
 
 
@@ -188,19 +188,19 @@ def test_cache_is_cleared_without_signing_the_user_out():
     from dreamference.chat.desktop_runner import WEBVIEW_CACHE_DIR_NAME
 
     assert WEBVIEW_CACHE_DIR_NAME == "WebKitCache"
-    with patch.object(DesktopRunner, "_app_identifier", return_value="dev.dreamference.puffin"), \
+    with patch.object(DesktopRunner, "_app_identifier", return_value="dev.dreamference.mightling"), \
          patch("os.path.isdir", return_value=True), \
          patch("shutil.rmtree") as rmtree:
         assert DesktopRunner.clear_webview_cache() is True
 
     removed = rmtree.call_args[0][0]
-    assert removed.endswith(os.path.join("dev.dreamference.puffin", "WebKitCache"))
+    assert removed.endswith(os.path.join("dev.dreamference.mightling", "WebKitCache"))
     assert "cookies" not in removed
 
 
 def test_identifier_comes_from_the_tauri_config():
     # Repeating it here would let the data directory drift from the one the app really uses.
-    assert DesktopRunner._app_identifier() == "dev.dreamference.puffin"
+    assert DesktopRunner._app_identifier() == "dev.dreamference.mightling"
 
 
 def test_window_background_is_painted_rather_than_left_black():

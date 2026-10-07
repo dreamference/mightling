@@ -2,11 +2,11 @@
 
 A chat assistant in your browser, answered by the same local model as the terminal agent. It is
 built on [Onyx](https://github.com/onyx-dot-app/onyx), running its lightweight edition (a web
-server, an API server and PostgreSQL, about 900 MB resident), and rebranded as Puffin.
+server, an API server and PostgreSQL, about 900 MB resident), and rebranded as Mightling.
 
 ```bash
-puffin-admin puffin start
-puffin-admin puffin configure --email you@example.com --password '<a strong password>'
+mling-admin chat start
+mling-admin chat configure --email you@example.com --password '<a strong password>'
 ```
 
 Then open <http://localhost:3000>. See [Get started](getting-started.md#5-optional-the-web-chat-and-desktop-app)
@@ -20,23 +20,23 @@ for why you should always pass your own credentials.
 | **Images** | Attach an image and ask about it. The default model reads images. | |
 | **Web search** | Searches go through a SearXNG instance on your machine, which queries public search engines for you. No API key or account. | `--no-web` |
 | **Voice input** | A microphone button, transcribed by a local Whisper server on the CPU. | `--no-voice` |
-| **Gmail, read-only** | After `puffin-admin puffin gmail`, the assistant can search and read your connected mailboxes. It cannot send, delete or change mail. | `--no-gmail` |
+| **Gmail, read-only** | After `mling-admin chat gmail`, the assistant can search and read your connected mailboxes. It cannot send, delete or change mail. | `--no-gmail` |
 | **Image search** | Finds images on the web and shows them in the chat. | `--no-image-search` |
-| **Google sign-in** | `puffin-admin puffin google-auth` adds "Sign in with Google" to the login page. | |
+| **Google sign-in** | `mling-admin chat google-auth` adds "Sign in with Google" to the login page. | |
 
-The "Skip with" flags go on `puffin-admin puffin configure`. `--no-brand` keeps Onyx's own
+The "Skip with" flags go on `mling-admin chat configure`. `--no-brand` keeps Onyx's own
 branding.
 
 ## Managing it
 
 ```bash
-puffin-admin puffin status       # version, containers and health
-puffin-admin puffin logs         # container logs
-puffin-admin puffin stop         # stop, keeping your data
-puffin-admin puffin uninstall    # delete the deployment and all its data
+mling-admin chat status       # version, containers and health
+mling-admin chat logs         # container logs
+mling-admin chat stop         # stop, keeping your data
+mling-admin chat uninstall    # delete the deployment and all its data
 ```
 
-`puffin-admin onyx …` is an alias for the same commands.
+`mling-admin onyx …` is an alias for the same commands.
 
 ## Privacy
 

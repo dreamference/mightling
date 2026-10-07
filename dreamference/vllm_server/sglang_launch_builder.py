@@ -112,7 +112,7 @@ class SGLangLaunchBuilder:
             "python3", "-m", "sglang.launch_server",
             "--model-path", cls.snapshot_path(hf_model, recipe.get("revision")),
             "--trust-remote-code",
-            # The id clients see in /v1/models, and the one puffin, Onyx and the agents send back.
+            # The id clients see in /v1/models, and the one mling, Onyx and the agents send back.
             # Kept to the repository ID, as vLLM reports it, so switching engines renames nothing.
             "--served-model-name", hf_model,
             # Every interface, as vLLM: Onyx and OpenHands reach the server from Docker's bridge.

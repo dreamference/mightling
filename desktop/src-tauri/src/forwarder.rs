@@ -1,5 +1,5 @@
 // The loopback forwarder that lets the window keep loading `http://localhost:3000/app` on a
-// machine that is not the node (specs/DREAMFERENCE_PUFFIN_NODE.md §7).
+// machine that is not the node (specs/DREAMFERENCE_MIGHTLING_NODE.md §7).
 //
 // The web UI is served by the node. A window pointed at `http://<node address>:3000` would not be
 // a secure context, so the page would have no `navigator.mediaDevices` and the microphone could
@@ -47,7 +47,7 @@ pub fn start(upstream: Upstream) -> std::io::Result<u16> {
     let listener = bind()?;
     let port = listener.local_addr()?.port();
     std::thread::Builder::new()
-        .name("puffin-forwarder".to_string())
+        .name("mightling-forwarder".to_string())
         .spawn(move || serve(listener, upstream))?;
     Ok(port)
 }
@@ -63,7 +63,7 @@ pub fn serve(listener: TcpListener, upstream: Upstream) {
         let Ok(client) = connection else { continue };
         let upstream = upstream.clone();
         let _ = std::thread::Builder::new()
-            .name("puffin-forward".to_string())
+            .name("mightling-forward".to_string())
             .spawn(move || match upstream {
                 Upstream::Node(target) => forward(client, &target),
                 Upstream::Message(text) => answer(client, &text),
@@ -82,7 +82,7 @@ fn forward(client: TcpStream, target: &str) {
     let Some(node) = node else {
         answer(
             client,
-            &format!("The Puffin node at {target} is not answering. Is its web UI running? On the node: puffin-admin puffin start"),
+            &format!("The Mightling node at {target} is not answering. Is its web UI running? On the node: mling-admin chat start"),
         );
         return;
     };
@@ -144,9 +144,9 @@ pub fn message_page(message: &str) -> String {
         .collect();
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"10\">\
-         <title>Puffin</title><style>body{{font-family:Roboto,system-ui,sans-serif;background:#fff;color:#111;\
+         <title>Mightling</title><style>body{{font-family:Roboto,system-ui,sans-serif;background:#fff;color:#111;\
          max-width:40em;margin:18vh auto;padding:0 1.5em;line-height:1.5}}h1{{font-size:1.3em}}\
-         p{{margin:.4em 0}}</style></head><body><h1>Puffin</h1>{paragraphs}</body></html>"
+         p{{margin:.4em 0}}</style></head><body><h1>Mightling</h1>{paragraphs}</body></html>"
     )
 }
 
@@ -250,13 +250,13 @@ mod tests {
 
     #[test]
     fn with_no_node_every_request_gets_the_message_page() {
-        let address = forwarder(Upstream::Message("No Puffin node found on this network.\nStart one on a GB10 <now>.".to_string()));
+        let address = forwarder(Upstream::Message("No Mightling node found on this network.\nStart one on a GB10 <now>.".to_string()));
         let mut client = TcpStream::connect(address).expect("connect");
         let _ = client.write_all(b"GET /app HTTP/1.1\r\nHost: localhost:3000\r\n\r\n");
         let mut response = String::new();
         let _ = client.read_to_string(&mut response);
         assert!(response.starts_with("HTTP/1.1 503 "), "{response}");
-        assert!(response.contains("<p>No Puffin node found on this network.</p>"));
+        assert!(response.contains("<p>No Mightling node found on this network.</p>"));
         assert!(response.contains("<p>Start one on a GB10 &lt;now&gt;.</p>"));
         assert!(response.contains("http-equiv=\"refresh\""));
     }

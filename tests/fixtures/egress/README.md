@@ -1,7 +1,7 @@
 # Egress audit fixtures
 
 - `exec_pass.strace`: a real trace, recorded on 2026-10-01 from
-  `strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256 -o … puffin exec --skip-git-repo-check "Reply with exactly: pong"`
+  `strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256 -o … mling exec --skip-git-repo-check "Reply with exactly: pong"`
   with the 16-patch build of Codex `rust-v0.158.0` that was installed at the time, in a throwaway repository and `CODEX_HOME`.
   Only the home and scratch paths were rewritten.
 - `exec_leaks.strace`: the same trace with **synthetic** lines appended for the channels patches
@@ -15,6 +15,6 @@
   `sendmmsg` to systemd-resolved's stub, the address-sorting `connect`s, an fd reused from the
   resolver to the web server). The TLS payload lines were dropped.
 - `tui_pass.strace`: a real trace of the full-screen interface, recorded on 2026-10-02 by
-  `puffin-admin audit egress --tui`'s own session (the same strace around `puffin` on a
+  `mling-admin audit egress --tui`'s own session (the same strace around `mling` on a
   pseudo-terminal: the prompt typed, the reply awaited, `/quit`), with the 17-patch build of Codex
   `rust-v0.158.0` installed on 2026-10-01 21:41. Only the home and scratch paths were rewritten.

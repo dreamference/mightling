@@ -1,0 +1,284 @@
+# Codex tests that `mling-admin codex test` does not run, each with the reason.
+#
+# Everything not listed here is expected to pass on Mightling's tree: the pinned `codex/` submodule
+# with `codex-patches/` applied and the launcher compiled in, built and tested by CodexTestRunner.
+#
+#
+
+[[package]]
+name = "codex-voice-host"
+reason = "Realtime voice's helper binary. Mightling hides /voice (patch 0010) and does not ship it, and it links GStreamer 1.28, which is not installed."
+
+[[target]]
+package = "codex-code-mode-host"
+test = "stdio"
+reason = "Does not compile at rust-v0.158.0: it builds a ToolDefinition without input_schema_max_bytes, a field the same release added. Upstream's defect; the crate's other test targets run."
+
+# cli-name: 3 tests
+[[test]]
+reason = """Patch 0001 sets clap's name to `mling`, so usage lines read `Usage: mling ...` and `--version` prints `mling X.Y.Z`; these tests match `codex`."""
+filter = """
+  (binary_id(codex-cli::bin/codex) & test(=exec_server_args_tests::exec_server_help_documents_remote_options))
+| (binary_id(codex-cli::bin/codex) & test(=tests::plugin_marketplace_help_uses_plugin_namespace))
+| (binary_id(codex-cli::sandbox_cloud_config) & test(=sandbox_fetches_and_enforces_cloud_managed_permission_profile))
+"""
+
+# tui-feedback: 5 tests
+[[test]]
+reason = """Patch 0009 removes /feedback, which uploads logs to the upstream vendor, and with it the interrupted-turn hint `Something went wrong? Hit /feedback to report the issue.` these snapshots contain."""
+filter = """
+  (binary_id(codex-tui) & test(=app::tests::math_interruption_tests::unicode_math_termination_preserves_source_through_mode_and_resize))
+| (binary_id(codex-tui) & test(=chatwidget::tests::composer_submission::output_free_ctrl_c_interrupt_keeps_prompt_and_opens_blank_composer))
+| (binary_id(codex-tui) & test(=chatwidget::tests::exec_flow::interrupt_preserves_unified_exec_wait_streak_snapshot))
+| (binary_id(codex-tui) & test(=chatwidget::tests::history_replay::replayed_nested_review_prompts_do_not_render_or_seed_composer_history))
+| (binary_id(codex-tui) & test(=chatwidget::tests::review_mode::interrupted_turn_error_message_snapshot))
+"""
+
+# tui-cavemode-completion: 1 test
+[[test]]
+reason = """Patch 0017 adds /cavemode after /model, ahead of /compact in the command list, so `/c` then Tab completes `/cavemode` where upstream completed `/compact`. The completion itself is unchanged; the first match is a Mightling command. Moving /cavemode after /compact in 0017 would restore upstream's result and un-skip this (found 2026-10-02, the only TUI failure of 5,517)."""
+filter = """
+  (binary_id(codex-tui) & test(=bottom_pane::chat_composer::tests::slash_tab_completion_moves_cursor_to_end))
+"""
+
+# app-server-analytics-timeouts: 16 tests
+[[test]]
+reason = """Patch 0013 constructs the analytics client disabled. These tests drive plugin installs, external-agent config imports, client metadata and a guardian review, then wait for the analytics event that action emits; with no event they time out instead of failing. Checked on 2026-10-02 on the 20-patch tree: with 0013 the 16 time out and the other 57 tests of the same four groups pass; on the same tree with 0013 left out of the test export, all 72 pass in 46 s."""
+filter = """
+  (binary_id(codex-app-server::all) & test(=suite::v2::analytics::guardian_review_turns_and_tools_reach_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::client_metadata::turn_start_sends_nested_subagent_lineage_after_cold_thread_resume_v2))
+| (binary_id(codex-app-server::all) & test(=suite::v2::client_metadata::turn_steer_updates_client_metadata_on_follow_up_responses_request_v2))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_completed_tracks_analytics_event))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_reinstalls_plugins_from_known_marketplaces))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_reports_failed_sync_import_in_completion))
+| (binary_id(codex-app-server::all) & test(=suite::v2::external_agent_config::external_agent_config_import_reports_session_config_error_subtype))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_failure_tracks_analytics_event))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_preserves_status_when_remote_bundle_error_body_is_too_large))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_rejects_remote_plugin_disabled_by_admin_before_download))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_rejects_remote_plugin_not_available))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_event))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_when_marketplace_file_cannot_be_read))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_when_remote_detail_fetch_fails))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_analytics_when_remote_install_is_rate_limited))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_install::plugin_install_tracks_remote_plugin_analytics_event))
+"""
+
+# tui-usage: 22 tests
+[[test]]
+reason = """Patch 0011 makes /usage this session's token counts. Upstream's /usage is the ChatGPT account's usage menu (analytics, rate-limit resets), fetched from the upstream vendor's backend; these tests drive that menu or its ChatGPT sign-in requirement."""
+filter = """
+  (binary_id(codex-tui) & test(=app::composer_hints::tests::usage_notice_preserves_composer_geometry_on_recovery))
+| (binary_id(codex-tui) & test(=app::tests::local_command_scroll_tests::usage_picker_opens_analytics_without_moving_the_background_transcript))
+| (binary_id(codex-tui) & test(=app::tests::rate_limits::stale_rate_limit_reads_preserve_newer_workspace_hard_stop_for_every_origin))
+| (binary_id(codex-tui) & test(=bottom_pane::slash_commands::tests::usage_command_is_hidden_from_input_when_account_token_activity_is_disabled))
+| (binary_id(codex-tui) & test(=chatwidget::tests::luna_reserve_usage_tests::luna_reserve_status_tracks_the_active_model))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::signed_out_usage_command_reports_chatgpt_login_requirement))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::signed_out_usage_command_with_args_reports_chatgpt_login_requirement))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::usage_command_runs_with_backend_auth_from_widget_init))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::usage_command_runs_with_backend_auth_without_chatgpt_account_flag))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::usage_command_with_invalid_view_reports_usage_snapshot))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::usage_views_open_the_requested_summary_mode))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::account_update_invalidates_usage_menu_refresh_when_visible_state_is_unchanged))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::failed_post_consume_refresh_does_not_keep_stale_reset_count))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::no_credit_outcome_disables_reset_entry_in_usage_menu))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_command_can_check_reset_availability_before_startup_refresh_finishes_snapshot))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_command_can_check_reset_availability_for_workspace_accounts))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_command_disables_reset_after_cached_zero_snapshot))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_command_opens_menu_when_reset_is_available_snapshot))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_menu_opens_analytics))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_menu_rate_limit_reset_entry_opens_reset_flow))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_menu_refresh_enables_newly_available_reset))
+| (binary_id(codex-tui) & test(=chatwidget::tests::usage::usage_menu_refresh_failure_preserves_disabled_known_zero))
+"""
+
+# tui-pets: 6 tests
+[[test]]
+reason = """Patch 0010 hides /pet and /pets, whose art is fetched from the upstream vendor's CDN, so the popup has no match and the commands do not dispatch."""
+filter = """
+  (binary_id(codex-tui) & test(=bottom_pane::chat_composer::tests::slash_popup_pets_for_pet_logic))
+| (binary_id(codex-tui) & test(=bottom_pane::chat_composer::tests::slash_popup_pets_for_pet_ui))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::slash_pet_hide_disables_pets_even_on_unsupported_terminal))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::slash_pets_disable_disables_pets_even_on_unsupported_terminal))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::slash_pets_with_arg_on_unsupported_terminal_shows_notice_without_selection))
+| (binary_id(codex-tui) & test(=chatwidget::tests::slash_commands::slash_pets_with_arg_selects_named_pet))
+"""
+
+# cli-refused: 8 tests
+[[test]]
+reason = """`mling login`, `logout` and `cloud` are refused before Codex parses its arguments (the launcher's REMOVED_COMMANDS, with patches 0005 and 0006): Mightling has no a cloud account. These tests run those commands."""
+filter = """
+  (binary_id(codex-cli::cloud_auth) & test(=cloud_list_only_allows_trusted_credential_destinations))
+| (binary_id(codex-cli::features) & test(=strict_config_is_not_supported_for_cloud_command))
+| (binary_id(codex-cli::login) & test(=device_login_revokes_existing_auth_before_requesting_new_tokens))
+| (binary_id(codex-cli::login) & test(=login_status_reports_auth_storage_errors))
+| (binary_id(codex-cli::login) & test(=login_status_validates_configured_workload_identity))
+| (binary_id(codex-cli::login) & test(=login_with_access_token_rejects_invalid_jwt))
+| (binary_id(codex-cli::login) & test(=login_with_api_key_reads_stdin_and_writes_auth_json))
+| (binary_id(codex-cli::login) & test(=logout_clears_only_the_selected_bedrock_provider))
+"""
+
+# cli-update: 1 tests
+[[test]]
+reason = """Patch 0008 makes `update` Mightling's own updater, which looks up Mightling's GitHub releases; the test expects upstream's debug-build refusal and, run here, reaches GitHub."""
+filter = """
+  (binary_id(codex-cli::update) & test(=update_does_not_start_interactive_prompt))
+"""
+
+# cli-doctor: 2 tests
+[[test]]
+reason = """Patch 0016 switches off `doctor`'s reachability, sign-in and update checks, which contact the upstream vendor and GitHub; these tests read the provider-reachability result those checks produce."""
+filter = """
+  (binary_id(codex-cli::doctor_enterprise_network) & test(=invalid_custom_ca_falls_back_to_system_roots))
+| (binary_id(codex-cli::doctor_path_safety) & test(=non_interactive_dumb_terminal_preserves_other_doctor_failures))
+"""
+
+# analytics: 102 tests
+[[test]]
+reason = """Patch 0013 disables the usage-analytics client where it is constructed. These tests wait for or inspect analytics events. Checked on 2026-10-01: all pass on the same tree with 0013 left out."""
+filter = """
+  (binary_id(codex-app-server::all) & test(=suite::v2::analytics::multi_agent_v2_tools_emit_collaborator_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::analytics::remote_unified_background_plugin_script_emits_measurements_after_turn_completion))
+| (binary_id(codex-app-server::all) & test(=suite::v2::analytics::remote_unified_plugin_script_emits_measurement_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::analytics::unified_background_plugin_script_emits_measurements_after_turn_completion))
+| (binary_id(codex-app-server::all) & test(=suite::v2::analytics::unified_plugin_script_emits_measurement_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::executor_skills::explicit_executor_skill_can_read_referenced_file))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::action_budget::oversized_async_action_requires_sync_review_and_later_scores_recover))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::code_mode::model_guardian_policy_scores_code_mode_cells::legacy_all_tools_still_scores_wrappers))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::code_mode::model_guardian_policy_scores_code_mode_cells::legacy_cua_only_still_ignores_wrappers))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::code_mode::model_guardian_policy_scores_code_mode_cells::model_policy_scores_cua_and_preserves_its_cache_across_cells))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::code_mode::model_guardian_policy_scores_code_mode_cells::required_legacy_cua_only_still_ignores_wrappers))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::code_mode::model_guardian_policy_scores_code_mode_cells::required_model_preserves_cua_cache_across_cells))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::guardian_v2_high_risk_actions_require_full_reviews::approved_evidence))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::guardian_v2_high_risk_actions_require_full_reviews::denied_evidence))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::guardian_v2_high_risk_actions_require_full_reviews::failed_review_without_evidence))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::guardian_v2_high_risk_actions_require_full_reviews::forged_tool_output))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::guardian_v2_low_risk_actions_skip_subsequent_reviews))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::guardian_v2_required_model_bypasses_scoring_and_runs_full_reviews))
+| (binary_id(codex-app-server::all) & test(=suite::v2::guardian_v2::guardian_v2_threshold_score_requires_full_reviews))
+| (binary_id(codex-app-server::all) & test(=suite::v2::history_notes_extension::app_server_uses_configured_notes_backend_for_context_window_hints::native_failure_does_not_use_bridge))
+| (binary_id(codex-app-server::all) & test(=suite::v2::history_notes_extension::app_server_uses_configured_notes_backend_for_context_window_hints::native_hint))
+| (binary_id(codex-app-server::all) & test(=suite::v2::history_notes_extension::app_server_uses_configured_notes_backend_for_context_window_hints::native_hint_without_experimental_capability))
+| (binary_id(codex-app-server::all) & test(=suite::v2::history_notes_extension::app_server_uses_configured_notes_backend_for_context_window_hints::no_notes))
+| (binary_id(codex-app-server::all) & test(=suite::v2::history_notes_extension::history_notes_and_async_message_emit_control_tool_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::imagegen_extension::standalone_image_generation_failure_emits_terminal_item))
+| (binary_id(codex-app-server::all) & test(=suite::v2::imagegen_extension::standalone_image_generation_returns_saved_path_hint_to_model::omitted_defaults_to_opaque))
+| (binary_id(codex-app-server::all) & test(=suite::v2::imagegen_extension::standalone_image_generation_returns_saved_path_hint_to_model::opaque))
+| (binary_id(codex-app-server::all) & test(=suite::v2::imagegen_extension::standalone_image_generation_returns_saved_path_hint_to_model::transparent))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_reconcile::plugin_reconcile_syncs_bundles_and_reports_changes::global))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_reconcile::plugin_reconcile_syncs_bundles_and_reports_changes::workspace))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_uninstall::plugin_uninstall_tracks_analytics_event))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_uninstall::plugin_uninstall_writes_remote_plugin_to_cloud_when_remote_plugin_enabled))
+| (binary_id(codex-app-server::all) & test(=suite::v2::selected_capability_stack::selected_plugin_mcp_startup_respects_explicit_mentions::optional_batched))
+| (binary_id(codex-app-server::all) & test(=suite::v2::selected_capability_stack::selected_plugin_mcp_startup_respects_explicit_mentions::optional_direct))
+| (binary_id(codex-app-server::all) & test(=suite::v2::selected_capability_stack::selected_plugin_mcp_startup_respects_explicit_mentions::plugin_link_batched))
+| (binary_id(codex-app-server::all) & test(=suite::v2::selected_capability_stack::selected_plugin_mcp_startup_respects_explicit_mentions::plugin_link_direct))
+| (binary_id(codex-app-server::all) & test(=suite::v2::selected_capability_stack::selected_plugin_mcp_startup_respects_explicit_mentions::structured_mention_batched))
+| (binary_id(codex-app-server::all) & test(=suite::v2::selected_capability_stack::selected_plugin_mcp_startup_respects_explicit_mentions::structured_mention_direct))
+| (binary_id(codex-app-server::all) & test(=suite::v2::sleep::clock_tools_emit_control_tool_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::thread_archive::thread_archive_requires_materialized_rollout))
+| (binary_id(codex-app-server::all) & test(=suite::v2::thread_archive::thread_archive_succeeds_when_descendant_archive_fails))
+| (binary_id(codex-app-server::all) & test(=suite::v2::thread_fork::thread_fork_tracks_thread_initialized_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::thread_resume::thread_goal_lifecycle_emits_analytics_and_clear_deletes_goal))
+| (binary_id(codex-app-server::all) & test(=suite::v2::thread_resume::thread_resume_running_thread_tracks_thread_originator_in_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::thread_resume::thread_resume_tracks_thread_initialized_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::thread_start::thread_start_tracks_thread_initialized_analytics::_codex_work_desktop_expects))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::code_mode_exec_emits_correlated_production_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::direct_input_to_multi_agent_v2_subagent_is_rejected::legacy))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::direct_input_to_multi_agent_v2_subagent_is_rejected::paginated))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::tool_call_metadata_stays_out_of_raw_response_item_notifications::analytics_enabled))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::tool_call_metadata_stays_out_of_raw_response_item_notifications::analytics_unset))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::turn_profile_tracks_blocking_tool_and_follow_up_sampling))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::turn_start_emits_spawn_agent_item_with_model_metadata_v2))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::turn_start_tracks_thread_originator_in_analytics))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_start::turn_start_with_empty_input_runs_model_request))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_steer::turn_steer_requires_active_turn))
+| (binary_id(codex-app-server::all) & test(=suite::v2::turn_steer::turn_steer_returns_active_turn_id))
+| (binary_id(codex-core) & test(=codex_delegate::tests::delegate_start_analytics_honors_child_opt_out_with_enabled_parent))
+| (binary_id(codex-core) & test(=mcp_tool_call::tests::dispatched_mcp_approval_with_closed_response_is_classified_as_approval))
+| (binary_id(codex-core) & test(=session::tests::emit_subagent_session_started_includes_fork_lineage_and_originator))
+| (binary_id(codex-core) & test(=session::tests::responses_metadata_uses_selected_harness_analytics_client))
+| (binary_id(codex-core) & test(=thread_manager::tests::thread_analytics_opt_out_overrides_shared_client))
+| (binary_id(codex-core::all) & test(=suite::code_mode::code_mode_result_metadata_follows_runtime_recording_enablement))
+| (binary_id(codex-core::all) & test(=suite::code_mode::code_mode_result_metadata_keeps_prepared_call_binding_across_runtime_refresh))
+| (binary_id(codex-core::all) & test(=suite::code_mode::direct_result_metadata_retained_budget_preserves_resource_access))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::accepted_error_keeps_metadata))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::analytics_enabled_keeps_metadata))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::copies_full_metadata_without_rules))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::direct_accepted_error_keeps_metadata))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::direct_analytics_enabled_keeps_metadata))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::direct_extension_owned_apps_do_not_record))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::direct_feature_off_does_not_record))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::direct_keeps_metadata))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::direct_missing_metadata_stays_absent))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::employee_keeps_metadata))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::extension_owned_apps_do_not_record))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::feature_off_does_not_record))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_follows_call_binding::missing_metadata_stays_absent))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_preserves_results_within_request_budget::code_mode))
+| (binary_id(codex-core::all) & test(=suite::code_mode::result_metadata_preserves_results_within_request_budget::direct))
+| (binary_id(codex-core::all) & test(=suite::direct_tool_metadata::direct_metadata_limit_retains_marker_without_sending_it_to_custom_provider))
+| (binary_id(codex-core::all) & test(=suite::mcp_auth_elicitation::actual_turn_elicitation_analytics::auth_metadata_removed_by_callback))
+| (binary_id(codex-core::all) & test(=suite::mcp_auth_elicitation::actual_turn_elicitation_analytics::auth_requests_elicitation_by_default))
+| (binary_id(codex-core::all) & test(=suite::mcp_auth_elicitation::actual_turn_elicitation_analytics::legacy_accepted_ordinary))
+| (binary_id(codex-core::all) & test(=suite::mcp_auth_elicitation::actual_turn_elicitation_analytics::legacy_cancelled))
+| (binary_id(codex-core::all) & test(=suite::mcp_auth_elicitation::actual_turn_elicitation_analytics::modern_accepted_auth))
+| (binary_id(codex-core::all) & test(=suite::mcp_auth_elicitation::actual_turn_elicitation_analytics::modern_declined))
+| (binary_id(codex-core::all) & test(=suite::plugins::explicit_plugin_mentions_track_plugin_used_analytics))
+| (binary_id(codex-core::all) & test(=suite::plugins::explicit_plugin_skill_invocation_tracks_remote_plugin_id))
+| (binary_id(codex-core::all) & test(=suite::plugins::implicit_plugin_skill_invocation_tracks_remote_plugin_id::skill_document_read))
+| (binary_id(codex-core::all) & test(=suite::plugins::implicit_plugin_skill_invocation_tracks_remote_plugin_id::skill_script_run))
+| (binary_id(codex-core::all) & test(=suite::plugins::persisted_remote_plugin_command_attribution_flows_through_turn_context::classic_shell))
+| (binary_id(codex-core::all) & test(=suite::plugins::plugin_metrics_stdin_works_with_sandbox_approval_disabled::local))
+| (binary_id(codex-core::all) & test(=suite::plugins::plugin_metrics_stdin_works_with_sandbox_approval_disabled::remote))
+| (binary_id(codex-core::all) & test(=suite::plugins::remote_plugin_measurements_require_the_frontend_version))
+| (binary_id(codex-core::all) & test(=suite::request_plugin_install::endpoint_recommendation_hydrates_install_identity_after_selection))
+| (binary_id(codex-core::all) & test(=suite::skills_extension::cloud_skill_tests::explicit_only_cloud_skill_is_hidden_but_can_be_invoked))
+| (binary_id(codex-core::all) & test(=suite::skills_extension::cloud_skill_tests::yielded_skill_tests::yielded_skill_read_keeps_originating_turn_metadata))
+| (binary_id(codex-core::all) & test(=suite::skills_extension::executor_skill_invocation_is_environment_scoped_and_deduplicated))
+| (binary_id(codex-core::all) & test(=suite::skills_extension::production_turn_uses_provider_host_catalog_and_core_snapshot_injection))
+| (binary_id(codex-core::responses_headers) & test(=responses_stream_includes_turn_metadata_header_for_git_workspace_e2e))
+| (binary_id(codex-exec::all) & test(=suite::apply_patch::shutdown_flushes_completed_turn_and_file_diff))
+"""
+
+# network-channels: 8 tests
+[[test]]
+reason = """Patch 0015 closes the channels to the upstream vendor and GitHub that need no login: Statsig/OTEL metrics, the featured-plugins request, the startup `git ls-remote` of openai/plugins and the announcement tip. These tests wait for one of those requests, or for a plugin catalog that arrives through it. Checked on 2026-10-01: all pass on the same tree with 0015 left out."""
+filter = """
+  (binary_id(codex-app-server::all) & test(=suite::v2::curated_mcp_sync::existing_thread_loads_api_curated_mcp_after_auth_switch_sync))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_list::plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled::configured_product_sku))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_list::plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled::invalid_project_preserves_remote_plugins))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_list::plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled::project_disables_local_plugins))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_list::plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled::without_project_override))
+| (binary_id(codex-app-server::all) & test(=suite::v2::plugin_list::plugin_list_uses_warmed_featured_plugin_ids_cache_on_first_request))
+| (binary_id(codex-core-plugins) & test(=manager::tests::featured_plugin_ids_for_config_defaults_query_param_to_codex))
+| (binary_id(codex-core-plugins) & test(=manager::tests::featured_plugin_ids_for_config_uses_restriction_product_query_param))
+"""
+
+# env-tls: 6 tests
+[[test]]
+reason = """Fail identically on unmodified Codex at rust-v0.158.0 on this machine, so not Mightling's: the native-TLS attempt's error arrives as rustls' `AlertReceived(ProtocolVersion)`, not OpenSSL's `tlsv1 alert protocol version` that the fallback classifier matches, so no rustls retry happens. OpenSSL here is vendored (no libssl-dev). Root cause not established."""
+filter = """
+  (binary_id(codex-http-client) & test(=route_aware_client_pool::tests::request_failures_classify_real_untrusted_certificate_handshakes))
+| (binary_id(codex-http-client) & test(=route_aware_client_pool::tls_fallback_tests::does_not_retry_a_non_replayable_streaming_request))
+| (binary_id(codex-http-client) & test(=route_aware_client_pool::tls_fallback_tests::retries_a_native_tls_failure_after_another_request_caches_rustls))
+| (binary_id(codex-http-client) & test(=route_aware_client_pool::tls_fallback_tests::retries_a_native_tls_protocol_failure_once_with_rustls))
+| (binary_id(codex-http-client) & test(=route_aware_client_pool::tls_fallback_tests::retries_a_tls_protocol_failure_when_request_url_contains_certificate_markers))
+| (binary_id(codex-http-client) & test(=route_aware_client_pool::tls_fallback_tests::successful_rustls_fallback_replays_the_request_and_reuses_the_destination))
+"""
+
+# env-exec-server: 4 tests
+[[test]]
+reason = """Fail identically on unmodified Codex at rust-v0.158.0 on this machine, run one at a time too: the remote exec-server's shell-snapshot capture runs the profile inside the read-only sandbox, which cannot write its capture file (`Read-only file system`). Upstream runs the remote variants in a Docker remote-env shard, and here the sandbox is the system bubblewrap (CODEX_SKIP_BWRAP_BUILD). Mightling does not use a remote exec server."""
+filter = """
+  (binary_id(codex-exec-server::exec_process) & test(=shell_snapshot::shell_snapshot_concurrent_replays_keep_independent_readers::blocked_descriptor_path))
+| (binary_id(codex-exec-server::exec_process) & test(=shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_pipe_recovery))
+| (binary_id(codex-exec-server::exec_process) & test(=shell_snapshot_v2_capture_failure_falls_back_and_retries::remote_tty_recovery))
+| (binary_id(codex-exec-server::exec_process) & test(=shell_snapshot_v2_filters_profile_exports_and_stays_in_memory::remote_sandbox))
+"""
+
+# env-v8: 1 tests
+[[test]]
+reason = """The V8 Mightling links is the upstream vendor's pointer-compression-and-sandbox build (the only one published for aarch64 Linux), while a workspace build leaves the proof-of-concept crate's `sandbox` feature off, so 'feature matches linked V8' is false. Fails identically on unmodified Codex here."""
+filter = """
+  (binary_id(codex-v8-poc) & test(=tests::sandbox_feature_matches_linked_v8))
+"""

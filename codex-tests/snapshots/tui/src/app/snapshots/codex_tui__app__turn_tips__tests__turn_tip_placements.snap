@@ -11,7 +11,7 @@ Response row 0
   └ Tip: Try /help.
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-test default · /tmp/project
   ? for shortcuts
@@ -19,7 +19,7 @@ Response row 0
 working=true, response rows=1, 80x6
 • Working (0s • esc to interrupt)
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-test default · /tmp/project
   ? for shortcuts
@@ -33,7 +33,7 @@ Show a response.
   [completion time]
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-test default · /tmp/project
   ? for shortcuts
@@ -47,7 +47,7 @@ Show a response.
   [completion time]
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-test default · /tmp/project
   ? for shortcuts
@@ -58,7 +58,7 @@ working=false, response rows=1, 80x9
   [completion time]
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-test default · /tmp/project
   ? for shortcuts
@@ -70,7 +70,7 @@ Show a response.
   [completion time]
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-test default · /tmp/project
   ? for shortcuts
@@ -83,7 +83,7 @@ Show a response.
   [completion time]
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   gpt-test default · /tmp/project
   ? for shortcuts
@@ -104,6 +104,6 @@ Response row
 
 working=false, response rows=1, 80x4
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   ? for shortcuts

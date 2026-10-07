@@ -1,6 +1,6 @@
 # Cave-mode benchmark
 
-The measurements behind [specs/DREAMFERENCE_PUFFIN_CAVE_MODE.md](../../specs/DREAMFERENCE_PUFFIN_CAVE_MODE.md) §1.1, kept so they can be re-run when the default model changes. It drives the real `puffin` against the model server on this machine, so it is not part of the test suite (`conftest.py` keeps pytest out of `tasks/`, whose workspaces contain a deliberately failing test).
+The measurements behind [specs/DREAMFERENCE_MIGHTLING_CAVE_MODE.md](../../specs/DREAMFERENCE_MIGHTLING_CAVE_MODE.md) §1.1, kept so they can be re-run when the default model changes. It drives the real `mling` against the model server on this machine, so it is not part of the test suite (`conftest.py` keeps pytest out of `tasks/`, whose workspaces contain a deliberately failing test).
 
 ```bash
 cd scripts/cave_mode_bench
@@ -10,17 +10,17 @@ cd scripts/cave_mode_bench
 ../../.venv/bin/python analyze.py --drift results/drift-new.jsonl
 ```
 
-- **Runs one at a time.** A run is `puffin exec -s workspace-write` in a fresh git workspace with a fresh `CODEX_HOME`, so no memory or session leaks between runs. Levels and tasks are interleaved per repetition, because the server's speed drifts with whatever else it serves.
+- **Runs one at a time.** A run is `mling exec -s workspace-write` in a fresh git workspace with a fresh `CODEX_HOME`, so no memory or session leaks between runs. Levels and tasks are interleaved per repetition, because the server's speed drifts with whatever else it serves.
 - **A level is passed as `developer_instructions`**, the text the `cave_mode` World State fragment would add. `+R` in `drift.py` adds the level's one-line reminder before each later user message, which is where the per-turn reminder lands.
 - **Tokens are counted with the served model's tokenizer** (`tok.py` finds Qwen3.8's in the Hugging Face cache; `CAVE_TOKENIZER` overrides it).
 - **Each task has an automatic check** (`tasks/<task>/check.py <workspace> <final-answer-file>`). Four are coding tasks checked by tests; five are questions checked for the facts the answer must contain. `safety` also checks that the agent did not run the destructive command.
 - **Workspaces and sessions** go to `/tmp/cave_mode_bench_runs` (`--runs`, `CAVE_RUNS`), not into the repository.
 - **Compare a level only with `off` from the same results file** (see `analyze.py`).
-- **`puffin`'s own cave mode is switched off for every run** (`DREAMFERENCE_PUFFIN_CAVE_MODE=off`, since 2026-10-02), so the level under test is the only one the model sees.
+- **`mling`'s own cave mode is switched off for every run** (`DREAMFERENCE_MIGHTLING_CAVE_MODE=off`, since 2026-10-02), so the level under test is the only one the model sees.
 - **A level name resolves to `levels/<name>.txt`, else `levels/history/<name>.txt`**, so an older or candidate text (`ultra_v4`, `ultra_v5`) runs without being copied over the shipped one.
 - **`wrote_files` and `pass_strict`** (since batch 6): the files a run created or changed, not counting what the task's setup leaves uncommitted, and a pass that also wrote nothing on a question task. `analyze.py` prints `strict` when a file has them.
 - **`drift.py` asks nine turns** (the ninth, "Give me the full explanation of your last answer.", tests the way out). `+RS` sends the reminder like `+R` but skips it on a turn whose message asks for more detail.
-- **Pin the binary for a long batch:** copy `puffin` and `codex-code-mode-host` aside and put that directory first on `PATH`, so a rebuild during the batch cannot change what is measured.
+- **Pin the binary for a long batch:** copy `mling` and `codex-code-mode-host` aside and put that directory first on `PATH`, so a rebuild during the batch cannot change what is measured.
 
 ## Results of 2026-09-30/10-01
 

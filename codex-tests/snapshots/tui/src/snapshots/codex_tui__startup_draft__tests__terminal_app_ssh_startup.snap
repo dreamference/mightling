@@ -4,7 +4,7 @@ expression: "frames.join(\"\\n---\\n\").replace(crate::version::CODEX_CLI_VERSIO
 ---
 terminal_app_over_ssh=false, owned=true
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
@@ -16,18 +16,18 @@ terminal_app_over_ssh=false, owned=true
 
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   ? for shortcuts
 ---
 terminal_app_over_ssh=true, owned=false
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   ? for shortcuts

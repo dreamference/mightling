@@ -1,4 +1,4 @@
-"""Does a level hold over a long session, and does its way out work? Nine turns through `puffin exec`
+"""Does a level hold over a long session, and does its way out work? Nine turns through `mling exec`
 and `exec resume --last`: eight questions, then "Give me the full explanation of your last answer."
 
     python drift.py --levels off,full,ultra,ultra+R --rep 1 [--out results/drift-new.jsonl]
@@ -52,7 +52,7 @@ def session(variant, rep, runs, out):
             question = f"<system-reminder>\n{reminder}\n</system-reminder>\n\n{question}"
         tail = [question] if turn == 1 else ["resume", "--last", question]
         start = time.time()
-        rc = subprocess.run(["puffin", "exec", *exec_args(ws, level), *tail], cwd=ws,
+        rc = subprocess.run(["mling", "exec", *exec_args(ws, level), *tail], cwd=ws,
                             env=bench_env(home), stdin=subprocess.DEVNULL,
                             capture_output=True, text=True, timeout=900).returncode
         wall = round(time.time() - start, 1)

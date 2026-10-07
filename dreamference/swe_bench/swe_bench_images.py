@@ -1,6 +1,6 @@
 """
 Instance images for this machine's architecture, and the list of instances that are known to
-grade correctly in them (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §5.3, §12).
+grade correctly in them (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §12).
 
 On arm64 the only source is the community repository `greynewell/swe-bench-arm64`, whose tags
 are the instance ids with `__` written `-`. An image existing is not evidence that the instance

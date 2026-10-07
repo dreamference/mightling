@@ -95,4 +95,4 @@ def test_the_switch_brings_it_all_back(monkeypatch, capsys):
     assert "--no-diffusion" in capsys.readouterr().out
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["diffusion-model"])
-    assert exit_info.value.code == 1 and "usage: puffin-admin diffusion-model" in capsys.readouterr().out
+    assert exit_info.value.code == 1 and "usage: mling-admin diffusion-model" in capsys.readouterr().out

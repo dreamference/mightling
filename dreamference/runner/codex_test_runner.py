@@ -2,23 +2,23 @@
 Codex Test Runner for Dreamference.
 
 This module provides the CodexTestRunner class, which runs Codex's own Rust test suite against the
-tree `puffin` is built from: the pinned `codex/` submodule exported with `git archive`, the launcher
+tree `mling` is built from: the pinned `codex/` submodule exported with `git archive`, the launcher
 crate copied in and the patch series applied, exactly as `CodexBrandedBuilder` prepares it. The
 submodule is never touched; the export and its build output live in the builder's cache, beside
 (not inside) the directories the product build uses, so a test run never invalidates a build.
 
-Not every Codex test applies to Puffin. Puffin renames Codex, hides OpenAI's account, cloud, voice
+Not every Codex test applies to Mightling. Mightling renames Codex, hides OpenAI's account, cloud, voice
 and feedback features, switches analytics off and keeps the model on this machine, so a test that
-checks one of those upstream behaviours fails by design. `codex-tests/puffin-skips.toml` lists each
+checks one of those upstream behaviours fails by design. `codex-tests/mightling-skips.toml` lists each
 such test with the reason, and this runner leaves them out; everything else is expected to pass.
 
 Renaming is the exception that is not skipped. Patch 0001 renames Codex on screen, so ~130 TUI
 tests whose expected text says "OpenAI Codex" or "Ask Codex to do anything" fail on it, and they
 are the tests that guard layout, wrapping and every popup. Instead of losing them, the test export
-gets Puffin's expectations before it is built: `codex-tests/snapshots/` holds Puffin's accepted
+gets Mightling's expectations before it is built: `codex-tests/snapshots/` holds Mightling's accepted
 versions of upstream's `.snap` files, copied over the originals, and `codex-tests/patches/` holds
 test-only diffs for expectations written in Rust (inline snapshots, `contains` checks). Neither
-reaches the build `puffin` comes from. `--accept-snapshots` regenerates the first after a Codex
+reaches the build `mling` comes from. `--accept-snapshots` regenerates the first after a Codex
 bump and accepts a new snapshot only if it differs from upstream's by the name alone.
 """
 
@@ -36,28 +36,28 @@ from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.chat.desktop_runner import DesktopRunner
 from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR, REPO_ROOT, CodexBrandedBuilder
 
-# The skip list: which Codex tests Puffin does not run, and why.
-SKIP_FILE: Final[str] = os.path.join(REPO_ROOT, "codex-tests", "puffin-skips.toml")
+# The skip list: which Codex tests Mightling does not run, and why.
+SKIP_FILE: Final[str] = os.path.join(REPO_ROOT, "codex-tests", "mightling-skips.toml")
 
-# Puffin's expectations for tests that check the on-screen name (see the module docstring).
+# Mightling's expectations for tests that check the on-screen name (see the module docstring).
 SNAPSHOT_OVERLAY_DIR: Final[str] = os.path.join(REPO_ROOT, "codex-tests", "snapshots")
 TEST_PATCHES_DIR: Final[str] = os.path.join(REPO_ROOT, "codex-tests", "patches")
 
 # What patch 0001 puts on screen in place of upstream's names. A snapshot is accepted only if it
 # equals upstream's once both are reduced by these (and by the padding the shorter name leaves).
 UPSTREAM_NAMES: Final[tuple] = ("OpenAI Codex", "Codex")
-PUFFIN_NAME: Final[str] = "Puffin"
+MIGHTLING_NAME: Final[str] = "Mightling"
 
 # The export and its Cargo output, kept apart from the product build's `src/` and `target/`.
 TEST_SOURCE_DIR: Final[str] = os.path.join(BUILD_CACHE_DIR, "test-src")
 TEST_TARGET_DIR: Final[str] = os.path.join(BUILD_CACHE_DIR, "test-target")
 # The HOME the tests see, emptied before each run: Codex's tests read `~/.codex`, `~/.config` and
-# git's global config, and must see neither the user's nor Puffin's.
+# git's global config, and must see neither the user's nor Mightling's.
 TEST_HOME_DIR: Final[str] = os.path.join(BUILD_CACHE_DIR, "test-home")
 TOOLS_DIR: Final[str] = os.path.join(BUILD_CACHE_DIR, "tools")
 
 # The launcher crate, copied into the export by CodexBrandedBuilder.
-LAUNCHER_PACKAGE: Final[str] = "puffin-launcher"
+LAUNCHER_PACKAGE: Final[str] = "mling-launcher"
 
 # Upstream's own test profile: the test profile at opt-level 0, which its CI uses to keep test
 # binaries small. 20,000 tests across ~280 binaries.
@@ -74,7 +74,7 @@ NEXTEST_SHA256: Final[dict] = {
     "aarch64-unknown-linux-gnu": "caf1cbf376a485a30795d08dad21f1d9d2baddc6c102d24b60432e7ae7d9d7a4",
 }
 
-# A closed local port. The launcher steps aside under PUFFIN_UPSTREAM_TESTS, so no test should look
+# A closed local port. The launcher steps aside under MIGHTLING_UPSTREAM_TESTS, so no test should look
 # for a model server at all; this makes one that does fail here rather than reach the server
 # running on this machine.
 CLOSED_MODEL_HOST: Final[str] = "http://127.0.0.1:9"
@@ -97,7 +97,7 @@ DEFAULT_TEST_THREADS: Final[int] = 8
 
 
 class CodexTestRunner:
-    """Runs Codex's test suite on Puffin's patched tree, minus the tests that do not apply to it."""
+    """Runs Codex's test suite on Mightling's patched tree, minus the tests that do not apply to it."""
 
     @classmethod
     def load_skips(cls, path: str = SKIP_FILE) -> dict:
@@ -202,9 +202,9 @@ class CodexTestRunner:
         Puts the exported workspace back at version 0.0.0, the version its tests are written for.
 
         Upstream's tests run on `main`, where every workspace crate is 0.0.0; its release job bumps
-        the version just before building, so the release tag Puffin pins says 0.158.0 and ~30 TUI
+        the version just before building, so the release tag Mightling pins says 0.158.0 and ~30 TUI
         snapshots ("OpenAI Codex (v0.0.0)", "Update available! 0.0.0 -> 9.9.9") fail on an
-        unmodified checkout of it. Only the test export is changed; `puffin` keeps its version.
+        unmodified checkout of it. Only the test export is changed; `mling` keeps its version.
 
         Args:
             source_dir (str): The exported tree.
@@ -219,7 +219,7 @@ class CodexTestRunner:
     @classmethod
     def apply_test_overlay(cls, source_dir: str) -> bool:
         """
-        Gives the test export Puffin's expectations for the renamed TUI.
+        Gives the test export Mightling's expectations for the renamed TUI.
 
         Copies `codex-tests/snapshots/` over the export's `codex-rs/` and applies the test-only
         diffs in `codex-tests/patches/`, after the product patches. Only test files change.
@@ -239,7 +239,7 @@ class CodexTestRunner:
                     if not os.path.isfile(target):
                         # The test it belonged to was renamed or removed upstream.
                         print(f"❌ codex-tests/snapshots/{relative} replaces no upstream snapshot.")
-                        print("💡 Regenerate the overlay with `puffin-admin codex test --accept-snapshots`.")
+                        print("💡 Regenerate the overlay with `mling-admin codex test --accept-snapshots`.")
                         return False
                     shutil.copyfile(os.path.join(root, name), target)
         patches = sorted(
@@ -275,7 +275,7 @@ class CodexTestRunner:
         return hashes
 
     @classmethod
-    def differs_only_by_name(cls, upstream: str, puffin: str) -> bool:
+    def differs_only_by_name(cls, upstream: str, mling: str) -> bool:
         """
         Tells whether a snapshot differs from upstream's by the on-screen name and nothing else.
 
@@ -285,7 +285,7 @@ class CodexTestRunner:
 
         Args:
             upstream (str): Upstream's snapshot.
-            puffin (str): The snapshot the patched tree produced.
+            mling (str): The snapshot the patched tree produced.
 
         Returns:
             bool: True if the two reduce to the same text.
@@ -293,11 +293,11 @@ class CodexTestRunner:
         def reduce(text: str) -> str:
             # insta's header (`source:`, `expression:`) is left as it is; only the body matters.
             body = text.split("\n---\n", 1)[-1]
-            for name in UPSTREAM_NAMES + (PUFFIN_NAME,):
+            for name in UPSTREAM_NAMES + (MIGHTLING_NAME,):
                 body = body.replace(name, "\x00")
             return re.sub(r"[\s│─]+", "", body)
 
-        return reduce(upstream) == reduce(puffin)
+        return reduce(upstream) == reduce(mling)
 
     @classmethod
     def accept_snapshots(cls, before: dict) -> int:
@@ -317,18 +317,18 @@ class CodexTestRunner:
         refused = []
         for relative in changed:
             with open(os.path.join(workspace_dir, relative)) as handle:
-                puffin = handle.read()
+                mling = handle.read()
             upstream = subprocess.run(
                 ["git", "-C", os.path.join(REPO_ROOT, "codex"), "show", f"{commit}:codex-rs/{relative}"],
                 capture_output=True, text=True, check=False,
             )
-            if upstream.returncode != 0 or not cls.differs_only_by_name(upstream.stdout, puffin):
+            if upstream.returncode != 0 or not cls.differs_only_by_name(upstream.stdout, mling):
                 refused.append(relative)
                 continue
             target = os.path.join(SNAPSHOT_OVERLAY_DIR, relative)
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "w") as handle:
-                handle.write(puffin)
+                handle.write(mling)
         pending = [os.path.relpath(os.path.join(root, name), workspace_dir)
                    for root, dirs, files in os.walk(workspace_dir)
                    for name in files if name.endswith(".pending-snap")]
@@ -386,7 +386,7 @@ class CodexTestRunner:
 
         Its name is letters and digits only. The external-agent migration tests encode a project's
         path into a directory name with `-`, `.` and `_` as separators and decode it again, so a
-        temporary root containing any of them (`puffin-codex-tests-x_y`) decodes to a different
+        temporary root containing any of them (`mightling-codex-tests-x_y`) decodes to a different
         path and four of them fail. It is also outside any repository: the skills tests treat an
         ancestor holding `.git` as a project root.
 
@@ -456,10 +456,10 @@ class CodexTestRunner:
             f"CARGO_PROFILE_{CARGO_PROFILE.upper().replace('-', '_')}_STRIP": "debuginfo",
             # Upstream's `just test` and CI both set this: some tests recurse deeply.
             "RUST_MIN_STACK": "8388608",
-            # The launcher leaves the tests' command lines alone (puffin-rs, UPSTREAM_TESTS_ENV).
-            "PUFFIN_UPSTREAM_TESTS": "1",
+            # The launcher leaves the tests' command lines alone (mling-rs, UPSTREAM_TESTS_ENV).
+            "MIGHTLING_UPSTREAM_TESTS": "1",
             "DREAMFERENCE_VLLM_HOST": CLOSED_MODEL_HOST,
-            # codex-bwrap compiles a vendored bubblewrap that needs libcap's headers. Puffin does
+            # codex-bwrap compiles a vendored bubblewrap that needs libcap's headers. Mightling does
             # not ship it (the sandbox runs the system's /usr/bin/bwrap), and the crate's build
             # script offers this switch for machines without them.
             "CODEX_SKIP_BWRAP_BUILD": "1",
@@ -567,8 +567,8 @@ class CodexTestRunner:
         for package in sorted(skipped_targets):
             kept = [name for name in cls.test_targets(workspace_dir, package, environment)
                     if name not in skipped_targets[package]]
-            # puffin-launcher is built alongside, never tested here: it is what turns on vendored
-            # OpenSSL for the whole build (puffin-rs/Cargo.toml), and Cargo unifies features only
+            # mling-launcher is built alongside, never tested here: it is what turns on vendored
+            # OpenSSL for the whole build (mling-rs/Cargo.toml), and Cargo unifies features only
             # across the packages one invocation builds. Without it openssl-sys looks for system
             # headers this machine does not have.
             only_this = cls.filterset(skips, f"package({package})" if not user_filter
@@ -672,7 +672,7 @@ class CodexTestRunner:
         environment = cls.environment(rusty_v8, tools_dir, jobs, temp_dir, accept_snapshots)
         workspace_dir = os.path.join(TEST_SOURCE_DIR, "codex-rs")
         skipped = sum(len(skips[kind]) for kind in skips)
-        print(f"🧪 Running the upstream tests on Puffin's tree ({skipped} skip-list entries, "
+        print(f"🧪 Running the upstream tests on Mightling's tree ({skipped} skip-list entries, "
               f"see {os.path.relpath(SKIP_FILE, REPO_ROOT)})...")
         status = 0
         # Upstream's CI runs under umask 022. Under 002, common on desktop Linux, every temporary
@@ -688,6 +688,6 @@ class CodexTestRunner:
                 status = status or code
         finally:
             os.umask(previous_umask)
-        print("✅ Every upstream test that applies to Puffin passed." if status == 0
+        print("✅ Every upstream test that applies to Mightling passed." if status == 0
               else "❌ Some upstream tests failed; see the summary above.")
         return status

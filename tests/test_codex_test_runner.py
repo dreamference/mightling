@@ -1,4 +1,4 @@
-"""Codex's own tests run on Puffin's patched export, never the submodule, minus a reasoned skip list."""
+"""Codex's own tests run on Mightling's patched export, never the submodule, minus a reasoned skip list."""
 
 import glob
 import os
@@ -75,18 +75,18 @@ def test_binaries_are_built_first_and_a_package_with_a_skipped_target_runs_on_it
     assert package[package.index("-p") + 1] == "codex-code-mode-host"
     assert "stdio" not in package and ["--test", "grpc"] == package[-4:-2]
     # The launcher is built beside it (its vendored OpenSSL), but only that package's tests run.
-    assert ["-p", "puffin-launcher"] == package[package.index("-p") + 2:package.index("-p") + 4]
+    assert ["-p", "mling-launcher"] == package[package.index("-p") + 2:package.index("-p") + 4]
     assert package[package.index("-E") + 1] == "(package(codex-code-mode-host))"
 
 
 def test_the_tests_see_an_empty_home_and_no_model_server(tmp_path):
-    with patch.dict(os.environ, {"RUST_BACKTRACE": "1", "CODEX_HOME": "/home/x/.puffin",
+    with patch.dict(os.environ, {"RUST_BACKTRACE": "1", "CODEX_HOME": "/home/x/.mightling",
                                  "DREAMFERENCE_CONFIG_PATH": "/home/x/dreamference.toml"}):
         environment = CodexTestRunner.environment({"RUSTY_V8_ARCHIVE": "a"}, "/tools", 6, str(tmp_path))
     assert environment["HOME"] == runner_module.TEST_HOME_DIR
     assert environment["TMPDIR"] == str(tmp_path)
     # The launcher steps aside, and a test that looked for a model server anyway finds a closed port.
-    assert environment["PUFFIN_UPSTREAM_TESTS"] == "1"
+    assert environment["MIGHTLING_UPSTREAM_TESTS"] == "1"
     assert environment["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:9"
     assert "CODEX_HOME" not in environment and "DREAMFERENCE_CONFIG_PATH" not in environment
     assert "RUST_BACKTRACE" not in environment and environment["RUST_LIB_BACKTRACE"] == "0"
@@ -129,7 +129,7 @@ def test_the_run_tests_the_export_and_never_the_submodule(tmp_path, monkeypatch)
     for command, cwd, env in calls:
         assert cwd == str(tmp_path / "test-src" / "codex-rs")
         assert not cwd.startswith(CODEX_SUBMODULE_DIR)
-        assert env["PUFFIN_UPSTREAM_TESTS"] == "1"
+        assert env["MIGHTLING_UPSTREAM_TESTS"] == "1"
     # The private temporary directory is removed afterwards.
     assert not os.path.exists(calls[0][2]["TMPDIR"])
 
@@ -186,13 +186,13 @@ expression: rendered
 
 
 def test_a_snapshot_that_only_renames_codex_is_accepted():
-    puffin = (BOXED_UPSTREAM.replace("OpenAI Codex (v0.0.0)      ", "Puffin (v0.0.0)            ")
-              .replace("Ask Codex", "Ask Puffin"))
-    assert CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, puffin)
+    mling = (BOXED_UPSTREAM.replace("OpenAI Codex (v0.0.0)      ", "Mightling (v0.0.0)            ")
+              .replace("Ask Codex", "Ask Mightling"))
+    assert CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, mling)
 
 
 def test_a_snapshot_with_any_other_change_is_refused():
-    renamed = BOXED_UPSTREAM.replace("OpenAI Codex", "Puffin").replace("Ask Codex", "Ask Puffin")
+    renamed = BOXED_UPSTREAM.replace("OpenAI Codex", "Mightling").replace("Ask Codex", "Ask Mightling")
     # A layout regression: a row of content gone, a word changed, a symbol changed.
     assert not CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, renamed.replace(
         "│ model:     gpt-5   /model to change   │\n", ""))
@@ -212,18 +212,18 @@ def test_the_overlay_replaces_upstream_snapshots_and_applies_the_test_patches(tm
 
     overlay = tmp_path / "snapshots"
     (overlay / "tui" / "src" / "snapshots").mkdir(parents=True)
-    (overlay / "tui" / "src" / "snapshots" / "header.snap").write_text("puffin's\n")
+    (overlay / "tui" / "src" / "snapshots" / "header.snap").write_text("mling's\n")
     patches = tmp_path / "patches"
     patches.mkdir()
     (patches / "0001-tests.patch").write_text(
         "--- a/codex-rs/tui/tests/suite.rs\n+++ b/codex-rs/tui/tests/suite.rs\n@@ -1 +1 @@\n"
-        '-wait_for_screen("Ask Codex to do anything");\n+wait_for_screen("Ask Puffin to do anything");\n'
+        '-wait_for_screen("Ask Codex to do anything");\n+wait_for_screen("Ask Mightling to do anything");\n'
     )
     monkeypatch.setattr(runner_module, "SNAPSHOT_OVERLAY_DIR", str(overlay))
     monkeypatch.setattr(runner_module, "TEST_PATCHES_DIR", str(patches))
     assert CodexTestRunner.apply_test_overlay(str(export))
-    assert snap.read_text() == "puffin's\n"
-    assert "Ask Puffin" in test_file.read_text()
+    assert snap.read_text() == "mling's\n"
+    assert "Ask Mightling" in test_file.read_text()
 
 
 def test_an_overlay_snapshot_with_no_upstream_original_stops_the_run(tmp_path, monkeypatch):

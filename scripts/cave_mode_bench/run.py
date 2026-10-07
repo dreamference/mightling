@@ -1,12 +1,12 @@
-"""Cave-mode benchmark: `puffin exec` over tasks x levels x repetitions, one run at a time.
+"""Cave-mode benchmark: `mling exec` over tasks x levels x repetitions, one run at a time.
 
     python run.py --reps 1,2,3 --levels off,lite,full,ultra [--tasks all] [--out results/new.jsonl]
 
 Each run gets a fresh CODEX_HOME and a fresh git workspace copied from tasks/<task>/ws. A level
 other than `off` is passed as `developer_instructions` from levels/<level>.txt (or, for an older or
 candidate text such as `ultra_v5`, levels/history/<level>.txt), which is the text the cave_mode
-World State fragment would add. `puffin`'s own cave mode is switched off for every run
-(DREAMFERENCE_PUFFIN_CAVE_MODE=off), so the level under test is the only one the model sees. The rollout is split into final answer, commentary
+World State fragment would add. `mling`'s own cave mode is switched off for every run
+(DREAMFERENCE_MIGHTLING_CAVE_MODE=off), so the level under test is the only one the model sees. The rollout is split into final answer, commentary
 between tool calls and tool-call arguments, counted with the served model's tokenizer, and the
 task's check.py decides pass or fail. Results are appended as JSON lines; finished cells are
 skipped, so an interrupted run resumes.
@@ -85,9 +85,9 @@ def exec_args(ws, level):
 
 
 def bench_env(home):
-    # Since 2026-10-01 `puffin` adds its own cave_mode section (ultra by default); without this the
+    # Since 2026-10-01 `mling` adds its own cave_mode section (ultra by default); without this the
     # model would get the shipped level on top of the one under test, and `off` would not be off.
-    return {**os.environ, "CODEX_HOME": str(home), "DREAMFERENCE_PUFFIN_CAVE_MODE": "off"}
+    return {**os.environ, "CODEX_HOME": str(home), "DREAMFERENCE_MIGHTLING_CAVE_MODE": "off"}
 
 
 def dirty(ws):
@@ -144,7 +144,7 @@ def run_one(task, level, rep, runs, out):
     prompt = (HERE / "tasks" / task / "prompt.txt").read_text().strip()
     start = time.time()
     try:
-        rc = subprocess.run(["puffin", "exec", *exec_args(ws, level), prompt],
+        rc = subprocess.run(["mling", "exec", *exec_args(ws, level), prompt],
                             env=bench_env(home), stdin=subprocess.DEVNULL,
                             capture_output=True, text=True, timeout=900).returncode
     except subprocess.TimeoutExpired:

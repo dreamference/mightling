@@ -1,9 +1,9 @@
 # Cuts a product release on demand: Actions tab → "Release" → Run workflow.
 #
-# Builds the Python distribution (the `puffin-admin` command), the prebuilt `puffin` agent that
-# `puffin update` downloads, and, optionally, the Puffin desktop bundle, then publishes them as a
+# Builds the Python distribution (the `mling-admin` command), the prebuilt `mling` agent that
+# `mling update` downloads, and, optionally, the Mightling desktop bundle, then publishes them as a
 # GitHub release tagged v<version> on the commit the workflow was dispatched from. The version is
-# stamped into setup.py, tauri.conf.json and the puffin binary inside the runner's checkout only --
+# stamped into setup.py, tauri.conf.json and the mling binary inside the runner's checkout only --
 # nothing is committed back, so the tag is the record of the release.
 name: Release
 
@@ -27,7 +27,7 @@ on:
         type: boolean
         default: true
       build_desktop:
-        description: "Build the Puffin desktop app (.deb and AppImage)"
+        description: "Build the Mightling desktop app (.deb and AppImage)"
         type: boolean
         default: true
       desktop_runner:
@@ -37,12 +37,12 @@ on:
         options:
           - ubuntu-24.04-arm
           - ubuntu-24.04
-      build_puffin:
-        description: "Build the puffin agent binaries that `puffin update` installs"
+      build_mightling:
+        description: "Build the Mightling agent binaries that `mling update` installs"
         type: boolean
         default: true
-      puffin_runner:
-        description: "Runner for the puffin build; its architecture names the assets (GB10 is arm64)"
+      mightling_runner:
+        description: "Runner for the mling build; its architecture names the assets (GB10 is arm64)"
         type: choice
         default: ubuntu-24.04-arm
         options:
@@ -166,13 +166,13 @@ jobs:
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
-  puffin:
+  mling:
     needs: [validate, test]
-    if: ${{ inputs.build_puffin && !failure() && !cancelled() }}
-    runs-on: ${{ inputs.puffin_runner }}
+    if: ${{ inputs.build_mightling && !failure() && !cancelled() }}
+    runs-on: ${{ inputs.mightling_runner }}
     env:
-      # Compiled into the launcher, so `puffin update` can tell whether a newer release exists.
-      PUFFIN_VERSION: ${{ inputs.version }}
+      # Compiled into the launcher, so `mling update` can tell whether a newer release exists.
+      MIGHTLING_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
       # Only the pinned Codex fork; the fano submodule plays no part in the build.
@@ -183,7 +183,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: setup.py
-      - name: Install puffin-admin
+      - name: Install mling-admin
         run: pip install -e .
       # Only the registry is cached: Codex's target directory runs to many gigabytes, past what the
       # Actions cache holds. rustup fetches the toolchain codex-rs/rust-toolchain.toml pins.
@@ -192,48 +192,58 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-registry-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'puffin-rs/**', 'puffin-web-rs/Cargo.lock', 'puffin-code-rs/Cargo.lock') }}
+          key: cargo-registry-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'mling-rs/**', 'mling-web-rs/Cargo.lock', 'mling-code-rs/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.arch }}-
-      # The same build `puffin-admin codex build` runs locally: export the submodule, add
-      # puffin-rs/, apply codex-patches/, cargo build with prebuilt V8 fetched and verified; then
-      # the web commands from puffin-web-rs/ and the code index router from puffin-code-rs/, each a
+      # The same build `mling-admin codex build` runs locally: export the submodule, add
+      # mling-rs/, apply codex-patches/, cargo build with prebuilt V8 fetched and verified; then
+      # the web commands from mling-web-rs/ and the code index router from mling-code-rs/, each a
       # separate --locked build.
-      - name: Build puffin
-        run: puffin-admin codex build --force
+      - name: Build mling
+        run: mling-admin codex build --force
       # Their own tests run the two binaries against a local stand-in for SearXNG and for web
       # pages; the build above has installed the toolchain they need.
       - name: Test the web commands
-        working-directory: puffin-web-rs
+        working-directory: mling-web-rs
         run: ~/.cargo/bin/cargo test --release --locked
       - name: Package
         run: |
           bin="$(dirname "$(python -c 'from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; print(B.executable_path())')")"
           target="$(uname -m)-unknown-linux-gnu"
           mkdir -p dist
-          gzip -9 -c "$bin/puffin" > "dist/puffin-$target.gz"
+          gzip -9 -c "$bin/mling" > "dist/mling-$target.gz"
           gzip -9 -c "$bin/codex-code-mode-host" > "dist/codex-code-mode-host-$target.gz"
-          gzip -9 -c "$bin/puffin-search" > "dist/puffin-search-$target.gz"
-          gzip -9 -c "$bin/puffin-fetch" > "dist/puffin-fetch-$target.gz"
-          # The router only: `puffin-admin code setup` fetches the indexers it runs.
-          gzip -9 -c "$bin/puffin-code" > "dist/puffin-code-$target.gz"
-          # puffin began as a fork of the Codex CLI (Apache 2.0), whose licence and notice must
+          gzip -9 -c "$bin/mling-search" > "dist/mling-search-$target.gz"
+          gzip -9 -c "$bin/mling-fetch" > "dist/mling-fetch-$target.gz"
+          # The router only: `mling-admin code setup` fetches the indexers it runs.
+          gzip -9 -c "$bin/mling-code" > "dist/mling-code-$target.gz"
+          # Mightling began as a fork of the Codex CLI (Apache 2.0), whose licence and notice must
           # travel with the binaries (Apache 2.0 section 4); the names say what they belong to.
           cp codex/LICENSE dist/THIRD-PARTY-LICENSE-codex-cli.txt
           cp codex/NOTICE dist/THIRD-PARTY-NOTICE-codex-cli.txt
-          # `puffin update` checks every archive against this file before installing any.
+          # `mling update` checks every archive against this file before installing any.
+          (cd dist && sha256sum "mling-$target.gz" "codex-code-mode-host-$target.gz" \
+            "mling-search-$target.gz" "mling-fetch-$target.gz" "mling-code-$target.gz" \
+            > "mling-$target.sha256sums")
+          # The transition from Puffin (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.1): a 1.4.x
+          # `puffin update` asks for these exact names, so the same binaries are published under
+          # them too, with a checksum file that lists them. The new binary migrates the old
+          # installation the first time it runs. Dropped in a later release, announced in its notes.
+          for name in "" -search -fetch -code; do
+            cp "dist/mling$name-$target.gz" "dist/puffin$name-$target.gz"
+          done
           (cd dist && sha256sum "puffin-$target.gz" "codex-code-mode-host-$target.gz" \
             "puffin-search-$target.gz" "puffin-fetch-$target.gz" "puffin-code-$target.gz" \
             > "puffin-$target.sha256sums")
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
-          name: puffin-binaries
+          name: mightling-binaries
           path: dist/*
           if-no-files-found: error
 
   release:
-    needs: [python-dist, desktop, puffin]
-    # `desktop` and `puffin` are skipped when their inputs are off; the release still goes out
+    needs: [python-dist, desktop, mling]
+    # `desktop` and `mling` are skipped when their inputs are off; the release still goes out
     # without them.
     if: ${{ !failure() && !cancelled() && needs.python-dist.result == 'success' }}
     runs-on: ubuntu-latest
@@ -246,7 +256,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          flags=(--generate-notes --target "$GITHUB_SHA" --title "Puffin $TAG")
+          flags=(--generate-notes --target "$GITHUB_SHA" --title "Mightling $TAG")
           [[ "${{ inputs.prerelease }}" == "true" ]] && flags+=(--prerelease)
           [[ "${{ inputs.draft }}" == "true" ]] && flags+=(--draft)
           # merge-multiple keeps each artifact's own subdirectories (deb/, appimage/), so collect the

@@ -1,8 +1,8 @@
 {
-  "name": "puffin-work",
+  "name": "mightling-work",
   "private": true,
   "version": "0.1.0",
-  "description": "The Work window of puffin-app: a client of puffin app-server (specs/DREAMFERENCE_PUFFIN_DESKTOP.md).",
+  "description": "The Work window of mling-app: a client of mling app-server (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md).",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {

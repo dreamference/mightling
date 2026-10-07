@@ -1,7 +1,7 @@
 """
-Puffin Brand Asset Generation and Installation for Onyx.
+Mightling Brand Asset Generation and Installation for Onyx.
 
-This module provides the OnyxBrandAssets class, which renders Puffin logos and copies them over
+This module provides the OnyxBrandAssets class, which renders Mightling logos and copies them over
 the Onyx web server's static assets.
 
 This is the part of the rebrand that Onyx's settings API cannot reach. `application_name`, the
@@ -12,7 +12,7 @@ replacing a PNG in a container you host yourself is a file change, not a license
 window title still says Onyx, because that one *is* behind the flag.
 
 The trade-off is impermanence: `docker cp` writes into the running container's filesystem, so an
-upgrade or a `deploy install --force` restores the originals. Re-running `puffin-admin puffin configure`
+upgrade or a `deploy install --force` restores the originals. Re-running `mling-admin chat configure`
 puts them back, and the assets are re-rendered rather than stored in the repo so there is no
 binary to keep in sync.
 """
@@ -27,7 +27,7 @@ from typing import Final, List, Optional, Tuple
 # Where the Next.js server keeps the images it serves from the site root.
 WEB_PUBLIC_DIR: Final[str] = "/app/public"
 
-# Puffin's palette. `TIFFANY_BLUE` is the brand colour's single definition -- `onyx_ui_overrides.py`
+# Mightling's palette. `TIFFANY_BLUE` is the brand colour's single definition -- `onyx_ui_overrides.py`
 # imports it from here for the selected sidebar row and the unread badge, so the favicon and the UI
 # cannot drift apart.
 #
@@ -71,18 +71,18 @@ WEB_BUILD_DIR: Final[str] = "/app/.next"
 # 152x64 viewBox -- not the `appName` text and not /logotype.png, which the bundle never
 # references at all. `Logo` lays the two components side by side in a flex row.
 #
-# Replacing letterforms means replacing outlines: this is "Puffin" set in DejaVu Sans Bold,
+# Replacing letterforms means replacing outlines: this is "Mightling" set in DejaVu Sans Bold,
 # converted from the font's glyph outlines to a single path with fontTools and fitted to the same
 # viewBox. It is stored as a constant rather than generated at runtime so the rebrand needs no
 # font-tooling dependency, and because the geometry is fixed once chosen.
-PUFFIN_WORDMARK_PATH: Final[str] = (
+MIGHTLING_WORDMARK_PATH: Final[str] = (
     "M12.95 17.96H25.25Q30.73 17.96 33.67 20.4Q36.6 22.83 36.6 27.33Q36.6 31.86 33.67 34.29Q30.73 36.72 25.25 36.72H20.36V46.69H12.95ZM20.36 23.33V31.36H24.46Q26.61 31.36 27.79 30.31Q28.96 29.26 28.96 27.33Q28.96 25.41 27.79 24.37Q26.61 23.33 24.46 23.33ZM41.3 38.3V25.14H48.22V27.3Q48.22 29.05 48.2 31.69Q48.18 34.34 48.18 35.22Q48.18 37.82 48.32 38.97Q48.45 40.11 48.78 40.63Q49.2 41.3 49.89 41.67Q50.57 42.04 51.46 42.04Q53.61 42.04 54.84 40.38Q56.07 38.73 56.07 35.78V25.14H62.96V46.69H56.07V43.57Q54.52 45.46 52.77 46.36Q51.03 47.25 48.93 47.25Q45.2 47.25 43.25 44.96Q41.3 42.67 41.3 38.3ZM83.76 16.75V21.27H79.95Q78.49 21.27 77.91 21.8Q77.34 22.33 77.34 23.64V25.14H83.23V30.07H77.34V46.69H70.45V30.07H67.02V25.14H70.45V23.64Q70.45 20.12 72.41 18.43Q74.37 16.75 78.49 16.75ZM100.91 16.75V21.27H97.1Q95.64 21.27 95.06 21.8Q94.48 22.33 94.48 23.64V25.14H100.37V30.07H94.48V46.69H87.59V30.07H84.17V25.14H87.59V23.64Q87.59 20.12 89.56 18.43Q91.52 16.75 95.64 16.75ZM103.87 25.14H110.76V46.69H103.87ZM103.87 16.75H110.76V22.37H103.87ZM139.05 33.57V46.69H132.12V44.56V36.65Q132.12 33.86 132 32.8Q131.87 31.74 131.56 31.24Q131.16 30.57 130.47 30.19Q129.77 29.82 128.89 29.82Q126.73 29.82 125.5 31.48Q124.27 33.14 124.27 36.09V46.69H117.38V25.14H124.27V28.3Q125.83 26.41 127.58 25.52Q129.33 24.62 131.45 24.62Q135.18 24.62 137.12 26.91Q139.05 29.2 139.05 33.57Z"
 )
 
 # The four "onyx" letters, matched on a prefix because the "o" path is 1.3 KB and only its head is
-# needed to identify it. The first becomes the Puffin wordmark; the rest collapse to nothing.
+# needed to identify it. The first becomes the Mightling wordmark; the rest collapse to nothing.
 ONYX_WORDMARK_PREFIXES: Final[dict] = {
-    "M19.1795 51.2136C15.6695 51.2136 12.4353 50.3862": "PUFFIN",
+    "M19.1795 51.2136C15.6695 51.2136 12.4353 50.3862": "MIGHTLING",
     "M42.6413 50.4614V12.4031H50.6891V17.7433L55.5028 12.7039": "HIDE",
     "M82.3035 64V56.0273H89.9753C91.2288 56.0273 92.2066 55.7264": "HIDE",
     "M115.657 50.4614L129.045 31.2066L116.033 12.4031H125.435": "HIDE",
@@ -98,21 +98,21 @@ ONYX_WORDMARK_PREFIXES: Final[dict] = {
 # of a builtin skill, the fallback owner of a shared agent -- and rewriting those would state
 # something untrue rather than rebrand anything.
 ONYX_APP_NAME_STRINGS: Final[dict] = {
-    'application_name?.trim()||"Onyx"': 'application_name?.trim()||"Puffin"',
-    '.trim()}return"Onyx"': '.trim()}return"Puffin"',
+    'application_name?.trim()||"Onyx"': 'application_name?.trim()||"Mightling"',
+    '.trim()}return"Onyx"': '.trim()}return"Mightling"',
 }
 
 
 
 class OnyxBrandAssets:
     """
-    Renders Puffin logo assets and installs them into a running Onyx web server container.
+    Renders Mightling logo assets and installs them into a running Onyx web server container.
     """
 
     @classmethod
     def install(cls, container: Optional[str] = None) -> bool:
         """
-        Renders the Puffin assets and copies them over the web server's static files.
+        Renders the Mightling assets and copies them over the web server's static files.
 
         Args:
             container (Optional[str]): Onyx web server container name; discovered if omitted.
@@ -142,7 +142,7 @@ class OnyxBrandAssets:
                     print(f"⚠️  Could not replace {filename}: {result.stderr.strip()[:160]}")
                     return False
         except (OSError, subprocess.SubprocessError) as exc:
-            print(f"⚠️  Could not install Puffin logos: {exc}")
+            print(f"⚠️  Could not install Mightling logos: {exc}")
             return False
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -180,9 +180,9 @@ class OnyxBrandAssets:
             "const o=s;for(const k in MAP)if(s.includes(k))s=s.split(k).join(MAP[k]);"
             # The wordmark is matched by prefix, so it needs a rewrite of the whole d:"..." rather
             # than a literal substring swap.
-            f"const PRE={json.dumps(ONYX_WORDMARK_PREFIXES)},PUFFIN={json.dumps(PUFFIN_WORDMARK_PATH)};"
+            f"const PRE={json.dumps(ONYX_WORDMARK_PREFIXES)},MIGHTLING={json.dumps(MIGHTLING_WORDMARK_PATH)};"
             "s=s.replace(/d:\"(M[^\"]+)\"/g,(m,dd)=>{for(const k in PRE){if(dd.startsWith(k))"
-            "return 'd:\"'+(PRE[k]==='PUFFIN'?PUFFIN:'M0 0Z')+'\"'}return m});"
+            "return 'd:\"'+(PRE[k]==='MIGHTLING'?MIGHTLING:'M0 0Z')+'\"'}return m});"
             "if(s!==o){try{fs.writeFileSync(p,s);changed++}catch(x){}}}};"
             f"walk({json.dumps(WEB_BUILD_DIR)},0);console.log(changed);"
         )
@@ -218,7 +218,7 @@ class OnyxBrandAssets:
     @classmethod
     def render(cls, workdir: str) -> dict:
         """
-        Draws every Puffin asset at the dimensions Onyx ships.
+        Draws every Mightling asset at the dimensions Onyx ships.
 
         Sizes match the originals because the frontend lays them out against those aspect ratios;
         a square wordmark or an oversized mark reflows the sidebar rather than simply looking
@@ -243,7 +243,7 @@ class OnyxBrandAssets:
     @classmethod
     def render_app_icon(cls, destination: str, size: int) -> bool:
         """
-        Renders the square Puffin mark to an arbitrary path and size.
+        Renders the square Mightling mark to an arbitrary path and size.
 
         The web UI's own assets are produced by `render()` at the dimensions Onyx expects. This is
         the same artwork for callers outside it -- the desktop app's icon set -- so that the window
@@ -262,7 +262,7 @@ class OnyxBrandAssets:
             print("⚠️  Pillow is not installed — cannot render the app icon.")
             return False
 
-        workdir = tempfile.mkdtemp(prefix="puffin-icon-")
+        workdir = tempfile.mkdtemp(prefix="mightling-icon-")
         try:
             rendered = cls._mark(workdir, os.path.basename(destination), (size, size))
             shutil.copyfile(rendered, destination)
@@ -345,7 +345,7 @@ class OnyxBrandAssets:
     @classmethod
     def _wordmark(cls, workdir: str, filename: str, size: Tuple[int, int], dark: bool) -> str:
         """
-        Renders the horizontal "Puffin" wordmark on a transparent background.
+        Renders the horizontal "Mightling" wordmark on a transparent background.
 
         Args:
             workdir (str): Output directory.
@@ -367,16 +367,16 @@ class OnyxBrandAssets:
         point = int(size[1] * 0.7)
         while point > 8:
             font = cls._font(point)
-            box = draw.textbbox((0, 0), "Puffin", font=font)
+            box = draw.textbbox((0, 0), "Mightling", font=font)
             if box[2] - box[0] <= size[0] * 0.88 and box[3] - box[1] <= size[1] * 0.72:
                 break
             point = int(point * 0.92)
 
-        box = draw.textbbox((0, 0), "Puffin", font=font)
+        box = draw.textbbox((0, 0), "Mightling", font=font)
         draw.text(
             ((size[0] - (box[2] - box[0])) / 2 - box[0],
              (size[1] - (box[3] - box[1])) / 2 - box[1]),
-            "Puffin", font=font, fill=colour,
+            "Mightling", font=font, fill=colour,
         )
         path = os.path.join(workdir, filename)
         image.save(path)

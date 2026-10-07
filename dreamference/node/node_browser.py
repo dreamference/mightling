@@ -1,6 +1,6 @@
 """
 What a browse of the local network returns, from the node's side
-(specs/DREAMFERENCE_PUFFIN_NODE.md §5): `puffin-admin node status` shows it so the owner sees what
+(specs/DREAMFERENCE_MIGHTLING_NODE.md §5): `mling-admin node status` shows it so the owner sees what
 clients see. Clients themselves browse with the launcher's own code, not with this.
 """
 
@@ -12,7 +12,7 @@ from dreamference.node.node_service_file import SERVICE_TYPE
 
 
 class NodeBrowser:
-    """Browses `_puffin-node._tcp` through Avahi's own tool."""
+    """Browses `_mightling-node._tcp` through Avahi's own tool."""
 
     @classmethod
     def parse(cls, output: str) -> List[Dict[str, str]]:

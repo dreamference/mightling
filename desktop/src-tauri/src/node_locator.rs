@@ -1,4 +1,4 @@
-//! Where the Puffin node is (specs/DREAMFERENCE_PUFFIN_NODE.md §6.1, §6.2).
+//! Where the Mightling node is (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1, §6.2).
 //!
 //! A machine is either a node (it has `~/.config/dreamference/node-id`, written the first time it
 //! loads a model) or a client. A node's programs talk to its own services on loopback. A client's
@@ -11,7 +11,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 /// The DNS-SD service type a node is advertised under.
-pub const SERVICE_TYPE: &str = "_puffin-node._tcp.local.";
+pub const SERVICE_TYPE: &str = "_mightling-node._tcp.local.";
 
 /// The version of the advertised contract this code understands. A node advertising a higher
 /// `proto` is refused.
@@ -29,7 +29,7 @@ pub struct Node {
     /// The node's stable id. Empty for a node set by address that never answered a browse.
     pub node: String,
     pub name: String,
-    /// An IP address, or a host name the user gave to `puffin node use`.
+    /// An IP address, or a host name the user gave to `mling node use`.
     pub address: String,
     pub model_port: u16,
     pub web_port: Option<u16>,
@@ -210,11 +210,11 @@ pub fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// `$CODEX_HOME`, or `~/.puffin` when a shell-environment policy stripped the variable.
+/// `$CODEX_HOME`, or `~/.mightling` when a shell-environment policy stripped the variable.
 pub fn codex_home() -> Option<PathBuf> {
     match std::env::var_os("CODEX_HOME") {
         Some(home) if !home.is_empty() => Some(PathBuf::from(home)),
-        _ => Some(home_dir()?.join(".puffin")),
+        _ => Some(home_dir()?.join(".mightling")),
     }
 }
 
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn an_empty_id_file_does_not_make_a_node() {
-        let dir = std::env::temp_dir().join(format!("puffin-node-locator-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mightling-node-locator-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("node-id");
         assert!(!is_node_at(&path));

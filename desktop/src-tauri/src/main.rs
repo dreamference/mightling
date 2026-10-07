@@ -1,24 +1,24 @@
-// Puffin desktop shell.
+// Mightling desktop shell.
 //
 // The window points straight at the Onyx deployment on this machine, so there is no bundled
 // frontend to keep in step with the browser UI -- the desktop app and the browser render the same
-// server, and every patch `puffin-admin onyx configure` applies shows up in both.
+// server, and every patch `mling-admin onyx configure` applies shows up in both.
 //
-// On a machine that is not the Puffin node the deployment is the node's. The window still loads
+// On a machine that is not the Mightling node the deployment is the node's. The window still loads
 // `http://localhost:3000/app`: `forwarder.rs` binds that port and passes it through to the node
 // `discover.rs` found, which keeps the page a secure context (the microphone) and leaves every
 // cookie, redirect and patch seeing the address it sees on the node.
 //
-// Beside it, the Work window (specs/DREAMFERENCE_PUFFIN_DESKTOP.md): the coding agent, a bundled UI
-// that drives `puffin app-server` through `bridge.rs`. It opens only when asked for
-// (`puffin app --work`, a folder or `--thread <id>`); without that the app is exactly the Chat
+// Beside it, the Work window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md): the coding agent, a bundled UI
+// that drives `mling app-server` through `bridge.rs`. It opens only when asked for
+// (`mling app --work`, a folder or `--thread <id>`); without that the app is exactly the Chat
 // window it always was.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bridge;
 mod discover;
 mod forwarder;
-#[allow(dead_code)] // A byte-identical copy of puffin-rs/node-locator; not all of it is used here.
+#[allow(dead_code)] // A byte-identical copy of mling-rs/node-locator; not all of it is used here.
 mod node_locator;
 
 /// Environment the WebKitGTK webview needs, applied before Tauri starts it.
@@ -41,8 +41,8 @@ mod node_locator;
 ///   On a dark desktop the app therefore came up in dark mode, where none of Dreamference's styling
 ///   applies: every rule in `onyx_ui_overrides.py` is scoped `html:not(.dark)` on purpose, so dark
 ///   mode is plain Onyx. Pinning the webview to a light GTK theme is what makes the window show
-///   Puffin rather than the stock UI. It does not touch the rest of the desktop session.
-/// The web UI's default account, as `puffin-admin puffin configure` creates it
+///   Mightling rather than the stock UI. It does not touch the rest of the desktop session.
+/// The web UI's default account, as `mling-admin chat configure` creates it
 /// (`DEFAULT_ONYX_EMAIL` and `DEFAULT_ONYX_PASSWORD` in `dreamference/chat/onyx_runner.py`; a test
 /// holds the two in step). Used once per window to sign in when there is no session.
 const DEFAULT_EMAIL: &str = "admin@dreamference.dev";
@@ -51,8 +51,8 @@ const DEFAULT_PASSWORD: &str = "dreamference";
 /// The sign-in script, with the account filled in.
 fn auto_sign_in_script() -> String {
     include_str!("auto_sign_in.js")
-        .replace("__PUFFIN_EMAIL__", DEFAULT_EMAIL)
-        .replace("__PUFFIN_PASSWORD__", DEFAULT_PASSWORD)
+        .replace("__MIGHTLING_EMAIL__", DEFAULT_EMAIL)
+        .replace("__MIGHTLING_PASSWORD__", DEFAULT_PASSWORD)
 }
 
 const WEBVIEW_ENV: [(&str, &str); 2] = [
@@ -61,7 +61,7 @@ const WEBVIEW_ENV: [(&str, &str); 2] = [
 ];
 
 /// The Chat window's label in `tauri.conf.json`: the Onyx web UI, unchanged since before Work.
-const CHAT_LABEL: &str = "puffin";
+const CHAT_LABEL: &str = "mling";
 
 /// Chat's window configuration when this process started with Work only, so the Work window's
 /// Chat button can open it later exactly as configured.
@@ -81,7 +81,7 @@ pub fn show_chat(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// How `puffin app` asked for the window: `--work`, `--cwd <folder>` and `--thread <id>` open Work
+/// How `mling app` asked for the window: `--work`, `--cwd <folder>` and `--thread <id>` open Work
 /// (the launcher passes them); nothing opens Chat, as before.
 fn work_target(args: &[String]) -> Option<bridge::WorkTarget> {
     let value_of = |flag: &str| args.iter().position(|arg| arg == flag).and_then(|i| args.get(i + 1)).cloned();
@@ -111,10 +111,10 @@ fn main() {
                     if let Ok(url) = format!("http://localhost:{port}/app").parse() {
                         window.url = tauri::WebviewUrl::External(url);
                     }
-                    window.title = format!("Puffin (port {port}: 3000 is in use on this machine)");
+                    window.title = format!("Mightling (port {port}: 3000 is in use on this machine)");
                 }
             }
-            Err(error) => eprintln!("puffin-app: could not bind a loopback port for the node's web UI: {error}"),
+            Err(error) => eprintln!("mling-app: could not bind a loopback port for the node's web UI: {error}"),
         }
     }
 
@@ -158,7 +158,7 @@ fn main() {
             Ok(())
         })
         .build(context)
-        .expect("failed to start the Puffin window");
+        .expect("failed to start the Mightling window");
     app.run(move |_, event| {
         if let tauri::RunEvent::Exit = event {
             bridge.shutdown();

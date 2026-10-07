@@ -1,8 +1,8 @@
-//! The Work window's side of `puffin app-server` (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §4.3).
+//! The Work window's side of `mling app-server` (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §4.3).
 //!
 //! The window speaks Codex's app-server protocol: one JSON object per line on the server's stdin
 //! and stdout, without JSON-RPC's `"jsonrpc"` field. Everything the window sends passes
-//! [`vet_outgoing`] first, so a bug in the UI cannot reach a method that would replace Puffin's
+//! [`vet_outgoing`] first, so a bug in the UI cannot reach a method that would replace Mightling's
 //! prompt, provider or policy, pair the machine with OpenAI, or upload anything. Everything the
 //! server writes passes [`classify`], and [`BusyTracker`] keeps the marker Night Shift reads to know
 //! whether a turn is running (§8.3). No Tauri here, so this compiles and tests on its own.
@@ -187,12 +187,12 @@ impl BusyTracker {
     }
 }
 
-/// `puffin`'s home folder: `$CODEX_HOME`, else `~/.puffin` (`puffin-rs/src/home.rs`).
+/// `mling`'s home folder: `$CODEX_HOME`, else `~/.mightling` (`mling-rs/src/home.rs`).
 pub fn codex_home() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(home));
     }
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".puffin"))
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".mightling"))
 }
 
 /// Where the busy marker of the app-server with process id `pid` goes; Night Shift reads the
@@ -210,20 +210,20 @@ pub fn served_model(codex_home: &Path) -> Option<String> {
     first.get("slug").or_else(|| first.get("id"))?.as_str().map(str::to_string)
 }
 
-/// The `puffin` executable: `$PUFFIN_BIN`, then `puffin` on PATH, then `~/.local/bin/puffin`.
-/// Never a bare `codex`: the launcher is what brings Puffin's model server, prompt and home (§4.3).
-pub fn find_puffin() -> Option<PathBuf> {
+/// The `mling` executable: `$MIGHTLING_BIN`, then `mling` on PATH, then `~/.local/bin/mling`.
+/// Never a bare `codex`: the launcher is what brings Mightling's model server, prompt and home (§4.3).
+pub fn find_mightling() -> Option<PathBuf> {
     let is_file = |path: &Path| path.is_file();
-    if let Some(explicit) = std::env::var_os("PUFFIN_BIN").map(PathBuf::from).filter(|p| is_file(p)) {
+    if let Some(explicit) = std::env::var_os("MIGHTLING_BIN").map(PathBuf::from).filter(|p| is_file(p)) {
         return Some(explicit);
     }
     if let Some(found) = std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path).map(|dir| dir.join("puffin")).find(|candidate| is_file(candidate))
+        std::env::split_paths(&path).map(|dir| dir.join("mling")).find(|candidate| is_file(candidate))
     }) {
         return Some(found);
     }
     std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".local/bin/puffin"))
+        .map(|home| PathBuf::from(home).join(".local/bin/mling"))
         .filter(|path| is_file(path))
 }
 
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn the_marker_exists_exactly_while_a_turn_runs() {
-        let dir = std::env::temp_dir().join(format!("puffin-desktop-bridge-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mightling-desktop-bridge-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let marker = busy_marker(&dir, 4242);
         assert_eq!(marker, dir.join("night/busy/4242"));
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn the_served_model_is_the_catalogs_first() {
-        let dir = std::env::temp_dir().join(format!("puffin-desktop-bridge-model-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mightling-desktop-bridge-model-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         assert_eq!(served_model(&dir), None);
         let _ = std::fs::write(dir.join("model_catalog.json"), r#"{"models":[{"id":"x","slug":"RadixArk/Qwen3.8-27B-NVFP4"}]}"#);

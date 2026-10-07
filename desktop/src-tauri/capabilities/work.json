@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "work",
-  "description": "The Work window only: listening to the bridge's events. The Chat window (label puffin) is Onyx's page and gets no capability, so it has no IPC at all (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §4.2).",
+  "description": "The Work window only: listening to the bridge's events. The Chat window (label mling) is Onyx's page and gets no capability, so it has no IPC at all (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §4.2).",
   "windows": ["work"],
   "permissions": ["core:default"]
 }

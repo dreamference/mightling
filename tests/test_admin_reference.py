@@ -1,4 +1,4 @@
-"""The product site's `puffin-admin` reference is generated from the CLI and must stay in step with it."""
+"""The product site's `mling-admin` reference is generated from the CLI and must stay in step with it."""
 
 import importlib.util
 import os

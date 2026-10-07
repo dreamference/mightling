@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
-# Installs Puffin from a release, with no checkout of the repository and nothing compiled.
+# Installs Mightling from a release, with no checkout of the repository and nothing compiled.
 #
 #   ./install.sh [--role client|node] [--version X.Y.Z] [--no-advertise]
 #
 # What it installs depends on the machine:
 #
-#   client   the `puffin` terminal agent and its commands (`puffin-search`, `puffin-fetch`,
-#            `puffin-code` when the release carries it): prebuilt binaries, downloaded from the
+#   client   the `mling` terminal agent and its commands (`mling-search`, `mling-fetch`,
+#            `mling-code` when the release carries it): prebuilt binaries, downloaded from the
 #            release, checked against its checksum file, placed in
-#            ~/.local/share/dreamference/puffin/bin and linked into ~/.local/bin.
-#   node     the client, plus `puffin-admin` (the Python package, from the release's wheel, in a
+#            ~/.local/share/dreamference/mightling/bin and linked into ~/.local/bin.
+#   node     the client, plus `mling-admin` (the Python package, from the release's wheel, in a
 #            virtualenv of its own) and the host settings a model load needs. This is what a GB10
 #            (DGX Spark and its siblings) gets by default; every other machine gets the client.
-#            A node is then offered to the local network (`puffin-admin node enable`), so that
-#            `puffin` on your other computers finds it with no address typed; that asks for
+#            A node is then offered to the local network (`mling-admin node enable`), so that
+#            `mling` on your other computers finds it with no address typed; that asks for
 #            your password once, and says what it opens. --no-advertise skips it.
 #
-# It downloads the same assets, by the same names and with the same checks, as `puffin update`
-# (puffin-rs/src/update.rs), so a machine installed this way is updated by that command.
+# It downloads the same assets, by the same names and with the same checks, as `mling update`
+# (mling-rs/src/update.rs), so a machine installed this way is updated by that command.
 #
 # The repository is public, so no token is needed. One is used when present (GH_TOKEN,
 # GITHUB_TOKEN, or a logged-in `gh`): it raises GitHub's rate limit, and it is what reads a private
-# fork named by PUFFIN_RELEASE_REPO.
-# PUFFIN_RELEASE_REPO names another repository (a fork), PUFFIN_RELEASE_API another API root (the
-# tests' stand-in server); PUFFIN_INSTALL_DIR and PUFFIN_VENV move the two directories.
+# fork named by MIGHTLING_RELEASE_REPO.
+# MIGHTLING_RELEASE_REPO names another repository (a fork), MIGHTLING_RELEASE_API another API root (the
+# tests' stand-in server); MIGHTLING_INSTALL_DIR and MIGHTLING_VENV move the two directories.
 #
 # For a development install from a checkout, use scripts/install_gb10.sh instead.
 set -euo pipefail
 
-REPO="${PUFFIN_RELEASE_REPO:-dreamference/dgx-lunny}"
-API="${PUFFIN_RELEASE_API:-https://api.github.com}"
-INSTALL_DIR="${PUFFIN_INSTALL_DIR:-$HOME/.local/share/dreamference/puffin}"
-VENV_DIR="${PUFFIN_VENV:-$HOME/.local/share/dreamference/venv}"
+REPO="${MIGHTLING_RELEASE_REPO:-dreamference/mightling}"
+API="${MIGHTLING_RELEASE_API:-https://api.github.com}"
+INSTALL_DIR="${MIGHTLING_INSTALL_DIR:-$HOME/.local/share/dreamference/mightling}"
+VENV_DIR="${MIGHTLING_VENV:-$HOME/.local/share/dreamference/venv}"
 LINK_DIR="$HOME/.local/bin"
 ROLE=""
 VERSION=""
@@ -89,7 +89,7 @@ is_gb10() {
         && nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | grep -q "GB10"; then
         return 0
     fi
-    for device in "${PUFFIN_PCI_DEVICES:-/sys/bus/pci/devices}"/*; do
+    for device in "${MIGHTLING_PCI_DEVICES:-/sys/bus/pci/devices}"/*; do
         [ "$(cat "$device/vendor" 2>/dev/null)" = "0x10de" ] \
             && [ "$(cat "$device/device" 2>/dev/null)" = "0x2e12" ] && return 0
     done
@@ -154,17 +154,17 @@ fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
     curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
 }
 
-say "🐧 Puffin $TAG for $TARGET, role: $ROLE"
+say "🐧 Mightling $TAG for $TARGET, role: $ROLE"
 
-SUMS="puffin-$TARGET.sha256sums"
+SUMS="mling-$TARGET.sha256sums"
 if ! fetch "$SUMS"; then
-    fail "release $TAG has no binaries for $TARGET (no $SUMS). Published targets: $(awk -F'\t' '/sha256sums/ {sub(/^puffin-/, "", $1); sub(/\.sha256sums$/, "", $1); printf "%s ", $1}' "$WORK/assets.tsv")"
+    fail "release $TAG has no binaries for $TARGET (no $SUMS). Published targets: $(awk -F'\t' '/sha256sums/ {sub(/^mling-/, "", $1); sub(/\.sha256sums$/, "", $1); printf "%s ", $1}' "$WORK/assets.tsv")"
 fi
 
 # Required, then optional: releases before the web commands and the code index were Rust binaries
-# do not carry them, which is how `puffin update` treats them too.
-REQUIRED="puffin codex-code-mode-host"
-OPTIONAL="puffin-search puffin-fetch puffin-code"
+# do not carry them, which is how `mling update` treats them too.
+REQUIRED="mling codex-code-mode-host"
+OPTIONAL="mling-search mling-fetch mling-code"
 INSTALLED=""
 for name in $REQUIRED $OPTIONAL; do
     asset="$name-$TARGET.gz"
@@ -178,6 +178,23 @@ for name in $REQUIRED $OPTIONAL; do
         || fail "$asset does not match its checksum in $SUMS; nothing was installed."
     gzip -dc "$WORK/$asset" > "$WORK/$name"
     INSTALLED="$INSTALLED $name"
+done
+
+# The product was called Puffin before 1.5 (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4). An old
+# installation's folder becomes the new one, keeping the code index's tools in it, and the old
+# command links go: the old names are not kept as aliases. `mling` moves the agent's home and the
+# rest the first time it runs.
+OLD_DIR="$(dirname "$INSTALL_DIR")/puffin"
+if [ -d "$OLD_DIR" ] && [ ! -e "$INSTALL_DIR" ]; then
+    mv "$OLD_DIR" "$INSTALL_DIR"
+    for pair in puffin:mling puffin-search:mling-search puffin-fetch:mling-fetch puffin-code:mling-code; do
+        old="${pair%%:*}"; new="${pair#*:}"
+        [ -e "$INSTALL_DIR/bin/$old" ] && [ ! -e "$INSTALL_DIR/bin/$new" ] && mv "$INSTALL_DIR/bin/$old" "$INSTALL_DIR/bin/$new"
+    done
+    say "🐦 Puffin is now Mightling: moved $OLD_DIR to $INSTALL_DIR"
+fi
+for old in puffin puffin-search puffin-fetch puffin-code puffin-app puffin-admin; do
+    [ -L "$LINK_DIR/$old" ] && rm -f "$LINK_DIR/$old"
 done
 
 # Everything is checked before anything is placed. Each file is renamed over the old one, so a
@@ -203,7 +220,7 @@ say "✅ Installed$INSTALLED in $INSTALL_DIR/bin"
 if [ "$ROLE" = "node" ]; then
     command -v python3 >/dev/null 2>&1 || fail "the node needs python3 (3.10 or newer) and it was not found."
     command -v docker >/dev/null 2>&1 \
-        || say "⚠️  docker was not found. The model server runs in Docker; install it before \`puffin-admin server start\`."
+        || say "⚠️  docker was not found. The model server runs in Docker; install it before \`mling-admin server start\`."
 
     wheel="$(awk -F'\t' '$1 ~ /^dreamference-.*\.whl$/ {print $1; exit}' "$WORK/assets.tsv")"
     [ -n "$wheel" ] || fail "release $TAG has no Python wheel, so the node cannot be installed from it."
@@ -214,28 +231,28 @@ if [ "$ROLE" = "node" ]; then
         python3 -m venv "$VENV_DIR" \
             || fail "python3 could not create a virtualenv (on Ubuntu: sudo apt install python3-venv)."
     fi
-    say "📦 Installing puffin-admin and what it depends on (about 6 GB with PyTorch; a few minutes) ..."
+    say "📦 Installing mling-admin and what it depends on (about 6 GB with PyTorch; a few minutes) ..."
     "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
     "$VENV_DIR/bin/python" -m pip install --quiet --upgrade "$WORK/$wheel"
-    link "$VENV_DIR/bin/puffin-admin" puffin-admin
-    say "✅ Installed puffin-admin $TAG in $VENV_DIR"
+    link "$VENV_DIR/bin/mling-admin" mling-admin
+    say "✅ Installed mling-admin $TAG in $VENV_DIR"
 
     # The settings a model load is refused without. They change the machine outside this home
     # folder, so the command prints each line before it runs and sudo asks on the terminal; when
     # this script has no terminal (piped into bash), it reads the keyboard through /dev/tty.
     say ""
     if [ -t 0 ]; then
-        "$VENV_DIR/bin/puffin-admin" host setup || true
+        "$VENV_DIR/bin/mling-admin" host setup || true
     elif (exec < /dev/tty) 2>/dev/null; then
-        "$VENV_DIR/bin/puffin-admin" host setup < /dev/tty || true
+        "$VENV_DIR/bin/mling-admin" host setup < /dev/tty || true
     else
-        "$VENV_DIR/bin/puffin-admin" host check || true
+        "$VENV_DIR/bin/mling-admin" host check || true
     fi
 
-    # A machine with the node half is a node: its id is written now, so `puffin` here uses this
+    # A machine with the node half is a node: its id is written now, so `mling` here uses this
     # machine's own model server and never looks for another one on the network
-    # (specs/DREAMFERENCE_PUFFIN_NODE.md §6.1, §9).
-    "$VENV_DIR/bin/puffin-admin" node id >/dev/null || true
+    # (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1, §9).
+    "$VENV_DIR/bin/mling-admin" node id >/dev/null || true
     # Then it is offered to the local network. That publishes the model, web search and the web
     # UI to every machine on it, so the command says so and asks for the password itself; with no
     # terminal to ask on, it is left as a next step.
@@ -243,9 +260,9 @@ if [ "$ROLE" = "node" ]; then
     if [ "$ADVERTISE" = 1 ]; then
         say ""
         if [ -t 0 ]; then
-            "$VENV_DIR/bin/puffin-admin" node enable && ADVERTISED=1 || true
+            "$VENV_DIR/bin/mling-admin" node enable && ADVERTISED=1 || true
         elif (exec < /dev/tty) 2>/dev/null; then
-            "$VENV_DIR/bin/puffin-admin" node enable < /dev/tty && ADVERTISED=1 || true
+            "$VENV_DIR/bin/mling-admin" node enable < /dev/tty && ADVERTISED=1 || true
         fi
     fi
 fi
@@ -260,11 +277,11 @@ esac
 say ""
 if [ "$ROLE" = "node" ]; then
     say "🎉 Done. Next:"
-    say "   puffin-admin server start     # downloads the default model on first use, then serves it"
-    say "   puffin                        # the terminal agent"
+    say "   mling-admin server start     # downloads the default model on first use, then serves it"
+    say "   mling                        # the terminal agent"
     if [ "${ADVERTISED:-0}" != 1 ]; then
-        say "   puffin-admin node enable      # let puffin on your other computers find and use this machine"
+        say "   mling-admin node enable      # let mling on your other computers find and use this machine"
     fi
 else
-    say "🎉 Done. \`puffin\` needs a Puffin node to talk to: start one on a GB10, then run \`puffin\`."
+    say "🎉 Done. \`mling\` needs a Mightling node to talk to: start one on a GB10, then run \`mling\`."
 fi

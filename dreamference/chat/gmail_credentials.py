@@ -9,7 +9,7 @@ chances to disagree about the same file.
 
 There is no `connect()` here, and that is the point of the current design: the credential is a
 Google account the user has added to their desktop, not something Dreamference collects. The host
-reads the tokens created by the Puffin OAuth flow and writes it
+reads the tokens created by the Mightling OAuth flow and writes it
 where the container can find it; `OnyxRunner.refresh_gnome_token` is what does that, on a timer.
 """
 

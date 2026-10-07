@@ -1,4 +1,4 @@
-// The Work window against a scripted app-server stand-in (specs/DREAMFERENCE_PUFFIN_DESKTOP.md
+// The Work window against a scripted app-server stand-in (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md
 // §12): a full turn with a command, a patch, an approval and an interrupt, as the server's
 // messages arrive, and Full Access disabled at `on`. No window, no bridge, no model server.
 

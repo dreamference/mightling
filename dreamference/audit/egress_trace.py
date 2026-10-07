@@ -1,5 +1,5 @@
 """
-What one traced `puffin` session did on the network (specs/DREAMFERENCE_PUFFIN_EGRESS.md §3.1).
+What one traced `mling` session did on the network (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1).
 
 This module provides the EgressTrace dataclass: the destinations, DNS names, unix sockets and
 processes that StraceParser reads out of a trace, counted.

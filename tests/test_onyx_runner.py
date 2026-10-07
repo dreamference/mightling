@@ -15,9 +15,9 @@ from dreamference.chat.onyx_runner import (
     ONYX_PROVIDER_TYPE,
     ONYX_SEARCH_PROVIDER_NAME,
     SEARXNG_CONTAINER_URL,
-    PUFFIN_ASSISTANT_NAME,
-    PUFFIN_COMPANY_NAME,
-    PUFFIN_EXCLUDED_TOOLS,
+    MIGHTLING_ASSISTANT_NAME,
+    MIGHTLING_COMPANY_NAME,
+    MIGHTLING_EXCLUDED_TOOLS,
     DEFAULT_ONYX_EMAIL,
 )
 
@@ -146,7 +146,7 @@ def test_configure_names_the_served_model_and_its_context_length():
 
 def test_default_admin_email_avoids_reserved_domains():
     # email-validator rejects .local, .localhost, .test and .invalid outright, so a default in
-    # one of those makes the very first `puffin-admin puffin configure` fail with a 422.
+    # one of those makes the very first `mling-admin chat configure` fail with a 422.
     assert not DEFAULT_ONYX_EMAIL.endswith((".local", ".localhost", ".test", ".invalid"))
 
 
@@ -316,17 +316,17 @@ def test_branding_creates_a_dream_assistant_from_available_tools():
         assert runner.apply_branding("http://x/api", "cookie") is True
 
     persona = next(p for u, p, m in calls if u.endswith("/persona"))
-    assert persona["name"] == PUFFIN_ASSISTANT_NAME
+    assert persona["name"] == MIGHTLING_ASSISTANT_NAME
     assert 11 not in persona["tool_ids"], "coding_agent is excluded on purpose"
     assert sorted(persona["tool_ids"]) == [3, 6, 7]
 
     settings = next(p for u, p, m in calls if u.endswith("/admin/settings"))
-    assert settings["company_name"] == PUFFIN_COMPANY_NAME
+    assert settings["company_name"] == MIGHTLING_COMPANY_NAME
     assert settings["disable_default_assistant"] is True
 
 
 def test_branding_updates_the_existing_dream_assistant():
-    # Re-running must not leave a second "Puffin" in the assistant list.
+    # Re-running must not leave a second "Mightling" in the assistant list.
     runner = OnyxRunner()
     calls = []
 
@@ -334,7 +334,7 @@ def test_branding_updates_the_existing_dream_assistant():
         if url.endswith("/tool"):
             return [{"id": 7, "name": "open_url"}]
         if url.endswith("/persona"):
-            return [{"id": 9, "name": PUFFIN_ASSISTANT_NAME, "builtin_persona": False}]
+            return [{"id": 9, "name": MIGHTLING_ASSISTANT_NAME, "builtin_persona": False}]
         return {}
 
     with patch.object(OnyxRunner, "_get_json", side_effect=fake_get), \
@@ -344,6 +344,28 @@ def test_branding_updates_the_existing_dream_assistant():
 
     assert ("http://x/api/persona/9", "PATCH") in calls
     assert not any(u.endswith("/api/persona") and m == "POST" for u, m in calls)
+
+
+def test_branding_renames_the_assistant_a_puffin_install_created():
+    # Puffin became Mightling: the old "Puffin" persona is renamed in place, not joined by a second.
+    runner = OnyxRunner()
+    calls = []
+
+    def fake_get(url, cookie):
+        if url.endswith("/tool"):
+            return [{"id": 7, "name": "open_url"}]
+        if url.endswith("/persona"):
+            return [{"id": 4, "name": "Puffin", "builtin_persona": False}]
+        return {}
+
+    with patch.object(OnyxRunner, "_get_json", side_effect=fake_get), \
+         patch.object(OnyxRunner, "_request",
+                      side_effect=lambda u, p, c, method="POST": (calls.append((u, method, p)), ({"id": 4}, None))[1]):
+        runner.apply_branding("http://x/api", "cookie")
+
+    patches = [p for u, m, p in calls if u == "http://x/api/persona/4" and m == "PATCH"]
+    assert patches and patches[0]["name"] == MIGHTLING_ASSISTANT_NAME
+    assert not any(u.endswith("/api/persona") and m == "POST" for u, m, _ in calls)
 
 
 def test_branding_keeps_the_stock_assistant_when_dream_could_not_be_created():
@@ -414,14 +436,14 @@ def test_wordmark_replacement_targets_every_onyx_letter():
     # The sidebar wordmark is four inline letter paths, not /logotype.png -- which the bundle
     # never references. Missing one letter leaves a fragment of "onyx" on screen.
     from dreamference.chat.onyx_brand_assets import (
-        ONYX_WORDMARK_PREFIXES, PUFFIN_WORDMARK_PATH,
+        ONYX_WORDMARK_PREFIXES, MIGHTLING_WORDMARK_PATH,
     )
 
     assert len(ONYX_WORDMARK_PREFIXES) == 4, "o, n, y and x each need a rule"
-    assert list(ONYX_WORDMARK_PREFIXES.values()).count("PUFFIN") == 1
+    assert list(ONYX_WORDMARK_PREFIXES.values()).count("MIGHTLING") == 1
     assert list(ONYX_WORDMARK_PREFIXES.values()).count("HIDE") == 3
-    assert PUFFIN_WORDMARK_PATH.startswith("M")
-    assert '"' not in PUFFIN_WORDMARK_PATH, "must survive embedding in the patch script"
+    assert MIGHTLING_WORDMARK_PATH.startswith("M")
+    assert '"' not in MIGHTLING_WORDMARK_PATH, "must survive embedding in the patch script"
 
 
 def test_logo_patch_leaves_unrelated_onyx_strings_alone():
@@ -698,18 +720,18 @@ def test_assistant_is_told_its_own_name():
     # Onyx's persona name is a UI label and is never sent to the model, so without this the model
     # answers "what is your name?" from pretraining -- "I'm an AI assistant".
     from dreamference.chat.onyx_runner import (
-        PUFFIN_ASSISTANT_INSTRUCTIONS, PUFFIN_ASSISTANT_NAME,
+        MIGHTLING_ASSISTANT_INSTRUCTIONS, MIGHTLING_ASSISTANT_NAME,
     )
 
-    assert PUFFIN_ASSISTANT_NAME in PUFFIN_ASSISTANT_INSTRUCTIONS
+    assert MIGHTLING_ASSISTANT_NAME in MIGHTLING_ASSISTANT_INSTRUCTIONS
 
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_get_json", side_effect=[[{"id": 1, "name": "web_search"}], []]), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 7}, None)) as request:
-        assert runner._upsert_puffin_assistant("http://x/api", "cookie") == 7
+        assert runner._upsert_mightling_assistant("http://x/api", "cookie") == 7
 
     payload = request.call_args_list[0][0][1]
-    assert payload["system_prompt"] == PUFFIN_ASSISTANT_INSTRUCTIONS
+    assert payload["system_prompt"] == MIGHTLING_ASSISTANT_INSTRUCTIONS
     # Appended to Onyx's base prompt, not in place of it -- the base prompt is what tells the model
     # how to drive the search and Python tools.
     assert payload["replace_base_system_prompt"] is False
@@ -920,11 +942,11 @@ def test_assistant_is_not_told_it_is_disconnected():
     # An earlier prompt opened with "air-gapped" and the model believed it: asked for the weather it
     # explained it had no internet and suggested looking out of the window, while holding a working
     # web_search tool. Local is not the same as disconnected.
-    from dreamference.chat.onyx_runner import PUFFIN_ASSISTANT_INSTRUCTIONS
+    from dreamference.chat.onyx_runner import MIGHTLING_ASSISTANT_INSTRUCTIONS
 
-    assert "air-gapped" not in PUFFIN_ASSISTANT_INSTRUCTIONS
-    assert "no internet" in PUFFIN_ASSISTANT_INSTRUCTIONS  # only as the thing never to say
-    assert "search tool" in PUFFIN_ASSISTANT_INSTRUCTIONS
+    assert "air-gapped" not in MIGHTLING_ASSISTANT_INSTRUCTIONS
+    assert "no internet" in MIGHTLING_ASSISTANT_INSTRUCTIONS  # only as the thing never to say
+    assert "search tool" in MIGHTLING_ASSISTANT_INSTRUCTIONS
 
 
 def test_google_login_is_additive_and_leaves_auth_type_alone():
@@ -1136,7 +1158,7 @@ def test_gmail_registration_does_not_wait_for_a_mailbox():
 
 
 def test_configure_registers_gmail_so_a_fresh_install_has_the_tool():
-    # Registering only from `puffin-admin puffin gmail --email …` meant a fresh install had no Gmail tool
+    # Registering only from `mling-admin chat gmail --email …` meant a fresh install had no Gmail tool
     # until someone had finished a flow they can only start from the page that lists it.
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
@@ -1263,10 +1285,10 @@ def test_scrollbar_defaults_to_visible_and_hides_only_in_the_browser():
         f"scrollbar-color:{SIDEBAR_SCROLLBAR_THUMB} var(--background-tint-00)}}"
     )
     # Only the browser hides it; the desktop app keeps it permanently.
-    assert SIDEBAR_SCROLLBAR_CSS.count('html[data-puffin-engine="blink"]') == 2
+    assert SIDEBAR_SCROLLBAR_CSS.count('html[data-mightling-engine="blink"]') == 2
     # WebKitGTK paints its scrollbar as engine chrome that no CSS colour reaches, so the app
     # suppresses the bar entirely; the browser keeps its hover-revealed one.
-    assert 'html[data-puffin-engine="webkit"] .opal-sidebar-body__scroll{scrollbar-width:none}' in SIDEBAR_SCROLLBAR_CSS
+    assert 'html[data-mightling-engine="webkit"] .opal-sidebar-body__scroll{scrollbar-width:none}' in SIDEBAR_SCROLLBAR_CSS
 
 
 def test_scrollbar_styles_both_engines_because_they_disagree():
@@ -1390,7 +1412,7 @@ def test_the_service_holds_no_long_lived_credential(tmp_path):
     assert "ya29.tok" not in json.dumps(stored)
     assert account["expires_at"] > 0
     assert GmailSearchService.credentials(str(tmp_path)) == [
-        # Saved without scopes, as every token was before Puffin's apps: a Gmail grant.
+        # Saved without scopes, as every token was before Mightling's apps: a Gmail grant.
         {"email": "me@gmail.com", "access_token": "ya29.tok", "scopes": ["https://mail.google.com/"]},
     ]
 
@@ -1445,8 +1467,8 @@ def test_the_nginx_image_route_is_deferred_resolution_and_idempotent():
     template = "server {\n    client_max_body_size 5G;\n    location / {}\n}\n"
     once = OnyxRunner.apply_image_route(template)
     assert "resolver 127.0.0.11" in once
-    assert "set $puffin_img" in once
-    assert "proxy_pass $puffin_img;" in once
+    assert "set $mightling_img" in once
+    assert "proxy_pass $mightling_img;" in once
     assert "proxy_pass http" not in once
     assert OnyxRunner.apply_image_route(once) == once
     # A template without the anchor is left alone rather than guessed at.

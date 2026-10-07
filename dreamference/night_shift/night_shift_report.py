@@ -1,5 +1,5 @@
 """
-The morning report (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §5.6).
+The morning report (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.6).
 
 One `## <repository>` section per repository, so `/night report` can print just the section of the
 repository it is asked from, and the general notes after them.
