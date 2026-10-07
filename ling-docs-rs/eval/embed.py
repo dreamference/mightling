@@ -33,9 +33,13 @@ t_load = time.perf_counter()
 emb = TextEmbedding(model, threads=THREADS, cache_dir=f"{D}/models", providers=["CPUExecutionProvider"])
 t_load = time.perf_counter() - t_load
 texts = [dp + evallib.embed_text(c, c["title"]) for c in chunks]
+r0 = resource.getrusage(resource.RUSAGE_SELF)
 t0 = time.perf_counter()
 docs = np.stack(list(emb.embed(texts, batch_size=16))).astype(np.float32)
 t_docs = time.perf_counter() - t0
+r1 = resource.getrusage(resource.RUSAGE_SELF)
+# CPU seconds are robust to other load on the pinned cores; wall seconds are what a user waits.
+cpu_docs = (r1.ru_utime - r0.ru_utime) + (r1.ru_stime - r0.ru_stime)
 lat = []
 qv = []
 for q in questions:
@@ -46,6 +50,8 @@ np.save(f"{out}.docs.npy", docs)
 np.save(f"{out}.queries.npy", np.stack(qv).astype(np.float32))
 info = {"model": model, "threads": THREADS, "chunks": len(chunks), "pdf_pages": data["pdf_pages"],
         "load_seconds": t_load, "embed_seconds": t_docs, "chunks_per_second": len(chunks) / t_docs,
+        "embed_cpu_seconds": cpu_docs, "chunks_per_cpu_second": len(chunks) / cpu_docs,
+        "cpu_share_of_4_cores": cpu_docs / t_docs / THREADS,
         "query_ms_p50": float(np.percentile(lat, 50)), "query_ms_p95": float(np.percentile(lat, 95)),
         "maxrss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, "dim": int(docs.shape[1]),
         "loadavg_at_end": open("/proc/loadavg").read().split()[:3]}

@@ -8,5 +8,10 @@ models/
 hf/
 venv/
 rustpdf/target/
+downloads/
+tess/
+ocr/fixtures/
+ocr/sources/
+ocr/truth.json
 results/pdf-*.json
 !results/pdf-summary.json

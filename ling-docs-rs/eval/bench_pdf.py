@@ -19,6 +19,8 @@ def run(engine, path, cap="1G", timeout=30):
            "--", "nice", "-n", "15", "ionice", "-c", "3", "timeout", "-s", "KILL", str(timeout),
            "bwrap", "--die-with-parent", "--unshare-all", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
            "--tmpfs", HOME, "--tmpfs", "/var/tmp", "--setenv", "HOME", "/var/tmp",
+           # The home folder is hidden; only the folder being read comes back, read-only (§7.1).
+           "--ro-bind", os.path.dirname(os.path.abspath(path)), os.path.dirname(os.path.abspath(path)),
            PY, os.path.join(D, "worker.py"), engine, path]
     r = subprocess.run(cmd, capture_output=True)
     if r.returncode == 0 and r.stdout.strip():

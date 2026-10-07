@@ -29,6 +29,36 @@
    "truncated.pdf": "error (clean)"
   }
  },
+ "pdfium-ordered": {
+  "licence": "as pdfium (worker.py ordered_page)",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 18.4,
+  "pages_per_second": 78.2,
+  "eia_298_pages_seconds": 2.6,
+  "peak_rss_mb_median": 24,
+  "peak_rss_mb_max": 96,
+  "near_empty_pages": 9,
+  "pdf_question_snippets_found": "34/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.887,
+   "rfc9114": 0.873,
+   "rfc9293": 0.841
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "ok, empty text (no error)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "killed at memory cap",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "error (clean)",
+   "text-ops.pdf": "killed at memory cap",
+   "truncated.pdf": "error (clean)"
+  }
+ },
  "pymupdf": {
   "licence": "AGPL-3.0 (or commercial)",
   "corpus_ok": "31/31",

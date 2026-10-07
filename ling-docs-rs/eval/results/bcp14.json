@@ -1,0 +1,11 @@
+{
+ "pdfium": "1/796",
+ "pdfium-ordered": "791/796",
+ "pymupdf": "0/796",
+ "pymupdf-sort": "796/796",
+ "pdftotext": "796/796",
+ "pdf_oxide": "762/796",
+ "pdf-extract": "0/796",
+ "pypdf": "0/796",
+ "pdfminer": "84/796"
+}

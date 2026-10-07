@@ -10,8 +10,8 @@ D = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, D)
 import evallib  # noqa: E402
 
-ENGINES = ["pdfium", "pymupdf", "pymupdf-sort", "pdftotext", "pdf_oxide", "pdf-extract", "pypdf", "pdfminer"]
-LICENCE = {"pdfium": "Apache-2.0 / BSD-3 (pypdfium2; PDFium BSD-3); Rust: pdfium-render MIT OR Apache-2.0",
+ENGINES = ["pdfium", "pdfium-ordered", "pymupdf", "pymupdf-sort", "pdftotext", "pdf_oxide", "pdf-extract", "pypdf", "pdfminer"]
+LICENCE = {"pdfium": "Apache-2.0 / BSD-3 (pypdfium2; PDFium BSD-3); Rust: pdfium-render MIT OR Apache-2.0", "pdfium-ordered": "as pdfium (worker.py ordered_page)",
            "pymupdf": "AGPL-3.0 (or commercial)", "pymupdf-sort": "AGPL-3.0 (or commercial)",
            "pdftotext": "GPL-2.0/3.0 (Poppler), external process only", "pdf_oxide": "MIT OR Apache-2.0 (Rust)",
            "pdf-extract": "MIT (Rust)", "pypdf": "BSD-3-Clause", "pdfminer": "MIT"}

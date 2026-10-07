@@ -1,0 +1,47 @@
+{
+ "folders_files": 616,
+ "folders_gib": 10.84,
+ "ext": {
+  "files": 616,
+  "candidates": 301,
+  "kept": 301,
+  "duplicates": 0,
+  "read_mb": 0.7,
+  "cpu_s": 0.08,
+  "peak_rss_mb": 14.4,
+  "wall_s": 0.01
+ },
+ "ext+sniff": {
+  "files": 616,
+  "candidates": 301,
+  "kept": 299,
+  "duplicates": 0,
+  "read_mb": 2.9,
+  "cpu_s": 0.1,
+  "peak_rss_mb": 14.5,
+  "wall_s": 0.08
+ },
+ "dedupe": {
+  "files": 616,
+  "candidates": 301,
+  "kept": 299,
+  "duplicates": 113,
+  "read_mb": 449.0,
+  "cpu_s": 0.68,
+  "peak_rss_mb": 16.5,
+  "wall_s": 1.69
+ },
+ "hash-all": {
+  "files": 616,
+  "candidates": 0,
+  "kept": 0,
+  "duplicates": 0,
+  "read_mb": 11101.9,
+  "cpu_s": 13.7,
+  "peak_rss_mb": 19.5,
+  "wall_s": 20.8
+ },
+ "slurp-all": {
+  "failed": "OOM-killed at the 1 GB cap after 5.7 s (on the 3.5 GiB disk image); exit -9"
+ }
+}
