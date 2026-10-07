@@ -1,4 +1,5 @@
-//! Web access for the `ling` agent: `ling-search` and `ling-fetch`.
+//! Web access for the `ling` agent: `ling-search` (with `--read`, which also reads the top
+//! results) and `ling-fetch`.
 //!
 //! These are the two shell commands Mightling's system prompt tells the model to use for the web
 //! (`WEB_ACCESS_INSTRUCTIONS` in `ling-rs/src/lib.rs`). They were Python until 2026-09-30 --
@@ -18,6 +19,7 @@ pub mod airgapped;
 pub mod fetch;
 pub mod html_text;
 pub mod node_locator;
+pub mod read;
 pub mod search;
 
 use std::time::Duration;

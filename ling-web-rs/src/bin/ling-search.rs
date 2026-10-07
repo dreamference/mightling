@@ -1,8 +1,10 @@
 //! `ling-search "query" [-n N] [--json]`: search the web through this machine's SearXNG.
+//! `ling-search --read "query" [--pages N]`: search, then read the top results and print extracts.
 
 use std::process::ExitCode;
 
 use clap::Parser;
+use ling_web::read;
 use ling_web::search;
 
 /// Search the web through the SearXNG instance on this machine.
@@ -25,6 +27,14 @@ struct Args {
     /// Emit JSON instead of text
     #[arg(long)]
     json: bool,
+
+    /// Also read the top results: print numbered sources and an extract of each page
+    #[arg(long)]
+    read: bool,
+
+    /// With --read: pages to read (1 to 5)
+    #[arg(long, default_value_t = read::DEFAULT_PAGES as i64, allow_negative_numbers = true, requires = "read")]
+    pages: i64,
 }
 
 fn main() -> ExitCode {
@@ -40,6 +50,30 @@ fn main() -> ExitCode {
             println!("❌ {message}");
         }
         return ExitCode::FAILURE;
+    }
+    if args.read {
+        return match read::search_and_read(
+            &search::searxng_url(),
+            &args.query.join(" "),
+            read::pages_wanted(args.pages),
+            level,
+        ) {
+            Ok(payload) => {
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+                } else {
+                    print!("{}", read::render_text(&payload));
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                println!("❌ {}", error.error);
+                if let Some(hint) = error.hint {
+                    println!("💡 {hint}");
+                }
+                ExitCode::FAILURE
+            }
+        };
     }
     match search::search(
         &search::searxng_url(),
