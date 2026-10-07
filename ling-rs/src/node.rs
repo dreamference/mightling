@@ -116,7 +116,18 @@ pub fn resolve(inputs: &Inputs, browser: &dyn Browser) -> Resolution {
             return Resolution::LastAddress { node: remembered.clone(), note: None };
         }
         let found = browser.browse(Some(remembered));
-        if let Some(advert) = found.iter().find(|advert| advert.node.node == remembered.node) {
+        // An id is only what an advert says, and anything on the network can say it. Two adverts
+        // with the remembered id are therefore a question, unless one of them is at the address
+        // the node was remembered at (security review 2026-10).
+        let same_id: Vec<&Advert> = found.iter().filter(|advert| advert.node.node == remembered.node).collect();
+        let at_remembered = same_id
+            .iter()
+            .find(|advert| advert.addresses.iter().any(|address| *address == remembered.address))
+            .copied();
+        if same_id.len() > 1 && at_remembered.is_none() {
+            return Resolution::Choose { adverts: found, gone: Some(label(remembered).to_string()) };
+        }
+        if let Some(advert) = at_remembered.or_else(|| same_id.first().copied()) {
             // A node with several addresses (two interfaces, or seen from its own machine) keeps
             // the one that is remembered for as long as it answers there: the address changes,
             // and the line that says so appears, only when the node has really moved.
@@ -787,6 +798,21 @@ mod tests {
         // At the same address nothing is said.
         let same = Fixed::new(vec![spark1()]);
         assert_eq!(resolve(&inputs, &same), Resolution::Found { advert: spark1(), remember: true, note: None });
+    }
+
+    #[test]
+    fn a_second_advert_claiming_the_remembered_id_is_never_followed_silently() {
+        let inputs = Inputs { remembered: Some(spark1().node), ..Inputs::default() };
+        let impostor = advert("spark-1", "11111111-aaaa", "192.168.50.66");
+        // The real node still answers where it was remembered: that one is used, whatever order
+        // the browse returned them in.
+        assert_eq!(
+            resolve(&inputs, &Fixed::new(vec![impostor.clone(), spark1()])),
+            Resolution::Found { advert: spark1(), remember: true, note: None }
+        );
+        // Two claimants and neither at the remembered address: the user is asked.
+        let other = advert("spark-1", "11111111-aaaa", "192.168.50.67");
+        assert!(matches!(resolve(&inputs, &Fixed::new(vec![impostor, other])), Resolution::Choose { .. }));
     }
 
     #[test]

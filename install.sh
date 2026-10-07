@@ -109,8 +109,12 @@ fi
 
 # -- the release -----------------------------------------------------------------------------
 
+# A token is used when GH_TOKEN or GITHUB_TOKEN is set; a logged-in gh's token only for a fork
+# named by MIGHTLING_RELEASE_REPO (the public repository needs none, and a gh login carries far more
+# access than reading a release). It is only ever sent to the API root, never to a download URL
+# the release names.
 TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-if [ -z "$TOKEN" ] && command -v gh >/dev/null 2>&1; then
+if [ -z "$TOKEN" ] && [ -n "${MIGHTLING_RELEASE_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
     TOKEN="$(gh auth token 2>/dev/null || true)"
 fi
 auth=()
@@ -151,7 +155,9 @@ asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/asset
 fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
     local url; url="$(asset_url "$1")"
     [ -n "$url" ] || return 1
-    curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
+    local header=()
+    case "$url" in "$API"/*) header=(${auth[@]+"${auth[@]}"}) ;; esac
+    curl -fsSL ${header[@]+"${header[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
 }
 
 say "🐧 Mightling $TAG for $TARGET, role: $ROLE"
@@ -225,6 +231,16 @@ if [ "$ROLE" = "node" ]; then
     wheel="$(awk -F'\t' '$1 ~ /^dreamference-.*\.whl$/ {print $1; exit}' "$WORK/assets.tsv")"
     [ -n "$wheel" ] || fail "release $TAG has no Python wheel, so the node cannot be installed from it."
     fetch "$wheel" || fail "could not download $wheel."
+    # The wheel is checked like the binaries, against the release-wide SHA256SUMS that releases
+    # from 1.5 on carry; an older release has none, which is said rather than skipped silently.
+    if fetch SHA256SUMS; then
+        wanted="$(awk -v file="$wheel" '{ f = $2; sub(/^\*/, "", f); if (f == file) { print $1; exit } }' "$WORK/SHA256SUMS")"
+        [ -n "$wanted" ] || fail "SHA256SUMS has no checksum for $wheel; nothing was installed."
+        [ "$(sha256 "$WORK/$wheel")" = "$wanted" ] \
+            || fail "$wheel does not match its checksum in SHA256SUMS; nothing was installed."
+    else
+        say "⚠️  Release $TAG has no SHA256SUMS, so $wheel is installed without a checksum check."
+    fi
 
     if [ ! -x "$VENV_DIR/bin/python" ]; then
         say "🐍 Creating $VENV_DIR ..."
