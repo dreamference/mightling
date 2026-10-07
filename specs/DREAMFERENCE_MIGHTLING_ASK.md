@@ -309,7 +309,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 
 ## 14. Questions for the user
 
-1. **Port 3100** for the web server, kept forever?
+1. ~~Port~~ **Decided 2026-10-07:** 3100 for now (the user may revisit it; keep the port in one constant and the node advert, so a change is one edit).
 2. ~~Voice from phones~~ **Decided 2026-10-07:** text only from other devices' browsers; voice through the desktop app (§4.4).
 3. ~~Onyx history export~~ **Decided 2026-10-07:** not needed; a clean start. Phase B drops the export.
 4. **Phase A's scope:** all of §10's row A in one release, or Ask and `ling web` first, with `ling-docs` in a release of its own?
