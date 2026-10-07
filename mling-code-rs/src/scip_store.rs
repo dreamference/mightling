@@ -4,9 +4,11 @@
 //! about 200 each), `global_symbols`, `mentions(chunk_id, symbol_id, role)` and
 //! `defn_enclosing_ranges`. `expt-convert` stores no relationships, and `display_name` is empty for
 //! scip-python and rust-analyzer, so [`postprocess`] adds two tables of its own after conversion:
-//! `mightling_names` (each symbol's descriptor name, for lookup by name) and `mightling_relationships`
-//! (read from the `.scip` file, for `impl`). Objects named `mightling_*` are left out of the schema
-//! fingerprint, which pins what `expt-convert` itself writes.
+//! `puffin_names` (each symbol's descriptor name, for lookup by name) and `puffin_relationships`
+//! (read from the `.scip` file, for `impl`). Objects named `puffin_*` are left out of the schema
+//! fingerprint, which pins what `expt-convert` itself writes. They keep the name they had before
+//! the product became Mightling: the stores already built on users' machines carry them, and a
+//! rename would make every one of those indexes unreadable (specs/DREAMFERENCE_RENAME_MIGHTLING.md).
 //!
 //! Positions in SCIP are 0-based; everything this module returns is 1-based (spec §7.4 step 5).
 
@@ -21,7 +23,7 @@ use crate::manifest::{hex, RunEntry};
 use crate::scip_symbol::{self, SymbolName};
 
 /// SHA-256 of the ordered `sql` column of `sqlite_master` of an `expt-convert` store, scip CLI
-/// v0.10.0, `mightling_*` objects excluded. A store whose schema differs is not read (§7.5).
+/// v0.10.0, `puffin_*` objects excluded. A store whose schema differs is not read (§7.5).
 pub const SCHEMA_FINGERPRINT: &str = "5ac15027d79d86e9d43ec1489ca13345f75a6d937b9e254a11bf2ff0d9d0c68c";
 
 /// Role bits of a SCIP occurrence.
@@ -93,7 +95,7 @@ impl ScipStore {
             );
         }
         let has_names: bool = conn
-            .query_row("SELECT count(*) FROM sqlite_master WHERE name = 'mightling_names'", [], |r| r.get::<_, i64>(0))
+            .query_row("SELECT count(*) FROM sqlite_master WHERE name = 'puffin_names'", [], |r| r.get::<_, i64>(0))
             .map(|n| n > 0)?;
         if !has_names {
             bail!("{} has not been post-processed; run `mling-code index` to rebuild it", path.display());
@@ -126,7 +128,7 @@ impl ScipStore {
     pub fn definitions_named(&self, query: &[String]) -> Result<Vec<Definition>> {
         let Some(last) = query.last() else { return Ok(Vec::new()) };
         let mut stmt = self.conn.prepare_cached(
-            "SELECT g.id, g.symbol FROM mightling_names n JOIN global_symbols g ON g.id = n.symbol_id WHERE n.name = ?1",
+            "SELECT g.id, g.symbol FROM puffin_names n JOIN global_symbols g ON g.id = n.symbol_id WHERE n.name = ?1",
         )?;
         let symbols: Vec<(i64, String)> =
             stmt.query_map([last], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
@@ -268,7 +270,7 @@ impl ScipStore {
     /// Symbols that implement `symbol` (from the `.scip`'s relationships, spec §7.1's `impl`).
     pub fn implementations(&self, symbol: &str) -> Result<Vec<(i64, String)>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT g.id, g.symbol FROM mightling_relationships r JOIN global_symbols g ON g.id = r.symbol_id
+            "SELECT g.id, g.symbol FROM puffin_relationships r JOIN global_symbols g ON g.id = r.symbol_id
              WHERE r.target = ?1 AND r.is_implementation = 1",
         )?;
         let mut out: Vec<(i64, String)> =
@@ -277,7 +279,7 @@ impl ScipStore {
         // `impl#[Type][Trait]member`, and a trait's own implementations `impl#[Type][Trait]`.
         if let Some(target) = scip_symbol::parse(symbol) {
             let mut stmt = self.conn.prepare_cached(
-                "SELECT g.id, g.symbol FROM mightling_names n JOIN global_symbols g ON g.id = n.symbol_id WHERE n.name = ?1",
+                "SELECT g.id, g.symbol FROM puffin_names n JOIN global_symbols g ON g.id = n.symbol_id WHERE n.name = ?1",
             )?;
             let trait_name = if target.kind == scip_symbol::Kind::Type { target.name().to_string() } else {
                 target.segments.iter().rev().nth(1).cloned().unwrap_or_default()
@@ -326,12 +328,12 @@ impl ScipStore {
     }
 }
 
-/// SHA-256 of the ordered `sql` of `sqlite_master`, `mightling_*` objects and SQLite's own excluded.
+/// SHA-256 of the ordered `sql` of `sqlite_master`, `puffin_*` objects and SQLite's own excluded.
 pub fn schema_fingerprint(conn: &Connection) -> Result<String> {
     use sha2::{Digest, Sha256};
     let mut stmt = conn.prepare(
         "SELECT coalesce(sql, '') FROM sqlite_master
-         WHERE name NOT LIKE 'mling\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+         WHERE name NOT LIKE 'puffin\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
          ORDER BY type, name",
     )?;
     let mut hasher = Sha256::new();
@@ -349,15 +351,15 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
     let mut conn = Connection::open(db)?;
     let tx = conn.transaction()?;
     tx.execute_batch(
-        "DROP TABLE IF EXISTS mightling_names; DROP TABLE IF EXISTS mightling_relationships; DROP TABLE IF EXISTS mightling_meta;
-         CREATE TABLE mightling_names (symbol_id INTEGER NOT NULL, name TEXT NOT NULL);
-         CREATE TABLE mightling_relationships (symbol_id INTEGER NOT NULL, target TEXT NOT NULL,
+        "DROP TABLE IF EXISTS puffin_names; DROP TABLE IF EXISTS puffin_relationships; DROP TABLE IF EXISTS puffin_meta;
+         CREATE TABLE puffin_names (symbol_id INTEGER NOT NULL, name TEXT NOT NULL);
+         CREATE TABLE puffin_relationships (symbol_id INTEGER NOT NULL, target TEXT NOT NULL,
              is_reference INTEGER NOT NULL, is_implementation INTEGER NOT NULL, is_type_definition INTEGER NOT NULL);
-         CREATE TABLE mightling_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+         CREATE TABLE puffin_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
     )?;
     {
         let mut select = tx.prepare("SELECT id, symbol FROM global_symbols")?;
-        let mut insert = tx.prepare("INSERT INTO mightling_names (symbol_id, name) VALUES (?1, ?2)")?;
+        let mut insert = tx.prepare("INSERT INTO puffin_names (symbol_id, name) VALUES (?1, ?2)")?;
         let rows: Vec<(i64, String)> = select.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
         for (id, symbol) in rows {
             if let Some(name) = scip_symbol::parse(&symbol) {
@@ -371,7 +373,7 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
         };
         let bytes = std::fs::read(scip_file).with_context(|| format!("reading {}", scip_file.display()))?;
         let mut insert = tx.prepare(
-            "INSERT INTO mightling_relationships (symbol_id, target, is_reference, is_implementation, is_type_definition) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO puffin_relationships (symbol_id, target, is_reference, is_implementation, is_type_definition) VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
         for (symbol, rel) in relationships(&bytes)? {
             if let Some(id) = ids.get(&symbol) {
@@ -380,10 +382,10 @@ pub fn postprocess(db: &Path, scip_file: &Path) -> Result<()> {
         }
     }
     tx.execute_batch(
-        "CREATE INDEX mightling_names_name ON mightling_names(name);
-         CREATE INDEX mightling_relationships_target ON mightling_relationships(target);",
+        "CREATE INDEX puffin_names_name ON puffin_names(name);
+         CREATE INDEX puffin_relationships_target ON puffin_relationships(target);",
     )?;
-    tx.execute("INSERT INTO mightling_meta (k, v) VALUES ('postprocessed', '1')", [])?;
+    tx.execute("INSERT INTO puffin_meta (k, v) VALUES ('postprocessed', '1')", [])?;
     tx.commit()?;
     // expt-convert writes WAL mode, and a WAL database cannot be opened read-only where its
     // directory is not writable (the read-only sandbox): the reader must create `-shm`.
