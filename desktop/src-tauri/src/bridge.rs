@@ -4,7 +4,7 @@
 // the Work window first asks for it. Its stdout carries the protocol, one JSON object per line,
 // passed to the Work window as `work://message` events; its stderr carries the launcher's own
 // messages (the wait for a model server that is still loading), passed as `work://stderr` for the
-// start-up screen. What the window sends goes through `mightling_desktop_bridge::vet_outgoing` first.
+// start-up screen. What the window sends goes through `mling_desktop_bridge::vet_outgoing` first.
 // Only the window labelled `work` may use any of this: Chat is Onyx's page and has no business
 // with the agent, and every command here refuses it whatever the capabilities say.
 
@@ -20,8 +20,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use mightling_desktop_bridge::BusyTracker;
-use mightling_desktop_bridge::Incoming;
+use mling_desktop_bridge::BusyTracker;
+use mling_desktop_bridge::Incoming;
 use serde_json::Value;
 use tauri::AppHandle;
 use tauri::Emitter;
@@ -84,7 +84,7 @@ impl Bridge {
         if running.child.is_some() {
             return Ok(false);
         }
-        let mling = mightling_desktop_bridge::find_mightling()
+        let mling = mling_desktop_bridge::find_mightling()
             .ok_or("mling is not installed: build it with `mling-admin codex build`, or install Mightling")?;
         let mut child = Command::new(&mling)
             .arg("app-server")
@@ -96,7 +96,7 @@ impl Bridge {
         let stdout = child.stdout.take().ok_or("the server has no stdout")?;
         let stderr = child.stderr.take().ok_or("the server has no stderr")?;
         running.stdin = child.stdin.take();
-        running.marker = mightling_desktop_bridge::codex_home().map(|home| mightling_desktop_bridge::busy_marker(&home, child.id()));
+        running.marker = mling_desktop_bridge::codex_home().map(|home| mling_desktop_bridge::busy_marker(&home, child.id()));
         running.pending.clear();
         running.busy = BusyTracker::default();
         running.child = Some(child);
@@ -125,7 +125,7 @@ impl Bridge {
         if line.trim().is_empty() {
             return;
         }
-        let (kind, value) = mightling_desktop_bridge::classify(line);
+        let (kind, value) = mling_desktop_bridge::classify(line);
         match &kind {
             Incoming::NotProtocol => {
                 // Fails loudly: something wrote on the protocol channel.
@@ -168,7 +168,7 @@ impl Bridge {
     fn send(&self, mut message: Value) -> Result<(), String> {
         let mut running = self.lock();
         let Running { stdin, pending, .. } = &mut *running;
-        mightling_desktop_bridge::vet_outgoing(&mut message, pending)?;
+        mling_desktop_bridge::vet_outgoing(&mut message, pending)?;
         let stdin = stdin.as_mut().ok_or("the agent's server is not running")?;
         let mut line = message.to_string();
         line.push('\n');
@@ -184,7 +184,7 @@ impl Bridge {
 pub fn work_start(app: AppHandle, window: WebviewWindow, bridge: tauri::State<'_, Bridge>) -> Result<Started, String> {
     only_work(&window)?;
     let started = bridge.start(&app)?;
-    let served_model = mightling_desktop_bridge::codex_home().and_then(|home| mightling_desktop_bridge::served_model(&home));
+    let served_model = mling_desktop_bridge::codex_home().and_then(|home| mling_desktop_bridge::served_model(&home));
     Ok(Started { served_model, started })
 }
 

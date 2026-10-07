@@ -28,7 +28,7 @@ mling-airgapped = { path = "airgapped" }
 mling-apps = { path = "apps" }
 # Observation masking: the rule Codex's core calls (patch 0021); the launcher sets its policy.
 mling-masking = { path = "masking" }
-mightling-node-locator = { path = "node-locator" }
+mling-node-locator = { path = "node-locator" }
 # Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
 mling-skills = { path = "skills" }
 rand = { workspace = true }

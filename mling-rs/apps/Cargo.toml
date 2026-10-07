@@ -15,5 +15,5 @@ path = "src/lib.rs"
 
 [dependencies]
 mling-airgapped = { path = "../airgapped" }
-mightling-node-locator = { path = "../node-locator" }
+mling-node-locator = { path = "../node-locator" }
 serde_json = { workspace = true }

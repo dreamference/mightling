@@ -63,7 +63,7 @@ The `$` mention hint in the header ("Use $ to insert an installed app") stays up
 
 ### 4.1 A leaf crate, `mling-rs/apps/` (`mling-apps`)
 
-Like `mling-tools` (patch `0020`) and `mling-airgapped`, the logic lives in a crate of its own that Codex's crates can depend on without a cycle: `serde_json` and the standard library only, plus `mling-airgapped` and `mightling-node-locator` (both std-only). It answers two questions:
+Like `mling-tools` (patch `0020`) and `mling-airgapped`, the logic lives in a crate of its own that Codex's crates can depend on without a cycle: `serde_json` and the standard library only, plus `mling-airgapped` and `mling-node-locator` (both std-only). It answers two questions:
 
 - `offered() -> bool`: the model server is on this machine and the Google service's address is configured. Cheap, no network; called by the TUI on every gate check.
 - `list() -> Option<serde_json::Value>`: `None` when Mightling offers no apps (so Codex's own path runs, which without a sign-in returns empty); otherwise the apps as JSON in `AppInfo`'s serde shape. It asks the service `GET http://127.0.0.1:8767/status` (unauthenticated today, over std `TcpStream`, 2 s timeout) for the connected accounts and their granted scopes, and resolves the air-gap level.

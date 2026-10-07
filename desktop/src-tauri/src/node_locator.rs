@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn an_empty_id_file_does_not_make_a_node() {
-        let dir = std::env::temp_dir().join(format!("mightling-node-locator-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mling-node-locator-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("node-id");
         assert!(!is_node_at(&path));

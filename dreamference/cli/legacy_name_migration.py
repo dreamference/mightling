@@ -26,6 +26,12 @@ LEGACY_KEY_COMMENT: Final[str] = "puffin-node"
 LEGACY_ADMIN: Final[str] = "puffin-admin"
 LEGACY_DESKTOP_DATA: Final[str] = "~/.local/share/dev.dreamference.puffin"
 DESKTOP_DATA: Final[str] = "~/.local/share/dev.dreamference.mightling"
+LEGACY_INSTALL_DIR: Final[str] = "~/.local/share/dreamference/puffin"
+# The binaries the old install folder held, by their old and new names (`codex-code-mode-host` keeps its).
+LEGACY_BINARIES: Final[tuple] = (("puffin", "mling"), ("puffin-search", "mling-search"),
+                                 ("puffin-fetch", "mling-fetch"), ("puffin-code", "mling-code"))
+LEGACY_LINKS: Final[tuple] = ("puffin", "puffin-search", "puffin-fetch", "puffin-code", "puffin-app",
+                              "puffin-admin")
 
 
 class LegacyNameMigration:
@@ -40,8 +46,9 @@ class LegacyNameMigration:
             List[str]: What was done, one line per step; empty when there was nothing old.
         """
         done: List[str] = []
-        for step in (cls.rewrite_user_config, cls.replace_night_units, cls.replace_service_file,
-                     cls.rewrite_authorized_keys, cls.move_desktop_data):
+        for step in (cls.move_install_dir, cls.remove_old_links, cls.rewrite_user_config,
+                     cls.replace_night_units, cls.replace_service_file, cls.rewrite_authorized_keys,
+                     cls.move_desktop_data):
             try:
                 line = step()
             except OSError as error:
@@ -54,6 +61,42 @@ class LegacyNameMigration:
             for line in done + ([stale] if stale else []):
                 print(f"   {line}", file=sys.stderr)
         return done
+
+    @classmethod
+    def move_install_dir(cls) -> Optional[str]:
+        """
+        Moves the old install folder, with the code index's tools in it, to the new one, before a
+        `codex build` or `code setup` would start an empty one beside it.
+
+        Returns:
+            Optional[str]: A line when the folder was moved.
+        """
+        from dreamference.runner.codex_branded_builder import INSTALL_DIR
+
+        legacy, new = Path(os.path.expanduser(LEGACY_INSTALL_DIR)), Path(INSTALL_DIR)
+        if not legacy.is_dir() or new.exists():
+            return None
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy), str(new))
+        for old, current in LEGACY_BINARIES:
+            if (new / "bin" / old).is_file() and not (new / "bin" / current).exists():
+                (new / "bin" / old).rename(new / "bin" / current)
+        return f"moved {legacy} to {new}"
+
+    @classmethod
+    def remove_old_links(cls) -> Optional[str]:
+        """
+        Removes the old command links from `~/.local/bin`, links only: a real file of that name is
+        someone else's. `codex build` and `mling` make the new ones.
+
+        Returns:
+            Optional[str]: A line when old links were removed.
+        """
+        links = Path(os.path.expanduser("~/.local/bin"))
+        removed = [name for name in LEGACY_LINKS if (links / name).is_symlink()]
+        for name in removed:
+            (links / name).unlink()
+        return f"removed the links {', '.join(removed)} from {links}" if removed else None
 
     @classmethod
     def rewrite_keys(cls, path: Path) -> bool:

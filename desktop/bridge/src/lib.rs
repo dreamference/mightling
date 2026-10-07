@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn the_marker_exists_exactly_while_a_turn_runs() {
-        let dir = std::env::temp_dir().join(format!("mightling-desktop-bridge-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mling-desktop-bridge-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let marker = busy_marker(&dir, 4242);
         assert_eq!(marker, dir.join("night/busy/4242"));
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn the_served_model_is_the_catalogs_first() {
-        let dir = std::env::temp_dir().join(format!("mightling-desktop-bridge-model-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mling-desktop-bridge-model-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         assert_eq!(served_model(&dir), None);
         let _ = std::fs::write(dir.join("model_catalog.json"), r#"{"models":[{"id":"x","slug":"RadixArk/Qwen3.8-27B-NVFP4"}]}"#);

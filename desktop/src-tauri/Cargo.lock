@@ -2401,7 +2401,7 @@ version = "1.4.1"
 dependencies = [
  "mdns-sd",
  "mling-airgapped",
- "mightling-desktop-bridge",
+ "mling-desktop-bridge",
  "serde",
  "serde_json",
  "tauri",
@@ -2409,7 +2409,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mightling-desktop-bridge"
+name = "mling-desktop-bridge"
 version = "0.1.0"
 dependencies = [
  "serde_json",

@@ -407,7 +407,7 @@ Written while an overnight SWE-bench run held the machine: nothing below was bui
 
 | Part | Where |
 |---|---|
-| The bridge's pure half: the method allow-list, the thread fields never sent (`baseInstructions`, `developerInstructions`, `modelProvider`, `config`, `personality`), the framing of stdout, the busy marker, the served model from the catalog, finding `mling` | `desktop/bridge/` (`mightling-desktop-bridge`, serde_json only) |
+| The bridge's pure half: the method allow-list, the thread fields never sent (`baseInstructions`, `developerInstructions`, `modelProvider`, `config`, `personality`), the framing of stdout, the busy marker, the served model from the catalog, finding `mling` | `desktop/bridge/` (`mling-desktop-bridge`, serde_json only) |
 | The bridge: one `mling app-server` per app, started through the launcher when Work first asks; stdout to Work as `work://message`, stderr as `work://stderr` (the start-up screen), a non-protocol line as `work://protocol-error`; answers only to server requests still waiting; the busy marker kept and removed on exit | `desktop/src-tauri/src/bridge.rs` |
 | Two windows: Chat exactly as configured; Work created only for `--work`, `--cwd <folder>` or `--thread <id>`, in which case Chat's entry is taken out of the configuration and opened later from Work's Chat button. The sign-in script and the forwarder's port rewrite now name Chat's label | `desktop/src-tauri/src/main.rs` |
 | Work's capability (`core:default`, window `work` only); the CSP of §4.2 plus `style-src 'self' 'unsafe-inline'`; `frontendDist` `../ui/dist` | `desktop/src-tauri/capabilities/work.json`, `tauri.conf.json` |

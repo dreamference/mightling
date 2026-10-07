@@ -15,7 +15,7 @@
 //! whichever node is chosen. `mling node list|use|forget` is the same logic from a shell.
 //!
 //! Only this module browses. `mling-search` and the others read `node.json` through the
-//! `mightling-node-locator` crate, so they need no multicast and work inside the sandbox.
+//! `mling-node-locator` crate, so they need no multicast and work inside the sandbox.
 
 use std::io::IsTerminal;
 use std::io::Write;
@@ -27,7 +27,7 @@ use std::time::Instant;
 
 use anyhow::bail;
 pub use mling_node_locator::Node;
-use mightling_node_locator as locator;
+use mling_node_locator as locator;
 
 /// How long a browse may take when nothing answers.
 const BROWSE_TIMEOUT: Duration = Duration::from_secs(2);

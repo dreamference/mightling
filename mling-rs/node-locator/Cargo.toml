@@ -5,7 +5,7 @@
 # (mling-web-rs/src/node_locator.rs; a test compares them), because it is built on its own,
 # outside the Codex workspace.
 [package]
-name = "mightling-node-locator"
+name = "mling-node-locator"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"

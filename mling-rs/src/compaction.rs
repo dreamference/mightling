@@ -408,11 +408,12 @@ mod tests {
     /// The hook and hash below are the ones a live session accepted on 2026-10-02: defined in a
     /// `config.toml` exactly like this, the hook ran after a compaction with no
     /// `--dangerously-bypass-hook-trust`. If Codex changes how it hashes a hook, this is where to
-    /// find out; re-run that check before changing the expected value.
+    /// find out; re-run that check before changing the expected value. The path is the one recorded
+    /// that day, before the product was renamed, so it keeps the old binary name.
     #[test]
     fn the_trust_hash_is_the_one_codex_computes() {
         assert_eq!(
-            hook_hash("/home/user/.cache/dreamference/compaction-phase0/ledger-bin/target/release/mightling-ledger"),
+            hook_hash("/home/user/.cache/dreamference/compaction-phase0/ledger-bin/target/release/puffin-ledger"),
             "sha256:5cee02e5271aa2540559a85813a274411fdf53a822a6b933805d44325e4fbb76"
         );
     }

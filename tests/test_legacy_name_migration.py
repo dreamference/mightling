@@ -47,6 +47,16 @@ def _legacy_node(tmp_home: Path):
     desktop = tmp_home / ".local/share/dev.dreamference.puffin"
     desktop.mkdir(parents=True, exist_ok=True)
     (desktop / "cookies").write_text("session")
+    old_bin = tmp_home / ".local/share/dreamference/puffin/bin"
+    old_bin.mkdir(parents=True, exist_ok=True)
+    for name in ("puffin", "puffin-code", "codex-code-mode-host"):
+        (old_bin / name).write_text(name)
+    (tmp_home / ".local/share/dreamference/puffin/indexers").mkdir()
+    links = tmp_home / ".local/bin"
+    links.mkdir(parents=True, exist_ok=True)
+    (links / "puffin").symlink_to(old_bin / "puffin")
+    (links / "puffin-admin").symlink_to(venv / "puffin-admin")
+    (links / "puffin-code").write_text("a real file someone else put here")
     return venv, legacy_file
 
 
@@ -66,7 +76,15 @@ def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(m
 
     done = LegacyNameMigration.run()
 
-    assert len(done) == 5, done
+    assert len(done) == 7, done
+    from dreamference.runner.codex_branded_builder import INSTALL_DIR
+    new_bin = Path(INSTALL_DIR) / "bin"
+    assert (new_bin / "mling").is_file() and (new_bin / "mling-code").is_file()
+    assert (new_bin / "codex-code-mode-host").is_file() and (Path(INSTALL_DIR) / "indexers").is_dir()
+    assert not (tmp_home / ".local/share/dreamference/puffin").exists()
+    links = tmp_home / ".local/bin"
+    assert not (links / "puffin").is_symlink() and not (links / "puffin-admin").is_symlink()
+    assert (links / "puffin-code").read_text() == "a real file someone else put here"
     assert ["disable", "--now", "puffin-night.timer"] in calls
     assert enabled_windows == ["01:00-07:00"], "the timer comes back in the same window"
     assert not (NightShiftScheduler.unit_dir() / "puffin-night.timer").exists()

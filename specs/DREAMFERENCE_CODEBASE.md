@@ -169,7 +169,7 @@ scripts/                                  # at the repository root, not inside t
 
 mling-rs/src/{lib,help,home,app,update,usage,cave,night,code_index,airgapped,node}.rs   # launcher compiled into mling
 mling-rs/airgapped/src/lib.rs                  # crate mling-airgapped: the three levels and their resolution (std only)
-mling-rs/node-locator/src/lib.rs               # crate mightling-node-locator: where the node is (std only)
+mling-rs/node-locator/src/lib.rs               # crate mling-node-locator: where the node is (std only)
 mling-web-rs/src/{lib,search,fetch,html_text,airgapped,node_locator}.rs, src/bin/   # mling-search, mling-fetch
 mling-code-rs/src/                             # mling-code, the code index (router, SCIP stores, submodules, session, MCP)
 codex-patches/00NN-*.patch                      # patch series for the codex/ submodule (17 patches, 0001–0019)
@@ -232,7 +232,7 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float3
 
 ### 3.12. `node/`
 
-`NodeAdvertiser` is `mling-admin node enable|disable|status`, and `NodeRemote`, `NodePairing` and `NodeServe` are `node list|add|remove|set|start|stop` (other nodes are listed from their open model port and changed only over an SSH pairing). `NodeAdvertiser` installs the Avahi service file `NodeServiceFile` renders, publishes the web UI and SearXNG beyond loopback, and records both switches in `NodeSettings`. `NodeIdentity` is the id clients remember a node by. The client side is Rust: `mling-rs/src/node.rs` and the `mightling-node-locator` crate, with byte-identical copies of the locator in `mling-web-rs/` and `desktop/src-tauri/` (a test compares them, as one does for the `mling-airgapped` copy in `mling-web-rs/`). See `DREAMFERENCE_MIGHTLING_NODE.md`.
+`NodeAdvertiser` is `mling-admin node enable|disable|status`, and `NodeRemote`, `NodePairing` and `NodeServe` are `node list|add|remove|set|start|stop` (other nodes are listed from their open model port and changed only over an SSH pairing). `NodeAdvertiser` installs the Avahi service file `NodeServiceFile` renders, publishes the web UI and SearXNG beyond loopback, and records both switches in `NodeSettings`. `NodeIdentity` is the id clients remember a node by. The client side is Rust: `mling-rs/src/node.rs` and the `mling-node-locator` crate, with byte-identical copies of the locator in `mling-web-rs/` and `desktop/src-tauri/` (a test compares them, as one does for the `mling-airgapped` copy in `mling-web-rs/`). See `DREAMFERENCE_MIGHTLING_NODE.md`.
 
 ---
 

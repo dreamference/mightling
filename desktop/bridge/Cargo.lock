@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mightling-desktop-bridge"
+name = "mling-desktop-bridge"
 version = "0.1.0"
 dependencies = [
  "serde_json",

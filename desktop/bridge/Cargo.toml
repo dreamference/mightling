@@ -3,7 +3,7 @@
 # are never sent, the framing of what the server writes, and the busy marker Night Shift reads.
 # Kept out of the Tauri crate so its tests run without building a webview: `cargo test` here.
 [package]
-name = "mightling-desktop-bridge"
+name = "mling-desktop-bridge"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
