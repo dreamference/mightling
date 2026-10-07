@@ -363,7 +363,7 @@ class CodexTestRunner:
         free = shutil.disk_usage(BUILD_CACHE_DIR).free / 2**30
         needed = max(0.0, TEST_BUILD_DISK_GIB - size_gib(TEST_TARGET_DIR))
         if free < needed:
-            print(f"❌ Codex's test build needs about {needed:.0f} GiB more disk; {free:.0f} GiB is free.")
+            print(f"❌ The upstream test build needs about {needed:.0f} GiB more disk; {free:.0f} GiB is free.")
             print(f"💡 Free some space, or remove an old test build: {TEST_TARGET_DIR}")
             return False
         return True
@@ -521,7 +521,7 @@ class CodexTestRunner:
         for entry in json.loads(metadata.stdout)["packages"]:
             if entry["name"] == package:
                 return [t["name"] for t in entry["targets"] if "test" in t["kind"]]
-        raise ValueError(f"no package {package} in the Codex workspace")
+        raise ValueError(f"no package {package} in the upstream workspace")
 
     @classmethod
     def commands(cls, skips: dict, workspace_dir: str, environment: dict, user_filter: Optional[str],
@@ -628,13 +628,13 @@ class CodexTestRunner:
             return 1
         markers_before = cls.stray_project_markers()
         for marker in markers_before:
-            print(f"⚠️ {marker} makes {tempfile.gettempdir()} a project root to Codex's tests; "
+            print(f"⚠️ {marker} makes {tempfile.gettempdir()} a project root to the upstream tests; "
                   "the skills tests will fail until it is removed.")
         with open(os.path.join(BUILD_CACHE_DIR, ".test.lock"), "w") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                print("❌ Another Codex test run is using the test tree.")
+                print("❌ Another upstream test run is using the test tree.")
                 return 1
             if not CodexBrandedBuilder.prepare_source(TEST_SOURCE_DIR):
                 return 1
@@ -672,7 +672,7 @@ class CodexTestRunner:
         environment = cls.environment(rusty_v8, tools_dir, jobs, temp_dir, accept_snapshots)
         workspace_dir = os.path.join(TEST_SOURCE_DIR, "codex-rs")
         skipped = sum(len(skips[kind]) for kind in skips)
-        print(f"🧪 Running Codex's tests on Puffin's tree ({skipped} skip-list entries, "
+        print(f"🧪 Running the upstream tests on Puffin's tree ({skipped} skip-list entries, "
               f"see {os.path.relpath(SKIP_FILE, REPO_ROOT)})...")
         status = 0
         # Upstream's CI runs under umask 022. Under 002, common on desktop Linux, every temporary
@@ -683,11 +683,11 @@ class CodexTestRunner:
             for command in cls.commands(skips, workspace_dir, environment, user_filter, test_threads):
                 code = subprocess.call(cls.scoped(command, memory_max), cwd=workspace_dir, env=environment)
                 if command[1] == "build" and code != 0:
-                    print("❌ Building Codex's binaries failed; see the cargo output above.")
+                    print("❌ Building the upstream test binaries failed; see the cargo output above.")
                     return code
                 status = status or code
         finally:
             os.umask(previous_umask)
-        print("✅ Every Codex test that applies to Puffin passed." if status == 0
-              else "❌ Some Codex tests failed; see the summary above.")
+        print("✅ Every upstream test that applies to Puffin passed." if status == 0
+              else "❌ Some upstream tests failed; see the summary above.")
         return status

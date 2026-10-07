@@ -385,6 +385,6 @@ class NightShiftHost:
         for line in units.splitlines():
             if line.strip():
                 unit = line.split()[0]
-                kind = "an index run" if unit.startswith("puffin-index-") else "a Codex test run"
+                kind = "an index run" if unit.startswith("puffin-index-") else "an upstream test run"
                 found.append(f"{kind} is active ({unit})")
         return found

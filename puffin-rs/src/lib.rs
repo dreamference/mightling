@@ -96,9 +96,9 @@ const REMOVED_COMMANDS: &[(&str, &str)] = &[
     ("cloud-tasks", CLOUD_REASON),
 ];
 const ACCOUNT_REASON: &str =
-    "puffin uses the model served on this machine, so there is no OpenAI account to sign in to or out of";
+    "puffin uses the model served on this machine, so there is no account to sign in to or out of";
 const CLOUD_REASON: &str =
-    "Codex Cloud runs on OpenAI's servers; the command is switched off until a private cloud replaces it";
+    "cloud tasks run on a vendor's servers; the command is switched off until a private cloud replaces it";
 
 /// Appended to Codex's own system prompt. Web access has to travel with the session rather than
 /// the directory: an `AGENTS.md` would only apply inside this repository. It is a shell command,

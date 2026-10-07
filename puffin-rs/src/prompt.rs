@@ -93,7 +93,7 @@ impl Prompt {
             name: DEFAULT_PROMPT.to_string(),
             core: Core::Codex,
             blocks: Blocks::ALL,
-            origin: Origin::BuiltIn("Codex's own prompt: conversational, web and email"),
+            origin: Origin::BuiltIn("the general prompt: conversational, web and email"),
         }
     }
 
@@ -621,7 +621,7 @@ mod tests {
         let resolved = resolve_from(Some("high-swe"), None, &installed);
         let lines = list_lines(&resolved, &installed);
         assert_eq!(lines[0], format!("Prompt for new sessions: high-swe ({ENV_VAR})"));
-        assert!(lines[1].starts_with("  default   Codex's own prompt") && !lines[1].contains('←'));
+        assert!(lines[1].starts_with("  default   the general prompt") && !lines[1].contains('←'));
         assert!(lines[2].starts_with("  high-swe  repository tasks") && lines[2].ends_with("← new sessions"));
         let updated = with_choice("# mine\nvllm_host = \"http://h:8000\"\n\n[night]\nprompt = \"x\"\n", "high-swe").unwrap();
         assert!(updated.starts_with("# mine\nvllm_host = \"http://h:8000\"\n"));

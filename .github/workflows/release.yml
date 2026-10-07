@@ -216,10 +216,10 @@ jobs:
           gzip -9 -c "$bin/puffin-fetch" > "dist/puffin-fetch-$target.gz"
           # The router only: `puffin-admin code setup` fetches the indexers it runs.
           gzip -9 -c "$bin/puffin-code" > "dist/puffin-code-$target.gz"
-          # puffin is built from OpenAI's Codex (Apache 2.0), which asks that its licence and notice
-          # travel with the binaries.
-          cp codex/LICENSE dist/codex-LICENSE.txt
-          cp codex/NOTICE dist/codex-NOTICE.txt
+          # puffin began as a fork of the Codex CLI (Apache 2.0), whose licence and notice must
+          # travel with the binaries (Apache 2.0 section 4); the names say what they belong to.
+          cp codex/LICENSE dist/THIRD-PARTY-LICENSE-codex-cli.txt
+          cp codex/NOTICE dist/THIRD-PARTY-NOTICE-codex-cli.txt
           # `puffin update` checks every archive against this file before installing any.
           (cd dist && sha256sum "puffin-$target.gz" "codex-code-mode-host-$target.gz" \
             "puffin-search-$target.gz" "puffin-fetch-$target.gz" "puffin-code-$target.gz" \

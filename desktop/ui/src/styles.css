@@ -1,5 +1,5 @@
 /* The Work window: light only for now (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §14 question 3), in
-   Puffin's colours, not OpenAI's. Scroll areas use a thin scrollbar: WebKitGTK paints its own and
+   Puffin's own colours. Scroll areas use a thin scrollbar: WebKitGTK paints its own and
    CSS colours do not reach it (CLAUDE.md, the desktop app). */
 :root {
   --accent: #0abab5; /* TIFFANY_BLUE, dreamference/chat/onyx_brand_assets.py */

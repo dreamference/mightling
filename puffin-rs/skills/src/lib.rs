@@ -51,7 +51,7 @@ Usage: puffin skill <command>
                             A ClawHub skill its scan does not call clean needs a confirmation
                             at a terminal; one it calls malicious is never installed
   remove <name>             delete a skill puffin installed
-  search <words>            search OpenAI's, Anthropic's and Hermes's catalogues and ClawHub
+  search <words>            search the public skill catalogues and ClawHub
   enable <name>             offer a skill although it is unavailable, manual-only or shadowed
   disable <name>            never offer a skill
   source <agent> on|off     link, or stop linking, the skills of claude, gemini, openclaw or hermes,

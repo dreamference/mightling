@@ -65,6 +65,6 @@ class CodexInstaller:
             bool: True if an up-to-date `puffin-codex` is installed afterwards.
         """
         if cls.is_installed():
-            print("✅ Puffin Codex (`puffin-codex`) is already built.")
+            print("✅ puffin is already built.")
             return True
         return CodexBrandedBuilder.build()

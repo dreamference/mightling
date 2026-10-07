@@ -216,7 +216,7 @@ CASES: Dict[str, Case] = {
     "mcp": Case("inline", expect=("MCP",)),
     "apps": Case("absent", reason="apps are OpenAI-hosted connectors that need a ChatGPT login"),
     "plugins": Case("popup"),
-    "logout": Case("absent", reason="hidden by patch 0005: there is no OpenAI account to sign out of"),
+    "logout": Case("absent", reason="hidden by patch 0005: there is no account to sign out of"),
     "quit": Case("exit"),
     "exit": Case("exit"),
     "feedback": Case("absent", reason="removed by patch 0009: it uploads session logs to OpenAI"),

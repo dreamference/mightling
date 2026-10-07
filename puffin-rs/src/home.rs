@@ -60,7 +60,7 @@ pub fn use_puffin_home() {
         {
             eprintln!(
                 "puffin: copied your session history from {} to {} ({carried} items). \
-                 Your ChatGPT login was not copied; Puffin has no OpenAI account.",
+                 No cloud sign-in was copied: Puffin has no account to sign in to.",
                 upstream.display(),
                 puffin_home.display()
             );

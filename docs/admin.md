@@ -119,7 +119,7 @@ Clear local tensorizer model cache only.
 
 ### `puffin-admin endpoints`
 
-Print all available vLLM/OpenAI-compatible endpoints and credentials.
+Print the model server's endpoints (the standard /v1 API) and credentials.
 
 ### `puffin-admin server`
 
@@ -132,7 +132,7 @@ Launch local vLLM server optimized for GB10 unified memory.
 | Option | Description |
 |---|---|
 | `--model` | Model name to serve (default: the configured main model; examples: qwen3.8-27b-nvfp4-dflash2, llama-3.3-70b) |
-| `--port` | Port to expose OpenAI API endpoint. |
+| `--port` | Port for the model server's /v1 API. |
 | `--quantization` | Quantization method (int8, fp8, awq) |
 | `--draft-model` | Speculative decoding draft model (e.g. qwen2.5-coder-1.5b) |
 | `--num-speculative-tokens` | Number of speculative tokens to propose. |
@@ -140,7 +140,7 @@ Launch local vLLM server optimized for GB10 unified memory.
 | `--num-scheduler-steps` | Multi-step scheduling iterations per step. |
 | `--attention-backend` | Attention backend (FLASHINFER, FLASH_ATTN, auto) |
 | `--kv-cache-dtype` | KV cache precision (auto, fp8) |
-| `--api-key` | OpenAI-compatible API key (optional; not set by default) |
+| `--api-key` | API key for the model server's /v1 API (optional; not set by default) |
 | `--enable-auto-tool-choice` | Enable automatic tool choice for function calling (default: enabled) |
 | `--tool-call-parser` | Tool call parser name (default: from the model's registry recipe, e.g. hermes, qwen3_xml) |
 | `--reasoning-parser` | Reasoning-channel parser for models that emit separate thinking output (e.g. qwen3) |
@@ -180,7 +180,7 @@ Tail the vLLM Docker container logs.
 
 | Option | Description |
 |---|---|
-| `target` | server: vLLM container logs. mcp: Codex MCP server lifecycle, read from ~/.puffin/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file) One of: `server`, `mcp`. |
+| `target` | server: vLLM container logs. mcp: the agent's MCP server lifecycle, read from ~/.puffin/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file) One of: `server`, `mcp`. |
 | `--port` | Port of the server to tail logs for. |
 
 ### `puffin-admin codex`
@@ -189,7 +189,7 @@ Build puffin and manage its app-server daemon.
 
 #### `puffin-admin codex build`
 
-Build the Puffin-branded Codex from the codex submodule and codex-patches/.
+Build puffin from the pinned upstream source in codex/ and the patches in codex-patches/.
 
 | Option | Description |
 |---|---|
@@ -206,7 +206,7 @@ Stop puffin's app-server daemon.
 
 #### `puffin-admin codex test`
 
-Run Codex's own tests on puffin's patched tree, except those in codex-tests/puffin-skips.toml.
+Run the upstream test suite on puffin's patched tree, except the tests in codex-tests/puffin-skips.toml.
 
 | Option | Description |
 |---|---|
