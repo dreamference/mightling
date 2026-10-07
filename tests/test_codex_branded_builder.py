@@ -314,6 +314,21 @@ def test_the_web_crate_is_committed_with_its_lockfile():
     assert os.path.isfile(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.toml"))
 
 
+@pytest.mark.parametrize("system, machine, target", [
+    ("Linux", "aarch64", "aarch64-unknown-linux-gnu"),
+    ("Linux", "x86_64", "x86_64-unknown-linux-gnu"),
+    # macOS says arm64 where Rust and the prebuilt V8 assets say aarch64.
+    ("Darwin", "arm64", "aarch64-apple-darwin"),
+    ("Darwin", "x86_64", "x86_64-apple-darwin"),
+])
+def test_the_target_names_the_v8_assets_and_release_assets_per_platform(monkeypatch, system, machine, target):
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: system)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    assert CodexBrandedBuilder.host_target() == target
+
+
 @pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
 def test_the_remaining_codex_names_on_screen_say_puffin(tmp_path):
     # Found by driving the real TUI through every popup/inline slash command, an approval prompt,

@@ -74,9 +74,20 @@ pub fn decide(current: Option<&str>, latest: &str) -> Decision {
     }
 }
 
-/// The Rust target triple the release assets are named after.
-pub fn target() -> String {
-    format!("{}-unknown-linux-gnu", std::env::consts::ARCH)
+/// The Rust target triple the release assets are named after: this machine's architecture on
+/// Linux (glibc) or macOS. `None` where no release build exists.
+pub fn target() -> Option<String> {
+    target_for(std::env::consts::ARCH, std::env::consts::OS)
+}
+
+/// [`target`] for a given architecture and operating system, as `std::env::consts` names them.
+pub fn target_for(arch: &str, os: &str) -> Option<String> {
+    let system = match os {
+        "linux" => "unknown-linux-gnu",
+        "macos" => "apple-darwin",
+        _ => return None,
+    };
+    matches!(arch, "aarch64" | "x86_64").then(|| format!("{arch}-{system}"))
 }
 
 /// Asset names for a target: the two gzipped binaries and the checksum file.
@@ -130,9 +141,13 @@ fn github_token() -> Option<String> {
 
 /// Runs `puffin update`.
 pub async fn run() -> anyhow::Result<()> {
-    if !cfg!(target_os = "linux") {
-        bail!("`puffin update` only has Linux release builds to install");
-    }
+    let Some(target) = target() else {
+        bail!(
+            "`puffin update` has no release builds for {} on {}; releases carry Linux and macOS builds",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        );
+    };
     let repo = std::env::var("PUFFIN_RELEASE_REPO")
         .ok()
         .filter(|repo| !repo.is_empty())
@@ -184,7 +199,6 @@ pub async fn run() -> anyhow::Result<()> {
         },
     }
 
-    let target = target();
     let [puffin_asset, host_asset, sums_asset] = asset_names(&target);
     let assets: HashMap<&str, &str> = release["assets"]
         .as_array()
@@ -331,5 +345,17 @@ mod tests {
         );
         // The launcher finds the router by this name beside `puffin` (code_index::binary).
         assert!(optional_commands().contains(&"puffin-code"));
+    }
+
+    #[test]
+    fn every_released_platform_has_a_target_and_others_have_none() {
+        // The same names install.sh and the release workflow give the assets.
+        assert_eq!(target_for("aarch64", "linux").as_deref(), Some("aarch64-unknown-linux-gnu"));
+        assert_eq!(target_for("x86_64", "linux").as_deref(), Some("x86_64-unknown-linux-gnu"));
+        assert_eq!(target_for("aarch64", "macos").as_deref(), Some("aarch64-apple-darwin"));
+        assert_eq!(target_for("x86_64", "macos").as_deref(), Some("x86_64-apple-darwin"));
+        assert_eq!(target_for("riscv64", "linux"), None);
+        assert_eq!(target_for("x86_64", "freebsd"), None);
+        assert!(target().is_some());
     }
 }

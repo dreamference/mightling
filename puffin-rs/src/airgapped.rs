@@ -49,6 +49,89 @@ pub const ON_TEXT: &str = "This session has no network. puffin-search, puffin-fe
 /// applies") was delivered and the model still refused to run `curl`, quoting the `on` message.
 pub const OFF_TEXT: &str = "The user has lifted this session's air-gap restriction. The earlier message about it no longer applies: commands have the network again, and curl, git fetch and push, package installs, puffin-search and puffin-fetch work as the system prompt describes. Run them when the task calls for it.";
 
+/// Whether a session's level can change while it runs. On Linux every sandboxed command goes through
+/// Codex's helper, which reads the level for that command (patch 0019). On macOS the sandbox is
+/// Seatbelt, whose network rule Codex derives from the configuration once, when `puffin` starts: the
+/// launcher can set it then ([`launch_overrides`]), and nothing it writes later reaches a running
+/// session. So there the level is fixed at launch, and `/airgapped <level>` says so instead of
+/// claiming a change it cannot make.
+const LEVEL_FIXED_AT_LAUNCH: bool = cfg!(target_os = "macos");
+
+/// The `-c` setting that takes the network away from the workspace-write sandbox.
+const NO_NETWORK_SETTING: &str = "sandbox_workspace_write.network_access=false";
+const NETWORK_KEY: &str = "sandbox_workspace_write.network_access";
+
+/// What enforces `on` here, for the status.
+fn enforced_line(fixed_at_launch: bool) -> &'static str {
+    if fixed_at_launch {
+        "Enforced: sandboxed commands run with no network (Seatbelt, set when puffin started)."
+    } else {
+        "Enforced: sandboxed commands run with no network (bwrap --unshare-net)."
+    }
+}
+
+/// The `-c` settings a launch at `level` needs on this platform, or why it must not start. On
+/// macOS a configured `on` becomes `sandbox_workspace_write.network_access=false`, which Codex turns
+/// into Seatbelt's network denial for every sandboxed command; the read-only sandbox has no network
+/// in the first place, and Full Access is refused by [`full_access_conflict`]. A `-c` of the same
+/// key from the user would decide instead, so it is refused rather than silently lost or obeyed.
+pub fn launch_overrides(user_args: &[String], level: Level) -> Result<Vec<String>, String> {
+    launch_overrides_for(user_args, level, LEVEL_FIXED_AT_LAUNCH)
+}
+
+fn launch_overrides_for(user_args: &[String], level: Level, fixed_at_launch: bool) -> Result<Vec<String>, String> {
+    if !fixed_at_launch || level != Level::On {
+        return Ok(Vec::new());
+    }
+    let mut args = user_args.iter().map(String::as_str);
+    while let Some(arg) = args.next() {
+        let setting = match arg {
+            "-c" | "--config" => args.next(),
+            _ => arg.strip_prefix("--config="),
+        };
+        if setting.is_some_and(|text| text.split_once('=').is_some_and(|(key, _)| key.trim() == NETWORK_KEY)) {
+            return Err(format!(
+                "airgapped is on, and -c {NETWORK_KEY} would decide the sandbox's network instead. Leave it out, or run puffin airgapped default off ({ENV_VAR}=off for one run)."
+            ));
+        }
+    }
+    Ok(vec![NO_NETWORK_SETTING.to_string()])
+}
+
+/// The launch arguments with [`launch_overrides`] added after the program name, where Codex reads
+/// global `-c` settings.
+pub fn with_launch_policy(
+    args: Vec<std::ffi::OsString>,
+    user_args: &[String],
+    level: Level,
+) -> Result<Vec<std::ffi::OsString>, String> {
+    let settings = launch_overrides(user_args, level)?;
+    if settings.is_empty() {
+        return Ok(args);
+    }
+    let mut args = args.into_iter();
+    let mut out: Vec<std::ffi::OsString> = args.next().into_iter().collect();
+    for setting in settings {
+        out.extend(["-c".into(), setting.into()]);
+    }
+    out.extend(args);
+    Ok(out)
+}
+
+/// What `/airgapped <level>` says on a platform where the level is fixed at launch.
+fn fixed_at_launch_lines(level: Level, now: Level) -> Vec<String> {
+    vec![
+        format!(
+            "Airgapped not changed: this session stays {}. On macOS the sandbox's network is set once, when puffin starts, so a level cannot change inside a running session.",
+            now.name()
+        ),
+        format!(
+            "To start at {0}: puffin airgapped default {0} (or {ENV_VAR}={0} for one run), then restart puffin.",
+            level.name()
+        ),
+    ]
+}
+
 fn summary(level: Level) -> &'static str {
     match level {
         Level::Off => "search through every engine SearXNG has enabled; pages fetched directly",
@@ -205,13 +288,15 @@ fn status_lines(resolved: &Resolved, in_session: bool, guard: &[String]) -> Vec<
         lines.push(format!("  {:<11} {}{marker}", level.name(), summary(level)));
     }
     if resolved.level == Level::On {
-        lines.push("Enforced: sandboxed commands run with no network (bwrap --unshare-net).".to_string());
+        lines.push(enforced_line(LEVEL_FIXED_AT_LAUNCH).to_string());
         lines.push("NOT ENFORCED for: Full Access, a command you approve to run outside the sandbox, MCP servers, and puffin's own connection to the model server.".to_string());
     }
     lines.extend(guard.iter().cloned());
     lines.extend(resolved.invalid.iter().map(|note| format!("Note: {note}.")));
     lines.push("Not covered at any level: the web chat, MCP servers you configured.".to_string());
-    lines.push(if in_session {
+    lines.push(if LEVEL_FIXED_AT_LAUNCH {
+        "Change: puffin airgapped default <level>, then restart puffin (on macOS the level is set when puffin starts).".to_string()
+    } else if in_session {
         "Change: /airgapped on (this session) or /airgapped default on (new sessions).".to_string()
     } else {
         "Change: puffin airgapped default <level> (new sessions), or /airgapped <level> inside a session.".to_string()
@@ -220,6 +305,9 @@ fn status_lines(resolved: &Resolved, in_session: bool, guard: &[String]) -> Vec<
 }
 
 fn set_session(thread_id: Option<&str>, level: Level) -> Vec<String> {
+    if LEVEL_FIXED_AT_LAUNCH {
+        return fixed_at_launch_lines(level, resolve(thread_id).level);
+    }
     let Some(path) = thread_id.and_then(puffin_airgapped::session_file) else {
         return vec!["No session yet: send a message first, or use /airgapped default <level>.".to_string()];
     };
@@ -288,7 +376,12 @@ fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
         level.name(),
         path.display()
     )];
-    if thread_id.is_some() {
+    if thread_id.is_some() && LEVEL_FIXED_AT_LAUNCH {
+        lines.push(format!(
+            "This session stays {} until puffin restarts: on macOS the sandbox's network is set when puffin starts.",
+            resolve(thread_id).level.name()
+        ));
+    } else if thread_id.is_some() {
         lines.extend(set_session(thread_id, level));
     }
     // Say so when another tier still decides differently for a new session.
@@ -676,6 +769,56 @@ mod tests {
         assert_eq!(full_access_conflict(&args(&["-s", "danger-full-access"]), Level::Off), None);
         let refusal = full_access_conflict(&args(&["--yolo"]), Level::On).unwrap_or_default();
         assert!(refusal.contains("--yolo selects Full Access") && refusal.contains("incompatible"));
+    }
+
+    #[test]
+    fn on_macos_a_configured_on_takes_the_sandbox_network_away_at_launch() {
+        let args = |words: &[&str]| words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+        // Where the level is fixed at launch (macOS), `on` becomes Seatbelt's network denial.
+        assert_eq!(
+            launch_overrides_for(&args(&["exec", "hi"]), Level::On, true),
+            Ok(vec![NO_NETWORK_SETTING.to_string()])
+        );
+        assert_eq!(launch_overrides_for(&args(&["exec", "hi"]), Level::Off, true), Ok(Vec::new()));
+        // Linux enforces through the sandbox helper instead, so nothing is added there.
+        assert_eq!(launch_overrides_for(&args(&["exec", "hi"]), Level::On, false), Ok(Vec::new()));
+        // The user's own setting of the same key would decide instead: refused, not overridden.
+        for user in [
+            args(&["-c", "sandbox_workspace_write.network_access=true"]),
+            args(&["--config", "sandbox_workspace_write.network_access = true"]),
+            args(&["--config=sandbox_workspace_write.network_access=false"]),
+        ] {
+            let refusal = launch_overrides_for(&user, Level::On, true).unwrap_err();
+            assert!(refusal.contains("airgapped is on") && refusal.contains(NETWORK_KEY));
+        }
+        // Another `-c` is no conflict.
+        assert!(launch_overrides_for(&args(&["-c", "model=x"]), Level::On, true).is_ok());
+    }
+
+    #[test]
+    fn the_setting_goes_after_the_program_name_where_codex_reads_global_flags() {
+        let args: Vec<std::ffi::OsString> = ["puffin", "exec", "hi"].iter().map(Into::into).collect();
+        let settings = launch_overrides_for(&[], Level::On, true).unwrap();
+        let mut expected: Vec<std::ffi::OsString> = vec!["puffin".into()];
+        for setting in &settings {
+            expected.extend(["-c".into(), setting.into()]);
+        }
+        expected.extend(["exec".into(), "hi".into()]);
+        // with_launch_policy uses this platform's rule; check the shape it produces where it applies.
+        if LEVEL_FIXED_AT_LAUNCH {
+            assert_eq!(with_launch_policy(args.clone(), &[], Level::On).unwrap(), expected);
+        } else {
+            assert_eq!(with_launch_policy(args.clone(), &[], Level::On).unwrap(), args);
+        }
+    }
+
+    #[test]
+    fn where_the_level_is_fixed_at_launch_a_switch_is_refused_and_says_how() {
+        let lines = fixed_at_launch_lines(Level::On, Level::Off).join("\n");
+        assert!(lines.contains("Airgapped not changed: this session stays off"));
+        assert!(lines.contains("puffin airgapped default on"));
+        assert!(lines.contains(&format!("{ENV_VAR}=on")));
+        assert!(enforced_line(true).contains("Seatbelt") && enforced_line(false).contains("bwrap"));
     }
 
     fn layers(files: &[(&str, &str)]) -> Vec<(String, toml::Table)> {

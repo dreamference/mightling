@@ -255,6 +255,11 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     if let Some(reason) = airgapped::full_access_conflict(&user_args, configured.level) {
         bail!("{reason}");
     }
+    // On macOS the sandbox's network is set once, now: a configured `on` takes it away here.
+    let args = match airgapped::with_launch_policy(args, &user_args, configured.level) {
+        Ok(args) => args,
+        Err(reason) => bail!("{reason}"),
+    };
     // A session that starts at `on` says first whether that holds (airgapped.rs).
     for line in airgapped::startup_lines_now(&configured) {
         notice::say(&line);

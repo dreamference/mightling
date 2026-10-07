@@ -374,11 +374,15 @@ class CodexBrandedBuilder:
         Returns the Rust target triple of this machine, which is the one Codex is built for.
 
         Returns:
-            str: For example `aarch64-unknown-linux-gnu` on GB10.
+            str: For example `aarch64-unknown-linux-gnu` on GB10, `aarch64-apple-darwin` on an Apple
+            silicon Mac (whose `uname -m` says `arm64`), `x86_64-apple-darwin` on an Intel one.
         """
         import platform
 
-        return f"{platform.machine()}-unknown-linux-gnu"
+        machine = {"arm64": "aarch64", "amd64": "x86_64"}.get(platform.machine().lower(), platform.machine())
+        if platform.system() == "Darwin":
+            return f"{machine}-apple-darwin"
+        return f"{machine}-unknown-linux-gnu"
 
     @classmethod
     def fetch_rusty_v8(cls, source_dir: str) -> Optional[dict]:
