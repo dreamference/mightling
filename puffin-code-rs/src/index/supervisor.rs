@@ -466,6 +466,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "a scope is stopped by a Unix signal; Windows indexing is Phase 5")]
     fn a_scope_stopped_from_outside_is_deferred_and_records_no_peak() {
         let dir = tempfile::tempdir().unwrap();
         for stand_in in ["exit 143", "kill -TERM $$"] {

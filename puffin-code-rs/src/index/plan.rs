@@ -1161,6 +1161,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "indexing plans a Linux sandbox; Windows indexing is Phase 5")]
     fn jvm_and_dotnet_build_a_copy_offline() {
         let (dir, repo) = make_repo(&[("jvm/pom.xml", "<project/>"), ("net/App.csproj", "<Project/>")]);
         std::env::set_var("PUFFIN_CODE_SCRATCH_DIR", dir.path().join("scratch"));
