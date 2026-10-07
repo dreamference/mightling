@@ -168,8 +168,10 @@ jobs:
             $refusedExit = $LASTEXITCODE
             Write-Host "refusal: exit $refusedExit, $refused"
             if ($refusedExit -eq 0 -or $refused -notmatch "non-admin sandbox") { throw "the non-admin sandbox was not refused at on" }
-            # The elevated sandbox: a command reaches the network at `off` and not at `on`.
-            $probe = @("sandbox", "-c", "sandbox_mode=workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--", "curl.exe", "-sS", "-m", "20", "-o", "NUL", "-w", "%{http_code}", "https://example.com")
+            # The elevated sandbox: a command reaches the network at `off` and not at `on`. Plain
+            # HTTP: Windows' curl.exe uses Schannel, which cannot acquire credentials as the
+            # sandbox's account (SEC_E_NO_CREDENTIALS), so an https probe fails at off after connecting.
+            $probe = @("sandbox", "-c", "sandbox_mode=workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--", "curl.exe", "-sS", "-m", "20", "-o", "NUL", "-w", "%{http_code}", "http://example.com")
             $env:DREAMFERENCE_PUFFIN_AIRGAPPED = "off"
             $off = & $puffin @probe 2>&1 | Out-String
             $offExit = $LASTEXITCODE

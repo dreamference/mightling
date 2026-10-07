@@ -270,6 +270,16 @@ pub fn run_cli(args: &[String]) -> i32 {
         println!("{host} is not a model server URL. {USAGE}");
         return 2;
     };
+    // A server that is not there would have the session wait out its whole timeout (five minutes,
+    // in install.ps1's elevated window) for a trace that can only fail. Asked before tracing, so
+    // this connection is not part of what is judged.
+    if let (Some(address), port) = model
+        && std::net::TcpStream::connect_timeout(&std::net::SocketAddr::new(address, port), std::time::Duration::from_secs(5)).is_err()
+    {
+        println!("⚠️ Egress audit: trace failed");
+        println!("   - the model server at {host} does not answer: start it, or pass --host <URL>");
+        return 2;
+    }
     match windows::audit(&host, keep) {
         Ok((events, root, replied)) => {
             let session = session(&events, root);
