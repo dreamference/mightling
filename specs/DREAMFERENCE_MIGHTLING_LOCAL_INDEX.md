@@ -290,5 +290,7 @@ they land.
    of both runs in the background under the shared memory budget.
 2. ~~Visibility~~ **Decided 2026-10-07:** every collection is searchable from every session (coding sessions and Ask threads alike).
 3. ~~OCR~~ **Decided 2026-10-07:** OCR moves to Phase 2 with **RapidOCR** (Apache-2.0 code and models; small ONNX models on the CPU). Tesseract was the alternative; Surya was set aside because its weights are free only below $5M of funding or revenue, which every larger customer would inherit. Qwen3.8 (the served model has a vision encoder) handles the hard pages overnight and on demand, so no larger OCR model is downloaded. Phase 0 measures RapidOCR on the scanned fixtures, against Tesseract as a reference.
-4. Languages: English-only embeddings are smaller and faster; a multilingual model costs speed.
-   Which languages do the user's documents use?
+4. ~~Languages~~ **Decided 2026-10-07:** all major languages, since users' documents can be in any.
+   The embedding model must be multilingual (Phase 0 compares multilingual candidates only), and
+   OCR ships RapidOCR's multilingual recognition models (Latin, Cyrillic, CJK, Arabic and so on),
+   picked per page by script detection, rather than English alone.
