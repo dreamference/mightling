@@ -1,11 +1,11 @@
 <#
 Installs the Puffin client on Windows from a release, with nothing compiled.
 
-    irm https://github.com/dreamference/puffin-ai/releases/latest/download/install.ps1 | iex
+    irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex
 
 or, to pick a release:
 
-    & ([scriptblock]::Create((irm https://github.com/dreamference/puffin-ai/releases/latest/download/install.ps1))) -Version 1.5.0
+    & ([scriptblock]::Create((irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1))) -Version 1.5.0
 
 It installs `puffin.exe` and its commands (puffin-search, puffin-fetch, puffin-code, and the
 sandbox's helpers when the release carries them) into %LOCALAPPDATA%\Programs\Puffin\bin and puts
@@ -41,7 +41,7 @@ $ProgressPreference = "SilentlyContinue"
 function Say([string]$Text) { Write-Host $Text }
 function Fail([string]$Text) { Write-Host "ERROR: $Text" -ForegroundColor Red; throw $Text }
 
-$Repo = if ($env:PUFFIN_RELEASE_REPO) { $env:PUFFIN_RELEASE_REPO } else { "dreamference/puffin-ai" }
+$Repo = if ($env:PUFFIN_RELEASE_REPO) { $env:PUFFIN_RELEASE_REPO } else { "dreamference/mightling" }
 $Api = if ($env:PUFFIN_RELEASE_API) { $env:PUFFIN_RELEASE_API } else { "https://api.github.com" }
 $InstallDir = if ($env:PUFFIN_INSTALL_DIR) { $env:PUFFIN_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\Puffin\bin" }
 

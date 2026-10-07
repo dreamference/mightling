@@ -255,7 +255,8 @@ mod tests {
         let here = std::env::current_dir().unwrap_or_default();
         let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
         assert_eq!(session_dir(&args(&["exec", "hi"])), here);
-        assert_eq!(session_dir(&args(&["exec", "-C", "/srv/tree", "hi"])), std::path::PathBuf::from("/srv/tree"));
+        let absolute = if cfg!(windows) { r"C:\srv\tree" } else { "/srv/tree" };
+        assert_eq!(session_dir(&args(&["exec", "-C", absolute, "hi"])), std::path::PathBuf::from(absolute));
         assert_eq!(session_dir(&args(&["--cd=sub", "exec"])), here.join("sub"));
         assert_eq!(session_dir(&args(&["-Csub", "exec"])), here.join("sub"));
     }
@@ -275,7 +276,7 @@ mod tests {
             .collect();
         assert_eq!(out[0], "puffin");
         assert_eq!(out[1], "-c");
-        assert_eq!(out[2], format!("mcp_servers.puffin_code.command=\"{}\"", binary.display()));
+        assert_eq!(out[2], format!("mcp_servers.puffin_code.command={}", toml::Value::String(binary.display().to_string())));
         assert_eq!(out[4], "mcp_servers.puffin_code.args=[\"mcp\"]");
         assert!(out[6].starts_with("mcp_servers.puffin_code.env_vars=[\"PUFFIN_CODE_ROOT\", "), "{}", out[6]);
         assert_eq!(out[8], format!("mcp_optional_startup_grace_ms={STARTUP_GRACE_MS}"));

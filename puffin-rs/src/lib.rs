@@ -1144,7 +1144,7 @@ mod tests {
                 .and_then(toml::Value::as_array)
                 .map(|roots| roots.iter().filter_map(toml::Value::as_str).map(str::to_string).collect::<Vec<_>>())
         };
-        assert_eq!(roots(""), Some(vec!["/h/skills".to_string()]));
+        assert_eq!(roots(""), Some(vec![Path::new("/h").join("skills").display().to_string()]));
         // The user's own list, an empty one included, is left alone.
         assert_eq!(roots("[sandbox_workspace_write]\nwritable_roots = []\n"), Some(vec![]));
         assert_eq!(

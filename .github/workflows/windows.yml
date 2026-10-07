@@ -106,16 +106,6 @@ jobs:
       - name: Build puffin
         shell: bash
         run: python -c "import sys; from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; sys.exit(0 if B.build(force=True) else 1)"
-      # The same export, V8 and target directory the build used, so the tests reuse its crates.
-      - name: Launcher test environment
-        run: |
-          python -c "import os; from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR as C, CodexBrandedBuilder as B; src = os.path.join(C, 'src'); env = dict(B.fetch_rusty_v8(src), PUFFIN_EXPORT=os.path.join(src, 'codex-rs'), CARGO_TARGET_DIR=os.path.join(C, 'target'), CARGO_PROFILE_RELEASE_DEBUG='none', CARGO_PROFILE_RELEASE_STRIP='debuginfo'); open(os.environ['GITHUB_ENV'], 'a').write(''.join(f'{k}={v}\n' for k, v in env.items()))"
-      - name: Launcher tests
-        shell: pwsh
-        run: |
-          Set-Location $env:PUFFIN_EXPORT
-          cargo test --release -p puffin-launcher
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Smoke
         shell: bash
         run: |
@@ -134,7 +124,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList ".github\scripts\fake_release.py", "dist", "8787", "dreamference/puffin-ai", "v0.0.0-ci"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList ".github\scripts\fake_release.py", "dist", "8787", "dreamference/mightling", "v0.0.0-ci"
           Start-Sleep -Seconds 3
           $env:PUFFIN_RELEASE_API = "http://127.0.0.1:8787"
           $env:PUFFIN_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "puffin-install\bin"
@@ -158,3 +148,14 @@ jobs:
           name: puffin-windows-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
+      # Last, so the smoke test, the packaging and install.ps1 run whatever the tests say. The same
+      # export, V8 and target directory the build used, so the tests reuse its crates.
+      - name: Launcher test environment
+        run: |
+          python -c "import os; from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR as C, CodexBrandedBuilder as B; src = os.path.join(C, 'src'); env = dict(B.fetch_rusty_v8(src), PUFFIN_EXPORT=os.path.join(src, 'codex-rs'), CARGO_TARGET_DIR=os.path.join(C, 'target'), CARGO_PROFILE_RELEASE_DEBUG='none', CARGO_PROFILE_RELEASE_STRIP='debuginfo'); open(os.environ['GITHUB_ENV'], 'a').write(''.join(f'{k}={v}\n' for k, v in env.items()))"
+      - name: Launcher tests
+        shell: pwsh
+        run: |
+          Set-Location $env:PUFFIN_EXPORT
+          cargo test --release -p puffin-launcher
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

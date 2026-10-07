@@ -607,7 +607,8 @@ mod tests {
         assert_eq!(catalog, home.join("model_catalog.high-swe.json"));
         let args: Vec<OsString> = vec!["puffin".into(), "exec".into(), "hi".into()];
         let out: Vec<String> = with_catalog(args, &catalog).iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(out, ["puffin", "-c", "model_catalog_json=\"/h/.puffin/model_catalog.high-swe.json\"", "exec", "hi"]);
+        let setting = format!("model_catalog_json={}", toml::Value::String(catalog.display().to_string()));
+        assert_eq!(out, ["puffin", "-c", setting.as_str(), "exec", "hi"]);
         let (_, value) = out[2].split_once('=').unwrap();
         assert!(format!("v = {value}").parse::<toml::Table>().is_ok());
         // The user's own catalog wins.

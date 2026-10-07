@@ -232,10 +232,9 @@ fn patched_paths(calls: &[Call]) -> Vec<String> {
 fn workspace_files(command: &str, base: &Path, cwd: &Path) -> Vec<String> {
     let root = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
     let mut files: Vec<String> = Vec::new();
-    let separators = |c: char| c.is_whitespace() || ";|&<>()\"'`=,:".contains(c);
-    for word in command.split(separators) {
+    for word in command_words(command) {
         let word = word.trim_end_matches('.');
-        if word.len() < 3 || word.len() > 300 || !(word.contains('/') || word.contains('.')) {
+        if word.len() < 3 || word.len() > 300 || !(word.contains('/') || word.contains('\\') || word.contains('.')) {
             continue;
         }
         let candidate = if Path::new(word).is_absolute() { PathBuf::from(word) } else { base.join(word) };
@@ -244,12 +243,39 @@ fn workspace_files(command: &str, base: &Path, cwd: &Path) -> Vec<String> {
             continue;
         }
         let Ok(relative) = resolved.strip_prefix(&root) else { continue };
-        let relative = relative.to_string_lossy().into_owned();
+        // Written with `/`, as git names files, so a file `git status` lists is recognised.
+        let relative = relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
         if !relative.starts_with(".git/") && !files.contains(&relative) {
             files.push(relative);
         }
     }
     files
+}
+
+/// The words of a command that could name a file: split at whitespace, shell punctuation, `=`,
+/// `,` and `:` (`file.py:12`), except that a drive path (`C:\x`, `C:/x`) keeps its colon.
+fn command_words(command: &str) -> Vec<&str> {
+    let separators = |c: char| c.is_whitespace() || ";|&<>()\"'`=,".contains(c);
+    let mut words = Vec::new();
+    for word in command.split(separators) {
+        let bytes = word.as_bytes();
+        let drive = bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/');
+        if drive {
+            let (head, rest) = word.split_at(2);
+            let mut parts = rest.split(':');
+            if let Some(first) = parts.next() {
+                words.push(&word[..head.len() + first.len()]);
+            }
+            words.extend(parts);
+        } else {
+            words.extend(word.split(':'));
+        }
+    }
+    words
 }
 
 /// The exit code Codex's command tool reports in its output (`Process exited with code N`).
@@ -378,6 +404,13 @@ mod tests {
     }
 
     const COMPACTED: &str = r#"{"type":"compacted","payload":{"message":"summary"}}"#;
+
+    #[test]
+    fn a_drive_path_keeps_its_colon_and_a_line_number_does_not() {
+        assert_eq!(command_words(r"cat C:\x\a.py:12 b.py:3"), vec!["cat", r"C:\x\a.py", "12", "b.py", "3"]);
+        assert_eq!(command_words("sed -n 1,5p C:/x/b.py"), vec!["sed", "-n", "1", "5p", "C:/x/b.py"]);
+        assert_eq!(command_words("PYTHONPATH=src:lib x"), vec!["PYTHONPATH", "src", "lib", "x"]);
+    }
 
     #[test]
     fn the_trail_is_rebuilt_from_the_rollout() {
