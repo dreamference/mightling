@@ -1081,6 +1081,31 @@ class GmailSearchService:
     # ------------------------------------------------------------------ HTTP
 
     @classmethod
+    def post_refusal(cls, origin: Optional[str]) -> Optional[str]:
+        """
+        Decides whether a POST may change the service's state, judged by the page that sent it.
+        `/disconnect` and the two OAuth steps take no shared secret, because the pages that call
+        them (the web chat's Connect card and this service's own setup page) cannot hold one; so
+        the browser's `Origin` header is what keeps another website, or a DNS-rebinding page
+        that resolves to 127.0.0.1, from disconnecting an account or connecting its own. A
+        request with no `Origin` comes from a program (the launcher, `puffin-admin`), which a
+        browser never sends a cross-site POST as.
+
+        Args:
+            origin (Optional[str]): The request's `Origin` header.
+
+        Returns:
+            Optional[str]: The reason to refuse, or None when the request may proceed.
+        """
+        if origin is None:
+            return None
+        allowed = {ONYX_ORIGIN, HOST_ORIGIN, f"http://127.0.0.1:{HOST_PORT}",
+                   ONYX_ORIGIN.replace("localhost", "127.0.0.1")}
+        if origin.rstrip("/") in allowed:
+            return None
+        return f"requests from {origin} are not accepted"
+
+    @classmethod
     def serve(cls, port: int = SERVICE_PORT, secret: Optional[str] = None) -> None:
         """
         Runs the HTTP service until killed.
@@ -1193,6 +1218,10 @@ class GmailSearchService:
 
             def do_POST(self) -> None:
                 parsed = urllib.parse.urlparse(self.path)
+                refused = cls.post_refusal(self.headers.get("Origin"))
+                if refused:
+                    self._reply(403, {"error": refused})
+                    return
                 if parsed.path == "/api/google/oauth/start":
                     app = (urllib.parse.parse_qs(parsed.query).get("app") or ["gmail"])[0]
                     app = app if app in APP_SCOPES else "gmail"
