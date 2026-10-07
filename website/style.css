@@ -142,7 +142,7 @@ footer a { color: var(--ink-soft); }
 .sub.flush { margin: 0; }
 .sub.centered { margin: 0 auto; }
 .note-small { margin-top: 10px; font-size: 15px; color: var(--ink-soft); }
-.cmd.has-copy pre { padding-right: 78px; }
+.cmd.has-copy pre { margin-right: 72px; padding-right: 8px; }
 /* A long command must scroll inside its box, not widen the column. */
 .install > *, .proof > *, .pillars > *, .features > * { min-width: 0; }
 .cmd { max-width: 100%; overflow: hidden; }
