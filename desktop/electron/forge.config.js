@@ -27,9 +27,11 @@ module.exports = {
     asar: true,
     icon: path.join(__dirname, "icons", "icon"),
     extraResource,
-    // The project's own sources, tests and staged binaries stay out of the asar (the binaries go
-    // in as extra resources above).
-    ignore: [/^\/resources\//, /^\/e2e\//, /^\/src\//, /^\/tests\//, /\.test\.(ts|js)$/],
+    // The asar holds what the app loads: the Vite build (main, preload, Work's page, with
+    // multicast-dns bundled in), the icons and package.json. Sources, configs, tests, the staged
+    // binaries (extra resources above) and node_modules stay out.
+    ignore: (file) =>
+      !(file === "" || file === "/package.json" || file === "/.vite" || file.startsWith("/.vite/") || file === "/icons" || file.startsWith("/icons/")),
   },
   rebuildConfig: {},
   makers: [

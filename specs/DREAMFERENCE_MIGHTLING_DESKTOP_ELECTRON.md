@@ -95,6 +95,9 @@ Everything in §3 is built, with these records:
 - **Not built:** AppImage (§3.7), an apt repository, review/worktrees/settings in Work (DESKTOP §15), the tool glossary. `ling-rs`'s `airgapped.rs` gained `--thread <id>` (three lines); its unit tests were not re-run here, because they need the Codex export directory, which this branch's build names differently from the one on this machine.
 - **The `fakeroot` the `.deb` maker insists on** was absent here; the local `.deb` was made through a stand-in that calls `dpkg-deb --root-owner-group` (what fakeroot is for), so its files are root-owned as a real one's are. `desktop build` names `fakeroot` as a prerequisite; the release runners have it.
 - **`chrome-sandbox` is deleted in the `postPackage` hook,** not in the packager's `afterCopy`: that hook's path is the app folder inside `resources/`, not Electron's root, so the first package still shipped the helper.
+- **Found in review, fixed in the second commit:** `desktop run` used `electron-forge start`, where plugin-vite defines a dev-server URL and `main.ts` then served Work's `app://` page from an empty path (a 404); it now packages the app and runs the packaged binary, and `main.ts` always serves the built renderer. The packaged tray looked for its icon in `app.asar.unpacked/icons`, which the auto-unpack plugin (native modules only) never creates; it reads `icons/` from the asar. The release workflow's `dist/ling-*.gz` also matched `ling-search`, `ling-fetch` and `ling-code`, which `gunzip -c` would have concatenated into one file; the names are now exact. And **Night Shift did not recognise the bundled `ling`**: its busy-marker check accepted only the installed binary as `/proc/<pid>/exe`, so a turn in Work would have had its marker deleted and the night run would have started anyway; a program of the same name running `app-server` now counts too (`NightShiftHost._is_app_server`, with a test that runs a copy under another path).
+- **`rg` is not bundled.** `copy_bundled_binaries` adds it when `rg` is on PATH, which it is not on this machine, and the release workflow does not fetch it; the agent's fuzzy file search then falls back to its own. Bundling a pinned `rg` in the workflow is a later step.
+- **The probe of §9.1 is still Electron 44.6.0;** the app is 42.11.11.
 - **Two `vitest` traps:** a socket explicitly paused does not resume when a `data` listener is added, so a test reader that pauses to `unshift` a leftover must `resume()`; and `new URL("mightling://thread/../etc")` normalises the path, so a traversal-shaped id is not a test of anything (the id is only ever sent to the server as a thread id).
 
 ### 9.1 The probe
@@ -115,7 +118,9 @@ Measured on 2026-10-07, arm64, from the final `make`:
 
 | What | Result |
 |---|---|
-| `.deb` | `mightling_1.5.0_arm64.deb`, 204 MB download, **727 MB installed** (`Installed-Size: 744991` KB) vs ~15 MB for the Tauri binary; 412 MB of it is `ling` + `codex-code-mode-host` |
+| `.deb` | `mightling_1.5.0_arm64.deb`, 203 MB download, **727 MB installed** (`Installed-Size: 744610` KB) vs ~15 MB for the Tauri binary; 412 MB of it is `ling` + `codex-code-mode-host` |
+| `app.asar` | 364 KB: the Vite build (main, preload, Work's page, `multicast-dns` bundled in), the icons, `package.json`; nothing else (an `ignore` function; a regex list had replaced the Vite plugin's default and let configs and stray `node_modules` in) |
+| Simulated install (`apt-get -s install ./…deb`, installs nothing) | resolves on this Ubuntu 24.04: `1 newly installed`, no unmet dependency |
 | `chrome-sandbox` in the package | none |
 | Fuses (`@electron/fuses read`) | RunAsNode, NODE_OPTIONS, `--inspect`, file:// privileges **off**; cookie encryption, asar integrity, only-from-asar, Wasm trap handlers **on** |
 | `desktop/electron` vitest | 44 passed (bundle check included, bundles present) |
@@ -123,6 +128,6 @@ Measured on 2026-10-07, arm64, from the final `make`:
 | Playwright-Electron | 1 passed (hidden window, scripted `ling`) |
 | Chat sign-in against the live web UI | signed in from the main process with the per-install credential; `/api/me` 200; the cookie HttpOnly; nothing of the credential in the page |
 | `ling-admin audit egress --app` | **pass** (§9.3) |
-| Python suite | 775 passed, 90 skipped, 1 failed: `test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_models_shell`, which looks for `ling-admin` in the running virtualenv; the suite ran with the main checkout's virtualenv, which predates the rename and has `puffin-admin`. Unrelated to this branch; passes once the package is reinstalled from `rename/mightling` |
+| Python suite | all passed but one: `test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_models_shell`, which looks for `ling-admin` in the running virtualenv; the suite ran with the main checkout's virtualenv, which predates the rename and has only `puffin-admin`. Inherited: neither that test nor `dreamference/runner/` differs from the base commit (`git diff 03b5cc5` is empty); passes once the package is reinstalled from `rename/mightling` |
 
-Not run here: `cargo test` for `ling-rs` (the three-line `--thread` branch was checked against `command`'s signature and the launcher's actual output format, not compiled), a real install of the `.deb` (it would replace the live app), and everything in §8.
+Not run here: the `tui` egress audit with the new `-yy`/`write` flags (`exec` and `--app` were); `DesktopInstaller.userns_allowed()` (the `aa-exec -p unconfined` probe) and `install_apparmor_profile` against the real system (both covered by mocked tests only); `cargo test` for `ling-rs` (the three-line `--thread` branch was checked against `command`'s signature and the launcher's actual output format, not compiled), a real install of the `.deb` (it would replace the live app), and everything in §8.

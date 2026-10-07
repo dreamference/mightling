@@ -292,7 +292,10 @@ class NightShiftHost:
         window left open must not hold every night back. While a turn runs, `ling-app` keeps a
         marker named after the server's pid in `$CODEX_HOME/night/busy/`
         (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3). A marker counts when its pid is alive and is
-        the installed `ling`; any other marker is left by a window killed hard, and is deleted.
+        a `ling app-server`: the installed `ling`, or the one bundled inside the desktop app
+        (desktop/electron, `<app>/resources/ling`), which has the same name and runs `app-server`.
+        Any other marker is left by a window killed hard, or names a pid since reused, and is
+        deleted.
 
         Args:
             mightling_bin: The installed `ling` executable.
@@ -310,11 +313,33 @@ class NightShiftHost:
         pids = []
         for marker in markers:
             pid = int(marker.name) if marker.name.isdigit() else 0
-            if pid > 0 and cls._process_alive(pid) and os.path.realpath(f"/proc/{pid}/exe") == target:
+            if pid > 0 and cls._process_alive(pid) and cls._is_app_server(pid, target):
                 pids.append(pid)
             else:
                 marker.unlink(missing_ok=True)
         return pids
+
+    @classmethod
+    def _is_app_server(cls, pid: int, target: str) -> bool:
+        """Whether a live pid is a `ling app-server`: the installed binary, or a bundled copy.
+
+        Args:
+            pid: The process id.
+            target: The installed `ling`, resolved.
+
+        Returns:
+            bool: True for the installed `ling`, or a program of the same name running `app-server`.
+        """
+        exe = os.path.realpath(f"/proc/{pid}/exe")
+        if exe == target:
+            return True
+        if os.path.basename(exe) != os.path.basename(target):
+            return False
+        try:
+            args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        except OSError:
+            return False
+        return b"app-server" in args
 
     @classmethod
     def _process_alive(cls, pid: int) -> bool:

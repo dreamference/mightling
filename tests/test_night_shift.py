@@ -483,6 +483,33 @@ def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_p
     assert NightShiftHost.busy_app_server_pids(sys.executable, str(tmp_path / "elsewhere")) == []
 
 
+def test_the_desktop_apps_bundled_ling_is_recognised_as_an_app_server(tmp_path):
+    # The Electron app runs the `ling` bundled inside it, not the installed one: a program of the
+    # same name running `app-server` counts; the same name doing anything else does not.
+    import shutil
+    bundled = tmp_path / "app" / "resources" / "ling"
+    bundled.parent.mkdir(parents=True)
+    shutil.copy("/bin/bash", bundled)
+    installed = str(tmp_path / "installed" / "ling")
+    busy = tmp_path / "home" / "night" / "busy"
+    busy.mkdir(parents=True)
+    server = subprocess.Popen([str(bundled), "-c", "sleep 30", "app-server"])
+    other = subprocess.Popen([str(bundled), "-c", "sleep 30", "exec"])
+    try:
+        for process in (server, other):
+            (busy / str(process.pid)).write_text('{"threads": ["t1"]}')
+        for _ in range(50):  # until both have exec'd the copy
+            if all(os.path.realpath(f"/proc/{p.pid}/exe") == str(bundled) for p in (server, other)):
+                break
+            time.sleep(0.05)
+        assert NightShiftHost.busy_app_server_pids(installed, str(tmp_path / "home")) == [server.pid]
+        assert sorted(p.name for p in busy.iterdir()) == [str(server.pid)]
+    finally:
+        for process in (server, other):
+            process.kill()
+            process.wait()
+
+
 def test_sizes_parse():
     assert NightShiftHost.parse_size("8G") == 8 * 1024 ** 3
     assert NightShiftHost.parse_size("512M") == 512 * 1024 ** 2

@@ -28,10 +28,9 @@ export interface MainOptions {
 const resourcesPath = () => (app.isPackaged ? process.resourcesPath : null);
 
 export async function main(options: MainOptions): Promise<void> {
-  const rendererDir = app.isPackaged
-    ? path.join(__dirname, "..", "renderer", "main_window")
-    : (process.env.MAIN_WINDOW_VITE_DEV_SERVER_URL ? "" : path.join(__dirname, "..", "renderer", "main_window"));
-  serve(rendererDir);
+  // Work's page is the built renderer beside this bundle, packaged or not: app:// serves files,
+  // never Vite's dev server.
+  serve(path.join(__dirname, "..", "renderer", "main_window"));
 
   let chat: BrowserWindow | null = null;
   let work: BrowserWindow | null = null;
@@ -74,7 +73,8 @@ export async function main(options: MainOptions): Promise<void> {
   };
 
   installMenu({ openChat: showChat, openWork: showWork });
-  installTray(path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, "..", ".."), app.isPackaged ? "app.asar.unpacked/icons" : "icons"), { openChat: showChat, openWork: showWork });
+  // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
+  installTray(path.join(__dirname, "..", "..", "icons"), { openChat: showChat, openWork: showWork });
 
   // The one channel from Work's page.
   const fromView = new Reassembler();

@@ -140,9 +140,11 @@ jobs:
           path: dist
       - name: Bundled binaries
         run: |
+          # Named exactly: `ling-*` would also match ling-search, ling-fetch and ling-code.
+          target="$(uname -m)-unknown-linux-gnu"
           mkdir -p desktop/electron/resources
-          gunzip -c dist/ling-*.gz > desktop/electron/resources/ling
-          gunzip -c dist/codex-code-mode-host-*.gz > desktop/electron/resources/codex-code-mode-host
+          gunzip -c "dist/ling-$target.gz" > desktop/electron/resources/ling
+          gunzip -c "dist/codex-code-mode-host-$target.gz" > desktop/electron/resources/codex-code-mode-host
           chmod 755 desktop/electron/resources/ling desktop/electron/resources/codex-code-mode-host
       - uses: actions/setup-node@v4
         with:

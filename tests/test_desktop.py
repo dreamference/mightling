@@ -294,3 +294,31 @@ def test_identifier_comes_from_the_app_config():
 def test_window_background_is_painted_rather_than_left_black():
     # A repaint gap shows the window's own background; painted the UI's white it is invisible.
     assert app_config()["chat"]["backgroundColor"] == "#ffffff"
+
+
+def test_run_packages_the_app_and_opens_the_packaged_binary():
+    # Not `electron-forge start`: Work's page is served by app:// from the built renderer, which a
+    # dev server run does not produce; the window that opens is the one the .deb ships.
+    commands = []
+    with patch.object(DesktopRunner, "onyx_is_up", return_value=True), \
+         patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
+         patch.object(DesktopRunner, "install_packages", return_value=True), \
+         patch.object(DesktopInstaller, "userns_allowed", return_value=True), \
+         patch.object(DesktopRunner, "copy_bundled_binaries", return_value=True), \
+         patch.object(DesktopRunner, "_npm", side_effect=lambda args, cwd: commands.append(args) or True), \
+         patch.object(DesktopRunner, "binary_path", return_value="/opt/out/Mightling-linux-arm64/Mightling"), \
+         patch.object(DesktopRunner, "install_desktop_entry"), \
+         patch.object(DesktopRunner, "clear_webview_cache"), \
+         patch("subprocess.call", return_value=0) as call:
+        assert DesktopRunner.run() == 0
+    assert commands == [["run", "package"]]
+    assert call.call_args[0][0] == ["/opt/out/Mightling-linux-arm64/Mightling"]
+
+
+def test_works_page_is_served_from_the_built_renderer_in_every_mode():
+    main = (ELECTRON / "src" / "main.ts").read_text(encoding="utf-8")
+    assert 'serve(path.join(__dirname, "..", "renderer", "main_window"));' in main
+    assert "MAIN_WINDOW_VITE_DEV_SERVER_URL" not in main
+    # The tray's icon is read from the asar, where the icons are packed.
+    assert 'installTray(path.join(__dirname, "..", "..", "icons")' in main
+    assert "app.asar.unpacked/icons" not in main

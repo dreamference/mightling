@@ -214,8 +214,10 @@ class DesktopRunner:
     @classmethod
     def run(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> int:
         """
-        Opens the Mightling desktop window from the checkout (`electron-forge start`), building
-        the UI and the main process first.
+        Opens the Mightling desktop window from the checkout: packages the app (`electron-forge
+        package`: Vite builds the main process, the preload and Work's page; `ling` is bundled)
+        and runs the packaged binary, so what opens is what the `.deb` ships. Not
+        `electron-forge start`, whose dev server Work's `app://` page does not use.
 
         Args:
             web_url (str): Base URL of the Onyx web UI the window points at.
@@ -236,14 +238,20 @@ class DesktopRunner:
             print("   profile; from a plain terminal or the launcher the app would abort at start.")
             print("💡 `ling-admin desktop install` writes the profile (sudo once).")
 
-        # Only once something has been built -- on a first run there is no binary to point an
-        # Exec line at yet, and `build()` registers it as soon as there is.
-        if cls.binary_path():
-            cls.install_desktop_entry()
+        if not cls.copy_bundled_binaries():
+            return 1
+        print("🔨 Building the desktop app (Vite, then Forge's package)...")
+        if not cls._npm(["run", "package"], ELECTRON_DIR):
+            return 1
+        binary = cls.binary_path()
+        if binary is None:
+            print(f"❌ The package step wrote no app under {ELECTRON_DIR / 'out'}.")
+            return 1
+        cls.install_desktop_entry()
 
         cls.clear_webview_cache()
         print("🚀 Opening the Mightling desktop window...")
-        return subprocess.call([shutil.which("npm") or "npm", "start", "--", "--chat"], cwd=ELECTRON_DIR, env=cls._environment())
+        return subprocess.call([binary], env=cls._environment())
 
     @classmethod
     def build(cls) -> int:
