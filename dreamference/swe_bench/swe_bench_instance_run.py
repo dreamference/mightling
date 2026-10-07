@@ -125,7 +125,8 @@ class SweBenchInstanceRun:
                  settings: "swe_bench_settings.SweBenchSettings", runtime_dir: Path, model_url: str,
                  deadline: float, extra_env: Optional[Dict[str, str]] = None,
                  code_index: Optional[Dict[str, Any]] = None,
-                 extra_mounts: Optional[List[str]] = None) -> None:
+                 extra_mounts: Optional[List[str]] = None,
+                 issue: Optional[Dict[str, Any]] = None) -> None:
         """
         Args:
             store: The run's files.
@@ -141,11 +142,14 @@ class SweBenchInstanceRun:
             code_index: How the container is given a code index (`mounts`, `env`, `path`, and
                 the index's `record`); None for the arm without one.
             extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
+            issue: In a `--strip-names` run, the issue as the agent sees it: `text`, and the
+                names `replaced` (name to phrase). None gives the agent the dataset's text.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
         self.base_commit: str = row["base_commit"]
-        self.problem_statement: str = row["problem_statement"]
+        self.issue = issue
+        self.problem_statement: str = issue["text"] if issue else row["problem_statement"]
         self.image = image
         self.model_name = model_name
         self.settings = settings
@@ -212,6 +216,11 @@ class SweBenchInstanceRun:
             # Built before the agent started and outside its time limit; recorded beside it.
             record = self.code_index.get("record", {})
             state["index"] = {key: record.get(key) for key in ("layers", "seconds", "cached", "bytes")}
+        if self.issue is not None:
+            # The text this agent saw, beside its result, so a report can be read without the
+            # manifest.
+            state["issue"] = {"stripped": True, "replaced": self.issue.get("replaced", {}),
+                              "text": self.issue["text"]}
         self.store.write_state(self.instance_id, state)
         patch = ""
         try:

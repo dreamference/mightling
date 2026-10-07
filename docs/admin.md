@@ -308,6 +308,7 @@ The agent phase: one puffin exec per instance, producing predictions.jsonl.
 | `--code-index` | universal: index each instance's repository on the host and give the agent puffin-code (default off) One of: `off`, `universal`. |
 | `--prompt` | The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one) |
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
+| `--strip-names` | Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open puffin sessions to close (for testing) |

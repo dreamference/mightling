@@ -22,11 +22,11 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit",
 )
 # What a manifest written before a field existed ran with.
-MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off"}
+MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim"}
 
 
 class SweBenchReport:
@@ -125,6 +125,11 @@ class SweBenchReport:
         lines.append(f"Tokens              {tokens['input_tokens']:,} in ({tokens['cached_input_tokens']:,} cached), "
                      f"{tokens['output_tokens']:,} out; {summary['commands']:,} commands")
         lines.append(cls.code_index_line(summary))
+        if manifest.get("issue_text") == "names stripped":
+            stripped = manifest.get("stripped_issues") or {}
+            changed = sum(1 for entry in stripped.values() if entry.get("replaced"))
+            lines.append(f"Issue text          names stripped: the files, modules, functions and classes the reference "
+                         f"fix touches were taken out of {changed} of {len(stripped)} issues; the rest named none of them")
         if summary["grading"] is not None:
             grader = summary["grader"]
             lines.append(f"Grading {summary['grading']}: harness {grader.get('harness')}, dataset revision "
@@ -257,6 +262,7 @@ class SweBenchReport:
             resolved = sum(1 for i in both if summary["results"][i].get("resolved"))
             return {
                 "code index": summary["code_index"],
+                "issue text": summary["manifest"].get("issue_text", "verbatim"),
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
                 "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",
                 "agent time": cls.duration(sum(walls)),

@@ -21,8 +21,8 @@ from dreamference.night_shift import NightShiftQueue
 from dreamference.night_shift.night_shift_task_run import NUDGE
 from dreamference.swe_bench import (
     SweBenchCodeIndex, SweBenchCommand, SweBenchDocker, SweBenchEvaluator, SweBenchHarness, SweBenchImages,
-    SweBenchInstanceRun, SweBenchReport, SweBenchRunStore, SweBenchRunner, SweBenchRuntime,
-    SweBenchSettings,
+    SweBenchInstanceRun, SweBenchNameStripper, SweBenchReport, SweBenchRunStore, SweBenchRunner,
+    SweBenchRuntime, SweBenchSettings,
 )
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATCH
@@ -1136,3 +1136,119 @@ def test_a_named_puffin_code_build_replaces_the_installed_one(tmp_path, monkeypa
     # A name that does not exist is not silently replaced by the installed binary.
     monkeypatch.setenv(PUFFIN_CODE_OVERRIDE_ENV, str(tmp_path / "missing"))
     assert SweBenchCodeIndex.host_binary() is None
+
+
+# -- the issue with the fix's names taken out (`--strip-names`) --------------------------------------
+
+GOLD = """diff --git a/acme/db/sql/compiler.py b/acme/db/sql/compiler.py
+--- a/acme/db/sql/compiler.py
++++ b/acme/db/sql/compiler.py
+@@ -10,7 +10,8 @@ def pre_sql_setup(self):
+         query = self.query
+-        query.add_fields([pk])
++        query.add_fields(fields)
+@@ -40,3 +41,6 @@ class SQLUpdateCompiler(SQLCompiler):
++    def related_updates(self):
++        return []
+diff --git a/acme/runserver.py b/acme/runserver.py
+--- a/acme/runserver.py
++++ b/acme/runserver.py
+@@ -1,2 +1,2 @@ def update(self):
+-    pass
++    return 1
+"""
+
+
+@pytest.fixture
+def english(monkeypatch):
+    """A fixed word list, so the tests do not depend on the machine's /usr/share/dict."""
+    monkeypatch.setattr(SweBenchNameStripper, "_english", frozenset({"update", "query", "compiler", "the"}))
+
+
+def test_the_names_come_from_the_gold_patch_alone(english):
+    found = {name: kind for name, kind, _ in SweBenchNameStripper.names(GOLD)}
+    assert found["acme/db/sql/compiler.py"] == found["sql/compiler.py"] == found["compiler.py"] == "file"
+    assert found["acme.db.sql.compiler"] == found["compiler"] == "module"
+    assert found["pre_sql_setup"] == "function" and found["related_updates"] == "function"
+    assert found["SQLUpdateCompiler"] == "class" and found["update"] == "function"
+    # A context line's `query` is not a name the fix touches, and longer names come first, so a
+    # path is replaced before the file name inside it.
+    assert "query" not in found
+    names = [name for name, _, _ in SweBenchNameStripper.names(GOLD)]
+    assert names.index("acme/db/sql/compiler.py") < names.index("compiler.py")
+
+
+def test_strip_replaces_each_name_with_one_numbered_phrase(english):
+    issue = ("SQLUpdateCompiler.pre_sql_setup() selects the wrong ids; see acme/db/sql/compiler.py, "
+             "which is sql/compiler.py in a traceback, and `import acme.db.sql.compiler`.\n"
+             "pre_sql_setup is called twice. The error is: ValueError: bad ids")
+    text, replaced = SweBenchNameStripper.strip(issue, GOLD)
+    assert "pre_sql_setup" not in text and "SQLUpdateCompiler" not in text and "compiler.py" not in text
+    # The same function is the same phrase everywhere; a file and its module share a number.
+    assert text.count("[function 1]") == 2 and "[class 1]" in text
+    assert "[file 1]" in text and "[module 1]" in text
+    # Behaviour and error messages stay.
+    assert "selects the wrong ids" in text and "ValueError: bad ids" in text
+    assert replaced["pre_sql_setup"] == "[function 1]"
+
+
+def test_an_english_word_is_replaced_only_where_it_reads_as_code(english):
+    issue = ("Please update the docs. Calling obj.update() fails, `update` too, and in a traceback:\n"
+             '  File "x.py", line 3, in update\n'
+             "and the runserver command breaks, though format=\"runserver\" is a value.")
+    text, _ = SweBenchNameStripper.strip(issue, GOLD)
+    assert text.startswith("Please update the docs.")
+    assert "obj.[function 1]()" in text and "`[function 1]`" in text and "in [function 1]" in text
+    # Not an English word: code wherever it stands, except as a quoted value.
+    assert "the [module 1] command" in text and 'format="runserver"' in text
+
+
+def test_a_windows_path_is_stripped_and_an_issue_naming_nothing_is_left_alone(english):
+    text, replaced = SweBenchNameStripper.strip("File C:\\py\\acme\\db\\sql\\compiler.py, line 2", GOLD)
+    assert "compiler.py" not in text and "[file 1]" in text
+    assert SweBenchNameStripper.strip("The widget is broken.", GOLD) == ("The widget is broken.", {})
+    assert SweBenchNameStripper.strip("pre_sql_setup", "not a diff") == ("pre_sql_setup", {})
+
+
+def test_without_a_word_list_every_plain_name_counts_as_english(monkeypatch):
+    monkeypatch.setattr(SweBenchNameStripper, "_english", frozenset())
+    text, _ = SweBenchNameStripper.strip("the runserver command; acme.runserver.main()", GOLD)
+    assert text.startswith("the runserver command")
+
+
+def test_a_stripped_run_gives_the_agent_the_stripped_issue_and_records_it(bench, english):
+    snapshot = SweBenchHarness.snapshot_path("verified")
+    rows = [dict(row(i)) for i in IDS]
+    rows[0].update(problem_statement="SQLUpdateCompiler.pre_sql_setup() breaks in acme/db/sql/compiler.py",
+                   patch=GOLD)
+    snapshot.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="stripped", instances=["acme__widget-1"], strip_names=True) == 0
+    prompts = [call[-1] for call in bench["docker"].calls if call[0] == "exec" and "puffin" in call[2]]
+    assert "pre_sql_setup" in prompts[0]
+    expected = "[class 1].[function 1]() breaks in [file 1]"
+    assert prompts[-1] == SweBenchInstanceRun.compose_prompt(expected)
+    assert "diff --git" not in json.dumps(bench["docker"].calls), "the gold patch never reaches a container"
+    manifest = SweBenchRunStore("stripped").manifest()
+    assert manifest["issue_text"] == "names stripped"
+    assert manifest["stripped_issues"]["acme__widget-1"]["text"] == expected
+    assert SweBenchRunStore("plain").manifest()["issue_text"] == "verbatim"
+    state = json.loads((SweBenchRunStore("stripped").directory / "instances" / "acme__widget-1.json").read_text())
+    assert state["issue"]["text"] == expected and state["issue"]["replaced"]["pre_sql_setup"] == "[function 1]"
+    for name in ("plain", "stripped"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    assert "names stripped: the files, modules, functions and classes" in SweBenchReport.render(SweBenchRunStore("stripped"))
+    text = SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("stripped"))
+    assert "differs: issue_text: verbatim | names stripped" in text
+
+
+def test_strip_names_is_a_command_line_switch(monkeypatch):
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--strip-names", "--name", "x"])) == 0
+    assert seen["strip_names"] is True
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["strip_names"] is False

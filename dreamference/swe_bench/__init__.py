@@ -12,6 +12,7 @@ from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_code_index import SweBenchCodeIndex
 from dreamference.swe_bench.swe_bench_instance_run import SweBenchInstanceRun
+from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
 from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
@@ -26,6 +27,7 @@ __all__ = [
     "SweBenchHarness",
     "SweBenchImages",
     "SweBenchInstanceRun",
+    "SweBenchNameStripper",
     "SweBenchRelay",
     "SweBenchReport",
     "SweBenchRunStore",
