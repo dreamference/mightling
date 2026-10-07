@@ -110,7 +110,7 @@ A node that is not advertised keeps today's binds. `ling-admin node enable` (§5
 Under the trusted-LAN decision both become "accepted by design" on an advertised node. When this is implemented the two rows move to that table in [README](./README.md) with the date and this reason; they are not silently reopened. Mechanically: `HOST_PORT=0.0.0.0:3000` in the web UI's `.env` (the variable `bind_to_loopback()` already writes) and the SearXNG sidecar's publish address, both keyed on one config value, `node_advertise`.
 
 **What that exposes, stated plainly** (§11 has the rest):
-- **The web UI has one account**, `admin@dreamference.dev` with a published default password. Every person on the LAN who opens it shares one chat history and the admin panel.
+- **The web UI has one account**, `admin@dreamference.dev`, with a password generated per install since 2026-10-07 (before that, a published default; ONYX §2 step 2). Every person on the LAN given that password shares one chat history and the admin panel; `ling-admin chat password` on the node prints it for a client's login page.
 - **The web UI's Gmail tool reads the node owner's mail.** Anyone on the LAN using the web UI can ask it to search that mail. `ling-admin node enable --no-web` leaves the web UI on loopback for an owner who wants remote `ling` but not a shared web UI (question 2).
 
 ---

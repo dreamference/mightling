@@ -26,6 +26,7 @@ from dreamference.hardware import (
     get_model_launch_overrides,
     model_supports_vision,
 )
+from dreamference.chat.chat_admin_credentials import ChatAdminCredentials
 from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
 from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
 from dreamference.chat.onyx_ui_labels import OnyxUILabels
@@ -51,16 +52,23 @@ ONYX_PROVIDER_NAME: Final[str] = "dreamference-vllm"
 # field to be non-empty for this provider type.
 ONYX_PLACEHOLDER_API_KEY: Final[str] = "dreamference-local"
 
-# The first account to sign up becomes the admin, so these are the credentials Dreamference
-# registers with when no account exists yet. Weak on purpose and printed on use: this is a
-# single-node air-gapped box, and a password the user cannot discover would be worse than a
-# well-known one they can change in the UI.
+# The first account to sign up becomes the admin, so this is the e-mail Mightling registers when
+# no account exists yet. Its password is generated per install and kept in
+# ~/.config/dreamference/chat-admin.json (ChatAdminCredentials); the e-mail is not a secret.
 #
 # `.dev` rather than the more natural `.local` because Onyx validates the address with
 # email-validator, which rejects special-use and reserved domains -- `.local`, `.localhost`,
 # `.test` and `.invalid` all fail. No mail is ever sent to it.
 DEFAULT_ONYX_EMAIL: Final[str] = "admin@dreamference.dev"
-DEFAULT_ONYX_PASSWORD: Final[str] = "dreamference"
+
+# The password every install used before 2026-10-07, published in this repository. Read only to
+# move such an install to a generated password (OnyxRunner._admin_session); never registered,
+# printed or handed to the desktop app again. A test holds that nothing else reads it.
+LEGACY_ONYX_PASSWORD: Final[str] = "dreamference"
+
+# Onyx's own route for changing the signed-in user's password (onyx/server/features/password/
+# api.py in v4.5.6): JSON {old_password, new_password}, 400 when the old one does not match.
+ONYX_CHANGE_PASSWORD_PATH: Final[str] = "/password/change-password"
 
 # Google sign-in, alongside the password form rather than instead of it.
 #
@@ -96,7 +104,7 @@ ONYX_PRIVACY_ENV: Final[dict] = {"DISABLE_TELEMETRY": "true"}
 
 # Onyx's nginx publishes `${HOST_PORT_80:-80}:80` and `${HOST_PORT:-3000}:80`, which Docker binds
 # on every interface -- so the web UI, and the admin account `configure()` creates with a published
-# default password (DEFAULT_ONYX_PASSWORD), were reachable from anything on the local network, and
+# default password (now LEGACY_ONYX_PASSWORD), were reachable from anything on the local network, and
 # that account can search the user's mail through the Gmail tool. Prefixing the host side with
 # 127.0.0.1 keeps both ports on this machine; the browser and the desktop app use localhost:3000
 # either way. Done through the `.env` Onyx already reads, so its compose files stay untouched.
@@ -455,8 +463,8 @@ class OnyxRunner:
 
     def configure(
         self,
-        email: str = DEFAULT_ONYX_EMAIL,
-        password: str = DEFAULT_ONYX_PASSWORD,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
         web_url: str = DEFAULT_ONYX_WEB_URL,
         enable_web: bool = True,
         brand: bool = True,
@@ -473,8 +481,9 @@ class OnyxRunner:
         account is only registered when logging in first fails.
 
         Args:
-            email (str): Admin account e-mail; registered if no account exists yet.
-            password (str): Admin account password.
+            email (Optional[str]): The user's own admin e-mail; registered if no account exists
+                yet. None uses the stored account (ChatAdminCredentials).
+            password (Optional[str]): The user's own admin password, given together with `email`.
             web_url (str): Base URL of the Onyx deployment.
             enable_web (bool): Whether to also give the default assistant SearXNG web access.
             brand (bool): Whether to rebrand the deployment as Mightling.
@@ -492,7 +501,7 @@ class OnyxRunner:
         self.disable_telemetry()
         self.bind_to_loopback()
 
-        cookie = self._authenticate(api, email, password)
+        cookie = self._admin_session(api, email, password)
         if not cookie:
             return 1
 
@@ -611,7 +620,7 @@ class OnyxRunner:
             self.enable_voice(api, cookie)
 
         print(f"✅ Onyx is pointed at the local model — open {web_url}")
-        print(f"💡 Sign in as {email} / {password}")
+        print(f"💡 Sign-in details: ling-admin chat password (kept in {ChatAdminCredentials.path()})")
         return 0
 
     def enable_voice(self, api: str, cookie: str) -> bool:
@@ -1117,12 +1126,12 @@ class OnyxRunner:
     def connect_gmail(
         self,
         web_url: str = DEFAULT_ONYX_WEB_URL,
-        email: str = DEFAULT_ONYX_EMAIL,
-        password: str = DEFAULT_ONYX_PASSWORD,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
     ) -> bool:
-        """Registers the Gmail search tool in Onyx."""
+        """Registers the Gmail search tool in Onyx, signed in as the stored admin account."""
         api = f"{web_url.rstrip('/')}/api"
-        cookie = self._authenticate(api, email, password)
+        cookie = self._admin_session(api, email, password)
         if not cookie:
             return False
         if not self.enable_gmail_search(api, cookie):
@@ -1755,6 +1764,119 @@ class OnyxRunner:
             if provider.get("name") == name:
                 return provider.get("id")
         return None
+
+    def _admin_session(
+        self, api: str, email: Optional[str] = None, password: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Signs in as the web chat's administrator, setting the account up the first time.
+
+        In order:
+        1. Credentials the user passed (`--email`/`--password`) are used as given, registered if
+           no account exists, and stored, so the desktop app signs in with them too.
+        2. Stored credentials (ChatAdminCredentials) are used when present.
+        3. An install made before 2026-10-07 still has the published default password: sign in
+           with it, change it to a generated one through Onyx's API, and store that.
+        4. A fresh deployment has no account: register the default e-mail with a generated
+           password, and store it.
+        5. Anything else -- the default rejected and registration refused, because an account
+           exists -- is a password the user chose: nothing is changed, and the message says how
+           to pass it.
+
+        Args:
+            api (str): Onyx API base URL.
+            email (Optional[str]): The user's own admin e-mail, if given.
+            password (Optional[str]): The user's own admin password, if given.
+
+        Returns:
+            Optional[str]: The session cookie header value, or None if signing in failed.
+        """
+        if email or password:
+            if not (email and password):
+                print("❌ Give both --email and --password, or neither.")
+                return None
+            cookie = self._authenticate(api, email, password)
+            if cookie:
+                ChatAdminCredentials.save(email, password)
+            return cookie
+
+        stored = ChatAdminCredentials.load()
+        if stored:
+            cookie = self._login(api, *stored)
+            if cookie:
+                return cookie
+            print(f"❌ The web chat rejected the stored admin password ({ChatAdminCredentials.path()}).")
+            print("💡 If you changed it in the web UI, pass it once so it is stored:")
+            print("   ling-admin chat configure --email <admin e-mail> --password <password>")
+            return None
+
+        legacy = self._login(api, DEFAULT_ONYX_EMAIL, LEGACY_ONYX_PASSWORD)
+        if legacy:
+            return self._migrate_legacy_password(api, legacy) or legacy
+
+        generated = ChatAdminCredentials.generate_password()
+        cookie = self._authenticate(api, DEFAULT_ONYX_EMAIL, generated)
+        if cookie:
+            ChatAdminCredentials.save(DEFAULT_ONYX_EMAIL, generated)
+            print(f"🔐 Admin account {DEFAULT_ONYX_EMAIL} created with a generated password, kept in "
+                  f"{ChatAdminCredentials.path()} (ling-admin chat password shows it).")
+        return cookie
+
+    def _migrate_legacy_password(self, api: str, cookie: str) -> Optional[str]:
+        """
+        Replaces the published default password of an existing install with a generated one.
+
+        The new password is stored before Onyx is asked to change it, so a crash between the two
+        cannot leave an account whose password is nowhere; if Onyx refuses, the file is removed
+        again and the account keeps its old password.
+
+        Args:
+            api (str): Onyx API base URL.
+            cookie (str): A session signed in with the default password.
+
+        Returns:
+            Optional[str]: A session signed in with the new password, or None if the change was
+                refused or the new password could not be confirmed (the caller keeps the old
+                session).
+        """
+        generated = ChatAdminCredentials.generate_password()
+        ChatAdminCredentials.save(DEFAULT_ONYX_EMAIL, generated)
+        _, error = self._request(
+            f"{api}{ONYX_CHANGE_PASSWORD_PATH}",
+            {"old_password": LEGACY_ONYX_PASSWORD, "new_password": generated},
+            cookie=cookie,
+        )
+        if error:
+            ChatAdminCredentials.forget()
+            print(f"⚠️  Could not replace the web chat's default admin password: {error}")
+            print("💡 Change it in the web UI, then store it once with:")
+            print(f"   ling-admin chat configure --email {DEFAULT_ONYX_EMAIL} --password <new password>")
+            return None
+        fresh = self._login(api, DEFAULT_ONYX_EMAIL, generated)
+        if not fresh:
+            print(f"⚠️  Changed the admin password, but signing in with the new one failed; it is in "
+                  f"{ChatAdminCredentials.path()}.")
+            return None
+        print(f"🔐 Replaced the web chat's published default admin password with a generated one, kept in "
+              f"{ChatAdminCredentials.path()} (ling-admin chat password shows it).")
+        return fresh
+
+    def show_admin_credentials(self) -> int:
+        """
+        Prints the stored admin e-mail and password, for signing in by hand or from a client.
+
+        Returns:
+            int: 0 when stored credentials exist, 1 otherwise.
+        """
+        stored = ChatAdminCredentials.load()
+        if not stored:
+            print(f"❌ No admin credentials stored at {ChatAdminCredentials.path()}.")
+            print("💡 Run ling-admin chat configure first, on the node that runs the web chat.")
+            return 1
+        email, password = stored
+        print(f"E-mail:   {email}")
+        print(f"Password: {password}")
+        return 0
 
     def _authenticate(self, api: str, email: str, password: str) -> Optional[str]:
         """

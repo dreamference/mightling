@@ -31,6 +31,7 @@ from dreamference.chat.onyx_ui_scripts import OnyxUIScripts  # noqa: E402
 
 # Kept for the tests that exercise the real methods (the fixture below replaces them).
 REAL_SERVED_MODEL_KEY = OnyxRunner.served_model_key
+REAL_LOGIN = OnyxRunner._login
 REAL_START_GMAIL_SERVICE = OnyxRunner._start_gmail_service
 REAL_ATTACH_SEARXNG = OnyxRunner._attach_searxng
 REAL_BRAND_INSTALL = OnyxBrandAssets.install
@@ -72,6 +73,13 @@ def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
         raise AssertionError("a test tried to recreate a real Onyx container; mock _recreate_service")
 
     monkeypatch.setattr(onyx_runner.OnyxRunner, "_recreate_service", classmethod(refuse))
+
+    def refuse_login(*args, **kwargs):
+        raise AssertionError("a test tried to sign in to a real web chat; mock _login or _admin_session")
+
+    # Signing in is the first step of a password change: an unmocked _login in a test would sign in
+    # to the web chat running on this machine and could replace its admin password.
+    monkeypatch.setattr(onyx_runner.OnyxRunner, "_login", refuse_login)
     # configure() asks the live server which model it serves; tests use the configured one, so
     # their result does not depend on what happens to be running on this machine.
     monkeypatch.setattr(onyx_runner.OnyxRunner, "served_model_key", lambda self: self.config.model)

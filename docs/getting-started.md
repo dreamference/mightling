@@ -95,9 +95,11 @@ ling-admin chat configure --email you@example.com --password '<a strong password
 `configure` connects the chat to the local model, switches its features on and, if no account
 exists yet, registers the one you give as the administrator.
 
-!!! warning "Always pass your own credentials"
+!!! note "The administrator account"
     Run without `--email` and `--password`, `configure` creates the administrator account with a
-    built-in default e-mail and password. Give your own, or change the password straight away.
+    password generated for this machine and keeps it in `~/.config/dreamference/chat-admin.json`,
+    readable by you only. `ling-admin chat password` shows it. Pass `--email` and `--password` to
+    use your own account instead.
 
 Open <http://localhost:3000> and sign in. See [Web chat](web-chat.md).
 

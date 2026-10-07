@@ -1095,7 +1095,8 @@ def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_
 
 SIGN_IN_HARNESS = r"""
 const script = require("fs").readFileSync(process.argv[2], "utf8")
-  .replace("__MIGHTLING_EMAIL__", "admin@dreamference.dev").replace("__MIGHTLING_PASSWORD__", "dreamference");
+  .replace("__MIGHTLING_EMAIL_JSON__", JSON.stringify("admin@dreamference.dev"))
+  .replace("__MIGHTLING_PASSWORD_JSON__", JSON.stringify("g3n\"er'ated&=+Ml7!"));
 const scenario = JSON.parse(process.argv[3]);
 const store = {};
 const calls = [];
@@ -1129,12 +1130,15 @@ def run_sign_in(tmp_path, **scenario):
     return json.loads(result.stdout)
 
 
-def test_the_window_signs_in_with_the_default_account_once(tmp_path):
-    # No session: one login with the default account, then the app.
+def test_the_window_signs_in_with_the_stored_account_once(tmp_path):
+    # No session: one login with the stored account, then the app. The password is passed as a
+    # JSON literal, so quotes, ampersands and the like arrive intact and cannot break the script.
     out = run_sign_in(tmp_path, me=403, login=204, loads=1)
     assert [call["url"] for call in out["calls"]] == ["/api/me", "/api/auth/login"]
     assert out["calls"][1]["method"] == "POST"
-    assert out["calls"][1]["body"] == "username=admin%40dreamference.dev&password=dreamference"
+    assert out["calls"][1]["body"] == (
+        "username=admin%40dreamference.dev&password=g3n%22er'ated%26%3D%2BMl7!"
+    )
     assert out["navigated"] == "/app"
 
 
@@ -1150,12 +1154,15 @@ def test_a_signed_in_window_is_left_alone(tmp_path):
     assert out["navigated"] is None
 
 
-def test_the_window_uses_the_account_configure_creates():
+def test_the_window_reads_the_account_configure_stores_and_compiles_none_in():
     from pathlib import Path
-    from dreamference.chat.onyx_runner import DEFAULT_ONYX_EMAIL, DEFAULT_ONYX_PASSWORD
+    from dreamference.chat.onyx_runner import LEGACY_ONYX_PASSWORD
     main = (Path(__file__).resolve().parent.parent / "desktop" / "src-tauri" / "src" / "main.rs").read_text()
-    assert f'const DEFAULT_EMAIL: &str = "{DEFAULT_ONYX_EMAIL}";' in main
-    assert f'const DEFAULT_PASSWORD: &str = "{DEFAULT_ONYX_PASSWORD}";' in main
+    # The same file ChatAdminCredentials writes, read at run time.
+    assert '.join(".config").join("dreamference").join("chat-admin.json")' in main
+    # The published default spells the same as the config folder; it may appear only there.
+    assert main.count(f'"{LEGACY_ONYX_PASSWORD}"') == main.count('.join("dreamference")')
+    assert "DEFAULT_PASSWORD" not in main and "__MIGHTLING_PASSWORD__" not in main
 
 
 def test_node_id_prints_the_id_and_writes_it_once(monkeypatch, capsys):

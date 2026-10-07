@@ -42,17 +42,34 @@ mod node_locator;
 ///   applies: every rule in `onyx_ui_overrides.py` is scoped `html:not(.dark)` on purpose, so dark
 ///   mode is plain Onyx. Pinning the webview to a light GTK theme is what makes the window show
 ///   Mightling rather than the stock UI. It does not touch the rest of the desktop session.
-/// The web UI's default account, as `ling-admin chat configure` creates it
-/// (`DEFAULT_ONYX_EMAIL` and `DEFAULT_ONYX_PASSWORD` in `dreamference/chat/onyx_runner.py`; a test
-/// holds the two in step). Used once per window to sign in when there is no session.
-const DEFAULT_EMAIL: &str = "admin@dreamference.dev";
-const DEFAULT_PASSWORD: &str = "dreamference";
+/// The web UI's admin account, as `ling-admin chat configure` stores it: a generated password per
+/// install, in a file readable by the owner only (`ChatAdminCredentials` in
+/// `dreamference/chat/chat_admin_credentials.py`). Nothing is compiled in. A client machine has no
+/// such file -- the account belongs to the node -- and gets the ordinary login page.
+fn chat_admin_path() -> Option<std::path::PathBuf> {
+    Some(node_locator::home_dir()?.join(".config").join("dreamference").join("chat-admin.json"))
+}
 
-/// The sign-in script, with the account filled in.
-fn auto_sign_in_script() -> String {
-    include_str!("auto_sign_in.js")
-        .replace("__MIGHTLING_EMAIL__", DEFAULT_EMAIL)
-        .replace("__MIGHTLING_PASSWORD__", DEFAULT_PASSWORD)
+/// The stored (email, password), if there are any.
+fn chat_admin_credentials() -> Option<(String, String)> {
+    let text = std::fs::read_to_string(chat_admin_path()?).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let email = value.get("email")?.as_str()?.to_string();
+    let password = value.get("password")?.as_str()?.to_string();
+    (!email.is_empty() && !password.is_empty()).then_some((email, password))
+}
+
+/// The sign-in script with the account filled in as JSON string literals (so no character of a
+/// user-chosen password can break out of the script), or None when no account is stored.
+fn auto_sign_in_script() -> Option<String> {
+    let (email, password) = chat_admin_credentials()?;
+    let email = serde_json::to_string(&email).ok()?;
+    let password = serde_json::to_string(&password).ok()?;
+    Some(
+        include_str!("auto_sign_in.js")
+            .replace("__MIGHTLING_EMAIL_JSON__", &email)
+            .replace("__MIGHTLING_PASSWORD_JSON__", &password),
+    )
 }
 
 const WEBVIEW_ENV: [(&str, &str); 2] = [
@@ -144,11 +161,13 @@ fn main() {
             bridge::work_target,
             bridge::work_airgapped,
         ])
-        // After each page load: sign in with the default account if the window has no session.
-        // Chat only: Work is not Onyx.
+        // After each page load: sign in with the stored admin account if the window has no
+        // session. Chat only: Work is not Onyx. Without stored credentials, the login page stays.
         .on_page_load(move |webview, payload| {
             if webview.label() == CHAT_LABEL && payload.event() == tauri::webview::PageLoadEvent::Finished {
-                let _ = webview.eval(sign_in.as_str());
+                if let Some(script) = sign_in.as_deref() {
+                    let _ = webview.eval(script);
+                }
             }
         })
         .setup(move |app| {

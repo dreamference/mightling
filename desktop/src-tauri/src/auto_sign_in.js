@@ -1,8 +1,9 @@
-// Signs the window in with the web UI's default account, once, when it has no session
-// (specs/DREAMFERENCE_MIGHTLING_NODE.md §7). A fresh install has one account with a published
-// default password, and "type `ling-app` and it works" is the point of the client; an owner
-// who changed the password gets the ordinary login page, because the attempt fails and is not
-// repeated. Evaluated by main.rs after every page load; the two placeholders are filled in there.
+// Signs the window in with the web UI's admin account, once, when it has no session
+// (specs/DREAMFERENCE_MIGHTLING_NODE.md §7). The account's password is generated per install and
+// stored in ~/.config/dreamference/chat-admin.json; main.rs fills the two placeholders with JSON
+// string literals read from that file, and evaluates this after every page load. On a client
+// machine there is no such file and this script is never run: the login page stays. An owner who
+// changed the password gets the login page too, because the attempt fails and is not repeated.
 (function () {
   "use strict";
   var FLAG = "mightling-auto-sign-in";
@@ -22,8 +23,8 @@
           credentials: "same-origin",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body:
-            "username=" + encodeURIComponent("__MIGHTLING_EMAIL__") +
-            "&password=" + encodeURIComponent("__MIGHTLING_PASSWORD__"),
+            "username=" + encodeURIComponent(__MIGHTLING_EMAIL_JSON__) +
+            "&password=" + encodeURIComponent(__MIGHTLING_PASSWORD_JSON__),
         });
       })
       .then(function (login) {

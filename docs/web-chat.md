@@ -6,11 +6,12 @@ server, an API server and PostgreSQL, about 900 MB resident), and rebranded as M
 
 ```bash
 ling-admin chat start
-ling-admin chat configure --email you@example.com --password '<a strong password>'
+ling-admin chat configure          # or --email you@example.com --password '<your password>'
+ling-admin chat password           # the generated administrator account
 ```
 
-Then open <http://localhost:3000>. See [Get started](getting-started.md#5-optional-the-web-chat-and-desktop-app)
-for why you should always pass your own credentials.
+Then open <http://localhost:3000> and sign in. The desktop app signs itself in on this machine;
+on another machine, sign in with the account `ling-admin chat password` prints on the node.
 
 ## What it can do
 

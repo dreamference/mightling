@@ -23,6 +23,7 @@ from dreamference.chat.gmail_credentials import GmailCredentials
 from dreamference.chat.gmail_search_service import GmailSearchService
 from dreamference.chat.google_service import GoogleService
 from dreamference.chat.google_workspace_reader import GoogleWorkspaceReader
+from dreamference.chat.chat_admin_credentials import ChatAdminCredentials
 from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
 from dreamference.chat.onyx_installer import OnyxInstaller
 from dreamference.chat.onyx_runner import OnyxRunner
@@ -34,6 +35,7 @@ from dreamference.chat.searxng_sidecar import SearxngSidecar
 from dreamference.chat.sidecar_network import SidecarNetwork
 
 __all__ = [
+    "ChatAdminCredentials",
     "DesktopInstaller",
     "DesktopRunner",
     "GmailClient",
