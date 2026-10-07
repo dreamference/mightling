@@ -172,6 +172,10 @@ Browsers allow the microphone and the clipboard API only on HTTPS or `localhost`
 1. **Phase A: accept it,** and say so in the UI. Text works from any device. The Electron app on a client keeps working, because it loads the UI over `app://` and reaches the node through its own connection.
 2. **Phase D: TLS for an advertised node.** `ling-admin web tls` creates a per-node certificate authority, prints its fingerprint, and offers the CA file to paired devices, which install it once. This is a decision for the user (§14), because installing a CA on a phone is a real step.
 
+**Decided 2026-10-07 (the user):** the web UI stays text-only from other devices; most people will use the desktop app, which needs no certificate. Phase D is not scheduled. If it is ever built, it should be a name-constrained authority (`.local` names and private addresses only), verified on iOS and Android before relying on the constraint, and the desktop app should pin the node's certificate at pairing instead of installing the authority system-wide.
+
+Copying still works over plain HTTP: selecting and copying text, Ctrl+V and pasting a screenshot (the `paste` event's `clipboardData`) are not restricted. Only `navigator.clipboard` is, so every copy button must fall back to `document.execCommand('copy')` on a hidden textarea when `navigator.clipboard` is undefined; a test runs the button with `navigator.clipboard` removed.
+
 ### 4.5 What `ling web` never does
 
 - No telemetry, no analytics, no remote fonts or scripts. The pages carry a strict CSP (`default-src 'none'`, scripts and styles `'self'`, `connect-src 'self'`).
@@ -306,8 +310,8 @@ Browsers allow the microphone and the clipboard API only on HTTPS or `localhost`
 ## 14. Questions for the user
 
 1. **Port 3100** for the web server, kept forever?
-2. **Voice from phones and other devices** needs HTTPS (§4.4). Is "text only from other devices" acceptable for Phase A, with a per-node certificate later, which each device installs once?
-3. **The Onyx history export** (Phase B): needed, or is a clean start fine?
+2. ~~Voice from phones~~ **Decided 2026-10-07:** text only from other devices' browsers; voice through the desktop app (§4.4).
+3. ~~Onyx history export~~ **Decided 2026-10-07:** not needed; a clean start. Phase B drops the export.
 4. **Phase A's scope:** all of §10's row A in one release, or Ask and `ling web` first, with `ling-docs` in a release of its own?
 
 ---
