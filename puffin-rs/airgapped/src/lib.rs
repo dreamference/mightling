@@ -203,9 +203,28 @@ pub fn writable_roots(cwd: &Path, tmpdir: Option<&Path>) -> Vec<PathBuf> {
 
 /// Whether `path` lies in (or is) one of `roots`, comparing real paths where they exist.
 pub fn within(path: &Path, roots: &[PathBuf]) -> bool {
-    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = real(path);
-    roots.iter().any(|root| path.starts_with(real(root)))
+    let path = real_location(path);
+    roots.iter().any(|root| path.starts_with(real_location(root)))
+}
+
+/// Where a path really is: its nearest existing ancestor with links resolved, and the rest as
+/// written. A file that does not exist yet still lies under its folder's real location, which
+/// matters where a link is on the way (macOS's `/tmp` and `/var` lead to `/private/...`).
+fn real_location(path: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut existing = path;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(existing) {
+            return rest.iter().rev().fold(real, |acc: PathBuf, part| acc.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// [`writable_roots`] for this process: its working directory and its `$TMPDIR`.
@@ -526,6 +545,10 @@ mod tests {
         {
             let _ = std::os::unix::fs::symlink(&home, base.join("link"));
             assert!(within(&base.join("link").join(".puffin"), &[home.clone()]));
+            // A file not yet written, reached through the link: still inside (macOS's /tmp and
+            // /var are such links, and a user config file often does not exist yet).
+            assert!(within(&base.join("link").join(".config/dreamference/config.toml"), &[home.clone()]));
+            assert!(within(&home.join(".config/dreamference/config.toml"), &[base.join("link")]));
         }
         assert_eq!(writable_roots(&home, Some(Path::new("/var/tmp/x"))).len(), 3);
         assert_eq!(writable_roots(&home, Some(Path::new(""))).len(), 2);
