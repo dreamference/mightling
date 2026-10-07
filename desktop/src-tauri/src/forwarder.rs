@@ -82,7 +82,7 @@ fn forward(client: TcpStream, target: &str) {
     let Some(node) = node else {
         answer(
             client,
-            &format!("The Mightling node at {target} is not answering. Is its web UI running? On the node: mling-admin chat start"),
+            &format!("The Mightling node at {target} is not answering. Is its web UI running? On the node: ling-admin chat start"),
         );
         return;
     };

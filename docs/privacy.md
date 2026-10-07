@@ -10,19 +10,19 @@ off.
 |---|---|---|
 | Installing or starting services | Downloads of container images, Python packages and the speech-to-text model | Docker registries, PyPI, Hugging Face |
 | Downloading a model | Requests for the model's files | Hugging Face |
-| Building `mling` for the first time | Downloads of the Rust toolchain, build dependencies and a prebuilt V8 engine (checked against pinned checksums) | rustup, crates.io, GitHub |
+| Building `ling` for the first time | Downloads of the Rust toolchain, build dependencies and a prebuilt V8 engine (checked against pinned checksums) | rustup, crates.io, GitHub |
 | The agent or web chat searches the web | The search query | Public search engines, through the SearXNG instance on your machine |
 | The agent fetches a page | A request for that URL | The website |
 | Gmail, Drive or Calendar, if you connect an account | Read-only requests for your mail, files or events | Google |
 | Signing in to the web chat with Google, if you enable it | The sign-in exchange | Google |
 | Image search, if you use it | The image query, then downloads of the matching images | Public search engines through SearXNG, then the sites hosting the images |
-| `mling update` | A check for, and download of, the latest Mightling release | GitHub |
+| `ling update` | A check for, and download of, the latest Mightling release | GitHub |
 
 Apart from these, Mightling does not send your repositories, prompts or chats anywhere. The only content that leaves the machine is what these features need: a search query,
 a URL, a mailbox read.
 
 !!! note "A home of its own"
-    `mling` keeps its settings and sessions in `~/.mightling`. It never reads `~/.codex`, so a cloud
+    `ling` keeps its settings and sessions in `~/.mightling`. It never reads `~/.codex`, so a cloud
     sign-in stored there by another tool is never visible to it; on first run it copies sessions,
     history and settings from there, and never the sign-in. Usage analytics are switched off in the
     code itself, so no setting or sign-in can turn them back on.
@@ -36,8 +36,8 @@ a URL, a mailbox read.
     refused.
   - `/feedback`, which uploaded session logs, is removed.
   - `/voice` and `/approve`, which depend on cloud models, are hidden.
-  - The only update check is Mightling's own, `mling update`.
-  - Usage analytics are disabled in the code (patch `0013`), and `mling` never reads `~/.codex`,
+  - The only update check is Mightling's own, `ling update`.
+  - Usage analytics are disabled in the code (patch `0013`), and `ling` never reads `~/.codex`,
     where another tool may keep a cloud sign-in.
 - **Network exposure.** The web chat is published on `127.0.0.1` only (ports 80 and 3000), so its
   admin account is not reachable from other machines on your network; `configure` applies this.
@@ -50,11 +50,11 @@ a URL, a mailbox read.
   you do not trust, block the port for everything but the bridge, for example
   `sudo ufw deny in on <your-LAN-interface> to any port 8000`.
 
-  See [Terminal agent](mling.md#what-mightling-removes).
+  See [Terminal agent](ling.md#what-mightling-removes).
 
 ## The agent's sandbox
 
-`mling` runs shell commands inside its Linux sandbox, which limits what they can write. Network
+`ling` runs shell commands inside its Linux sandbox, which limits what they can write. Network
 access from that sandbox is **on** by default, because the agent's web search and page fetching are
 shell commands.
 
@@ -67,7 +67,7 @@ model server is reached. Full Access, which runs commands outside the sandbox, c
 with it: Mightling refuses to start with both, greys Full Access out in `/permissions` and in the
 desktop app, and refuses `/airgapped on` in a Full Access session. `/airgapped` lists what the level
 does not cover, such as commands you approve to run outside the sandbox. See
-[Terminal agent](mling.md#what-mightling-adds).
+[Terminal agent](ling.md#what-mightling-adds).
 
 ## Email is untrusted input
 

@@ -6,14 +6,14 @@ index 4d7984d..003136b 100644
      // the generic `codex` command name that users run.
 -    bin_name = "codex",
 -    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
-+    name = "mling",
-+    bin_name = "mling",
-+    override_usage = "mling [OPTIONS] [PROMPT]\n       mling [OPTIONS] <COMMAND> [ARGS]"
++    name = "ling",
++    bin_name = "ling",
++    override_usage = "ling [OPTIONS] [PROMPT]\n       ling [OPTIONS] <COMMAND> [ARGS]"
  )]
 @@ -2693,3 +2694,3 @@ fn print_completion(cmd: CompletionCommand) {
      let mut app = MultitoolCli::command();
 -    let name = "codex";
-+    let name = "mling";
++    let name = "ling";
      generate(cmd.shell, &mut app, name, &mut std::io::stdout());
 diff --git a/codex-rs/cli/src/mcp_cmd.rs b/codex-rs/cli/src/mcp_cmd.rs
 index 8fda684..1ae8765 100644
@@ -22,7 +22,7 @@ index 8fda684..1ae8765 100644
 @@ -97,3 +97,3 @@ pub struct GetArgs {
  #[derive(Debug, clap::Parser)]
 -#[command(override_usage = "codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
-+#[command(override_usage = "mling mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
++#[command(override_usage = "ling mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)")]
  pub struct AddArgs {
 diff --git a/codex-rs/exec/src/cli.rs b/codex-rs/exec/src/cli.rs
 index 0ef0be6..a6bd293 100644
@@ -31,7 +31,7 @@ index 0ef0be6..a6bd293 100644
 @@ -12,3 +12,3 @@ use std::path::PathBuf;
      version,
 -    override_usage = "codex exec [OPTIONS] [PROMPT]\n       codex exec [OPTIONS] <COMMAND> [ARGS]"
-+    override_usage = "mling exec [OPTIONS] [PROMPT]\n       mling exec [OPTIONS] <COMMAND> [ARGS]"
++    override_usage = "ling exec [OPTIONS] [PROMPT]\n       ling exec [OPTIONS] <COMMAND> [ARGS]"
  )]
 diff --git a/codex-rs/exec/src/event_processor_with_human_output.rs b/codex-rs/exec/src/event_processor_with_human_output.rs
 index 222bc48..17fa132 100644
@@ -40,7 +40,7 @@ index 222bc48..17fa132 100644
 @@ -102,3 +102,3 @@
                      "{}\n{}",
 -                    "codex".style(self.italic).style(self.magenta),
-+                    "mling".style(self.italic).style(self.magenta),
++                    "ling".style(self.italic).style(self.magenta),
                      text
 @@ -218,3 +218,3 @@ impl EventProcessor for EventProcessorWithHumanOutput {
          const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -50,7 +50,7 @@ index 222bc48..17fa132 100644
 @@ -420,3 +420,3 @@
                  "{}\n{}",
 -                "codex".style(self.italic).style(self.magenta),
-+                "mling".style(self.italic).style(self.magenta),
++                "ling".style(self.italic).style(self.magenta),
                  message
 diff --git a/codex-rs/tui/src/chatwidget.rs b/codex-rs/tui/src/chatwidget.rs
 index 5ca4182..c1a7ea0 100644

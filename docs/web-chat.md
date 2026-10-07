@@ -5,8 +5,8 @@ built on [Onyx](https://github.com/onyx-dot-app/onyx), running its lightweight e
 server, an API server and PostgreSQL, about 900 MB resident), and rebranded as Mightling.
 
 ```bash
-mling-admin chat start
-mling-admin chat configure --email you@example.com --password '<a strong password>'
+ling-admin chat start
+ling-admin chat configure --email you@example.com --password '<a strong password>'
 ```
 
 Then open <http://localhost:3000>. See [Get started](getting-started.md#5-optional-the-web-chat-and-desktop-app)
@@ -20,23 +20,23 @@ for why you should always pass your own credentials.
 | **Images** | Attach an image and ask about it. The default model reads images. | |
 | **Web search** | Searches go through a SearXNG instance on your machine, which queries public search engines for you. No API key or account. | `--no-web` |
 | **Voice input** | A microphone button, transcribed by a local Whisper server on the CPU. | `--no-voice` |
-| **Gmail, read-only** | After `mling-admin chat gmail`, the assistant can search and read your connected mailboxes. It cannot send, delete or change mail. | `--no-gmail` |
+| **Gmail, read-only** | After `ling-admin chat gmail`, the assistant can search and read your connected mailboxes. It cannot send, delete or change mail. | `--no-gmail` |
 | **Image search** | Finds images on the web and shows them in the chat. | `--no-image-search` |
-| **Google sign-in** | `mling-admin chat google-auth` adds "Sign in with Google" to the login page. | |
+| **Google sign-in** | `ling-admin chat google-auth` adds "Sign in with Google" to the login page. | |
 
-The "Skip with" flags go on `mling-admin chat configure`. `--no-brand` keeps Onyx's own
+The "Skip with" flags go on `ling-admin chat configure`. `--no-brand` keeps Onyx's own
 branding.
 
 ## Managing it
 
 ```bash
-mling-admin chat status       # version, containers and health
-mling-admin chat logs         # container logs
-mling-admin chat stop         # stop, keeping your data
-mling-admin chat uninstall    # delete the deployment and all its data
+ling-admin chat status       # version, containers and health
+ling-admin chat logs         # container logs
+ling-admin chat stop         # stop, keeping your data
+ling-admin chat uninstall    # delete the deployment and all its data
 ```
 
-`mling-admin onyx …` is an alias for the same commands.
+`ling-admin onyx …` is an alias for the same commands.
 
 ## Privacy
 

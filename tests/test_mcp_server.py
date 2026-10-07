@@ -89,12 +89,12 @@ def test_web_search_reports_engines_that_all_failed_rather_than_no_results():
 
 
 def _fake_mightling_code(tmp_path, monkeypatch, script: str):
-    """Installs a stand-in `mling-code` where CodeIndexSearch looks for the real one."""
+    """Installs a stand-in `ling-code` where CodeIndexSearch looks for the real one."""
     from dreamference.mcp_server import code_index_search
 
     install = tmp_path / "install"
     (install / "bin").mkdir(parents=True)
-    binary = install / "bin" / "mling-code"
+    binary = install / "bin" / "ling-code"
     binary.write_text("#!/bin/sh\n" + script)
     binary.chmod(0o755)
     monkeypatch.setattr(code_index_search, "INSTALL_DIR", str(install))
@@ -114,8 +114,8 @@ def test_code_search_is_answered_by_the_code_index_when_the_workspace_has_one(tm
     monkeypatch.setattr(MCPServer, "context_engine", property(lambda self: (_ for _ in ()).throw(AssertionError("engine built"))))
     result = server.execute_tool("workspace_search_code", {"query": "loader load", "top_k": 2})
     assert result == [
-        {"rel_path": "pkg/a.py", "line": 15, "kind": "class", "symbol": "pkg.a.Loader", "source": "mling-code"},
-        {"rel_path": "pkg/a.py", "line": 40, "kind": "method", "symbol": "pkg.a.Loader.load", "source": "mling-code"},
+        {"rel_path": "pkg/a.py", "line": 15, "kind": "class", "symbol": "pkg.a.Loader", "source": "ling-code"},
+        {"rel_path": "pkg/a.py", "line": 40, "kind": "method", "symbol": "pkg.a.Loader.load", "source": "ling-code"},
     ]
     # The words are separate arguments: no shell, and nothing the query says is interpreted.
     assert calls.read_text().strip() == "search loader load --json"

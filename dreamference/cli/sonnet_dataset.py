@@ -1,5 +1,5 @@
 """
-Sonnet corpus used by `mling-admin benchmark_server`.
+Sonnet corpus used by `ling-admin benchmark_server`.
 
 Embedded as a literal rather than read out of the vLLM image or fetched at run time. Each vLLM image
 keeps this file somewhere different — the project image under /opt/vllm, the DFlash image under

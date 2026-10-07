@@ -4,15 +4,15 @@
 **Target:** new DGX Spark-class machines (DGX Spark and the partner GB10 units; this one is an ASUS Ascent GX10) on the same local network as an existing Mightling node.
 **Builds on:**
 - the client/node split, discovery and SSH pairing in [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md), in particular §9 (installing), §12.4 (no roles), §13.2 (pairing), §15.1 (control over SSH) and §18.6 (pairing as built);
-- the release install `install.sh` and the host settings `mling-admin host check|setup` in [SETUP](./DREAMFERENCE_SETUP.md) §3.2–§3.3;
+- the release install `install.sh` and the host settings `ling-admin host check|setup` in [SETUP](./DREAMFERENCE_SETUP.md) §3.2–§3.3;
 - the model matrix and the images its recipes pin ([MODELS](./DREAMFERENCE_MODELS.md), [DOCKER](./DREAMFERENCE_DOCKER.md));
 - the trusted-LAN decision of 2026-09-30 ([README](./README.md), "Accepted by design").
 
-**The answer, first.** Yes, the work can be automated from this machine, apart from a first-boot wizard of a few minutes on each new unit. That wizard runs from a phone, so it needs no monitor or keyboard. NVIDIA documents a way to skip it: a recovery image repacked with cloud-init. That route still needs a USB stick and a wired keyboard at every machine, and the scripts it depends on have no public download, so it is not the first route (§4.3). Everything after the wizard is done by one command run on this GB10, `mling-admin node provision <host>…`. Re-running the same command later is also how the fleet is updated.
+**The answer, first.** Yes, the work can be automated from this machine, apart from a first-boot wizard of a few minutes on each new unit. That wizard runs from a phone, so it needs no monitor or keyboard. NVIDIA documents a way to skip it: a recovery image repacked with cloud-init. That route still needs a USB stick and a wired keyboard at every machine, and the scripts it depends on have no public download, so it is not the first route (§4.3). Everything after the wizard is done by one command run on this GB10, `ling-admin node provision <host>…`. Re-running the same command later is also how the fleet is updated.
 
 **Decisions made here, stated first because each could be read the other way:**
 
-1. **Extend `mling-admin node`. Do not use Ansible** (§6). The logic already exists as `install.sh`, `host setup`, `node enable` and `node add`, and each of them reads the host before it changes it. Provisioning runs those same steps on another machine. It does not reimplement them.
+1. **Extend `ling-admin node`. Do not use Ansible** (§6). The logic already exists as `install.sh`, `host setup`, `node enable` and `node add`, and each of them reads the host before it changes it. Provisioning runs those same steps on another machine. It does not reimplement them.
 2. **Two channels, kept apart.** A **provisioning session** is an ordinary SSH login, authenticated by the account's password, and it lasts only while the command runs. It is the only channel that installs anything or runs anything as root. The **pairing key** of MIGHTLING_NODE §13.2 is left as restricted as it is today. It is used to steer, read and check, never to install. The rule behind this is that **changing what a node runs needs the node's password; using and steering it needs only the pairing** (§8).
 3. **No new persistent access.** There is no `NOPASSWD` sudoers entry. No full-access key is left on any node. NVIDIA's `discover-sparks` copies one shared private key to every machine; nothing like that happens here. Passwords are typed at the prompts of `ssh` and `sudo`, or held in memory for one run (§8.2). They are never written to disk and never put on a command line.
 4. **The fleet runs what this machine runs.** By default a new node gets the Mightling version and the model that the machine typing the command has, copied over the LAN, and the same model-server image. A new node therefore needs no GitHub token and no Hugging Face token. It does still need the internet, for two things: the Python dependencies from PyPI (§7.2) and the digest-pinned images from their registry (§7.4). That lasts until Phase 0 settles the wheelhouse and the image-id check; after that, a node could be provisioned with no internet at all.
@@ -121,7 +121,7 @@ All read on 2026-10-02. The DGX Spark documentation pages carry "Last updated Se
 | Other tools present | `rsync` 3.2.7, `rrsync`, `zstd`, `python3-venv`, `fwupd`. Not present: `sshpass`, `pigz`, `ansible` |
 | NVIDIA's telemetry | `nvidia-dgx-telemetry` (7.3) is active and enabled. Its journal lines mention an "OOBE event" being sent |
 | Network | This machine is on **Wi-Fi** (`wlP9s9`). The 10GbE port (`enP7s7`, Realtek 8127) has no carrier. **No ConnectX device appears on `lspci`.** `dgx-spark-mlnx-hotplug` is installed and its udev rule handles hot-plug, so the QSFP NIC is probably absent until a cable is in; that is unverified |
-| Sizes a new node needs (default model) | SGLang image (digest-pinned) **33.4 GB**. RadixArk Qwen3.8-27B-NVFP4 **21 GB**. DFlash2 drafter 1.5 GB. Diffusion model 1.2 GB. nomic embedding model 0.6 GB. About **58 GB**, plus the `mling-admin` virtualenv (5.8 GB, mostly PyTorch; SETUP §3.2). The fallback's locally built DFlash images are **40.7 GB each** and cannot be pulled from anywhere; its weights are 72 GB |
+| Sizes a new node needs (default model) | SGLang image (digest-pinned) **33.4 GB**. RadixArk Qwen3.8-27B-NVFP4 **21 GB**. DFlash2 drafter 1.5 GB. Diffusion model 1.2 GB. nomic embedding model 0.6 GB. About **58 GB**, plus the `ling-admin` virtualenv (5.8 GB, mostly PyTorch; SETUP §3.2). The fallback's locally built DFlash images are **40.7 GB each** and cannot be pulled from anywhere; its weights are 72 GB |
 | Disk | `/` is 916 GB, 292 GB free |
 | `sudo` | Asks for a password (`sudo -n true` fails). `/etc/sudoers.d/` holds only its README |
 
@@ -153,7 +153,7 @@ NVIDIA's documented route (§2.2): repack the recovery image with a cloud-init s
 - **The tools are not obtainable as documented.** The repack scripts have no public URL. Whether the ASUS GX10's recovery image is NVIDIA's or ASUS's, and whether it accepts the same seed, is unknown.
 - **It erases the disk**, which is harmless on a new unit but a sharp tool to hand to a fleet command.
 
-If it is pursued later (question 8 answered *not now*, 2026-10-03), Mightling's part is small. `mling-admin node seed` would write the `user-data` and `meta-data`, containing:
+If it is pursued later (question 8 answered *not now*, 2026-10-03), Mightling's part is small. `ling-admin node seed` would write the `user-data` and `meta-data`, containing:
 - the user, in the `docker` group;
 - the host name;
 - a **one-time bootstrap key** that `node provision` removes once the pairing exists.
@@ -167,10 +167,10 @@ The licence acceptance is not something Mightling writes on the user's behalf. T
 ## 5. The command
 
 ```bash
-mling-admin node provision                       # list unprovisioned Sparks on the LAN (§9.1)
-mling-admin node provision spark-1a2b gx10-77c0  # provision these
-mling-admin node provision --all                 # re-run on every paired node: the fleet update
-mling-admin node provision spark-1a2b --model qwen3.5-122b-a10b-hybrid-dflash --web
+ling-admin node provision                       # list unprovisioned Sparks on the LAN (§9.1)
+ling-admin node provision spark-1a2b gx10-77c0  # provision these
+ling-admin node provision --all                 # re-run on every paired node: the fleet update
+ling-admin node provision spark-1a2b --model qwen3.5-122b-a10b-hybrid-dflash --web
 ```
 
 | Option | Meaning |
@@ -182,7 +182,7 @@ mling-admin node provision spark-1a2b --model qwen3.5-122b-a10b-hybrid-dflash --
 | `--from this\|release[=X.Y.Z]` | What to install (§7.2). Default: `this` |
 | `--per-host-password` | With several hosts: ask for each machine's password separately. **Default is one password**, asked once and used for every machine's login and `sudo` (§8.2; decided 2026-10-03) |
 | `--mesh` | Also pair every provisioned node with every other, so any of them can manage the fleet. Off by default: only this machine pairs with each node (§9.3; decided 2026-10-03) |
-| `--web` | Also install and configure the web UI there (`mling-admin chat start` and `configure`). Off by default |
+| `--web` | Also install and configure the web UI there (`ling-admin chat start` and `configure`). Off by default |
 | `--no-start` | Leave the model server stopped |
 | `--restart` | Restart a running model server whose image or model has changed. Without it, the summary says a restart is pending |
 | `--os-update` | NVIDIA's documented update before everything else, with a reboot (§10.3). Off by default |
@@ -192,13 +192,13 @@ mling-admin node provision spark-1a2b --model qwen3.5-122b-a10b-hybrid-dflash --
 
 ---
 
-## 6. Ansible, or `mling-admin node`
+## 6. Ansible, or `ling-admin node`
 
 NVIDIA recommends Ansible for Spark fleets (§2.2), and it would work. It is not chosen, for these reasons.
 
 ### 6.1 What Ansible would add and duplicate
 
-- **Duplication.** The work is `install.sh`, `HostSafetySetup` (which reads every setting with the check's own helpers and changes only what fails), `node enable` and `node add`. A playbook either reimplements them as Ansible tasks, giving two copies that drift, as SETUP §3.3 records the check and the fix once did. Or it calls `mling-admin` through `command:`, at which point Ansible is an SSH loop with an inventory around our commands.
+- **Duplication.** The work is `install.sh`, `HostSafetySetup` (which reads every setting with the check's own helpers and changes only what fails), `node enable` and `node add`. A playbook either reimplements them as Ansible tasks, giving two copies that drift, as SETUP §3.3 records the check and the fix once did. Or it calls `ling-admin` through `command:`, at which point Ansible is an SSH loop with an inventory around our commands.
 - **More to install and learn.** `ansible-core` is not on DGX OS (§3), and Ansible brings an inventory file, playbooks and roles to keep. The project's rule is few moving parts, and the user asked for it to be "as simple as possible".
 - **What it would not do.** Find new units over mDNS, pin host keys to node ids, or install the restricted pairing key with its forced command. Those are Mightling's own (MIGHTLING_NODE §13.2) and would still be Python.
 
@@ -213,7 +213,7 @@ NVIDIA recommends Ansible for Spark fleets (§2.2), and it would work. It is not
 
 ### 6.3 The escape hatch
 
-If the fleet ever joins an organisation's own configuration management, a playbook that runs `mling-admin node prepare` and `install.sh --from` is a few lines. The commands of §7 are the stable interface for it. **Decided 2026-10-03: no example playbook is shipped**; one supported route.
+If the fleet ever joins an organisation's own configuration management, a playbook that runs `ling-admin node prepare` and `install.sh --from` is a few lines. The commands of §7 are the stable interface for it. **Decided 2026-10-03: no example playbook is shipped**; one supported route.
 
 ---
 
@@ -228,11 +228,11 @@ Each step reads first and does nothing if the machine already satisfies it.
 | 1 | **Connect.** Open the provisioning session (§8.1) and check that it is a GB10: `/etc/dgx-release`, `nvidia-smi` | session | no | nothing |
 | 2 | **Read the state.** A plain shell probe, sent over the session (Mightling may not be there yet), reports: Mightling's version if installed; the facts `host check` reads (swap, the two sysctls, earlyoom, sysstat); the docker group; lingering; node id; whether the node is advertised; models and images present; free disk | session | no | nothing |
 | 3 | *(opt-in)* OS update (§10.3) | session | yes | packages, firmware, reboot |
-| 4 | **Install Mightling**, from a bundle copied from this machine (§7.2): `install.sh --from <dir> --role node --no-advertise --no-host-setup` | session | no | `~/.local/share/dreamference/{mling,venv}`, links in `~/.local/bin` |
-| 5 | **Root half**: `sudo mling-admin node prepare` (§7.3), in one command so `sudo` asks once | session | yes | §7.3's list |
-| 6 | **User half of advertising**: `mling-admin node enable --no-web` (or without `--no-web` under `--web`). The Avahi file is now the user's, so this needs no root, as in MIGHTLING_NODE §18.2. It writes `node-advertise.json` and moves SearXNG to every interface, which `mling-search` on clients needs | session | no | `~/.config/dreamference/node-advertise.json`; SearXNG's publish address |
-| 7 | **Model and images** (§7.4): weights and local-tag images copied from this machine, and digest-pinned images pulled by the node itself, here and not inside step 11, so the pull is timed and reported on its own. Docker commands run as `sg docker -c '…'`, because the session's login predates the group that step 5 added. Then `mling-admin searxng start`, which `server start` does not do, so that `mling-search` on clients has a SearXNG to ask (its image, 254 MB, is pulled by the node) | session | no | `~/.cache/huggingface/hub/models--…`, Docker images, the SearXNG container |
-| 8 | **Assignment**: `mling-admin main-model set <key>` there | session | no | `~/.config/dreamference/config.toml` |
+| 4 | **Install Mightling**, from a bundle copied from this machine (§7.2): `install.sh --from <dir> --role node --no-advertise --no-host-setup` | session | no | `~/.local/share/dreamference/{ling,venv}`, links in `~/.local/bin` |
+| 5 | **Root half**: `sudo ling-admin node prepare` (§7.3), in one command so `sudo` asks once | session | yes | §7.3's list |
+| 6 | **User half of advertising**: `ling-admin node enable --no-web` (or without `--no-web` under `--web`). The Avahi file is now the user's, so this needs no root, as in MIGHTLING_NODE §18.2. It writes `node-advertise.json` and moves SearXNG to every interface, which `ling-search` on clients needs | session | no | `~/.config/dreamference/node-advertise.json`; SearXNG's publish address |
+| 7 | **Model and images** (§7.4): weights and local-tag images copied from this machine, and digest-pinned images pulled by the node itself, here and not inside step 11, so the pull is timed and reported on its own. Docker commands run as `sg docker -c '…'`, because the session's login predates the group that step 5 added. Then `ling-admin searxng start`, which `server start` does not do, so that `ling-search` on clients has a SearXNG to ask (its image, 254 MB, is pulled by the node) | session | no | `~/.cache/huggingface/hub/models--…`, Docker images, the SearXNG container |
+| 8 | **Assignment**: `ling-admin main-model set <key>` there | session | no | `~/.config/dreamference/config.toml` |
 | 9 | **Pair**: `node add` through the open session (§7.6) | session | no | one `authorized_keys` line; here, the node record and its pinned host key |
 | 10 | **Close the session.** From here only the pairing key is used | — | — | — |
 | 11 | **Start**: `node start <node>`, then wait for `state=ready` on the advert, with a time limit (default 20 min) | key | no | the model containers |
@@ -244,18 +244,18 @@ Each step reads first and does nothing if the machine already satisfies it.
 
 - **`--from this`** (the default).
   - **On a machine running from a checkout**, as this one does, the bundle holds:
-    - the binaries installed here (`mling`, `codex-code-mode-host`, `mling-search`, `mling-fetch`, `mling-code`), gzipped under the release names;
+    - the binaries installed here (`ling`, `codex-code-mode-host`, `ling-search`, `ling-fetch`, `ling-code`), gzipped under the release names;
     - a wheel of the checkout's `dreamference` package (`pip wheel --no-deps`);
     - a `sha256sums` file written for them.
     The new node then runs the same build as this one, including a source build that was never released. That is the point for a development fleet.
   - **On a release install** there is no wheel to copy, since pip does not keep the file. There `this` means `release=<the installed version>`, fetched as below.
 - **`--from release[=X.Y.Z]`**. The release's own assets, downloaded once here with this machine's token (`GH_TOKEN` or `gh`), checked against the release's checksum file, then copied. The token stays on this machine.
 - **Python dependencies.** The wheel's dependencies come to about 5.8 GB, mostly PyTorch. By default the node downloads them from PyPI. With a wheelhouse built here (`pip download` for `aarch64`/cp312, which is the same platform), the node installs with `--no-index` and needs no internet. Whether to make the wheelhouse the default is a Phase 0 measurement of the two times.
-- The installed `mling-admin` and the binaries on every node are those of one bundle, and the bundle's version is recorded in the node record here (§11).
+- The installed `ling-admin` and the binaries on every node are those of one bundle, and the bundle's version is recorded in the node record here (§11).
 
-### 7.3 `mling-admin node prepare`: the root half
+### 7.3 `ling-admin node prepare`: the root half
 
-A new command that does **every root step of a single-machine install, and nothing else**, for the user who invoked `sudo` (`SUDO_USER`). It refuses to run if not root or if `SUDO_USER` is missing. It prints each step before doing it, the rule `host setup` follows. It is also the one command a person would type on a single machine (`sudo mling-admin node prepare`), so it is not fleet-only code.
+A new command that does **every root step of a single-machine install, and nothing else**, for the user who invoked `sudo` (`SUDO_USER`). It refuses to run if not root or if `SUDO_USER` is missing. It prints each step before doing it, the rule `host setup` follows. It is also the one command a person would type on a single machine (`sudo ling-admin node prepare`), so it is not fleet-only code.
 
 | Step | Source of the logic | Change |
 |---|---|---|
@@ -325,9 +325,9 @@ A second run on a provisioned node goes through the same table:
 
 ### 8.2 `sudo`, and the passwords
 
-- **One host named:** the password is typed at `ssh`'s own prompt, and step 5 runs as `ssh -t … sudo <venv>/bin/mling-admin node prepare`, so `sudo` prompts on the remote terminal. The password goes from the keyboard to that machine and nowhere else. `mling-admin` never sees it.
-- **Several hosts named:** the `sudo` prompt cannot come before the slow part, because `prepare` needs the virtualenv that step 4 installs, which takes minutes. To keep §9.2's "questions first", `mling-admin` asks for the password at the start, with `getpass`: **once for all machines by default** (decided 2026-10-03, the same username everywhere makes one password the common case), or once per machine with `--per-host-password`. A machine that refuses the shared password is asked for its own once. It then uses that password for both prompts:
-  - for `ssh`'s password prompt, through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4 or later; this machine has 9.6). The askpass helper is `mling-admin` itself, reading the password from an inherited pipe, never from the environment or argv;
+- **One host named:** the password is typed at `ssh`'s own prompt, and step 5 runs as `ssh -t … sudo <venv>/bin/ling-admin node prepare`, so `sudo` prompts on the remote terminal. The password goes from the keyboard to that machine and nowhere else. `ling-admin` never sees it.
+- **Several hosts named:** the `sudo` prompt cannot come before the slow part, because `prepare` needs the virtualenv that step 4 installs, which takes minutes. To keep §9.2's "questions first", `ling-admin` asks for the password at the start, with `getpass`: **once for all machines by default** (decided 2026-10-03, the same username everywhere makes one password the common case), or once per machine with `--per-host-password`. A machine that refuses the shared password is asked for its own once. It then uses that password for both prompts:
+  - for `ssh`'s password prompt, through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4 or later; this machine has 9.6). The askpass helper is `ling-admin` itself, reading the password from an inherited pipe, never from the environment or argv;
   - for `sudo`, through `sudo -S -p ''`, the password written to the remote command's standard input over the encrypted channel.
 - Each password is checked when it is asked for, by opening that machine's session at once. It is held in memory for the run and nowhere else. A machine that refuses one is asked again once, then dropped from the run; nothing is retried in a loop.
 - **Not done, and why:**
@@ -384,7 +384,7 @@ Only this machine pairs with each new node, which keeps pairing one-way, as buil
 ### 10.1 Drift
 
 The `info` operation of `serve-job` (MIGHTLING_NODE §18.6) gains read-only fields:
-- Mightling's bundle version and the `mling-admin` version;
+- Mightling's bundle version and the `ling-admin` version;
 - the result of `host check`;
 - DGX OS's OTA version, the kernel and the driver;
 - the assigned and the loaded model;
@@ -393,7 +393,7 @@ The `info` operation of `serve-job` (MIGHTLING_NODE §18.6) gains read-only fiel
 
 `node list` adds one column, **drift**, naming what differs from this machine. A node on a different DGX OS version is also flagged. Because `info` goes through the pairing key, seeing drift needs no password.
 
-**A source bundle and `mling update` disagree.** A binary built from a checkout carries no `MIGHTLING_VERSION`, so `mling update` typed on such a node treats it as behind and replaces it with the latest release. That is correct for a single machine and is drift on a fleet. The drift column shows it, and the next `node provision` from the managing machine puts the bundle back. Whether `mling update` should refuse on a node provisioned from a source bundle is left to that command's spec.
+**A source bundle and `ling update` disagree.** A binary built from a checkout carries no `MIGHTLING_VERSION`, so `ling update` typed on such a node treats it as behind and replaces it with the latest release. That is correct for a single machine and is drift on a fleet. The drift column shows it, and the next `node provision` from the managing machine puts the bundle back. Whether `ling update` should refuse on a node provisioned from a source bundle is left to that command's spec.
 
 ### 10.2 Updating
 
@@ -442,7 +442,7 @@ The `info` operation of `serve-job` (MIGHTLING_NODE §18.6) gains read-only fiel
 |---|---|---|
 | 0 | **Measurements on the first new unit** (below) | each has a measured answer recorded here |
 | 1 | `install.sh --from`, the bundle (`this` and `release`), `node add <address>`, the `info` fields, drift in `node list` | a node installed by hand from a bundle shows no drift against this machine |
-| 2 | `node prepare`; `node provision <host>` for one machine: session, root half, install, copy, pairing, start, verify, summary, log | one new unit goes from the end of the wizard to answering a completion through `mling` on a laptop, with one command typed here |
+| 2 | `node prepare`; `node provision <host>` for one machine: session, root half, install, copy, pairing, start, verify, summary, log | one new unit goes from the end of the wizard to answering a completion through `ling` on a laptop, with one command typed here |
 | 3 | Several machines: finding new units, questions first, one password for all (`--per-host-password` to opt out), `--all`, `--mesh` | three units in one run, with every password typed in the first minutes |
 | 4 | Opt-in extras: `--os-update`; `--web`; the image-id fix if Phase 0 calls for it; no `node seed` (question 8: not now) | each tested on one unit |
 
@@ -454,7 +454,7 @@ The `info` operation of `serve-job` (MIGHTLING_NODE §18.6) gains read-only fiel
 5. Copy throughput over the actual link, for the weights (`rsync`) and for a 40 GB image (`docker save | zstd | docker load`), against the node's own downloads from Hugging Face and Docker Hub.
 6. Whether a loaded digest-pinned image keeps its repository digest under `overlay2` (§7.4).
 7. With a QSFP cable in: does the ConnectX appear (`lspci`, `ibdev2netdev`), and what does a copy reach over it?
-8. The bubblewrap fix chosen by SETUP, applied by `prepare`, then `mling sandbox` from an SSH login and from a user unit.
+8. The bubblewrap fix chosen by SETUP, applied by `prepare`, then `ling sandbox` from an SSH login and from a user unit.
 9. The wheelhouse against PyPI, for the 5.8 GB of Python dependencies.
 
 ---
@@ -464,7 +464,7 @@ The `info` operation of `serve-job` (MIGHTLING_NODE §18.6) gains read-only fiel
 Offline, with `ssh`, `rsync`, `docker` and `sudo` replaced by stand-ins (conftest already fails real `docker` changes; add the same for `ssh` and `rsync`):
 
 - **Passwords:** never present in any spawned process's argv or environment, nor in the log file. The askpass helper reads only from its pipe. A refused password is asked again once, for that machine only.
-- **Session options:** `ControlPath` under a 0700 directory, `accept-new` only at first contact, no forwarding. Docker commands after `prepare` are wrapped in `sg docker -c`. With one host, `mling-admin` never reads a password. With several, every password is asked before the first install starts.
+- **Session options:** `ControlPath` under a 0700 directory, `accept-new` only at first contact, no forwarding. Docker commands after `prepare` are wrapped in `sg docker -c`. With one host, `ling-admin` never reads a password. With several, every password is asked before the first install starts.
 - **Advertising:** step 6 runs the user-level `node enable`, with `--no-web` unless `--web` is given.
 - **`prepare`:** refuses without root or without `SUDO_USER`. For a matrix of host states, its command list is exactly the missing steps. It never emits a command touching `sshd`, netplan, NetworkManager, users or APT sources.
 - **Idempotency:** a second run against a satisfied stand-in host issues no changing command.
@@ -491,7 +491,7 @@ Live, from Phase 0 on: everything in §13's list, then one unit end to end, then
 8. **Zero-touch:** not now (§4.3 stays recorded, not chosen).
 9. **Passwords:** one password by default for several hosts; `--per-host-password` to opt out (§8.2).
 10. **An example Ansible playbook:** no (§6.3).
-11. **The bubblewrap fix:** the AppArmor profile route, `mling-admin host setup` (`/etc/apparmor.d/puffin-bwrap`), loaded and verified on this machine on 2026-10-03: from a systemd user unit `bwrap --unshare-user --unshare-net` and `mling sandbox` succeed and `host check` reports nothing to do. `node prepare` applies the same step (§7.3).
+11. **The bubblewrap fix:** the AppArmor profile route, `ling-admin host setup` (`/etc/apparmor.d/puffin-bwrap`), loaded and verified on this machine on 2026-10-03: from a systemd user unit `bwrap --unshare-user --unshare-net` and `ling sandbox` succeed and `host check` reports nothing to do. `node prepare` applies the same step (§7.3).
 
 ---
 

@@ -56,7 +56,7 @@ class VLLMReadinessWaiter:
 
             if max_wait is not None and (time.time() - start_time) > max_wait:
                 print(f"\n❌ Timed out waiting for vLLM server after {max_wait} seconds.")
-                print("💡 Start vLLM in another terminal via: `mling-admin server start`")
+                print("💡 Start vLLM in another terminal via: `ling-admin server start`")
                 return False
 
             sys.stdout.write(".")

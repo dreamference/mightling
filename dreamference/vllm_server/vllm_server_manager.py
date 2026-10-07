@@ -890,9 +890,9 @@ class VLLMServerManager:
     @classmethod
     def _stop_index_scopes(cls) -> None:
         """
-        Stops every running `mling-code` index run before a model loads.
+        Stops every running `ling-code` index run before a model loads.
 
-        mling-code runs its indexers in `mightling-index-*` scopes of the user's systemd
+        ling-code runs its indexers in `mightling-index-*` scopes of the user's systemd
         (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §9.2) and stops them itself when it sees a load,
         but only after the load has begun; stopping them here keeps `check_host_safety()`'s view
         of free memory true. A stopped run is recorded `deferred: stopped` (no peak is recorded for it) and retried later.
@@ -999,7 +999,7 @@ class VLLMServerManager:
                 f"{listed}\n\n"
                 f"These guard against the freeze mode this hardware is prone to: unreclaimable\n"
                 f"driver-pinned pages starving the host with no OOM kill to end it.\n\n"
-                f"💡 `mling-admin host setup` applies these for you (sudo asks for your password).\n"
+                f"💡 `ling-admin host setup` applies these for you (sudo asks for your password).\n"
             )
             sys.exit(1)
 
@@ -1543,7 +1543,7 @@ class VLLMServerManager:
         hw = HardwareManager.detect_gb10_hardware()
         if not hw.is_gb10:
             raise RuntimeError(
-                "mling-admin server start requires an NVIDIA GB10 machine (DGX Spark or one of its OEM "
+                "ling-admin server start requires an NVIDIA GB10 machine (DGX Spark or one of its OEM "
                 "siblings): the model recipes and host-safety checks are written for its unified memory."
             )
 

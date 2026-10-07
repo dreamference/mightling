@@ -1,5 +1,5 @@
 """
-Mightling admin command line interface (`mling-admin`) controller.
+Mightling admin command line interface (`ling-admin`) controller.
 
 This module provides the DreamferenceCLIController class which parses command line arguments
 for subcommands (`init`, `run`, `status`, `server start`, `index`, `mcp`, `model download`, `web`),
@@ -33,7 +33,7 @@ from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 # Global Rich console instance for styled terminal outputs
 console: Final[Console] = Console()
 
-# Where `mling-admin benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
+# Where `ling-admin benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
 # sonnet_dataset.py rather than read out of the image or fetched, because images disagree about
 # where they keep it and this project is meant to work without a network.
 SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
@@ -41,7 +41,7 @@ SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
 
 class DreamferenceCLIController:
     """
-    Controller class for mling-admin operations, Rich status panels, and subcommand routing.
+    Controller class for ling-admin operations, Rich status panels, and subcommand routing.
     """
 
     @classmethod
@@ -561,7 +561,7 @@ class DreamferenceCLIController:
 
     @classmethod
     def _run_google(cls, command: str | None) -> None:
-        """Runs `mling-admin google start|stop|status` and exits.
+        """Runs `ling-admin google start|stop|status` and exits.
 
         Args:
             command (str | None): The subcommand.
@@ -569,7 +569,7 @@ class DreamferenceCLIController:
         actions = {"start": cls._google_start, "stop": cls._google_stop, "status": cls._google_status}
         action = actions.get(command or "")
         if action is None:
-            print("usage: mling-admin google {start,stop,status}")
+            print("usage: ling-admin google {start,stop,status}")
             sys.exit(2)
         sys.exit(action())
 
@@ -586,7 +586,7 @@ class DreamferenceCLIController:
             print(f"❌ The Google service did not start. {GoogleService.problem}")
             return 1
         print(f"✅ The Google service is running on http://127.0.0.1:{GOOGLE_HOST_PORT}")
-        print("💡 Connect accounts with /apps in mling, or in the web UI's Settings.")
+        print("💡 Connect accounts with /apps in ling, or in the web UI's Settings.")
         return 0
 
     @classmethod
@@ -622,7 +622,7 @@ class DreamferenceCLIController:
     @classmethod
     def _refuse_during_night_run(cls, what: str) -> None:
         """
-        Stops `mling-admin <what>` while a Night Shift run or a SWE-bench run holds the runner
+        Stops `ling-admin <what>` while a Night Shift run or a SWE-bench run holds the runner
         lock: a build, an index run or a model load beside its sessions is what put the model
         server at risk before (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §6.2).
 
@@ -633,14 +633,14 @@ class DreamferenceCLIController:
         holder = NightShiftQueue.runner_holder()
         if holder:
             where = "swe-bench status" if "SWE-bench" in holder else "night status"
-            print(f"❌ {holder[0].upper()}{holder[1:]} is in progress, so `mling-admin {what}` waits: "
-                  f"see `mling-admin {where}`.")
+            print(f"❌ {holder[0].upper()}{holder[1:]} is in progress, so `ling-admin {what}` waits: "
+                  f"see `ling-admin {where}`.")
             sys.exit(1)
 
     @classmethod
     def handle_status(cls) -> None:
         """
-        Executes `mling-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
+        Executes `ling-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
         and context engine index telemetry in formatted Rich panels.
         """
         cls.display_header()
@@ -649,7 +649,7 @@ class DreamferenceCLIController:
         vllm_mgr = VLLMServerManager(host=config.vllm_host)
         vllm_status = vllm_mgr.get_server_status()
         # Imported here, not at module scope: the context engine pulls in torch, which
-        # costs ~2.1s and 0.7 GB. `mling-admin mcp` never needs it, and Codex starts one of
+        # costs ~2.1s and 0.7 GB. `ling-admin mcp` never needs it, and Codex starts one of
         # those per session on a box that is already tight on memory.
         from dreamference.context_engine import ContextEngine
         ctx_engine = ContextEngine()
@@ -717,7 +717,7 @@ class DreamferenceCLIController:
         agent_table.add_row("Cline Extension Runtime", cline_str)
         agent_table.add_row("Continue IDE Runtime", continue_str)
         agent_table.add_row("OpenHands Docker Runtime", openhands_str)
-        agent_table.add_row("mling agent", codex_str)
+        agent_table.add_row("ling agent", codex_str)
         # With no config file anywhere, the resolver names where one *would* be written (the
         # current directory), which read as though settings were being loaded from there.
         config_path = str(config.config_file_path)
@@ -742,7 +742,7 @@ class DreamferenceCLIController:
     @classmethod
     def handle_gmail(cls, args: argparse.Namespace) -> int:
         """
-        Runs `mling-admin gmail search|read|status` and prints the result for the agent to read.
+        Runs `ling-admin gmail search|read|status` and prints the result for the agent to read.
 
         The body of `read` is framed as untrusted: an email is text written by a third party, now in
         the context of an agent that holds a shell, and the frame keeps that boundary visible.
@@ -830,13 +830,13 @@ class DreamferenceCLIController:
     @classmethod
     def build_parser(cls) -> argparse.ArgumentParser:
         """
-        Constructs ArgumentParser with subcommands for mling-admin operations.
+        Constructs ArgumentParser with subcommands for ling-admin operations.
 
         Returns:
             argparse.ArgumentParser: Configured argument parser object.
         """
         parser = argparse.ArgumentParser(
-            prog="mling-admin",
+            prog="ling-admin",
             description="Mightling by Dreamference: private AI on your NVIDIA GB10. Runs the model server, the Mightling agent, the web chat and the desktop app; also drives Cline, Continue and OpenHands"
         )
         agent_choices = ["codex", "cline", "continue", "openhands"]
@@ -846,7 +846,7 @@ class DreamferenceCLIController:
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
         subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-        # Command: mling-admin init
+        # Command: ling-admin init
         init_parser = subparsers.add_parser("init", help="Initialize .dreamference project workspace and agent configs")
         init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
@@ -854,7 +854,7 @@ class DreamferenceCLIController:
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
-        # Command: mling-admin run
+        # Command: ling-admin run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
         run_parser.add_argument("prompt", type=str, help="Task prompt for AI agent")
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
@@ -864,24 +864,24 @@ class DreamferenceCLIController:
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
 
-        # Command: mling-admin status
+        # Command: ling-admin status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
 
-        # Command: mling-admin index
+        # Command: ling-admin index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
         index_parser.add_argument("--dir", default=None, help="Directory to index")
         index_parser.add_argument("--force", action="store_true", help="Force reindexing")
 
-        # Command: mling-admin mcp
+        # Command: ling-admin mcp
         subparsers.add_parser("mcp", help="Run stdio MCP server for JetBrains & VS Code extensions")
 
-        # Command: mling-admin model
+        # Command: ling-admin model
         model_parser = subparsers.add_parser("model", help="Model operations")
         model_subparsers = model_parser.add_subparsers(dest="model_command", help="Model commands")
         
 
 
-        # Command: mling-admin main-model
+        # Command: ling-admin main-model
         main_model_parser = subparsers.add_parser("main-model", help="Main model operations")
         main_model_subparsers = main_model_parser.add_subparsers(dest="main_model_command", help="Main model commands")
         main_model_set_parser = main_model_subparsers.add_parser("set", help="Set the main model")
@@ -898,7 +898,7 @@ class DreamferenceCLIController:
                  "and per-workload speculative acceptance (sends extra requests; slower)",
         )
 
-        # Command: mling-admin diffusion-model. Absent while diffusion is switched off
+        # Command: ling-admin diffusion-model. Absent while diffusion is switched off
         # (DIFFUSION_ENABLED), so it is neither listed nor accepted.
         diffusion_on = ModelMatrixRegistry.diffusion_enabled()
         diffusion_model_parser = None
@@ -908,41 +908,41 @@ class DreamferenceCLIController:
             diffusion_model_set_parser = diffusion_model_subparsers.add_parser("set", help="Set the diffusion model served beside the main one")
             diffusion_model_set_parser.add_argument("model_name", type=str, help="Name of the diffusion model to set")
 
-        # Command: mling-admin model download
-        # Command: mling-admin model list
+        # Command: ling-admin model download
+        # Command: ling-admin model list
         model_subparsers.add_parser("list", help="List available model names and HuggingFace repos")
         
-        # Command: mling-admin model download
+        # Command: ling-admin model download
         download_parser = model_subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
         download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=False, help="Auto-convert model to tensorize format after download (default: False)")
-        # Command: mling-admin clear-tensorize-cache
+        # Command: ling-admin clear-tensorize-cache
         subparsers.add_parser("clear-tensorize-cache", help="Clear local tensorizer model cache only")
 
-        # Command: mling-admin clear
+        # Command: ling-admin clear
         clear_parser = subparsers.add_parser("clear", help="Clear operations")
         clear_subparsers = clear_parser.add_subparsers(dest="clear_command", help="Clear commands")
         
-        # Command: mling-admin clear model-cache
+        # Command: ling-admin clear model-cache
         clear_subparsers.add_parser("model-cache", help="Clear local HuggingFace and tensorizer model caches")
         
-        # Command: mling-admin clear tensorize-cache
+        # Command: ling-admin clear tensorize-cache
         clear_subparsers.add_parser("tensorize-cache", help="Clear local tensorizer model cache only")
 
-        # Command: mling-admin endpoints
+        # Command: ling-admin endpoints
         subparsers.add_parser("endpoints", help="Print the model server's endpoints (the standard /v1 API) and credentials")
 
-        # Command: mling-admin server
+        # Command: ling-admin server
         server_parser = subparsers.add_parser("server", help="Manage the vLLM server container (start, stop, remove)")
         server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operations")
 
 
 
-        # Command: mling-admin server start
+        # Command: ling-admin server start
         start_server_parser = server_subparsers.add_parser("start", help="Launch local vLLM server optimized for GB10 unified memory")
         # default=None, resolved to the *configured* model in the handler. A concrete default
-        # here silently outranked `mling-admin main-model set`: the config said one model and
+        # here silently outranked `ling-admin main-model set`: the config said one model and
         # `server start` launched another -- found live, when a recipe switch started the old
         # checkpoint on the old image and only the /v1/models listing told the truth.
         start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
@@ -970,39 +970,39 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--diffusion-model", default=None, help=diffusion_help(f"Diffusion model to serve beside the main one (default: the configured diffusion model, {DEFAULT_DIFFUSION_MODEL})"))
         start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port for the diffusion sidecar's /v1 API"))
         start_server_parser.add_argument("--no-diffusion", action="store_true", help=diffusion_help("Skip starting the diffusion sidecar"))
-        # Command: mling-admin server stop
+        # Command: ling-admin server stop
         stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM and diffusion Docker containers" if diffusion_on else "Stop the running model server")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
         stop_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port of the diffusion sidecar to stop"))
 
-        # Command: mling-admin server remove
+        # Command: ling-admin server remove
         remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM and diffusion Docker containers" if diffusion_on else "Remove the model server's container")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
         remove_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port of the diffusion sidecar to remove"))
 
-        # Command: mling-admin server logs
+        # Command: ling-admin server logs
         server_logs_parser = server_subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         server_logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
-        # Command: mling-admin logs
+        # Command: ling-admin logs
         logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         logs_parser.add_argument("target", nargs="?", choices=["server", "mcp"],
                                  help="server: vLLM container logs. mcp: the agent's MCP server lifecycle, "
                                       "read from ~/.mightling/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file)")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
-        # Command: mling-admin codex
-        codex_parser = subparsers.add_parser("codex", help="Build mling and manage its app-server daemon")
-        codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Build, run and test mling")
+        # Command: ling-admin codex
+        codex_parser = subparsers.add_parser("codex", help="Build ling and manage its app-server daemon")
+        codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Build, run and test ling")
         codex_build_parser = codex_subparsers.add_parser(
-            "build", help="Build mling from the pinned upstream source in codex/ and the patches in codex-patches/"
+            "build", help="Build ling from the pinned upstream source in codex/ and the patches in codex-patches/"
         )
         codex_build_parser.add_argument("--force", action="store_true", help="Rebuild even if the installed build is current")
-        codex_build_parser.add_argument("--no-audit", action="store_true", help="Do not trace the new build's network use afterwards (`mling-admin audit egress`)")
-        codex_subparsers.add_parser("start", help="Start mling's app-server daemon in the background")
-        codex_subparsers.add_parser("stop", help="Stop mling's app-server daemon")
+        codex_build_parser.add_argument("--no-audit", action="store_true", help="Do not trace the new build's network use afterwards (`ling-admin audit egress`)")
+        codex_subparsers.add_parser("start", help="Start ling's app-server daemon in the background")
+        codex_subparsers.add_parser("stop", help="Stop ling's app-server daemon")
         codex_test_parser = codex_subparsers.add_parser(
-            "test", help="Run the upstream test suite on mling's patched tree, except the tests in codex-tests/mightling-skips.toml"
+            "test", help="Run the upstream test suite on ling's patched tree, except the tests in codex-tests/mightling-skips.toml"
         )
         codex_test_parser.add_argument("-E", "--filter", default=None, help="nextest filterset to narrow the run to")
         codex_test_parser.add_argument("--test-threads", type=int, default=8, help="Tests run at once (default 8)")
@@ -1013,23 +1013,23 @@ class DreamferenceCLIController:
             help="Rewrite the selected TUI snapshots and keep those that differ from upstream's by the name alone",
         )
 
-        # Command: mling-admin code -- the code index's tools. `mling-code` itself is a Rust
-        # binary built beside `mling` (`codex build`); what it runs to index (codebase-memory, the
+        # Command: ling-admin code -- the code index's tools. `ling-code` itself is a Rust
+        # binary built beside `ling` (`codex build`); what it runs to index (codebase-memory, the
         # scip CLI, scip-python) is pinned by checksum and installed here, the one step that uses
         # the network (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §5).
-        code_parser = subparsers.add_parser("code", help="Install the pinned tools of mling-code's code index")
+        code_parser = subparsers.add_parser("code", help="Install the pinned tools of ling-code's code index")
         code_subparsers = code_parser.add_subparsers(dest="code_command", help="Code index commands")
         code_subparsers.add_parser(
             "setup", help="Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin"
         )
 
-        # Command: mling-admin host (the settings a model load is refused without)
-        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and mling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap)")
+        # Command: ling-admin host (the settings a model load is refused without)
+        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and ling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap)")
         host_subparsers = host_parser.add_subparsers(dest="host_command")
         host_subparsers.add_parser("check", help="Show what `server start` would refuse over, changing nothing")
         host_subparsers.add_parser("setup", help="Apply the settings; each command is printed first and sudo asks for your password")
 
-        # Command: mling-admin night (Night Shift: run queued tasks overnight)
+        # Command: ling-admin night (Night Shift: run queued tasks overnight)
         night_parser = subparsers.add_parser("night", help="Run the Night Shift queue overnight (tasks are queued with /night add)")
         night_subparsers = night_parser.add_subparsers(dest="night_command")
         night_enable_parser = night_subparsers.add_parser("enable", help="Install the systemd user timer that runs the queue every night")
@@ -1040,29 +1040,29 @@ class DreamferenceCLIController:
         night_run_parser.add_argument("--until", default=None, help="HH:MM to stop at (default: the end of the window)")
         night_run_parser.add_argument("--minutes", type=float, default=None, help="Run for this many minutes instead")
         night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
-        night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open mling sessions to close (for testing; their requests still pause the run)")
+        night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing; their requests still pause the run)")
 
-        # Command: mling-admin swe-bench (run mling over SWE-bench instances and grade the patches)
+        # Command: ling-admin swe-bench (run ling over SWE-bench instances and grade the patches)
         from dreamference.swe_bench.swe_bench_command import SweBenchCommand
         SweBenchCommand.add_parser(subparsers)
 
-        # Command: mling-admin audit (what does mling do on the network?)
+        # Command: ling-admin audit (what does ling do on the network?)
         audit_parser = subparsers.add_parser("audit", help="Check what a Mightling session does on the network")
         audit_subparsers = audit_parser.add_subparsers(dest="audit_command")
         audit_egress_parser = audit_subparsers.add_parser(
-            "egress", help="Trace one real mling session and list every network destination and process, with a verdict")
-        audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `mling exec` (needs pexpect and pyte)")
+            "egress", help="Trace one real ling session and list every network destination and process, with a verdict")
+        audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
 
-        # Command: mling-admin node (offer this machine to the local network as a Mightling node)
+        # Command: ling-admin node (offer this machine to the local network as a Mightling node)
         node_parser = subparsers.add_parser("node", help="Advertise this machine on the local network so clients find it with no address typed")
         node_subparsers = node_parser.add_subparsers(dest="node_command")
         node_enable_parser = node_subparsers.add_parser("enable", help="Advertise the node and publish the web UI and web search to the local network")
-        node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get mling and web search only")
+        node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get ling and web search only")
         node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
         node_status_parser = node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status")
-        node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `mling-admin status` instead")
+        node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `ling-admin status` instead")
         node_subparsers.add_parser("id", help="Print this node's id, writing it first if this machine has none yet")
         node_subparsers.add_parser("list", help="List every node on the local network: its model, its load, and whether it is paired")
         node_add_parser = node_subparsers.add_parser("add", help="Pair with another node over SSH, once, so it can be managed from here")
@@ -1115,14 +1115,14 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
-        # Command: mling-admin chat
+        # Command: ling-admin chat
         #
         # A subcommand group rather than an `--agent onyx` runner, because Onyx is a service and
-        # not a terminal session. Every entry in the --agent switch is a CLI that mling-admin
+        # not a terminal session. Every entry in the --agent switch is a CLI that ling-admin
         # execs and waits on; Onyx is a set of long-lived containers with a lifecycle of its own,
-        # so it mirrors `mling-admin server` instead.
+        # so it mirrors `ling-admin server` instead.
         # "chat" is the command's name (it was `puffin` before the product became Mightling, and
-        # `mling-admin mightling start` would read as nonsense); "onyx" remains, as it was before.
+        # `ling-admin mightling start` would read as nonsense); "onyx" remains, as it was before.
         onyx_parser = subparsers.add_parser(
             "chat", aliases=["onyx"],
             help="Manage the Mightling web chat UI (Onyx Lite) backed by local vLLM"
@@ -1183,9 +1183,9 @@ class DreamferenceCLIController:
         )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
 
-        # Command: mling-admin desktop {run,build,status}
+        # Command: ling-admin desktop {run,build,status}
         #
-        # The desktop shell is a window onto the same deployment `mling-admin chat` manages, so it is a
+        # The desktop shell is a window onto the same deployment `ling-admin chat` manages, so it is a
         # sibling command rather than an `--agent` entry: nothing is exec'd and waited on here
         # except the window itself.
         desktop_parser = subparsers.add_parser(
@@ -1211,15 +1211,15 @@ class DreamferenceCLIController:
             "uninstall", help="Permanently delete the Onyx deployment and all its data"
         )
 
-        # Web access is not here. Searching and fetching are the agent's commands, `mling-search`
-        # and `mling-fetch`: Rust binaries built from mling-web-rs/ and installed beside `mling`,
-        # so they work from any shell without this virtualenv. `mling-admin fetch` was retired on
-        # 2026-09-30, as `mling-admin search` was before it.
+        # Web access is not here. Searching and fetching are the agent's commands, `ling-search`
+        # and `ling-fetch`: Rust binaries built from ling-web-rs/ and installed beside `ling`,
+        # so they work from any shell without this virtualenv. `ling-admin fetch` was retired on
+        # 2026-09-30, as `ling-admin search` was before it.
 
-        # Command: mling-admin gmail -- read-only mail access for the Mightling agent, in the same shape
+        # Command: ling-admin gmail -- read-only mail access for the Mightling agent, in the same shape
         # as search/fetch and for the same reason (a shell command the model uses reliably). It is a
         # client of the service the web UI already runs, not a second IMAP path; connecting an
-        # account is still `mling-admin chat gmail`.
+        # account is still `ling-admin chat gmail`.
         gmail_parser = subparsers.add_parser("gmail", help="Search and read connected Gmail accounts (read-only)")
         gmail_subparsers = gmail_parser.add_subparsers(dest="gmail_command", required=True)
         gmail_search_parser = gmail_subparsers.add_parser("search", help="Search with Gmail query syntax")
@@ -1233,12 +1233,12 @@ class DreamferenceCLIController:
         gmail_status_parser = gmail_subparsers.add_parser("status", help="Show which accounts are connected")
         gmail_status_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
 
-        # Command: mling-admin searxng (the search container behind mling-search and the web UI)
+        # Command: ling-admin searxng (the search container behind ling-search and the web UI)
         searxng_parser = subparsers.add_parser("searxng", help="Manage the local SearXNG search container")
         searxng_subparsers = searxng_parser.add_subparsers(dest="searxng_command")
         searxng_subparsers.add_parser("start", help="Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge)")
 
-        # Command: mling-admin google (the service behind Gmail, Drive and Calendar in /apps)
+        # Command: ling-admin google (the service behind Gmail, Drive and Calendar in /apps)
         google_parser = subparsers.add_parser("google", help="Manage the local Google service (Gmail, Drive, Calendar)")
         google_subparsers = google_parser.add_subparsers(dest="google_command")
         google_subparsers.add_parser(
@@ -1251,13 +1251,13 @@ class DreamferenceCLIController:
             "status", help="Show whether it runs and which accounts hold which apps"
         )
 
-        # Command: mling-admin web
+        # Command: ling-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
 
         # Kept on the parser so run_cli can print a group's help when no subcommand is given.
-        # Without it `mling-admin server` (or clear, model, …) matched no branch and exited 0
-        # having printed nothing; desktop and mling named locals of build_parser and hit NameError.
+        # Without it `ling-admin server` (or clear, model, …) matched no branch and exited 0
+        # having printed nothing; desktop and ling named locals of build_parser and hit NameError.
         parser.command_groups = {
             "model": (model_parser, "model_command"),
             "main-model": (main_model_parser, "main_model_command"),
@@ -1388,7 +1388,7 @@ class DreamferenceCLIController:
                         if config.draft_model:
                             download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                     else:
-                        print("⚠️  No model specified. Use --model <model_name> or initialize config with 'mling-admin init --model <model_name>'")
+                        print("⚠️  No model specified. Use --model <model_name> or initialize config with 'ling-admin init --model <model_name>'")
                 sys.exit(0)
 
         elif args.command == "diffusion-model":
@@ -1406,7 +1406,7 @@ class DreamferenceCLIController:
                         f"[bold red]❌ '{args.model_name}' is not a diffusion model in the registry.[/bold red]\n"
                         f"   Diffusion checkpoints generate by block denoising and are served by the "
                         f"diffusion sidecar, not vLLM. For the main model use: "
-                        f"[cyan]mling-admin main-model set {args.model_name}[/cyan]")
+                        f"[cyan]ling-admin main-model set {args.model_name}[/cyan]")
                     sys.exit(1)
                 config.diffusion_model = args.model_name
                 saved_path = config.save_config()
@@ -1428,7 +1428,7 @@ class DreamferenceCLIController:
                     out_console.print(
                         f"[bold red]❌ '{args.model_name}' is a diffusion model and cannot be served "
                         f"by vLLM as the main model.[/bold red]\n"
-                        f"   Use: [cyan]mling-admin diffusion-model set {args.model_name}[/cyan]")
+                        f"   Use: [cyan]ling-admin diffusion-model set {args.model_name}[/cyan]")
                     sys.exit(1)
                 config.model = args.model_name
                 saved_path = config.save_config()
@@ -1438,7 +1438,7 @@ class DreamferenceCLIController:
                 # A model change is not local to vLLM: Onyx's LLM provider is registered by
                 # name, its vision flag follows the checkpoint, and the image search sidecar
                 # carries the served model id in its environment. Left alone, all three keep
-                # pointing at the previous model until someone remembers `mling-admin chat configure`
+                # pointing at the previous model until someone remembers `ling-admin chat configure`
                 # -- so it runs here, when Onyx is up. configure() is idempotent, and skipping
                 # when Onyx is absent keeps `main-model set` usable before any deployment.
                 if not args.no_onyx:
@@ -1469,7 +1469,7 @@ class DreamferenceCLIController:
                 # level requests.get/post helpers. Each of those builds a throwaway Session with
                 # its own connection pool and never closes it, so eleven probes left eleven
                 # sockets in CLOSE-WAIT for the life of the process — visible in `ss` after any
-                # `mling-admin main-model inspect`. A shared session also reuses the one connection
+                # `ling-admin main-model inspect`. A shared session also reuses the one connection
                 # instead of reconnecting per probe. External hosts stay on the module API.
                 session = requests.Session()
 
@@ -1641,7 +1641,7 @@ class DreamferenceCLIController:
                     # then breaks, deliberately abandoning the rest of the body. A streamed
                     # response whose body is never finished holds its connection open, and the
                     # server's FIN then leaves the socket in CLOSE-WAIT for the life of the
-                    # process — `mling-admin main-model inspect` was leaking one per probe.
+                    # process — `ling-admin main-model inspect` was leaking one per probe.
                     with session.post(
                         api_base, json=payload_stream, headers=headers, timeout=15, stream=True
                     ) as s_response:
@@ -1963,7 +1963,7 @@ class DreamferenceCLIController:
             cls.display_header()
             db = os.path.join(CodexInstaller.home_dir(), "logs_2.sqlite")
             if not os.path.exists(db):
-                print(f"❌ No mling log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace mling` first.")
+                print(f"❌ No ling log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace ling` first.")
                 sys.exit(1)
             try:
                 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -1990,19 +1990,19 @@ class DreamferenceCLIController:
                     seen.append(entry)
 
             if not seen:
-                print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace mling` to record some.")
+                print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace ling` to record some.")
             else:
                 print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:
                     icon = "✅" if marker == "Service initialized as client" else "⚠️ "
                     print(f"   {icon} {name:16} {marker}")
-                print("\nNote: a server can initialize and then be cancelled — mling still reports")
+                print("\nNote: a server can initialize and then be cancelled — ling still reports")
                 print("      it as 'not initialized' in its startup banner.")
             sys.exit(0)
 
         elif args.command == "desktop":
             from dreamference.chat import DesktopRunner
-            # `mling-admin` exists only on a node: the window built here then shows this
+            # `ling-admin` exists only on a node: the window built here then shows this
             # machine's web UI and never looks for another node's.
             from dreamference.node import NodeIdentity
             NodeIdentity.ensure()
@@ -2341,7 +2341,7 @@ class DreamferenceCLIController:
             if args.audit_command == "egress":
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
                 sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui))
-            print("usage: mling-admin audit {egress}")
+            print("usage: ling-admin audit {egress}")
             sys.exit(2)
 
         elif args.command == "swe-bench":
@@ -2405,7 +2405,7 @@ class DreamferenceCLIController:
                 sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
             if args.node_command == "serve-job":
                 sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
-            print("usage: mling-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
+            print("usage: ling-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
             sys.exit(2)
 
         elif args.command == "host":
@@ -2414,7 +2414,7 @@ class DreamferenceCLIController:
                 sys.exit(0 if HostSafetySetup.check() else 1)
             if args.host_command == "setup":
                 sys.exit(0 if HostSafetySetup.setup() else 1)
-            print("usage: mling-admin host {check,setup}")
+            print("usage: ling-admin host {check,setup}")
             sys.exit(2)
 
         elif args.command == "night":
@@ -2430,14 +2430,14 @@ class DreamferenceCLIController:
                 sys.exit(NightShiftRunner.run(until=args.until, minutes=args.minutes,
                                               idle_minutes=args.idle_minutes,
                                               ignore_sessions=args.ignore_open_sessions))
-            print("usage: mling-admin night {enable,disable,status,run}")
+            print("usage: ling-admin night {enable,disable,status,run}")
             sys.exit(2)
 
         elif args.command == "code":
             from dreamference.cli.code_index_setup import CodeIndexSetup
             if args.code_command == "setup":
                 sys.exit(0 if CodeIndexSetup.install() else 1)
-            print("usage: mling-admin code setup")
+            print("usage: ling-admin code setup")
             sys.exit(2)
 
         elif args.command == "codex":
@@ -2469,18 +2469,18 @@ class DreamferenceCLIController:
                 sys.exit(1)
             codex_bin = CodexInstaller.get_codex_executable()
             if args.codex_command == "start":
-                print("🚀 Starting mling's app-server daemon...")
+                print("🚀 Starting ling's app-server daemon...")
                 subprocess.Popen(
                     [codex_bin, "app-server", "daemon", "start"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-                print("✅ mling's app-server daemon started.")
+                print("✅ ling's app-server daemon started.")
             elif args.codex_command == "stop":
-                print("🛑 Stopping mling's app-server daemon...")
+                print("🛑 Stopping ling's app-server daemon...")
                 subprocess.call([codex_bin, "app-server", "daemon", "stop"])
-                print("✅ mling's app-server daemon stopped.")
+                print("✅ ling's app-server daemon stopped.")
 
         elif args.command == "logs":
             cls.display_header()
@@ -2560,7 +2560,7 @@ class DreamferenceCLIController:
                 from dreamference.node import NodeAdvertiser
                 NodeAdvertiser.on_searxng_started()
                 sys.exit(0)
-            print("usage: mling-admin searxng {start}")
+            print("usage: ling-admin searxng {start}")
             sys.exit(2)
 
         elif args.command == "google":
@@ -2569,7 +2569,7 @@ class DreamferenceCLIController:
         elif args.command == "web":
             cls.display_header()
             # Lazy for the same reason as the context engine: web_canvas imports it, and
-            # `mling-admin web` is the only subcommand that needs either.
+            # `ling-admin web` is the only subcommand that needs either.
             from dreamference.web_canvas import start_web_canvas_server
 
             start_web_canvas_server(port=args.port, daemon=False)
@@ -2583,8 +2583,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     """
     Standalone CLI main function.
 
-    `mling` is not defined here: it is the Rust binary built from the codex submodule, with the
-    session setup this package used to do compiled into it (see `mling-rs/`).
+    `ling` is not defined here: it is the Rust binary built from the codex submodule, with the
+    session setup this package used to do compiled into it (see `ling-rs/`).
 
     Args:
         argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.

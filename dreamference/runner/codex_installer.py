@@ -34,10 +34,10 @@ class CodexInstaller:
     @classmethod
     def home_dir(cls) -> str:
         """
-        Returns the configuration folder `mling` uses: `$CODEX_HOME` if set, else `~/.mightling`.
+        Returns the configuration folder `ling` uses: `$CODEX_HOME` if set, else `~/.mightling`.
 
         Not `~/.codex`: that is upstream Codex's folder, where a ChatGPT login may live, and the
-        launcher (`mling-rs/src/home.rs`) keeps Mightling out of it. This mirrors its resolution so
+        launcher (`ling-rs/src/home.rs`) keeps Mightling out of it. This mirrors its resolution so
         the Python side reads the same session logs.
 
         Returns:
@@ -65,6 +65,6 @@ class CodexInstaller:
             bool: True if an up-to-date `mightling-codex` is installed afterwards.
         """
         if cls.is_installed():
-            print("✅ mling is already built.")
+            print("✅ ling is already built.")
             return True
         return CodexBrandedBuilder.build()

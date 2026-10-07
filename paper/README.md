@@ -3,8 +3,8 @@
 LaTeX source for the arXiv preprint describing the terminal coding agent of Mightling (by Dreamference).
 
 ```bash
-make              # builds mling.pdf inside the texlive/texlive container (no local TeX needed)
-make arxiv.tar.gz # source bundle for arXiv: mling.tex, references.bib and the generated mling.bbl
+make              # builds ling.pdf inside the texlive/texlive container (no local TeX needed)
+make arxiv.tar.gz # source bundle for arXiv: ling.tex, references.bib and the generated ling.bbl
 ```
 
 ## Decisions for the author before submitting
@@ -47,12 +47,12 @@ code has moved:
 
 | Figure | Source |
 |---|---|
-| Upstream size (4,894 `.rs` files, 1.93M lines) | exported `codex-rs/` of `rust-v0.158.0`, excluding `mling/` |
+| Upstream size (4,894 `.rs` files, 1.93M lines) | exported `codex-rs/` of `rust-v0.158.0`, excluding `ling/` |
 | Patch series (16 patches, 26,933 B, 27 files, +109/−47; per-patch columns of Table 1) | `codex-patches/*.patch`, each through `git apply --numstat` |
 | Smallest series (about 9 KB) | status line of `specs/DREAMFERENCE_MIGHTLING_CODEX.md` |
 | Initial series (406,116 B; 395,156 B in one patch) | `git ls-tree -l b03ad9b codex-patches/` |
-| Launcher (3,359 lines, 59 tests; `cave.rs` 566 and `night.rs` 769 lines) | `mling-rs/src/*.rs` |
-| Code-index router (6,107 lines, 73 tests) | `mling-code-rs/src/`, `cargo test --locked` there |
+| Launcher (3,359 lines, 59 tests; `cave.rs` 566 and `night.rs` 769 lines) | `ling-rs/src/*.rs` |
+| Code-index router (6,107 lines, 73 tests) | `ling-code-rs/src/`, `cargo test --locked` there |
 | Binary sizes (315 MB, 93 MB, binary megabytes; 1.4 GB unstripped) | `~/.local/share/dreamference/mightling/bin/` |
 | Python (87 modules, 23.2k lines) | `dreamference/**/*.py` |
 | Python tests (511; 509 pass and 2 skip in 775.5 s with the server; 63 skip without it) | `pytest tests/`, 2026-10-01 |

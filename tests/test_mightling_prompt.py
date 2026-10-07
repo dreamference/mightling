@@ -1,7 +1,7 @@
 """
 Named system prompts (specs/DREAMFERENCE_MIGHTLING_PROMPT.md): the Python side of the choice, the
 shipped `high-swe` text, and where Night Shift passes it. The launcher's own behaviour is tested in
-Rust (mling-rs/src/prompt.rs).
+Rust (ling-rs/src/prompt.rs).
 """
 
 import re
@@ -14,8 +14,8 @@ from dreamference.config.dreamference_config import DreamferenceConfig
 from dreamference.night_shift import NightShiftHost, NightShiftSettings
 
 REPO = Path(__file__).resolve().parent.parent
-PROMPT_RS = REPO / "mling-rs" / "src" / "prompt.rs"
-HIGH_SWE = REPO / "mling-rs" / "prompts" / "high-swe.md"
+PROMPT_RS = REPO / "ling-rs" / "src" / "prompt.rs"
+HIGH_SWE = REPO / "ling-rs" / "prompts" / "high-swe.md"
 SPEC = REPO / "specs" / "DREAMFERENCE_MIGHTLING_PROMPT.md"
 
 # The two edits §6.4 of the spec made to Appendix A's v1 for the text that ships (v2).
@@ -30,7 +30,7 @@ V2_EDITS = (
 
 def test_the_python_default_is_the_launchers():
     match = re.search(r'pub const DEFAULT_PROMPT: &str = "([a-z0-9-]+)";', PROMPT_RS.read_text())
-    assert match, "DEFAULT_PROMPT not found in mling-rs/src/prompt.rs"
+    assert match, "DEFAULT_PROMPT not found in ling-rs/src/prompt.rs"
     assert match.group(1) == cfg_mod.DEFAULT_MIGHTLING_PROMPT
 
 
@@ -75,8 +75,8 @@ def test_prompt_names_are_read_as_the_launcher_reads_them(value, expected):
 
 
 def test_save_config_keeps_a_chosen_prompt_and_writes_no_default(tmp_path, monkeypatch):
-    # save_config() writes only the flat keys it knows: without the field, `mling-admin main-model
-    # set` would drop a `mightling_prompt` that `mling prompt use` wrote.
+    # save_config() writes only the flat keys it knows: without the field, `ling-admin main-model
+    # set` would drop a `mightling_prompt` that `ling prompt use` wrote.
     monkeypatch.delenv("DREAMFERENCE_MIGHTLING_PROMPT", raising=False)
     path = tmp_path / "dreamference.toml"
     path.write_text('mightling_prompt = "high-swe"\n')

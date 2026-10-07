@@ -1,8 +1,8 @@
 """
-One interactive `mling` session driven on a pseudo-terminal, for `mling-admin audit egress --tui`
+One interactive `ling` session driven on a pseudo-terminal, for `ling-admin audit egress --tui`
 (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1 step 3).
 
-This module provides the TuiSession class. `mling exec` and the full-screen interface start
+This module provides the TuiSession class. `ling exec` and the full-screen interface start
 different parts of Codex: the announcement tip that patch `0015` closed was fetched by the
 interface alone, and no trace of `exec` could have shown it. So the audit also opens the real
 interface, types a prompt, waits for the reply and quits, with strace around all of it.
@@ -100,7 +100,7 @@ class TuiSession:
     def run(cls, command: List[str], cwd: str, env: Dict[str, str], home: str, prompt: str,
             timeout: float) -> Dict[str, object]:
         """
-        Runs `command` (strace around `mling`) on a pseudo-terminal: waits for the composer,
+        Runs `command` (strace around `ling`) on a pseudo-terminal: waits for the composer,
         types `prompt`, waits for the reply, and quits with `/quit`. A session that does not end
         by itself is stopped with everything it started.
 
@@ -178,7 +178,7 @@ class TuiSession:
 
     @classmethod
     def _stop(cls, child) -> None:
-        """Ends the session's whole process group: strace alone, killed, would leave `mling`."""
+        """Ends the session's whole process group: strace alone, killed, would leave `ling`."""
         if child.isalive():
             for sig in (signal.SIGTERM, signal.SIGKILL):
                 try:

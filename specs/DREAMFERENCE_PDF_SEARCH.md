@@ -69,7 +69,7 @@ Onyx's custom-tool API takes an **OpenAPI document**, not a `custom_tool_url`. R
 - `openapi_definition()` in the service module, with one `pdf_search` POST operation;
 - sent to `POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate;
 - a `custom_headers` shared secret (e.g. `X-Mightling-PDF-Token`) generated once into the data directory;
-- a `--no-pdf-search` opt-out on `mling-admin chat configure`, like the other tools.
+- a `--no-pdf-search` opt-out on `ling-admin chat configure`, like the other tools.
 
 ### 3.2 PDF Parsing and Chunking
 The sidecar uses `pymupdf` (fitz) to extract text. 
@@ -116,7 +116,7 @@ Because the tool fetches arbitrary PDFs from the internet and parses them locall
 - Hardened downloader SSRF assertions.
 
 **Integration:**
-- `mling-admin chat configure` successfully registers the tool.
+- `ling-admin chat configure` successfully registers the tool.
 - End-to-end local test against a mock SearXNG instance returning a test PDF. 
 - Verify the tool extracts text, embeds it, and returns the top chunk.
 - Verify memory is freed (no PDF files left on disk).

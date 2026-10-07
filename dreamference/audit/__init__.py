@@ -1,5 +1,5 @@
 """
-Audits of what Mightling does on the network: `mling-admin audit egress` traces one real `mling`
+Audits of what Mightling does on the network: `ling-admin audit egress` traces one real `ling`
 session and judges where it connected (specs/DREAMFERENCE_MIGHTLING_EGRESS.md).
 """
 

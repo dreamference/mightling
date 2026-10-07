@@ -1,5 +1,5 @@
 """
-`mling-admin night run`: works through the Night Shift queue inside a window
+`ling-admin night run`: works through the Night Shift queue inside a window
 (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5).
 
 It never starts, stops or loads the model server, and gives way to anyone working interactively.
@@ -60,10 +60,10 @@ class NightShiftRunner:
             idle_minutes: How long the model server must have been idle before starting;
                 defaults to `[night] idle_minutes` (10).
             night_dir: The queue directory; defaults to `$CODEX_HOME/night`.
-            mightling_bin: The `mling` executable; defaults to the installed branded build.
+            mightling_bin: The `ling` executable; defaults to the installed branded build.
             vllm_host: The model server; defaults to the configured host.
             settings: Night Shift settings; defaults to the config file's.
-            ignore_sessions: Do not wait for open `mling` TUI sessions (for testing beside one;
+            ignore_sessions: Do not wait for open `ling` TUI sessions (for testing beside one;
                 requests from them still block a start).
 
         Returns:
@@ -77,7 +77,7 @@ class NightShiftRunner:
             from dreamference.runner.codex_installer import CodexInstaller
             mightling_bin = os.environ.get("MIGHTLING_NIGHT_MIGHTLING_BIN") or CodexInstaller.get_codex_executable()
         if not mightling_bin:
-            print("❌ mling is not built: run `mling-admin codex build` first.")
+            print("❌ ling is not built: run `ling-admin codex build` first.")
             return 1
         if vllm_host is None:
             from dreamference.config import DreamferenceConfig
@@ -172,7 +172,7 @@ class NightShiftRunner:
         if cls.host.served_model(vllm_host) is None:
             return f"the model server at {vllm_host} is not answering (the night run never starts it)"
         if not cls.host.host_safety_ok():
-            return "the host-safety checks failed (see `mling-admin server start` for the details)"
+            return "the host-safety checks failed (see `ling-admin server start` for the details)"
         available = cls.host.mem_available_bytes()
         if available < MEMORY_RESERVE:
             return f"only {available / GIB:.1f} GiB of memory is available; a night run needs {MEMORY_RESERVE // GIB}"
@@ -216,7 +216,7 @@ class NightShiftRunner:
                         end: datetime, notes: List[str]) -> None:
         """
         Refreshes the code index of every repository with queued tasks, one at a time, before any
-        task starts, so each begins with a fresh index (code-index spec §6.3). `mling-code` admits
+        task starts, so each begins with a fresh index (code-index spec §6.3). `ling-code` admits
         and sandboxes its own runs; a refresh that does not finish leaves the index as it was,
         which the router's answers already account for.
 
@@ -373,10 +373,10 @@ class NightShiftRunner:
 
         Args:
             vllm_host: The model server the task would use.
-            mightling_bin: The `mling` executable.
+            mightling_bin: The `ling` executable.
             active: The running tasks.
             settings: Night Shift settings.
-            local: Whether that server is this machine's. An open `mling` session here uses this
+            local: Whether that server is this machine's. An open `ling` session here uses this
                 machine's server, so it blocks this machine's lane and no other; a replica's own
                 users show up as its outside requests.
 

@@ -2,7 +2,7 @@
 Codex Test Runner for Dreamference.
 
 This module provides the CodexTestRunner class, which runs Codex's own Rust test suite against the
-tree `mling` is built from: the pinned `codex/` submodule exported with `git archive`, the launcher
+tree `ling` is built from: the pinned `codex/` submodule exported with `git archive`, the launcher
 crate copied in and the patch series applied, exactly as `CodexBrandedBuilder` prepares it. The
 submodule is never touched; the export and its build output live in the builder's cache, beside
 (not inside) the directories the product build uses, so a test run never invalidates a build.
@@ -18,7 +18,7 @@ are the tests that guard layout, wrapping and every popup. Instead of losing the
 gets Mightling's expectations before it is built: `codex-tests/snapshots/` holds Mightling's accepted
 versions of upstream's `.snap` files, copied over the originals, and `codex-tests/patches/` holds
 test-only diffs for expectations written in Rust (inline snapshots, `contains` checks). Neither
-reaches the build `mling` comes from. `--accept-snapshots` regenerates the first after a Codex
+reaches the build `ling` comes from. `--accept-snapshots` regenerates the first after a Codex
 bump and accepts a new snapshot only if it differs from upstream's by the name alone.
 """
 
@@ -57,7 +57,7 @@ TEST_HOME_DIR: Final[str] = os.path.join(BUILD_CACHE_DIR, "test-home")
 TOOLS_DIR: Final[str] = os.path.join(BUILD_CACHE_DIR, "tools")
 
 # The launcher crate, copied into the export by CodexBrandedBuilder.
-LAUNCHER_PACKAGE: Final[str] = "mling-launcher"
+LAUNCHER_PACKAGE: Final[str] = "ling-launcher"
 
 # Upstream's own test profile: the test profile at opt-level 0, which its CI uses to keep test
 # binaries small. 20,000 tests across ~280 binaries.
@@ -204,7 +204,7 @@ class CodexTestRunner:
         Upstream's tests run on `main`, where every workspace crate is 0.0.0; its release job bumps
         the version just before building, so the release tag Mightling pins says 0.158.0 and ~30 TUI
         snapshots ("OpenAI Codex (v0.0.0)", "Update available! 0.0.0 -> 9.9.9") fail on an
-        unmodified checkout of it. Only the test export is changed; `mling` keeps its version.
+        unmodified checkout of it. Only the test export is changed; `ling` keeps its version.
 
         Args:
             source_dir (str): The exported tree.
@@ -239,7 +239,7 @@ class CodexTestRunner:
                     if not os.path.isfile(target):
                         # The test it belonged to was renamed or removed upstream.
                         print(f"❌ codex-tests/snapshots/{relative} replaces no upstream snapshot.")
-                        print("💡 Regenerate the overlay with `mling-admin codex test --accept-snapshots`.")
+                        print("💡 Regenerate the overlay with `ling-admin codex test --accept-snapshots`.")
                         return False
                     shutil.copyfile(os.path.join(root, name), target)
         patches = sorted(
@@ -275,7 +275,7 @@ class CodexTestRunner:
         return hashes
 
     @classmethod
-    def differs_only_by_name(cls, upstream: str, mling: str) -> bool:
+    def differs_only_by_name(cls, upstream: str, ling: str) -> bool:
         """
         Tells whether a snapshot differs from upstream's by the on-screen name and nothing else.
 
@@ -285,7 +285,7 @@ class CodexTestRunner:
 
         Args:
             upstream (str): Upstream's snapshot.
-            mling (str): The snapshot the patched tree produced.
+            ling (str): The snapshot the patched tree produced.
 
         Returns:
             bool: True if the two reduce to the same text.
@@ -297,7 +297,7 @@ class CodexTestRunner:
                 body = body.replace(name, "\x00")
             return re.sub(r"[\s│─]+", "", body)
 
-        return reduce(upstream) == reduce(mling)
+        return reduce(upstream) == reduce(ling)
 
     @classmethod
     def accept_snapshots(cls, before: dict) -> int:
@@ -317,18 +317,18 @@ class CodexTestRunner:
         refused = []
         for relative in changed:
             with open(os.path.join(workspace_dir, relative)) as handle:
-                mling = handle.read()
+                ling = handle.read()
             upstream = subprocess.run(
                 ["git", "-C", os.path.join(REPO_ROOT, "codex"), "show", f"{commit}:codex-rs/{relative}"],
                 capture_output=True, text=True, check=False,
             )
-            if upstream.returncode != 0 or not cls.differs_only_by_name(upstream.stdout, mling):
+            if upstream.returncode != 0 or not cls.differs_only_by_name(upstream.stdout, ling):
                 refused.append(relative)
                 continue
             target = os.path.join(SNAPSHOT_OVERLAY_DIR, relative)
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "w") as handle:
-                handle.write(mling)
+                handle.write(ling)
         pending = [os.path.relpath(os.path.join(root, name), workspace_dir)
                    for root, dirs, files in os.walk(workspace_dir)
                    for name in files if name.endswith(".pending-snap")]
@@ -456,7 +456,7 @@ class CodexTestRunner:
             f"CARGO_PROFILE_{CARGO_PROFILE.upper().replace('-', '_')}_STRIP": "debuginfo",
             # Upstream's `just test` and CI both set this: some tests recurse deeply.
             "RUST_MIN_STACK": "8388608",
-            # The launcher leaves the tests' command lines alone (mling-rs, UPSTREAM_TESTS_ENV).
+            # The launcher leaves the tests' command lines alone (ling-rs, UPSTREAM_TESTS_ENV).
             "MIGHTLING_UPSTREAM_TESTS": "1",
             "DREAMFERENCE_VLLM_HOST": CLOSED_MODEL_HOST,
             # codex-bwrap compiles a vendored bubblewrap that needs libcap's headers. Mightling does
@@ -567,8 +567,8 @@ class CodexTestRunner:
         for package in sorted(skipped_targets):
             kept = [name for name in cls.test_targets(workspace_dir, package, environment)
                     if name not in skipped_targets[package]]
-            # mling-launcher is built alongside, never tested here: it is what turns on vendored
-            # OpenSSL for the whole build (mling-rs/Cargo.toml), and Cargo unifies features only
+            # ling-launcher is built alongside, never tested here: it is what turns on vendored
+            # OpenSSL for the whole build (ling-rs/Cargo.toml), and Cargo unifies features only
             # across the packages one invocation builds. Without it openssl-sys looks for system
             # headers this machine does not have.
             only_this = cls.filterset(skips, f"package({package})" if not user_filter

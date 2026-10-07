@@ -1,12 +1,12 @@
 # Mightling Skills — skills from the upstream vendor, Claude, Gemini, OpenClaw and Hermes
 
-**Status:** Phases 1 and 2 implemented on 2026-10-02: the crate `mling-rs/skills/` and the launcher module `mling-rs/src/skills.rs`. Phase 3 (ClawHub and Hermes as install sources, a trusted repository's `.claude/skills` and `.gemini/skills`) implemented on 2026-10-03 (§15.6). §15 records what was built, where it departs from the design below, and what was measured; the sections before it are the design as specified, with §2 being what was measured on 2026-10-01 before any code.
-**Goal:** a skill written for Codex, Claude Code, Gemini CLI, OpenClaw or Hermes Agent can be installed into `mling` with one command and used by the local model, without the user knowing which ecosystem it came from.
-**Short answer:** the file format is already shared. All five consume the [Agent Skills](https://agentskills.io/specification) `SKILL.md` (Hermes and OpenClaw add fields under `metadata`; Claude Code adds top-level fields). Every dialect loads today when its files are where `mling` looks: a Claude-style and a Hermes-style skill were discovered, read and used in a live session, and so was a real skill from Anthropic's catalogue (§2.2). `~/.claude/skills`, `~/.gemini/skills`, `~/.hermes/skills` and `~/.openclaw/skills` are not where it looks (§2.3). What differs between the ecosystems, and what this spec designs, is four things: **where** each keeps skills on disk, what each one's **extra frontmatter** means, which **tool names** the instruction bodies assume, and how skills are **installed**.
-**Target:** the `mling` terminal agent. The web chat (Onyx) has no skills and is not covered.
+**Status:** Phases 1 and 2 implemented on 2026-10-02: the crate `ling-rs/skills/` and the launcher module `ling-rs/src/skills.rs`. Phase 3 (ClawHub and Hermes as install sources, a trusted repository's `.claude/skills` and `.gemini/skills`) implemented on 2026-10-03 (§15.6). §15 records what was built, where it departs from the design below, and what was measured; the sections before it are the design as specified, with §2 being what was measured on 2026-10-01 before any code.
+**Goal:** a skill written for Codex, Claude Code, Gemini CLI, OpenClaw or Hermes Agent can be installed into `ling` with one command and used by the local model, without the user knowing which ecosystem it came from.
+**Short answer:** the file format is already shared. All five consume the [Agent Skills](https://agentskills.io/specification) `SKILL.md` (Hermes and OpenClaw add fields under `metadata`; Claude Code adds top-level fields). Every dialect loads today when its files are where `ling` looks: a Claude-style and a Hermes-style skill were discovered, read and used in a live session, and so was a real skill from Anthropic's catalogue (§2.2). `~/.claude/skills`, `~/.gemini/skills`, `~/.hermes/skills` and `~/.openclaw/skills` are not where it looks (§2.3). What differs between the ecosystems, and what this spec designs, is four things: **where** each keeps skills on disk, what each one's **extra frontmatter** means, which **tool names** the instruction bodies assume, and how skills are **installed**.
+**Target:** the `ling` terminal agent. The web chat (Onyx) has no skills and is not covered.
 **Builds on:**
 - Codex's skill loader in the pinned source (`codex-rs/skills`, `codex-rs/ext/skills`), unmodified ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md));
-- the launcher crate `mling-rs/`, which already intercepts subcommands before Codex parses them (`mling night`, `mling airgapped`), writes the model's prompt block into `model_catalog.json` and edits `config.toml`;
+- the launcher crate `ling-rs/`, which already intercepts subcommands before Codex parses them (`ling night`, `ling airgapped`), writes the model's prompt block into `model_catalog.json` and edits `config.toml`;
 - `/airgapped` ([MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)): installing a skill is a network action and follows the level;
 - commit `77b9471`, which made `$CODEX_HOME/skills` writable inside the workspace-write sandbox so Codex's built-in `skill-installer` works.
 
@@ -34,7 +34,7 @@ Gemini contributes no catalogue: its part of this is the `~/.agents/skills` and 
 
 ---
 
-## 2. What `mling` does today
+## 2. What `ling` does today
 
 ### 2.1 Read from the pinned source (`rust-v0.158.0`)
 
@@ -42,7 +42,7 @@ Gemini contributes no catalogue: its part of this is the `~/.agents/skills` and 
 - **Scan**: recursive to depth 6, at most 2,000 directories and 20,000 entries per root; hidden directories below a root are skipped (`HiddenDirectoryPolicy::Skip` for every host root, `loader/host.rs`); directory symlinks are followed in user, repository and admin roots and not in the system root (`loader/host.rs`).
 - **Frontmatter**: only `name`, `description` and `metadata.short-description` are read (`skills/src/parser.rs`). Unknown keys are ignored, and a line-oriented repair retries YAML that third-party skills get wrong (an unquoted colon in a description).
 - **Sidecar**: beside `SKILL.md`, Codex reads `agents/openai.yaml` (`loader/metadata.rs`, `skills/src/model.rs`): an `interface` block for display, `dependencies` on tools, and a `policy` with `allow_implicit_invocation` and `products`. The installed `pdf` skill has one, with an `interface` block only. `allow_implicit_invocation: false` is Codex's own form of Claude's `disable-model-invocation`; how the pinned version enforces it was not read through (a comment in the source says product gating is parsed and stored but not enforced). Codex also lets the user name a skill explicitly in a message (`skills/src/mentions.rs`); read, not run.
-- **Catalogue budget** (`ext/skills/src/render.rs`): the list of names and descriptions the model sees each session is capped at 2% of the model's context window (a configured `skills.max_context_tokens` is itself capped at 10,000). `mling` advertises 262,144 tokens, so the budget is 5,242 tokens, about 21,000 characters. Descriptions are truncated to fit; past that, **all descriptions are removed** and a warning is shown.
+- **Catalogue budget** (`ext/skills/src/render.rs`): the list of names and descriptions the model sees each session is capped at 2% of the model's context window (a configured `skills.max_context_tokens` is itself capped at 10,000). `ling` advertises 262,144 tokens, so the budget is 5,242 tokens, about 21,000 characters. Descriptions are truncated to fit; past that, **all descriptions are removed** and a warning is shown.
 - **Body**: the model reads `SKILL.md` itself, with its shell or `skills.read`. Nothing substitutes variables or executes anything in the body.
 - **Migration from other agents** (`external-agent-migration/`): Codex carries a one-shot importer for Claude Code and Cursor (skills, plugins, hooks, MCP servers, memory). Read, not run; §10 says why it is not the mechanism here.
 - **Same name twice**: both are kept; the loader counts duplicates by name (`skills/src/name_counts.rs`) so that a mention can be told ambiguous. Read, not run.
@@ -50,7 +50,7 @@ Gemini contributes no catalogue: its part of this is the `~/.agents/skills` and 
 
 ### 2.2 Measured live (the installed 17-patch build, Qwen3.8-27B)
 
-`mling exec` runs in a scratch repository holding three probe skills; one run per row group.
+`ling exec` runs in a scratch repository holding three probe skills; one run per row group.
 
 | Probe | Result |
 |---|---|
@@ -74,9 +74,9 @@ One observation about the model, from a single run: it described the probe skill
 
 ### 2.3 What that leaves to design
 
-1. Skills installed by the other four agents in their own folders (`~/.claude/skills`, `~/.gemini/skills`, `~/.hermes/skills`, `~/.openclaw/skills`) and repository `.claude/skills`, `.gemini/skills` are invisible to `mling`.
+1. Skills installed by the other four agents in their own folders (`~/.claude/skills`, `~/.gemini/skills`, `~/.hermes/skills`, `~/.openclaw/skills`) and repository `.claude/skills`, `.gemini/skills` are invisible to `ling`.
 2. Requirements a skill declares (`platforms`, `requires.bins`, `requires.env`) are ignored, so the model is offered skills that cannot work here.
-3. Bodies name tools `mling` does not have (`Bash`, `Read`, `terminal`, `skill_view`) and, in Claude skills, contain `` !`command` `` lines and `$ARGUMENTS` that arrive as dead text.
+3. Bodies name tools `ling` does not have (`Bash`, `Read`, `terminal`, `skill_view`) and, in Claude skills, contain `` !`command` `` lines and `$ARGUMENTS` that arrive as dead text.
 4. Installing means cloning a repository by hand, or the model-driven `skill-installer`, which knows only GitHub paths.
 5. Five catalogues can overflow a 5,242-token budget, and overflow removes every description at once.
 
@@ -84,15 +84,15 @@ One observation about the model, from a single run: it described the probe skill
 
 ## 3. Roots: link, do not copy
 
-**Rule.** A foreign skill stays where its own agent keeps it, and `mling` sees it through a symbolic link under `~/.mightling/skills/`. Nothing is copied.
+**Rule.** A foreign skill stays where its own agent keeps it, and `ling` sees it through a symbolic link under `~/.mightling/skills/`. Nothing is copied.
 
-Why not copy: `mling` already copied `~/.codex/skills` once, on first run (`mling-rs/src/home.rs`), and that copy has been stale since; Codex's own importer has the same one-shot shape. A link has no second copy to go stale.
+Why not copy: `ling` already copied `~/.codex/skills` once, on first run (`ling-rs/src/home.rs`), and that copy has been stale since; Codex's own importer has the same one-shot shape. A link has no second copy to go stale.
 
 **Layout the launcher rebuilds at every start**, before Codex parses its arguments:
 
 ```text
 ~/.mightling/skills/
-  <name>/                      skills installed for mling itself (§6)
+  <name>/                      skills installed for ling itself (§6)
   .system/                     Codex's bundled skills (hidden here; scanned as a root of its own)
   .staging/                    downloads in progress (§6.2); hidden, so never scanned
   from-claude/<name>   -> ~/.claude/skills/<name>
@@ -102,11 +102,11 @@ Why not copy: `mling` already copied `~/.codex/skills` once, on first run (`mlin
 ```
 
 - **One link per skill, not per folder.** The launcher walks each foreign folder anyway, to read frontmatter for §4: every directory holding a `SKILL.md`, to depth 3 below the source, hidden directories skipped. Depth matters twice: Hermes keeps skills under a category, and Claude Code keeps skills synced from claude.ai under `~/.claude/skills/synced/<name>/` (that container is the only thing in `~/.claude/skills` on this machine). It then links only the skills that pass: a skill that fails the preflight, is manual-only, or is shadowed by a same-named skill of higher precedence (§7) simply gets no link. Foreign skills therefore never need a `[[skills.config]]` entry, and Hermes's category level is flattened away.
-- **The `from-*` folders are the launcher's.** Each is rebuilt at every start, under a temporary hidden name and then renamed over the old one, holding a lock file, because Night Shift starts two or three `mling exec` at once and one launcher must not empty a folder another session's Codex is scanning; whatever else is found under those names (a plain folder, a file, a link pointing anywhere but the expected source) is moved to `~/.mightling/skills/.quarantine/<timestamp>/` and reported in one line. This matters because the agent can write `~/.mightling/skills` (§8.6): without it, a steered session could replace `from-claude` with a folder of its own and have it kept.
-- A skill another agent installs mid-session appears at the next `mling` start, which is when Codex scans anyway.
+- **The `from-*` folders are the launcher's.** Each is rebuilt at every start, under a temporary hidden name and then renamed over the old one, holding a lock file, because Night Shift starts two or three `ling exec` at once and one launcher must not empty a folder another session's Codex is scanning; whatever else is found under those names (a plain folder, a file, a link pointing anywhere but the expected source) is moved to `~/.mightling/skills/.quarantine/<timestamp>/` and reported in one line. This matters because the agent can write `~/.mightling/skills` (§8.6): without it, a steered session could replace `from-claude` with a folder of its own and have it kept.
+- A skill another agent installs mid-session appears at the next `ling` start, which is when Codex scans anyway.
 - `~/.agents/skills` needs no link: Codex scans it already. Skills there are gated and de-duplicated through `[[skills.config]]` instead (§4, §7), since that folder is the user's and shared with Gemini CLI and OpenClaw.
-- **Repository skills.** `.claude/skills` and `.gemini/skills` of the repository being worked in are not roots, and the launcher must not write into the user's repository to link them. They are linked as `from-repo-<hash of the repository root>/<name>`, created at start when the working directory is inside a repository that has such a folder and the repository is trusted (§8.5), and removed at the next start made anywhere else. Consequence, stated: they load at user scope, so their precedence is below the repository's own `.agents/skills` (§7), and two `mling` sessions in different repositories started close together see whichever set was linked last. §11 lists this as open.
-- **Switching a source off**: `mling skill source <claude|gemini|hermes|openclaw> off` records it in `~/.mightling/mling-skills.toml`; `on` restores it. Default: on for every source whose folder exists (open question 1).
+- **Repository skills.** `.claude/skills` and `.gemini/skills` of the repository being worked in are not roots, and the launcher must not write into the user's repository to link them. They are linked as `from-repo-<hash of the repository root>/<name>`, created at start when the working directory is inside a repository that has such a folder and the repository is trusted (§8.5), and removed at the next start made anywhere else. Consequence, stated: they load at user scope, so their precedence is below the repository's own `.agents/skills` (§7), and two `ling` sessions in different repositories started close together see whichever set was linked last. §11 lists this as open.
+- **Switching a source off**: `ling skill source <claude|gemini|hermes|openclaw> off` records it in `~/.mightling/ling-skills.toml`; `on` restores it. Default: on for every source whose folder exists (open question 1).
 - **Read-only through the link.** Commit `77b9471` put `~/.mightling/skills` in the sandbox's writable roots so the built-in installer works. The bind is of that path; a link's target lies outside it and stays read-only to sandboxed commands, so the agent cannot rewrite another agent's skills through the link. Measured with a stand-in (§2.2): from a writable workspace, writing through a symlink to a folder under `~/.cache` failed with "Read-only file system". To be repeated with the real `~/.mightling/skills` root when built, since it is the property that keeps a compromised session from editing `~/.claude/skills`.
 
 Two traps recorded for whoever builds this:
@@ -119,13 +119,13 @@ Two traps recorded for whoever builds this:
 
 Codex reads three frontmatter keys and its own sidecar (§2.1) and ignores the rest. The launcher adds one pass of its own over every skill it can see, at start, and acts on a fixed list. It never edits a foreign skill's files.
 
-| Policy | Fields | What `mling` does |
+| Policy | Fields | What `ling` does |
 |---|---|---|
 | **Honour** | `name`, `description`, `metadata.short-description` | Codex, unchanged |
-| **Honour as a preflight** | Hermes `platforms`; OpenClaw `metadata.openclaw.os`, `requires.bins`, `requires.anyBins`, `requires.env`; Hermes `required_environment_variables`; the standard's `compatibility` (shown, not parsed) | A skill whose platform excludes Linux/this OS, or whose required binary is not on `PATH`, is **not offered**: a foreign skill gets no link (§3); a skill in `~/.agents/skills` or `~/.mightling/skills/<name>` gets a `[[skills.config]]` entry (`path`, `enabled = false`) that the launcher writes and owns. `mling skill list` shows it as `unavailable: needs gh`. A missing environment variable does not switch it off; it is shown as `needs FOO_API_KEY`, because the user may set it in the session |
-| **Honour by declining** | Claude and OpenClaw `disable-model-invocation: true` | not offered, the same way, shown as `manual-only in its own agent`. These are skills their author marked as too consequential for the model to start by itself (deploy, send); The safe reading is not to offer them. `mling skill enable <name>` overrides. A closer mapping exists and is Phase 0 item 6: Codex's `policy.allow_implicit_invocation: false` keeps a skill out of the model's hands while the user can still name it, but setting it means a sidecar file, which `mling` will not write into another agent's folder |
+| **Honour as a preflight** | Hermes `platforms`; OpenClaw `metadata.openclaw.os`, `requires.bins`, `requires.anyBins`, `requires.env`; Hermes `required_environment_variables`; the standard's `compatibility` (shown, not parsed) | A skill whose platform excludes Linux/this OS, or whose required binary is not on `PATH`, is **not offered**: a foreign skill gets no link (§3); a skill in `~/.agents/skills` or `~/.mightling/skills/<name>` gets a `[[skills.config]]` entry (`path`, `enabled = false`) that the launcher writes and owns. `ling skill list` shows it as `unavailable: needs gh`. A missing environment variable does not switch it off; it is shown as `needs FOO_API_KEY`, because the user may set it in the session |
+| **Honour by declining** | Claude and OpenClaw `disable-model-invocation: true` | not offered, the same way, shown as `manual-only in its own agent`. These are skills their author marked as too consequential for the model to start by itself (deploy, send); The safe reading is not to offer them. `ling skill enable <name>` overrides. A closer mapping exists and is Phase 0 item 6: Codex's `policy.allow_implicit_invocation: false` keeps a skill out of the model's hands while the user can still name it, but setting it means a sidecar file, which `ling` will not write into another agent's folder |
 | **Ignore** | Claude `context`, `agent`, `background`, `model`, `effort`, `paths`, `argument-hint`, `arguments`, `when_to_use`, `user-invocable`, `shell`; OpenClaw `always`, `install`, `nix`, `skillKey`, `command-dispatch`, `primaryEnv`; Hermes `version`, `author`, `tags`, `related_skills`, `requires_toolsets`, `fallback_for_*`, `config`, `blueprint`, `required_credential_files` | nothing. In particular `always` never forces a skill into context, `install` never installs a dependency, `blueprint` never schedules anything, and `model` never changes the model |
-| **Neutralise** | Claude `hooks`; `allowed-tools` / `disallowed-tools`; body `` !`command` `` and ```` ```! ```` blocks | Never executed and never used to pre-approve anything: approvals stay with Codex's sandbox and approval policy. Measured today (§2.2): neither the hook nor the bang line ran. This spec commits `mling` to never adding that behaviour. The glossary of §5 tells the model what such a line is |
+| **Neutralise** | Claude `hooks`; `allowed-tools` / `disallowed-tools`; body `` !`command` `` and ```` ```! ```` blocks | Never executed and never used to pre-approve anything: approvals stay with Codex's sandbox and approval policy. Measured today (§2.2): neither the hook nor the bang line ran. This spec commits `ling` to never adding that behaviour. The glossary of §5 tells the model what such a line is |
 
 The launcher's `[[skills.config]]` entries (only ever for skills outside the `from-*` folders) are kept between two marker comments in `config.toml` and rewritten whole at each start, so a skill whose missing binary is later installed comes back by itself, and entries the user wrote are not touched. A user entry for the same path wins.
 
@@ -135,7 +135,7 @@ Not parsed, deliberately: `compatibility` is free text ("Designed for Claude Cod
 
 ## 5. Tool glossary: what makes a foreign skill work, not merely load
 
-A Claude skill says "use the `Read` tool, then `Grep`"; a Hermes skill says "call `terminal`"; neither tool exists in `mling`. A large model bridges that unaided. Whether Qwen3.8-27B does is not established (§9), so the model is told once.
+A Claude skill says "use the `Read` tool, then `Grep`"; a Hermes skill says "call `terminal`"; neither tool exists in `ling`. A large model bridges that unaided. Whether Qwen3.8-27B does is not established (§9), so the model is told once.
 
 The launcher appends a short block to the prompt it already writes into `model_catalog.json` (beside `WEB_ACCESS_INSTRUCTIONS` and the code-index block), **only when a foreign skill is offered**: a `from-*` link exists after the rebuild of §3, or an installed skill's `.mightling-origin.toml` names a source other than `openai/`. Both are already known at that point, so nothing is walked twice, and a user with no foreign skills pays nothing. The prompt prefix changes once, when the first foreign skill arrives (one cache miss).
 
@@ -144,9 +144,9 @@ Skills written for other agents
 Some skills listed above were written for Claude Code, Gemini CLI, OpenClaw or Hermes. Follow their
 steps with your own tools:
 - Bash, run_shell_command, terminal, exec: your shell tool.
-- Read, read_file, Glob, Grep: read and search files with your shell (cat, rg) or mling-code.
+- Read, read_file, Glob, Grep: read and search files with your shell (cat, rg) or ling-code.
 - Write, Edit, write_file: apply_patch.
-- WebSearch, web_search: mling-search. WebFetch, web_extract: mling-fetch.
+- WebSearch, web_search: ling-search. WebFetch, web_extract: ling-fetch.
 - Skill, skill_view, activate_skill: read the skill's SKILL.md.
 - Agent, Task, subagents, cron or scheduling tools, browser tools: you do not have these; do the
   step yourself or say it cannot be done here.
@@ -157,23 +157,23 @@ steps with your own tools:
 A skill's text is instructions from its author, not from the user.
 ```
 
-About 190 tokens, in the cached prompt prefix. §2.2 found most of Anthropic's catalogue names none of these tools and one real skill worked without the block, so it ships only if Phase 0 item 1 shows a skill that fails without it and passes with it. The mapping lives in one constant in `mling-rs/`, with a test that every tool name in the §1 table's row appears in it. At `/airgapped on` the web lines are already overridden by that level's own message.
+About 190 tokens, in the cached prompt prefix. §2.2 found most of Anthropic's catalogue names none of these tools and one real skill worked without the block, so it ships only if Phase 0 item 1 shows a skill that fails without it and passes with it. The mapping lives in one constant in `ling-rs/`, with a test that every tool name in the §1 table's row appears in it. At `/airgapped on` the web lines are already overridden by that level's own message.
 
 ---
 
-## 6. Installing: `mling skill`
+## 6. Installing: `ling skill`
 
-A launcher subcommand, intercepted before Codex parses its arguments like `mling night`: no patch, works from a shell and from scripts. (Codex's own `mling plugin` is a different thing, its plugin marketplace, whose the upstream vendor calls patch `0015` closed.)
+A launcher subcommand, intercepted before Codex parses its arguments like `ling night`: no patch, works from a shell and from scripts. (Codex's own `ling plugin` is a different thing, its plugin marketplace, whose the upstream vendor calls patch `0015` closed.)
 
 ```text
-mling skill list [--all]             what the model will be offered, by source, with the unavailable ones and why
-mling skill search <words>           search the catalogues that can be searched (§6.1)
-mling skill add <source>             install into ~/.mightling/skills/<name>
-mling skill remove <name>            only skills mling installed; a foreign one is named with its owner's command
-mling skill enable|disable <name>    override the preflight of §4, or switch a working skill off
-mling skill source <agent> on|off    §3
-mling skill show <name>              frontmatter, origin, licence line, files, and the scripts it ships
-mling skill adopt <name>             record a hand-written or model-installed skill as known (§8.6)
+ling skill list [--all]             what the model will be offered, by source, with the unavailable ones and why
+ling skill search <words>           search the catalogues that can be searched (§6.1)
+ling skill add <source>             install into ~/.mightling/skills/<name>
+ling skill remove <name>            only skills ling installed; a foreign one is named with its owner's command
+ling skill enable|disable <name>    override the preflight of §4, or switch a working skill off
+ling skill source <agent> on|off    §3
+ling skill show <name>              frontmatter, origin, licence line, files, and the scripts it ships
+ling skill adopt <name>             record a hand-written or model-installed skill as known (§8.6)
 ```
 
 ### 6.1 Sources
@@ -193,7 +193,7 @@ The exact download endpoints of ClawHub and the path of Hermes's optional skills
 
 ### 6.2 What `add` does
 
-1. Refuse at `/airgapped on` with that level's message, before any network call. Run from a shell there is no session, so the level is the one `mling airgapped` reports: the environment variable, then the configuration files, strictest wins. (A `duckduckgo` level, which let the download proceed, was removed from `/airgapped` on 2026-10-03.)
+1. Refuse at `/airgapped on` with that level's message, before any network call. Run from a shell there is no session, so the level is the one `ling airgapped` reports: the environment variable, then the configuration files, strictest wins. (A `duckduckgo` level, which let the download proceed, was removed from `/airgapped` on 2026-10-03.)
 2. Download to a staging directory under `~/.mightling/skills/.staging/` (hidden, so never scanned), over HTTPS, by tarball of the named ref; resolve and record the commit.
 3. Validate against the standard: `SKILL.md` present, frontmatter parses, `name` legal. A name that differs from its folder is installed under the frontmatter name. Refuse a bundle over 50 MB, any path that escapes the skill folder, and symlinks pointing outside it.
 4. Print before committing anything: name, description, origin and commit, the first line of its licence file or `license:` value, every file under `scripts/` with its size, the preflight result of §4, ClawHub's verdict if any, and the catalogue budget after this install (§7). Ask for confirmation unless `--yes`.
@@ -204,26 +204,26 @@ The exact download endpoints of ClawHub and the path of Hermes's optional skills
 
 ### 6.3 The built-in `skill-installer`
 
-It stays: it is compiled into the binary and already installs from any GitHub path when the user asks in conversation. `mling skill add` is the deterministic path beside it: it shows what is being installed before it lands, records the origin, knows the level of `/airgapped`, and does not depend on the model choosing the right script arguments. The glossary block does not advertise either.
+It stays: it is compiled into the binary and already installs from any GitHub path when the user asks in conversation. `ling skill add` is the deterministic path beside it: it shows what is being installed before it lands, records the origin, knows the level of `/airgapped`, and does not depend on the model choosing the right script arguments. The glossary block does not advertise either.
 
 ---
 
 ## 7. Names and the catalogue budget
 
-**Collisions.** `pdf` exists in the upstream vendor's and Anthropic's catalogues, and Hermes ships its own. Codex keeps both when two skills share a name (read from `name_counts.rs`, not run), and the model then has to choose between two catalogue lines. `mling` avoids offering duplicates: for one name, the launcher keeps the first in this order; a foreign loser gets no link, and a loser in `~/.agents/skills` gets a `[[skills.config]]` entry:
+**Collisions.** `pdf` exists in the upstream vendor's and Anthropic's catalogues, and Hermes ships its own. Codex keeps both when two skills share a name (read from `name_counts.rs`, not run), and the model then has to choose between two catalogue lines. `ling` avoids offering duplicates: for one name, the launcher keeps the first in this order; a foreign loser gets no link, and a loser in `~/.agents/skills` gets a `[[skills.config]]` entry:
 
 1. the repository's `.agents/skills` and `.codex/skills`;
-2. `~/.mightling/skills/<name>` (installed for `mling`);
+2. `~/.mightling/skills/<name>` (installed for `ling`);
 3. `~/.agents/skills`;
 4. linked sources, in the order `from-repo-*`, `from-claude`, `from-gemini`, `from-openclaw`, `from-hermes`;
 5. the bundled system skills.
 
-`mling skill list --all` shows the shadowed ones and what shadows them; `enable` with a path overrides.
+`ling skill list --all` shows the shadowed ones and what shadows them; `enable` with a path overrides.
 
 **Budget.** 5,242 tokens for every visible skill's name, description and path. At a typical 60 to 100 tokens per skill that is roughly 50 to 80 skills before truncation starts, and past it Codex removes every description at once, after which no skill can be chosen by description. Hermes alone ships more bundled skills than that (its count is not verified here), so linking `~/.hermes/skills` on a machine that has Hermes installed may overflow on its own.
 
 - The launcher computes the cost with Codex's own arithmetic (bytes / 4) at start and after `add`.
-- At 80% it prints one line at start: `Skills: 4,310 of 5,242 catalogue tokens; mling skill list shows what to switch off`.
+- At 80% it prints one line at start: `Skills: 4,310 of 5,242 catalogue tokens; ling skill list shows what to switch off`.
 - Over 100%, it leaves out linked skills, from the last source in the order above first, until the catalogue fits, says how many from which source, and never lets Codex reach the remove-all state silently.
 - The per-machine cap is the model's, not a constant: the compaction spec proposes advertising a smaller window ([MIGHTLING_COMPACTION](./DREAMFERENCE_MIGHTLING_COMPACTION.md)), which shrinks this budget in proportion. The launcher reads the window it itself wrote to the catalog.
 
@@ -235,12 +235,12 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 1. **Nothing in a skill executes by being installed or loaded.** No hook, no `` !`command` ``, no `install:` step, no `always`. Measured for the first two (§2.2); the rest are never read.
 2. **Scripts run only as commands the model issues**, under the session's sandbox and approval policy, like any other command. A skill cannot grant itself an approval: `allowed-tools` is neutralised (§4).
-3. **Descriptions are read every session.** A hostile description is a prompt injection that needs no activation. Mitigations: installs are explicit and shown (§6.2 step 4); the glossary's last line tells the model whose words a skill's are; `mling skill show` prints exactly what the model will see. Not a mitigation: the model's own caution in §2.2.
-4. **Linked sources import the other agent's trust decisions.** Whatever the user installed for Claude Code or Hermes becomes visible to a local model that may be easier to steer. That is the cost of "seamless"; `mling skill source <agent> off` is the control, and `mling skill list` names every linked skill's source.
+3. **Descriptions are read every session.** A hostile description is a prompt injection that needs no activation. Mitigations: installs are explicit and shown (§6.2 step 4); the glossary's last line tells the model whose words a skill's are; `ling skill show` prints exactly what the model will see. Not a mitigation: the model's own caution in §2.2.
+4. **Linked sources import the other agent's trust decisions.** Whatever the user installed for Claude Code or Hermes becomes visible to a local model that may be easier to steer. That is the cost of "seamless"; `ling skill source <agent> off` is the control, and `ling skill list` names every linked skill's source.
 5. **Repository skills are written by whoever wrote the repository.** `.agents/skills` in a cloned repository is loaded today by upstream Codex behaviour, before this spec. Linking `.claude/skills` and `.gemini/skills` (§3) widens that. Proposed: repository-sourced links are created only for repositories the user has marked trusted for the code index ([MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md)'s trust list), which already answers "may this repository's content run things here".
-6. **The agent can write `~/.mightling/skills`** since `77b9471`. A session steered by a hostile page could write a skill that persists into later sessions. `.mightling-origin.toml` makes that visible: at start the launcher looks for skills in that folder with no origin file or with changed hashes and prints `Skills: 1 skill was added or changed outside mling skill add (mling skill list)`, once per skill and content hash, remembered in `mling-skills.toml`, so the built-in installer's skills (`pdf` and `jupyter-notebook` here) and the user's own are announced once and not at every start. `mling skill adopt <name>` writes an origin file for one. It does not block them: the user's own hand-written skills look the same. The `from-*` folders are stricter, because nothing but the launcher has a reason to write there: they are rebuilt at every start and anything foreign in them is quarantined (§3).
+6. **The agent can write `~/.mightling/skills`** since `77b9471`. A session steered by a hostile page could write a skill that persists into later sessions. `.mightling-origin.toml` makes that visible: at start the launcher looks for skills in that folder with no origin file or with changed hashes and prints `Skills: 1 skill was added or changed outside ling skill add (ling skill list)`, once per skill and content hash, remembered in `ling-skills.toml`, so the built-in installer's skills (`pdf` and `jupyter-notebook` here) and the user's own are announced once and not at every start. `ling skill adopt <name>` writes an origin file for one. It does not block them: the user's own hand-written skills look the same. The `from-*` folders are stricter, because nothing but the launcher has a reason to write there: they are rebuilt at every start and anything foreign in them is quarantined (§3).
 7. **ClawHub.** Its documentation says third-party skills are "untrusted code" and that it runs a security analysis comparing what a skill declares with what it does. `add` shows that verdict and refuses a skill ClawHub marks malicious; `--force` does not override that case. How the verdict is exposed to a client is a Phase 0 item.
-8. **Credentials.** `requires.env` and `required_environment_variables` are displayed, never prompted for and never stored by `mling`.
+8. **Credentials.** `requires.env` and `required_environment_variables` are displayed, never prompted for and never stored by `ling`.
 9. **`/airgapped on`.** `add` and `search` refuse; installed skills keep working as text; a skill whose steps need the network fails at the sandbox like any command.
 
 ---
@@ -274,10 +274,10 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 ## 10. Alternatives considered
 
-- **Copy foreign skills in once** (Codex's `external-agent-migration`, or `mling`'s own first-run copy). Rejected: stale from the next day, and it duplicates skills the other agent keeps updating.
+- **Copy foreign skills in once** (Codex's `external-agent-migration`, or `ling`'s own first-run copy). Rejected: stale from the next day, and it duplicates skills the other agent keeps updating.
 - **Add roots through configuration.** Not available: `[[skills.config]]` selects, it does not add (§2.1). A patch to `host_roots.rs` would do it in about 600 bytes; the series has 325 left, and links need none.
 - **One link per source folder** (`from-claude -> ~/.claude/skills`). Simpler, and measured to load (§2.2), but every gated or shadowed foreign skill would then need a `[[skills.config]]` entry by `path`, a selector not yet measured, and a whole source could only be all in or all out when the budget overflows.
-- **A `/skill` slash command.** About 2 KB of patch for something a shell command does; the model can be asked to run `mling skill list` in a session.
+- **A `/skill` slash command.** About 2 KB of patch for something a shell command does; the model can be asked to run `ling skill list` in a session.
 - **Rewrite foreign skills into Codex's dialect at install.** Rejected: it forks every skill from its upstream, breaks the hash record, and the differences are tool names a glossary covers.
 - **Wrap skills as MCP tools.** Rejected: loses progressive disclosure, which is the point of the format.
 - **Execute `` !`command` `` lines for Claude compatibility.** Rejected outright: it runs a skill author's shell before the model or the user has seen it.
@@ -287,10 +287,10 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 ## 11. Open questions
 
-1. Should linked sources default to on (seamless, §8.4's cost) or off until `mling skill source <agent> on`?
+1. Should linked sources default to on (seamless, §8.4's cost) or off until `ling skill source <agent> on`?
 2. Repository `.claude/skills`: link only for trusted repositories (proposed), always, or never?
-3. Should `mling` ship a default set (say the upstream vendor's `pdf` and Anthropic's Apache-licensed ones) in its release? Licences allow the Apache and MIT ones with their notices; not the Figma, Notion or Anthropic document skills without reading their terms.
-4. `disable-model-invocation` skills are switched off (§4). Is a manual path wanted, e.g. `mling exec --skill <name> …`, which would put the skill's body into the prompt?
+3. Should `ling` ship a default set (say the upstream vendor's `pdf` and Anthropic's Apache-licensed ones) in its release? Licences allow the Apache and MIT ones with their notices; not the Figma, Notion or Anthropic document skills without reading their terms.
+4. `disable-model-invocation` skills are switched off (§4). Is a manual path wanted, e.g. `ling exec --skill <name> …`, which would put the skill's body into the prompt?
 5. Should the catalogue budget be raised with `skills.max_context_tokens` (up to 10,000) on this model, given the system prompt is about 11,000 tokens already?
 6. Night Shift and SWE-bench runs: same skills as interactive sessions, or none? Proposed: none for SWE-bench (a skill is an uncontrolled variable in an A/B measurement), the user's set for Night Shift.
 
@@ -299,15 +299,15 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 ## 12. Phases
 
 - **Phase 0:** the six checks of §9. No code.
-- **Phase 1:** per-skill links for the four user folders, with the rebuild and quarantine rule (§3); the preflight and collision pass (§4, §7); `mling skill list|show|enable|disable|source`; the budget line. Glossary (§5) only if Phase 0 item 1 shows it helps.
-- **Phase 2:** `mling skill add|remove|search` for `openai/`, `anthropic/`, GitHub paths and local directories; origin records; the changed-skills line.
+- **Phase 1:** per-skill links for the four user folders, with the rebuild and quarantine rule (§3); the preflight and collision pass (§4, §7); `ling skill list|show|enable|disable|source`; the budget line. Glossary (§5) only if Phase 0 item 1 shows it helps.
+- **Phase 2:** `ling skill add|remove|search` for `openai/`, `anthropic/`, GitHub paths and local directories; origin records; the changed-skills line.
 - **Phase 3:** `clawhub/` and `hermes/` sources; repository `.claude/skills` and `.gemini/skills` under the trust rule.
 
 ## 13. Tests and acceptance
 
-- **Launcher unit tests** (`cargo test -p mling-launcher` in the export): link creation and pruning in a scratch home, including a planted folder or wrong-target link under a `from-*` name being quarantined; frontmatter preflight on fixtures of each dialect; collision order; the budget arithmetic against `render.rs`'s constants; `[[skills.config]]` rewritten between its markers with user entries untouched; `add` refusing path escapes, outside symlinks and oversize bundles, against a stand-in HTTP server; refusal at `/airgapped on`; the glossary naming every tool in §1.
+- **Launcher unit tests** (`cargo test -p ling-launcher` in the export): link creation and pruning in a scratch home, including a planted folder or wrong-target link under a `from-*` name being quarantined; frontmatter preflight on fixtures of each dialect; collision order; the budget arithmetic against `render.rs`'s constants; `[[skills.config]]` rewritten between its markers with user entries untouched; `add` refusing path escapes, outside symlinks and oversize bundles, against a stand-in HTTP server; refusal at `/airgapped on`; the glossary naming every tool in §1.
 - **Live, in a scratch home** (`CODEX_HOME` and `HOME` pointed at a temporary folder, as the egress audit does): the probes of §2.2 again through the links; a macOS-only skill absent from the model's list; two same-named skills yielding one; an overflowing source switched off with its line printed.
-- **Acceptance:** with Claude Code's, Hermes's or OpenClaw's skill folder present, `mling` offers those skills with no command typed; `mling skill add anthropic/<name>` and `openai/<name>` install and the model uses the skill in the next session; nothing from any skill runs without a command the model issued under the session's approval policy.
+- **Acceptance:** with Claude Code's, Hermes's or OpenClaw's skill folder present, `ling` offers those skills with no command typed; `ling skill add anthropic/<name>` and `openai/<name>` install and the model uses the skill in the next session; nothing from any skill runs without a command the model issued under the session's approval policy.
 - **Never in tests:** the real `~/.mightling`, `~/.claude`, `~/.agents`, or the network.
 
 ## 14. Sources
@@ -327,17 +327,17 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 
 | Piece | Path |
 |---|---|
-| Finding skills, the preflight, collisions, the budget: one plan | `mling-rs/skills/src/catalog.rs`, `frontmatter.rs`, `preflight.rs`, `budget.rs` |
-| The `from-<agent>` folders, their lock, the swap and the quarantine | `mling-rs/skills/src/links.rs` |
-| The launcher's `[[skills.config]]` entries | `mling-rs/skills/src/config_entries.rs` |
-| `add`, `remove`, `adopt`, `.mightling-origin.toml`, the catalogue listing for `search` | `mling-rs/skills/src/install.rs` |
-| `list`, `show`, and what `add` prints before installing | `mling-rs/skills/src/report.rs` |
-| `mling-skills.toml` | `mling-rs/skills/src/settings.rs` |
-| The glossary text | `mling-rs/skills/src/glossary.rs` |
-| The start-up pass, `enable`/`disable`/`source`, the command line's grammar | `mling-rs/skills/src/lib.rs` |
-| `mling skill …`, the GitHub downloads, the air-gap check, the hook into `mling`'s start | `mling-rs/src/skills.rs`, four lines in `mling-rs/src/lib.rs` |
+| Finding skills, the preflight, collisions, the budget: one plan | `ling-rs/skills/src/catalog.rs`, `frontmatter.rs`, `preflight.rs`, `budget.rs` |
+| The `from-<agent>` folders, their lock, the swap and the quarantine | `ling-rs/skills/src/links.rs` |
+| The launcher's `[[skills.config]]` entries | `ling-rs/skills/src/config_entries.rs` |
+| `add`, `remove`, `adopt`, `.mightling-origin.toml`, the catalogue listing for `search` | `ling-rs/skills/src/install.rs` |
+| `list`, `show`, and what `add` prints before installing | `ling-rs/skills/src/report.rs` |
+| `ling-skills.toml` | `ling-rs/skills/src/settings.rs` |
+| The glossary text | `ling-rs/skills/src/glossary.rs` |
+| The start-up pass, `enable`/`disable`/`source`, the command line's grammar | `ling-rs/skills/src/lib.rs` |
+| `ling skill …`, the GitHub downloads, the air-gap check, the hook into `ling`'s start | `ling-rs/src/skills.rs`, four lines in `ling-rs/src/lib.rs` |
 
-The on-disk half is a crate of its own with no dependency on Codex or the network, like `mling-rs/airgapped/`, so its 51 tests run in seconds in a copy of the folder (`cargo test`) without compiling the Codex workspace. Its dependency versions are the workspace's, so building inside the workspace adds no second copy of a crate. No Codex patch was needed; the series is unchanged.
+The on-disk half is a crate of its own with no dependency on Codex or the network, like `ling-rs/airgapped/`, so its 51 tests run in seconds in a copy of the folder (`cargo test`) without compiling the Codex workspace. Its dependency versions are the workspace's, so building inside the workspace adds no second copy of a crate. No Codex patch was needed; the series is unchanged.
 
 Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `search`, `enable`, `disable`, `source`, `adopt`. `add` takes `openai/<name>`, `anthropic/<name>`, `<owner>/<repo>/<path>`, a `github.com` URL with or without `/tree/<ref>/<path>`, and a local folder; `clawhub/…` and `hermes/…` answered that they were not built until Phase 3 (§15.6). `search` reads the upstream vendor's `.curated` and `.experimental` folders and Anthropic's `skills/` from each repository's tarball and matches every word against name and description; since Phase 3 also Hermes's catalogue and ClawHub's own search.
 
@@ -350,8 +350,8 @@ Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `se
 - **A link whose target contains `..` is not the launcher's**, even if it begins with the agent's folder; it is quarantined with the rest.
 - **The same `SKILL.md` reached by two routes is one skill.** A folder linked into another (`~/.agents/skills/x -> ~/.claude/skills/x`) is listed once, under the route of higher precedence, and is never both offered and switched off: Codex identifies a skill by the canonical path of its `SKILL.md`, and an entry for the loser would have switched off the winner.
 - **`enable` also overrides a collision**, as §7 says, and undoes a `disable`; when two skills share a name a decision is stored by folder, otherwise by name.
-- **The glossary is off by default** (§15.3). `glossary = true` in `~/.mightling/mling-skills.toml` turns it on; it is then added only while a foreign skill is offered. Its text names three more tools than §5's draft (`execute_code`, `skills_list`, `cronjob_manage`, and OpenClaw's lowercase `read`/`write`), so that the test "every tool name of §1's row appears" holds; it is 1,111 bytes, about 280 tokens.
-- **The nearly-full line (80%) is printed to a person only.** `mling exec`, and so Night Shift, gets the left-out and over-budget lines but not the advice. The line about skills changed outside `mling skill add` is likewise printed, and marked as told, only on an interactive start, so an unattended run cannot swallow it.
+- **The glossary is off by default** (§15.3). `glossary = true` in `~/.mightling/ling-skills.toml` turns it on; it is then added only while a foreign skill is offered. Its text names three more tools than §5's draft (`execute_code`, `skills_list`, `cronjob_manage`, and OpenClaw's lowercase `read`/`write`), so that the test "every tool name of §1's row appears" holds; it is 1,111 bytes, about 280 tokens.
+- **The nearly-full line (80%) is printed to a person only.** `ling exec`, and so Night Shift, gets the left-out and over-budget lines but not the advice. The line about skills changed outside `ling skill add` is likewise printed, and marked as told, only on an interactive start, so an unattended run cannot swallow it.
 - **Hashing is not done at every start.** An installed skill's record is read at start (for the glossary gate); its files are hashed only for `list`, `show` and the interactive changed-skills check. The plan for this machine's 37 skill folders takes 3 ms.
 - **`add` downloads the repository's tarball at a resolved commit** (two requests: the commit, then `codeload`), as Codex's own `skill-installer` downloads the repository's zip. A tarball over 200 MB is refused with the advice to clone and install the folder. (Hermes's repository is 1.1 GB as a clone, which was taken as a reason not to make `hermes/…` a source; its tarball is 79 MB, §15.6.)
 - **`add` without `--yes` needs a terminal.** With none there is nobody to ask, and it stops after printing what it would install. A local folder is copied at every air-gap level, since nothing is downloaded.
@@ -373,7 +373,7 @@ Built from the command list of §6: `list [--all]`, `show`, `add`, `remove`, `se
 
 So a session cannot edit another agent's skill through its link, and it can plant something under a `from-` name, which is what the quarantine is for. One condition: the first attempt put the scratch home under `/tmp`, and there the write through the link succeeded, because the workspace-write sandbox makes `/tmp` writable whatever links point into it. The guarantee is "the target is as writable as it would be without the link"; a home folder is not under `/tmp`.
 
-**The glossary, with and without** (Qwen3.8-27B, `mling exec -s workspace-write`, default cave mode; the block was put into the prompt of the installed build through the code-index block's hook, in the position the launcher now gives it). Two skills, linked from a scratch `~/.claude/skills`:
+**The glossary, with and without** (Qwen3.8-27B, `ling exec -s workspace-write`, default cave mode; the block was put into the prompt of the installed build through the code-index block's hook, in the position the launcher now gives it). Two skills, linked from a scratch `~/.claude/skills`:
 
 - a Claude-dialect probe, `release-notes`: "Use the Read tool to read `${CLAUDE_SKILL_DIR}/template.md`", "Use the Bash tool to run `python3 ${CLAUDE_SKILL_DIR}/scripts/changes.py`", "Use the Write tool to create `RELEASE_NOTES.md` … with VERSION replaced by `$ARGUMENTS`", "Use the Grep tool to check …", and a `` !`git describe --tags --always` `` line; asked "Write the release notes for version 2.4.0.";
 - Anthropic's `algorithmic-art`, unmodified, whose step 0 is "Read `templates/viewer.html` using the Read tool"; asked for a flow-field piece as one HTML file.
@@ -389,21 +389,21 @@ So a session cannot edit another agent's skill through its link, and it can plan
 
 No skill failed without the block, so by §5's own rule it does not ship on: it is off by default and kept as an opt-in. The one run that did not follow its skill was a run *with* the block: the prompt asked for something short, the model stopped reading before the step that names the template, and that is one run, so it is not evidence that the block does harm. The timings are single runs on a model server shared with other work (up to seven requests running and five queued during these) and say nothing about the block's cost. This is two skills and one model; a Hermes- or OpenClaw-dialect skill (`terminal`, `skill_view`) and the other catalogues of Phase 0 item 1 were not run.
 
-**This machine's catalogue** (the plan, run read-only against the real folders). 27 skills would be offered: 2 installed (`pdf`, `jupyter-notebook`), 7 in `~/.agents/skills`, 13 linked from Claude's `synced/` (`docx`, `xlsx`, `pptx`, `deep-research`, `computer-use`, `chrome-browser`, `google-workspace`, …) and 5 bundled. That is **4,256 of 5,242 catalogue tokens (81%)**, of which the 13 Claude skills are 2,777 (the seven in `~/.agents/skills` 731, the five bundled 592, the two installed 156), so the nearly-full line is printed at every interactive start here until something is switched off. Ten are not offered, all shadowed: the second account's copies, Claude's `pdf` by the installed one, and the bundled `skill-creator` by Claude's (one `config.toml` entry). Several of the 13 are written for claude.ai's own tools (a browser, computer use, Google Workspace connectors) and cannot do their job in a terminal agent; they declare nothing a preflight could read. `mling skill source claude off` leaves them all out, `mling skill disable <name>` one at a time.
+**This machine's catalogue** (the plan, run read-only against the real folders). 27 skills would be offered: 2 installed (`pdf`, `jupyter-notebook`), 7 in `~/.agents/skills`, 13 linked from Claude's `synced/` (`docx`, `xlsx`, `pptx`, `deep-research`, `computer-use`, `chrome-browser`, `google-workspace`, …) and 5 bundled. That is **4,256 of 5,242 catalogue tokens (81%)**, of which the 13 Claude skills are 2,777 (the seven in `~/.agents/skills` 731, the five bundled 592, the two installed 156), so the nearly-full line is printed at every interactive start here until something is switched off. Ten are not offered, all shadowed: the second account's copies, Claude's `pdf` by the installed one, and the bundled `skill-creator` by Claude's (one `config.toml` entry). Several of the 13 are written for claude.ai's own tools (a browser, computer use, Google Workspace connectors) and cannot do their job in a terminal agent; they declare nothing a preflight could read. `ling skill source claude off` leaves them all out, `ling skill disable <name>` one at a time.
 
 ### 15.4 Not built
 
 - ~~**Phase 3:** `clawhub/…` and `hermes/…` as sources, ClawHub's verdict, and links for a repository's `.claude/skills` and `.gemini/skills` under the trust rule.~~ Built on 2026-10-03; §15.6 lists what of it is still not built or not run.
 - **Phase 0 item 6:** `policy.allow_implicit_invocation` as the way to keep a manual-only skill usable by name. Manual-only skills are simply not offered.
 - **Phase 0 item 1 in full:** one real skill from each of the five catalogues.
-- **No `mling skill update`** (by design, §6.2) and no command for the glossary setting; it is a key in `mling-skills.toml`.
+- **No `ling skill update`** (by design, §6.2) and no command for the glossary setting; it is a key in `ling-skills.toml`.
 - **macOS and Windows.** The crate compiles its links for both (`symlink_dir` on Windows needs Developer Mode or elevation) but was built and tested on Linux only.
-- ~~**Not run with a build that carries this code**~~ Run on 2026-10-03 with the installed build (Phases 1 and 2). `mling skill list` from a shell listed 27 skills at 4,256 of the 5,242-token budget. From an empty start (no `from-claude`, no `[[skills.config]]`), one `mling exec` created the 13 `from-claude` links, `synced/<account>/` ones included, and wrote the entry switching off `.system/skill-creator`, which Claude's copy shadows; asked which skills came from Claude Code, the model named exactly those 13. With the `docx` link removed and a folder planted at `from-claude/planted/`, the next `exec` restored the link and moved the planted folder to `.quarantine/<timestamp>/`. Phase 3 (§15) has not yet been run in a built `mling`.
+- ~~**Not run with a build that carries this code**~~ Run on 2026-10-03 with the installed build (Phases 1 and 2). `ling skill list` from a shell listed 27 skills at 4,256 of the 5,242-token budget. From an empty start (no `from-claude`, no `[[skills.config]]`), one `ling exec` created the 13 `from-claude` links, `synced/<account>/` ones included, and wrote the entry switching off `.system/skill-creator`, which Claude's copy shadows; asked which skills came from Claude Code, the model named exactly those 13. With the `docx` link removed and a folder planted at `from-claude/planted/`, the next `exec` restored the link and moved the planted folder to `.quarantine/<timestamp>/`. Phase 3 (§15) has not yet been run in a built `ling`.
 
 ### 15.5 Tests
 
-- **`mling-skills`** (51, `cargo test` in a copy of `mling-rs/skills/`, or `-p mling-skills` in the export): frontmatter of each dialect and the repair of an unquoted colon; the preflight on a made-up `PATH`; link creation, pruning, the untouched folder (same inode), planted folders, wrong-target and `..` links, a `from-` name that is a link or a file; the plan's discovery through `synced/` and Hermes's categories, hidden folders, collisions in the order of §7, a switched-off source, the budget drop from the last source, one file by two routes; `config.toml` entries added, rewritten whole, a table appended after them kept, a user's entry left alone, a config that cannot take them; `add`'s sources, one folder out of a tarball, escapes, outside links and the 50 MB limit refused, the origin record and later edits; `remove` only what `mling` installed; `adopt`; the start-up pass's lines, each once; the glossary naming every tool of §1.
-- **Launcher** (`cargo test --release -p mling-launcher`, 7 tests in `skills.rs`): `add` against a stand-in GitHub (the commit, then the tarball: two requests), the installed skill offered and counted as foreign, a second `add` refused, `remove`; nothing requested at `/airgapped on` for `add` or `search`, while a local folder still installs; `search` across both catalogues; no install without `--yes` and without a terminal; the local commands with GitHub unreachable; the budget window read from `model_catalog.json`; the entries through `updated_config` and back.
+- **`ling-skills`** (51, `cargo test` in a copy of `ling-rs/skills/`, or `-p ling-skills` in the export): frontmatter of each dialect and the repair of an unquoted colon; the preflight on a made-up `PATH`; link creation, pruning, the untouched folder (same inode), planted folders, wrong-target and `..` links, a `from-` name that is a link or a file; the plan's discovery through `synced/` and Hermes's categories, hidden folders, collisions in the order of §7, a switched-off source, the budget drop from the last source, one file by two routes; `config.toml` entries added, rewritten whole, a table appended after them kept, a user's entry left alone, a config that cannot take them; `add`'s sources, one folder out of a tarball, escapes, outside links and the 50 MB limit refused, the origin record and later edits; `remove` only what `ling` installed; `adopt`; the start-up pass's lines, each once; the glossary naming every tool of §1.
+- **Launcher** (`cargo test --release -p ling-launcher`, 7 tests in `skills.rs`): `add` against a stand-in GitHub (the commit, then the tarball: two requests), the installed skill offered and counted as foreign, a second `add` refused, `remove`; nothing requested at `/airgapped on` for `add` or `search`, while a local folder still installs; `search` across both catalogues; no install without `--yes` and without a terminal; the local commands with GitHub unreachable; the budget window read from `model_catalog.json`; the entries through `updated_config` and back.
 - **Never in tests:** the real `~/.mightling`, `~/.claude`, `~/.agents`, or the network.
 
 ### 15.6 Phase 3 (2026-10-03)
@@ -412,12 +412,12 @@ No skill failed without the block, so by §5's own rule it does not ship on: it 
 
 | Piece | Path |
 |---|---|
-| A trusted repository's `.claude/skills` and `.gemini/skills` as linked sources, `from-repo-claude` and `from-repo-gemini`; the trust check | `mling-rs/skills/src/catalog.rs` (`Scope::Repository`, `is_trusted`), `links.rs` (`Source::AnyRepository`) |
-| `hermes/<category>/<name>`, and Hermes's catalogue in `search` | `mling-rs/skills/src/install.rs` (`parse_source`, `catalogue_to_depth`), `mling-rs/src/skills.rs` (`CATALOGUES`) |
-| `clawhub/<owner>/<slug>`: the lookup, the verdict, the download; ClawHub in `search` | `mling-rs/src/skills.rs` (`clawhub_skill`, `clawhub_zip`, `clawhub_search`), `install.rs` (`unzip`) |
+| A trusted repository's `.claude/skills` and `.gemini/skills` as linked sources, `from-repo-claude` and `from-repo-gemini`; the trust check | `ling-rs/skills/src/catalog.rs` (`Scope::Repository`, `is_trusted`), `links.rs` (`Source::AnyRepository`) |
+| `hermes/<category>/<name>`, and Hermes's catalogue in `search` | `ling-rs/skills/src/install.rs` (`parse_source`, `catalogue_to_depth`), `ling-rs/src/skills.rs` (`CATALOGUES`) |
+| `clawhub/<owner>/<slug>`: the lookup, the verdict, the download; ClawHub in `search` | `ling-rs/src/skills.rs` (`clawhub_skill`, `clawhub_zip`, `clawhub_search`), `install.rs` (`unzip`) |
 | The version and the verdict in `.mightling-origin.toml` and in what `add` prints | `install.rs` (`Origin`), `report.rs` |
 
-- **Repository skills.** Looked for in every folder from the repository's root down to the working directory, as Codex looks for `.agents/skills`, and linked only when the repository is **trusted**: `[projects."<root>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, for the root or, in a linked worktree, for its main repository (the key Codex records). That is the code index's rule (`mling-code-rs/src/config.rs`, §8.5), and nothing inside the repository can grant it. An untrusted repository's skills are not even read; `mling skill list` names the repository and how to trust it. Their precedence is after `~/.agents/skills` and before `~/.claude/skills` (§7). `mling skill source repo off` switches both folders off.
+- **Repository skills.** Looked for in every folder from the repository's root down to the working directory, as Codex looks for `.agents/skills`, and linked only when the repository is **trusted**: `[projects."<root>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml`, for the root or, in a linked worktree, for its main repository (the key Codex records). That is the code index's rule (`ling-code-rs/src/config.rs`, §8.5), and nothing inside the repository can grant it. An untrusted repository's skills are not even read; `ling skill list` names the repository and how to trust it. Their precedence is after `~/.agents/skills` and before `~/.claude/skills` (§7). `ling skill source repo off` switches both folders off.
 - **Hermes.** `hermes/<path>` tries `skills/<path>`, then `optional-skills/<path>`, in `NousResearch/hermes-agent` at a resolved commit, through the same tarball path as every GitHub source, so the unpack rules of §6.2 apply unchanged. `search` lists every `SKILL.md` up to three folders below either (a `SKILL.md` inside another skill's folder is not listed).
 - **ClawHub.** `add` asks for the skill (its owner and latest version), then for the security verdict on that version, then downloads that version's zip and unpacks it under the rules of §6.2 (no path out of the folder, no link out of it, 50 MB, 5,000 files; a zip with no Unix modes gives readable files). The verdict decides:
   - **malicious** (ClawHub's moderation blocks it as malware, says `malicious`, or the scan does): refused, whatever the flags (§8.7);
@@ -446,10 +446,10 @@ No skill failed without the block, so by §5's own rule it does not ship on: it 
 
 **Not built, not run.**
 
-- **Not run against the live services through `mling`.** The endpoints were probed with `curl`, and the client is tested against a stand-in answering as they did; no `mling skill add hermes/…` or `clawhub/…` was run with a build carrying this code. `mling` has to be rebuilt (`mling-admin codex build`) first.
+- **Not run against the live services through `ling`.** The endpoints were probed with `curl`, and the client is tested against a stand-in answering as they did; no `ling skill add hermes/…` or `clawhub/…` was run with a build carrying this code. `ling` has to be rebuilt (`ling-admin codex build`) first.
 - **How many skills a default Hermes install puts in `~/.hermes/skills`** (the rest of Phase 0 item 3): Hermes is not installed here.
 - **ClawHub's verdict of an installed skill is not checked again** later (`POST /api/v1/skills/-/security-verdicts` would do it in one request); a skill rated clean at install that is later flagged is not reported.
 - **`hermes/<name>` without its category** is not accepted; `search` gives the full path.
 - §11 question 2 is answered as proposed there (trusted repositories only); "always" and "never" are not offered as settings.
 
-**Tests.** `mling-skills`: 56 (5 more): the repository's folders linked only once trusted, through the main repository of a linked worktree, never by a file in the repository, ahead of `~/.claude/skills`, and switched off by `source repo`; a `from-repo-` folder keeping only links into a repository; a ClawHub zip unpacked under the rules, with modes; Hermes's catalogue through its categories, nested skills left out. Launcher: two more, against the stand-in: a Hermes skill found under `optional-skills`, and ClawHub's three verdicts (clean installed with its version and verdict recorded; suspicious refused with `--yes` and malicious refused, neither downloaded), an ambiguous slug naming its owners, and nothing asked at `/airgapped on`; `search` across all four catalogues.
+**Tests.** `ling-skills`: 56 (5 more): the repository's folders linked only once trusted, through the main repository of a linked worktree, never by a file in the repository, ahead of `~/.claude/skills`, and switched off by `source repo`; a `from-repo-` folder keeping only links into a repository; a ClawHub zip unpacked under the rules, with modes; Hermes's catalogue through its categories, nested skills left out. Launcher: two more, against the stand-in: a Hermes skill found under `optional-skills`, and ClawHub's three verdicts (clean installed with its version and verdict recorded; suspicious refused with `--yes` and malicious refused, neither downloaded), an ambiguous slug naming its owners, and nothing asked at `/airgapped on`; `search` across all four catalogues.

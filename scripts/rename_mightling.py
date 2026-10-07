@@ -27,7 +27,7 @@ EXCLUDE_FILES = {
     "specs/DREAMFERENCE_RELEASE_1.5.0.md",
     "specs/DREAMFERENCE_RENAME_MIGHTLING.md",
     "scripts/rename_mightling.py",
-    "mling-rs/src/rename.rs",
+    "ling-rs/src/rename.rs",
     "dreamference/cli/legacy_name_migration.py",
     "tests/test_legacy_name_migration.py",
     "install.sh",
@@ -71,14 +71,14 @@ RULES = [
     (r"PUFFIN_", "MIGHTLING_"),
     (r"_PUFFIN\b", "_MIGHTLING"),
     (r"\bPUFFIN\b", "MIGHTLING"),
-    (r"puffin-admin", "mling-admin"),
-    (r"puffin-node-locator", "mling-node-locator"),
+    (r"puffin-admin", "ling-admin"),
+    (r"puffin-node-locator", "ling-node-locator"),
     (r"puffin-node", "mightling-node"),
-    # crates, commands and folders: the short `mling` prefix
-    (r"puffin-" + CRATES + r"(?![a-z])", r"mling-\1"),
-    (r"puffin_" + CRATES + r"(?=::|\s+as\b|\b(?=\s*[;,}\]]))", r"mling_\1"),
-    (r'name = "puffin_', 'name = "mling_'),
-    (r"\bpuffin_code\b", "mling_code"),  # the MCP server's name
+    # crates, commands and folders: the short `ling` prefix
+    (r"puffin-" + CRATES + r"(?![a-z])", r"ling-\1"),
+    (r"puffin_" + CRATES + r"(?=::|\s+as\b|\b(?=\s*[;,}\]]))", r"ling_\1"),
+    (r'name = "puffin_', 'name = "ling_'),
+    (r"\bpuffin_code\b", "ling_code"),  # the MCP server's name
     # the rest of the hyphenated names: systemd units, DOM ids, container and file prefixes
     (r"puffin-", "mightling-"),
     # homes and the install dir
@@ -89,7 +89,7 @@ RULES = [
     (r"_puffin\b", "_mightling"),
     (r"Puffin", "Mightling"),
     # what is left is the command
-    (r"puffin", "mling"),
+    (r"puffin", "ling"),
 ]
 COMPILED = [(re.compile(a), b) for a, b in RULES]
 

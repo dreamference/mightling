@@ -216,7 +216,7 @@ MODEL_SELECTOR_CSS: Final[str] = (
 # The sidebar's Agents section, hidden.
 #
 # Hidden rather than removed: nothing is taken out of Onyx's bundle, and dropping this one constant
-# from `UI_OVERRIDES` brings the section back on the next `mling-admin chat configure`.
+# from `UI_OVERRIDES` brings the section back on the next `ling-admin chat configure`.
 #
 # The section wrapper is a bare `flex flex-col` with no handle of its own, so it is selected by
 # what it *contains* -- `:has()` on the More Agents entry, which does carry a test id. That reads
@@ -392,7 +392,7 @@ SETTINGS_SECTIONS_CSS: Final[str] = (
 )
 
 # The Accounts & Access tab in Settings, hidden. Password and MFA management is surplus on a
-# single-user appliance where `mling-admin chat configure` owns the one account. The tab renders as a
+# single-user appliance where `ling-admin chat configure` owns the one account. The tab renders as a
 # div stack with no href in the DOM (the route lives only in the router data), so the anchor is
 # the nav's own test id plus the label the span carries verbatim in its `title` attribute; the
 # `.relative` wrapper is the per-tab row, so hiding it removes the hover target and the row's

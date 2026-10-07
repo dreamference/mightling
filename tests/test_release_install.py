@@ -1,4 +1,4 @@
-"""Installing Mightling from a release, with no checkout (install.sh, `mling-admin host`, and the
+"""Installing Mightling from a release, with no checkout (install.sh, `ling-admin host`, and the
 builder on a machine that has no source).
 
 `install.sh` runs for real against a stand-in for GitHub's release API on loopback, into the
@@ -67,7 +67,7 @@ class FakeRelease:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def document(self, port):
-        base = f"http://127.0.0.1:{port}/repos/test/mling"
+        base = f"http://127.0.0.1:{port}/repos/test/ling"
         return json.dumps({
             "url": f"{base}/releases/1",
             "tag_name": self.tag,
@@ -83,14 +83,14 @@ class FakeRelease:
         self.server.shutdown()
 
 
-def binaries(names=("mling", "codex-code-mode-host", "mling-search", "mling-fetch"), corrupt=None):
+def binaries(names=("ling", "codex-code-mode-host", "ling-search", "ling-fetch"), corrupt=None):
     """Release assets for `names`: gzipped scripts that print their own name, and the sums file."""
     assets, sums = {}, []
     for name in names:
         archive = gzip.compress(f"#!/bin/sh\necho {name} from the release\n".encode())
         sums.append(f"{hashlib.sha256(archive).hexdigest()}  {name}-{TARGET}.gz")
         assets[f"{name}-{TARGET}.gz"] = archive + (b"tampered" if name == corrupt else b"")
-    assets[f"mling-{TARGET}.sha256sums"] = ("\n".join(sums) + "\n").encode()
+    assets[f"ling-{TARGET}.sha256sums"] = ("\n".join(sums) + "\n").encode()
     return assets
 
 
@@ -128,7 +128,7 @@ def run_install(home, server, *args, token=None, uname_m="aarch64", gpu="Some Ot
         (slot / "vendor").write_text(vendor + "\n")
         (slot / "device").write_text(device + "\n")
     env = {"HOME": str(home), "PATH": f"{fake_bin}:/usr/bin:/bin", "MIGHTLING_PCI_DEVICES": str(pci_dir),
-           "MIGHTLING_RELEASE_API": server.url, "MIGHTLING_RELEASE_REPO": "test/mling"}
+           "MIGHTLING_RELEASE_API": server.url, "MIGHTLING_RELEASE_REPO": "test/ling"}
     if token:
         env["GH_TOKEN"] = token
     return subprocess.run(["bash", str(INSTALL_SH), *args], env=env, capture_output=True, text=True,
@@ -141,35 +141,35 @@ def test_the_client_is_installed_from_the_release_checked_and_linked(tmp_path, r
     assert result.returncode == 0, result.stdout + result.stderr
     bin_dir = tmp_path / ".local/share/dreamference/mightling/bin"
     assert sorted(path.name for path in bin_dir.iterdir()) == [
-        "codex-code-mode-host", "mling", "mling-fetch", "mling-search"]
-    for name in ("mling", "mling-search", "mling-fetch"):
+        "codex-code-mode-host", "ling", "ling-fetch", "ling-search"]
+    for name in ("ling", "ling-search", "ling-fetch"):
         link = tmp_path / ".local/bin" / name
         assert link.is_symlink() and os.readlink(link) == str(bin_dir / name)
         assert subprocess.run([str(link)], capture_output=True, text=True).stdout == f"{name} from the release\n"
     # Codex finds its Code Mode host beside its own executable; it is not a command to type.
     assert not (tmp_path / ".local/bin/codex-code-mode-host").exists()
     assert "v9.9.9" in result.stdout and "role: client" in result.stdout
-    # Nothing of the node: no virtualenv, no mling-admin.
+    # Nothing of the node: no virtualenv, no ling-admin.
     assert not (tmp_path / ".local/share/dreamference/venv").exists()
 
 
 def test_a_release_with_the_code_index_installs_it_too(tmp_path, release_server):
-    names = ("mling", "codex-code-mode-host", "mling-search", "mling-fetch", "mling-code")
+    names = ("ling", "codex-code-mode-host", "ling-search", "ling-fetch", "ling-code")
     result = run_install(tmp_path, release_server(binaries(names)), "--role", "client")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / ".local/bin/mling-code").is_symlink()
+    assert (tmp_path / ".local/bin/ling-code").is_symlink()
 
 
 def test_an_old_release_without_the_optional_commands_still_installs(tmp_path, release_server):
-    result = run_install(tmp_path, release_server(binaries(("mling", "codex-code-mode-host"))), "--role", "client")
+    result = run_install(tmp_path, release_server(binaries(("ling", "codex-code-mode-host"))), "--role", "client")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / ".local/bin/mling").is_symlink()
-    assert not (tmp_path / ".local/bin/mling-search").exists()
+    assert (tmp_path / ".local/bin/ling").is_symlink()
+    assert not (tmp_path / ".local/bin/ling-search").exists()
 
 
 def test_a_download_that_fails_its_checksum_installs_nothing(tmp_path, release_server):
     # The last archive is the tampered one: the ones before it passed, and must not be placed.
-    result = run_install(tmp_path, release_server(binaries(corrupt="mling-fetch")), "--role", "client")
+    result = run_install(tmp_path, release_server(binaries(corrupt="ling-fetch")), "--role", "client")
     assert result.returncode == 1
     assert "does not match its checksum" in result.stderr
     assert not (tmp_path / ".local/share/dreamference/mightling").exists()
@@ -203,10 +203,10 @@ def test_a_named_version_is_fetched_by_its_tag(tmp_path, release_server):
 
 def test_a_real_file_on_the_path_is_left_alone(tmp_path, release_server):
     (tmp_path / ".local/bin").mkdir(parents=True)
-    (tmp_path / ".local/bin/mling").write_text("mine")
+    (tmp_path / ".local/bin/ling").write_text("mine")
     result = run_install(tmp_path, release_server(binaries()), "--role", "client")
     assert result.returncode == 0
-    assert (tmp_path / ".local/bin/mling").read_text() == "mine"
+    assert (tmp_path / ".local/bin/ling").read_text() == "mine"
     assert "is not a link; leaving it" in result.stdout
 
 
@@ -278,8 +278,8 @@ def release_install(tmp_path, monkeypatch):
 
 
 def test_a_release_install_is_current_and_never_starts_a_build(release_install, monkeypatch):
-    # Measured with the v1.3.0 wheel: `mling-admin run` installed rustup and then died on the
-    # missing mling-web-rs/ directory.
+    # Measured with the v1.3.0 wheel: `ling-admin run` installed rustup and then died on the
+    # missing ling-web-rs/ directory.
     def no_build(*args, **kwargs):
         raise AssertionError("a release install must not run cargo or install Rust")
     monkeypatch.setattr(subprocess, "call", no_build)
@@ -289,7 +289,7 @@ def test_a_release_install_is_current_and_never_starts_a_build(release_install, 
     assert not CodexInstaller.is_installed()
     assert CodexBrandedBuilder.build() is False          # nothing installed: says how to install
 
-    release_install("mling", "codex-code-mode-host", "mling-search", "mling-fetch")
+    release_install("ling", "codex-code-mode-host", "ling-search", "ling-fetch")
     assert CodexBrandedBuilder.is_current() and CodexBrandedBuilder.web_tools_are_current()
     assert CodexInstaller.is_installed() and CodexInstaller.install_if_missing()
     assert CodexBrandedBuilder.build() is True           # nothing to build, links refreshed
@@ -309,13 +309,13 @@ def test_the_desktop_app_is_not_built_without_its_project(tmp_path, monkeypatch,
     assert ".deb or AppImage" in capsys.readouterr().out
     # With the release's .deb installed, `desktop run` opens that app.
     monkeypatch.setattr(DesktopRunner, "onyx_is_up", classmethod(lambda cls, url=None: True))
-    monkeypatch.setattr("dreamference.chat.desktop_runner.shutil.which", lambda name: "/usr/bin/mling-app")
+    monkeypatch.setattr("dreamference.chat.desktop_runner.shutil.which", lambda name: "/usr/bin/ling-app")
     calls = []
     monkeypatch.setattr("dreamference.chat.desktop_runner.subprocess.call", lambda command, **kw: calls.append(command) or 0)
-    assert DesktopRunner.run() == 0 and calls == [["/usr/bin/mling-app"]]
+    assert DesktopRunner.run() == 0 and calls == [["/usr/bin/ling-app"]]
 
 
-# -- mling-admin host -------------------------------------------------------------------------------
+# -- ling-admin host -------------------------------------------------------------------------------
 
 @pytest.fixture
 def host(monkeypatch):
@@ -584,13 +584,13 @@ def test_the_refusal_names_the_command_that_fixes_it(monkeypatch, capsys):
     monkeypatch.setattr(VLLMServerManager, "_sysctl_int", staticmethod(lambda name: None))
     with pytest.raises(SystemExit):
         VLLMServerManager.check_host_safety()
-    assert "mling-admin host setup" in capsys.readouterr().out
+    assert "ling-admin host setup" in capsys.readouterr().out
 
 
 def test_the_cli_has_the_host_commands(monkeypatch, capsys):
     from dreamference.cli import main
     monkeypatch.setattr(HostSafetySetup, "check", classmethod(lambda cls: True))
-    monkeypatch.setattr("sys.argv", ["mling-admin", "host", "check"])
+    monkeypatch.setattr("sys.argv", ["ling-admin", "host", "check"])
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 0

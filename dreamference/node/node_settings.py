@@ -3,7 +3,7 @@ Whether this node is advertised, and what it shares (specs/DREAMFERENCE_MIGHTLIN
 
 Kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`: that file is
 resolved from the working directory first, and the address a container publishes on must not
-depend on the folder `mling-admin chat configure` happened to be run from.
+depend on the folder `ling-admin chat configure` happened to be run from.
 """
 
 import json
@@ -16,7 +16,7 @@ EVERY_INTERFACE: Final[str] = "0.0.0.0"
 
 
 class NodeSettings:
-    """The two switches `mling-admin node enable|disable` set."""
+    """The two switches `ling-admin node enable|disable` set."""
 
     @classmethod
     def path(cls) -> Path:

@@ -75,7 +75,7 @@ def test_binaries_are_built_first_and_a_package_with_a_skipped_target_runs_on_it
     assert package[package.index("-p") + 1] == "codex-code-mode-host"
     assert "stdio" not in package and ["--test", "grpc"] == package[-4:-2]
     # The launcher is built beside it (its vendored OpenSSL), but only that package's tests run.
-    assert ["-p", "mling-launcher"] == package[package.index("-p") + 2:package.index("-p") + 4]
+    assert ["-p", "ling-launcher"] == package[package.index("-p") + 2:package.index("-p") + 4]
     assert package[package.index("-E") + 1] == "(package(codex-code-mode-host))"
 
 
@@ -186,9 +186,9 @@ expression: rendered
 
 
 def test_a_snapshot_that_only_renames_codex_is_accepted():
-    mling = (BOXED_UPSTREAM.replace("OpenAI Codex (v0.0.0)      ", "Mightling (v0.0.0)            ")
+    ling = (BOXED_UPSTREAM.replace("OpenAI Codex (v0.0.0)      ", "Mightling (v0.0.0)            ")
               .replace("Ask Codex", "Ask Mightling"))
-    assert CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, mling)
+    assert CodexTestRunner.differs_only_by_name(BOXED_UPSTREAM, ling)
 
 
 def test_a_snapshot_with_any_other_change_is_refused():
@@ -212,7 +212,7 @@ def test_the_overlay_replaces_upstream_snapshots_and_applies_the_test_patches(tm
 
     overlay = tmp_path / "snapshots"
     (overlay / "tui" / "src" / "snapshots").mkdir(parents=True)
-    (overlay / "tui" / "src" / "snapshots" / "header.snap").write_text("mling's\n")
+    (overlay / "tui" / "src" / "snapshots" / "header.snap").write_text("ling's\n")
     patches = tmp_path / "patches"
     patches.mkdir()
     (patches / "0001-tests.patch").write_text(
@@ -222,7 +222,7 @@ def test_the_overlay_replaces_upstream_snapshots_and_applies_the_test_patches(tm
     monkeypatch.setattr(runner_module, "SNAPSHOT_OVERLAY_DIR", str(overlay))
     monkeypatch.setattr(runner_module, "TEST_PATCHES_DIR", str(patches))
     assert CodexTestRunner.apply_test_overlay(str(export))
-    assert snap.read_text() == "mling's\n"
+    assert snap.read_text() == "ling's\n"
     assert "Ask Mightling" in test_file.read_text()
 
 

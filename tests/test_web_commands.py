@@ -1,4 +1,4 @@
-"""The agent's web commands are Rust binaries (mling-web-rs/), not console scripts of this virtualenv."""
+"""The agent's web commands are Rust binaries (ling-web-rs/), not console scripts of this virtualenv."""
 
 import os
 
@@ -22,11 +22,11 @@ def test_the_web_commands_are_not_console_scripts():
     # instead of the binary the builder installs.
     with open(os.path.join(REPO_ROOT, "setup.py")) as handle:
         setup = handle.read()
-    assert "mling-search=" not in setup and "mling-fetch=" not in setup
+    assert "ling-search=" not in setup and "ling-fetch=" not in setup
 
 
 def test_the_builder_installs_both_web_commands():
-    assert builder_module.WEB_BIN_NAMES == ("mling-search", "mling-fetch")
+    assert builder_module.WEB_BIN_NAMES == ("ling-search", "ling-fetch")
     with open(os.path.join(builder_module.WEB_CRATE_DIR, "Cargo.toml")) as handle:
         manifest = handle.read()
     for name in builder_module.WEB_BIN_NAMES:

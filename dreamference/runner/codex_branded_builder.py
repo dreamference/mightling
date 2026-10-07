@@ -2,13 +2,13 @@
 Mightling-Branded Codex Builder for Dreamference.
 
 This module provides the CodexBrandedBuilder class, which turns the pinned `codex/` submodule (a
-fork of openai/codex at a stable release tag) into `mling`, the terminal agent. It is Codex with
-Mightling's branding and with the launcher in `mling-rs/` compiled in, so it finds the local model
+fork of openai/codex at a stable release tag) into `ling`, the terminal agent. It is Codex with
+Mightling's branding and with the launcher in `ling-rs/` compiled in, so it finds the local model
 server and configures itself with no Python involved.
 
 The submodule is never modified. Each build exports the pinned commit with `git archive` into a
 scratch tree, applies the patch series in `codex-patches/` there with `git apply`, and compiles that
-tree, after copying `mling-rs/` in beside the workspace crates as `codex-rs/mling` -- so the fork
+tree, after copying `ling-rs/` in beside the workspace crates as `codex-rs/ling` -- so the fork
 stays byte-identical to upstream and moving to a newer release is a submodule
 bump plus whatever patch hunks stop applying. Only `codex-rs/` is exported: it is the whole Rust
 workspace, and the rest of the repository (the npm wrapper, Bazel files, SDKs) plays no part in a
@@ -18,9 +18,9 @@ The compiled output is keyed by the source commit, the patch contents and the la
 not rebuilt, and Cargo's target directory is kept across builds so a patch edit recompiles only the
 crates it touches rather than the several hundred dependencies beneath them.
 
-The agent's web commands, `mling-search` and `mling-fetch`, are built here too, from the
-standalone crate `mling-web-rs/`: a separate Cargo build with its own lockfile, target directory
-and stamp, installed beside `mling`, so either can be rebuilt without the other.
+The agent's web commands, `ling-search` and `ling-fetch`, are built here too, from the
+standalone crate `ling-web-rs/`: a separate Cargo build with its own lockfile, target directory
+and stamp, installed beside `ling`, so either can be rebuilt without the other.
 
 All of that needs a checkout. A machine installed from a release (`install.sh`) has the package
 from a wheel and the binaries from the release's assets, with no `codex/`, `codex-patches/` or
@@ -47,8 +47,8 @@ CODEX_PATCH_DIR: Final[str] = os.path.join(REPO_ROOT, "codex-patches")
 
 # The launcher crate. It is Dreamference's own Rust, so it lives here as source rather than inside a
 # patch, and is copied into the exported tree where patch 0002's dependency line expects it.
-MIGHTLING_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "mling-rs")
-MIGHTLING_CRATE_DEST: Final[str] = os.path.join("codex-rs", "mling")
+MIGHTLING_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "ling-rs")
+MIGHTLING_CRATE_DEST: Final[str] = os.path.join("codex-rs", "ling")
 
 # The release the patches are written against. The submodule is pinned to this tag's commit; the
 # constant exists so a mismatch can be reported by name rather than as a hunk that fails to apply.
@@ -61,39 +61,39 @@ INSTALL_DIR: Final[str] = os.path.expanduser("~/.local/share/dreamference/mightl
 
 # Cargo still builds the binary as `codex` -- renaming the [[bin]] and `default-run` would be two
 # more patch hunks for a name the builder can simply give the file when it installs it. Codex's
-# own help and --version already say `mling` (patch 0001 sets clap's name and bin_name).
+# own help and --version already say `ling` (patch 0001 sets clap's name and bin_name).
 CARGO_BIN_NAME: Final[str] = "codex"
-BRANDED_EXECUTABLE_NAME: Final[str] = "mling"
+BRANDED_EXECUTABLE_NAME: Final[str] = "ling"
 
-# Where the user types `mling`. A symlink rather than a copy, because Codex finds
+# Where the user types `ling`. A symlink rather than a copy, because Codex finds
 # codex-code-mode-host next to its own executable, and it resolves that through the link.
-PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling")
+PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling")
 
-# Where `mling-admin` and the web commands become reachable from any shell -- including the one
-# `mling` runs the model's commands in. The prompt tells the model to use `mling-search`,
-# `mling-fetch` and `mling-admin gmail` for web and mail access, but the commands only existed
+# Where `ling-admin` and the web commands become reachable from any shell -- including the one
+# `ling` runs the model's commands in. The prompt tells the model to use `ling-search`,
+# `ling-fetch` and `ling-admin gmail` for web and mail access, but the commands only existed
 # inside the repository's virtualenv, so every such call ended in "command not found" (exit 127).
-ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-admin")
-SEARCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-search")
-FETCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-fetch")
+ADMIN_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-admin")
+SEARCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-search")
+FETCH_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-fetch")
 
-# The agent's web commands, `mling-search` and `mling-fetch`: a small Rust crate of its own rather
+# The agent's web commands, `ling-search` and `ling-fetch`: a small Rust crate of its own rather
 # than part of the launcher, so changing them never relinks Codex, and a static binary rather than
 # a console script, so they do not depend on this virtualenv. Built with its own lockfile into its
-# own target directory, installed beside `mling`, and stamped separately from the Codex build.
-WEB_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "mling-web-rs")
+# own target directory, installed beside `ling`, and stamped separately from the Codex build.
+WEB_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "ling-web-rs")
 WEB_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-web")
 WEB_BUILD_STAMP_NAME: Final[str] = "web-build-key"
-WEB_BIN_NAMES: Final[tuple] = ("mling-search", "mling-fetch")
+WEB_BIN_NAMES: Final[tuple] = ("ling-search", "ling-fetch")
 
-# The code index router, `mling-code` (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §4.2): a crate of
+# The code index router, `ling-code` (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §4.2): a crate of
 # its own for the same reasons as the web commands, built the same way. The prompt tells the model
 # to run it, so it is linked onto PATH beside the others.
-CODE_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "mling-code-rs")
+CODE_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "ling-code-rs")
 CODE_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/puffin-code-build")
 CODE_BUILD_STAMP_NAME: Final[str] = "code-build-key"
-CODE_BIN_NAMES: Final[tuple] = ("mling-code",)
-CODE_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/mling-code")
+CODE_BIN_NAMES: Final[tuple] = ("ling-code",)
+CODE_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-code")
 
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
@@ -141,13 +141,13 @@ class CodexBrandedBuilder:
         """
         Tells a checkout from a release install.
 
-        Until 2026-10-02 a release install was treated as a stale build: `mling-admin run` and
+        Until 2026-10-02 a release install was treated as a stale build: `ling-admin run` and
         `codex build` installed rustup and then died with FileNotFoundError on the missing
-        `mling-web-rs/` (measured with the v1.3.0 wheel in a scratch home).
+        `ling-web-rs/` (measured with the v1.3.0 wheel in a scratch home).
 
         Returns:
             bool: True if the patch series and the launcher crate are beside the package, i.e.
-            `mling` can be built here.
+            `ling` can be built here.
         """
         return os.path.isdir(CODEX_PATCH_DIR) and os.path.isdir(MIGHTLING_CRATE_DIR)
 
@@ -233,7 +233,7 @@ class CodexBrandedBuilder:
         Lists the launcher crate's source files, in a stable order.
 
         Returns:
-            List[str]: Absolute paths under `mling-rs/`, excluding any local build output.
+            List[str]: Absolute paths under `ling-rs/`, excluding any local build output.
         """
         return cls.crate_files(MIGHTLING_CRATE_DIR)
 
@@ -330,7 +330,7 @@ class CodexBrandedBuilder:
     @classmethod
     def mightling_version(cls) -> str:
         """
-        The version `mling` reports: the release being built (`MIGHTLING_VERSION`, which the release
+        The version `ling` reports: the release being built (`MIGHTLING_VERSION`, which the release
         workflow sets), else this package's own version.
 
         Returns:
@@ -478,7 +478,7 @@ class CodexBrandedBuilder:
             force (bool): Rebuild even if the installed binaries match the current inputs.
 
         Returns:
-            bool: True if an up-to-date `mling` and its web commands are installed afterwards.
+            bool: True if an up-to-date `ling` and its web commands are installed afterwards.
         """
         if not cls.has_source():
             return cls._release_install_report()
@@ -494,16 +494,16 @@ class CodexBrandedBuilder:
         What `build()` does where there is nothing to build from: says so, and refreshes the links.
 
         Returns:
-            bool: True if the release's `mling` is installed.
+            bool: True if the release's `ling` is installed.
         """
         if cls.is_current():
             cls.link_onto_path()
-            print(f"✅ mling is installed from a release ({cls.executable_path()}); there is no "
-                  "source here to build it from. `mling update` installs a newer release.")
+            print(f"✅ ling is installed from a release ({cls.executable_path()}); there is no "
+                  "source here to build it from. `ling update` installs a newer release.")
             return True
-        print("❌ mling is not installed, and this is not a checkout, so it cannot be built here.")
+        print("❌ ling is not installed, and this is not a checkout, so it cannot be built here.")
         print("💡 Install the release's binaries with install.sh (see the README), or clone the "
-              "repository and run `mling-admin codex build` there.")
+              "repository and run `ling-admin codex build` there.")
         return False
 
     @classmethod
@@ -515,7 +515,7 @@ class CodexBrandedBuilder:
             force (bool): Rebuild even if the installed binaries match the current inputs.
 
         Returns:
-            bool: True if an up-to-date `mling` is installed afterwards.
+            bool: True if an up-to-date `ling` is installed afterwards.
         """
         if not force and cls.is_current():
             # Cheap and idempotent, so an install that predates a link still gets it.
@@ -532,7 +532,7 @@ class CodexBrandedBuilder:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                print("⏳ Another mling build is running; waiting for it to finish...")
+                print("⏳ Another ling build is running; waiting for it to finish...")
                 fcntl.flock(lock, fcntl.LOCK_EX)
             if not force and cls.is_current():
                 return True
@@ -544,7 +544,7 @@ class CodexBrandedBuilder:
         The build itself; `build()` holds the lock around it.
 
         Returns:
-            bool: True if an up-to-date `mling` is installed afterwards.
+            bool: True if an up-to-date `ling` is installed afterwards.
         """
         # The toolchain version itself is pinned by codex-rs/rust-toolchain.toml; rustup fetches it
         # on the first cargo invocation, so only rustup has to exist beforehand.
@@ -572,9 +572,9 @@ class CodexBrandedBuilder:
             "-p", "codex-cli", "--bin", CARGO_BIN_NAME,
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
-        print(f"🔨 Building mling (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
+        print(f"🔨 Building ling (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
         if subprocess.call(command, cwd=os.path.join(source_dir, "codex-rs"), env=environment) != 0:
-            print("❌ The mling build failed; see the cargo output above.")
+            print("❌ The ling build failed; see the cargo output above.")
             return False
 
         release_dir = os.path.join(BUILD_CACHE_DIR, "target", "release")
@@ -642,7 +642,7 @@ class CodexBrandedBuilder:
         cls, crate_dir: str, cache_dir: str, stamp_name: str, bin_names: tuple, force: bool = False
     ) -> bool:
         """
-        Builds a standalone crate of Mightling's commands and installs its binaries beside `mling`.
+        Builds a standalone crate of Mightling's commands and installs its binaries beside `ling`.
 
         Unlike the Codex build this compiles the crate in place, with `--locked` against its own
         committed lockfile, into its own target directory: it is Dreamference's source, not an
@@ -688,7 +688,7 @@ class CodexBrandedBuilder:
     @classmethod
     def web_tools_are_current(cls) -> bool:
         """
-        Checks that `mling-search` and `mling-fetch` are installed and built from current source.
+        Checks that `ling-search` and `ling-fetch` are installed and built from current source.
 
         Returns:
             bool: True if no rebuild is needed.
@@ -698,7 +698,7 @@ class CodexBrandedBuilder:
     @classmethod
     def build_web_tools(cls, force: bool = False) -> bool:
         """
-        Builds `mling-search` and `mling-fetch` from `mling-web-rs/` unless they are current.
+        Builds `ling-search` and `ling-fetch` from `ling-web-rs/` unless they are current.
 
         Args:
             force (bool): Rebuild even if the installed binaries match the source.
@@ -713,7 +713,7 @@ class CodexBrandedBuilder:
     @classmethod
     def build_code_index(cls, force: bool = False) -> bool:
         """
-        Builds `mling-code` from `mling-code-rs/` unless it is current.
+        Builds `ling-code` from `ling-code-rs/` unless it is current.
 
         Args:
             force (bool): Rebuild even if the installed binary matches the source.
@@ -731,7 +731,7 @@ class CodexBrandedBuilder:
         Returns a console script of the Python environment running this code, if it has one.
 
         Args:
-            name (str): The script's name, e.g. `mling-admin`.
+            name (str): The script's name, e.g. `ling-admin`.
 
         Returns:
             Optional[str]: Absolute path of the console script beside this interpreter, or None.
@@ -742,21 +742,21 @@ class CodexBrandedBuilder:
     @classmethod
     def link_onto_path(cls) -> None:
         """
-        Points `~/.local/bin/mling`, `mling-admin`, `mling-search`, `mling-fetch` and
-        `mling-code` at their executables.
+        Points `~/.local/bin/ling`, `ling-admin`, `ling-search`, `ling-fetch` and
+        `ling-code` at their executables.
 
-        `mling` so it works from any shell; the others so the model can run the web and mail
-        commands its prompt names from the shell `mling` gives it. A web command is linked only
+        `ling` so it works from any shell; the others so the model can run the web and mail
+        commands its prompt names from the shell `ling` gives it. A web command is linked only
         once its binary is installed, so a link never dangles.
         """
         cls._link(cls.executable_path(), PATH_LINK)
-        script = cls.console_script_path("mling-admin")
+        script = cls.console_script_path("ling-admin")
         if script:
             cls._link(script, ADMIN_PATH_LINK)
         for name, link in (
-            ("mling-search", SEARCH_PATH_LINK),
-            ("mling-fetch", FETCH_PATH_LINK),
-            ("mling-code", CODE_PATH_LINK),
+            ("ling-search", SEARCH_PATH_LINK),
+            ("ling-fetch", FETCH_PATH_LINK),
+            ("ling-code", CODE_PATH_LINK),
         ):
             binary = os.path.join(INSTALL_DIR, "bin", name)
             if os.access(binary, os.X_OK):

@@ -1,5 +1,5 @@
 """
-SWE-bench on this machine: `mling-admin swe-bench` runs `mling` over benchmark instances, each
+SWE-bench on this machine: `ling-admin swe-bench` runs `ling` over benchmark instances, each
 in its own container with no network but the model server, and has the upstream harness grade
 the patches (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 """

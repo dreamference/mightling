@@ -133,7 +133,7 @@ class SweBenchInstanceRun:
             image: The instance image for this machine.
             model_name: The run's `model_name_or_path`.
             settings: Benchmark settings.
-            runtime_dir: The relocated `mling` runtime on the host.
+            runtime_dir: The relocated `ling` runtime on the host.
             model_url: The model server as the container reaches it (the network's gateway).
             deadline: `time.time()` by which the instance must stop (its timeout, or the run's
                 `--until`).
@@ -305,7 +305,7 @@ class SweBenchInstanceRun:
             environment["PATH"] = f"{self.code_index['path']}:{CONTAINER_PATH}"
             mounts += list(self.code_index["mounts"])
         command = ["run", "-d", "--init", "--name", self.container,
-                   "--label", f"mling.swe-bench.run={self.store.name}",
+                   "--label", f"ling.swe-bench.run={self.store.name}",
                    "--network", swe_bench_settings.NETWORK_NAME,
                    "--user", self.user,
                    "--memory", self.settings.task_memory, "--memory-swap", self.settings.task_memory,
@@ -324,8 +324,8 @@ class SweBenchInstanceRun:
         return None
 
     def _exec(self, prompt: str, resume: bool) -> str:
-        """Runs one `mling exec` turn in the container; returns `ok`, `error` or `timeout`."""
-        command = ["exec", self.container, f"{CONTAINER_MOUNT}/bin/mling", "exec", "--json",
+        """Runs one `ling exec` turn in the container; returns `ok`, `error` or `timeout`."""
+        command = ["exec", self.container, f"{CONTAINER_MOUNT}/bin/ling", "exec", "--json",
                    "-o", f"{SCRATCH_MOUNT}/last.txt", "--dangerously-bypass-approvals-and-sandbox",
                    "-C", "/testbed", "-c", f"model_auto_compact_token_limit={self.settings.task_context}"]
         for override in (self.code_index or {}).get("config", []):

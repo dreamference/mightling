@@ -1,6 +1,6 @@
 """
 Sending a job to another node (specs/DREAMFERENCE_MIGHTLING_NODE.md §13.3):
-`mling-admin node run|jobs|logs|cancel|fetch`.
+`ling-admin node run|jobs|logs|cancel|fetch`.
 
 The sender pushes `HEAD` to the node over the pairing, asks for the job, and shows its output;
 when it ends, the branch the node committed is fetched back, and the files the job kept under
@@ -164,11 +164,11 @@ class NodeJobSender:
         """
         cwd = cwd or os.getcwd()
         if not command:
-            print("❌ Nothing to run: mling-admin node run <node> -- <command>")
+            print("❌ Nothing to run: ling-admin node run <node> -- <command>")
             return 1
         record = NodePairing.find(name)
         if record is None:
-            print(f"❌ {name} is not a paired node. Pair once with: mling-admin node add {name}")
+            print(f"❌ {name} is not a paired node. Pair once with: ling-admin node add {name}")
             return 1
         top = cls._git(cwd, "rev-parse", "--show-toplevel")
         head = cls._git(cwd, "rev-parse", "HEAD")
@@ -193,7 +193,7 @@ class NodeJobSender:
         if code == 255:
             # The stream was lost, not the job: it carries on there.
             print(f"⚠️  The connection to {record['name']} ended; the job carries on there. "
-                  f"`mling-admin node logs {request['id']}` shows it, `node fetch` brings it back.")
+                  f"`ling-admin node logs {request['id']}` shows it, `node fetch` brings it back.")
             return code
         cls._fetch_branch(request["id"], quiet_when_absent=True)
         if out:
@@ -218,7 +218,7 @@ class NodeJobSender:
             at the first word that is not one of these options.
         """
         import argparse
-        parser = argparse.ArgumentParser(add_help=False, prog="mling-admin node run")
+        parser = argparse.ArgumentParser(add_help=False, prog="ling-admin node run")
         parser.add_argument("--memory", default=None)
         parser.add_argument("--time", default=None)
         parser.add_argument("--test", default=None)
@@ -257,7 +257,7 @@ class NodeJobSender:
             print(f"❌ {name} is not a paired node.")
             return 1
         if not records:
-            print("No node is paired (`mling-admin node add <node>`).")
+            print("No node is paired (`ling-admin node add <node>`).")
             return 0
         for record in records:
             answer = NodePairing.run(record, "job-list")

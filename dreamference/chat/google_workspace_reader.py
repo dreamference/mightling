@@ -3,7 +3,7 @@
 Specified in specs/DREAMFERENCE_MIGHTLING_APPS.md §9 and §9a.
 
 The Google service (`gmail_search_service.py`, container `dreamference-gmail`) calls this with
-the accounts it holds tokens for; `mling apps serve drive|calendar` reaches it through the
+the accounts it holds tokens for; `ling apps serve drive|calendar` reaches it through the
 service's `/drive/…` and `/calendar/…` endpoints. It is staged into the container beside the
 service, so it imports nothing but the standard library.
 

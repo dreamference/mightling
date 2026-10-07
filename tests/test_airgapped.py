@@ -8,9 +8,9 @@ import dreamference.config.dreamference_config as cfg_mod
 from dreamference.config import DreamferenceConfig
 
 REPO = Path(__file__).resolve().parent.parent
-LEAF_RS = REPO / "mling-rs" / "airgapped" / "src" / "lib.rs"
-WEB_COPY_RS = REPO / "mling-web-rs" / "src" / "airgapped.rs"
-LAUNCHER_RS = REPO / "mling-rs" / "src" / "airgapped.rs"
+LEAF_RS = REPO / "ling-rs" / "airgapped" / "src" / "lib.rs"
+WEB_COPY_RS = REPO / "ling-web-rs" / "src" / "airgapped.rs"
+LAUNCHER_RS = REPO / "ling-rs" / "src" / "airgapped.rs"
 
 
 def test_the_level_resolves_through_the_tiers(tmp_path, monkeypatch):
@@ -61,14 +61,14 @@ def test_save_config_writes_only_a_non_default_level(tmp_path, monkeypatch):
 def test_the_default_and_the_level_names_match_the_rust_side():
     text = LEAF_RS.read_text()
     match = re.search(r'pub const DEFAULT_MIGHTLING_AIRGAPPED: &str = "(\w+)";', text)
-    assert match, "DEFAULT_MIGHTLING_AIRGAPPED not found in mling-rs/airgapped/src/lib.rs"
+    assert match, "DEFAULT_MIGHTLING_AIRGAPPED not found in ling-rs/airgapped/src/lib.rs"
     assert match.group(1) == cfg_mod.DEFAULT_MIGHTLING_AIRGAPPED
     for name in cfg_mod.MIGHTLING_AIRGAPPED_LEVELS:
         assert f'=> "{name}"' in text, name
 
 
 def test_the_web_commands_carry_the_same_resolver():
-    # mling-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a level
+    # ling-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a level
     # the sandbox and the web commands resolved differently would be a restriction with a hole.
     assert WEB_COPY_RS.read_bytes() == LEAF_RS.read_bytes()
 
@@ -99,7 +99,7 @@ def _two_files(tmp_path, monkeypatch, repo_text, user_text):
 
 
 def test_between_the_two_files_the_stricter_wins_as_on_the_rust_side(tmp_path, monkeypatch):
-    # The cases of `between_the_two_files_the_strictest_wins` in mling-rs/airgapped/src/lib.rs.
+    # The cases of `between_the_two_files_the_strictest_wins` in ling-rs/airgapped/src/lib.rs.
     resolve = DreamferenceConfig.resolve_airgapped_level
     # A repository file the agent can write does not loosen the user's level.
     cwd = _two_files(tmp_path / "a", monkeypatch, 'mightling_airgapped = "off"\n', 'mightling_airgapped = "on"\n')

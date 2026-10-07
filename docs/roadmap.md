@@ -2,7 +2,7 @@
 
 Work that is planned or designed but **not built yet**. Nothing here is a commitment to a date.
 
-Already shipped and so no longer listed here: the code index (`mling-code`, offered to the agent
+Already shipped and so no longer listed here: the code index (`ling-code`, offered to the agent
 as tools), Gmail, Google Drive and Calendar in `/apps`, the desktop app's Work window, and
 observation masking with a per-output cap (built, off by default).
 
@@ -10,7 +10,7 @@ observation masking with a per-output cap (built, off by default).
 
 *Status: Phase 1 built.*
 
-The desktop app's **Work** window drives `mling` sessions: threads, approvals, diffs, Stop, steer
+The desktop app's **Work** window drives `ling` sessions: threads, approvals, diffs, Stop, steer
 and undo. Still to come: review, git worktrees, settings pages and choosing a model from the window.
 
 ## Keeping long tasks inside the context window

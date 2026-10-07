@@ -30,9 +30,9 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "mling-admin=dreamference.cli:main",
-            # `mling-search` and `mling-fetch` are not console scripts: they are Rust binaries
-            # (mling-web-rs/) that `mling-admin codex build` installs beside `mling`.
+            "ling-admin=dreamference.cli:main",
+            # `ling-search` and `ling-fetch` are not console scripts: they are Rust binaries
+            # (ling-web-rs/) that `ling-admin codex build` installs beside `ling`.
         ],
     },
 )

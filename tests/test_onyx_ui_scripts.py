@@ -20,7 +20,7 @@ def test_script_is_guarded_against_taking_the_app_down():
     # worth that, so the block is wrapped and runs at most once.
     assert CONNECT_GOOGLE_SCRIPT.startswith(";(function(){try{")
     assert CONNECT_GOOGLE_SCRIPT.endswith("}catch(e){}})();")
-    assert "window.__mlingConnect" in CONNECT_GOOGLE_SCRIPT
+    assert "window.__lingConnect" in CONNECT_GOOGLE_SCRIPT
 
 
 def test_scripts_go_only_into_chunks_that_render_the_anchor():
@@ -163,7 +163,7 @@ def test_drawn_scrollbar_replaces_the_suppressed_native_one():
     # Same containment contract as the connect script: guarded, wrapped, run-once.
     assert SCROLLBAR_SCRIPT.startswith(";(function(){try{")
     assert SCROLLBAR_SCRIPT.endswith("}catch(e){}})();")
-    assert "window.__mlingScrollbar" in SCROLLBAR_SCRIPT
+    assert "window.__lingScrollbar" in SCROLLBAR_SCRIPT
 
 
 def test_drawn_scrollbar_survives_react_recreating_the_chat_list():

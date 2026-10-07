@@ -1,7 +1,7 @@
 # Mightling Agent Runtimes & Integration
 
 > **Version:** 1.2.0
-> **Subject:** the agent runners: Codex (`mling`, default), Cline, Continue, OpenHands.
+> **Subject:** the agent runners: Codex (`ling`, default), Cline, Continue, OpenHands.
 > **Checked against the code:** 2026-10-01 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
 
 ---
@@ -9,7 +9,7 @@
 ## Table of Contents
 
 - [1. Agent Runtimes Overview](#1-agent-runtimes-overview)
-- [2. Codex / `mling` (Default)](#2-codex--mightling-default)
+- [2. Codex / `ling` (Default)](#2-codex--mightling-default)
 - [3. Cline (VS Code)](#3-cline-vs-code)
 - [4. Continue (IDE)](#4-continue-ide)
 - [5. OpenHands (Docker UI)](#5-openhands-docker-ui)
@@ -26,25 +26,25 @@ The runner is chosen by `--agent`, then `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUN
 **Choices:** `codex`, `cline`, `continue`, `openhands`.
 
 **How each is reached:**
-- **Codex:** the interactive agent is the `mling` binary itself, run directly.
-- **All four:** reachable through `mling-admin run "PROMPT" [--agent …]`. `mling-admin chat` was removed on 2026-09-28.
+- **Codex:** the interactive agent is the `ling` binary itself, run directly.
+- **All four:** reachable through `ling-admin run "PROMPT" [--agent …]`. `ling-admin chat` was removed on 2026-09-28.
 
 **Dispatch:** a strategy switch on `config.agent_runner` in `DreamferenceCLIController.run_cli`. Each agent has a `<agent>_installer.py` / `<agent>_runner.py` pair under `dreamference/runner/`.
 
-**Waiting for vLLM** (§6): the three non-Codex runners call `VLLMReadinessWaiter.wait_for_vllm()`. Codex doesn't: the `mling` launcher waits for the server itself.
+**Waiting for vLLM** (§6): the three non-Codex runners call `VLLMReadinessWaiter.wait_for_vllm()`. Codex doesn't: the `ling` launcher waits for the server itself.
 
-**No container sandbox of Dreamference's own.** `mling-admin`'s `--sandbox` option and `SandboxManager` (apptainer/podman/docker prefixes) were removed on 2026-10-01: Goose applied the prefixes and Aider read the setting, and once both were gone nothing used them. Codex has its own sandbox (`mling -s/--sandbox` policy), which is unrelated.
+**No container sandbox of Dreamference's own.** `ling-admin`'s `--sandbox` option and `SandboxManager` (apptainer/podman/docker prefixes) were removed on 2026-10-01: Goose applied the prefixes and Aider read the setting, and once both were gone nothing used them. Codex has its own sandbox (`ling -s/--sandbox` policy), which is unrelated.
 
 ---
 
-## 2. Codex / `mling` (Default)
+## 2. Codex / `ling` (Default)
 
 - **Package:** `dreamference/runner/codex_runner.py`, `codex_installer.py`, `codex_branded_builder.py`.
-- **Runtime:** the Mightling-branded Codex build (`~/.local/share/dreamference/mightling/bin/mling`, linked at `~/.local/bin/mling`), built from the `codex/` submodule plus `codex-patches/`. It never uses an upstream `codex` from PATH.
-- **Session:** `CodexRunner.run_session()` builds `mling` if needed and runs `mling [args…] ["PROMPT"]`, passing `DREAMFERENCE_VLLM_HOST` along. With `--debug` it sets `RUST_LOG`.
-- **Everything else happens in the launcher `mling-rs/`:**
+- **Runtime:** the Mightling-branded Codex build (`~/.local/share/dreamference/mightling/bin/ling`, linked at `~/.local/bin/ling`), built from the `codex/` submodule plus `codex-patches/`. It never uses an upstream `codex` from PATH.
+- **Session:** `CodexRunner.run_session()` builds `ling` if needed and runs `ling [args…] ["PROMPT"]`, passing `DREAMFERENCE_VLLM_HOST` along. With `--debug` it sets `RUST_LOG`.
+- **Everything else happens in the launcher `ling-rs/`:**
   - waiting for vLLM;
-  - the model catalog and `config.toml` in `$CODEX_HOME`, which `mling` sets to `~/.mightling` (never upstream's `~/.codex`);
+  - the model catalog and `config.toml` in `$CODEX_HOME`, which `ling` sets to `~/.mightling` (never upstream's `~/.codex`);
   - the system prompt, with web access and optionally Gmail;
   - the `--oss --local-provider openai-custom --model <id>` options.
 
@@ -162,10 +162,10 @@ The prompt is unused.
 1. It prints `⏳ Waiting for local vLLM server at {vllm_host} to become available...`.
 2. Every second it checks `GET /v1/models` (1 s timeout) and prints a dot.
 3. Once healthy, it sends a silent `max_tokens=1` chat completion naming the served model id. This proves that the engine can generate, not just list models; it returns success only when that request succeeds.
-4. After 600 s it prints `❌ Timed out …` and `💡 Start vLLM in another terminal via: mling-admin server start`, and fails.
+4. After 600 s it prints `❌ Timed out …` and `💡 Start vLLM in another terminal via: ling-admin server start`, and fails.
 5. Ctrl+C cancels without starting the agent.
 
-**It does not launch vLLM.** Nothing downloads or starts a server from here. Start the server with `mling-admin server start`, which is documented in `DREAMFERENCE_INFERENCE.md`.
+**It does not launch vLLM.** Nothing downloads or starts a server from here. Start the server with `ling-admin server start`, which is documented in `DREAMFERENCE_INFERENCE.md`.
 
 ---
 
@@ -184,19 +184,19 @@ The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call
 
 | Failure | Signal | Recovery |
 | :------ | :----- | :------- |
-| vLLM not running | No healthy `/v1/models` within 600 s | Hint `mling-admin server start`; exit 1 |
+| vLLM not running | No healthy `/v1/models` within 600 s | Hint `ling-admin server start`; exit 1 |
 | vLLM up but not generating | Pre-warm request fails | Keeps waiting until the timeout |
 | Ctrl+C during wait | `KeyboardInterrupt` | Cancel without starting the agent |
 | Cline / Continue without VS Code | Neither `code` nor `codium` on PATH | Exit 1 with a PATH hint |
 | OpenHands without Docker | `docker ps` fails | Exit 1 with a Docker daemon hint |
 | OpenHands image pull failure | `docker pull` error | Exit 1 with the pull command |
-| `mling` not built (Codex) | Build fails or is missing | `mling-admin codex build` |
+| `ling` not built (Codex) | Build fails or is missing | `ling-admin codex build` |
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_MIGHTLING_CODEX.md](./DREAMFERENCE_MIGHTLING_CODEX.md):** the default agent, `mling`
+- **[DREAMFERENCE_MIGHTLING_CODEX.md](./DREAMFERENCE_MIGHTLING_CODEX.md):** the default agent, `ling`
 - **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM launch and configuration
 - **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md):** Docker architecture and images
 - **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md):** CLI commands and configuration

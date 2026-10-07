@@ -15,7 +15,7 @@ diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
                  "update",
              )?;
 -            run_update_command()?;
-+            mling_launcher::update::run().await?;
++            ling_launcher::update::run().await?;
          }
          Some(Subcommand::Doctor(doctor_cli)) => {
              reject_remote_mode_for_subcommand(

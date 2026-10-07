@@ -1,6 +1,6 @@
 // The Work window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, Phase 1): projects and threads on the
 // left, the selected thread's turns streaming in the middle, approvals inline, and a composer that
-// starts a turn, steers a running one, or stops it. Everything goes through `mling app-server`.
+// starts a turn, steers a running one, or stops it. Everything goes through `ling app-server`.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
@@ -257,8 +257,8 @@ function StartupScreen(props: { state: string; stderr: string[]; protocolErrors:
     <div className="startup">
       <h1>{props.state === "exited" ? "The agent's server stopped" : "Starting Mightling…"}</h1>
       <p>{props.state === "exited"
-        ? "mling app-server exited. Its last messages are below."
-        : "mling app-server is waiting for the model server. A cold load takes a few minutes; `mling-admin server start` starts it if it is stopped."}</p>
+        ? "ling app-server exited. Its last messages are below."
+        : "ling app-server is waiting for the model server. A cold load takes a few minutes; `ling-admin server start` starts it if it is stopped."}</p>
       <pre className="log">{[...props.stderr, ...props.protocolErrors, ...props.notices].join("\n") || "…"}</pre>
       {props.state === "exited" ? <button className="primary" onClick={props.onRetry}>Start again</button> : null}
     </div>

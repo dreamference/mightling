@@ -3,7 +3,7 @@ Pairing with another node over SSH (specs/DREAMFERENCE_MIGHTLING_NODE.md §13.2,
 
 Using a node (prompts, search, the web UI) is open to the local network. Controlling one, or
 running a job on it, is not: that goes through a key made for nothing else, which the other node
-restricts to one forced command, `mling-admin node serve-job`. `mling-admin node add <node>`
+restricts to one forced command, `ling-admin node serve-job`. `ling-admin node add <node>`
 sets the key up once; the user never types an SSH command.
 """
 
@@ -212,7 +212,7 @@ class NodePairing:
         import getpass
         target = cls.discover(name)
         if target is None:
-            print(f"❌ No node named {name} answers on this network (`mling-admin node list`).")
+            print(f"❌ No node named {name} answers on this network (`ling-admin node list`).")
             return False
         public_key = cls.ensure_key()
         if public_key is None:
@@ -238,7 +238,7 @@ class NodePairing:
             print("❌ The machine that answered is not the node that was advertised; pairing removed.")
             cls.record_path(record["node"]).unlink(missing_ok=True)
             return False
-        print(f"✅ Paired with {record['name']}. This key can ask it for `mling-admin node` operations and nothing else.")
+        print(f"✅ Paired with {record['name']}. This key can ask it for `ling-admin node` operations and nothing else.")
         if info.get("linger") is False:
             print(f"⚠️  Lingering is off for {record['user']} on {record['name']}: a job would stop when its "
                   f"sender disconnects. On that node: loginctl enable-linger")
@@ -247,7 +247,7 @@ class NodePairing:
     @classmethod
     def authorize_on_node(cls, record: Dict[str, Any], public_key: str) -> bool:
         """
-        Sends the public key to the node's `mling-admin node authorize`, over an ordinary SSH
+        Sends the public key to the node's `ling-admin node authorize`, over an ordinary SSH
         login (password or the user's own key), which writes the restricted line.
 
         Args:
@@ -262,7 +262,7 @@ class NodePairing:
                    "-o", f"HostKeyAlias={cls.host_alias(record['node'])}",
                    "-o", "StrictHostKeyChecking=accept-new",
                    f"{record['user']}@{record['address']}",
-                   "$HOME/.local/bin/mling-admin node authorize"]
+                   "$HOME/.local/bin/ling-admin node authorize"]
         try:
             return subprocess.run(command, input=public_key + "\n", text=True, check=False).returncode == 0
         except OSError:

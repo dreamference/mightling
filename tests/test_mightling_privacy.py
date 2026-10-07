@@ -30,12 +30,12 @@ def test_the_analytics_client_is_never_enabled(tmp_path):
 def test_mightling_uses_its_own_home_before_codex_reads_one(tmp_path):
     # Patch 0014: the first statement of Codex's main() switches CODEX_HOME to ~/.mightling, before
     # arg0 loads `.env` from the home folder, so upstream's ~/.codex -- and its ChatGPT login --
-    # is never read. mling-rs/src/home.rs carries session history over without auth.json.
+    # is never read. ling-rs/src/home.rs carries session history over without auth.json.
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     main = (tmp_path / "src" / "codex-rs" / "cli" / "src" / "main.rs").read_text()
     start = main.index("fn main() -> anyhow::Result<()> {")
     body = main[start:start + 400]
-    assert body.index("mling_launcher::home::use_mightling_home();") < body.index("arg0_dispatch_or_else")
+    assert body.index("ling_launcher::home::use_mightling_home();") < body.index("arg0_dispatch_or_else")
 
 
 def test_the_python_side_reads_the_same_home(monkeypatch):
@@ -49,7 +49,7 @@ def test_the_python_side_reads_the_same_home(monkeypatch):
 
 @pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
 def test_no_statsig_metrics_or_openai_plugin_sync(tmp_path):
-    # A traced `mling exec` on 2026-09-29, with no ChatGPT login anywhere, still contacted
+    # A traced `ling exec` on 2026-09-29, with no ChatGPT login anywhere, still contacted
     # ab.chatgpt.com (OTEL metrics to Statsig, on by default in release builds),
     # chatgpt.com/backend-api/plugins/featured, and github.com (`git ls-remote openai/plugins`).
     # Patch 0015 closes all three at the call sites.
@@ -68,7 +68,7 @@ def test_no_statsig_metrics_or_openai_plugin_sync(tmp_path):
 
 @pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
 def test_doctor_checks_that_reach_openai_or_github_are_switched_off(tmp_path):
-    # `mling doctor` checked sign-in, looked for updates on api.github.com, Homebrew and OpenAI's
+    # `ling doctor` checked sign-in, looked for updates on api.github.com, Homebrew and OpenAI's
     # desktop feed, and probed chatgpt.com and the provider (api.openai.com when no config loads).
     # Patch 0016 disables those four checks behind one constant; their code is kept.
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
@@ -92,7 +92,7 @@ def test_pets_are_hidden_because_their_art_comes_from_openai(tmp_path):
     slash = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "slash_command.rs").read_text()
     visible = slash[slash.index("fn is_visible(self)"):]
     assert "SlashCommand::Pets => false," in visible[:visible.index("_ => true")]
-    launcher = open(os.path.join(os.path.dirname(__file__), os.pardir, "mling-rs", "src", "lib.rs")).read()
+    launcher = open(os.path.join(os.path.dirname(__file__), os.pardir, "ling-rs", "src", "lib.rs")).read()
     assert 'tui.remove("pet");' in launcher
     assert 'doc["check_for_update_on_startup"] = value(false);' in launcher
 

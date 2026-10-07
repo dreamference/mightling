@@ -1,4 +1,4 @@
-"""The check `mling-admin` makes on every run: can bubblewrap sandbox from an ordinary login?
+"""The check `ling-admin` makes on every run: can bubblewrap sandbox from an ordinary login?
 
 Nothing here runs sudo, `systemd-run` or `apparmor_parser -r`: the probe, the root commands and
 the Night Shift timer are replaced, and the decision file lives in the test's home.

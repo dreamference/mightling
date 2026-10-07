@@ -10,11 +10,11 @@ between the two rules is the GitHub release's description.
 `desktop/src-tauri/Cargo.toml` with its lock. The release workflow stamps it into the binaries.
 
 **Checklist before publishing:**
-- **Both asset sets:** the release carries both `mling-<target>.gz` and `puffin-<target>.gz`, both checksum files and `codex-code-mode-host`.
+- **Both asset sets:** the release carries both `ling-<target>.gz` and `puffin-<target>.gz`, both checksum files and `codex-code-mode-host`.
 - **Upgrade from a real 1.4.1 install** in a scratch HOME:
   1. `install.sh --version 1.4.1 --role client`;
   2. `puffin update`, which must install 1.5.0;
-  3. `puffin` prints the notice, after which `mling --version` says 1.5.0, `puffin` is gone and `~/.mightling` holds the sessions.
+  3. `puffin` prints the notice, after which `ling --version` says 1.5.0, `puffin` is gone and `~/.mightling` holds the sessions.
 - **The installer:** `install.sh` from 1.5.0 over a 1.4.1 install moves the folder and removes the old links.
 
 ---
@@ -31,16 +31,16 @@ Puffin, and a confidential tool should not be confused with someone's cloud serv
    - the `puffin_*` settings in `dreamference.toml` become `mightling_*`.
 
    No cloud sign-in or log is copied, and `~/.puffin` is left as it was.
-3. From then on the command is **`mling`**. The old names are gone, not aliased.
-4. **On a GB10 node,** run the installer again for **`mling-admin`**:
+3. From then on the command is **`ling`**. The old names are gone, not aliased.
+4. **On a GB10 node,** run the installer again for **`ling-admin`**:
    `curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash`.
    Its first run moves the Night Shift timer, the network advertisement (which asks for sudo once) and paired machines' keys over to the new names.
 
 | Before | Now |
 |---|---|
-| `puffin`, `puffin-search`, `puffin-fetch`, `puffin-code`, `puffin-app` | `mling`, `mling-search`, `mling-fetch`, `mling-code`, `mling-app` |
-| `puffin-admin` | `mling-admin` |
-| `puffin-admin puffin …` (the web chat) | `mling-admin chat …` (`onyx` still works) |
+| `puffin`, `puffin-search`, `puffin-fetch`, `puffin-code`, `puffin-app` | `ling`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app` |
+| `puffin-admin` | `ling-admin` |
+| `puffin-admin puffin …` (the web chat) | `ling-admin chat …` (`onyx` still works) |
 | `~/.puffin` | `~/.mightling` |
 | `puffin_*` settings, `DREAMFERENCE_PUFFIN_*`, `PUFFIN_*` variables | `mightling_*`, `DREAMFERENCE_MIGHTLING_*`, `MIGHTLING_*` |
 | Network service `_puffin-node._tcp` | `_mightling-node._tcp` |

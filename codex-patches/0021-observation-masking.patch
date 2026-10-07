@@ -3,8 +3,8 @@ index 1444e51..9cdf413 100644
 --- a/codex-rs/core/Cargo.toml
 +++ b/codex-rs/core/Cargo.toml
 @@ -74,2 +74,3 @@ codex-tools = { workspace = true }
- mling-tools = { path = "../mling/tools" }
-+mling-masking = { path = "../mling/masking" }
+ ling-tools = { path = "../ling/tools" }
++ling-masking = { path = "../ling/masking" }
  codex-utils-absolute-path = { workspace = true }
 diff --git a/codex-rs/core/src/context_manager/history.rs b/codex-rs/core/src/context_manager/history.rs
 index 7e19dae..f5904be 100644
@@ -16,6 +16,6 @@ index 7e19dae..f5904be 100644
          self.normalize_history(input_modalities);
 -        Arc::unwrap_or_clone(self.items)
 +        let mut items = Arc::unwrap_or_clone(self.items);
-+        mling_masking::apply(&mut items, size, |envelope| &mut envelope.item);
++        ling_masking::apply(&mut items, size, |envelope| &mut envelope.item);
 +        items
      }

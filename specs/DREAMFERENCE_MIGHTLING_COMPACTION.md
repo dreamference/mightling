@@ -6,7 +6,7 @@
 **Short answer on the prompt and algorithm (§7–§10):** Codex's stock prompt already writes a good summary with this model, except for the trail of files; a structured prompt fixed the trail and lost the code, a trade and not a gain. What compaction loses is not prose but the **tool history**: every tool call and output is dropped, and the summary alone decides which paths survive. The fix that measured best is not a model at all: a rule-built ledger (files touched, failed commands, last test result) re-injected by a hook after each compaction. At night the useful job is an audit of the day's compactions; the diffusion sidecar failed the three new roles it was tried in.
 **Builds on:**
 - Codex's own compaction (`codex-rs/core/src/compact.rs`), unmodified;
-- the launcher's model catalog (`mling-rs/src/lib.rs`, `auto_compact_token_limit`);
+- the launcher's model catalog (`ling-rs/src/lib.rs`, `auto_compact_token_limit`);
 - Night Shift ([MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md)), whose parallelism is computed from a per-task context budget;
 - the diffusion slot ([MIGHTLING_FAST_TOOLS](./DREAMFERENCE_MIGHTLING_FAST_TOOLS.md), which already measured the sidecar on summaries).
 
@@ -20,9 +20,9 @@
 | Peak prompt size per session (83 sessions with usage records) | median **14,153** tokens, p90 30,679, p99 54,390, max **71,421** |
 | When Mightling compacts | The launcher writes `auto_compact_token_limit = max_model_len` into the catalog: **262,144** on the default model |
 | What the server can hold | SGLang's KV pool is **156,907** tokens (`sglang:max_total_num_tokens`), shared by every stream, while it is launched with `--context-length 262144` and reports that as `max_model_len`. The pool is sized at launch from free memory: Night Shift §11.1 read 144,870 on an earlier launch. Both the window Mightling advertises and its compaction limit are above the pool |
-| Lowering the limit without a patch | `mling exec -c model_auto_compact_token_limit=6000 …` compacts: 7 `compacted` items in one small task. Measured under the default scope (`model_auto_compact_token_limit_scope = total`); the other scope, `body_after_prefix`, counts only growth after the prefix and was not tried |
+| Lowering the limit without a patch | `ling exec -c model_auto_compact_token_limit=6000 …` compacts: 7 `compacted` items in one small task. Measured under the default scope (`model_auto_compact_token_limit_scope = total`); the other scope, `body_after_prefix`, counts only growth after the prefix and was not tried |
 | What too low a limit costs | A deliberately degenerate limit: Mightling's fixed prefix (instructions and tool schemas) is itself near 6,000 tokens, so it compacted after almost every command. This shows the failure mode, not the cost at 32–49K. The same task (three `cat` commands of ~2.4K tokens each) ran **13 commands instead of 3** and read 175,625 prompt tokens: after each compaction the model re-ran what the summary no longer held. The answer was still right |
-| The diffusion sidecar as a tool-output compressor (Tiny-A2D 0.5B, chat completions, "keep every path, number, hash and error") | a 3,000-character `git log --stat`: **14 of 50** identifiers survived, one path came back misspelt (`mlingin-code`), 9.1 s. Fast Tools §1 found the same on 2026-09-30: its log "summary" copied the log |
+| The diffusion sidecar as a tool-output compressor (Tiny-A2D 0.5B, chat completions, "keep every path, number, hash and error") | a 3,000-character `git log --stat`: **14 of 50** identifiers survived, one path came back misspelt (`lingin-code`), 9.1 s. Fast Tools §1 found the same on 2026-09-30: its log "summary" copied the log |
 | Prefix reuse today | `sglang:cached_tokens_total` / `prompt_tokens_total` = 78,976 / 118,663 after a restart: about two thirds of prompt tokens come from the cache |
 
 Three conclusions:
@@ -68,9 +68,9 @@ Figures in this table are from abstracts and summaries read on 2026-10-01, not f
 *Built as a setting, off by default: Phase 0 (§11) found no limit at or below `task_context` that is no slower than none.*
 
 
-`NightShiftTaskRun._exec` adds `-c model_auto_compact_token_limit=<n>` to every `mling exec`, with `n` from a new `[night] compact_at` (default: `task_context`, 49,152).
+`NightShiftTaskRun._exec` adds `-c model_auto_compact_token_limit=<n>` to every `ling exec`, with `n` from a new `[night] compact_at` (default: `task_context`, 49,152).
 
-- No patch: the key exists (`core/src/config/mod.rs`, `model_auto_compact_token_limit`) and §1 shows `-c` reaches `mling exec`.
+- No patch: the key exists (`core/src/config/mod.rs`, `model_auto_compact_token_limit`) and §1 shows `-c` reaches `ling exec`.
 - It makes `task_context` true, so `floor(pool / task_context)` parallel tasks really fit the pool.
 - **Accept only on measurement** (§5, Phase 0): the §1 probe shows a limit can cost more than it saves.
 
@@ -79,15 +79,15 @@ Figures in this table are from abstracts and summaries read on 2026-10-01, not f
 *Built (§11.1), with the 0.6 kept: no recorded session, and no Phase 0 run, reached 94K, so the share is a ceiling, not a measured optimum.*
 
 
-The launcher already reads `/v1/models`; it would also read the pool (`sglang:max_total_num_tokens`, or `num_gpu_blocks × block_size` on vLLM, as `NightShiftHost` does) and write `auto_compact_token_limit = min(max_model_len, pool × 0.6)`: about 94K today. The pool is read at each start because it changes between launches (§1). The 0.6 is a placeholder, leaving room for a second stream and the summary request; Phase 0 sets it. No session recorded so far would have compacted; one that grows now compacts instead of exhausting the pool. `max_context_window` should be capped at the pool the same way once §1's untested case is tested. The interactive limit and Night Shift's do not compete: a night run does not start while a `mling` session is open.
+The launcher already reads `/v1/models`; it would also read the pool (`sglang:max_total_num_tokens`, or `num_gpu_blocks × block_size` on vLLM, as `NightShiftHost` does) and write `auto_compact_token_limit = min(max_model_len, pool × 0.6)`: about 94K today. The pool is read at each start because it changes between launches (§1). The 0.6 is a placeholder, leaving room for a second stream and the summary request; Phase 0 sets it. No session recorded so far would have compacted; one that grows now compacts instead of exhausting the pool. `max_context_window` should be capped at the pool the same way once §1's untested case is tested. The interactive limit and Night Shift's do not compete: a night run does not start while a `ling` session is open.
 
 ### 4.3 Try: compact at idle, with Codex's own turn-end compaction
 
-Codex has `model_post_turn_compact_threshold_percent` (default 0, off): when a turn **ends** above that percentage of the window, and no input is queued, it compacts then, while the user reads the answer, instead of in the middle of the next turn. This is "continuous" compaction at the only moment it is free. The launcher would set it so the turn-end threshold sits below the §4.2 limit (for example 25% of 262K ≈ 65K). Unverified: how it behaves in `mling exec`, and whether a user who types at once waits for it.
+Codex has `model_post_turn_compact_threshold_percent` (default 0, off): when a turn **ends** above that percentage of the window, and no input is queued, it compacts then, while the user reads the answer, instead of in the middle of the next turn. This is "continuous" compaction at the only moment it is free. The launcher would set it so the turn-end threshold sits below the §4.2 limit (for example 25% of 262K ≈ 65K). Unverified: how it behaves in `ling exec`, and whether a user who types at once waits for it.
 
 ### 4.4 Try: a nightly consolidation task, not a nightly compaction
 
-`mling-admin night run` gains one built-in task per repository with sessions since the last run: the main model reads those rollouts' user messages and final answers and writes `$CODEX_HOME/night/notes/<repo>.md` (decisions made, commands that work, dead ends), merging with the previous file under a fixed size cap. The launcher appends that file to the catalog's instructions, as it does `WEB_ACCESS_INSTRUCTIONS`.
+`ling-admin night run` gains one built-in task per repository with sessions since the last run: the main model reads those rollouts' user messages and final answers and writes `$CODEX_HOME/night/notes/<repo>.md` (decisions made, commands that work, dead ends), merging with the previous file under a fixed size cap. The launcher appends that file to the catalog's instructions, as it does `WEB_ACCESS_INSTRUCTIONS`.
 
 - It runs last in the window, after queued tasks, under the same admission rules.
 - It writes its own file, never `AGENTS.md`: a wrong note there would steer every session and be committed.
@@ -104,7 +104,7 @@ Codex has `model_post_turn_compact_threshold_percent` (default 0, off): when a t
 ### 4.6 When the diffusion slot holds a capable model
 
 Fast Tools proposes a stronger model in the slot. Only then is a diffusion role in compaction worth testing, in this order:
-1. **Summarise a long tool result before it enters history** (a `mling fast` verb the main model calls instead of reading 10K tokens of log). It is append-only, so the cache is untouched; this is the Paritok use, conditioned on the task.
+1. **Summarise a long tool result before it enters history** (a `ling fast` verb the main model calls instead of reading 10K tokens of log). It is append-only, so the cache is untouched; this is the Paritok use, conditioned on the task.
 2. **Write the compaction summary.** Codex's compaction uses the session's model; routing it elsewhere needs the Fast Tools router or a patch. Worth it only if the summary's minute of prose output (§2) proves to matter.
 
 Each needs the §5 identifier-survival test passed first.
@@ -113,7 +113,7 @@ Each needs the §5 identifier-survival test passed first.
 
 ## 5. Phases and tests
 
-**Phase 0, measure (no code).** One long task (a multi-file change with tests in this repository, known to pass 60K tokens) run with `mling exec` at limits of 32K, 49K, 64K and none, three runs each. Record: pass or fail, wall time, commands run, prompt tokens, compactions. §4.1 ships with the limit that is no slower and no less successful than "none"; if none qualifies, §4.1 is dropped and Night Shift's `task_context` is raised instead.
+**Phase 0, measure (no code).** One long task (a multi-file change with tests in this repository, known to pass 60K tokens) run with `ling exec` at limits of 32K, 49K, 64K and none, three runs each. Record: pass or fail, wall time, commands run, prompt tokens, compactions. §4.1 ships with the limit that is no slower and no less successful than "none"; if none qualifies, §4.1 is dropped and Night Shift's `task_context` is raised instead.
 
 **Phase 1.** §4.1 and §4.2, with tests: the runner's command line carries the limit; the launcher's catalog carries `min(window, pool × 0.6)` and falls back to the window when `/metrics` does not answer.
 
@@ -180,7 +180,7 @@ Scripts and outputs are in the session scratchpad (not kept). All against the de
 
 ### 9.1 The stock prompt against a structured one, on one real coding session
 
-**No recorded session was usable.** The largest rollouts under `~/.mightling/sessions` are web lookups and compaction probes; none is long coding work. So one was made: `mling exec` in a scratch repository (a cut-down copy of this one) with a scratch `CODEX_HOME`, asked to add a dry-run mode to Night Shift with two tests. It ran 37 commands and peaked at 54,399 prompt tokens. The session was cut just after its first test run (31 commands in; one test passing, one failing), flattened into chat messages (tool output capped at 12,000 characters each, 33K prompt tokens) and sent to `/v1/chat/completions` twice, once ending with Codex's `prompt.md` and once with the candidate of §10.2. This is not byte-for-byte Codex's request; both prompts saw the same input.
+**No recorded session was usable.** The largest rollouts under `~/.mightling/sessions` are web lookups and compaction probes; none is long coding work. So one was made: `ling exec` in a scratch repository (a cut-down copy of this one) with a scratch `CODEX_HOME`, asked to add a dry-run mode to Night Shift with two tests. It ran 37 commands and peaked at 54,399 prompt tokens. The session was cut just after its first test run (31 commands in; one test passing, one failing), flattened into chat messages (tool output capped at 12,000 characters each, 33K prompt tokens) and sent to `/v1/chat/completions` twice, once ending with Codex's `prompt.md` and once with the candidate of §10.2. This is not byte-for-byte Codex's request; both prompts saw the same input.
 
 | | Stock prompt | Structured candidate |
 |---|---|---|
@@ -208,7 +208,7 @@ Reading: **the stock prompt is strong on understanding and code, and weak on the
 | Stock summary | 4/14 | 0/2 | in prose |
 | Stock summary + ledger | **14/14** | **2/2** | verbatim |
 
-**Delivery.** A `SessionStart` hook with matcher `compact`, in a scratch `CODEX_HOME`, printing `additionalContext`; `mling exec` with `model_auto_compact_token_limit=14000` on a three-command task:
+**Delivery.** A `SessionStart` hook with matcher `compact`, in a scratch `CODEX_HOME`, printing `additionalContext`; `ling exec` with `model_auto_compact_token_limit=14000` on a three-command task:
 
 - Without trust the hook did not run and nothing in `exec`'s output said so (the scratch home's logs were not checked). With `--dangerously-bypass-hook-trust`, `PreCompact` and `SessionStart` both ran and received `transcript_path`.
 - The hook's text was recorded as a developer message 55 ms after the `compacted` item and before the next model request.
@@ -302,16 +302,16 @@ Asked for ideas before the measurements, the advisor proposed: scoring the **sto
 
 | Piece | Where | Default |
 |---|---|---|
-| The interactive limit follows the KV pool (§4.2) | `mling-rs/src/compaction.rs`: at every launch that reaches the model, the pool is read from `/metrics` (`sglang:max_total_num_tokens`, or vLLM's `num_gpu_blocks × block_size`) and `-c model_auto_compact_token_limit=<60% of it>` goes in front of the user's arguments, unless the command line or `config.toml` sets that key. With the default model that is **94,144** against the catalog's 262,144. An unreadable `/metrics` leaves the catalog's limit | on |
-| The ledger (§10.1) | `mling-rs/src/ledger.rs`, run as `mling ledger` (the hook: JSON on stdin, JSON on stdout) or `mling ledger show <rollout> [<cwd>]`. By rule, no model, in ~15 ms: `git status --porcelain` (or the `apply_patch` headers outside a repository); the other workspace files any command named, checked on disk and most recent first; the commands that exited non-zero since the previous compaction; the last test-summary line (pytest, `cargo test`, Jest, `go test`). Capped at 6,000 characters, under Codex's 2,500-token spill limit | — |
+| The interactive limit follows the KV pool (§4.2) | `ling-rs/src/compaction.rs`: at every launch that reaches the model, the pool is read from `/metrics` (`sglang:max_total_num_tokens`, or vLLM's `num_gpu_blocks × block_size`) and `-c model_auto_compact_token_limit=<60% of it>` goes in front of the user's arguments, unless the command line or `config.toml` sets that key. With the default model that is **94,144** against the catalog's 262,144. An unreadable `/metrics` leaves the catalog's limit | on |
+| The ledger (§10.1) | `ling-rs/src/ledger.rs`, run as `ling ledger` (the hook: JSON on stdin, JSON on stdout) or `ling ledger show <rollout> [<cwd>]`. By rule, no model, in ~15 ms: `git status --porcelain` (or the `apply_patch` headers outside a repository); the other workspace files any command named, checked on disk and most recent first; the commands that exited non-zero since the previous compaction; the last test-summary line (pytest, `cargo test`, Jest, `go test`). Capped at 6,000 characters, under Codex's 2,500-token spill limit | — |
 | The hook's registration | `compaction.rs`: one `[[hooks.SessionStart]]` group, matcher `compact`, command `<this binary> ledger`, timeout 10 s, and `[hooks.state."<config path>:session_start:<n>:0"] trusted_hash = "sha256:…"`. The hash is rebuilt from Codex's own definition (`hooks/src/engine/discovery.rs`, `hook_hash`: SHA-256 of the canonical JSON of the normalised hook); a test pins a value Codex accepted. The group is updated in place, the user's own hooks and their trust entries are untouched, switching off removes both, and with a `hooks.json` beside `config.toml` nothing is written | on (since 2026-10-02); off with `mightling_compaction_ledger = false` / `DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER=0` |
-| Night Shift's per-task limit (§4.1) | `[night] compact_at`: `-c model_auto_compact_token_limit=<n>` on every `mling exec` of a task; on the command line it beats the launcher's | `0`: none, so the launcher's 60% applies |
+| Night Shift's per-task limit (§4.1) | `[night] compact_at`: `-c model_auto_compact_token_limit=<n>` on every `ling exec` of a task; on the command line it beats the launcher's | `0`: none, so the launcher's 60% applies |
 
-**Trust, checked live** (mling 0.158.0, scratch `CODEX_HOME`, a three-command task at a 14,000 limit): the registration as written by `compaction.rs` made the hook run after the compaction with **no** `--dangerously-bypass-hook-trust`, and the ledger arrived as a developer message after the summary; the same file with one hex digit of the hash changed compacted and ran no hook. An untrusted hook is still skipped in silence (§7).
+**Trust, checked live** (ling 0.158.0, scratch `CODEX_HOME`, a three-command task at a 14,000 limit): the registration as written by `compaction.rs` made the hook run after the compaction with **no** `--dangerously-bypass-hook-trust`, and the ledger arrived as a developer message after the summary; the same file with one hex digit of the hash changed compacted and ran no hook. An untrusted hook is still skipped in silence (§7).
 
 ### 11.2 Phase 0
 
-**The task.** §5 asked for "one long task … in this repository". A cut-down copy of this repository (its `dreamference/` package and the Night Shift tests, 3.1 MB, committed as one base) and a 2,500-character task: five changes to Night Shift (a dry run, a per-night task cap, a totals line in the report, a `--dry-run` flag, a JSON report), each with a test, and the whole test file passing. It reads every Night Shift module (the largest ~20 KB) and a 600-line test file. Graded afterwards by five **hidden** acceptance tests copied in after the agent stopped, and by the agent's own test file. `mling exec -s workspace-write` from a pinned copy of the installed binary, one hour each, two runs at a time.
+**The task.** §5 asked for "one long task … in this repository". A cut-down copy of this repository (its `dreamference/` package and the Night Shift tests, 3.1 MB, committed as one base) and a 2,500-character task: five changes to Night Shift (a dry run, a per-night task cap, a totals line in the report, a `--dry-run` flag, a JSON report), each with a test, and the whole test file passing. It reads every Night Shift module (the largest ~20 KB) and a 600-line test file. Graded afterwards by five **hidden** acceptance tests copied in after the agent stopped, and by the agent's own test file. `ling exec -s workspace-write` from a pinned copy of the installed binary, one hour each, two runs at a time.
 
 **Load.** The model server was shared with other tasks all day. Running and queued requests were sampled every minute; the first pair of limited runs saw on average 4.5 running and 6.5 queued, the second pair 2.2–2.4 running and none queued. The unlimited runs were not sampled (spot readings during `none-2`: 5–8 running). **Wall times are comparable only within a pair.**
 

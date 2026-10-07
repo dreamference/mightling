@@ -1,5 +1,5 @@
 /// <reference types="vitest/config" />
-// The Work window is bundled into mling-app (tauri.conf.json `frontendDist`), never served from a
+// The Work window is bundled into ling-app (tauri.conf.json `frontendDist`), never served from a
 // network: everything it loads is in dist/, as the window's CSP requires.
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";

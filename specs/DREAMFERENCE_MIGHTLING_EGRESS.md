@@ -1,8 +1,8 @@
 # Mightling Egress — audit and airlock
 
-**Status:** Phase 1 (the audit) implemented: `exec` sessions on 2026-10-01, the full-screen interface (`--tui`) and the audit after `mling-admin codex build` on 2026-10-02: `dreamference/audit/`, `mling-admin audit egress`; §10 records what was built and where it differs. Phase 2 (the airlock) is not built; its mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2).
-**Superseded in part (2026-10-01):** the airlock's switch is now the `on` level of `/airgapped` ([MIGHTLING_AIRGAPPED §5.4](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)), not `mling --airlock`. The mechanism (§4.1, §4.2), the ledger (§4.4) and the audit (§3) stand; the surface (§2), the allowlist (§4.3) and §5 are read through that spec, which allows only the model server at `on`.
-**Target:** the `mling` terminal agent. `mling-admin` runs the audit.
+**Status:** Phase 1 (the audit) implemented: `exec` sessions on 2026-10-01, the full-screen interface (`--tui`) and the audit after `ling-admin codex build` on 2026-10-02: `dreamference/audit/`, `ling-admin audit egress`; §10 records what was built and where it differs. Phase 2 (the airlock) is not built; its mechanism in §4.2 was checked on this host on 2026-09-29 (details in §4.2).
+**Superseded in part (2026-10-01):** the airlock's switch is now the `on` level of `/airgapped` ([MIGHTLING_AIRGAPPED §5.4](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)), not `ling --airlock`. The mechanism (§4.1, §4.2), the ledger (§4.4) and the audit (§3) stand; the surface (§2), the allowlist (§4.3) and §5 are read through that spec, which allows only the model server at `on`.
+**Target:** the `ling` terminal agent. `ling-admin` runs the audit.
 **Builds on:**
 - the network-channel work of patches `0013` and `0015` ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md));
 - the launcher's forced `chatgpt_base_url`;
@@ -15,16 +15,16 @@
 
 Make "your code stays on your machine" something a user can check, not a promise.
 
-- **Phase 1, `mling-admin audit egress`:** run one real `mling` session under a tracer and print every network destination and every process it started, with a verdict.
-- **Phase 2, `mling --airlock`:** run `mling` where only an allowlist of local services is reachable. Every other attempt fails and is written to a ledger.
+- **Phase 1, `ling-admin audit egress`:** run one real `ling` session under a tracer and print every network destination and every process it started, with a verdict.
+- **Phase 2, `ling --airlock`:** run `ling` where only an allowlist of local services is reachable. Every other attempt fails and is written to a ledger.
 
 **Why it matters.**
 - **Developers care:** 81% of developers report security and privacy concerns about AI coding agents.
 - **Toggles are not enough:** at least one commercial agent was found uploading whole repositories over a channel that ignored its privacy toggle.
-- **Our own record:** tracing mling found five channels to the upstream vendor or GitHub. One needed a ChatGPT login; four needed none: Statsig metrics, featured plugins, a startup `git ls-remote` and the TUI announcement tip. All five are closed (`0013`, `0015`), and traced `exec` and TUI sessions now reach only `127.0.0.1:8000` (vLLM) and `127.0.0.1:8767` (the Gmail service). Phase 1 makes that trace a command anyone can rerun; Phase 2 makes a regression fail locally instead of leaking.
+- **Our own record:** tracing ling found five channels to the upstream vendor or GitHub. One needed a ChatGPT login; four needed none: Statsig metrics, featured plugins, a startup `git ls-remote` and the TUI announcement tip. All five are closed (`0013`, `0015`), and traced `exec` and TUI sessions now reach only `127.0.0.1:8000` (vLLM) and `127.0.0.1:8767` (the Gmail service). Phase 1 makes that trace a command anyone can rerun; Phase 2 makes a regression fail locally instead of leaking.
 
 **Non-goals:**
-- **Calling it air-gapped.** Web search and `mling-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them. The command `/airgapped` keeps to this: only its `on` level, which allows neither, carries the word ([MIGHTLING_AIRGAPPED §1](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)).
+- **Calling it air-gapped.** Web search and `ling-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them. The command `/airgapped` keeps to this: only its `on` level, which allows neither, carries the word ([MIGHTLING_AIRGAPPED §1](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md)).
 - **Inbound exposure.** The model server listening on `0.0.0.0:8000` is accepted by design: Mightling assumes the local network is trusted ([README](./README.md), "Accepted by design").
 - **Containers.** The web chat's own egress (Onyx, SearXNG, the sidecars) is out of scope. Onyx's telemetry is handled by `configure` ([ONYX](./DREAMFERENCE_ONYX.md)).
 
@@ -36,11 +36,11 @@ This spec adds no slash command of its own. (When it was written the patch budge
 
 | Command | Phase | Effect |
 |---|---|---|
-| `mling-admin audit egress [--tui] [--prompt "…"] [--json]` | 1 | Traces one session; prints destinations, processes, verdict; exit 0 on pass, 1 on an unexpected destination, 2 when the trace itself failed. |
-| `mling --airlock …` or `airlock = true` in `$CODEX_HOME/config.toml` | 2 | Runs `mling` in the airlock. The launcher handles the flag before Codex parses its arguments, like `mling app`, so it needs no patch. |
-| `mling airlock log [--since 1d]` | 2 | Prints the ledger (§4.4). |
+| `ling-admin audit egress [--tui] [--prompt "…"] [--json]` | 1 | Traces one session; prints destinations, processes, verdict; exit 0 on pass, 1 on an unexpected destination, 2 when the trace itself failed. |
+| `ling --airlock …` or `airlock = true` in `$CODEX_HOME/config.toml` | 2 | Runs `ling` in the airlock. The launcher handles the flag before Codex parses its arguments, like `ling app`, so it needs no patch. |
+| `ling airlock log [--since 1d]` | 2 | Prints the ledger (§4.4). |
 
-**`codex build` runs the audit.** After a build with a new Codex release, `mling-admin codex build` runs `audit egress` and prints the verdict. A failing verdict does not undo the build, but it is shown in red with the offending destinations. (As built, §10.5: after every build that installs a new `mling`, both kinds of session, `--no-audit` to skip; the verdict is marked ❌, the CLI's mark for a failure, not coloured.) [MIGHTLING_CODEX §6](./DREAMFERENCE_MIGHTLING_CODEX.md) says to re-run the trace after every Codex bump; this makes that automatic.
+**`codex build` runs the audit.** After a build with a new Codex release, `ling-admin codex build` runs `audit egress` and prints the verdict. A failing verdict does not undo the build, but it is shown in red with the offending destinations. (As built, §10.5: after every build that installs a new `ling`, both kinds of session, `--no-audit` to skip; the verdict is marked ❌, the CLI's mark for a failure, not coloured.) [MIGHTLING_CODEX §6](./DREAMFERENCE_MIGHTLING_CODEX.md) says to re-run the trace after every Codex bump; this makes that automatic.
 
 ---
 
@@ -50,7 +50,7 @@ This spec adds no slash command of its own. (When it was written the patch budge
 
 This productises the 2026-09-29 procedure.
 1. **Setup.** A throwaway git repository with one committed file, and a throwaway `CODEX_HOME`, so that no login, history or config of the user's influences the result, and none is touched.
-2. **Exec session.** `strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256` (as built: `sendmmsg` is how glibc sends a lookup's queries, and without it a DNS query leaves a connect to the resolver and no name, §10) around `mling exec --skip-git-repo-check "<prompt>"`, with the default prompt `Reply with exactly: pong`.
+2. **Exec session.** `strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256` (as built: `sendmmsg` is how glibc sends a lookup's queries, and without it a DNS query leaves a connect to the resolver and no name, §10) around `ling exec --skip-git-repo-check "<prompt>"`, with the default prompt `Reply with exactly: pong`.
 3. **TUI session** (`--tui`). The same trace around the interactive TUI, driven on a pseudo-terminal: accept the trust prompt, send the prompt, wait for the reply, quit. The TUI-only announcement fetch was found this way and is invisible to `exec`.
 4. **Destinations.** Every `sin_addr`/`sin6_addr` and port from `connect`, `sendto` and `sendmsg`, counted.
 5. **DNS.** Every name in UDP payloads to port 53.
@@ -63,7 +63,7 @@ This productises the 2026-09-29 procedure.
 - **Fail:** anything else, listed first.
 - **Trace failed:** the session did not produce a reply, or `strace` could not attach. This is not a pass.
 
-`--json` writes the full result to `~/.mightling/audit/<timestamp>-<exec|tui>.json` as well (the session kind is in the name since 2026-10-02, so a build's two records cannot collide): destinations, DNS names, processes, verdict, the `mling --version` output, and the Codex tag and patch hashes from the build stamp. Two audits can then be compared across builds.
+`--json` writes the full result to `~/.mightling/audit/<timestamp>-<exec|tui>.json` as well (the session kind is in the name since 2026-10-02, so a build's two records cannot collide): destinations, DNS names, processes, verdict, the `ling --version` output, and the Codex tag and patch hashes from the build stamp. Two audits can then be compared across builds.
 
 ### 3.3. Requirements
 
@@ -76,13 +76,13 @@ This productises the 2026-09-29 procedure.
 
 ### 4.1. Model
 
-`mling` runs in its own network namespace, where the only interface is `lo`. Every outbound connection fails with `ENETUNREACH` at the kernel. On the namespace's `lo`, the launcher listens on each allowlisted port and relays each connection to the same port on the host's loopback. The allowed services therefore see ordinary loopback clients, and nothing else is routable.
+`ling` runs in its own network namespace, where the only interface is `lo`. Every outbound connection fails with `ENETUNREACH` at the kernel. On the namespace's `lo`, the launcher listens on each allowlisted port and relays each connection to the same port on the host's loopback. The allowed services therefore see ordinary loopback clients, and nothing else is routable.
 
 This is the stronger form of what the patches do. The patches close channels one at a time at their call sites. The airlock needs no knowledge of the channels: a new one in a future Codex release fails closed.
 
 ### 4.2. Mechanism
 
-**Starting the airlock.** `mling --airlock` makes the launcher do the following before Codex parses its arguments:
+**Starting the airlock.** `ling --airlock` makes the launcher do the following before Codex parses its arguments:
 1. **Relay directory.** It creates `$XDG_RUNTIME_DIR/mightling-airlock/<pid>/`, mode `0700`.
    - The path must stay short: unix socket paths are limited to 108 bytes, and a path under the scratch directory used for the checks failed with `AF_UNIX path too long`.
 2. **Host-side relay.** It starts a relay, in-process on a thread of the launcher that stays outside the namespace. For each allowlisted port, the relay:
@@ -113,8 +113,8 @@ The allowlist is `airlock.allow` in `$CODEX_HOME/config.toml`, written by the la
 | Port | Service | Why |
 |---|---|---|
 | vLLM port (from the resolved `vllm_host`) | model server | The agent's model. |
-| `8767` | Gmail search service | `mling-admin gmail`. |
-| `8888` | SearXNG | `mling-search` (§5). |
+| `8767` | Gmail search service | `ling-admin gmail`. |
+| `8888` | SearXNG | `ling-search` (§5). |
 
 **The diffusion endpoint (`8001`) is not allowed:** the agent does not use it. Unix sockets on the host are unaffected by a network namespace, which is intended: the Docker socket, the D-Bus session and the like stay reachable. If one of them should be closed too, that belongs to Codex's command sandbox, not the airlock.
 
@@ -127,17 +127,17 @@ A connection that fails at the kernel leaves no trace by itself. The ledger is b
 The ledger is appended to `~/.mightling/airlock/ledger.jsonl`:
 
 ```json
-{"at": "…", "session": "…", "kind": "dns", "name": "ab.chatgpt.com", "pid": 4242, "exe": "/home/…/mling"}
+{"at": "…", "session": "…", "kind": "dns", "name": "ab.chatgpt.com", "pid": 4242, "exe": "/home/…/ling"}
 ```
 
-`mling airlock log` prints it grouped by name and executable. An empty ledger over a week of use is the record the goal asks for.
+`ling airlock log` prints it grouped by name and executable. An empty ledger over a week of use is the record the goal asks for.
 
 ---
 
 ## 5. Search and fetch, honestly
 
-- **Search goes out by design:** `mling-search` reaches SearXNG on `127.0.0.1:8888`, and SearXNG queries the upstream engines from outside the airlock. The ledger cannot see those queries. The airlock's own docs and the agent's prompt must say plainly that searches leave the machine through SearXNG.
-- **`mling-fetch`** connects directly to the URL (or through `https_proxy` when set), so it fails inside the airlock. It fails with its existing error path, and the ledger records the lookup.
+- **Search goes out by design:** `ling-search` reaches SearXNG on `127.0.0.1:8888`, and SearXNG queries the upstream engines from outside the airlock. The ledger cannot see those queries. The airlock's own docs and the agent's prompt must say plainly that searches leave the machine through SearXNG.
+- **`ling-fetch`** connects directly to the URL (or through `https_proxy` when set), so it fails inside the airlock. It fails with its existing error path, and the ledger records the lookup.
 
 **The prompt must match the mode.** The launcher writes the model catalog, including `WEB_ACCESS_INSTRUCTIONS`, at every start. In airlock mode it writes a variant:
 - search is available, and its queries leave the machine;
@@ -153,7 +153,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 
 - **Opt-in.** Interactive use is opt-in (`--airlock` or the config key) until a release has run a week of the maintainer's own sessions with an empty ledger and nothing broken.
 - **Night Shift** runs use the airlock by default once it exists ([NIGHT_SHIFT §6](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md)): no one is watching those sessions.
-- **`mling-admin drafter tune`** runs its training process in the airlock ([SELF_SPEEDING §7](./DREAMFERENCE_SELF_SPEEDING.md)).
+- **`ling-admin drafter tune`** runs its training process in the airlock ([SELF_SPEEDING §7](./DREAMFERENCE_SELF_SPEEDING.md)).
 
 ---
 
@@ -164,9 +164,9 @@ Without that, the model would be told it can fetch pages, and would keep trying.
   - a live test (skips without a server): the audit passes on the current build.
 - **Phase 2:**
   - launcher unit tests for the allowlist, the socket-path length check and the resolver stub;
-  - a live test in which an airlocked `mling exec` session answers through vLLM;
+  - a live test in which an airlocked `ling exec` session answers through vLLM;
   - inside the same session, a `curl https://example.com` run by the agent fails, and `example.com` appears in the ledger;
-  - `mling-admin gmail status` and `mling-search` still work inside it;
+  - `ling-admin gmail status` and `ling-search` still work inside it;
   - Codex's command sandbox still starts inside the airlock (§4.2, not yet verified).
 
 ---
@@ -185,7 +185,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 
 ## 9. Open questions
 
-- **`mling app`.** The desktop app launches its own process tree. Should the airlock also cover it, or is it only for the terminal agent?
+- **`ling app`.** The desktop app launches its own process tree. Should the airlock also cover it, or is it only for the terminal agent?
 - **MCP servers.** A user-configured MCP server that needs the network fails inside the airlock. Should the allowlist accept per-server exceptions (by port), or should such servers be run outside and reached over a unix socket?
 
 ---
@@ -194,7 +194,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 
 ### 10.1 What exists
 
-`mling-admin audit egress [--prompt "…"] [--json]`, in `dreamference/audit/`:
+`ling-admin audit egress [--prompt "…"] [--json]`, in `dreamference/audit/`:
 
 | Piece | Path |
 |---|---|
@@ -203,7 +203,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 | The verdict and its exit code (0 pass, 1 unexpected destination, 2 trace failed) | `egress_verdict.py` |
 | The session, the judgement, the report, the JSON result | `egress_audit.py` |
 
-**Run on this machine, twice, both a pass.** At 21:34 on the 16-patch build of `rust-v0.158.0` installed at 19:10, and at 21:44 on the 17-patch build that the `/airgapped` work installed at 21:41 (the kept record, `~/.mightling/audit/20261001-214436.json`, `build_matches_checkout: true`). Each time one `mling exec "Reply with exactly: pong"` in a throwaway repository with a throwaway `CODEX_HOME` connected to `127.0.0.1:8000` (twice) and `127.0.0.1:8767` (once), sent no DNS query, opened no unix socket but glibc's absent `nscd` one, and ran no networked git command; 2.7 s. A second run whose prompt made the agent run `curl https://example.com` also passed, correctly: Codex's read-only sandbox refuses the `socket` call (`socket(AF_INET6, SOCK_DGRAM, …) = -1 EPERM` in a trace taken with `socket` added), so `curl` never reaches a `connect` or a lookup and exits 6.
+**Run on this machine, twice, both a pass.** At 21:34 on the 16-patch build of `rust-v0.158.0` installed at 19:10, and at 21:44 on the 17-patch build that the `/airgapped` work installed at 21:41 (the kept record, `~/.mightling/audit/20261001-214436.json`, `build_matches_checkout: true`). Each time one `ling exec "Reply with exactly: pong"` in a throwaway repository with a throwaway `CODEX_HOME` connected to `127.0.0.1:8000` (twice) and `127.0.0.1:8767` (once), sent no DNS query, opened no unix socket but glibc's absent `nscd` one, and ran no networked git command; 2.7 s. A second run whose prompt made the agent run `curl https://example.com` also passed, correctly: Codex's read-only sandbox refuses the `socket` call (`socket(AF_INET6, SOCK_DGRAM, …) = -1 EPERM` in a trace taken with `socket` added), so `curl` never reaches a `connect` or a lookup and exits 6.
 
 ### 10.2 Where it differs from §2 and §3
 
@@ -211,7 +211,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 - **Port 53 is a resolver, not a destination.** A connect to `127.0.0.53:53` is loopback, and a query sent there still leaves the machine through systemd-resolved. So resolvers are listed apart, every name asked is a failure, and a query whose name could not be read (strace cuts payloads at 256 bytes) fails too, naming the resolver.
 - **A connect counts whatever it returned**: `EINPROGRESS` is the normal result of a non-blocking connect, and a refused or unreachable one was still an attempt.
 - **`127.0.0.1:9` is a failure with its own wording.** It is where the launcher points `chatgpt_base_url`; a connect there is a ChatGPT-backend call that no patch closes and that failed only because of the redirect.
-- **`git ls-remote --get-url` is not networked** (it prints a URL after applying `insteadOf`; `mling-code` uses it for the submodule policy). git's subcommand is the first word that is neither an option nor an option's value, so a directory named `fetch` or a `--grep pull` is not a finding. `push` is counted as networked beside §3.1's list.
+- **`git ls-remote --get-url` is not networked** (it prints a URL after applying `insteadOf`; `ling-code` uses it for the submodule policy). git's subcommand is the first word that is neither an option nor an option's value, so a directory named `fetch` or a `--grep pull` is not a finding. `push` is counted as networked beside §3.1's list.
 - **A failed `execve` is not a process**: it is the shell walking `PATH`. An `execve` interrupted in the trace (`<unfinished ...>`) is counted when its `resumed` line reports success.
 - **The code index is off for the traced session** (`code_index_enabled = false` in a throwaway config named by `DREAMFERENCE_CONFIG_PATH`). Its indexers run detached, in their own network-less sandbox, and outlive the session; they are not what this trace can show.
 - **The JSON result also says whether the audited binary was built from the checkout as it is** (`build_matches_checkout`): the patch hashes are the checkout's.
@@ -222,7 +222,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 - The recorded trace of the passing session (`tests/fixtures/egress/exec_pass.strace`, 347 lines, 22 of them unfinished or resumed).
 - The same trace with the channels of `0013` and `0015` written back in (`exec_leaks.strace`): the verdict fails and names `ab.chatgpt.com`, `chatgpt.com`, `raw.githubusercontent.com`, the `git ls-remote` of `openai/plugins`, each address, and the `127.0.0.1:9` redirect. **These lines are written by hand in strace's format**: the traces of 2026-09-29 were in a scratch folder that has since been deleted, so §7's "the 2026-09-29 traces" could not be used.
 - A real recording of `curl https://example.com` (`curl_example.strace`): the name, the resolver and the four addresses are read from what glibc and the kernel actually printed.
-- A session with no reply, and an empty trace, are "trace failed"; a local port off the allowlist fails; the escapes and the DNS decoder; git commands that reach nothing; the report; the audit run end to end with a stand-in for strace (throwaway repository and home, both removed afterwards; the JSON written to the real `CODEX_HOME`); missing strace or `mling`.
+- A session with no reply, and an empty trace, are "trace failed"; a local port off the allowlist fails; the escapes and the DNS decoder; git commands that reach nothing; the report; the audit run end to end with a stand-in for strace (throwaway repository and home, both removed afterwards; the JSON written to the real `CODEX_HOME`); missing strace or `ling`.
 
 ### 10.4 Not built
 
@@ -231,7 +231,7 @@ Without that, the model would be told it can fetch pages, and would keep trying.
 
 ### 10.5 The interface, and the audit after a build (2026-10-02)
 
-**`mling-admin audit egress --tui`** traces the full-screen interface instead of `mling exec` (`dreamference/audit/tui_session.py`, `TuiSession`). The same strace is put around `mling` with no subcommand, on a pseudo-terminal of 160×50 with `TERM=xterm-256color`; the audit waits for the composer, types the prompt, waits for the reply, lets the session settle for 3 s, types `/quit`, and reads the trace.
+**`ling-admin audit egress --tui`** traces the full-screen interface instead of `ling exec` (`dreamference/audit/tui_session.py`, `TuiSession`). The same strace is put around `ling` with no subcommand, on a pseudo-terminal of 160×50 with `TERM=xterm-256color`; the audit waits for the composer, types the prompt, waits for the reply, lets the session settle for 3 s, types `/quit`, and reads the trace.
 
 Where it differs from §3.1 step 3:
 
@@ -239,9 +239,9 @@ Where it differs from §3.1 step 3:
 - **The reply is read from the session file, not from the screen.** The screen also shows the typed prompt, and the default prompt contains the word the reply consists of. A session has replied when a `rollout-*.jsonl` under the throwaway home holds a `task_complete` event with a non-empty `last_agent_message`.
 - **The terminal is driven with `pexpect` and rendered with `pyte`**, which the live tests already use and which are not dependencies of the package. Without them `--tui` is "trace failed" (exit 2) and prints the `pip install` line, as a missing `strace` does.
 - **A session that does not end is stopped with its process group**, after the same 300 s; "trace failed" then also says whether the interface had opened and taken the prompt.
-- **The interface's commands can reach the network; `exec`'s cannot.** The launcher gives the interface's workspace-write sandbox `network_access = true`, while `mling exec` runs read-only with none. A command the model chooses to run in the traced interface session is therefore traced with network access. The default prompt asks for one word so that no command runs; `--prompt` is how to look at what a task does.
+- **The interface's commands can reach the network; `exec`'s cannot.** The launcher gives the interface's workspace-write sandbox `network_access = true`, while `ling exec` runs read-only with none. A command the model chooses to run in the traced interface session is therefore traced with network access. The default prompt asks for one word so that no command runs; `--prompt` is how to look at what a task does.
 
-**Run on this machine, 2026-10-02 11:49, both a pass**, on the `mling` installed 2026-10-01 21:41 (build key `064c6b8c737f-4b9f72c9a5ce`, 17 patches; `build_matches_checkout: false`, because the launcher source had moved on since). Records: `~/.mightling/audit/20261002-114937-tui.json`, `20261002-114948-exec.json`.
+**Run on this machine, 2026-10-02 11:49, both a pass**, on the `ling` installed 2026-10-01 21:41 (build key `064c6b8c737f-4b9f72c9a5ce`, 17 patches; `build_matches_checkout: false`, because the launcher source had moved on since). Records: `~/.mightling/audit/20261002-114937-tui.json`, `20261002-114948-exec.json`.
 
 | | `exec` | interface |
 |---|---|---|
@@ -253,20 +253,20 @@ Where it differs from §3.1 step 3:
 
 The session bus is the one thing the interface opens that `exec` does not. It is a unix socket on this machine and is listed, not judged; which part of the interface asks the accessibility service was not looked into.
 
-**After a build.** `mling-admin codex build` now ends with the audit when, and only when, it installed a new `mling`: the build was not current beforehand, or `--force` was given, and it succeeded. `EgressAudit.after_build()` traces an `exec` session and then the interface, and writes both records.
+**After a build.** `ling-admin codex build` now ends with the audit when, and only when, it installed a new `ling`: the build was not current beforehand, or `--force` was given, and it succeeded. `EgressAudit.after_build()` traces an `exec` session and then the interface, and writes both records.
 
 - **Not every build:** §10.4's old objection was a model request in every build. A `codex build` that finds the binary current runs nothing. Whether the binary was current is asked *before* the build, because afterwards a build that compiled and one that found nothing to do both report success.
 - **It never waits for a model server.** The server is asked once with a 3 s timeout; if it does not answer, one line says the audit was skipped and names the two commands to run later. Without that check a build on a machine whose server is down would end with the launcher's five-minute wait.
 - **It never changes the build's exit code.** The binary is installed either way. An unexpected destination ends with a ❌ line saying the build reaches something it should not; a trace that failed says the audit could not show what the build does; an audit that itself breaks is reported in one line.
 - **`--no-audit`** skips it. Without `pexpect` and `pyte` only the `exec` session is traced, and a line says so.
 - **Where the hook is:** in the CLI's `codex build` branch, not in `CodexBrandedBuilder`, so nothing that calls the builder from a test can start a session.
-- **Not exercised by a real build.** On 2026-10-02 several tasks were rebuilding `mling` and the model server was shared with a benchmark, so no `codex build` was started for this. The branch is covered by tests with the builder and the audit replaced; the two sessions it runs are the ones measured above.
+- **Not exercised by a real build.** On 2026-10-02 several tasks were rebuilding `ling` and the model server was shared with a benchmark, so no `codex build` was started for this. The branch is covered by tests with the builder and the audit replaced; the two sessions it runs are the ones measured above.
 
 ### 10.6 Tests added (`tests/test_egress_audit.py`, 27 in all)
 
 - A recorded trace of a real interface session (`tests/fixtures/egress/tui_pass.strace`, 385 lines): the same destinations as `exec` plus one more connect to the model server, and the session bus among the unix sockets.
 - The session file: a prompt alone is not a reply; a `task_complete` with a message is.
-- The interface played by a stand-in on a real pseudo-terminal, under a stand-in `strace`: `mling` is started with no subcommand on a terminal, the prompt and then `/quit` are typed, the throwaway home trusts the throwaway repository, both are removed afterwards, and the record is `…-tui.json` with `"session": "tui"`.
+- The interface played by a stand-in on a real pseudo-terminal, under a stand-in `strace`: `ling` is started with no subcommand on a terminal, the prompt and then `/quit` are typed, the throwaway home trusts the throwaway repository, both are removed afterwards, and the record is `…-tui.json` with `"session": "tui"`.
 - A stand-in that never answers: "trace failed", the report says the interface had taken the prompt, and the process is gone.
 - `--tui` without `pexpect` and `pyte`.
 - After a build: both sessions traced and recorded; no model server, no session and no wait; a failed trace does not hide a failing verdict; a broken audit is reported, not raised.

@@ -3,12 +3,12 @@ index fce548a..59f8446 100644
 --- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -539,2 +539,3 @@ impl ChatWidget {
-             SlashCommand::Cavemode => self.add_plain_history_lines(mling_launcher::cave::command(self.thread_id, "").into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Night => self.add_plain_history_lines(mling_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Cavemode => self.add_plain_history_lines(ling_launcher::cave::command(self.thread_id, "").into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Ide => {
 @@ -782,2 +783,3 @@ impl ChatWidget {
-             SlashCommand::Cavemode => self.add_plain_history_lines(mling_launcher::cave::command(self.thread_id, trimmed).into_iter().map(ratatui::text::Line::from).collect()),
-+            SlashCommand::Night => self.add_plain_history_lines(mling_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
+             SlashCommand::Cavemode => self.add_plain_history_lines(ling_launcher::cave::command(self.thread_id, trimmed).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
              SlashCommand::Voice => match trimmed.to_ascii_lowercase().as_str() {
 @@ -1208,2 +1210,3 @@ impl ChatWidget {
              | SlashCommand::Cavemode

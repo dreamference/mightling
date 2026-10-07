@@ -1,9 +1,9 @@
 """
-Reading an `strace` of a `mling` session (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1).
+Reading an `strace` of a `ling` session (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1).
 
 This module provides the StraceParser class. It reads the output of
 
-    strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256 -o <file> mling …
+    strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256 -o <file> ling …
 
 and extracts where the session's processes connected, which names they asked a resolver for,
 which unix sockets they opened and which programs they started. `sendmmsg` is in the list because

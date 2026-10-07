@@ -8,7 +8,7 @@ from dreamference.chat.desktop_runner import DESKTOP_PROJECT_DIR
 
 def test_window_points_at_the_local_deployment_rather_than_a_bundled_copy():
     # The desktop app and the browser render the same server, which is what keeps every patch
-    # `mling-admin chat configure` applies showing up in both without being ported.
+    # `ling-admin chat configure` applies showing up in both without being ported.
     with open(os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "tauri.conf.json")) as handle:
         config = json.load(handle)
 
@@ -138,7 +138,7 @@ def test_desktop_entry_matches_the_window_class_gnome_sees():
 
     assert WINDOW_CLASS == "Mightling-app"
     # Tao derives the class from the binary name, so the file is named after the instance too.
-    assert DESKTOP_ENTRY_NAME == "mling-app.desktop"
+    assert DESKTOP_ENTRY_NAME == "ling-app.desktop"
 
 
 def test_registration_removes_launchers_left_by_earlier_binary_names(tmp_path):
@@ -154,12 +154,12 @@ def test_registration_removes_launchers_left_by_earlier_binary_names(tmp_path):
         (icons / f"{legacy}.png").write_bytes(b"")
     with patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(entries)), \
          patch.object(desktop_runner, "ICON_DIR", str(icons)), \
-         patch.object(DesktopRunner, "binary_path", return_value="/opt/mling-app"), \
+         patch.object(DesktopRunner, "binary_path", return_value="/opt/ling-app"), \
          patch("dreamference.chat.onyx_brand_assets.OnyxBrandAssets.render_app_icon"), \
          patch("subprocess.run"):
         assert DesktopRunner.install_desktop_entry() is True
 
-    assert sorted(p.name for p in entries.iterdir()) == ["mling-app.desktop"]
+    assert sorted(p.name for p in entries.iterdir()) == ["ling-app.desktop"]
     assert list(icons.iterdir()) == []
 
 

@@ -1,7 +1,7 @@
-"""`mling-admin swe-bench` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §7.2).
+"""`ling-admin swe-bench` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §7.2).
 
 A stand-in plays `docker`: a "container" is a scratch git repository on the host, the scripts the
-runner executes in a container run against it with bash, and `mling exec` is a scripted agent
+runner executes in a container run against it with bash, and `ling exec` is a scripted agent
 that edits it. Another stand-in plays the upstream harness. Nothing here starts a container,
 pulls an image, installs a package or reaches the network.
 """
@@ -53,7 +53,7 @@ IDS = ["acme__widget-1", "acme__widget-2", "beta__gadget-7", "beta__gadget-9"]
 
 
 class FakeProcess:
-    """The `docker exec … mling exec` client: finished at once, or hanging until stopped."""
+    """The `docker exec … ling exec` client: finished at once, or hanging until stopped."""
 
     def __init__(self, code, hang=False):
         self.code, self.hang, self.stopped = code, hang, False
@@ -170,10 +170,10 @@ class FakeDocker:
             return process
         if mode == "error":
             return FakeProcess(1)
-        if "mling-code" in box["env"].get("PATH", ""):
+        if "ling-code" in box["env"].get("PATH", ""):
             # An agent that has the index uses it once before it edits.
             stdout.write((json.dumps({"type": "item.completed", "item": {
-                "type": "command_execution", "command": "/bin/bash -lc 'mling-code refs widget'", "exit_code": 0}}) + "\n").encode())
+                "type": "command_execution", "command": "/bin/bash -lc 'ling-code refs widget'", "exit_code": 0}}) + "\n").encode())
         stdout.write((json.dumps({"type": "item.completed", "item": {
             "type": "command_execution", "command": "/bin/bash -lc 'grep -rn widget .'", "exit_code": 0}}) + "\n").encode())
         stdout.write((json.dumps({"type": "turn.completed", "usage": {
@@ -272,8 +272,8 @@ def bench(tmp_path, monkeypatch):
     monkeypatch.setattr(SweBenchHarness, "execute", staticmethod(harness))
     monkeypatch.setattr(SweBenchImages, "fetch_tags", classmethod(
         lambda cls: [i.replace("__", "-") for i in IDS if i != "beta__gadget-9"]))
-    monkeypatch.setattr(SweBenchRuntime, "installed_mightling", classmethod(lambda cls: "/opt/none/mling"))
-    monkeypatch.setattr(SweBenchRuntime, "ensure", classmethod(lambda cls, mling, patchelf: "runtime-hash"))
+    monkeypatch.setattr(SweBenchRuntime, "installed_mightling", classmethod(lambda cls: "/opt/none/ling"))
+    monkeypatch.setattr(SweBenchRuntime, "ensure", classmethod(lambda cls, ling, patchelf: "runtime-hash"))
     index_calls = []
 
     def fake_mightling_code(command, **kwargs):
@@ -286,7 +286,7 @@ def bench(tmp_path, monkeypatch):
             (Path(environment["CBM_CACHE_DIR"]) / "host-path-testbed.db").write_text("graph")
         return subprocess.CompletedProcess(command, 0, "mightling-index-x-codebase-memory: ok\n", "")
 
-    installed = tmp_path / "installed" / "mling-code"
+    installed = tmp_path / "installed" / "ling-code"
     installed.parent.mkdir()
     installed.write_text("binary")
     monkeypatch.setattr(SweBenchCodeIndex, "execute", staticmethod(fake_mightling_code))
@@ -334,7 +334,7 @@ def test_only_the_code_index_arm_is_told_to_use_the_code_tools():
 def test_the_prompt_holds_the_issue_and_nothing_else_from_the_row(bench):
     assert run(bench, instances=["acme__widget-1"]) == 0
     docker = bench["docker"]
-    exec_call = next(call for call in docker.calls if call[0] == "exec" and "mling" in call[2])
+    exec_call = next(call for call in docker.calls if call[0] == "exec" and "ling" in call[2])
     prompt = exec_call[-1]
     assert prompt == SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.")
     assert "There is no network." in prompt
@@ -353,13 +353,13 @@ def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
     assert created[created.index("--network") + 1] == swe_bench_settings.NETWORK_NAME
     assert created[created.index("--memory") + 1] == created[created.index("--memory-swap") + 1] == "8G"
     assert created[created.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
-    assert any(mount.endswith(":/opt/mling:ro") for mount in created)
+    assert any(mount.endswith(":/opt/ling:ro") for mount in created)
     env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://172.30.0.1:8000"
     assert env["PATH"].startswith("/opt/miniconda3/envs/testbed/bin:")
     assert env["MIGHTLING_NIGHT_RUN"] == "1"
     assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("safe.directory", "/testbed")
-    agent = next(call for call in bench["docker"].calls if call[0] == "exec" and "mling" in call[2])
+    agent = next(call for call in bench["docker"].calls if call[0] == "exec" and "ling" in call[2])
     assert "--dangerously-bypass-approvals-and-sandbox" in agent
     assert "model_auto_compact_token_limit=49152" in agent
     # The image is the arm64 one, and the container is removed afterwards.
@@ -409,7 +409,7 @@ def test_a_stall_is_nudged_and_a_nudge_that_works_is_a_change(bench):
     store = SweBenchRunStore("r1")
     assert store.state("acme__widget-1")["status"] == "done"
     assert store.state("acme__widget-1")["nudges"] == 1
-    turns = [call for call in bench["docker"].calls if call[0] == "exec" and "mling" in call[2]]
+    turns = [call for call in bench["docker"].calls if call[0] == "exec" and "ling" in call[2]]
     assert len(turns) == 2 and turns[1][-3] == "resume" and turns[1][-1] == NUDGE
 
 
@@ -664,7 +664,7 @@ def test_other_commands_are_told_a_swe_bench_run_holds_the_lock(bench, capsys):
         assert NightShiftQueue.runner_holder() == "a SWE-bench run"
         with pytest.raises(SystemExit):
             DreamferenceCLIController._refuse_during_night_run("codex build")
-    assert "A SWE-bench run is in progress, so `mling-admin codex build` waits" in capsys.readouterr().out
+    assert "A SWE-bench run is in progress, so `ling-admin codex build` waits" in capsys.readouterr().out
     assert NightShiftQueue.runner_holder() is None
 
 
@@ -752,9 +752,9 @@ def test_mcnemar_and_the_paired_interval():
 def test_without_the_code_index_the_container_gets_nothing_of_mightling_code(bench):
     run(bench, instances=["acme__widget-1"])
     created = next(call for call in bench["docker"].calls if call[0] == "run")
-    assert "mling-code" not in json.dumps(created) and "MIGHTLING_CODE" not in json.dumps(created)
+    assert "ling-code" not in json.dumps(created) and "MIGHTLING_CODE" not in json.dumps(created)
     assert bench["index_calls"] == []
-    agent = next(call for call in bench["docker"].calls if call[0] == "exec" and "mling" in call[2])
+    agent = next(call for call in bench["docker"].calls if call[0] == "exec" and "ling" in call[2])
     assert "mcp_servers" not in json.dumps(agent)
     store = SweBenchRunStore("r1")
     assert store.manifest()["code_index"] == "off" and "index" not in store.state("acme__widget-1")
@@ -775,21 +775,21 @@ def test_with_the_code_index_the_repository_is_indexed_on_the_host_and_mounted_r
     created = next(call for call in docker.calls if call[0] == "run")
     mounts = [created[i + 1] for i, word in enumerate(created) if word == "-v"]
     assert f"{directory}:/mightling-index:ro" in mounts
-    assert f"{SweBenchCodeIndex.runtime_dir()}:/opt/mling-code:ro" in mounts
+    assert f"{SweBenchCodeIndex.runtime_dir()}:/opt/ling-code:ro" in mounts
     env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
-    assert env["MIGHTLING_CODE_BIN"] == "/opt/mling-code/bin/mling-code"
+    assert env["MIGHTLING_CODE_BIN"] == "/opt/ling-code/bin/ling-code"
     assert env["MIGHTLING_CODE_STATE_DIR"] == "/mightling-index/state"
     assert env["MIGHTLING_CODE_GRAPH_DB"] == "/mightling-index/cbm/host-path-testbed.db"
     assert env["MIGHTLING_CODE_PROJECT"] == "host-path-testbed"
-    assert env["PATH"].startswith("/opt/mling-code/bin:/opt/miniconda3/envs/testbed/bin:")
-    # The agent's mling declares the index's MCP server itself, as a required one, so the first
+    assert env["PATH"].startswith("/opt/ling-code/bin:/opt/miniconda3/envs/testbed/bin:")
+    # The agent's ling declares the index's MCP server itself, as a required one, so the first
     # request waits for its tools instead of going out without them.
-    agent = next(call for call in docker.calls if call[0] == "exec" and "mling" in call[2])
+    agent = next(call for call in docker.calls if call[0] == "exec" and "ling" in call[2])
     overrides = [agent[i + 1] for i, word in enumerate(agent) if word == "-c"]
-    assert "mcp_servers.mling_code.required=true" in overrides
-    assert 'mcp_servers.mling_code.command="/opt/mling-code/bin/mling-code"' in overrides
-    assert 'mcp_servers.mling_code.args=["mcp"]' in overrides
-    forwarded = next(o for o in overrides if o.startswith("mcp_servers.mling_code.env_vars="))
+    assert "mcp_servers.ling_code.required=true" in overrides
+    assert 'mcp_servers.ling_code.command="/opt/ling-code/bin/ling-code"' in overrides
+    assert 'mcp_servers.ling_code.args=["mcp"]' in overrides
+    forwarded = next(o for o in overrides if o.startswith("mcp_servers.ling_code.env_vars="))
     assert '"MIGHTLING_CODE_GRAPH_DB"' in forwarded and '"MIGHTLING_CODE_PROJECT"' in forwarded
     store = SweBenchRunStore("r1")
     state = store.state("acme__widget-1")
@@ -798,7 +798,7 @@ def test_with_the_code_index_the_repository_is_indexed_on_the_host_and_mounted_r
     assert store.log_stats("acme__widget-1") == {
         "commands": 2, "puffin_code_calls": 1, "input_tokens": 1000, "cached_input_tokens": 900, "output_tokens": 50}
     report = SweBenchReport.render(store)
-    assert "Code index          universal" in report and "called mling-code 1 time(s), in 1 of 1 instance(s)" in report
+    assert "Code index          universal" in report and "called ling-code 1 time(s), in 1 of 1 instance(s)" in report
 
 
 def test_an_index_is_cached_by_repository_and_commit_and_its_time_is_not_the_agents(bench, monkeypatch):
@@ -851,14 +851,14 @@ def test_against_sets_the_two_arms_side_by_side(bench):
     lines = {line.split()[0] + " " + line.split()[1]: line for line in text.splitlines() if len(line.split()) > 2}
     assert lines["code index"].split()[-2:] == ["universal", "off"]
     assert lines["resolved 2"].split()[1:] == ["2", "(66.7%)", "2", "(66.7%)"]
-    assert lines["mling-code calls"].split()[-2:] == ["3", "0"]
+    assert lines["ling-code calls"].split()[-2:] == ["3", "0"]
     assert lines["instances using"].split()[-2:] == ["3", "0"]
     assert lines["input tokens"].split()[-2:] == ["3,000", "3,000"]
     assert "Resolved in both: 1, only with: 1, only without: 1, neither: 0" in text
-    assert "In with the agent called mling-code in 3 of 3 instances" in text
+    assert "In with the agent called ling-code in 3 of 3 instances" in text
     assert "No measurable difference." in text
     row_line = next(line for line in text.splitlines() if line.strip().startswith("acme__widget-2"))
-    assert "only with" in row_line and "1 mling-code" in row_line
+    assert "only with" in row_line and "1 ling-code" in row_line
 
 
 def test_naming_mightling_code_is_not_calling_it(bench):
@@ -866,21 +866,21 @@ def test_naming_mightling_code_is_not_calling_it(bench):
     store.log_path("x").parent.mkdir(parents=True)
     command = lambda text: json.dumps({"type": "item.completed", "item": {"type": "command_execution", "command": text}})
     store.log_path("x").write_text("Reading additional input from stdin...\n" + "\n".join([
-        command("/bin/bash -lc 'ls /opt/mling-code/bin'"), command("/bin/bash -lc 'which mling-code'"),
-        command("/bin/bash -lc 'cd /testbed && mling-code refs Widget'"),
-        command("/bin/bash -lc 'mling-code   callers a.b | head'")]) + "\n")
+        command("/bin/bash -lc 'ls /opt/ling-code/bin'"), command("/bin/bash -lc 'which ling-code'"),
+        command("/bin/bash -lc 'cd /testbed && ling-code refs Widget'"),
+        command("/bin/bash -lc 'ling-code   callers a.b | head'")]) + "\n")
     assert store.log_stats("x")["commands"] == 4 and store.log_stats("x")["puffin_code_calls"] == 2
 
 
 def test_an_index_question_asked_as_a_tool_counts_as_one(bench):
-    # Since 2026-10-02 the launcher gives the model the index as `code_*` tools; `mling exec`
+    # Since 2026-10-02 the launcher gives the model the index as `code_*` tools; `ling exec`
     # reports such a call as an `mcp_tool_call` item, not as a command.
     store = SweBenchRunStore("tools")
     store.log_path("x").parent.mkdir(parents=True)
     tool = lambda server, name: json.dumps({"type": "item.completed", "item": {
         "type": "mcp_tool_call", "server": server, "tool": name, "arguments": {}}})
     store.log_path("x").write_text("\n".join([
-        tool("mling_code", "code_search"), tool("mling_code", "code_show"),
+        tool("ling_code", "code_search"), tool("ling_code", "code_show"),
         tool("codex", "list_mcp_resources"), tool("other", "decode_refs"),
         json.dumps({"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}})]) + "\n")
     assert store.log_stats("x")["commands"] == 5 and store.log_stats("x")["puffin_code_calls"] == 2
@@ -894,7 +894,7 @@ def test_an_arm_that_never_used_the_index_is_said_to_prove_nothing(bench, monkey
     monkeypatch.setattr(SweBenchRunStore, "log_stats", lambda self, instance_id: {
         "commands": 3, "puffin_code_calls": 0, "input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1})
     text = SweBenchReport.against(SweBenchRunStore("with"), SweBenchRunStore("without"))
-    assert "In with the agent never called mling-code: this comparison says nothing about the index." in text
+    assert "In with the agent never called ling-code: this comparison says nothing about the index." in text
 
 
 # -- setup, smoke, the runtime, the command line --------------------------------------------------
@@ -925,14 +925,14 @@ def test_the_runtime_names_every_library_mightling_is_linked_against(monkeypatch
     real_run = subprocess.run
     monkeypatch.setattr(subprocess, "run", lambda command, **kw: subprocess.CompletedProcess(command, 0, ldd, "")
                         if command[0] == "ldd" else real_run(command, **kw))
-    loader, libraries = SweBenchRuntime.host_libraries("/x/mling")
+    loader, libraries = SweBenchRuntime.host_libraries("/x/ling")
     assert loader == "/lib/ld-linux-aarch64.so.1" and len(libraries) == 3
     ldd += "\tliblzma.so.5 => /lib/aarch64-linux-gnu/liblzma.so.5 (0x6)\n"
-    loader, libraries = SweBenchRuntime.host_libraries("/x/mling")
+    loader, libraries = SweBenchRuntime.host_libraries("/x/ling")
     assert "/lib/aarch64-linux-gnu/liblzma.so.5" in libraries and len(libraries) == 4
     ldd += "\tlibssl.so.3 => /lib/aarch64-linux-gnu/libssl.so.3 (0x5)\n"
     with pytest.raises(ValueError, match="libssl.so.3"):
-        SweBenchRuntime.host_libraries("/x/mling")
+        SweBenchRuntime.host_libraries("/x/ling")
 
 
 def test_the_dataset_file_for_the_harness_names_this_machines_images(tmp_path):
@@ -981,7 +981,7 @@ def test_status_and_clean_touch_only_the_benchmarks_own_things(bench, capsys):
     assert SweBenchCommand.clean("r1", images=True) == 0
     assert not (SweBenchRunStore("r1").directory / "scratch").exists()
     assert bench["docker"].present == set()
-    assert ["ps", "-aq", "--filter", "label=mling.swe-bench.run=r1"] in bench["docker"].calls
+    assert ["ps", "-aq", "--filter", "label=ling.swe-bench.run=r1"] in bench["docker"].calls
 
 
 # -- the system prompt (specs/DREAMFERENCE_MIGHTLING_PROMPT.md §6.2) ---------------------------------
@@ -1045,7 +1045,7 @@ def test_a_custom_prompt_is_mounted_read_only_and_its_text_is_recorded(bench, mo
     assert not SweBenchRunStore("r1").manifest_path.exists()
     assert run(bench, instances=["acme__widget-1"], prompt="Mine") == 1, "not a prompt's name"
     (home / "system-prompts").mkdir(parents=True)
-    text = "<!-- mling: blocks=code -->\nFix it.\n"
+    text = "<!-- ling: blocks=code -->\nFix it.\n"
     (home / "system-prompts" / "mine.md").write_text(text)
     assert run(bench, instances=["acme__widget-1"], prompt="mine") == 0
     env, mounts = container_env(bench)
@@ -1129,7 +1129,7 @@ def test_the_relay_forwards_to_its_one_target_and_closes():
 
 def test_a_named_mightling_code_build_replaces_the_installed_one(tmp_path, monkeypatch):
     from dreamference.swe_bench.swe_bench_code_index import MIGHTLING_CODE_OVERRIDE_ENV
-    build = tmp_path / "mling-code"
+    build = tmp_path / "ling-code"
     build.write_text("")
     monkeypatch.setenv(MIGHTLING_CODE_OVERRIDE_ENV, str(build))
     assert SweBenchCodeIndex.host_binary() == str(build)

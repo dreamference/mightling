@@ -1,9 +1,9 @@
 """
-Puffin became Mightling (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.2): `mling-admin`'s half of the
+Puffin became Mightling (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.2): `ling-admin`'s half of the
 one-time migration.
 
-`mling` moves the binaries, the agent's home, the links and the user's configuration keys. What
-only the Python side knows how to redo is moved here, the first time any `mling-admin` command runs
+`ling` moves the binaries, the agent's home, the links and the user's configuration keys. What
+only the Python side knows how to redo is moved here, the first time any `ling-admin` command runs
 on a machine that still has it: the Night Shift timer, the Avahi service file, the pairing lines in
 `authorized_keys`, the user-level configuration keys and the desktop app's data. Each step checks
 before it acts, so on a machine with nothing old it does nothing and says nothing. The old names
@@ -28,8 +28,8 @@ LEGACY_DESKTOP_DATA: Final[str] = "~/.local/share/dev.dreamference.puffin"
 DESKTOP_DATA: Final[str] = "~/.local/share/dev.dreamference.mightling"
 LEGACY_INSTALL_DIR: Final[str] = "~/.local/share/dreamference/puffin"
 # The binaries the old install folder held, by their old and new names (`codex-code-mode-host` keeps its).
-LEGACY_BINARIES: Final[tuple] = (("puffin", "mling"), ("puffin-search", "mling-search"),
-                                 ("puffin-fetch", "mling-fetch"), ("puffin-code", "mling-code"))
+LEGACY_BINARIES: Final[tuple] = (("puffin", "ling"), ("puffin-search", "ling-search"),
+                                 ("puffin-fetch", "ling-fetch"), ("puffin-code", "ling-code"))
 LEGACY_LINKS: Final[tuple] = ("puffin", "puffin-search", "puffin-fetch", "puffin-code", "puffin-app",
                               "puffin-admin")
 
@@ -57,7 +57,7 @@ class LegacyNameMigration:
                 done.append(line)
         stale = cls.stale_project_config()
         if done or stale:
-            print("🐦 Puffin is now Mightling: the commands are `mling` and `mling-admin`.", file=sys.stderr)
+            print("🐦 Puffin is now Mightling: the commands are `ling` and `ling-admin`.", file=sys.stderr)
             for line in done + ([stale] if stale else []):
                 print(f"   {line}", file=sys.stderr)
         return done
@@ -87,7 +87,7 @@ class LegacyNameMigration:
     def remove_old_links(cls) -> Optional[str]:
         """
         Removes the old command links from `~/.local/bin`, links only: a real file of that name is
-        someone else's. `codex build` and `mling` make the new ones.
+        someone else's. `codex build` and `ling` make the new ones.
 
         Returns:
             Optional[str]: A line when old links were removed.
@@ -131,7 +131,7 @@ class LegacyNameMigration:
     @classmethod
     def stale_project_config(cls) -> Optional[str]:
         """
-        A project's own `dreamference.toml` is only read here, never rewritten: `mling` rewrites it
+        A project's own `dreamference.toml` is only read here, never rewritten: `ling` rewrites it
         when it runs in that project, and an old key in it would otherwise be silently ignored.
 
         Returns:
@@ -144,7 +144,7 @@ class LegacyNameMigration:
             return None
         if re.search(rf"^\s*{LEGACY_KEY_PREFIX}[A-Za-z0-9_]+\s*=", text, re.M):
             return (f"{path.resolve()} still has puffin_* settings, which are no longer read: rename "
-                    f"them mightling_*, or run `mling` once in that folder")
+                    f"them mightling_*, or run `ling` once in that folder")
         return None
 
     @classmethod
@@ -176,7 +176,7 @@ class LegacyNameMigration:
         if enabled and window and NightShiftScheduler.enable(window):
             return f"replaced the Night Shift timer ({window})"
         return "removed the old Night Shift timer (it was off)" if not enabled else \
-            "removed the old Night Shift timer; turn it on again with `mling-admin night enable`"
+            "removed the old Night Shift timer; turn it on again with `ling-admin night enable`"
 
     @classmethod
     def replace_service_file(cls) -> Optional[str]:
@@ -212,7 +212,7 @@ class LegacyNameMigration:
     @classmethod
     def rewrite_authorized_keys(cls) -> Optional[str]:
         """
-        Points paired senders' forced command at `mling-admin` and gives their lines the new marker,
+        Points paired senders' forced command at `ling-admin` and gives their lines the new marker,
         so a node paired under Puffin keeps answering its senders.
 
         Returns:
@@ -233,7 +233,7 @@ class LegacyNameMigration:
                 old_admin = re.search(rf'command="(\S*/{LEGACY_ADMIN}) ', body)
                 admin = NodeServe.admin_executable()
                 if old_admin:
-                    sibling = Path(old_admin.group(1)).with_name("mling-admin")
+                    sibling = Path(old_admin.group(1)).with_name("ling-admin")
                     admin = str(sibling) if sibling.exists() else admin
                     body = body.replace(old_admin.group(1), admin, 1)
                 body = body[: -len(LEGACY_KEY_COMMENT)] + KEY_COMMENT
@@ -243,7 +243,7 @@ class LegacyNameMigration:
         if not changed:
             return None
         path.write_text("".join(out))
-        return f"pointed {changed} paired sender(s) at mling-admin in {path}"
+        return f"pointed {changed} paired sender(s) at ling-admin in {path}"
 
     @classmethod
     def move_desktop_data(cls) -> Optional[str]:

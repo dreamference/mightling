@@ -4,7 +4,7 @@ index 9d61157..4033938 100644
 +++ b/codex-rs/tui/Cargo.toml
 @@ -24,2 +24,3 @@ workspace = true
  [dependencies]
-+mling-launcher = { path = "../mling" }
++ling-launcher = { path = "../ling" }
  codex-build-info = { workspace = true }
 diff --git a/codex-rs/tui/src/bottom_pane/slash_commands.rs b/codex-rs/tui/src/bottom_pane/slash_commands.rs
 index 383376a..c60916f 100644
@@ -25,7 +25,7 @@ index 4fe2ed0..878517b 100644
 -                }
 +                let u = |t: &crate::token_usage::TokenUsage| [t.input_tokens, t.cached_input_tokens, t.output_tokens, t.reasoning_output_tokens, t.total_tokens];
 +                let info = self.token_info.as_ref();
-+                let report = mling_launcher::usage::report(info.map(|i| u(&i.total_token_usage)), info.map(|i| u(&i.last_token_usage)), info.and_then(|i| i.model_context_window));
++                let report = ling_launcher::usage::report(info.map(|i| u(&i.total_token_usage)), info.map(|i| u(&i.last_token_usage)), info.and_then(|i| i.model_context_window));
 +                self.add_plain_history_lines(report.into_iter().map(ratatui::text::Line::from).collect());
              }
 @@ -778,14 +779,3 @@ impl ChatWidget {

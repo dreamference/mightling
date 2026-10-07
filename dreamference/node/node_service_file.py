@@ -62,7 +62,7 @@ class NodeServiceFile:
         lines = [
             "<?xml version=\"1.0\" standalone='no'?>",
             "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">",
-            "<!-- Written by `mling-admin node enable`; rewritten by `mling-admin server start|stop`. -->",
+            "<!-- Written by `ling-admin node enable`; rewritten by `ling-admin server start|stop`. -->",
             "<service-group>",
             "  <name replace-wildcards=\"yes\">%h</name>",
             "  <service>",

@@ -146,7 +146,7 @@ def test_configure_names_the_served_model_and_its_context_length():
 
 def test_default_admin_email_avoids_reserved_domains():
     # email-validator rejects .local, .localhost, .test and .invalid outright, so a default in
-    # one of those makes the very first `mling-admin chat configure` fail with a 422.
+    # one of those makes the very first `ling-admin chat configure` fail with a 422.
     assert not DEFAULT_ONYX_EMAIL.endswith((".local", ".localhost", ".test", ".invalid"))
 
 
@@ -1158,7 +1158,7 @@ def test_gmail_registration_does_not_wait_for_a_mailbox():
 
 
 def test_configure_registers_gmail_so_a_fresh_install_has_the_tool():
-    # Registering only from `mling-admin chat gmail --email …` meant a fresh install had no Gmail tool
+    # Registering only from `ling-admin chat gmail --email …` meant a fresh install had no Gmail tool
     # until someone had finished a flow they can only start from the page that lists it.
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \

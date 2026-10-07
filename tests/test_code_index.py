@@ -1,6 +1,6 @@
-"""The Python side of the code index: `mling-admin code setup`, and the model server stopping
-mling-code's index runs before a load (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §5, §9.2).
-The router itself is Rust, tested with `cargo test` in mling-code-rs/."""
+"""The Python side of the code index: `ling-admin code setup`, and the model server stopping
+ling-code's index runs before a load (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §5, §9.2).
+The router itself is Rust, tested with `cargo test` in ling-code-rs/."""
 
 import hashlib
 import inspect
@@ -163,7 +163,7 @@ def test_toolchains_are_found_once_and_only_when_new_enough(tmp_path, monkeypatc
     monkeypatch.setattr(code_setup, "INDEXERS_DIR", str(tmp_path / "indexers"))
     CodeIndexSetup.record_toolchains({"go": str(goroot), "java": str(jdk)})
     assert os.readlink(tmp_path / "indexers" / "go") == str(goroot)
-    # A toolchain no longer found loses its link, so mling-code never runs a stale path.
+    # A toolchain no longer found loses its link, so ling-code never runs a stale path.
     CodeIndexSetup.record_toolchains({"go": str(goroot)})
     assert not os.path.lexists(tmp_path / "indexers" / "java")
 
@@ -206,7 +206,7 @@ def test_the_admin_command_dispatches_setup(monkeypatch):
     from dreamference.cli.dreamference_cli_controller import main
 
     monkeypatch.setattr(CodeIndexSetup, "install", classmethod(lambda cls: True))
-    monkeypatch.setattr(sys, "argv", ["mling-admin", "code", "setup"])
+    monkeypatch.setattr(sys, "argv", ["ling-admin", "code", "setup"])
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 0

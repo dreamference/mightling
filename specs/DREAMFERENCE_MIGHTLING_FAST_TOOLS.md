@@ -1,14 +1,14 @@
 # Fast Tools — a diffusion model for Mightling's mundane work
 
 **Status:** proposed. Nothing in this spec is implemented yet. Since 2026-10-03 the diffusion slot it builds on is switched off (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`: no sidecar is started, downloaded or shown, the code is kept), so building this spec starts by switching it back on with a capable model in it.
-**Goal:** let `mling` hand long, low-judgement outputs (file scaffolds, tests, docstrings, docs, commit and PR text, summaries of long tool output) to a fast diffusion model, so the main model spends its time on the decisions.
+**Goal:** let `ling` hand long, low-judgement outputs (file scaffolds, tests, docstrings, docs, commit and PR text, summaries of long tool output) to a fast diffusion model, so the main model spends its time on the decisions.
 **Builds on:**
 - the diffusion slot beside the main model (`DiffusionServerManager`, `diffusion-model set`, port 8001; [INFERENCE](./DREAMFERENCE_INFERENCE.md), CLAUDE.md "Every configuration names a diffusion model");
-- the launcher in `mling-rs/`, which already handles `mling app` and `mling update` before Codex parses argv, and would handle `mling fast` the same way ([MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md) chose the other route, a separate `mling-code` binary, because its router is large and changes often; §4.2 there gives the trade-off);
-- the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `mling-search`;
+- the launcher in `ling-rs/`, which already handles `ling app` and `ling update` before Codex parses argv, and would handle `ling fast` the same way ([MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md) chose the other route, a separate `ling-code` binary, because its router is large and changes often; §4.2 there gives the trade-off);
+- the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `ling-search`;
 - admission control from [MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md) and host safety (`check_host_safety`).
 
-**Needs no Codex patch.** The patch budget has 567 bytes left (26,933 of 27,500 on 2026-10-01, after `0018`), so everything here lives in the launcher, the registry and `mling-admin`.
+**Needs no Codex patch.** The patch budget has 567 bytes left (26,933 of 27,500 on 2026-10-01, after `0018`), so everything here lives in the launcher, the registry and `ling-admin`.
 
 ---
 
@@ -21,8 +21,8 @@ Measured on this GB10 on 2026-09-30, before writing anything:
 | The current diffusion sidecar (Tiny-A2D, Qwen2.5-Coder 0.5B, bd3lm) on five mundane tasks | **Fast and unusable.** 136–173 tok/s, but: the commit message echoed the diff, docstrings were invented words and duplicated, unit tests did not parse, the lazy edit lost the file, the log "summary" copied the log. Its published HumanEval is 39.0 |
 | Qwen3.8-27B (the main model) applying a lazy edit to a 118-line file | **126 tok/s**, byte-exact outside the edit, 1,177 tokens in 9.9 s. The DFlash2 drafter accepted 8.8–14.7 of 16 drafted tokens: copying is what a block-diffusion drafter is best at |
 | Qwen3.8-27B on fresh output (greedy, single stream) | prose 25.5, code 50.3, JSON 87.0 tok/s |
-| Qwen3.8-27B on the §2 task types themselves (same prompts a `mling fast` verb would take) | README-style docs 39.3, PR description 39.3, new module from a spec 52.4, unit-test scaffold 69.1, docstrings across a file 69.9 tok/s: formulaic text drafts better than the 25.5 of generic prose |
-| Where `mling`'s own output goes (190 rollouts in `~/.mightling/sessions` and `~/.codex/sessions`) | **42.5%** of all model-emitted characters are whole files written through shell heredocs (`cat > f <<EOF`; median 3.9K chars, p90 14.6K); **24.6%** assistant prose (median 173 chars, p90 1.4K); 11.8% ordinary shell commands; no `apply_patch` calls at all. **Caveat:** most of these rollouts predate Qwen3.8 (Qwen3.5-era and `~/.codex` sessions), and the split between heredocs that *rewrite* existing files (copying, already fast) and heredocs that *create* files (fresh text, the real target) is not yet measured |
+| Qwen3.8-27B on the §2 task types themselves (same prompts a `ling fast` verb would take) | README-style docs 39.3, PR description 39.3, new module from a spec 52.4, unit-test scaffold 69.1, docstrings across a file 69.9 tok/s: formulaic text drafts better than the 25.5 of generic prose |
+| Where `ling`'s own output goes (190 rollouts in `~/.mightling/sessions` and `~/.codex/sessions`) | **42.5%** of all model-emitted characters are whole files written through shell heredocs (`cat > f <<EOF`; median 3.9K chars, p90 14.6K); **24.6%** assistant prose (median 173 chars, p90 1.4K); 11.8% ordinary shell commands; no `apply_patch` calls at all. **Caveat:** most of these rollouts predate Qwen3.8 (Qwen3.5-era and `~/.codex` sessions), and the split between heredocs that *rewrite* existing files (copying, already fast) and heredocs that *create* files (fresh text, the real target) is not yet measured |
 
 Three conclusions follow, and they are the spec's spine:
 
@@ -62,24 +62,24 @@ It goes into the **existing diffusion slot**: a registry entry `diffusiongemma-2
 
 ---
 
-## 4. How `mling` uses it
+## 4. How `ling` uses it
 
-### 4.1 Phase 1: `mling fast` — one-shot shell tools (no agent loop)
+### 4.1 Phase 1: `ling fast` — one-shot shell tools (no agent loop)
 
-The local model already calls `mling-search` because its prompt tells it to; `mling fast` works the same way, and needs only chat completions from the diffusion server (§7 explains why not the Responses API yet). Implemented in the launcher (`mling-rs/src/fast.rs`), dispatched before Codex parses argv, like `mling app`.
+The local model already calls `ling-search` because its prompt tells it to; `ling fast` works the same way, and needs only chat completions from the diffusion server (§7 explains why not the Responses API yet). Implemented in the launcher (`ling-rs/src/fast.rs`), dispatched before Codex parses argv, like `ling app`.
 
 | Command | Does | Writes files? |
 |---|---|---|
-| `mling fast scaffold <path> --spec <text or @file> [--like <file>...]` | Generates a new file from a spec, in the style of the example files | writes `<path>` only if it does not exist |
-| `mling fast tests <file> [--framework pytest] [--out <path>]` | Generates unit tests for a file's public functions | writes the test file, then **runs it** and prints pass/fail |
-| `mling fast docs <file>... [--style google]` | Adds docstrings only; parallel across files. Type hints change the AST (annotations are nodes), so they are not this verb's job; a separate `hints` verb, gated by a type checker, is future work | rewrites each file **only if the result parses and its AST with docstrings stripped is identical to the original's** |
-| `mling fast write <path> --spec ... ` | Prose: README section, changelog, PR description | writes `<path>` (or stdout with `-`) |
-| `mling fast digest <file or -> [--focus <text>]` | Summarises a long log or diff into what matters | stdout only |
+| `ling fast scaffold <path> --spec <text or @file> [--like <file>...]` | Generates a new file from a spec, in the style of the example files | writes `<path>` only if it does not exist |
+| `ling fast tests <file> [--framework pytest] [--out <path>]` | Generates unit tests for a file's public functions | writes the test file, then **runs it** and prints pass/fail |
+| `ling fast docs <file>... [--style google]` | Adds docstrings only; parallel across files. Type hints change the AST (annotations are nodes), so they are not this verb's job; a separate `hints` verb, gated by a type checker, is future work | rewrites each file **only if the result parses and its AST with docstrings stripped is identical to the original's** |
+| `ling fast write <path> --spec ... ` | Prose: README section, changelog, PR description | writes `<path>` (or stdout with `-`) |
+| `ling fast digest <file or -> [--focus <text>]` | Summarises a long log or diff into what matters | stdout only |
 
 Every command prints a compact result for the main model: what it wrote, the check it ran and the outcome (for example `tests/test_slug.py: 14 tests, 12 pass, 2 fail: <names>`), and the git diff stat. It never prints the generated content back unless asked (`--show`), so the main model's context gets the verdict, not the tokens it offloaded.
 
 The launcher appends a `FAST_TOOLS_INSTRUCTIONS` block (≤ 120 tokens, same mechanism as `WEB_ACCESS_INSTRUCTIONS`) only when the diffusion server answers at startup:
-> For long routine output (new files from a clear spec, unit-test scaffolds, docstrings across files, documentation, summaries of long logs) run `mling fast …` instead of writing it yourself, then review its report. Do the design, debugging and decisions yourself.
+> For long routine output (new files from a clear spec, unit-test scaffolds, docstrings across files, documentation, summaries of long logs) run `ling fast …` instead of writing it yourself, then review its report. Do the design, debugging and decisions yourself.
 
 ### 4.2 Verification gates (why a weaker model is acceptable)
 
@@ -105,7 +105,7 @@ Codex already lets the main model spawn subagents and name their model (`spawn_a
 
 ## 5. Parallel work
 
-DiffusionGemma measured 257 tok/s aggregate at 4 streams on a Spark. `mling fast docs a.py b.py …` and `tests` over several files send up to `--max-num-seqs` requests at once. The main model is idle while its tool call runs (the agent loop is sequential), so a single agent's offload does not compete with its own decode.
+DiffusionGemma measured 257 tok/s aggregate at 4 streams on a Spark. `ling fast docs a.py b.py …` and `tests` over several files send up to `--max-num-seqs` requests at once. The main model is idle while its tool call runs (the agent loop is sequential), so a single agent's offload does not compete with its own decode.
 
 ---
 
@@ -114,7 +114,7 @@ DiffusionGemma measured 257 tok/s aggregate at 4 streams on a Spark. `mling fast
 - **Budget:** Qwen3.8 on SGLang leaves ~38.7 GB available while serving. DiffusionGemma NVFP4 is 18 GB of weights plus the diffusion buffers. At `--gpu-memory-utilization 0.20` (~24 GB) and `--max-num-seqs 2`, availability would drop to ~14 GB. That is above earlyoom's 5% line (~6 GB), but only just: **measure before adopting (§7).**
 - **Start order:** unchanged. The diffusion sidecar starts **before** the main model, so the main model's pre-flight sees it resident.
 - **Contention:** decode on GB10 is bandwidth-bound, so the two models slow each other when both decode. One agent never overlaps (sequential tool calls); Night Shift and fan-out must count the fast model's streams in admission control.
-- **Falling back:** `diffusion-model set tiny-a2d-coder-0.5b-diffusion` restores today's footprint, and `mling fast` then refuses (the startup probe finds a model under the capability floor and omits the prompt block).
+- **Falling back:** `diffusion-model set tiny-a2d-coder-0.5b-diffusion` restores today's footprint, and `ling fast` then refuses (the startup probe finds a model under the capability floor and omits the prompt block).
 - **Egress:** loopback only, `HF_HUB_OFFLINE=1`, usage stats off, pinned digest.
 
 ---
@@ -126,7 +126,7 @@ Run with the machine otherwise idle, main model serving:
 1. **Fit:** start DiffusionGemma NVFP4 beside Qwen3.8 at 0.20 / 2 seqs. Pass: `MemAvailable` ≥ 12 GB at idle and ≥ 8 GB during a 4-stream burst, no earlyoom action, the main model's decode within 5% of its solo numbers when the fast model is idle.
 2. **Speed on our tasks:** the §2 tasks at their typical lengths. Pass: ≥ 2× the main model's wall time on scaffold, tests, docs-prose; report per-canvas behaviour for 100–300-token outputs.
 3. **Quality through the gates:** 20 real files from this repo. Pass: scaffold/tests parse ≥ 95%, generated tests run with ≥ 80% passing on correct code, `docs` AST-preservation 100% of accepted rewrites.
-4. **End to end:** a `mling exec` task that needs a new module plus its tests, with and without `mling fast`. Pass: faster wall clock at equal or better test outcome.
+4. **End to end:** a `ling exec` task that needs a new module plus its tests, with and without `ling fast`. Pass: faster wall clock at equal or better test outcome.
 5. **Responses API:** does vLLM serve `/v1/responses` with tool calls for DiffusionGemma? Decides whether Phase 2 needs a translating router.
 6. **The sampler:** confirm untruncated sampling on this engine does not emit token 0 (the SGLang defect found on 2026-09-29).
 
@@ -136,11 +136,11 @@ If (1) fails, the fallback is a smaller diffusion model or running the fast mode
 
 ## 8. Tests
 
-- Launcher unit tests for each `mling fast` verb against a stub /v1 server: request shape, gate enforcement (syntax, AST preservation, scope, repetition, token-0 run), report format.
+- Launcher unit tests for each `ling fast` verb against a stub /v1 server: request shape, gate enforcement (syntax, AST preservation, scope, repetition, token-0 run), report format.
 - The prompt block is added only when the fast model answers and meets the capability floor.
 - `DiffusionServerManager` builds the vLLM diffusion command from the registry recipe (flags, digest, loopback, telemetry off, memory cap).
 - conftest keeps these tests off the running stack (the docker guard of 2026-09-29).
-- A live test (skipped without the fast model) runs `mling fast tests` on a fixture file and requires the generated tests to parse and run.
+- A live test (skipped without the fast model) runs `ling fast tests` on a fixture file and requires the generated tests to parse and run.
 
 ---
 
@@ -148,7 +148,7 @@ If (1) fails, the fallback is a smaller diffusion model or running the fast mode
 
 - **Quality:** a weaker model writing code. Mitigated by the gates and by limiting the verbs to checkable outputs; the main model reviews every report.
 - **Memory:** two resident models on unified memory (§6); Phase 0 decides.
-- **Prompt adherence:** the local model may not reach for `mling fast`, or may over-use it. Measure call rates in rollouts after a week; adjust the prompt block.
+- **Prompt adherence:** the local model may not reach for `ling fast`, or may over-use it. Measure call rates in rollouts after a week; adjust the prompt block.
 - **Engine maturity:** diffusion support in vLLM is new (0.24+); pin the image and re-measure on upgrade, as with the main engines.
 
 ---

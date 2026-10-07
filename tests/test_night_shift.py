@@ -1,6 +1,6 @@
 """Night Shift's runner (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5, §8).
 
-A scripted stand-in for `mling` plays the agent: it changes files, stalls, stalls and then acts
+A scripted stand-in for `ling` plays the agent: it changes files, stalls, stalls and then acts
 after a nudge, hangs, or fails. Nothing here starts a systemd scope or unit, talks to the model
 server or opens the user's queue: every test has its own queue directory and repository.
 """
@@ -25,8 +25,8 @@ from dreamference.night_shift.night_shift_task_run import NUDGE
 
 FAKE_MIGHTLING = textwrap.dedent("""\
     #!{python}
-    # A stand-in for `mling exec`: behaviour from $FAKE_MIGHTLING_MODE, every call logged.
-    # `mling sandbox … -- <command>` is logged apart, with what the runner set for it, and the
+    # A stand-in for `ling exec`: behaviour from $FAKE_MIGHTLING_MODE, every call logged.
+    # `ling sandbox … -- <command>` is logged apart, with what the runner set for it, and the
     # command is run as it is: the suite never starts the real sandbox.
     import json, os, sys, time, uuid
     args = sys.argv[1:]
@@ -78,7 +78,7 @@ def git(cwd, *args):
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
-    """A repository with one commit, a queue directory and the fake `mling`."""
+    """A repository with one commit, a queue directory and the fake `ling`."""
     monkeypatch.setattr(NightShiftTaskRun, "USE_SCOPE", False)
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -88,17 +88,17 @@ def setup(tmp_path, monkeypatch):
     (repo / "README.md").write_text("readme\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "init")
-    mling = tmp_path / "mling"
-    mling.write_text(FAKE_MIGHTLING.format(python=sys.executable, nudge=NUDGE))
-    mling.chmod(mling.stat().st_mode | stat.S_IEXEC)
+    ling = tmp_path / "ling"
+    ling.write_text(FAKE_MIGHTLING.format(python=sys.executable, nudge=NUDGE))
+    ling.chmod(ling.stat().st_mode | stat.S_IEXEC)
     calls = tmp_path / "calls.jsonl"
     monkeypatch.setenv("FAKE_MIGHTLING_CALLS", str(calls))
     night = tmp_path / "night"
-    return {"repo": repo, "night": night, "mling": str(mling), "calls": calls}
+    return {"repo": repo, "night": night, "ling": str(ling), "calls": calls}
 
 
 def queue(night: Path, repo: Path, task_text: str = "Add hello.txt", test=None, task_id="20261001-0100-abc") -> dict:
-    """Writes a task as the launcher does (mling-rs/src/night.rs)."""
+    """Writes a task as the launcher does (ling-rs/src/night.rs)."""
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
     record = {
         "id": task_id, "repo": str(repo), "base": base, "branch": f"night/{task_id}", "task": task_text,
@@ -114,7 +114,7 @@ def queue(night: Path, repo: Path, task_text: str = "Add hello.txt", test=None, 
 def run_task(setup, monkeypatch, mode, deadline_s=60, **queue_args):
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", mode)
     record = queue(setup["night"], setup["repo"], **queue_args)
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["mling"],
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"],
                             deadline=time.time() + deadline_s)
     status = run.run()
     return status, NightShiftQueue.read(setup["night"], record["id"]), run
@@ -125,7 +125,7 @@ def calls(setup):
 
 
 def sandbox_calls(setup):
-    """The test runs the runner sent through `mling sandbox`, with their environment."""
+    """The test runs the runner sent through `ling sandbox`, with their environment."""
     log = Path(str(setup["calls"]) + ".sandbox")
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
@@ -156,12 +156,12 @@ def test_a_change_is_committed_on_its_branch_and_the_checkout_is_untouched(setup
 
 
 def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup, monkeypatch):
-    # `[night] prompt` (prompt spec §7): set, every `mling exec` of the task starts under it;
+    # `[night] prompt` (prompt spec §7): set, every `ling exec` of the task starts under it;
     # unset, the runner adds nothing and the configured prompt applies.
     monkeypatch.delenv("DREAMFERENCE_MIGHTLING_PROMPT", raising=False)
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     record = queue(setup["night"], setup["repo"])
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"prompt": "high-swe"}), setup["mling"],
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"prompt": "high-swe"}), setup["ling"],
                             deadline=time.time() + 60)
     assert run.run() == "done"
     seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
@@ -183,7 +183,7 @@ def test_what_the_test_run_leaves_behind_is_not_committed(setup, monkeypatch):
 
 def test_the_test_run_is_sandboxed_with_a_policy_the_runner_fixes(setup, monkeypatch):
     # The test command runs what the agent wrote. Until 2026-10-02 it ran as plain `bash -c`, with
-    # the user's full rights; it now goes through `mling sandbox`, the agent's own sandbox.
+    # the user's full rights; it now goes through `ling sandbox`, the agent's own sandbox.
     monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
     status, record, run = run_task(setup, monkeypatch, "change", test="test -f hello.txt")
     assert status == "done" and record["result"]["test_result"] == "passed"
@@ -227,7 +227,7 @@ def test_the_agent_cannot_loosen_the_level_for_its_own_tests(setup, monkeypatch)
     git(setup["repo"], "commit", "-q", "-m", "seal")
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "loosen")
     record = queue(setup["night"], setup["repo"], test="true")
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["mling"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
     assert run.run() == "done"
     assert (run.repo / "dreamference.toml").exists()
     changed = git(setup["repo"], "show", "--format=", record["branch"]).stdout
@@ -239,7 +239,7 @@ def test_the_agent_cannot_loosen_the_level_for_its_own_tests(setup, monkeypatch)
     resumed = dict(NightShiftQueue.read(setup["night"], record["id"]), id="20261001-0100-abe",
                    branch="night/20261001-0100-abe")
     (setup["night"] / "tasks" / "20261001-0100-abe.json").write_text(json.dumps(resumed))
-    again = NightShiftTaskRun(setup["night"], resumed, NightShiftSettings({}), setup["mling"], time.time() + 60)
+    again = NightShiftTaskRun(setup["night"], resumed, NightShiftSettings({}), setup["ling"], time.time() + 60)
     (setup["repo"] / "dreamference.toml").write_text('mightling_airgapped = "off"\n')
     again.worktree.mkdir(parents=True)
     assert again._fix_level() == "on"
@@ -248,7 +248,7 @@ def test_the_agent_cannot_loosen_the_level_for_its_own_tests(setup, monkeypatch)
 def test_night_airgapped_tightens_the_level_and_never_loosens_it(setup, monkeypatch):
     monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
     record = queue(setup["night"], setup["repo"])
-    level = lambda table: NightShiftTaskRun(setup["night"], record, NightShiftSettings(table), setup["mling"],
+    level = lambda table: NightShiftTaskRun(setup["night"], record, NightShiftSettings(table), setup["ling"],
                                             time.time() + 60)._fix_level()
     assert level({}) == "off"
     assert level({"airgapped": "on"}) == "on"
@@ -304,7 +304,7 @@ def test_unsandboxed_tests_are_an_explicit_choice_and_refused_at_airgapped_on(se
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     record = queue(setup["night"], setup["repo"], test="test -f hello.txt")
     settings = NightShiftSettings({"test_sandbox": False})
-    run = NightShiftTaskRun(setup["night"], record, settings, setup["mling"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, settings, setup["ling"], time.time() + 60)
     assert run.run() == "done"
     result = NightShiftQueue.read(setup["night"], record["id"])["result"]
     assert result["test_result"] == "passed" and result["test_sandbox"] == "off ([night] test_sandbox = false)"
@@ -312,7 +312,7 @@ def test_unsandboxed_tests_are_an_explicit_choice_and_refused_at_airgapped_on(se
     # With no sandbox nothing would keep the tests off the network, so at `on` they do not run.
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
     record = queue(setup["night"], setup["repo"], test="touch ran.txt", task_id="20261001-0100-abd")
-    run = NightShiftTaskRun(setup["night"], record, settings, setup["mling"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, settings, setup["ling"], time.time() + 60)
     assert run.run() == "done"
     result = NightShiftQueue.read(setup["night"], record["id"])["result"]
     assert result["test_result"] == "untested" and "not run: /airgapped is on" in result["test_source"]
@@ -367,7 +367,7 @@ def test_a_task_cut_off_keeps_its_worktree_and_resumes_its_session_next_time(set
     assert session and record["result"]["branch"] == "night/20261001-0100-abc"
     # The next night: the same worktree, the recorded session, and it finishes.
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "act_on_resume")
-    rerun = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["mling"],
+    rerun = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"],
                               deadline=time.time() + 60)
     assert rerun.run() == "done"
     last = calls(setup)[-1]
@@ -379,7 +379,7 @@ def test_a_dropped_task_is_cancelled_before_it_starts(setup, monkeypatch):
     record = queue(setup["night"], setup["repo"])
     NightShiftQueue.update(setup["night"], record["id"],
                            lambda task: NightShiftQueue.set_status(task, "cancel-requested"))
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["mling"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
     assert run.run() == "cancelled"
     assert not setup["calls"].exists()
 
@@ -395,7 +395,7 @@ def test_a_cancel_requested_while_running_wins_over_the_runners_next_status(setu
 def test_a_vanished_base_commit_fails_the_task(setup, monkeypatch):
     record = queue(setup["night"], setup["repo"])
     record["base"] = "0" * 40
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["mling"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
     assert run.run() == "failed"
     assert "no longer exists" in NightShiftQueue.read(setup["night"], record["id"])["result"]["last_message"]
 
@@ -469,7 +469,7 @@ def test_tui_command_lines_are_told_from_the_rest():
 def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_path):
     busy = tmp_path / "night" / "busy"
     busy.mkdir(parents=True)
-    # This test process stands in for `mling app-server`: its marker counts while it lives.
+    # This test process stands in for `ling app-server`: its marker counts while it lives.
     (busy / str(os.getpid())).write_text('{"threads": ["t1"]}')
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
@@ -477,7 +477,7 @@ def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_p
     (busy / "not-a-pid").write_text("{}")
     assert NightShiftHost.busy_app_server_pids(sys.executable, str(tmp_path)) == [os.getpid()]
     assert sorted(p.name for p in busy.iterdir()) == [str(os.getpid())]
-    # A live process that is not the installed `mling` is not a session either.
+    # A live process that is not the installed `ling` is not a session either.
     assert NightShiftHost.busy_app_server_pids("/bin/true", str(tmp_path)) == []
     # No markers, or no folder: an idle Work window holds nothing back.
     assert NightShiftHost.busy_app_server_pids(sys.executable, str(tmp_path / "elsewhere")) == []
@@ -548,12 +548,12 @@ def far_end():
     (("model", None), "not answering"),
     (("safe", False), "host-safety"),
     (("available", 4 * 1024 ** 3), "GiB of memory is available"),
-    (("heavy", ["a mling build holds the build lock"]), "build lock"),
+    (("heavy", ["a ling build holds the build lock"]), "build lock"),
     (("sessions", [4242]), "Mightling session is open"),
 ])
 def test_each_admission_check_stops_the_night_on_its_own(fake_host, monkeypatch, change, reason):
     monkeypatch.setattr(FakeHost, change[0], change[1])
-    assert reason in NightShiftRunner.admit("http://x", "mling", 0, far_end())
+    assert reason in NightShiftRunner.admit("http://x", "ling", 0, far_end())
 
 
 def test_admission_waits_for_the_model_to_be_idle(fake_host, monkeypatch):
@@ -566,7 +566,7 @@ def test_admission_waits_for_the_model_to_be_idle(fake_host, monkeypatch):
     moved = {"running": 0.0, "served": 20.0, "kv_pool": 1.0}
     quiet = {"running": 0.0, "served": 20.0, "kv_pool": 1.0}
     FakeHost.samples = [busy, moved, quiet]
-    assert NightShiftRunner.wait_for_idle("http://x", "mling", 1, far_end()) is None
+    assert NightShiftRunner.wait_for_idle("http://x", "ling", 1, far_end()) is None
     # Idle for a full minute counted from the last change, not from the start.
     assert clock["now"] >= 1000.0 + 60 + 30
 
@@ -574,7 +574,7 @@ def test_admission_waits_for_the_model_to_be_idle(fake_host, monkeypatch):
 def test_a_window_that_closes_while_waiting_reports_it(fake_host):
     FakeHost.samples = [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}]
     past = datetime.now().astimezone() - timedelta(minutes=1)
-    assert "until the window closed" in NightShiftRunner.wait_for_idle("http://x", "mling", 10, past)
+    assert "until the window closed" in NightShiftRunner.wait_for_idle("http://x", "ling", 10, past)
 
 
 def test_round_robin_alternates_repositories():
@@ -618,7 +618,7 @@ def test_one_wait_is_noted_once_whatever_its_figures(fake_host, monkeypatch):
     notes = []
     end = datetime.fromtimestamp(1000.0 + 4 * 5 + 1).astimezone()
     NightShiftRunner.schedule(Path("/nonexistent"), [{"id": "t", "repo": "r"}], NightShiftSettings({}),
-                              "mling", "http://x", end, 1, notes)
+                              "ling", "http://x", end, 1, notes)
     waits = [note for note in notes if "waiting to start" in note]
     assert len(waits) == 3, waits
     assert "11.6 GiB" in waits[0] and "session is open" in waits[1] and "11.7 GiB" in waits[2]
@@ -630,7 +630,7 @@ def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, 
         queue(setup["night"], setup["repo"], task_text=f"Task {index}", test="test -f hello.txt",
               task_id=f"20261001-0100-a{index}0")
     code = NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"],
-                                mightling_bin=setup["mling"], vllm_host="http://x",
+                                mightling_bin=setup["ling"], vllm_host="http://x",
                                 settings=NightShiftSettings({"max_parallel": 2}))
     assert code == 0
     statuses = [task["status"] for task in NightShiftQueue.tasks(setup["night"])]
@@ -646,8 +646,8 @@ def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, 
 
 
 class FakeIndex(NightShiftIndex):
-    """Records what would have been indexed; nothing in the suite runs `mling-code`."""
-    binary = "/opt/mling-code"
+    """Records what would have been indexed; nothing in the suite runs `ling-code`."""
+    binary = "/opt/ling-code"
     outcome = "3 ok"
     calls = []
 
@@ -666,7 +666,7 @@ class FakeIndex(NightShiftIndex):
 @pytest.fixture
 def fake_index(monkeypatch):
     monkeypatch.setattr(FakeIndex, "calls", [])
-    monkeypatch.setattr(FakeIndex, "binary", "/opt/mling-code")
+    monkeypatch.setattr(FakeIndex, "binary", "/opt/ling-code")
     monkeypatch.setattr(NightShiftRunner, "index", FakeIndex)
     return FakeIndex
 
@@ -675,9 +675,9 @@ def test_each_repository_is_indexed_once_before_its_tasks_start(setup, fake_host
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     for index in range(2):
         queue(setup["night"], setup["repo"], task_text=f"Task {index}", task_id=f"20261001-0100-b{index}0")
-    assert NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["mling"],
+    assert NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                                 vllm_host="http://x", settings=NightShiftSettings({"index_timeout": "5m"})) == 0
-    assert [(call[0], call[1], call[3]) for call in fake_index.calls] == [("/opt/mling-code", str(setup["repo"]), 0)]
+    assert [(call[0], call[1], call[3]) for call in fake_index.calls] == [("/opt/ling-code", str(setup["repo"]), 0)]
     assert fake_index.calls[0][2] == 300
     report = next((setup["night"] / "reports").glob("*.md")).read_text()
     assert f"Code index of {setup['repo']}: 3 ok." in report
@@ -687,20 +687,20 @@ def test_each_repository_is_indexed_once_before_its_tasks_start(setup, fake_host
 def test_the_index_refresh_can_be_switched_off_and_needs_mightling_code(setup, fake_host, fake_index, monkeypatch):
     monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     queue(setup["night"], setup["repo"])
-    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["mling"],
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                          vllm_host="http://x", settings=NightShiftSettings({"index": False}))
     assert fake_index.calls == []
     # Not installed: nothing runs, and nothing is said.
     queue(setup["night"], setup["repo"], task_id="20261001-0100-c00")
     fake_index.binary = None
-    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["mling"],
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                          vllm_host="http://x", settings=NightShiftSettings({}))
     assert fake_index.calls == []
     # A refused admission indexes nothing either: the run never started.
     queue(setup["night"], setup["repo"], task_id="20261001-0100-d00")
-    fake_index.binary = "/opt/mling-code"
+    fake_index.binary = "/opt/ling-code"
     FakeHost.model = None
-    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["mling"],
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                          vllm_host="http://x", settings=NightShiftSettings({}))
     assert fake_index.calls == []
 
@@ -719,12 +719,12 @@ def test_the_index_refresh_takes_at_most_half_of_what_is_left(fake_host, fake_in
 
 def test_index_output_is_condensed_for_the_report():
     output = (
-        "skipped: scip-go for svc: runs on demand (`mling-code index`)\n"
+        "skipped: scip-go for svc: runs on demand (`ling-code index`)\n"
         "mightling-index-0a1b2c3d4e-codebase-memory: ok\n"
         "mightling-index-0a1b2c3d4e-scip-python-dreamference: ok\n"
-        "mightling-index-0a1b2c3d4e-rust-analyzer-mling-code-rs: deferred: memory\n"
+        "mightling-index-0a1b2c3d4e-rust-analyzer-ling-code-rs: deferred: memory\n"
     )
-    assert NightShiftIndex.summarise(output) == "2 ok, 1 deferred (rust-analyzer-mling-code-rs deferred: memory)"
+    assert NightShiftIndex.summarise(output) == "2 ok, 1 deferred (rust-analyzer-ling-code-rs deferred: memory)"
     assert NightShiftIndex.summarise("skipped: codebase-memory-mcp is not installed\n") == "nothing to index"
 
 
@@ -732,7 +732,7 @@ def test_the_installed_mightling_code_is_the_only_one_used(tmp_path, monkeypatch
     monkeypatch.setattr("dreamference.night_shift.night_shift_index.INSTALL_DIR", str(tmp_path))
     assert NightShiftIndex.executable() is None
     (tmp_path / "bin").mkdir()
-    binary = tmp_path / "bin" / "mling-code"
+    binary = tmp_path / "bin" / "ling-code"
     binary.write_text("#!/bin/sh\necho \"mightling-index-x-codebase-memory: ok\"\n")
     binary.chmod(0o755)
     assert NightShiftIndex.executable() == str(binary)
@@ -746,7 +746,7 @@ def test_a_refused_admission_keeps_the_queue_and_says_why(setup, fake_host):
     queue(setup["night"], setup["repo"])
     FakeHost.model = None
     assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"],
-                                mightling_bin=setup["mling"], vllm_host="http://x",
+                                mightling_bin=setup["ling"], vllm_host="http://x",
                                 settings=NightShiftSettings({})) == 0
     assert NightShiftQueue.tasks(setup["night"])[0]["status"] == "queued"
     report = next((setup["night"] / "reports").glob("*.md")).read_text()
@@ -758,7 +758,7 @@ def test_a_second_runner_is_refused_while_the_lock_is_held(setup, fake_host):
     with NightShiftQueue.runner_lock(setup["night"]) as held:
         assert held
         assert NightShiftQueue.runner_active(setup["night"])
-        assert NightShiftRunner.run(minutes=5, night_dir=setup["night"], mightling_bin=setup["mling"],
+        assert NightShiftRunner.run(minutes=5, night_dir=setup["night"], mightling_bin=setup["ling"],
                                     vllm_host="http://x", settings=NightShiftSettings({})) == 1
     assert not NightShiftQueue.runner_active(setup["night"])
 
@@ -848,7 +848,7 @@ def test_a_session_here_holds_up_this_machines_lane_and_not_a_replicas(setup, fa
         lambda cls, host, settings: ([local, dict(REPLICA)], ["Also using spark-2's model server (…)."])))
     monkeypatch.setattr(NightShiftRunner, "admit", classmethod(lambda cls, *args: None))
     monkeypatch.setattr(FakeHost, "sessions", [4242])                    # someone is working here
-    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["mling"],
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                                 vllm_host="http://x", settings=NightShiftSettings({})) == 0
     tasks = NightShiftQueue.tasks(setup["night"])
     assert [task["status"] for task in tasks] == ["done", "done"]
@@ -930,10 +930,10 @@ def test_a_task_for_another_node_is_worked_there_and_its_branch_comes_back(two_n
 
     def the_other_nodes_night(seconds):
         # While this machine waits, the node's own runner works its queue.
-        node_runs.append(NightShiftRunner.run(minutes=5, idle_minutes=0, mightling_bin=two_nodes["mling"],
+        node_runs.append(NightShiftRunner.run(minutes=5, idle_minutes=0, mightling_bin=two_nodes["ling"],
                                               vllm_host="http://127.0.0.1:8000", settings=NightShiftSettings({})))
     monkeypatch.setattr(NightShiftRemote, "sleep", staticmethod(the_other_nodes_night))
-    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=two_nodes["night"], mightling_bin=two_nodes["mling"],
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=two_nodes["night"], mightling_bin=two_nodes["ling"],
                                 vllm_host="http://x", settings=NightShiftSettings({})) == 0
     assert node_runs == [0]
     here = NightShiftQueue.read(two_nodes["night"], task["id"])
@@ -994,10 +994,10 @@ def test_a_task_from_another_machine_runs_in_the_job_sandbox_with_its_own_home(s
     from dreamference.night_shift import NightShiftRemote
     task = {"id": "20261001-0100-f00", "repo": str(setup["repo"]), "base": "a" * 40, "task": "x",
             "remote": {"sender": "1111", "sender_name": "spark-1"}, "author": {"name": "S", "email": "s@x"}}
-    run = NightShiftTaskRun(setup["night"], task, NightShiftSettings({}), setup["mling"], time.time() + 60,
+    run = NightShiftTaskRun(setup["night"], task, NightShiftSettings({}), setup["ling"], time.time() + 60,
                             model_host="http://127.0.0.1:8000")
     run.airgapped = "on"
-    argv = NightShiftTaskRun.__dict__["remote_sandbox"](run, [setup["mling"], "exec", "-C", str(run.worktree)], {})
+    argv = NightShiftTaskRun.__dict__["remote_sandbox"](run, [setup["ling"], "exec", "-C", str(run.worktree)], {})
     home = NightShiftRemote.task_home(task["id"])
     assert argv[0] == "bwrap" and "--unshare-net" not in argv                  # loopback reaches the model
     assert [argv[i + 1] for i, word in enumerate(argv) if word == "--bind"] == [str(run.worktree), str(home)]

@@ -1,6 +1,6 @@
 // Signs the window in with the web UI's default account, once, when it has no session
 // (specs/DREAMFERENCE_MIGHTLING_NODE.md §7). A fresh install has one account with a published
-// default password, and "type `mling-app` and it works" is the point of the client; an owner
+// default password, and "type `ling-app` and it works" is the point of the client; an owner
 // who changed the password gets the ordinary login page, because the attempt fails and is not
 // repeated. Evaluated by main.rs after every page load; the two placeholders are filled in there.
 (function () {

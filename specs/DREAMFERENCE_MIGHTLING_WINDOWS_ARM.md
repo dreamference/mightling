@@ -23,7 +23,7 @@ the questions as asked):
   to what is left; below that the machine is a client of a node.
 - **A lone laptop (no node on the LAN) gets, natively:** web search (SearXNG has no Windows build,
   so a native search backend, §10), **Night Shift** in Rust (§13), and the **Chat window** of
-  `mling-app` without Onyx's Linux containers (§11). `/apps` (Gmail, Drive, Calendar) stays
+  `ling-app` without Onyx's Linux containers (§11). `/apps` (Gmail, Drive, Calendar) stays
   node-only on Windows.
 - **Unsigned for now.** Windows releases ship unsigned and are marked **preview**; the release notes
   say that Smart App Control must be off to run them (§16.3). Signing is revisited before Windows
@@ -37,13 +37,13 @@ the questions as asked):
 
 **Decisions proposed here, stated first because each could be read the other way:**
 
-1. **Native Windows, not WSL, for everything a person types.** This keeps MIGHTLING_NODE §15.1 (2026-10-02): `mling`, `mling-code`, `mling-search`, `mling-fetch` and `mling-app` are Windows executables. WSL appears in this spec only as optional plumbing *inside* the local-engine profile (§8.3), the way Docker Desktop uses it. Whether even that is acceptable is question 1 in §21.
+1. **Native Windows, not WSL, for everything a person types.** This keeps MIGHTLING_NODE §15.1 (2026-10-02): `ling`, `ling-code`, `ling-search`, `ling-fetch` and `ling-app` are Windows executables. WSL appears in this spec only as optional plumbing *inside* the local-engine profile (§8.3), the way Docker Desktop uses it. Whether even that is acceptable is question 1 in §21.
 2. **Arm64 first.** `aarch64-pc-windows-msvc` is the RTX Spark target. `x86_64-pc-windows-msvc` (in MIGHTLING_NODE §8.1) is the same code and the same workflow job with one more matrix row; it is added when it costs nothing, not before.
 3. **Three install profiles, decided by the machine and overridable** (§6): **client** (any Windows Arm PC; the model is on a DGX Spark or another node on the LAN), **local** (an RTX Spark with enough memory serves its own model), and **both**.
 4. **`/airgapped on` is enforced on Windows,** not cooperative as MIGHTLING_NODE §8.2 assumed. Codex's own *elevated* Windows sandbox already runs offline commands as a separate local account whose traffic the Windows Firewall and WFP block in the kernel (§7.3). Mightling needs one hook (patch `0024`, an estimated 1.3–1.8 KB) that forces that identity for a sealed session, the same shape as `0019`'s Linux hook. At `on`, the unelevated sandbox and no sandbox are refused, exactly as Full Access is.
 5. **The local engine is chosen by measurement, not here.** Two candidates are carried to an RTX Spark (§8): **W1**, a native `llama-server` that Mightling builds and manages; and **W2**, today's SGLang recipe (NVFP4 + DFlash2) in a Mightling-owned WSL2 distribution. W1 is simpler and native; W2 keeps the GB10 recipe and its speed. Until a machine is measured, Mightling runs against any local Responses-API server the user already has (Ollama, LM Studio, `llama-server`): Phase 3, §8.2.
 6. **Signing is reopened for Windows.** MIGHTLING_NODE §15.1 decided not to sign. On Windows 11, Smart App Control *blocks* unsigned unknown executables outright rather than warning, and new laptops ship with it in evaluation or on mode. RTX Spark buyers are exactly new laptops. §16.3 recommends Azure Artifact Signing (about $9.99 a month, open to organisations in the EU); question 2 in §21.
-7. **Python stays on the node, as MIGHTLING_NODE decided.** No part of a Windows install needs Python. Where `mling-admin` does node work today (managing the model server, Night Shift, the egress audit), the Windows equivalent is either Rust in the launcher or runs inside the WSL engine (§8.3, §13, §14).
+7. **Python stays on the node, as MIGHTLING_NODE decided.** No part of a Windows install needs Python. Where `ling-admin` does node work today (managing the model server, Night Shift, the egress audit), the Windows equivalent is either Rust in the launcher or runs inside the WSL engine (§8.3, §13, §14).
 
 ---
 
@@ -110,14 +110,14 @@ The default model, `qwen3.8-27b-nvfp4-dflash2`, is served by SGLang with `--mem-
 
 **Read on the web, not tested:** everything in §1; CUDA working inside WSL2 on an N1X (NemoClaw issue #9000, 2026-08-13: `docker run --gpus all … vectoradd` passed through Docker Desktop's WSL backend, GPU through `/dev/dxg`); NemoClaw serving Qwen 3.6 35B-A3B on N1X through Ollama on the Windows host and an "experimental managed llama.cpp recipe" in WSL (release notes v0.0.119–v0.0.130, September 2026); Ollama's Windows Arm64 CUDA support (v0.32.3, July 2026) and its `/v1/responses` (from 0.13.3); `llama-server`'s `/v1/responses` (translated to chat completions); GitHub's free `windows-11-arm` runners for public repositories; WSL's defaults (VM memory 50% of RAM, swap 25%, `networkingMode = mirrored`); Smart App Control's blocking; Azure Artifact Signing's price and eligibility.
 
-**Not checked by anyone here, and so the first work of each phase (§19):** any build of any Mightling binary for Windows; anything on RTX Spark hardware; whether SGLang or vLLM run in WSL2 on an N1X; the carveout setting; `mdns-sd` beside Windows' own mDNS responder; whether the sandbox accounts can read `%USERPROFILE%\.mightling`; WebView2's handling of `target="_blank"` in `mling-app`.
+**Not checked by anyone here, and so the first work of each phase (§19):** any build of any Mightling binary for Windows; anything on RTX Spark hardware; whether SGLang or vLLM run in WSL2 on an N1X; the carveout setting; `mdns-sd` beside Windows' own mDNS responder; whether the sandbox accounts can read `%USERPROFILE%\.mightling`; WebView2's handling of `target="_blank"` in `ling-app`.
 
 ---
 
 ## 3. Goals and non-goals
 
 **Goals**
-- A person with an RTX Spark laptop runs `irm …/install.ps1 | iex`, and then `mling` works: against a DGX Spark on their LAN, or against the laptop's own GPU.
+- A person with an RTX Spark laptop runs `irm …/install.ps1 | iex`, and then `ling` works: against a DGX Spark on their LAN, or against the laptop's own GPU.
 - The privacy story holds on Windows: no the upstream vendor channel, `/airgapped on` enforced by the kernel, and an egress audit that proves it (§14).
 - The same agent, prompts, skills, code index answers and `/apps` as on Linux.
 - Nothing new for Linux users: every change is gated by `cfg(windows)` or is a portable fix that Linux tests cover.
@@ -125,7 +125,7 @@ The default model, `qwen3.8-27b-nvfp4-dflash2`, is served by SGLang with `--mem-
 **Non-goals (this spec)**
 - Windows on x86-64 as a first target (decision 2).
 - A Windows *node* for other machines on the LAN. The local profile serves the laptop itself; publishing it (`node enable` on Windows) is Phase 6 at the earliest.
-- Running Mightling's Python (`mling-admin`) on Windows.
+- Running Mightling's Python (`ling-admin`) on Windows.
 - Linux on RTX Spark laptops. When NVIDIA ships it, they are GB10s and today's Linux node applies (the GB10-machines branch, `gb10/all-machines`, covers detection).
 - The NPU.
 
@@ -138,8 +138,8 @@ The default model, `qwen3.8-27b-nvfp4-dflash2`, is served by SGLang with `--mem-
 | Codex itself, its TUI, `exec`, `app-server` | Built upstream for `aarch64-pc-windows-msvc` | §2 |
 | Codex's Windows sandbox (three levels) | Upstream, compiled in on Windows | §2 |
 | `mdns-sd` | Pure Rust, documented for Windows | MIGHTLING_NODE §2 |
-| `node-locator` (and its two byte-identical copies) | Already reads `USERPROFILE` when `HOME` is absent (`mling-rs/node-locator/src/lib.rs:205`) | read here |
-| Night Shift's task lock in the launcher | `std::fs::File::lock`, which is cross-platform (`mling-rs/src/night.rs:504`) | read here |
+| `node-locator` (and its two byte-identical copies) | Already reads `USERPROFILE` when `HOME` is absent (`ling-rs/node-locator/src/lib.rs:205`) | read here |
+| Night Shift's task lock in the launcher | `std::fs::File::lock`, which is cross-platform (`ling-rs/src/night.rs:504`) | read here |
 | Tauri 2 | Builds `aarch64-pc-windows-msvc` with WebView2, which ships with Windows 11 | Tauri docs |
 | codebase-memory-mcp | `windows-arm64.zip` release asset | §2 |
 | rust-analyzer, Node.js, Git for Windows | Native Arm64 Windows builds published upstream | (not re-checked today) |
@@ -153,23 +153,23 @@ What each part of Mightling needs on Windows, with the phase that delivers it (�
 
 | Component | Linux today | Windows | Phase |
 |---|---|---|---|
-| `mling` (Codex + `mling-rs/` + patches) | built by `CodexBrandedBuilder` | same builder on a `windows-11-arm` runner, with the fixes of §16.1; ships `mling.exe` plus the three sandbox helpers named as upstream names them | 1 |
-| `codex-code-mode-host` | beside `mling` | `codex-code-mode-host.exe` beside `mling.exe` (Codex resolves it next to its own executable) | 1 |
-| `mling-search`, `mling-fetch` | `mling-web-rs/` | same crate; `airgapped.rs` copy gets the path fixes of §15 | 1 |
-| `mling-code` (queries) | SQLite reads | portable once its paths read `USERPROFILE` | 1 |
-| `mling-code` (indexing) | bwrap + `systemd-run` + cgroup slice + `flock` (`src/index/host.rs`, `index/mod.rs`) | a `WindowsHost` behind the existing `Host` trait: a Job Object with a memory cap and below-normal priority, no executing indexers (§12) | 5 |
+| `ling` (Codex + `ling-rs/` + patches) | built by `CodexBrandedBuilder` | same builder on a `windows-11-arm` runner, with the fixes of §16.1; ships `ling.exe` plus the three sandbox helpers named as upstream names them | 1 |
+| `codex-code-mode-host` | beside `ling` | `codex-code-mode-host.exe` beside `ling.exe` (Codex resolves it next to its own executable) | 1 |
+| `ling-search`, `ling-fetch` | `ling-web-rs/` | same crate; `airgapped.rs` copy gets the path fixes of §15 | 1 |
+| `ling-code` (queries) | SQLite reads | portable once its paths read `USERPROFILE` | 1 |
+| `ling-code` (indexing) | bwrap + `systemd-run` + cgroup slice + `flock` (`src/index/host.rs`, `index/mod.rs`) | a `WindowsHost` behind the existing `Host` trait: a Job Object with a memory cap and below-normal priority, no executing indexers (§12) | 5 |
 | Sandbox | bubblewrap (Codex's Linux helper) | Codex's elevated Windows sandbox, set up once with one UAC prompt (§7) | 2 |
 | `/airgapped on` enforcement | patch `0019` in `linux-sandbox` | patch `0024` in `windows-sandbox-rs` (§7.3) | 2 |
-| Egress audit | `mling-admin audit egress` (Python, strace) | `mling audit egress` in Rust over ETW, elevated (§14) | 2 |
-| Model server | Docker + SGLang/vLLM via `mling-admin server start` | Phase 1: a node on the LAN. Phase 3: any local Responses-API server. Phase 4: Mightling-managed W1 or W2 (§8) | 1, 3, 4 |
+| Egress audit | `ling-admin audit egress` (Python, strace) | `ling audit egress` in Rust over ETW, elevated (§14) | 2 |
+| Model server | Docker + SGLang/vLLM via `ling-admin server start` | Phase 1: a node on the LAN. Phase 3: any local Responses-API server. Phase 4: Mightling-managed W1 or W2 (§8) | 1, 3, 4 |
 | Host safety | `check_host_safety` + PSI watchdog | a Rust watchdog over Windows' memory notifications and DXGI budgets, plus engine-side caps (§9) | 4 |
 | Web search backend | SearXNG container on the node | the node's SearXNG; on a lone laptop, SearXNG inside the W2 distribution, or no search with a clear message (§10) | 1, 4 |
-| `mling-app` Chat (Onyx) | Onyx containers on the node | the node's Onyx through the forwarder; on a lone laptop, only with W2 (§11) | 5 |
-| `mling-app` Work | `mling app-server` | works natively; WebView2 instead of WebKitGTK (§11) | 5 |
+| `ling-app` Chat (Onyx) | Onyx containers on the node | the node's Onyx through the forwarder; on a lone laptop, only with W2 (§11) | 5 |
+| `ling-app` Work | `ling app-server` | works natively; WebView2 instead of WebKitGTK (§11) | 5 |
 | `/apps` (Gmail, Drive, Calendar) | the Google service container (port 8767) on the node | from a client: as MIGHTLING_NODE §15.2 question 7 (out of scope); on a lone laptop, only with W2 | 6 |
-| Night Shift | Python runner + systemd timer and scopes | a Rust runner (`mling night run`) under Task Scheduler and Job Objects, or none (§13) | 6 |
+| Night Shift | Python runner + systemd timer and scopes | a Rust runner (`ling night run`) under Task Scheduler and Job Objects, or none (§13) | 6 |
 | Skills from other agents | symlinks under `~/.mightling/skills/from-*` | directory junctions, which need no privilege (§15) | 1 |
-| `mling update` | Linux only (`update.rs:133`) | Windows asset names, rename-aside replacement of a running `.exe` (§15) | 1 |
+| `ling update` | Linux only (`update.rs:133`) | Windows asset names, rename-aside replacement of a running `.exe` (§15) | 1 |
 | Installer | `install.sh` | `install.ps1` (§16) | 1 |
 
 ---
@@ -178,8 +178,8 @@ What each part of Mightling needs on Windows, with the phase that delivers it (�
 
 | Profile | Machine | What installs | How it is chosen |
 |---|---|---|---|
-| **client** | any Windows 11 Arm64 PC; an RTX Spark whose GPU budget is under the threshold below | the Rust client, the sandbox set up, `mling node` finds a node on the LAN | the default |
-| **local** | an RTX Spark with a GPU budget of at least **48 GB** (Phase 4 measures and may raise it) | client plus the local engine (§8) and the watchdog (§9) | `install.ps1` reads the GPU name and `cudaMemGetInfo`'s total through a small probe in `mling.exe` (`mling doctor gpu`); NVML alone would undersize it (§1.2) |
+| **client** | any Windows 11 Arm64 PC; an RTX Spark whose GPU budget is under the threshold below | the Rust client, the sandbox set up, `ling node` finds a node on the LAN | the default |
+| **local** | an RTX Spark with a GPU budget of at least **48 GB** (Phase 4 measures and may raise it) | client plus the local engine (§8) and the watchdog (§9) | `install.ps1` reads the GPU name and `cudaMemGetInfo`'s total through a small probe in `ling.exe` (`ling doctor gpu`); NVML alone would undersize it (§1.2) |
 | **both** | local, plus a node elsewhere for when the laptop is busy or asleep | the launcher's resolution tiers (MIGHTLING_NODE §6.1) pick the loopback engine first, and a remembered node when loopback is down | automatic |
 
 `install.ps1 -Role client|local` overrides the detection, as `install.sh --role` does.
@@ -200,7 +200,7 @@ The resolution tiers need one change: today "a node → loopback" means a machin
 
 ### 7.1 Codex on Windows runs commands unsandboxed until someone sets a sandbox up
 
-`WindowsSandboxLevel::Disabled` is the default (§2). The TUI's first permission prompt offers "Set up default sandbox (requires Administrator permissions)", "Use non-admin sandbox (higher risk if prompt injected)" or "Quit" (`tui/src/chatwidget/windows_sandbox_prompts.rs`). `mling exec`, Night Shift and SWE-bench-style runs have no TUI to ask.
+`WindowsSandboxLevel::Disabled` is the default (§2). The TUI's first permission prompt offers "Set up default sandbox (requires Administrator permissions)", "Use non-admin sandbox (higher risk if prompt injected)" or "Quit" (`tui/src/chatwidget/windows_sandbox_prompts.rs`). `ling exec`, Night Shift and SWE-bench-style runs have no TUI to ask.
 
 **Mightling sets the sandbox up at install, not at first use:**
 - `install.ps1` runs `codex-windows-sandbox-setup.exe` behind one UAC prompt. That one elevation also adds the firewall rule for mDNS (§10.2), so the user sees one prompt, at a moment they expect it.
@@ -213,16 +213,16 @@ The resolution tiers need one change: today "a node → loopback" means a machin
 - **Filesystem:** writes are allowed only to roots that setup grants to the sandbox accounts through ACLs (`workspace_acl.rs`, `acl.rs`); reads are granted per policy (`core/src/windows_sandbox_read_grants.rs`).
 - **Network:** the offline account is blocked by Windows Firewall rules scoped to its SID and by WFP filters on `ALE_USER_ID` (`setup_provisioning/firewall.rs`, `wfp.rs`). Both are kernel-enforced and persistent. Rule names say "Codex Sandbox Offline …" in the firewall's interface. Renaming them would be a patch for no protection, so this spec leaves them.
 
-**To verify on the first machine:** whether `CodexSandboxOnline` can read `%USERPROFILE%\.mightling\node.json` (needed by `mling-search`) and execute `mling-search.exe` from the install directory; whether `%TEMP%` is a writable root.
+**To verify on the first machine:** whether `CodexSandboxOnline` can read `%USERPROFILE%\.mightling\node.json` (needed by `ling-search`) and execute `ling-search.exe` from the install directory; whether `%TEMP%` is a writable root.
 
 ### 7.3 Enforcing `on`: patch `0024`
 
 On Linux, `0019` makes the sandbox helper force `NetworkSandboxPolicy::Restricted` when the command's session is sealed, reading the session from the command's own environment (`CODEX_THREAD_ID`, then `CODEX_SESSION_ID`). The Windows equivalent:
 
 - **Where:** the two *elevated* entry points, each of which resolves the profile itself with the command's `env_map` in hand: `windows-sandbox-rs/src/unified_exec/backends/elevated.rs:178` (`spawn_windows_sandbox_session_elevated_for_permission_profile`, interactive and unified exec) and `elevated_impl.rs:120` (`run_windows_sandbox_capture_for_permission_profile`, captured commands). There is no single function with both the profile and the command's environment: `ResolvedWindowsSandboxPermissions::try_from_permission_profile`, which every path calls, sees only the parent's environment, where `CODEX_THREAD_ID` is not set. The legacy (unelevated) path, `spawn_prep.rs`'s `prepare_spawn_context_common`, is not hooked, because §7.4 refuses it at `on`.
-- **What:** one helper added to `resolved_permissions.rs`. It takes the profile and the `env_map`, and returns the profile unchanged, or a clone with `network = Restricted` when `mling_airgapped::resolve(&[thread, session]).level == On` for the ids in `env_map` (`CODEX_THREAD_ID`, then `CODEX_SESSION_ID`, as on Linux). Each of the two call sites passes the helper's result instead of `permission_profile`. The elevated setup then selects the offline identity (`SandboxNetworkIdentity::from_permissions`, `setup.rs:804`). Before writing it, confirm that Codex puts `CODEX_THREAD_ID` into the Windows command's environment: it does in `core/src/unified_exec/process_manager.rs:1453`, but the capture path was not traced.
+- **What:** one helper added to `resolved_permissions.rs`. It takes the profile and the `env_map`, and returns the profile unchanged, or a clone with `network = Restricted` when `ling_airgapped::resolve(&[thread, session]).level == On` for the ids in `env_map` (`CODEX_THREAD_ID`, then `CODEX_SESSION_ID`, as on Linux). Each of the two call sites passes the helper's result instead of `permission_profile`. The elevated setup then selects the offline identity (`SandboxNetworkIdentity::from_permissions`, `setup.rs:804`). Before writing it, confirm that Codex puts `CODEX_THREAD_ID` into the Windows command's environment: it does in `core/src/unified_exec/process_manager.rs:1453`, but the capture path was not traced.
 - **Size:** a dependency line in `windows-sandbox-rs/Cargo.toml`, the helper (about six lines) and two changed call lines: an estimated 1.3–1.8 KB. The series is 37,288 bytes under a 37,500 cap, with 38,500 approved (2026-10-05), so this passes the approved ceiling. That is the user's call (§21, question 3).
-- **Seals:** the resolver needs a place for seals that a sandboxed command cannot write. On Windows that is `%LOCALAPPDATA%\Mightling\airgapped-seals`: the sandbox accounts are other users, and setup grants them nothing there. `runtime_dir()` in `mling-rs/airgapped/src/lib.rs` gains a `cfg(windows)` branch, and the web crate's byte-identical copy follows (the test that compares them enforces it). Seal pruning needs process liveness without `/proc` (`airgapped.rs:79`): `OpenProcess` plus `GetExitCodeProcess`.
+- **Seals:** the resolver needs a place for seals that a sandboxed command cannot write. On Windows that is `%LOCALAPPDATA%\Mightling\airgapped-seals`: the sandbox accounts are other users, and setup grants them nothing there. `runtime_dir()` in `ling-rs/airgapped/src/lib.rs` gains a `cfg(windows)` branch, and the web crate's byte-identical copy follows (the test that compares them enforces it). Seal pruning needs process liveness without `/proc` (`airgapped.rs:79`): `OpenProcess` plus `GetExitCodeProcess`.
 
 ### 7.4 What is refused at `on`
 
@@ -234,7 +234,7 @@ On Linux, `0019` makes the sandbox helper force `NetworkSandboxPolicy::Restricte
 | `mxc` | refused for now: MXC's repository says no profile "should be treated as security boundaries currently" |
 | Full Access | refused, as today (`0019`, `0023`) |
 
-Full Access stays refused by `permission_refusal` (`0023`'s validator), which binds every `app-server` client. The sandbox-level refusals need the configured `[windows] sandbox`, which the validator does not see. They run in the launcher (at start, from `config.toml` and `-c`) and in `/airgapped on` (patch `0019`'s TUI hook calls into `mling-rs/src/airgapped.rs`). An `app-server` started by the launcher inherits the start-time check. One started some other way with an unelevated sandbox would not be refused, and its commands would only get proxy variables. Closing that gap means extending `0023`'s validator to the sandbox mode: about 0.3 KB more, listed with question 3.
+Full Access stays refused by `permission_refusal` (`0023`'s validator), which binds every `app-server` client. The sandbox-level refusals need the configured `[windows] sandbox`, which the validator does not see. They run in the launcher (at start, from `config.toml` and `-c`) and in `/airgapped on` (patch `0019`'s TUI hook calls into `ling-rs/src/airgapped.rs`). An `app-server` started by the launcher inherits the start-time check. One started some other way with an unelevated sandbox would not be refused, and its commands would only get proxy variables. Closing that gap means extending `0023`'s validator to the sandbox mode: about 0.3 KB more, listed with question 3.
 
 ### 7.5 Wording
 
@@ -246,28 +246,28 @@ The sandbox prompt and setup errors say "Codex" (`windows_sandbox_prompts.rs`). 
 
 ### 8.1 What the engine must provide
 
-Read from the launcher and `mling-code`:
+Read from the launcher and `ling-code`:
 
 | Need | Why | SGLang/vLLM | `llama-server` | Ollama |
 |---|---|---|---|---|
 | `POST /v1/responses` | Codex 0.158 speaks nothing else | yes | yes (translated to chat completions) | yes, from 0.13.3 |
 | `GET /v1/models` with `max_model_len` | the catalogue's context (`lib.rs:574`; falls back to 32,768) | yes | **no**: the context is in `/props` (`n_ctx`), to be read as a fallback | **no**: `/api/show` has `context_length`, to be read as a fallback |
-| `/metrics` busy gauges | `mling-code` waits for an idle model (`index/probe.rs:40`); the compaction limit reads the KV pool (`compaction.rs:72`) | yes | with `--metrics`; gauge names (`llamacpp:requests_processing`) to be added to `GAUGES` | none: idle detection degrades to "unknown", which must not block indexing forever |
-| Qwen3 tool calls (`qwen3_coder`) and reasoning split | the model's tool calls and `/think` text | parsers configured per recipe | Jinja template plus llama.cpp's tool-call parsing: **to measure** with `mling exec` | to measure |
+| `/metrics` busy gauges | `ling-code` waits for an idle model (`index/probe.rs:40`); the compaction limit reads the KV pool (`compaction.rs:72`) | yes | with `--metrics`; gauge names (`llamacpp:requests_processing`) to be added to `GAUGES` | none: idle detection degrades to "unknown", which must not block indexing forever |
+| Qwen3 tool calls (`qwen3_coder`) and reasoning split | the model's tool calls and `/think` text | parsers configured per recipe | Jinja template plus llama.cpp's tool-call parsing: **to measure** with `ling exec` | to measure |
 | Chat-template patches (`chat_template_patches`) | Codex's `high`/`minimal` efforts were answered with HTTP 400 | patched copy at launch | `--chat-template-file` with the same patched copy | Modelfile `TEMPLATE`, a different template language: **not portable** |
 
 ### 8.2 Phase 3: bring your own server
 
 The cheapest useful step, and testable on any Windows Arm PC with enough memory: the launcher already accepts any URL through `DREAMFERENCE_VLLM_HOST` or `vllm_host`. Phase 3 adds:
 - the two context fallbacks above, and llama.cpp's gauges;
-- detection at start of Ollama (11434), LM Studio (1234) and `llama-server` (8080) on loopback, offered once ("found Ollama at 127.0.0.1:11434 serving qwen3.8:27b; use it? `mling node use local:ollama`"), never adopted silently (MIGHTLING_NODE §6.1's rule);
+- detection at start of Ollama (11434), LM Studio (1234) and `llama-server` (8080) on loopback, offered once ("found Ollama at 127.0.0.1:11434 serving qwen3.8:27b; use it? `ling node use local:ollama`"), never adopted silently (MIGHTLING_NODE §6.1's rule);
 - a start-up line naming what is unmeasured: tool calls on a template Mightling did not patch.
 
 ### 8.3 Phase 4: a Mightling-managed engine, W1 (W2 not built: no WSL, decided 2026-10-07)
 
 | | **W1: native `llama-server`** | **W2: SGLang in a Mightling WSL2 distribution** |
 |---|---|---|
-| What runs | `llama-server.exe` built by Mightling's release for `aarch64-pc-windows-msvc` with CUDA 13.4 (`sm_121` to be confirmed on N1X), as a child of a Mightling engine supervisor | a WSL2 distribution `Mightling` (Ubuntu 24.04 arm64, imported from a tarball the release ships), Docker Engine inside it, and today's node: `mling-admin server start` with the pinned `lmsysorg/sglang` image and the NVFP4 + DFlash2 recipe |
+| What runs | `llama-server.exe` built by Mightling's release for `aarch64-pc-windows-msvc` with CUDA 13.4 (`sm_121` to be confirmed on N1X), as a child of a Mightling engine supervisor | a WSL2 distribution `Mightling` (Ubuntu 24.04 arm64, imported from a tarball the release ships), Docker Engine inside it, and today's node: `ling-admin server start` with the pinned `lmsysorg/sglang` image and the NVFP4 + DFlash2 recipe |
 | Model | GGUF: Qwen3.8-27B `Q4_K_M` (about 18 GB; Ollama and llama.cpp support the architecture). **Decided 2026-10-07: Qwen3.8-27B is the default on Windows too**, the same model as the node (§21, question 6) | the registry's default entry, unchanged |
 | Speed (expected, not measured) | dense 27B: bandwidth-bound, at most about 300 GB/s ÷ 18 GB ≈ 17 tok/s before speculation; an MoE with ~3 B active is several times faster | the GB10 numbers (prose 25.5, code 50.3, JSON 87.0 tok/s), if GPU paravirtualisation costs little; **unknown** |
 | GPU access | native WDDM; `cudaMalloc` as NVIDIA recommends (§1.2) | `/dev/dxg` paravirtualisation; CUDA on WSL lists limited UVM and "pinned system memory … availability is limited" (CUDA on WSL guide §5.1). NemoClaw's notes say its WSL path on N1X "still breaks" in QA |
@@ -281,15 +281,15 @@ The cheapest useful step, and testable on any Windows Arm PC with enough memory:
 **How to choose (Phase 4's gate):** on one 128 GB RTX Spark, for each engine:
 1. `server start` to first token, cold and warm;
 2. the SWE-bench-free benchmark the registry used (prose, code, JSON; single stream; temperature 0);
-3. `mling exec` on the slash-command suite (tool calls, efforts);
-4. four concurrent `mling` tasks;
+3. `ling exec` on the slash-command suite (tool calls, efforts);
+4. four concurrent `ling` tasks;
 5. the memory test of §9.4.
 
 **Decided 2026-10-07:** W1 for every local install; W2 is not built. (Proposed before the decision: W1 for every local install, because it has no WSL, no images and no second memory layer; W2 as an opt-in "full node on this laptop" (`-Role local -Engine wsl`) for people who want the GB10 recipe, Chat and Night Shift. If W2 turns out within 10% of the GB10's speed and passes §9.4, the default is revisited: speed is the product.)
 
 ### 8.4 Which model on which machine
 
-The registry gains Windows entries, never by renaming existing ones: `qwen3.8-27b-gguf-q4km` for W1 (min memory 24 GB), and the existing default for W2. `main-model set` on Windows is a launcher command (`mling model set`), because there is no `mling-admin`. `model_supports_vision` carries over: Qwen3.8 is multimodal in both formats, but llama.cpp needs its `mmproj` file, which W1 downloads beside the GGUF.
+The registry gains Windows entries, never by renaming existing ones: `qwen3.8-27b-gguf-q4km` for W1 (min memory 24 GB), and the existing default for W2. `main-model set` on Windows is a launcher command (`ling model set`), because there is no `ling-admin`. `model_supports_vision` carries over: Qwen3.8 is multimodal in both formats, but llama.cpp needs its `mmproj` file, which W1 downloads beside the GGUF.
 
 ---
 
@@ -323,7 +323,7 @@ On a 128 GB RTX Spark: start the engine, then allocate host memory in a second p
 
 ### 10.1 Web search
 
-`mling-search` queries a SearXNG instance: on a client, the node's (MIGHTLING_NODE §4). A lone laptop with W1 has none. Options:
+`ling-search` queries a SearXNG instance: on a client, the node's (MIGHTLING_NODE §4). A lone laptop with W1 has none. Options:
 1. no search, with the error naming why;
 2. SearXNG in the W2 distribution only;
 3. SearXNG as a native Windows process, which upstream does not support.
@@ -332,28 +332,28 @@ On a 128 GB RTX Spark: start the engine, then allocate host memory in a second p
 
 ### 10.2 Discovery and the firewall
 
-`mdns-sd` binds UDP 5353 and receives multicast answers. Windows Defender Firewall asks the first time an unknown program listens. On a network marked Public the default answer blocks it, and discovery then fails silently. The install's one elevation (§7.1) adds an inbound rule for `mling.exe` and `mling-app.exe` on UDP 5353, Private and Domain profiles only. On a Public network, `mling node use <address>` remains (MIGHTLING_NODE §6.3). Whether `mdns-sd` coexists with Windows' own mDNS responder (the DNS Client service also listens on 5353) is unverified (MIGHTLING_NODE §2) and is Phase 1's first test.
+`mdns-sd` binds UDP 5353 and receives multicast answers. Windows Defender Firewall asks the first time an unknown program listens. On a network marked Public the default answer blocks it, and discovery then fails silently. The install's one elevation (§7.1) adds an inbound rule for `ling.exe` and `ling-app.exe` on UDP 5353, Private and Domain profiles only. On a Public network, `ling node use <address>` remains (MIGHTLING_NODE §6.3). Whether `mdns-sd` coexists with Windows' own mDNS responder (the DNS Client service also listens on 5353) is unverified (MIGHTLING_NODE §2) and is Phase 1's first test.
 
 ---
 
-## 11. `mling-app` on Windows
+## 11. `ling-app` on Windows
 
 - **Builds** with `tauri build --target aarch64-pc-windows-msvc`. The bundle is NSIS (the installer itself runs emulated under Prism; the app is native) or MSI; NSIS, because it installs per user without elevation.
 - **The webview is WebView2 (Chromium).** Everything `main.rs` sets for WebKitGTK (`WEBKIT_DISABLE_DMABUF_RENDERER`, `GTK_THEME`) is inert there.
 - **Theme:** Chat's overrides are `html:not(.dark)`, so the window needs the light scheme. On Windows that comes from the window's `theme: "Light"` in `tauri.conf.json`, which Tauri passes to WebView2's preferred colour scheme. To verify.
 - **The injected scrollbar** (`onyx_ui_scripts.py`) refuses to run on Blink and leaves the native bar, which is correct for WebView2.
 - **`target="_blank"`:** wry handles new-window requests differently on WebView2. Whether a link opens a window, the browser, or nothing is to be checked in Phase 5, and the engine marker extended with `webview2`.
-- **Chat** needs Onyx: the node's (through the forwarder, unchanged), or W2's. With W1 alone, `mling app` opens Work only and says why there is no Chat.
-- **Work** drives `mling app-server` over stdio, which is native, and `0023` already binds its permission choices.
-- **Finding the app:** `app.rs` reads a `.desktop` entry (`find_executable`). On Windows it looks beside `mling.exe`, then under `%LOCALAPPDATA%\Programs\Mightling`, then the NSIS uninstall key in `HKCU`.
+- **Chat** needs Onyx: the node's (through the forwarder, unchanged), or W2's. With W1 alone, `ling app` opens Work only and says why there is no Chat.
+- **Work** drives `ling app-server` over stdio, which is native, and `0023` already binds its permission choices.
+- **Finding the app:** `app.rs` reads a `.desktop` entry (`find_executable`). On Windows it looks beside `ling.exe`, then under `%LOCALAPPDATA%\Programs\Mightling`, then the NSIS uninstall key in `HKCU`.
 - **Webview data:** `%LOCALAPPDATA%\dev.dreamference.mightling\EBWebView`.
 
 ---
 
 ## 12. The code index on Windows
 
-- **Queries** read SQLite and work once `paths::home()` reads `USERPROFILE` (`mling-code-rs/src/paths.rs:118` falls back to `/`).
-- **The universal layer:** codebase-memory-mcp `windows-arm64.zip` is pinned in `code-index.sha256` beside the Linux line, with its own checksum, and installed by `mling code setup` (Rust, MIGHTLING_NODE §8.3).
+- **Queries** read SQLite and work once `paths::home()` reads `USERPROFILE` (`ling-code-rs/src/paths.rs:118` falls back to `/`).
+- **The universal layer:** codebase-memory-mcp `windows-arm64.zip` is pinned in `code-index.sha256` beside the Linux line, with its own checksum, and installed by `ling code setup` (Rust, MIGHTLING_NODE §8.3).
 - **The exact layer:** the scip CLI has no Windows build. It is Go; Mightling's release can build it (`GOOS=windows GOARCH=arm64`) from the pinned v0.10.0 tag and publish it as a release asset with a checksum. **Proposed**, because without `scip` there is no exact layer at all, and the exact layer is the part of the index the SWE-bench runs used.
 - **Indexers that read source** (scip-python and scip-typescript under Node Arm64, codebase-memory) run in a Job Object with a memory cap (a quarter of RAM on a client, as MIGHTLING_NODE §8.3 says) at `BELOW_NORMAL_PRIORITY_CLASS`.
 - **Indexers that execute the project's build** (rust-analyzer, scip-java, scip-dotnet) **do not run**, as on macOS. Windows can contain them: the Codex sandbox's offline account, or an AppContainer, is a real filesystem and network boundary, and running them under the offline account is Phase 6.
@@ -363,19 +363,19 @@ On a 128 GB RTX Spark: start the engine, then allocate host memory in a second p
 
 ## 13. Night Shift on Windows
 
-The runner is Python (`dreamference/night_shift/`) under a systemd timer, with each task in a memory-capped scope, `mling sandbox` for its test run, and `flock`. With W2, the distribution runs it unchanged against repositories *inside* the distribution. Repositories on `C:\` reached through `/mnt/c` are slow, and `mling` there would be the Linux binary.
+The runner is Python (`dreamference/night_shift/`) under a systemd timer, with each task in a memory-capped scope, `ling sandbox` for its test run, and `flock`. With W2, the distribution runs it unchanged against repositories *inside* the distribution. Repositories on `C:\` reached through `/mnt/c` are slow, and `ling` there would be the Linux binary.
 
-**Proposed, Phase 6:** a Rust runner, `mling night run`, in the launcher. It reuses `night.rs`'s task format and lock, and runs each task's `mling exec` in a Job Object, with the elevated sandbox for the test run. Task Scheduler (`schtasks /create … /sc daily`, per user, no elevation) replaces the timer. Until then, `/night add` on Windows queues the task and says no runner exists on this machine; `/night add --on <node>` is the way (sending from a client is MIGHTLING_NODE §15.2 question 9).
+**Proposed, Phase 6:** a Rust runner, `ling night run`, in the launcher. It reuses `night.rs`'s task format and lock, and runs each task's `ling exec` in a Job Object, with the elevated sandbox for the test run. Task Scheduler (`schtasks /create … /sc daily`, per user, no elevation) replaces the timer. Until then, `/night add` on Windows queues the task and says no runner exists on this machine; `/night add --on <node>` is the way (sending from a client is MIGHTLING_NODE §15.2 question 9).
 
 ---
 
 ## 14. The egress audit on Windows
 
-`mling-admin audit egress` is strace and Python. The Windows version is `mling audit egress`, in Rust, because there is no Python on the client.
+`ling-admin audit egress` is strace and Python. The Windows version is `ling audit egress`, in Rust, because there is no Python on the client.
 
 - **Tracing:** an ETW real-time session (the `ferrisetw` crate) with Microsoft-Windows-Kernel-Network (TCP/UDP connect, send and accept, with process ids), Microsoft-Windows-DNS-Client (every name lookup, which strace could not see from `sendmmsg`) and Microsoft-Windows-Kernel-Process (process starts, to follow the session's tree, including commands spawned through the sandbox accounts).
 - **Verdict:** the same as Linux. Every destination is an allow-listed loopback port or the node; no DNS query; no networked git; exit 0, 1 or 2.
-- **Needs elevation:** a kernel ETW session needs Administrator or the Performance Log Users group. The audit runs elevated, once, after `mling update` (as `codex build` runs it on Linux), and prints the verdict.
+- **Needs elevation:** a kernel ETW session needs Administrator or the Performance Log Users group. The audit runs elevated, once, after `ling update` (as `codex build` runs it on Linux), and prints the verdict.
 - **Windows' own traffic** (Defender, Windows Update, telemetry) is outside the process tree and so outside the verdict. The report says so, because "Mightling made no connection" is not "this laptop made no connection". **Defender's automatic sample submission can upload an unknown executable to Microsoft**, Mightling's own binaries included. Signing (§16.3) reduces that; the README says it.
 - **W2:** the distribution's traffic leaves through the WSL virtual NIC, attributed to the WSL host process in Windows' events. The audit adds a strace run inside the distribution (the existing Python audit) and merges the two verdicts.
 
@@ -387,27 +387,27 @@ Each is a `cfg(windows)` branch or a portable fix with a Linux test. None needs 
 
 | File | Today | Change |
 |---|---|---|
-| `mling-rs/src/update.rs:78` `target()` | `{arch}-unknown-linux-gnu` | `{arch}-pc-windows-msvc` on Windows; asset names carry `.exe` inside the `.gz` |
+| `ling-rs/src/update.rs:78` `target()` | `{arch}-unknown-linux-gnu` | `{arch}-pc-windows-msvc` on Windows; asset names carry `.exe` inside the `.gz` |
 | `update.rs:133` | returns unless Linux | Windows allowed |
-| `update.rs` `replace()` | `rename` over the target and `chmod 0o755` | Windows cannot replace a running `.exe` by rename. Rename `mling.exe` aside to `mling.exe.old`, move the new one in, and delete `*.old` at the next start |
+| `update.rs` `replace()` | `rename` over the target and `chmod 0o755` | Windows cannot replace a running `.exe` by rename. Rename `ling.exe` aside to `ling.exe.old`, move the new one in, and delete `*.old` at the next start |
 | `update.rs` `link_onto_path()` | symlink in `~/.local/bin` | no links: the install directory is on the user's `PATH` (`HKCU\Environment`, set by `install.ps1`) |
-| `mling-rs/src/app.rs:145` `find_executable()` | `.desktop` entry under `XDG_DATA_HOME` | §11 |
+| `ling-rs/src/app.rs:145` `find_executable()` | `.desktop` entry under `XDG_DATA_HOME` | §11 |
 | `app.rs:127` | `process_group(0)` under `cfg(unix)` | `CREATE_NEW_PROCESS_GROUP \| DETACHED_PROCESS` |
-| `mling-rs/src/home.rs:85,133` | `DirBuilderExt` modes and symlink copying | skip both under Windows (ACLs of `%USERPROFILE%` already restrict); copy the allow-list without links |
-| `mling-rs/airgapped/src/lib.rs:156,173` | `HOME` only | `HOME`, then `USERPROFILE`, as `node-locator` already does. **This is a correctness bug on Windows:** a user-level `mightling_airgapped = "on"` would be silently unread when `HOME` is unset (the usual case) |
+| `ling-rs/src/home.rs:85,133` | `DirBuilderExt` modes and symlink copying | skip both under Windows (ACLs of `%USERPROFILE%` already restrict); copy the allow-list without links |
+| `ling-rs/airgapped/src/lib.rs:156,173` | `HOME` only | `HOME`, then `USERPROFILE`, as `node-locator` already does. **This is a correctness bug on Windows:** a user-level `mightling_airgapped = "on"` would be silently unread when `HOME` is unset (the usual case) |
 | `airgapped/src/lib.rs:194` `writable_roots()` | `/tmp`, `$TMPDIR` | `%TEMP%`, `%TMP%` on Windows |
 | `airgapped/src/lib.rs:229` `runtime_dir()` | `XDG_RUNTIME_DIR`, `/run/user/<uid>` | `%LOCALAPPDATA%\Mightling` (§7.3) |
-| `mling-rs/src/airgapped.rs:79` | prunes seals through `/proc` | `OpenProcess` liveness |
+| `ling-rs/src/airgapped.rs:79` | prunes seals through `/proc` | `OpenProcess` liveness |
 | `airgapped.rs:208` status line | "bwrap --unshare-net" | "the Windows sandbox's offline account" on Windows |
-| `mling-rs/src/compaction.rs:181` `hook_command_for()` | POSIX single quotes when the path is not plain | Codex runs hooks through `cmd.exe` on Windows, which does not understand single quotes, and a Windows path is never "plain" (`\`, `:`). Quote with double quotes on Windows. **Without this, the ledger and start-up-line hooks fail on every Windows session** |
-| `mling-rs/src/lib.rs:554` | `~/.config/dreamference/config.toml` from `HOME` | the same relative path under `USERPROFILE` |
-| `lib.rs` `WEB_ACCESS_INSTRUCTIONS` | shell commands with double-quoted arguments | valid in PowerShell as written; the Gmail block names `mling-admin gmail`, which does not exist on Windows, and stays out (it is only added when the service answers) |
+| `ling-rs/src/compaction.rs:181` `hook_command_for()` | POSIX single quotes when the path is not plain | Codex runs hooks through `cmd.exe` on Windows, which does not understand single quotes, and a Windows path is never "plain" (`\`, `:`). Quote with double quotes on Windows. **Without this, the ledger and start-up-line hooks fail on every Windows session** |
+| `ling-rs/src/lib.rs:554` | `~/.config/dreamference/config.toml` from `HOME` | the same relative path under `USERPROFILE` |
+| `lib.rs` `WEB_ACCESS_INSTRUCTIONS` | shell commands with double-quoted arguments | valid in PowerShell as written; the Gmail block names `ling-admin gmail`, which does not exist on Windows, and stays out (it is only added when the service answers) |
 | `lib.rs` `updated_config()` | Linux settings | also `[windows] sandbox = "elevated"` when absent (§7.1) |
-| `mling-rs/skills/` | `symlink_dir` (needs Developer Mode on Windows: MIGHTLING_SKILLS §15) | directory **junctions**, which need no privilege. `std::fs::canonicalize` returns `\\?\C:\…` verbatim paths on Windows: the `[[skills.config]]` entries must use the form Codex's own loader produces, which a test compares |
-| `mling-rs/src/code_index.rs:188` | `process_group` | as for `app.rs` |
-| `mling-web-rs/src/airgapped.rs` | the byte-identical copy | follows the crate (the comparing test keeps them identical) |
-| `mling-code-rs/src/paths.rs:118` | `HOME` or `/` | `USERPROFILE` |
-| `mling-code-rs/src/index/*` | Linux host | §12 |
+| `ling-rs/skills/` | `symlink_dir` (needs Developer Mode on Windows: MIGHTLING_SKILLS §15) | directory **junctions**, which need no privilege. `std::fs::canonicalize` returns `\\?\C:\…` verbatim paths on Windows: the `[[skills.config]]` entries must use the form Codex's own loader produces, which a test compares |
+| `ling-rs/src/code_index.rs:188` | `process_group` | as for `app.rs` |
+| `ling-web-rs/src/airgapped.rs` | the byte-identical copy | follows the crate (the comparing test keeps them identical) |
+| `ling-code-rs/src/paths.rs:118` | `HOME` or `/` | `USERPROFILE` |
+| `ling-code-rs/src/index/*` | Linux host | §12 |
 
 One helper, `home_dir()`, reading `HOME` then `USERPROFILE`, is shared by the std-only crates as `node-locator` does today, so the four copies cannot disagree.
 
@@ -428,11 +428,11 @@ One helper, `home_dir()`, reading `HOME` then `USERPROFILE`, is shared by the st
 
 ### 16.2 Release assets
 
-Per binary, as today: `mightling-aarch64-pc-windows-msvc.gz` (holding `mling.exe`), `codex-code-mode-host-…`, `mling-search-…`, `mling-fetch-…`, `mling-code-…`, and the three sandbox helpers `codex-windows-sandbox-setup-…`, `codex-windows-sandbox-service-…` and `codex-command-runner-…`, under the names Codex looks for. One `mightling-aarch64-pc-windows-msvc.sha256sums` covers them, so `install.ps1` and `mling update` share one mechanism, as `install.sh` and `update.rs` do. `mling-app` ships as an NSIS `.exe`. Codex's LICENSE and NOTICE travel with them.
+Per binary, as today: `mightling-aarch64-pc-windows-msvc.gz` (holding `ling.exe`), `codex-code-mode-host-…`, `ling-search-…`, `ling-fetch-…`, `ling-code-…`, and the three sandbox helpers `codex-windows-sandbox-setup-…`, `codex-windows-sandbox-service-…` and `codex-command-runner-…`, under the names Codex looks for. One `mightling-aarch64-pc-windows-msvc.sha256sums` covers them, so `install.ps1` and `ling update` share one mechanism, as `install.sh` and `update.rs` do. `ling-app` ships as an NSIS `.exe`. Codex's LICENSE and NOTICE travel with them.
 
 ### 16.3 Signing
 
-- **Why reopen it:** MIGHTLING_NODE §15.1 decided to document the warning rather than sign. On Windows 11, Smart App Control "outright blocks any unknown, unsigned … apps"; GitHub issues show installers that cannot be run at all, with no "Run anyway". It is on or in evaluation on clean installs, which describes every new RTX Spark laptop. Without signing, a share of the target audience cannot run `mling.exe`.
+- **Why reopen it:** MIGHTLING_NODE §15.1 decided to document the warning rather than sign. On Windows 11, Smart App Control "outright blocks any unknown, unsigned … apps"; GitHub issues show installers that cannot be run at all, with no "Run anyway". It is on or in evaluation on clean installs, which describes every new RTX Spark laptop. Without signing, a share of the target audience cannot run `ling.exe`.
 - **What it costs:** Azure Artifact Signing is about $9.99 a month (5,000 signatures), with no hardware token, open to organisations in the EU and UK (individuals only in the US and Canada). A signed binary still starts without SmartScreen reputation, but Smart App Control evaluates the signature, and reputation accrues to the certificate across releases.
 - **Decided 2026-10-07: unsigned for now.** Windows releases are marked preview, and their notes say Smart App Control must be off to run them; signing is revisited before Windows leaves preview. (Proposed before the decision: Dreamference applies for Artifact Signing as an organisation, and the release workflow signs every Windows `.exe` with `signtool` through the Azure action. Until then, the Windows release is marked preview, and the README says how to switch Smart App Control off, which Windows 11 now allows without a reinstall.)
 
@@ -444,9 +444,9 @@ Per binary, as today: `mightling-aarch64-pc-windows-msvc.gz` (holding `mling.exe
 3. Adds that directory to the user's `PATH` (`HKCU\Environment`, broadcast `WM_SETTINGCHANGE`).
 4. **One UAC prompt:** sandbox setup (§7.1) plus the mDNS firewall rule (§10.2). Declining leaves a working client without a sandbox; `/airgapped on` is refused, and the launcher says so at start.
 5. Decides the profile (§6), and for `local` installs the chosen engine (§8.3).
-6. Runs `mling audit egress` once with that elevation (§14), and prints the verdict.
+6. Runs `ling audit egress` once with that elevation (§14), and prints the verdict.
 
-Uninstall is `mling uninstall`. It removes the install directory, the PATH entry, the firewall rule (elevated), and the WSL distribution if one was created. It leaves `%USERPROFILE%\.mightling` unless `--purge` is given. The sandbox accounts stay, because upstream Codex may use them.
+Uninstall is `ling uninstall`. It removes the install directory, the PATH entry, the firewall rule (elevated), and the WSL distribution if one was created. It leaves `%USERPROFILE%\.mightling` unless `--purge` is given. The sandbox accounts stay, because upstream Codex may use them.
 
 ---
 
@@ -475,19 +475,19 @@ Uninstall is `mling uninstall`. It removes the install directory, the PATH entry
 - the refusal table of §7.4.
 
 **On `windows-11-arm` (CI):**
-- the whole launcher crate's tests (`cargo test --release -p mling-launcher` in the export directory);
-- `mling-web-rs` tests;
-- `mling-code` query tests;
-- `mling --version` and `mling exec` against a stub Responses server.
+- the whole launcher crate's tests (`cargo test --release -p ling-launcher` in the export directory);
+- `ling-web-rs` tests;
+- `ling-code` query tests;
+- `ling --version` and `ling exec` against a stub Responses server.
 
 **On a Windows Arm PC, no RTX Spark needed (Phase 1–2 gates):**
 - install, sandbox setup and uninstall;
-- discovery of a DGX Spark node, and `mling node use`;
-- `mling-search` through the node from a sandboxed command;
+- discovery of a DGX Spark node, and `ling node use`;
+- `ling-search` through the node from a sandboxed command;
 - `/airgapped on` (a sandboxed `curl` fails) and `off` (it succeeds);
 - the refusals at `on`;
-- `mling audit egress` passing;
-- `mling update` replacing a running `mling.exe`.
+- `ling audit egress` passing;
+- `ling update` replacing a running `ling.exe`.
 
 **On an RTX Spark (Phase 3–4 gates):**
 - the carveout and the GPU budget as `cudaMemGetInfo` and NVML report them;
@@ -526,10 +526,10 @@ laptop.
 |---|---|---|---|
 | 0 | the fixes of §15 and §16.1 that are portable, with their Linux tests; `.gitattributes`; `cargo check` of the std-only crates for the Windows target | nothing new | Linux suite green |
 | 1 | the Windows client: release jobs on `windows-11-arm` and x86-64 Windows (unsigned, preview), `install.ps1`, `update`, junction skills, client against a LAN node | a Windows Arm PC (Snapdragon is enough) | §18's client checks |
-| 2 | sandbox at install, patch `0024`, the refusals, `mling audit egress` over ETW | the same PC | the audit passes; `on` blocks |
+| 2 | sandbox at install, patch `0024`, the refusals, `ling audit egress` over ETW | the same PC | the audit passes; `on` blocks |
 | 3 | bring-your-own local server (§8.2) | an RTX Spark, or any Arm PC with a small model for function only | tool calls and efforts pass the slash-command suite on llama-server and Ollama |
 | 4 | the managed engine (W1), the watchdog, the `local` profile | the ASUS ProArt P16 (H7607) with 128 GB | §8.3's measurements and §9.4 |
-| 5 | `mling-app` on Windows, the code index's static layer, scip built for Windows | Phase 1 | Work and Chat (node) open; `code_def` answers exactly |
+| 5 | `ling-app` on Windows, the code index's static layer, scip built for Windows | Phase 1 | Work and Chat (node) open; `code_def` answers exactly |
 | 6 | Night Shift in Rust, executing indexers under the offline account, the lone laptop's native web search and Chat window | Phase 4 | per feature |
 
 Phases 1 and 2 need no RTX Spark and can be finished before the hardware arrives. Phases 3 and 4 need one; the Surface RTX Spark Dev Box (Microsoft.com, US) or an ASUS ProArt P16 with 128 GB are the candidates.

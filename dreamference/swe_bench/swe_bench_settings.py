@@ -1,5 +1,5 @@
 """
-Where `mling-admin swe-bench` keeps its files, what it pins, and the `[swe_bench]` table of
+Where `ling-admin swe-bench` keeps its files, what it pins, and the `[swe_bench]` table of
 `dreamference.toml` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4, §12).
 
 The directories are module-level constants on purpose: the test suite re-points every such
@@ -16,7 +16,7 @@ from typing import Any, Dict, Final, Optional
 from dreamference.config.config_path_resolver import ConfigPathResolver
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 
-# Rebuildable: the harness, the dataset snapshot, the relocated `mling`, the validated list.
+# Rebuildable: the harness, the dataset snapshot, the relocated `ling`, the validated list.
 CACHE_DIR: Final[Path] = Path(os.path.expanduser("~/.cache/dreamference/swe-bench"))
 
 # Results: one directory per run.

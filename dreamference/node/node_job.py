@@ -15,7 +15,7 @@ for the sender to fetch. Three things differ from a night task on one's own mach
   are not allowed for now (decided 2026-10-02).
 
 The job is a systemd user unit, not a child of the sender's SSH connection, so closing the laptop
-does not stop it (with lingering on; `mling-admin node add` says when it is off).
+does not stop it (with lingering on; `ling-admin node add` says when it is off).
 
 A worktree on another machine has no virtualenv, so a job that needs one says how to build it
 (`--setup`, or `[night] setup` in the repository's `dreamference.toml`); the result is kept per
@@ -334,7 +334,7 @@ class NodeJob:
 
         Args:
             record: The job's record.
-            admin: This node's `mling-admin`, by absolute path.
+            admin: This node's `ling-admin`, by absolute path.
 
         Returns:
             List[str]: The `systemd-run` argv.
@@ -351,7 +351,7 @@ class NodeJob:
 
         Args:
             request: What the sender asked for.
-            admin: This node's `mling-admin`, by absolute path.
+            admin: This node's `ling-admin`, by absolute path.
 
         Returns:
             Dict[str, Any]: The record as started.
@@ -510,7 +510,7 @@ class NodeJob:
     def execute(cls, job_id: str) -> int:
         """
         Runs a job: worktree, command, test, commit. Called inside the job's unit by
-        `mling-admin node job-exec`.
+        `ling-admin node job-exec`.
 
         Args:
             job_id: The job's id.

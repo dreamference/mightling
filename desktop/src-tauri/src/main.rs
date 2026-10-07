@@ -2,7 +2,7 @@
 //
 // The window points straight at the Onyx deployment on this machine, so there is no bundled
 // frontend to keep in step with the browser UI -- the desktop app and the browser render the same
-// server, and every patch `mling-admin onyx configure` applies shows up in both.
+// server, and every patch `ling-admin onyx configure` applies shows up in both.
 //
 // On a machine that is not the Mightling node the deployment is the node's. The window still loads
 // `http://localhost:3000/app`: `forwarder.rs` binds that port and passes it through to the node
@@ -10,15 +10,15 @@
 // cookie, redirect and patch seeing the address it sees on the node.
 //
 // Beside it, the Work window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md): the coding agent, a bundled UI
-// that drives `mling app-server` through `bridge.rs`. It opens only when asked for
-// (`mling app --work`, a folder or `--thread <id>`); without that the app is exactly the Chat
+// that drives `ling app-server` through `bridge.rs`. It opens only when asked for
+// (`ling app --work`, a folder or `--thread <id>`); without that the app is exactly the Chat
 // window it always was.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bridge;
 mod discover;
 mod forwarder;
-#[allow(dead_code)] // A byte-identical copy of mling-rs/node-locator; not all of it is used here.
+#[allow(dead_code)] // A byte-identical copy of ling-rs/node-locator; not all of it is used here.
 mod node_locator;
 
 /// Environment the WebKitGTK webview needs, applied before Tauri starts it.
@@ -42,7 +42,7 @@ mod node_locator;
 ///   applies: every rule in `onyx_ui_overrides.py` is scoped `html:not(.dark)` on purpose, so dark
 ///   mode is plain Onyx. Pinning the webview to a light GTK theme is what makes the window show
 ///   Mightling rather than the stock UI. It does not touch the rest of the desktop session.
-/// The web UI's default account, as `mling-admin chat configure` creates it
+/// The web UI's default account, as `ling-admin chat configure` creates it
 /// (`DEFAULT_ONYX_EMAIL` and `DEFAULT_ONYX_PASSWORD` in `dreamference/chat/onyx_runner.py`; a test
 /// holds the two in step). Used once per window to sign in when there is no session.
 const DEFAULT_EMAIL: &str = "admin@dreamference.dev";
@@ -61,7 +61,7 @@ const WEBVIEW_ENV: [(&str, &str); 2] = [
 ];
 
 /// The Chat window's label in `tauri.conf.json`: the Onyx web UI, unchanged since before Work.
-const CHAT_LABEL: &str = "mling";
+const CHAT_LABEL: &str = "ling";
 
 /// Chat's window configuration when this process started with Work only, so the Work window's
 /// Chat button can open it later exactly as configured.
@@ -81,7 +81,7 @@ pub fn show_chat(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// How `mling app` asked for the window: `--work`, `--cwd <folder>` and `--thread <id>` open Work
+/// How `ling app` asked for the window: `--work`, `--cwd <folder>` and `--thread <id>` open Work
 /// (the launcher passes them); nothing opens Chat, as before.
 fn work_target(args: &[String]) -> Option<bridge::WorkTarget> {
     let value_of = |flag: &str| args.iter().position(|arg| arg == flag).and_then(|i| args.get(i + 1)).cloned();
@@ -114,7 +114,7 @@ fn main() {
                     window.title = format!("Mightling (port {port}: 3000 is in use on this machine)");
                 }
             }
-            Err(error) => eprintln!("mling-app: could not bind a loopback port for the node's web UI: {error}"),
+            Err(error) => eprintln!("ling-app: could not bind a loopback port for the node's web UI: {error}"),
         }
     }
 

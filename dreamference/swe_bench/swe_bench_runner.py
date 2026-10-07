@@ -1,7 +1,7 @@
 """
-`mling-admin swe-bench run`: the agent phase (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5, §12).
+`ling-admin swe-bench run`: the agent phase (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5, §12).
 
-One `mling exec` per instance, in the instance's own container, several at once when the model
+One `ling exec` per instance, in the instance's own container, several at once when the model
 server's KV pool and the host's memory admit it. The run measures whatever model is being served
 and never starts, stops or loads it. Admission, the runner lock and the start checks are Night
 Shift's, imported, not copied: a benchmark run and a night run exclude each other.
@@ -38,7 +38,7 @@ POLL_S: Final[float] = 5.0
 # What the lock file says while a benchmark run holds Night Shift's runner lock.
 LOCK_HOLDER: Final[str] = "a SWE-bench run"
 
-# The prompts compiled into `mling` (mling-rs/src/prompt.rs); any other name is a file in
+# The prompts compiled into `ling` (ling-rs/src/prompt.rs); any other name is a file in
 # `$CODEX_HOME/system-prompts/`. A run's manifest without a prompt ran the default.
 BUILT_IN_PROMPTS: Final[tuple] = ("default", "high-swe")
 DEFAULT_RUN_PROMPT: Final[str] = "default"
@@ -256,12 +256,12 @@ class SweBenchRunner:
             evaluate: Grade the predictions when the agent phase ends.
             until: `HH:MM` after which no new instance starts; running ones finish.
             idle_minutes: Minutes the model must have been idle first; defaults to the setting.
-            ignore_sessions: Do not wait for open `mling` sessions (for testing beside one).
+            ignore_sessions: Do not wait for open `ling` sessions (for testing beside one).
             keep_images: With `evaluate`, False works one repository at a time and removes its
                 images once it is graded, to make room for the next repository's.
             require_smoke: Refuse to run unless a smoke has passed on this machine.
             code_index: `off`, or `universal` to index each instance's repository on the host
-                and give the agent `mling-code` (a new run only; a resumed run keeps its arm).
+                and give the agent `ling-code` (a new run only; a resumed run keeps its arm).
             prompt: The system prompt the agent starts with (prompt spec §6.2); None takes the
                 configured one. A new run only, like `code_index`.
             mask: `on` masks old tool outputs in the agent's requests (context budget spec
@@ -288,14 +288,14 @@ class SweBenchRunner:
                 return 1
         if require_smoke and not cls.smoke_passed():
             print("❌ No smoke has passed on this machine with this harness version: "
-                  "run `mling-admin swe-bench smoke` first.")
+                  "run `ling-admin swe-bench smoke` first.")
             return 1
         if not SweBenchHarness.rows(dataset):
-            print("❌ The dataset is not downloaded: run `mling-admin swe-bench setup` first.")
+            print("❌ The dataset is not downloaded: run `ling-admin swe-bench setup` first.")
             return 1
         mightling_bin = SweBenchRuntime.installed_mightling()
         if not mightling_bin:
-            print("❌ mling is not built: run `mling-admin codex build` first.")
+            print("❌ ling is not built: run `ling-admin codex build` first.")
             return 1
         from dreamference.config import DreamferenceConfig
         vllm_host = DreamferenceConfig().vllm_host
@@ -339,7 +339,7 @@ class SweBenchRunner:
                                               prompt, mask)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
-                print(f"❌ Run {store.name} was started with another mling build or model "
+                print(f"❌ Run {store.name} was started with another ling build or model "
                       f"({manifest.get('served_model')}); a run measures one configuration. Use a new --name.")
                 return 1
 
@@ -375,9 +375,9 @@ class SweBenchRunner:
                 code_hash = SweBenchCodeIndex.ensure_runtime(SweBenchHarness.tool("patchelf"))
                 if code_hash is None:
                     return 1
-                # Which `mling-code` answered, beside the manifest, which is never edited: a
+                # Which `ling-code` answered, beside the manifest, which is never edited: a
                 # resumed run may use another build, so each start appends its own line.
-                with open(store.directory / "mling-code.sha256", "a") as record:
+                with open(store.directory / "ling-code.sha256", "a") as record:
                     record.write(f"{code_hash}  {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
                 print(f"🗂️  Indexing {len(pending)} repositories on the host (universal layer)...", flush=True)
                 for instance_id in pending:

@@ -4,8 +4,8 @@ copyright: Mightling by Dreamference · licensed AGPL-3.0-or-later.
 
 theme:
   name: material
-  logo: assets/mling.svg
-  favicon: assets/mling.svg
+  logo: assets/ling.svg
+  favicon: assets/ling.svg
   # System fonts: a privacy-first product should not send every visitor to a font CDN.
   font: false
   palette:
@@ -42,11 +42,11 @@ nav:
   - Home: index.md
   - Get started: getting-started.md
   - Use Mightling:
-      - Terminal agent: mling.md
+      - Terminal agent: ling.md
       - Web chat: web-chat.md
       - Desktop app: desktop.md
   - Reference:
-      - mling-admin: admin.md
+      - ling-admin: admin.md
       - Models: models.md
   - How it works:
       - Architecture: architecture.md

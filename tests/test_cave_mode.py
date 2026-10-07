@@ -10,8 +10,8 @@ import dreamference.config.dreamference_config as cfg_mod
 from dreamference.config import DreamferenceConfig
 
 REPO = Path(__file__).resolve().parent.parent
-CAVE_RS = REPO / "mling-rs" / "src" / "cave.rs"
-CRATE_TEXTS = REPO / "mling-rs" / "cave"
+CAVE_RS = REPO / "ling-rs" / "src" / "cave.rs"
+CRATE_TEXTS = REPO / "ling-rs" / "cave"
 BENCH_TEXTS = REPO / "scripts" / "cave_mode_bench" / "levels"
 
 
@@ -55,7 +55,7 @@ def test_save_config_writes_only_a_non_default_level(tmp_path, monkeypatch):
 
 def test_the_default_matches_the_launcher():
     match = re.search(r'pub const DEFAULT_MIGHTLING_CAVE_MODE: &str = "(\w+)";', CAVE_RS.read_text())
-    assert match, "DEFAULT_MIGHTLING_CAVE_MODE not found in mling-rs/src/cave.rs"
+    assert match, "DEFAULT_MIGHTLING_CAVE_MODE not found in ling-rs/src/cave.rs"
     assert match.group(1) == cfg_mod.DEFAULT_MIGHTLING_CAVE_MODE
     assert cfg_mod.DEFAULT_MIGHTLING_CAVE_MODE in cfg_mod.MIGHTLING_CAVE_MODE_LEVELS
 

@@ -7,7 +7,7 @@ line-length = 100
 target-version = "py312"
 src = ["."]
 # Python outside dreamference/ and tests/ is out of scope (spec, "Scope").
-extend-exclude = ["codex", "scratch", "desktop", "mling-rs", "mling-web-rs", "mling-code-rs", "site"]
+extend-exclude = ["codex", "scratch", "desktop", "ling-rs", "ling-web-rs", "ling-code-rs", "site"]
 
 [tool.ruff.lint]
 # PLR1702 (nested blocks) is a preview rule; explicit-preview-rules turns on that one and no other.

@@ -1,4 +1,4 @@
-1623804 execve("/home/user/.local/share/dreamference/mightling/bin/mling", ["/home/user/.local/share/dreamference/mightling/bin/mling"], 0xffffef017170 /* 114 vars */) = 0
+1623804 execve("/home/user/.local/share/dreamference/mightling/bin/ling", ["/home/user/.local/share/dreamference/mightling/bin/ling"], 0xffffef017170 /* 114 vars */) = 0
 1623826 execve("/home/user/mightling/.venv/bin/git", ["git", "-C", "/tmp/mightling-audit-fixture/repo", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xffffdcb2a398 /* 114 vars */) = -1 ENOENT (No such file or directory)
 1623826 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "-C", "/tmp/mightling-audit-fixture/repo", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xffffdcb2a398 /* 114 vars */) = -1 ENOENT (No such file or directory)
 1623826 execve("/home/user/.local/bin/git", ["git", "-C", "/tmp/mightling-audit-fixture/repo", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xffffdcb2a398 /* 114 vars */) = -1 ENOENT (No such file or directory)
@@ -27,8 +27,8 @@
 1623828 connect(9, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
 1623805 connect(9, {sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
 1623805 connect(9, {sa_family=AF_INET, sin_port=htons(8767), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
-1623830 execve("/home/user/.local/share/dreamference/mightling/bin/mling-code", ["/home/user/.local/share/dreamference/mightling/bin/mling-code", "session", "--parent-pid", "1623804"], 0xffffdcb2a398 /* 114 vars */) = 0
-1623831 execve("/home/user/.local/share/dreamference/mightling/bin/mling-code", ["/home/user/.local/share/dreamference/mightling/bin/mling-code", "prompt-block"], 0xffffdcb2a398 /* 114 vars */) = 0
+1623830 execve("/home/user/.local/share/dreamference/mightling/bin/ling-code", ["/home/user/.local/share/dreamference/mightling/bin/ling-code", "session", "--parent-pid", "1623804"], 0xffffdcb2a398 /* 114 vars */) = 0
+1623831 execve("/home/user/.local/share/dreamference/mightling/bin/ling-code", ["/home/user/.local/share/dreamference/mightling/bin/ling-code", "prompt-block"], 0xffffdcb2a398 /* 114 vars */) = 0
 1623832 execve("/home/user/mightling/.venv/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xc4df560ea1d0 /* 115 vars */) = -1 ENOENT (No such file or directory)
 1623832 execve("/home/user/.nvm/versions/node/v24.19.0/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xc4df560ea1d0 /* 115 vars */) = -1 ENOENT (No such file or directory)
 1623832 execve("/home/user/.local/bin/git", ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"], 0xc4df560ea1d0 /* 115 vars */) = -1 ENOENT (No such file or directory)

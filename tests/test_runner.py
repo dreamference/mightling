@@ -34,7 +34,7 @@ def test_agent_runner_choices():
         assert cfg.agent_runner == agent
 
 def test_codex_runner_hands_arguments_and_host_to_mightling(tmp_path, monkeypatch):
-    # Session setup lives in the Rust launcher now (mling-rs/, with its own tests for the TOML
+    # Session setup lives in the Rust launcher now (ling-rs/, with its own tests for the TOML
     # scoping rule and the local-model options); the Python side only builds and hands over.
     # Arguments go through verbatim, the prompt is Codex's positional PROMPT, and the vLLM host
     # travels in the environment variable the launcher reads first.
@@ -43,7 +43,7 @@ def test_codex_runner_hands_arguments_and_host_to_mightling(tmp_path, monkeypatc
 
     runner = CodexRunner(config=DreamferenceConfig(config_file=str(tmp_path / "d.toml"), vllm_host="http://gb10:9000"))
     monkeypatch.setattr(CodexInstaller, "install_if_missing", classmethod(lambda cls: True))
-    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/opt/mling"))
+    monkeypatch.setattr(CodexInstaller, "get_codex_executable", classmethod(lambda cls: "/opt/ling"))
     calls = []
     monkeypatch.setattr("subprocess.call", lambda cmd, env=None, **k: calls.append((cmd, env)) or 0)
 
@@ -51,8 +51,8 @@ def test_codex_runner_hands_arguments_and_host_to_mightling(tmp_path, monkeypatc
     runner.run_session(prompt="fix the tests")
 
     (forwarded, env), (prompted, _) = calls
-    assert forwarded == ["/opt/mling", "exec", "--json", "do it"]
-    assert prompted == ["/opt/mling", "fix the tests"]
+    assert forwarded == ["/opt/ling", "exec", "--json", "do it"]
+    assert prompted == ["/opt/ling", "fix the tests"]
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://gb10:9000"
 
 

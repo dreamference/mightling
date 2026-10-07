@@ -23,13 +23,13 @@
 ## 1. Overview & Lifecycle
 
 **Onyx Lite** is the stock Onyx stack with Vespa, Redis, Celery, the model servers and object storage switched off. It is a browser chat UI in front of the same vLLM model the terminal agents use. Its containers are pinned to `mightling-*` names in the lite overlay:
-- `mling-web_server-1` (Next.js);
+- `ling-web_server-1` (Next.js);
 - `mightling-api_server-1` (FastAPI);
 - `mightling-relational_db-1` (PostgreSQL);
 - `mightling-nginx-1`;
-- `mling-code-interpreter-1`.
+- `ling-code-interpreter-1`.
 
-The UI is served at `http://localhost:3000`, and the desktop window `mling-app` shows the same server. Both of nginx's ports (80 and 3000) are published on **127.0.0.1 only** once `configure` has run (§2 step 1): Docker's default is every interface, which put the UI — and the admin account `configure` creates with a published default password, which can search the user's mail — on the local network. Until 2026-09-29 they were.
+The UI is served at `http://localhost:3000`, and the desktop window `ling-app` shows the same server. Both of nginx's ports (80 and 3000) are published on **127.0.0.1 only** once `configure` has run (§2 step 1): Docker's default is every interface, which put the UI — and the admin account `configure` creates with a published default password, which can search the user's mail — on the local network. Until 2026-09-29 they were.
 
 Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 
@@ -43,7 +43,7 @@ Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 
 Mightling never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
-| Command (`mling-admin chat …`, alias `onyx`) | Does |
+| Command (`ling-admin chat …`, alias `onyx`) | Does |
 |---|---|
 | `start [--no-wait]` | `onyx-cli deploy install --lite --no-prompt`, and waits until healthy unless `--no-wait` |
 | `configure [--email] [--password] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]` | §2 |
@@ -58,7 +58,7 @@ Mightling never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
 Onyx has **no environment variable for the LLM provider**. Providers live in its database, so `configure` drives the admin API that the Admin panel uses. In order:
 
-1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`), except on a node advertised with `mling-admin node enable`, where port 3000 is published on every interface for clients' `mling-app` and port 80 stays on loopback (`web_bind_env()`; [MIGHTLING_NODE §4](./DREAMFERENCE_MIGHTLING_NODE.md)): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
+1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`), except on a node advertised with `ling-admin node enable`, where port 3000 is published on every interface for clients' `ling-app` and port 80 stays on loopback (`web_bind_env()`; [MIGHTLING_NODE §4](./DREAMFERENCE_MIGHTLING_NODE.md)): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
 2. **Authenticate** as `admin@dreamference.dev` / `dreamference` by default. The account is registered, and becomes admin, when login fails.
 3. **Register the model** as provider `dreamference-vllm`, type `openai_compatible`:
    - `api_base` is the vLLM URL with loopback rewritten to the Docker **bridge gateway** (`docker network inspect bridge` → e.g. `http://172.17.0.1:8000/v1`), because vLLM uses `--network host` and `localhost` inside Onyx is the container itself;
@@ -191,13 +191,13 @@ Onyx shows no microphone button until a speech-to-text provider exists, and vLLM
 Onyx has first-class SearXNG support (`WebSearchProviderType.SEARXNG`, no API key). `configure` registers the provider `dreamference-searxng` with `searxng_base_url = http://dreamference-searxng:8080`. Onyx's own base prompt already teaches search-then-open.
 
 - **Container:**
-  - `configure` does **not** start SearXNG. `mling-admin searxng start` does (`SearxngSidecar`), and the error messages of `mling-search` and `web_tools.py` name that command. It creates the container on the network `dreamference-sidecars`, never Docker's default bridge, whose DNS is a copy taken at container start ([DOCKER §6](./DREAMFERENCE_DOCKER.md)).
+  - `configure` does **not** start SearXNG. `ling-admin searxng start` does (`SearxngSidecar`), and the error messages of `ling-search` and `web_tools.py` name that command. It creates the container on the network `dreamference-sidecars`, never Docker's default bridge, whose DNS is a copy taken at container start ([DOCKER §6](./DREAMFERENCE_DOCKER.md)).
   - It publishes only on loopback, **port 8888** on the host.
   - `_attach_searxng()` joins it to Onyx's network, because the bridge gateway that reaches vLLM doesn't reach it. A container still on the default bridge is recreated on `dreamference-sidecars` first.
 - **Why a provider, not a prompt:**
   - The only global prompt hook, `user_preferences`, is capped at 500 characters.
   - Reaching SearXNG through the LLM-driven `open_url` tool would require SSRF protection set to `disabled`. The admin-configured provider's client does no SSRF validation, so the secure `validate_all` default stays untouched.
-- **Other users:** `mling-search` and the MCP `web_search` tool use the same container, via `127.0.0.1:8888`.
+- **Other users:** `ling-search` and the MCP `web_search` tool use the same container, via `127.0.0.1:8888`.
 
 ---
 
@@ -215,8 +215,8 @@ It registers an **Image Search** custom tool, and injects an nginx route (`# >>>
 
 - **Service:** `dreamference-gmail` (`chat/gmail_search_service.py` on `python:3-slim`) reads the connected accounts' credentials, over **read-only IMAP**. It is published on `127.0.0.1:8767` and authenticated by the `X-Mightling-Gmail-Token` header.
 - **Tool:** `enable_gmail_search()` registers a **Gmail** custom tool, "Search and read the user's Gmail mailbox." It is registered even before an account is connected, because the Connect button lives in this UI.
-- **Connecting accounts:** in the web UI, through the injected "Connect Google" button and Settings → Gmail Accounts (§4.4). The OAuth flow runs in the Gmail service (`DREAMFERENCE_GOA.md` §0). `mling-admin chat gmail` only (re-)registers the tool.
-- **The terminal agent:** `mling` reaches the same service through `mling-admin gmail` (`DREAMFERENCE_MIGHTLING_GMAIL.md`).
+- **Connecting accounts:** in the web UI, through the injected "Connect Google" button and Settings → Gmail Accounts (§4.4). The OAuth flow runs in the Gmail service (`DREAMFERENCE_GOA.md` §0). `ling-admin chat gmail` only (re-)registers the tool.
+- **The terminal agent:** `ling` reaches the same service through `ling-admin gmail` (`DREAMFERENCE_MIGHTLING_GMAIL.md`).
 
 ---
 

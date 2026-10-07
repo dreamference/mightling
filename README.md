@@ -35,8 +35,8 @@ curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/in
 Then start the model and point Mightling at a project:
 
 ```bash
-mling-admin server start      # downloads the model once (~20 GB), then serves it
-cd ~/your-project && mling    # that's it
+ling-admin server start      # downloads the model once (~20 GB), then serves it
+cd ~/your-project && ling    # that's it
 ```
 
 Works on the **NVIDIA DGX Spark** and every GB10 machine from Acer, ASUS, Dell, Gigabyte, HP, Lenovo
@@ -46,15 +46,15 @@ each `sudo` command before running it. [Read it first](install.sh) if you like.
 Already using a coding agent? Paste this into it:
 
 ```text
-Install Mightling on this GB10 from https://github.com/dreamference/mightling (one-line installer in the README), then run mling-admin server start.
+Install Mightling on this GB10 from https://github.com/dreamference/mightling (one-line installer in the README), then run ling-admin server start.
 ```
 
 ## Try these first
 
 ```bash
-mling "explain this repository to me like I'm new on the team"
-mling "the tests are failing: find out why and fix them"
-mling "add input validation to the signup form, with tests"
+ling "explain this repository to me like I'm new on the team"
+ling "the tests are failing: find out why and fix them"
+ling "add input validation to the signup form, with tests"
 ```
 
 Or queue work for tonight, inside a session:
@@ -75,7 +75,7 @@ branches over coffee.
 | Cost per token | Metered | Zero |
 | Rate limits | Yes | No |
 | Works with the network unplugged | No | Yes |
-| You can verify what leaves | No | `mling-admin audit egress` |
+| You can verify what leaves | No | `ling-admin audit egress` |
 
 ---
 
@@ -92,7 +92,7 @@ client work, regulated data, unreleased products.
 network connection it made:
 
 ```console
-$ mling-admin audit egress
+$ ling-admin audit egress
 ✅ Egress audit: pass
 Network destinations:
    127.0.0.1:8000             29x  model server
@@ -128,15 +128,15 @@ nothing to pay per token, ever.
 - **It won't freeze your machine.** On a GB10 the GPU and the system share one pool of memory, and an
   oversized model load can lock up the whole box. Mightling checks the host first and watches memory
   pressure during the load, stopping it before the machine stalls.
-- **Your other machines find it.** Run `mling-admin node enable` on the GB10, install the same
-  script on another arm64 Linux machine on your network, and `mling` there finds the GB10 by itself.
-- **Updates are one command:** `mling update`.
+- **Your other machines find it.** Run `ling-admin node enable` on the GB10, install the same
+  script on another arm64 Linux machine on your network, and `ling` there finds the GB10 by itself.
+- **Updates are one command:** `ling update`.
 
 ## What you get
 
 | | |
 |---|---|
-| 🖥️ **`mling`, the terminal agent** | Reads your repository, runs commands and tests, edits code, and asks before anything risky. [More →](docs/mling.md) |
+| 🖥️ **`ling`, the terminal agent** | Reads your repository, runs commands and tests, edits code, and asks before anything risky. [More →](docs/ling.md) |
 | 🌙 **Night Shift** | `/night add <task>` before bed; each task done on its own git branch by morning. Nothing is merged or pushed without you. |
 | 🔎 **Web search and fetch** | Through a private SearXNG on your own machine: no search account, no API key. |
 | 🧭 **A code index** | Definitions, callers and impact across your repository, so the agent finds code instead of grepping for it. |
@@ -161,14 +161,14 @@ Windows on Arm (the RTX Spark laptops) are planned.
 
 **I installed Puffin. Is this it?** Yes: Puffin was renamed Mightling in 1.5. Run `puffin update`
 once, then `puffin` one last time. It moves your sessions, settings and links over and from then on
-the command is `mling`. On a node, run the installer again for `mling-admin`.
+the command is `ling`. On a node, run the installer again for `ling-admin`.
 
 **Is it really free?** Yes. Mightling is open source under the AGPL, and the model's weights are free.
 Your only running cost is the electricity.
 
 **What do I need besides the machine?** The OS it ships with (DGX OS 7, or Ubuntu 24.04 where the
 vendor offers it), Docker with the NVIDIA Container Toolkit, Python 3 and Git. On plain Ubuntu,
-`mling-admin host check` tells you what's missing.
+`ling-admin host check` tells you what's missing.
 
 **Does anything ever reach the internet?** Only what you or the agent asks for, such as a web search.
 The full list is below, and `/airgapped on` turns all of it off.
@@ -188,7 +188,7 @@ that leave the machine, and each one happens because you or the agent asked for 
 | The agent or chat searches the web | The search query | Search engines, through SearXNG on your machine |
 | The agent fetches a page | A request for that URL | That website |
 | You connect Gmail, Drive or Calendar | Read-only requests | Google |
-| You run `mling update` | A release check and download | GitHub |
+| You run `ling update` | A release check and download | GitHub |
 
 A search query is written by the model and can contain fragments of your context. At
 `/airgapped on` none of these happen: no search, no fetch, no mail, only the model on your machine.
@@ -221,7 +221,7 @@ mightling_gmail = false        # never offer Gmail to the agent
 ```
 
 The same model server also drives Cline, Continue and OpenHands:
-`mling-admin run --agent cline "add type hints to utils.py"`. The web chat and the desktop app are
+`ling-admin run --agent cline "add type hints to utils.py"`. The web chat and the desktop app are
 set up in [Get started](docs/getting-started.md).
 
 </details>
@@ -233,16 +233,16 @@ set up in [Get started](docs/getting-started.md).
 git clone --recurse-submodules https://github.com/dreamference/mightling.git mightling
 cd mightling
 python3 -m venv .venv && .venv/bin/pip install -e .
-export PATH="$PWD/.venv/bin:$PATH"   # the agent runs mling-admin, so keep it on PATH
+export PATH="$PWD/.venv/bin:$PATH"   # the agent runs ling-admin, so keep it on PATH
 
-mling-admin host setup              # swap, kernel settings, out-of-memory guard
-mling-admin server start            # checks the host, downloads and loads the model
-mling-admin codex build             # compiles mling and links it into ~/.local/bin
-cd ~/my-project && mling
+ling-admin host setup              # swap, kernel settings, out-of-memory guard
+ling-admin server start            # checks the host, downloads and loads the model
+ling-admin codex build             # compiles ling and links it into ~/.local/bin
+cd ~/my-project && ling
 ```
 
-`mling-admin` is the Python package that runs the model server, the web chat and the builds
-([command reference](docs/admin.md)); `mling` and its web and code-index tools are Rust. Tests need
+`ling-admin` is the Python package that runs the model server, the web chat and the builds
+([command reference](docs/admin.md)); `ling` and its web and code-index tools are Rust. Tests need
 no GPU or Docker: `.venv/bin/python -m pytest tests/`. Design specs are in [`specs/`](specs/README.md),
 and [How it works](docs/architecture.md) explains the pieces.
 

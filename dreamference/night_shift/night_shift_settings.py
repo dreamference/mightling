@@ -57,13 +57,13 @@ class NightShiftSettings:
         # A stricter `/airgapped` level for night runs alone (airgapped spec §7), as written; the
         # runner takes the stricter of this and the configured level, so a looser one is ignored.
         self.airgapped: Any = table.get("airgapped")
-        # The system prompt each task's `mling exec` starts with (prompt spec §7), passed as
+        # The system prompt each task's `ling exec` starts with (prompt spec §7), passed as
         # DREAMFERENCE_MIGHTLING_PROMPT; absent, the configured one. A task resumed the next night keeps
         # the prompt it started with whatever this says, because a session keeps its prompt.
         prompt = table.get("prompt")
         self.prompt: Optional[str] = prompt.strip() if isinstance(prompt, str) and prompt.strip() else None
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
-        # Where a task's session compacts, passed to every `mling exec` of the task (compaction
+        # Where a task's session compacts, passed to every `ling exec` of the task (compaction
         # spec §4.1). Absent (None, the default): the task's share of the KV pool, so the tasks of
         # a night fit in the pool together. A number: that limit, and only as many tasks at once as
         # fit at it. 0: no limit, the launcher's own (60% of the pool) applies and the run's

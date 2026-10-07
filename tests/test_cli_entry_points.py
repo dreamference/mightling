@@ -1,6 +1,6 @@
-"""`mling-admin` entry point. `mling`, the terminal agent, is the Rust binary (see mling-rs/ and
+"""`ling-admin` entry point. `ling`, the terminal agent, is the Rust binary (see ling-rs/ and
 tests/test_codex_branded_builder.py); there is no Python entry point of that name, and no
-`mling-admin chat` either.
+`ling-admin chat` either.
 """
 
 import sys
@@ -20,11 +20,11 @@ def test_there_is_no_python_mightling_entry_point():
     import dreamference.cli as cli
 
     assert not hasattr(cli, "mightling_main")
-    assert "mling=" not in open("setup.py").read()
+    assert "ling=" not in open("setup.py").read()
 
 
 def test_chat_is_the_web_chat_group_not_the_agent(capsys):
-    # `mling` is the terminal agent; the `chat` that started it was retired with the Python
+    # `ling` is the terminal agent; the `chat` that started it was retired with the Python
     # launcher. Since the rename `chat` names the web chat's group (it was `puffin-admin puffin`), so
     # on its own it prints that group's help and starts nothing.
     import pytest
@@ -32,7 +32,7 @@ def test_chat_is_the_web_chat_group_not_the_agent(capsys):
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["chat"])
     assert exit_info.value.code == 1
-    assert "usage: mling-admin chat" in capsys.readouterr().out
+    assert "usage: ling-admin chat" in capsys.readouterr().out
 
 
 def test_unknown_arguments_are_rejected(capsys):
@@ -54,7 +54,7 @@ def test_a_command_group_without_a_subcommand_prints_its_help(capsys):
             DreamferenceCLIController.run_cli([group])
         assert exit_info.value.code == 1, group
         name = "chat" if group == "onyx" else group  # the alias prints the command's own name
-        assert f"usage: mling-admin {name}" in capsys.readouterr().out, group
+        assert f"usage: ling-admin {name}" in capsys.readouterr().out, group
 
 
 def test_model_list_runs(capsys):

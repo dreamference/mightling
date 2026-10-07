@@ -30,7 +30,7 @@ def test_the_service_file_is_exactly_this_text():
                                   web_port=3000, search_port=8888, main=True)
     assert text == """<?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<!-- Written by `mling-admin node enable`; rewritten by `mling-admin server start|stop`. -->
+<!-- Written by `ling-admin node enable`; rewritten by `ling-admin server start|stop`. -->
 <service-group>
   <name replace-wildcards="yes">%h</name>
   <service>
@@ -98,7 +98,7 @@ def test_a_file_this_user_cannot_write_is_reported_not_ignored(capsys, monkeypat
     NodeServiceFile.service_path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.0.0"))
     monkeypatch.setattr(NodeServiceFile, "write", classmethod(lambda cls, text: False))
     NodeAdvertiser.on_server_ready()
-    assert "mling-admin node enable` again" in capsys.readouterr().out
+    assert "ling-admin node enable` again" in capsys.readouterr().out
 
 
 # -- identity and settings -------------------------------------------------------------------------
@@ -308,13 +308,13 @@ def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
 # -- the locator crate ------------------------------------------------------------------------------
 
 def test_the_web_crates_locator_is_a_byte_identical_copy():
-    # mling-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a
-    # launcher and a `mling-search` that read node.json differently would talk to two machines.
+    # ling-web-rs is built on its own, outside the Codex workspace, so it holds a copy; a
+    # launcher and a `ling-search` that read node.json differently would talk to two machines.
     from pathlib import Path
     repo = Path(__file__).resolve().parent.parent
-    leaf = repo / "mling-rs" / "node-locator" / "src" / "lib.rs"
-    assert (repo / "mling-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
-    # mling-app is a third build of its own (Tauri), with a third copy.
+    leaf = repo / "ling-rs" / "node-locator" / "src" / "lib.rs"
+    assert (repo / "ling-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
+    # ling-app is a third build of its own (Tauri), with a third copy.
     assert (repo / "desktop" / "src-tauri" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
     # ...and it agrees with the node about the service type and the contract's version.
     from dreamference.node import PROTO, SERVICE_TYPE
@@ -333,7 +333,7 @@ def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):
     monkeypatch.setattr(NodeAdvertiser, "enable", classmethod(lambda cls, no_web=False: calls.append(("enable", no_web)) or True))
     monkeypatch.setattr(NodeAdvertiser, "disable", classmethod(lambda cls: calls.append(("disable",)) or True))
     for argv, code in ((["node", "enable", "--no-web"], 0), (["node", "disable"], 0), (["node", "status"], 0), (["node"], 2)):
-        monkeypatch.setattr("sys.argv", ["mling-admin", *argv])
+        monkeypatch.setattr("sys.argv", ["ling-admin", *argv])
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == code
@@ -346,7 +346,7 @@ def test_mightling_node_is_not_an_open_session_to_night_shift():
     assert NightShiftHost.is_interactive(["node", "list"]) is False
 
 
-# -- callers that run `mling` name the model server, so the launcher never browses for a node -----
+# -- callers that run `ling` name the model server, so the launcher never browses for a node -----
 
 def test_a_night_task_names_its_model_server_to_mightling(tmp_path, monkeypatch):
     import time
@@ -355,7 +355,7 @@ def test_a_night_task_names_its_model_server_to_mightling(tmp_path, monkeypatch)
     monkeypatch.delenv("DREAMFERENCE_VLLM_HOST", raising=False)
     task = {"id": "20261002-0100-abc", "repo": str(tmp_path), "base": "0" * 40, "task": "x"}
     output = tmp_path / "out.txt"
-    run = NightShiftTaskRun(tmp_path / "night", task, NightShiftSettings({}), "mling",
+    run = NightShiftTaskRun(tmp_path / "night", task, NightShiftSettings({}), "ling",
                             deadline=time.time() + 30, model_host="http://localhost:8000")
     assert run._run_capped(["bash", "-c", "echo host=$DREAMFERENCE_VLLM_HOST"], tmp_path, output, timeout=20) == 0
     assert output.read_text().strip() == "host=http://localhost:8000"
@@ -395,7 +395,7 @@ def test_a_start_that_fails_does_not_leave_the_node_saying_loading(monkeypatch):
     monkeypatch.setattr(VLLMServerManager, "start_server", refused)
     from dreamference.vllm_server import DiffusionServerManager
     monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
-    monkeypatch.setattr("sys.argv", ["mling-admin", "server", "start", "--no-diffusion"])
+    monkeypatch.setattr("sys.argv", ["ling-admin", "server", "start", "--no-diffusion"])
     with pytest.raises(SystemExit):
         controller.main()
     assert NodeServiceFile.read()["state"] == "stopped"
@@ -408,8 +408,8 @@ PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyBodyForTestsOnly000000
 
 def test_the_authorised_line_forces_one_command_and_forbids_the_rest():
     from dreamference.node import NodePairing
-    line = NodePairing.authorized_line(PUBLIC_KEY, "/home/u/.local/bin/mling-admin node serve-job --key abc")
-    assert line.startswith('command="/home/u/.local/bin/mling-admin node serve-job --key abc",')
+    line = NodePairing.authorized_line(PUBLIC_KEY, "/home/u/.local/bin/ling-admin node serve-job --key abc")
+    assert line.startswith('command="/home/u/.local/bin/ling-admin node serve-job --key abc",')
     for restriction in ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding", "no-user-rc"):
         assert restriction in line.split(" ssh-ed25519 ")[0]
     assert line.endswith(" mightling-node")                       # the sender's own comment is not kept
@@ -527,7 +527,7 @@ def test_managing_a_node_needs_the_pairing_and_sends_one_operation(monkeypatch, 
     from dreamference.node import NodePairing, NodeRemote
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     assert NodeRemote.status("spark-2") == 1
-    assert "mling-admin node add spark-2" in capsys.readouterr().out
+    assert "ling-admin node add spark-2" in capsys.readouterr().out
     paired_record()
     sent = []
 
@@ -582,7 +582,7 @@ def test_the_node_list_shows_what_each_node_serves_without_any_pairing(monkeypat
                         "2 request(s) running, KV pool 156907 tokens, 40.0 of 120.0 GiB free  Mightling 1.3.0  (this machine)")
     # Memory is not on the open model port: an unpaired node shows none.
     assert lines[1] == ("spark-2  http://192.168.50.106:8000/v1  model server stopped  Mightling 1.3.0  "
-                        "(not paired: `mling-admin node add spark-2` to manage it; not a coding model)")
+                        "(not paired: `ling-admin node add spark-2` to manage it; not a coding model)")
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
     assert "No Mightling node answers" in NodeRemote.list_lines()[0]
 
@@ -714,13 +714,13 @@ def test_the_sandbox_writes_only_the_worktree_hides_the_home_folder_and_the_gpu(
 def test_a_job_is_a_capped_unit_of_its_own_not_a_child_of_the_connection():
     from dreamference.node import NodeJob
     record = NodeJob.validate(job_request(memory="16G", time="2h"))
-    argv = NodeJob.unit_command(record, "/home/u/.local/bin/mling-admin")
+    argv = NodeJob.unit_command(record, "/home/u/.local/bin/ling-admin")
     assert argv[:2] == ["systemd-run", "--user"] and "--scope" not in argv
     assert "--unit=mightling-job-20261002-1200-abc" in argv
     properties = [argv[i + 1] for i, word in enumerate(argv) if word == "-p"]
     assert f"MemoryMax={16 * 1024 ** 3}" in properties and "MemorySwapMax=0" in properties
     assert "RuntimeMaxSec=7200" in properties
-    assert argv[-4:] == ["/home/u/.local/bin/mling-admin", "node", "job-exec", "20261002-1200-abc"]
+    assert argv[-4:] == ["/home/u/.local/bin/ling-admin", "node", "job-exec", "20261002-1200-abc"]
 
 
 @pytest.fixture
@@ -755,7 +755,7 @@ def job_node(tmp_path, monkeypatch):
 def test_a_job_runs_in_a_worktree_and_its_changes_come_back_as_a_branch(job_node, capsys):
     from dreamference.node import NodeJob
     record = NodeJob.submit(job_request(commit=job_node["commit"], command=["bash", "-c", "echo hello; echo two >> data.txt; echo new > out.txt"],
-                                        test="grep -q two data.txt", author={"name": "Owner", "email": "s@example.org"}), "/x/mling-admin")
+                                        test="grep -q two data.txt", author={"name": "Owner", "email": "s@example.org"}), "/x/ling-admin")
     assert NodeJob.execute(record["id"]) == 0
     done = NodeJob.read(record["id"])
     assert (done["status"], done["exit_code"], done["test_exit_code"], done["branch"]) == ("done", 0, 0, "job/20261002-1200-abc")
@@ -769,7 +769,7 @@ def test_a_job_runs_in_a_worktree_and_its_changes_come_back_as_a_branch(job_node
     assert NodeJob.follow(record["id"]) == 0
     assert "hello" in capsys.readouterr().out
     with pytest.raises(ValueError, match="already exists"):
-        NodeJob.submit(job_request(commit=job_node["commit"]), "/x/mling-admin")
+        NodeJob.submit(job_request(commit=job_node["commit"]), "/x/ling-admin")
 
 
 def test_a_failing_job_and_a_job_that_changes_nothing(job_node, capsys):
@@ -797,7 +797,7 @@ def test_the_working_node_decides_whether_it_can_take_the_job(job_node, monkeypa
     with pytest.raises(ValueError, match="10.0 GiB of memory available"):
         NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
     monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 64 * 1024 ** 3))
-    monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: ["a mling build holds the build lock"]))
+    monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: ["a ling build holds the build lock"]))
     with pytest.raises(ValueError, match="build lock"):
         NodeJob.submit(job_request(commit=job_node["commit"]), "/x")
     monkeypatch.setattr(NightShiftHost, "heavy_jobs", classmethod(lambda cls: []))
@@ -1091,7 +1091,7 @@ def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_
     assert NodeJobSender.logs("20261002-1200-abc") == 1 and NodeJobSender.fetch("../x") == 1
 
 
-# -- mling-app's one-time sign-in (§7) -------------------------------------------------------------
+# -- ling-app's one-time sign-in (§7) -------------------------------------------------------------
 
 SIGN_IN_HARNESS = r"""
 const script = require("fs").readFileSync(process.argv[2], "utf8")
@@ -1161,7 +1161,7 @@ def test_the_window_uses_the_account_configure_creates():
 def test_node_id_prints_the_id_and_writes_it_once(monkeypatch, capsys):
     from dreamference.cli import main
     for _ in range(2):
-        monkeypatch.setattr("sys.argv", ["mling-admin", "node", "id"])
+        monkeypatch.setattr("sys.argv", ["ling-admin", "node", "id"])
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == 0
@@ -1173,9 +1173,9 @@ def test_the_installer_makes_a_gb10_a_node_and_offers_it_to_the_network():
     # §9: a GB10 gets both halves, its node id, and `node enable`; --no-advertise skips the last.
     from pathlib import Path
     script = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
-    node_id = script.index('mling-admin" node id')
-    enable = script.index('mling-admin" node enable')
-    assert script.index('mling-admin" host setup') < node_id < enable
+    node_id = script.index('ling-admin" node id')
+    enable = script.index('ling-admin" node enable')
+    assert script.index('ling-admin" host setup') < node_id < enable
     assert "--no-advertise) ADVERTISE=0" in script
     # Never without a terminal: the command opens the machine to the LAN and asks for a password.
     assert '[ -t 0 ]' in script[enable - 200:enable] or "/dev/tty" in script[enable - 200:enable]
@@ -1214,7 +1214,7 @@ def test_every_node_command_reaches_its_handler(monkeypatch, capsys):
                   "--bind", "/data/b", "--", "python3", "x.py", "--epochs", "3"],
                  ["jobs"], ["logs", job], ["cancel", job], ["fetch", job], ["job-exec", job],
                  ["serve-job", "--key", "abc"], ["sync-model", "spark-2", "m", "--address", "10.0.0.2"]):
-        monkeypatch.setattr("sys.argv", ["mling-admin", "node", *argv])
+        monkeypatch.setattr("sys.argv", ["ling-admin", "node", *argv])
         with pytest.raises(SystemExit) as exit_info:
             main()
         assert exit_info.value.code == 0, argv
@@ -1272,7 +1272,7 @@ def test_a_model_is_copied_to_a_paired_node_and_lands_whole(tmp_path, monkeypatc
         assert (folder / "snapshots" / "rev1" / "model.safetensors").is_symlink()
         assert (folder / "refs" / "main").read_text() == "rev1"
     assert not list(there.glob(".mightling-sync-*"))
-    assert "Serve it there with: mling-admin node set spark-2" in capsys.readouterr().out
+    assert "Serve it there with: ling-admin node set spark-2" in capsys.readouterr().out
     # A model this machine does not have is not sent.
     monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty"))
     assert NodeModelSync.sync("spark-2", SYNC_KEY) == 1

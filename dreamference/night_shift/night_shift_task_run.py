@@ -1,17 +1,17 @@
 """
 One Night Shift task, from worktree to branch (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.3).
 
-The agent works in a git worktree of its own, on `night/<id>`, through `mling exec` under a
+The agent works in a git worktree of its own, on `night/<id>`, through `ling exec` under a
 transient systemd scope with a memory cap, so neither the user's checkout nor the model server is
 at risk. The runner, not the agent, commits: the agent's sandbox cannot write the repository's
 `.git`, and nothing is merged, pushed or rebased. The runner's own test run executes code the agent
-wrote, so it goes through the same sandbox as the agent's commands (`mling sandbox`), with a
+wrote, so it goes through the same sandbox as the agent's commands (`ling sandbox`), with a
 policy the runner fixes: nothing the agent wrote runs with the user's full rights.
 
 A task handed over by another node (`remote` in its record, specs/DREAMFERENCE_MIGHTLING_NODE.md
 §13.5) runs every process inside bubblewrap as well: the node owner's home folder is an empty
 tmpfs, the task's worktree and its own `CODEX_HOME` are the only writable places, and the network
-namespace is the host's, because `mling exec` reaches this node's model server on loopback. The
+namespace is the host's, because `ling exec` reaches this node's model server on loopback. The
 agent's commands are confined by Codex's own sandbox inside that, as on any node.
 """
 
@@ -52,7 +52,7 @@ ANNOUNCES_WORK: Final[re.Pattern] = re.compile(
 KILL_GRACE_S: Final[int] = 30
 
 # `/airgapped` (specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md §3): the variable that overrides the
-# configuration files, and the key those files carry. Mirrors mling-rs/airgapped/src/lib.rs.
+# configuration files, and the key those files carry. Mirrors ling-rs/airgapped/src/lib.rs.
 AIRGAPPED_ENV: Final[str] = "DREAMFERENCE_MIGHTLING_AIRGAPPED"
 AIRGAPPED_KEY: Final[str] = "mightling_airgapped"
 SEALED: Final[str] = MIGHTLING_AIRGAPPED_LEVELS[-1]
@@ -64,12 +64,12 @@ TEST_TAIL_LINES: Final[int] = 200
 class NightShiftTaskRun:
     """Runs one task; `run()` returns its final status."""
 
-    # The memory and CPU cap around each `mling exec` and test run. Tests switch it off: nothing in
+    # The memory and CPU cap around each `ling exec` and test run. Tests switch it off: nothing in
     # the suite may create a real systemd scope.
     USE_SCOPE: bool = True
 
-    # Whether the test run goes through `mling sandbox`. Tests switch it off unless they supply a
-    # stand-in for `mling`: nothing in the suite may run the installed binary or bubblewrap.
+    # Whether the test run goes through `ling sandbox`. Tests switch it off unless they supply a
+    # stand-in for `ling`: nothing in the suite may run the installed binary or bubblewrap.
     USE_SANDBOX: bool = True
 
     def __init__(self, night_dir: Path, task: Dict[str, Any], settings: NightShiftSettings,
@@ -80,13 +80,13 @@ class NightShiftTaskRun:
             night_dir: The queue directory.
             task: The task record as queued.
             settings: Night Shift settings.
-            mightling_bin: The `mling` executable.
+            mightling_bin: The `ling` executable.
             deadline: `time.time()` by which the task must stop (task timeout or window end).
             model_host: The model server the night run was admitted against. Named to every
-                `mling exec`, so the agent talks to that server and the launcher never browses
+                `ling exec`, so the agent talks to that server and the launcher never browses
                 the network for a node from a worktree (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1).
             context_budget: The task's share of the KV pool (`NightShiftHost.task_budget`), passed to
-                every `mling exec` as its compaction limit. None falls back to `[night] compact_at`.
+                every `ling exec` as its compaction limit. None falls back to `[night] compact_at`.
             model_node: The paired node whose model server `model_host` is, when it is not this
                 machine's (a replica lane); recorded in the result.
         """
@@ -117,7 +117,7 @@ class NightShiftTaskRun:
         self.log_path = night_dir / "logs" / f"{self.task_id}.jsonl"
         self.last_message_path = night_dir / "logs" / f"{self.task_id}.last.txt"
         if self.remote:
-            # Written by `mling` from inside the sandbox, where only the task's own home is writable.
+            # Written by `ling` from inside the sandbox, where only the task's own home is writable.
             from dreamference.night_shift.night_shift_remote import NightShiftRemote
             self.home = NightShiftRemote.task_home(self.task_id)
             self.last_message_path = self.home / "last-message.txt"
@@ -169,7 +169,7 @@ class NightShiftTaskRun:
             return self._interrupted()
         if outcome == "error" and not self._has_changes():
             return self._cleanup_and_finish(
-                "failed", last_message=self._last_message() or "mling exec exited with an error; see the log")
+                "failed", last_message=self._last_message() or "ling exec exited with an error; see the log")
 
         while not self._has_changes() and self.nudges_used < self.settings.nudges \
                 and self.announces_work(self._last_message()):
@@ -229,7 +229,7 @@ class NightShiftTaskRun:
         return PREAMBLE.format(repo=self.repo, branch=self.branch, test_line=test_line, task=self.text)
 
     def _exec(self, prompt: str, resume: bool) -> str:
-        """Runs one `mling exec` turn; returns `ok`, `error` or `interrupted`."""
+        """Runs one `ling exec` turn; returns `ok`, `error` or `interrupted`."""
         command = [self.mightling_bin, "exec", "--json", "-o", str(self.last_message_path),
                    "-C", str(self.worktree), "-s", "workspace-write", "--skip-git-repo-check"]
         if self.context_budget:
@@ -259,7 +259,7 @@ class NightShiftTaskRun:
         """
         Fixes the task's `/airgapped` level, once, before the agent has run anything.
 
-        Every later command of the task (each `mling exec` and the test run) gets it in
+        Every later command of the task (each `ling exec` and the test run) gets it in
         `DREAMFERENCE_MIGHTLING_AIRGAPPED`, which outranks the configuration files: the agent can
         edit the worktree's `dreamference.toml`, and a level read again before the test run would
         be a level the agent could loosen for its own tests. A task resumed on a later night
@@ -454,7 +454,7 @@ class NightShiftTaskRun:
         Wraps one process of a task from another machine in the job sandbox (§13.5).
 
         Args:
-            command: The process's command line (`mling exec …` or the test run).
+            command: The process's command line (`ling exec …` or the test run).
             extra_env: Variables set for this command only.
 
         Returns:
@@ -474,7 +474,7 @@ class NightShiftTaskRun:
         if self.airgapped:
             variables[AIRGAPPED_ENV] = self.airgapped
         variables.update(extra_env)
-        # The host's network namespace: `mling` reaches this node's model server on loopback.
+        # The host's network namespace: `ling` reaches this node's model server on loopback.
         argv = NodeJob.sandbox_command(self.worktree, command, True, self.task_id, writable=[str(self.home)],
                                        readable=[binaries], environment=variables)
         return [os.path.realpath(self.mightling_bin) if word == self.mightling_bin else word for word in argv]
@@ -509,7 +509,7 @@ class NightShiftTaskRun:
         level comes from outside.
 
         Args:
-            mightling_bin: The `mling` executable.
+            mightling_bin: The `ling` executable.
             test_command: The shell command that decides pass or fail.
             level: The `/airgapped` level in force (`airgapped_level`).
             session: The task's session id, which the sandbox helper looks the level up by.
@@ -532,7 +532,7 @@ class NightShiftTaskRun:
                         repo: Optional[Path] = None) -> str:
         """
         Resolves the `/airgapped` level for a command run in `worktree`, in the launcher's order
-        (mling-rs/airgapped): the session's file, the environment variable, then the strictest
+        (ling-rs/airgapped): the session's file, the environment variable, then the strictest
         of the configuration files (a repository's file may tighten the user's level and never
         loosen it), then `off`.
 

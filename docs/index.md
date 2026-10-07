@@ -4,7 +4,7 @@ hide:
 ---
 
 <div class="mightling-hero" markdown>
-<img src="assets/mling.svg" alt="Mightling logo">
+<img src="assets/ling.svg" alt="Mightling logo">
 <div markdown>
 # Mightling
 
@@ -21,10 +21,10 @@ things in front of it:
 <div markdown>
 ### Terminal agent
 
-`mling` reads your code, runs commands and tests, and makes changes in your repository, asking
+`ling` reads your code, runs commands and tests, and makes changes in your repository, asking
 before anything risky. Its model is the one on your machine.
 
-[Terminal agent →](mling.md)
+[Terminal agent →](ling.md)
 </div>
 <div markdown>
 ### Web chat
@@ -37,7 +37,7 @@ same local model.
 <div markdown>
 ### Desktop app
 
-`mling-app` puts the web chat in a window of its own, with a Work window (preview) that drives
+`ling-app` puts the web chat in a window of its own, with a Work window (preview) that drives
 agent sessions with approvals, diffs and undo.
 
 [Desktop app →](desktop.md)
@@ -47,7 +47,7 @@ agent sessions with approvals, diffs and undo.
 ## Why Mightling
 
 - **Confidential, and you can prove it.** Inference runs on your GB10, nothing in Mightling phones
-  home, and `mling-admin audit egress` traces a real session and lists every connection it made.
+  home, and `ling-admin audit egress` traces a real session and lists every connection it made.
   `/airgapped on` takes the network away from every command the agent runs. See
   [Privacy & security](privacy.md) for exactly what can leave the machine, and when.
 - **Fast, with no rate limits.** The default model, Qwen3.8-27B with speculative decoding, measures
@@ -62,6 +62,6 @@ agent sessions with approvals, diffs and undo.
 With Mightling installed (see [Get started](getting-started.md)):
 
 ```bash
-mling-admin server start     # load the model (several minutes the first time)
-cd ~/my-project && mling     # start the terminal agent in a repository
+ling-admin server start     # load the model (several minutes the first time)
+cd ~/my-project && ling     # start the terminal agent in a repository
 ```

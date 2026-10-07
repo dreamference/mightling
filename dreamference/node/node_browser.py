@@ -1,6 +1,6 @@
 """
 What a browse of the local network returns, from the node's side
-(specs/DREAMFERENCE_MIGHTLING_NODE.md §5): `mling-admin node status` shows it so the owner sees what
+(specs/DREAMFERENCE_MIGHTLING_NODE.md §5): `ling-admin node status` shows it so the owner sees what
 clients see. Clients themselves browse with the launcher's own code, not with this.
 """
 

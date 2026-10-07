@@ -1,7 +1,7 @@
 """Mightling's apps, the Python half (specs/DREAMFERENCE_MIGHTLING_APPS.md).
 
 The Google service's per-app consent and recorded scopes, its read-only Drive and Calendar
-endpoints, and the container that `mling-admin google start` and `server start` create. Nothing
+endpoints, and the container that `ling-admin google start` and `server start` create. Nothing
 here reaches Google or Docker.
 """
 
@@ -299,10 +299,10 @@ def test_the_endpoints_say_when_nothing_is_connected(monkeypatch):
 
 
 def test_the_paths_the_mcp_server_asks_for_are_the_ones_served():
-    # mling-rs/apps/src/mcp.rs builds these; a rename on either side breaks the tools silently.
+    # ling-rs/apps/src/mcp.rs builds these; a rename on either side breaks the tools silently.
     import pathlib
 
-    rust = (pathlib.Path(__file__).parent.parent / "mling-rs/apps/src/mcp.rs").read_text()
+    rust = (pathlib.Path(__file__).parent.parent / "ling-rs/apps/src/mcp.rs").read_text()
     for path in (
         "/search?",
         "/message/",

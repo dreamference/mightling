@@ -1,0 +1,18 @@
+# Observation masking (specs/DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md §4.1): the output of old tool
+# calls is replaced in what is sent to the model by a short placeholder naming a saved copy. Its
+# own crate, with serde as its only dependency, because Codex's core calls it (patch 0021) and the
+# launcher crate depends on crates that depend on core.
+[package]
+name = "ling-masking"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_masking"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

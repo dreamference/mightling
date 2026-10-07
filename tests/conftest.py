@@ -47,7 +47,7 @@ from dreamference.vllm_server.vllm_server_manager import VLLMServerManager  # no
 REAL_STOP_INDEX_SCOPES = VLLMServerManager._stop_index_scopes
 from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite  # noqa: E402
 
-# Every `mling-admin` run checks bubblewrap through a transient unit of the user's systemd and may
+# Every `ling-admin` run checks bubblewrap through a transient unit of the user's systemd and may
 # ask a question; the fixture below replaces the check, and its own tests restore this.
 REAL_SANDBOX_GATE = SandboxPrerequisite.gate
 # The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
@@ -197,7 +197,7 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # that builds a docker command into creating folders in the real cache.
     for name in ("HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME"):
         monkeypatch.delenv(name, raising=False)
-    # `mling` exports CODEX_HOME to every command it runs, so a suite started by the agent, or by
+    # `ling` exports CODEX_HOME to every command it runs, so a suite started by the agent, or by
     # Night Shift's sandboxed test run, resolved `$CODEX_HOME/night` and the rest to the real
     # ~/.mightling whatever HOME said: outside a sandbox it wrote the real `night/runner.lock`, and
     # inside one that write failed a test (2026-10-02). A test that needs the variable sets it.

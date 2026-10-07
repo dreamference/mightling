@@ -1,4 +1,4 @@
-"""Puffin became Mightling: `mling-admin`'s one-time migration of a 1.4.x node
+"""Puffin became Mightling: `ling-admin`'s one-time migration of a 1.4.x node
 (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.2). Every test runs in conftest's scratch HOME, with
 systemctl and sudo stubbed."""
 
@@ -35,7 +35,7 @@ def _legacy_node(tmp_home: Path):
         "<txt-record>node=abc</txt-record></service></service-group>\n")
     venv = tmp_home / ".local/share/dreamference/venv/bin"
     venv.mkdir(parents=True, exist_ok=True)
-    (venv / "mling-admin").write_text("#!/bin/sh\n")
+    (venv / "ling-admin").write_text("#!/bin/sh\n")
     keys = NodeServe.authorized_keys()
     keys.parent.mkdir(parents=True, exist_ok=True)
     keys.write_text(
@@ -72,14 +72,14 @@ def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(m
         shutil.move(command[1], command[2])
         return True
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(fake_privileged))
-    monkeypatch.setattr(NodeServe, "admin_executable", classmethod(lambda cls: str(venv / "mling-admin")))
+    monkeypatch.setattr(NodeServe, "admin_executable", classmethod(lambda cls: str(venv / "ling-admin")))
 
     done = LegacyNameMigration.run()
 
     assert len(done) == 7, done
     from dreamference.runner.codex_branded_builder import INSTALL_DIR
     new_bin = Path(INSTALL_DIR) / "bin"
-    assert (new_bin / "mling").is_file() and (new_bin / "mling-code").is_file()
+    assert (new_bin / "ling").is_file() and (new_bin / "ling-code").is_file()
     assert (new_bin / "codex-code-mode-host").is_file() and (Path(INSTALL_DIR) / "indexers").is_dir()
     assert not (tmp_home / ".local/share/dreamference/puffin").exists()
     links = tmp_home / ".local/bin"
@@ -91,7 +91,7 @@ def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(m
     assert privileged == [["mv", str(legacy_file), str(NodeServiceFile.service_path)]]
     assert f"<type>{SERVICE_TYPE}</type>" in NodeServiceFile.service_path.read_text()
     keys = NodeServe.authorized_keys().read_text()
-    assert f"{venv}/mling-admin node serve-job --key k1" in keys and keys.rstrip().endswith(KEY_COMMENT)
+    assert f"{venv}/ling-admin node serve-job --key k1" in keys and keys.rstrip().endswith(KEY_COMMENT)
     assert "ssh-ed25519 AAAAmine me@laptop\n" in keys, "the user's own lines are untouched"
     assert "puffin" not in keys
     assert 'mightling_airgapped = "on"' in (tmp_home / ".config/dreamference/config.toml").read_text()

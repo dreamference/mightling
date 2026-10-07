@@ -95,14 +95,14 @@ POLL_INTERVAL_MS: Final[int] = 5000
 
 CONNECT_GOOGLE_SCRIPT: Final[str] = (
     ";(function(){try{"
-    "if(window.__mlingConnect)return;window.__mlingConnect=1;"
+    "if(window.__lingConnect)return;window.__lingConnect=1;"
     'var ENG=/Chrome\\//.test(navigator.userAgent)?"blink":"webkit";'
     f'document.documentElement.setAttribute("{ENGINE_ATTRIBUTE}",ENG);'
     f'var S="{HOST_ORIGIN}/status",U="{HOST_ORIGIN}{SERVICE_CONNECT_PATH}",ID="{BUTTON_ID}";'
     f'var PATH="{CONNECT_PATH}",HEADS={json.dumps(list(SECTION_HEADING_ALIASES))};'
     "var last=null,lastSig=null;"
     
-    "window.__mlingDisconnect = function(email) {"
+    "window.__lingDisconnect = function(email) {"
     f"  fetch('{HOST_ORIGIN}/disconnect', {{"
     "    method: 'POST',"
     "    headers: {'Content-Type': 'application/json'},"
@@ -161,7 +161,7 @@ CONNECT_GOOGLE_SCRIPT: Final[str] = (
     '    + "<svg width=\'20\' height=\'20\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'#374151\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\' style=\'flex-shrink:0\'><rect x=\'2\' y=\'4\' width=\'20\' height=\'16\' rx=\'2\'/><path d=\'m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7\'/></svg>"'
     '    + "<div style=\'flex:1;min-width:0\'><div style=\'font-size:15px;font-weight:600;color:#111827;\'>" + emails[i] + "</div>"'
     '    + "<div style=\'font-size:13px;color:#6b7280;margin-top:2px;\'>Gmail search is active for this account.</div></div>"'
-    '    + "<button onclick=\'window.__mlingDisconnect(\\"" + emails[i] + "\\")\' style=\'background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px 14px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;flex-shrink:0;\'>Disconnect</button></div>";'
+    '    + "<button onclick=\'window.__lingDisconnect(\\"" + emails[i] + "\\")\' style=\'background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px 14px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;flex-shrink:0;\'>Disconnect</button></div>";'
     "}"
     "div.innerHTML=html;"
     "p.appendChild(div);"
@@ -229,7 +229,7 @@ SCROLLBAR_ID: Final[str] = "mightling-scrollbar"
 SCROLLBAR_MIN_THUMB_PX: Final[int] = 30
 SCROLLBAR_SCRIPT: Final[str] = (
     ";(function(){try{"
-    "if(window.__mlingScrollbar)return;window.__mlingScrollbar=1;"
+    "if(window.__lingScrollbar)return;window.__lingScrollbar=1;"
     f'var ID="{SCROLLBAR_ID}",MIN={SCROLLBAR_MIN_THUMB_PX};'
     "function boot(){"
     "if(document.documentElement.getAttribute('data-mightling-engine')!=='webkit')return;"
@@ -278,14 +278,14 @@ FRAMED_ATTRIBUTE: Final[str] = "data-mightling-framed"
 SETTINGS_MODAL_ID: Final[str] = "mightling-settings-modal"
 SETTINGS_MODAL_SCRIPT: Final[str] = (
     ";(function(){try{"
-    "if(window.__mlingSettingsModal)return;window.__mlingSettingsModal=1;"
+    "if(window.__lingSettingsModal)return;window.__lingSettingsModal=1;"
     f'var OID="{SETTINGS_MODAL_ID}";'
     "if(window.top!==window.self){"
     f'document.documentElement.setAttribute("{FRAMED_ATTRIBUTE}","1");return}}'
     "function close(){var o=document.getElementById(OID);"
     "if(o){o.remove();document.removeEventListener('keydown',esc,true);"
-    "if(window.removeEventListener&&window.__mlingModalMsg){"
-    "window.removeEventListener('message',window.__mlingModalMsg);window.__mlingModalMsg=null;}}}"
+    "if(window.removeEventListener&&window.__lingModalMsg){"
+    "window.removeEventListener('message',window.__lingModalMsg);window.__lingModalMsg=null;}}}"
     "function esc(e){if(e.key==='Escape'){e.stopPropagation();close();}}"
     "function open(href){close();"
     "var o=document.createElement('div');o.id=OID;"
@@ -296,10 +296,10 @@ SETTINGS_MODAL_SCRIPT: Final[str] = (
     "height:min(680px,calc(100vh - 48px));background:#fff;border-radius:16px;"
     "box-shadow:0 25px 50px -12px rgba(0,0,0,.25);overflow:hidden;';"
     # One iframe per settings route, all loaded up front; the one matching the clicked href is
-    # shown. `__mlingTabs` is published by the synthetic-tabs script, which runs after this one
+    # shown. `__lingTabs` is published by the synthetic-tabs script, which runs after this one
     # but long before any click. Swapping frames on request is what makes cross-route tab
     # switches instant -- reloading a single iframe was a visible white flash.
-    "var tabs=window.__mlingTabs||[];var routes=[];"
+    "var tabs=window.__lingTabs||[];var routes=[];"
     "for(var i=0;i<tabs.length;i++){if(routes.indexOf(tabs[i].p[0])<0)routes.push(tabs[i].p[0]);}"
     "var cur=href.split('#')[0];if(routes.indexOf(cur)<0)routes.push(cur);"
     "var frames={};"
@@ -309,16 +309,16 @@ SETTINGS_MODAL_SCRIPT: Final[str] = (
     "frames[rt]=fr;});"
     "function onmsg(ev){"
     "if(ev.origin!==location.origin)return;"
-    "var d=ev.data;if(!d||!d.mlingSettingsNav)return;"
-    "var s=d.mlingSettingsNav,tb=null,i;"
-    "var tl=window.__mlingTabs||[];"
+    "var d=ev.data;if(!d||!d.lingSettingsNav)return;"
+    "var s=d.lingSettingsNav,tb=null,i;"
+    "var tl=window.__lingTabs||[];"
     "for(i=0;i<tl.length;i++){if(tl[i].s===s)tb=tl[i];}"
     "if(!tb||!frames[tb.p[0]])return;"
     "for(var rt in frames){frames[rt].style.display=rt===tb.p[0]?'block':'none';}"
     # Same-document hash write: replace() with only the fragment differing does not reload.
     "try{frames[tb.p[0]].contentWindow.location.replace(tb.p[0]+'#'+s);}"
     "catch(e){frames[tb.p[0]].src=tb.p[0]+'#'+s;}}"
-    "if(window.addEventListener){window.__mlingModalMsg=onmsg;window.addEventListener('message',onmsg);}"
+    "if(window.addEventListener){window.__lingModalMsg=onmsg;window.addEventListener('message',onmsg);}"
     "var x=document.createElement('button');x.setAttribute('aria-label','Close settings');"
     "x.textContent='\u00d7';"
     "x.style.cssText='position:absolute;top:10px;right:12px;width:32px;height:32px;border:none;"
@@ -372,7 +372,7 @@ SYNTHETIC_TABS: Final[tuple] = (
 )
 SETTINGS_TABS_SCRIPT: Final[str] = (
     ";(function(){try{"
-    "if(window.__mlingSynthTabs)return;window.__mlingSynthTabs=1;"
+    "if(window.__lingSynthTabs)return;window.__lingSynthTabs=1;"
     f'var ATTR="{SYNTHETIC_SECTION_ATTRIBUTE}";'
     f"var TABS={json.dumps([{'s': s, 'l': l, 'p': list(r)} for s, l, r in SYNTHETIC_TABS])};"
     'var NAV=\'[data-testid="settings-left-tab-navigation"]\';'
@@ -389,13 +389,13 @@ SETTINGS_TABS_SCRIPT: Final[str] = (
     # architectural: the modal preloads one iframe per settings route, and a framed document
     # just asks it to swap -- a postMessage and a hash write, no reload anywhere. At the top
     # level a cross-route switch is an ordinary page navigation, where a load is normal.
-    "window.__mlingTabs=TABS;"
+    "window.__lingTabs=TABS;"
     "function go(s){var tb=null,i;"
     "for(i=0;i<TABS.length;i++){if(TABS[i].s===s)tb=TABS[i];}"
     "if(!tb)return;"
     "if(tb.p.indexOf(location.pathname)>=0){location.hash=s;sync();return}"
     "if(window.top!==window.self&&window.parent&&window.parent.postMessage){"
-    "try{window.parent.postMessage({mlingSettingsNav:s},location.origin);return}catch(e){}}"
+    "try{window.parent.postMessage({lingSettingsNav:s},location.origin);return}catch(e){}}"
     "location.href=tb.p[0]+'#'+s;}"
     "function make(nav,def){"
     "var src=null,rows=nav.children,i;"
@@ -453,7 +453,7 @@ SETTINGS_TABS_SCRIPT: Final[str] = (
 # inserted node would first paint in, so the block never becomes visible; the interval remains
 # only as a 2s backstop. Other tools' Response blocks stay inspectable, and dropping the
 # constant restores everything.
-IMAGE_TOOL_STEP_SCRIPT: Final[str] = ';(function(){try{if(window.__mlingToolJson)return;window.__mlingToolJson=1;function ours(s){if(s.indexOf(\'/puffin-images/\')>=0&&(s.indexOf(\'"instructions"\')>=0||s.indexOf(\'"response"\')>=0))return true;return s.indexOf(\'"response"\')>=0&&s.indexOf(\'![\')>=0;}function hide(el){var box=(el.closest&&el.closest(\'pre\'))||el;if(box.__mlingHid)return;box.__mlingHid=1;box.style.display=\'none\';var w=box;for(var k=0;k<4&&w;k++){var sib=w.previousElementSibling;if(sib&&(sib.textContent||\'\').trim()===\'Response\'){sib.style.display=\'none\';break}if(w.parentElement&&w.parentElement.childElementCount===1){w=w.parentElement;w.style.display=\'none\';}else{break}}}function sweep(root){var blocks=(root||document).querySelectorAll(\'pre,code\');for(var i=0;i<blocks.length;i++){var el=blocks[i];if(!el.__mlingHid&&ours(el.textContent||\'\'))hide(el);}}function boot(){if(typeof MutationObserver!==\'undefined\'){new MutationObserver(function(muts){for(var i=0;i<muts.length;i++){var m=muts[i];if(m.type===\'characterData\'){var host=m.target.parentElement;if(host&&ours(m.target.data||\'\'))hide(host);continue;}for(var j=0;j<m.addedNodes.length;j++){var n=m.addedNodes[j];if(n.nodeType===1&&n.querySelectorAll)sweep(n);else if(n.nodeType===3&&n.parentElement&&ours(n.data||\'\'))hide(n.parentElement);}}}).observe(document.body,{childList:true,subtree:true,characterData:true});}sweep();setInterval(sweep,2000);}if(document.readyState===\'loading\'){document.addEventListener(\'DOMContentLoaded\',boot);}else{boot();}}catch(e){}})();'
+IMAGE_TOOL_STEP_SCRIPT: Final[str] = ';(function(){try{if(window.__lingToolJson)return;window.__lingToolJson=1;function ours(s){if(s.indexOf(\'/puffin-images/\')>=0&&(s.indexOf(\'"instructions"\')>=0||s.indexOf(\'"response"\')>=0))return true;return s.indexOf(\'"response"\')>=0&&s.indexOf(\'![\')>=0;}function hide(el){var box=(el.closest&&el.closest(\'pre\'))||el;if(box.__lingHid)return;box.__lingHid=1;box.style.display=\'none\';var w=box;for(var k=0;k<4&&w;k++){var sib=w.previousElementSibling;if(sib&&(sib.textContent||\'\').trim()===\'Response\'){sib.style.display=\'none\';break}if(w.parentElement&&w.parentElement.childElementCount===1){w=w.parentElement;w.style.display=\'none\';}else{break}}}function sweep(root){var blocks=(root||document).querySelectorAll(\'pre,code\');for(var i=0;i<blocks.length;i++){var el=blocks[i];if(!el.__lingHid&&ours(el.textContent||\'\'))hide(el);}}function boot(){if(typeof MutationObserver!==\'undefined\'){new MutationObserver(function(muts){for(var i=0;i<muts.length;i++){var m=muts[i];if(m.type===\'characterData\'){var host=m.target.parentElement;if(host&&ours(m.target.data||\'\'))hide(host);continue;}for(var j=0;j<m.addedNodes.length;j++){var n=m.addedNodes[j];if(n.nodeType===1&&n.querySelectorAll)sweep(n);else if(n.nodeType===3&&n.parentElement&&ours(n.data||\'\'))hide(n.parentElement);}}}).observe(document.body,{childList:true,subtree:true,characterData:true});}sweep();setInterval(sweep,2000);}if(document.readyState===\'loading\'){document.addEventListener(\'DOMContentLoaded\',boot);}else{boot();}}catch(e){}})();'
 
 
 # Image search results as a clickable gallery.
@@ -468,7 +468,7 @@ IMAGE_TOOL_STEP_SCRIPT: Final[str] = ';(function(){try{if(window.__mlingToolJson
 # connected) and rebuilds. The same interval posture as the scrollbar and tab scripts.
 GALLERY_ATTRIBUTE: Final[str] = "data-mightling-gallery"
 LIGHTBOX_ID: Final[str] = "mightling-lightbox"
-GALLERY_SCRIPT: Final[str] = ';(function(){try{if(window.__mlingGallery)return;window.__mlingGallery=1;var GA=\'data-mightling-gallery\',LID=\'mightling-lightbox\';var BLINK=/Chrome[/]/.test(navigator.userAgent);function msg(el){for(var n=el;n;n=n.parentElement){if(n.getAttribute&&n.getAttribute(\'data-testid\')===\'onyx-ai-message\')return n;}return null;}function lightbox(list,start){var old=document.getElementById(LID);if(old)old.remove();var i=start,zoomed=false;var o=document.createElement(\'div\');o.id=LID;o.style.cssText=\'position:fixed;inset:0;z-index:2200;background:rgba(17,24,39,.85);display:flex;align-items:center;justify-content:center;\';var wrap=document.createElement(\'div\');wrap.style.cssText=\'max-width:92vw;max-height:84vh;overflow:auto;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,.5);\';var img=document.createElement(\'img\');img.style.cssText=\'max-width:92vw;max-height:84vh;display:block;cursor:zoom-in;\';img.addEventListener(\'click\',function(e){e.stopPropagation();zoomed=!zoomed;img.style.maxWidth=zoomed?\'none\':\'92vw\';img.style.maxHeight=zoomed?\'none\':\'84vh\';img.style.cursor=zoomed?\'zoom-out\':\'zoom-in\';});var cap=document.createElement(\'div\');cap.style.cssText=\'position:absolute;left:50%;bottom:18px;transform:translateX(-50%);max-width:82vw;background:rgba(17,24,39,.78);color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;display:flex;gap:14px;align-items:center;\';var txt=document.createElement(\'span\');txt.style.cssText=\'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\';var num=document.createElement(\'span\');num.style.cssText=\'opacity:.7;flex-shrink:0;\';var src=document.createElement(\'a\');src.textContent=\'Open original\';src.rel=\'noopener\';src.target=\'_blank\';src.style.cssText=\'color:#fff;text-decoration:underline;flex-shrink:0;\';src.addEventListener(\'click\',function(e){e.stopPropagation();});cap.appendChild(txt);cap.appendChild(num);cap.appendChild(src);function show(n){i=(n+list.length)%list.length;var it=list[i];img.src=it.src;img.alt=it.alt;txt.textContent=it.alt;num.textContent=(i+1)+\' / \'+list.length;if(it.source&&BLINK){src.href=it.source;src.style.display=\'\';}else{src.style.display=\'none\';}}function cl(){o.remove();document.removeEventListener(\'keydown\',key,true);}function key(e){if(e.key===\'Escape\'){e.stopPropagation();cl();}else if(e.key===\'ArrowRight\'){show(i+1);}else if(e.key===\'ArrowLeft\'){show(i-1);}}function arrow(t2,side,d){var b=document.createElement(\'button\');b.textContent=t2;b.style.cssText=\'position:absolute;top:50%;\'+side+\':18px;transform:translateY(-50%);width:40px;height:40px;border:none;border-radius:20px;background:rgba(255,255,255,.92);color:#111827;font-size:20px;line-height:1;cursor:pointer;\';b.addEventListener(\'click\',function(e){e.stopPropagation();show(i+d);});return b;}o.addEventListener(\'click\',function(e){if(e.target===o)cl();});wrap.appendChild(img);o.appendChild(wrap);o.appendChild(cap);if(list.length>1){o.appendChild(arrow(\'\\u2039\',\'left\',-1));o.appendChild(arrow(\'\\u203a\',\'right\',1));}document.addEventListener(\'keydown\',key,true);show(i);document.body.appendChild(o);}function build(items){var g=document.createElement(\'div\');g.setAttribute(GA,\'1\');g.setAttribute(\'data-count\',String(items.length));if(items.length>4)g.setAttribute(\'data-large\',\'1\');items.forEach(function(it,idx){var tile=document.createElement(\'div\');tile.className=\'mightling-tile\';var c=document.createElement(\'img\');c.src=it.src;c.alt=it.alt;c.title=it.alt;var badge=document.createElement(\'span\');badge.className=\'mightling-badge\';tile.appendChild(c);tile.appendChild(badge);tile.addEventListener(\'click\',function(){lightbox(items,idx);});g.appendChild(tile);fetch(it.src.replace(/[.]jpg$/,\'.json\')).then(function(r){return r.json();}).then(function(m){it.source=m.source_url;if(m.host)badge.textContent=m.host;}).catch(function(){});});return g;}function sweep(){var gals=document.querySelectorAll(\'[\'+GA+\']\'),i;for(i=0;i<gals.length;i++){if(!gals[i].__src||!gals[i].__src.isConnected)gals[i].remove();}var all=document.querySelectorAll(\'img\'),imgs=[];for(i=0;i<all.length;i++){if((all[i].getAttribute(\'src\')||\'\').indexOf(\'/puffin-images/\')>=0)imgs.push(all[i]);}var byHost=[],hosts=[];for(i=0;i<imgs.length;i++){var im=imgs[i];if(im.__mlingDone||im.closest(\'[\'+GA+\']\')||im.closest(\'#\'+LID))continue;var host=msg(im);if(!host)continue;var at=hosts.indexOf(host);if(at<0){hosts.push(host);byHost.push([im]);}else{byHost[at].push(im);}}byHost.forEach(function(group){var items=group.map(function(im){return{src:im.src,alt:im.alt||\'\'};});var anchor=group[0].closest(\'p\')||group[0];var g=build(items);g.__src=group[0];anchor.parentElement.insertBefore(g,anchor);group.forEach(function(im){im.__mlingDone=1;});});}function paras(){var ps=document.querySelectorAll(\'p\');for(var i=0;i<ps.length;i++){var pe=ps[i];var tx=(pe.textContent||\'\').trim();if(!pe.__pTmp&&tx.indexOf(\'![\')===0&&tx.indexOf(\'](\')<0){pe.__pTmp=1;pe.style.display=\'none\';}else if(pe.__pTmp&&(pe.querySelector(\'img\')||(tx.indexOf(\'](\')>=0&&tx.indexOf(\'/puffin-images/\')<0))){pe.style.display=\'\';pe.__pTmp=0;}}}function progress(){var bar=document.getElementById(\'mightling-img-progress\');var rows=document.querySelectorAll(\'div,span\'),run=null,i;for(i=0;i<rows.length;i++){var e=rows[i];if(e.childElementCount===0&&(e.textContent||\'\').trim()===\'Executing image_search\'){run=e;break}}if(run){if(!bar){bar=document.createElement(\'div\');bar.id=\'mightling-img-progress\';bar.innerHTML=\'<div class="lbl">Searching the web for images\\u2026</div><div class="track"><div class="bar"></div></div>\';var anchor=run.parentElement||run;anchor.insertAdjacentElement(\'afterend\',bar);}}else if(bar){bar.remove();}}function tick(){progress();paras();sweep();}var pending=false;function onmut(){if(pending)return;pending=true;(window.requestAnimationFrame||setTimeout)(function(){pending=false;tick();});}if(typeof MutationObserver!==\'undefined\'&&document.body){new MutationObserver(onmut).observe(document.body,{childList:true,subtree:true,characterData:true});}tick();setInterval(tick,800);}catch(e){}})();'
+GALLERY_SCRIPT: Final[str] = ';(function(){try{if(window.__lingGallery)return;window.__lingGallery=1;var GA=\'data-mightling-gallery\',LID=\'mightling-lightbox\';var BLINK=/Chrome[/]/.test(navigator.userAgent);function msg(el){for(var n=el;n;n=n.parentElement){if(n.getAttribute&&n.getAttribute(\'data-testid\')===\'onyx-ai-message\')return n;}return null;}function lightbox(list,start){var old=document.getElementById(LID);if(old)old.remove();var i=start,zoomed=false;var o=document.createElement(\'div\');o.id=LID;o.style.cssText=\'position:fixed;inset:0;z-index:2200;background:rgba(17,24,39,.85);display:flex;align-items:center;justify-content:center;\';var wrap=document.createElement(\'div\');wrap.style.cssText=\'max-width:92vw;max-height:84vh;overflow:auto;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,.5);\';var img=document.createElement(\'img\');img.style.cssText=\'max-width:92vw;max-height:84vh;display:block;cursor:zoom-in;\';img.addEventListener(\'click\',function(e){e.stopPropagation();zoomed=!zoomed;img.style.maxWidth=zoomed?\'none\':\'92vw\';img.style.maxHeight=zoomed?\'none\':\'84vh\';img.style.cursor=zoomed?\'zoom-out\':\'zoom-in\';});var cap=document.createElement(\'div\');cap.style.cssText=\'position:absolute;left:50%;bottom:18px;transform:translateX(-50%);max-width:82vw;background:rgba(17,24,39,.78);color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;display:flex;gap:14px;align-items:center;\';var txt=document.createElement(\'span\');txt.style.cssText=\'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\';var num=document.createElement(\'span\');num.style.cssText=\'opacity:.7;flex-shrink:0;\';var src=document.createElement(\'a\');src.textContent=\'Open original\';src.rel=\'noopener\';src.target=\'_blank\';src.style.cssText=\'color:#fff;text-decoration:underline;flex-shrink:0;\';src.addEventListener(\'click\',function(e){e.stopPropagation();});cap.appendChild(txt);cap.appendChild(num);cap.appendChild(src);function show(n){i=(n+list.length)%list.length;var it=list[i];img.src=it.src;img.alt=it.alt;txt.textContent=it.alt;num.textContent=(i+1)+\' / \'+list.length;if(it.source&&BLINK){src.href=it.source;src.style.display=\'\';}else{src.style.display=\'none\';}}function cl(){o.remove();document.removeEventListener(\'keydown\',key,true);}function key(e){if(e.key===\'Escape\'){e.stopPropagation();cl();}else if(e.key===\'ArrowRight\'){show(i+1);}else if(e.key===\'ArrowLeft\'){show(i-1);}}function arrow(t2,side,d){var b=document.createElement(\'button\');b.textContent=t2;b.style.cssText=\'position:absolute;top:50%;\'+side+\':18px;transform:translateY(-50%);width:40px;height:40px;border:none;border-radius:20px;background:rgba(255,255,255,.92);color:#111827;font-size:20px;line-height:1;cursor:pointer;\';b.addEventListener(\'click\',function(e){e.stopPropagation();show(i+d);});return b;}o.addEventListener(\'click\',function(e){if(e.target===o)cl();});wrap.appendChild(img);o.appendChild(wrap);o.appendChild(cap);if(list.length>1){o.appendChild(arrow(\'\\u2039\',\'left\',-1));o.appendChild(arrow(\'\\u203a\',\'right\',1));}document.addEventListener(\'keydown\',key,true);show(i);document.body.appendChild(o);}function build(items){var g=document.createElement(\'div\');g.setAttribute(GA,\'1\');g.setAttribute(\'data-count\',String(items.length));if(items.length>4)g.setAttribute(\'data-large\',\'1\');items.forEach(function(it,idx){var tile=document.createElement(\'div\');tile.className=\'mightling-tile\';var c=document.createElement(\'img\');c.src=it.src;c.alt=it.alt;c.title=it.alt;var badge=document.createElement(\'span\');badge.className=\'mightling-badge\';tile.appendChild(c);tile.appendChild(badge);tile.addEventListener(\'click\',function(){lightbox(items,idx);});g.appendChild(tile);fetch(it.src.replace(/[.]jpg$/,\'.json\')).then(function(r){return r.json();}).then(function(m){it.source=m.source_url;if(m.host)badge.textContent=m.host;}).catch(function(){});});return g;}function sweep(){var gals=document.querySelectorAll(\'[\'+GA+\']\'),i;for(i=0;i<gals.length;i++){if(!gals[i].__src||!gals[i].__src.isConnected)gals[i].remove();}var all=document.querySelectorAll(\'img\'),imgs=[];for(i=0;i<all.length;i++){if((all[i].getAttribute(\'src\')||\'\').indexOf(\'/puffin-images/\')>=0)imgs.push(all[i]);}var byHost=[],hosts=[];for(i=0;i<imgs.length;i++){var im=imgs[i];if(im.__lingDone||im.closest(\'[\'+GA+\']\')||im.closest(\'#\'+LID))continue;var host=msg(im);if(!host)continue;var at=hosts.indexOf(host);if(at<0){hosts.push(host);byHost.push([im]);}else{byHost[at].push(im);}}byHost.forEach(function(group){var items=group.map(function(im){return{src:im.src,alt:im.alt||\'\'};});var anchor=group[0].closest(\'p\')||group[0];var g=build(items);g.__src=group[0];anchor.parentElement.insertBefore(g,anchor);group.forEach(function(im){im.__lingDone=1;});});}function paras(){var ps=document.querySelectorAll(\'p\');for(var i=0;i<ps.length;i++){var pe=ps[i];var tx=(pe.textContent||\'\').trim();if(!pe.__pTmp&&tx.indexOf(\'![\')===0&&tx.indexOf(\'](\')<0){pe.__pTmp=1;pe.style.display=\'none\';}else if(pe.__pTmp&&(pe.querySelector(\'img\')||(tx.indexOf(\'](\')>=0&&tx.indexOf(\'/puffin-images/\')<0))){pe.style.display=\'\';pe.__pTmp=0;}}}function progress(){var bar=document.getElementById(\'mightling-img-progress\');var rows=document.querySelectorAll(\'div,span\'),run=null,i;for(i=0;i<rows.length;i++){var e=rows[i];if(e.childElementCount===0&&(e.textContent||\'\').trim()===\'Executing image_search\'){run=e;break}}if(run){if(!bar){bar=document.createElement(\'div\');bar.id=\'mightling-img-progress\';bar.innerHTML=\'<div class="lbl">Searching the web for images\\u2026</div><div class="track"><div class="bar"></div></div>\';var anchor=run.parentElement||run;anchor.insertAdjacentElement(\'afterend\',bar);}}else if(bar){bar.remove();}}function tick(){progress();paras();sweep();}var pending=false;function onmut(){if(pending)return;pending=true;(window.requestAnimationFrame||setTimeout)(function(){pending=false;tick();});}if(typeof MutationObserver!==\'undefined\'&&document.body){new MutationObserver(onmut).observe(document.body,{childList:true,subtree:true,characterData:true});}tick();setInterval(tick,800);}catch(e){}})();'
 
 
 

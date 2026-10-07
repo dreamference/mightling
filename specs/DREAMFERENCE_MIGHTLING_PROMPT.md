@@ -1,11 +1,11 @@
 # Mightling Prompts — `/prompt`
 
-**Status:** Phase 1 implemented on 2026-10-03 (§13 records what was built and where it departs from the design); Phase 0 is built in part (§6.1 item 1, the writable `/testbed`, fixed in the runner on 2026-10-03), Phase 2 is not built, and the runs of §6.2 have not been made. §1 is read from the pinned Codex source and checked against the requests `mling` actually sends (a stub endpoint recorded them; no model was involved); §6.4 is a small pilot against the live model on 2026-10-02. §12 separates what was checked from what is assumed.
-**Goal:** `mling` can run under more than one system prompt, chosen by name. Two ship: `default`, today's prompt byte for byte, and `high-swe`, a prompt written to resolve as many SWE-bench tasks as the local model can. `/prompt` shows and switches them.
+**Status:** Phase 1 implemented on 2026-10-03 (§13 records what was built and where it departs from the design); Phase 0 is built in part (§6.1 item 1, the writable `/testbed`, fixed in the runner on 2026-10-03), Phase 2 is not built, and the runs of §6.2 have not been made. §1 is read from the pinned Codex source and checked against the requests `ling` actually sends (a stub endpoint recorded them; no model was involved); §6.4 is a small pilot against the live model on 2026-10-02. §12 separates what was checked from what is assumed.
+**Goal:** `ling` can run under more than one system prompt, chosen by name. Two ship: `default`, today's prompt byte for byte, and `high-swe`, a prompt written to resolve as many SWE-bench tasks as the local model can. `/prompt` shows and switches them.
 **Builds on:**
-- the launcher, which already composes the system prompt and writes it to the model catalog (`mling-rs/src/lib.rs`, `base_instructions()` and `model_catalog()`);
+- the launcher, which already composes the system prompt and writes it to the model catalog (`ling-rs/src/lib.rs`, `base_instructions()` and `model_catalog()`);
 - the configuration chain `/cavemode` and `/airgapped` use (a `DREAMFERENCE_*` variable, then the TOML file, then the built-in default), and their slash-command pattern ([MIGHTLING_CAVE_MODE](./DREAMFERENCE_MIGHTLING_CAVE_MODE.md), [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md));
-- `mling-admin swe-bench` ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)), which is how a prompt is measured, and its first runs, which are where `high-swe` comes from.
+- `ling-admin swe-bench` ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md)), which is how a prompt is measured, and its first runs, which are where `high-swe` comes from.
 
 **Three things to know before reading further:**
 1. **Codex fixes the system prompt when a session starts.** A resumed session keeps the prompt it started with. So Phase 1 chooses the prompt for *new* sessions and needs no Codex patch; switching the prompt of the session you are in (Phase 2) needs one hook in Codex's core, and costs a full re-read of the conversation.
@@ -18,11 +18,11 @@
 
 ### 1.1 What the model is sent today
 
-Captured from `mling exec` against a stub endpoint (first request of a new session, this machine, 2026-10-02):
+Captured from `ling exec` against a stub endpoint (first request of a new session, this machine, 2026-10-02):
 
 | Part | Size | Where it comes from |
 |---|---|---|
-| `instructions` (the system prompt) | 24,289 chars | the launcher: Codex's longest bundled template with "Codex" renamed, then `# Web access`, `# Email access` (an account is connected), `# Code navigation` (`mling-code` is installed) |
+| `instructions` (the system prompt) | 24,289 chars | the launcher: Codex's longest bundled template with "Codex" renamed, then `# Web access`, `# Email access` (an account is connected), `# Code navigation` (`ling-code` is installed) |
 | tool schemas | 30,399 chars | Codex: `exec`, `wait`, `exec_command`, `write_stdin`, `request_user_input`, `view_image`, `multi_agent_v1` (13,382 alone), three goal tools, `web_search` |
 | one developer message | 7,749 chars | Codex and the launcher: the skills list, the permissions text, the cave-mode rules |
 
@@ -58,7 +58,7 @@ By section, of 24,289 chars (a 151-char opening sentence is the remainder):
 
 - **It names tools this model does not have.** "Use `multi_tool_use.parallel`", "the `commentary` channel", "the `final` channel": none is in the tool list of §1.1. "Use `apply_patch` for manual code edits" is half true: there is no `apply_patch` tool, only a shell command of that name on the PATH Codex gives each command.
 - **It says nothing about how to resolve a bug**: no word on reproducing, on finding the code that owns a behaviour, on running the tests that already exist, or on what belongs in the final diff.
-- **In the benchmark container the web block is false.** It says "Do not say you cannot browse the web"; the task says "There is no network". Commands naming `mling-search` or `mling-fetch` appear 20 times in 7 of the 24 baseline instances: the model tried, and looked for the programs when they failed.
+- **In the benchmark container the web block is false.** It says "Do not say you cannot browse the web"; the task says "There is no network". Commands naming `ling-search` or `ling-fetch` appear 20 times in 7 of the 24 baseline instances: the model tried, and looked for the programs when they failed.
 - **The code-navigation block was never acted on**: 0 queries in 2,824 commands (SWE-bench spec §13). That is being worked on separately; this spec takes the block as it ships.
 
 ### 1.4 What the first benchmark runs showed
@@ -89,16 +89,16 @@ Three more things in the same trajectories:
 
 ## 2. Prompts
 
-A **prompt** has a name, a core text, and the list of launcher blocks appended to it. The blocks are the three the launcher already writes: `web`, `email` (only when an account is connected) and `code` (only when `mling-code` is installed).
+A **prompt** has a name, a core text, and the list of launcher blocks appended to it. The blocks are the three the launcher already writes: `web`, `email` (only when an account is connected) and `code` (only when `ling-code` is installed).
 
 | Name | Core | Blocks | For |
 |---|---|---|---|
 | `default` | Codex's bundled template, renamed (today's `base_instructions()`) | web, email, code | everyday interactive work. **The default.** |
 | `high-swe` | Appendix A, 4,229 chars | code | resolving a defined task in a repository: unattended runs, Night Shift, the benchmark |
 
-- **`default` is byte-identical to what `mling` sends today**, and a test holds it there (§10). Choosing nothing changes nothing.
+- **`default` is byte-identical to what `ling` sends today**, and a test holds it there (§10). Choosing nothing changes nothing.
 - **`high-swe` leaves web and email out on purpose.** A benchmark container has no network, a block that says "do not say you cannot browse" is false there, and each block is text the model reads on every task for a capability a repository fix rarely needs. A session that needs both the method and the web runs `default`.
-- **Custom prompts.** A file `$CODEX_HOME/system-prompts/<name>.md` is a prompt of that name. Its text is the whole core. Its first line may be `<!-- mling: blocks=web,email,code -->` (any subset); without it no block is appended. Names are lowercase letters, digits and hyphens; `default` and `high-swe` cannot be shadowed. This is also how a candidate text is benchmarked without a rebuild (§6).
+- **Custom prompts.** A file `$CODEX_HOME/system-prompts/<name>.md` is a prompt of that name. Its text is the whole core. Its first line may be `<!-- ling: blocks=web,email,code -->` (any subset); without it no block is appended. Names are lowercase letters, digits and hyphens; `default` and `high-swe` cannot be shadowed. This is also how a candidate text is benchmarked without a rebuild (§6).
 - **Where prompts cannot come from.** Never from the repository, and never from text the model wrote: `$CODEX_HOME` is outside the workspace-write sandbox's writable folders (only `skills/` was opened, in `77b9471`), and a test keeps `system-prompts/` out of them. A repository's `dreamference.toml` may *name* an installed prompt (§4.1), as it may name a cave level; it cannot supply one.
 
 ---
@@ -109,10 +109,10 @@ A **prompt** has a name, a core text, and the list of launcher blocks appended t
 
 | Command | Effect |
 |---|---|
-| `mling prompt` or `mling prompt list` | Lists the prompts, one line each, marks the one new sessions get and says where that choice comes from |
-| `mling prompt show [<name>]` | Prints the composed text exactly as a session would receive it, blocks included, and its size |
-| `mling prompt use <name>` | Writes `mightling_prompt = "<name>"` to the configuration file, so new sessions start with it. Says so if `DREAMFERENCE_MIGHTLING_PROMPT` is set and still wins |
-| `DREAMFERENCE_MIGHTLING_PROMPT=<name> mling …` | One launch under that prompt: `mling exec`, a script, a single interactive session |
+| `ling prompt` or `ling prompt list` | Lists the prompts, one line each, marks the one new sessions get and says where that choice comes from |
+| `ling prompt show [<name>]` | Prints the composed text exactly as a session would receive it, blocks included, and its size |
+| `ling prompt use <name>` | Writes `mightling_prompt = "<name>"` to the configuration file, so new sessions start with it. Says so if `DREAMFERENCE_MIGHTLING_PROMPT` is set and still wins |
+| `DREAMFERENCE_MIGHTLING_PROMPT=<name> ling …` | One launch under that prompt: `ling exec`, a script, a single interactive session |
 
 The launcher intercepts `prompt` as it does `night` and `node`, before Codex parses the command line; it never reaches Codex, and it needs no model server. The price is the one those two already pay: a session cannot be started with the single word `prompt` as its message.
 
@@ -122,7 +122,7 @@ The launcher intercepts `prompt` as it does `night` and `node`, before Codex par
 |---|---|
 | `/prompt` | Shows this session's prompt and the list |
 | `/prompt <name>` | Switches **this session** at its next model request. Prints the cost first (§4.3): the server re-reads the whole conversation once |
-| `/prompt use <name>` | Sets it for new sessions, as `mling prompt use` does, and leaves this session alone. (Not `/prompt default <name>`, cave mode's form: `default` is itself a prompt's name here) |
+| `/prompt use <name>` | Sets it for new sessions, as `ling prompt use` does, and leaves this session alone. (Not `/prompt default <name>`, cave mode's form: `default` is itself a prompt's name here) |
 | anything else | The usage line. Nothing changes |
 
 What `/prompt` prints:
@@ -137,7 +137,7 @@ New sessions: /prompt use high-swe.
 
 ### 3.3 Rules
 
-- **A session keeps its prompt.** `mling resume` and a fork continue with the prompt the session had, whatever the default is now (§1.2 shows Codex doing this by itself). Only `/prompt <name>` typed in that session changes it.
+- **A session keeps its prompt.** `ling resume` and a fork continue with the prompt the session had, whatever the default is now (§1.2 shows Codex doing this by itself). Only `/prompt <name>` typed in that session changes it.
 - **The model cannot change it.** No tool or message selects a prompt; only the command and the configuration do.
 - **`/prompt` never calls the model** and answers at once, mid-turn included. A switch typed mid-turn takes effect at the next request of that turn.
 - **A subagent starts with the prompt its process was launched with**, not with a prompt switched to by `/prompt` in its parent. (Its instructions come from the parent's request text either way.)
@@ -161,19 +161,19 @@ An unknown name is skipped with one line on stderr naming it and the tier it cam
 
 The launcher already writes `$CODEX_HOME/model_catalog.json` at every launch and injects `-c model_provider=…` in front of the user's arguments. Phase 1 adds:
 
-- **`mling-rs/src/prompt.rs`**: the built-in cores (`include_str!` of `mling-rs/prompts/high-swe.md`; `default` stays the bundled template), the custom-prompt loader, the tier resolution of §4.1, `compose(name)` (core plus its blocks), and the `mling prompt` subcommand.
+- **`ling-rs/src/prompt.rs`**: the built-in cores (`include_str!` of `ling-rs/prompts/high-swe.md`; `default` stays the bundled template), the custom-prompt loader, the tier resolution of §4.1, `compose(name)` (core plus its blocks), and the `ling prompt` subcommand.
 - **For `default`: nothing changes.** `model_catalog.json` is written as today, by the same code path.
-- **`DreamferenceConfig.mightling_prompt`** on the Python side, with the same tiers, as `mightling_cave_mode` has: `save_config()` writes the flat keys it knows, so a key it does not know would be dropped from the file by `mling-admin main-model set`.
+- **`DreamferenceConfig.mightling_prompt`** on the Python side, with the same tiers, as `mightling_cave_mode` has: `save_config()` writes the flat keys it knows, so a key it does not know would be dropped from the file by `ling-admin main-model set`.
 - **For any other prompt:** the launcher writes `$CODEX_HOME/model_catalog.<name>.json`, identical except for `base_instructions`, and injects `-c model_catalog_json="<that file>"`. The setting is per process, so a `high-swe` Night Shift task and a `default` interactive session started in the same second cannot read each other's catalog, which a single shared file would allow.
 - **Not `model_instructions_file`.** It works (§1.2), but as an override it also replaces the prompt of every session *resumed* by that launch, which breaks the rule of §3.3. The catalog route gives a new session its prompt and leaves resumed ones alone, with no code of ours deciding it.
 
-That is all Phase 1 needs: `mling exec`, Night Shift and the benchmark can each run under a named prompt.
+That is all Phase 1 needs: `ling exec`, Night Shift and the benchmark can each run under a named prompt.
 
 ### 4.3 Phase 2: switching the session you are in
 
-Three pieces, the first two with no dependency beyond the standard library, as `mling-airgapped` is built:
+Three pieces, the first two with no dependency beyond the standard library, as `ling-airgapped` is built:
 
-- **`mling-rs/prompt/`** (crate `mightling-prompt`): `for_request(thread_id, current_text) -> Option<String>`. It reads `$CODEX_HOME/prompt/<thread_id>`, a one-line file naming a prompt, and returns the text in `$CODEX_HOME/prompt/texts/<name>.md`. No file, an unknown name or an unreadable text returns `None`: the session keeps its own prompt. The launcher writes `texts/` at every launch, one composed file per installed prompt, since composing needs the Gmail and code-index probes only it makes. The first time it sees a thread it also records which installed prompt `current_text` equals (`<thread_id>.started`), so `/prompt` can name the prompt a resumed session started with. **Switching back to that prompt removes the session's file instead of naming it**, so the session returns to its own recorded text: `texts/<name>.md` is composed afresh at every launch, and a session started yesterday with a mail account connected must not get today's `default` in its place.
+- **`ling-rs/prompt/`** (crate `mightling-prompt`): `for_request(thread_id, current_text) -> Option<String>`. It reads `$CODEX_HOME/prompt/<thread_id>`, a one-line file naming a prompt, and returns the text in `$CODEX_HOME/prompt/texts/<name>.md`. No file, an unknown name or an unreadable text returns `None`: the session keeps its own prompt. The launcher writes `texts/` at every launch, one composed file per installed prompt, since composing needs the Gmail and code-index probes only it makes. The first time it sees a thread it also records which installed prompt `current_text` equals (`<thread_id>.started`), so `/prompt` can name the prompt a resumed session started with. **Switching back to that prompt removes the session's file instead of naming it**, so the session returns to its own recorded text: `texts/<name>.md` is composed afresh at every launch, and a session started yesterday with a mail account connected must not get today's `default` in its place.
 - **The hook**, in `Session::get_prompt_base_instructions()`: if `mightling_prompt::for_request(…)` returns a text, use it for this request. One function serves the turn, compaction, the start-up prewarm and the reviewer, so one hook covers them. The prompt recorded in the session file on disk is not rewritten.
 - **The command**, in the launcher crate: `prompt::command(thread_id, args)` writes or removes the session's file and returns the lines to print; the TUI hooks are the seven hunks every Mightling slash command has.
 
@@ -241,13 +241,13 @@ Disabling what a repository task never uses (`--disable multi_agent --disable go
 Found in the `acc-25` trajectories. They belong to the benchmark runner, and any prompt comparison made before they are fixed is a comparison of how well each prompt copes with them.
 
 1. **The agent cannot write the files it is asked to fix.** In the instance images `/testbed`'s sources are `root:root 0644` and the agent runs as the host's user. Directories are writable, so the model eventually learns to write a new file and rename it over the old one, after `sed -i`, appending, `sudo`, `whoami` and `chmod` have failed. `apply_patch` answers "Failed to write file". The runner opens up `.git` and nothing else. Fix: `chmod -R a+rwX /testbed` in the root-run preparation step (git does not track the write bit, so the patch is unaffected). The pilot ran with this fix. *Fixed in the runner on 2026-10-03 (`a7e49af`): the scrub step opens up all of `/testbed`; checked in a running container (`setup.py` 777).*
-2. **`rg` is not in the images**, and both prompts say to use it first. Either mount a static `rg` beside `mling`, or accept one failed command per instance.
+2. **`rg` is not in the images**, and both prompts say to use it first. Either mount a static `rg` beside `ling`, or accept one failed command per instance.
 3. **Everything the agent leaves behind is submitted**, test files included. The grader overwrites the test files it knows; an edited fixture next to them (`tests/lookup/models.py` in django-12774) stays and can fail tests that passed. Decide whether the runner drops changes under test directories from the prediction, as mini-swe-agent's submission rule does, or leaves that to the prompt. This spec assumes the prompt, and step 6 says so.
-4. **A fresh baseline.** `acc-25` was measured before these fixes, on a `mling` build that has since changed. Every arm of §6.2 is run again on one build.
+4. **A fresh baseline.** `acc-25` was measured before these fixes, on a `ling` build that has since changed. Every arm of §6.2 is run again on one build.
 
 ### 6.2 Arms
 
-All on the same validated instances, the same `mling` build and the same model, each **three times**:
+All on the same validated instances, the same `ling` build and the same model, each **three times**:
 
 | Arm | Prompt | Cave | Tools |
 |---|---|---|---|
@@ -270,12 +270,12 @@ The runner gains `--prompt <name>`, recorded in the run's manifest and printed i
 
 A check that the model follows `high-swe` and of what it does differently, not a measurement of the score. Arms A, B and C of §6.2, once each, on six instances chosen from §1.4's classes (django-16454 regression, django-13512 incomplete, django-16502 wrong place, sympy-13798 invented behaviour, and two that `acc-25` resolved).
 
-**What was the same as `acc-25`:** the `mling` build (the runtime's source hash, `9d107cf7…`, is `acc-25`'s `runtime_hash`), the model, the images and the task preamble.
+**What was the same as `acc-25`:** the `ling` build (the runtime's source hash, `9d107cf7…`, is `acc-25`'s `runtime_hash`), the model, the images and the task preamble.
 
 **How it differed from `acc-25`, so arm A is not that run again:**
 - the Phase 0 permission fix of §6.1 in every arm (`chmod -R a+rwX /testbed` before the agent starts);
 - 25 minutes per instance instead of 45, 3 GB per container instead of 8, two at a time;
-- arms B and C got the text through `-c model_instructions_file=` (§1.2), so no launcher block was appended. In the container that matches `high-swe` as specified, because neither `mling-code` nor a mail account is there; arm A's prompt in the container is the template plus the web block (about 22,700 chars), not the host's 24,289;
+- arms B and C got the text through `-c model_instructions_file=` (§1.2), so no launcher block was appended. In the container that matches `high-swe` as specified, because neither `ling-code` nor a mail account is there; arm A's prompt in the container is the template plus the web block (about 22,700 chars), not the host's 24,289;
 - **the model server was shared**: other tasks kept about six requests running throughout. Arm A on sympy-13798 got through 12 commands in 25 minutes; in `acc-25` the same instance took 45 commands and 196 s. Wall times and time-outs below measure the queue as much as the prompt;
 - the agent phase was cut off after 10 of 18 runs by the job's own two-hour limit; the B and C runs of sympy-13798 were interrupted and not graded, and django-11880 and pytest-5631 never ran.
 
@@ -311,7 +311,7 @@ A check that the model follows `high-swe` and of what it does differently, not a
 
 ### 6.5 First benchmark A/B (2026-10-03)
 
-Three arms of §6.2's A and B, one repetition each, run one after the other on the night of 2026-10-03 (18:44 to 23:54), interleaved so drift falls on both `default` arms: `ab-default-a`, `ab-highswe`, `ab-default-b`. Same 24 validated instances (the sample of SWE_BENCH §12.5, `sphinx-8056` excluded), same `mling` build (`runtime_hash` `39b8a92b6775`, the build of `258c3b5`; `high-swe` is v2, compiled in), same `mling-code` (`cd4d6b91…`), code index on (`--code-index universal`) in every arm, cave `ultra`, `task_context` 44,000 (the KV pool was 133,308 tokens), three at a time, 45-minute timeout, 8 GiB per container, two nudges, the writable `/testbed` of §6.1 item 1. No context masking: the build predates patch `0021`. The model server was shared: five times an instance waited for a request that was not the run's.
+Three arms of §6.2's A and B, one repetition each, run one after the other on the night of 2026-10-03 (18:44 to 23:54), interleaved so drift falls on both `default` arms: `ab-default-a`, `ab-highswe`, `ab-default-b`. Same 24 validated instances (the sample of SWE_BENCH §12.5, `sphinx-8056` excluded), same `ling` build (`runtime_hash` `39b8a92b6775`, the build of `258c3b5`; `high-swe` is v2, compiled in), same `ling-code` (`cd4d6b91…`), code index on (`--code-index universal`) in every arm, cave `ultra`, `task_context` 44,000 (the KV pool was 133,308 tokens), three at a time, 45-minute timeout, 8 GiB per container, two nudges, the writable `/testbed` of §6.1 item 1. No context masking: the build predates patch `0021`. The model server was shared: five times an instance waited for a request that was not the run's.
 
 | | `default` (a) | `default` (b) | `high-swe` |
 |---|---|---|---|
@@ -322,7 +322,7 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 | Input / output tokens | 49.1 M / 289 K | 64.1 M / 296 K | 62.8 M / 357 K |
 | Commands | 2,503 | 2,665 | 2,364 |
 | Compactions (instances) | 29 (14) | 26 (11) | 27 (12) |
-| `mling-code` calls (instances) | 328 (23) | 415 (24) | 334 (24) |
+| `ling-code` calls (instances) | 328 (23) | 415 (24) | 334 (24) |
 
 **The noise floor, measured in the same session:** the two `default` arms differ on 3 of 24 instances (`django-15563` and `sympy-14711` only in a, `django-12774` only in b), McNemar p = 1.0. `high-swe` against a differs on 2 (`django-16454` only `high-swe`, `sympy-13031` only `default`), p = 1.0; against b on 5 (3 to 2 for `high-swe`), p = 1.0. Every difference is inside the floor.
 
@@ -337,19 +337,19 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 
 ## 7. Where else a prompt is chosen
 
-- **Night Shift.** `[night] prompt = "<name>"` in the configuration sets `DREAMFERENCE_MIGHTLING_PROMPT` for each task's `mling exec`. It stays unset (so `default`) until §6 says otherwise; an interrupted task resumed the next night keeps the prompt it started with (§3.3).
+- **Night Shift.** `[night] prompt = "<name>"` in the configuration sets `DREAMFERENCE_MIGHTLING_PROMPT` for each task's `ling exec`. It stays unset (so `default`) until §6 says otherwise; an interrupted task resumed the next night keeps the prompt it started with (§3.3).
 - **The benchmark.** `--prompt` (§6.2).
 - **`/airgapped`.** The level's message to the model arrives as a later message and is independent of the prompt. `default`'s web block already defers to it ("unless a later message says web access is off"); `high-swe` has no web block to contradict.
 - **Skills.** The skills list is a developer message, not part of the prompt; both prompts see it.
 - **Compaction.** The compaction request goes through the same function as a turn (§1.2), so a session compacts under the prompt it runs under.
-- **`mling update` and the release.** The built-in texts are in the binary; nothing new is downloaded or installed.
+- **`ling update` and the release.** The built-in texts are in the binary; nothing new is downloaded or installed.
 
 ---
 
 ## 8. Alternatives considered
 
 - **A layer on top of the default, as cave mode is** (a World State section carrying `high-swe`'s rules). No patch to core and it switches live for free. Rejected as the mechanism: a layer can add rules but cannot remove 16 KB of prompt, and §5 argues the removal is most of the point. It is also where the cave-mode conflict of §5.4 comes from: two late messages telling the model opposite things about writing.
-- **Codex's own `model_instructions_file`, or a `[profiles.high-swe]` table in `config.toml` chosen with `mling -p high-swe`.** No code at all, and it is what the pilot used. Rejected as the product mechanism for two reasons measured in §1.2: it drops the launcher's blocks unless the launcher writes the file anyway, and as an override it replaces the prompt of sessions it resumes.
+- **Codex's own `model_instructions_file`, or a `[profiles.high-swe]` table in `config.toml` chosen with `ling -p high-swe`.** No code at all, and it is what the pilot used. Rejected as the product mechanism for two reasons measured in §1.2: it drops the launcher's blocks unless the launcher writes the file anyway, and as an override it replaces the prompt of sessions it resumes.
 - **Rewriting the session's recorded prompt** (a new operation in core that changes `session_configuration`). It would make the context estimate exact, but it is a larger patch, and it changes what forks and resumed sessions inherit, which is exactly what Codex's comment on the hooked function says not to do.
 - **Codex's `personality` feature** (off in this build) re-renders one templated paragraph of the prompt when the personality changes. It swaps a paragraph, not a prompt.
 - **Improving the default for everyone.** The default is Codex's maintained text; a submodule bump updates it for free, and interactive users chose it by using Mightling. `high-swe` earns the default place for unattended runs, if at all, through §6.
@@ -361,9 +361,9 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 
 **Phase 0: make the measurement mean something.** The four items of §6.1, in the benchmark runner. No prompt work depends on them, every prompt *claim* does.
 
-**Phase 1: named prompts, no patch.** `prompt.rs`, the two built-in prompts, custom prompts, the tiers, `mling prompt list|show|use`, the per-prompt catalog, `swe-bench run --prompt`, `[night] prompt`. Then the runs of §6.2. Output: §6.4 extended with real numbers, and either "`high-swe` is the prompt for unattended runs" or a revised text and another round.
+**Phase 1: named prompts, no patch.** `prompt.rs`, the two built-in prompts, custom prompts, the tiers, `ling prompt list|show|use`, the per-prompt catalog, `swe-bench run --prompt`, `[night] prompt`. Then the runs of §6.2. Output: §6.4 extended with real numbers, and either "`high-swe` is the prompt for unattended runs" or a revised text and another round.
 
-**Phase 2: `/prompt` in the TUI and the live switch.** The `mightling-prompt` crate, the core hook, the command, patch `0020` and the cap. Checks before it merges: the hook compiles without a dependency cycle; a switched session's next request carries the new text and its compaction does too (the stub endpoint shows both); `mling resume` of a switched session stays switched; a session with no file is byte-identical to today.
+**Phase 2: `/prompt` in the TUI and the live switch.** The `mightling-prompt` crate, the core hook, the command, patch `0020` and the cap. Checks before it merges: the hook compiles without a dependency cycle; a switched session's next request carries the new text and its compaction does too (the stub endpoint shows both); `ling resume` of a switched session stays switched; a session with no file is byte-identical to today.
 
 **Phase 3, only if §6 supports it:** a prompt's preferred cave level (§5.4); launch options that travel with a prompt (§5.5).
 
@@ -379,7 +379,7 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
   - custom prompts: the blocks line, the name rules, no shadowing of built-ins;
   - `default` adds no argument and writes no extra catalog;
   - another prompt writes its catalog and injects `model_catalog_json`, and a user's own `-c model_catalog_json=` is left alone;
-  - `mling prompt list|show|use` output, and `use` keeping the rest of the TOML file as written.
+  - `ling prompt list|show|use` output, and `use` keeping the rest of the TOML file as written.
 - **Against the stub endpoint (Python, offline):** the five rows of §1.2 as assertions on the `instructions` field, plus Phase 2's rows: switched, switched then compacted, switched then resumed, never switched.
 - **`mightling-prompt` crate:** missing file, unknown name, unreadable text and a thread id that is not a file name all return `None`; the `.started` record names the right prompt.
 - **Sandbox:** `$CODEX_HOME/system-prompts/` and `$CODEX_HOME/prompt/` are not writable under workspace-write.
@@ -403,7 +403,7 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 ## 12. Checked here, and assumed
 
 **Checked on this machine (2026-10-02):**
-- the request's three parts and their sizes (§1.1), by capturing `mling exec` at a stub endpoint;
+- the request's three parts and their sizes (§1.1), by capturing `ling exec` at a stub endpoint;
 - the five rows of §1.2, the same way: the catalog route, the resumed session keeping its prompt, the override beating it and dropping the blocks;
 - `apply_patch` as a shell command, by standard input and by argument, in a scratch directory;
 - the tool list after disabling `multi_agent`, `goals` and `web_search` (§5.5);
@@ -412,7 +412,7 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 - no existing `/prompt` slash command and no `prompt` subcommand in the pinned Codex;
 - the pilot of §6.4: ten runs against the live model on a shared server, graded with the benchmark's harness.
 
-**Read from the source, not run:** that `get_prompt_base_instructions()` is the only place a request's prompt is rendered (its callers: the turn, both compaction paths, the prewarm, world state, the reviewer); that `mightling-prompt` as a standard-library crate creates no cycle, by analogy with `mling-airgapped`.
+**Read from the source, not run:** that `get_prompt_base_instructions()` is the only place a request's prompt is rendered (its callers: the turn, both compaction paths, the prewarm, world state, the reviewer); that `mightling-prompt` as a standard-library crate creates no cycle, by analogy with `ling-airgapped`.
 
 **Assumed:** the patch size; the 30-second figure for a switch at 50K tokens (scaled from one cold read of 39.5K tokens); that a hundred instances validate on arm64.
 
@@ -420,27 +420,27 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 
 ## 13. What was built (Phase 1, 2026-10-03)
 
-**In the launcher** (`mling-rs/src/prompt.rs`, no Codex patch):
-- The two built-in prompts: `default` (`Core::Codex`, all three blocks) and `high-swe` (`mling-rs/prompts/high-swe.md`, v2: Appendix A with §6.4's two edits, 4,381 chars, the `code` block only). Custom prompts from `$CODEX_HOME/system-prompts/<name>.md` with the optional `<!-- mling: blocks=… -->` first line; a file with a bad name, no text, or a built-in's name is passed over with a note in `mling prompt list`, and an unknown block name is ignored with one.
+**In the launcher** (`ling-rs/src/prompt.rs`, no Codex patch):
+- The two built-in prompts: `default` (`Core::Codex`, all three blocks) and `high-swe` (`ling-rs/prompts/high-swe.md`, v2: Appendix A with §6.4's two edits, 4,381 chars, the `code` block only). Custom prompts from `$CODEX_HOME/system-prompts/<name>.md` with the optional `<!-- ling: blocks=… -->` first line; a file with a bad name, no text, or a built-in's name is passed over with a note in `ling prompt list`, and an unknown block name is ignored with one.
 - The tiers of §4.1: `DREAMFERENCE_MIGHTLING_PROMPT`, `mightling_prompt` in the configuration file, `default`. An unknown name prints `⚠️  prompt "<name>" from <tier> is not installed (installed: …); skipped.` at launch and the next tier is used. An interactive session started under another prompt than `default` prints `Prompt: <name> (<tier>).` once.
-- `mling prompt` / `list`, `show [<name>]` and `use <name>`, intercepted before Codex like `night` and `node`. `show` prints the text on stdout and its size and blocks on stderr; `use` writes the key with `toml_edit` and says when the variable still wins.
+- `ling prompt` / `list`, `show [<name>]` and `use <name>`, intercepted before Codex like `night` and `node`. `show` prints the text on stdout and its size and blocks on stderr; `use` writes the key with `toml_edit` and says when the variable still wins.
 - The catalog route of §4.2: `model_catalog.json` is written as before and always carries `default`; another prompt is written to `model_catalog.<name>.json` and named with `-c model_catalog_json="…"` in front of the user's arguments, unless the user passed their own `model_catalog_json`.
 
-**Elsewhere:** `DreamferenceConfig.mightling_prompt` (`DEFAULT_MIGHTLING_PROMPT`, a test keeps it equal to the launcher's), `[night] prompt` (passed as `DREAMFERENCE_MIGHTLING_PROMPT` to every command of the task), `mling-admin swe-bench run --prompt <name>` (§6.2), and `prompt` among the subcommands Night Shift does not count as an open session.
+**Elsewhere:** `DreamferenceConfig.mightling_prompt` (`DEFAULT_MIGHTLING_PROMPT`, a test keeps it equal to the launcher's), `[night] prompt` (passed as `DREAMFERENCE_MIGHTLING_PROMPT` to every command of the task), `ling-admin swe-bench run --prompt <name>` (§6.2), and `prompt` among the subcommands Night Shift does not count as an open session.
 
 **Where it departs from the design above:**
-- **`model_catalog.json` always holds `default`,** not the chosen prompt: `config.toml` names it, and `mling skill` and `/night` read the served model's id and window from it.
+- **`model_catalog.json` always holds `default`,** not the chosen prompt: `config.toml` names it, and `ling skill` and `/night` read the served model's id and window from it.
 - **The skills glossary follows every prompt.** It is not one of the three blocks: the skills list is a developer message both prompts see (§7), so the glossary that explains it goes wherever the list goes. It is off by default.
 - **Codex's search sentence is rewritten only for a prompt that carries the `code` block,** because the rewritten sentence points at the Code navigation section. `high-swe` has no such sentence; its own says `rg`, then `grep -rn`.
 - **The benchmark mounts the one file** (`<host>/system-prompts/<name>.md` at the container's `$CODEX_HOME/system-prompts/<name>.md`, read-only), not the folder, and the manifest records its SHA-256 as `prompt_sha256`; a built-in prompt is covered by `runtime_hash`. A manifest written before this has no `prompt` and is compared as `default`.
 - **The Python side checks the name's form only** (lowercase letters, digits, hyphens): which prompts are installed is the launcher's to say.
 
-**Tested:** 10 launcher tests (`cargo test --release -p mling-launcher` in a scratch export: 131 passed, 1 ignored), among them that `default` composes byte for byte to what the launcher sent before, for the combinations of email, code block, glossary and `rg`; and the Python tests in `tests/test_mightling_prompt.py`, `tests/test_night_shift.py` and `tests/test_swe_bench.py`, among them that the shipped text is Appendix A with §6.4's two edits and nothing else.
+**Tested:** 10 launcher tests (`cargo test --release -p ling-launcher` in a scratch export: 131 passed, 1 ignored), among them that `default` composes byte for byte to what the launcher sent before, for the combinations of email, code block, glossary and `rg`; and the Python tests in `tests/test_mightling_prompt.py`, `tests/test_night_shift.py` and `tests/test_swe_bench.py`, among them that the shipped text is Appendix A with §6.4's two edits and nothing else.
 
 **Run in the build of `258c3b5` (2026-10-03),** against the live model rather than a stub endpoint:
-- `DREAMFERENCE_MIGHTLING_PROMPT=high-swe mling exec …` recorded the `high-swe` text as the rollout's `base_instructions` (`You are Mightling, a coding agent. You work in a software repository through a shell, …`), and the launcher wrote `model_catalog.high-swe.json` beside `model_catalog.json`.
-- That session resumed with the variable unset (`mling exec resume <id>`) and asked to quote the first two sentences of its instructions quoted `high-swe`'s; a fresh session under `default`, asked the same, quoted `default`'s (`… You and the user share one workspace, …`). So a resumed session keeps its prompt.
-- `mling prompt list` from a shell listed `default` (chosen) and `high-swe`.
+- `DREAMFERENCE_MIGHTLING_PROMPT=high-swe ling exec …` recorded the `high-swe` text as the rollout's `base_instructions` (`You are Mightling, a coding agent. You work in a software repository through a shell, …`), and the launcher wrote `model_catalog.high-swe.json` beside `model_catalog.json`.
+- That session resumed with the variable unset (`ling exec resume <id>`) and asked to quote the first two sentences of its instructions quoted `high-swe`'s; a fresh session under `default`, asked the same, quoted `default`'s (`… You and the user share one workspace, …`). So a resumed session keeps its prompt.
+- `ling prompt list` from a shell listed `default` (chosen) and `high-swe`.
 
 **Not run:** Phase 0 (§6.1), the runs of §6.2, and Phase 2 (`/prompt` in the TUI, the live switch and its patch) are not built.
 
@@ -459,7 +459,7 @@ Three arms of §6.2's A and B, one repetition each, run one after the other on t
 
 ## Appendix A. The `high-swe` text (v1)
 
-The candidate the pilot of §6.4 ran, verbatim (4,229 chars). Phase 1 ships v2, which is this text with the two edits §6.4 lists, as `mling-rs/prompts/high-swe.md`; the runs of §6.2 measure v2; and once they are recorded a test pins the shipped file to the text of the most recent recorded run, as cave mode's test does for its levels.
+The candidate the pilot of §6.4 ran, verbatim (4,229 chars). Phase 1 ships v2, which is this text with the two edits §6.4 lists, as `ling-rs/prompts/high-swe.md`; the runs of §6.2 measure v2; and once they are recorded a test pins the shipped file to the text of the most recent recorded run, as cave mode's test does for its levels.
 
 ````markdown
 You are Mightling, a coding agent. You work in a software repository through a shell, and your job is to resolve the task you are given by changing the repository's source code, correctly and completely, without breaking anything that worked before.

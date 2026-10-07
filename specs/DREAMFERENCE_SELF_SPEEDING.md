@@ -5,7 +5,7 @@
 **Builds on:**
 - `resolve_speculative_config()` and the `--draft-model` layering ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
 - the compile-cache signature (`_compile_cache_signature`), which already includes the draft model;
-- `ModelDeepInspector.profile_acceptance_by_workload()` behind `mling-admin main-model inspect --deep`;
+- `ModelDeepInspector.profile_acceptance_by_workload()` behind `ling-admin main-model inspect --deep`;
 - the session logs in `~/.mightling/sessions/`;
 - the overnight window of [MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md).
 
@@ -13,7 +13,7 @@
 
 ## 1. Goal
 
-Make `mling` faster on *this user's* work by retraining the drafter on the user's own sessions, overnight and on this machine. Nothing leaves the host, and the answers do not change.
+Make `ling` faster on *this user's* work by retraining the drafter on the user's own sessions, overnight and on this machine. Nothing leaves the host, and the answers do not change.
 
 **Why it is safe to try.** Speculative decoding is lossless: the target model verifies every drafted token, so a better or worse drafter changes speed only, never output. The only risk is a slower machine, and §6 refuses to promote a drafter that is slower.
 
@@ -36,17 +36,17 @@ Make `mling` faster on *this user's* work by retraining the drafter on the user'
 
 ## 2. Surface
 
-No slash command. Tuning stops the model server, which the `mling` session asking for it depends on, so it cannot be triggered from inside an agent session. Everything is in `mling-admin`:
+No slash command. Tuning stops the model server, which the `ling` session asking for it depends on, so it cannot be triggered from inside an agent session. Everything is in `ling-admin`:
 
 | Command | Effect |
 |---|---|
-| `mling-admin drafter stats [--since 7d]` | Acceptance per workload class from the measurement log (§3), plus the live counters. |
-| `mling-admin drafter collect` | Builds the training set from sessions (§4). Reports size, class mix and what was excluded. The server may keep running. |
-| `mling-admin drafter tune [--budget 3h]` | Trains a candidate (§5). Refuses unless vLLM is stopped. Checkpoints, so it can stop at the budget or window end and resume. |
-| `mling-admin drafter evaluate <id>` | A/B against the current drafter (§6). Starts vLLM with the candidate, measures, and restores the server as it was. |
-| `mling-admin drafter promote <id>` | Makes the candidate the drafter (§6.3). |
-| `mling-admin drafter rollback` | Returns to the previous drafter, or the registry's. |
-| `mling-admin drafter list` | Candidates, with training data size, dates, evaluation results and which one is active. |
+| `ling-admin drafter stats [--since 7d]` | Acceptance per workload class from the measurement log (§3), plus the live counters. |
+| `ling-admin drafter collect` | Builds the training set from sessions (§4). Reports size, class mix and what was excluded. The server may keep running. |
+| `ling-admin drafter tune [--budget 3h]` | Trains a candidate (§5). Refuses unless vLLM is stopped. Checkpoints, so it can stop at the budget or window end and resume. |
+| `ling-admin drafter evaluate <id>` | A/B against the current drafter (§6). Starts vLLM with the candidate, measures, and restores the server as it was. |
+| `ling-admin drafter promote <id>` | Makes the candidate the drafter (§6.3). |
+| `ling-admin drafter rollback` | Returns to the previous drafter, or the registry's. |
+| `ling-admin drafter list` | Candidates, with training data size, dates, evaluation results and which one is active. |
 
 **Scheduling.** With Night Shift enabled, `drafter.auto = true` lets the night run take the tail of its window:
 1. once the task queue is empty, stop vLLM;
@@ -95,7 +95,7 @@ The source is Codex rollout files under `~/.mightling/sessions/YYYY/MM/DD/*.json
 
 These are dropped, and `collect` reports each count:
 - turns whose context contains Gmail results;
-- turns whose context contains `mling-admin gmail read` output;
+- turns whose context contains `ling-admin gmail read` output;
 - `.env`-like content, and matches of a credential pattern list;
 - sessions under paths listed in `drafter.exclude_paths`;
 - ephemeral sessions (`--ephemeral` writes none anyway).

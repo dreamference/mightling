@@ -11,7 +11,7 @@ patch Dreamference applies to a running Onyx -- replaced brand assets (`onyx_bra
 substituted and appended stylesheets (`onyx_ui_fonts`, `onyx_ui_overrides`), and rewritten strings
 in the compiled bundle (`onyx_ui_labels`) -- and the desktop shell that offers the same deployment
 in a window of its own (`desktop_installer`, `desktop_runner`). `searxng_sidecar` and
-`sidecar_network` start the search container the web UI, `mling-search` and the MCP server share;
+`sidecar_network` start the search container the web UI, `ling-search` and the MCP server share;
 `google_service` starts the Google service without the web UI, and `google_workspace_reader` is its
 read-only Drive and Calendar half (Mightling's apps).
 """

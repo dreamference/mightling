@@ -1,7 +1,7 @@
 """
-The Night Shift queue on disk, as the `mling` launcher writes it.
+The Night Shift queue on disk, as the `ling` launcher writes it.
 
-The launcher (`mling-rs/src/night.rs`) adds, lists and drops tasks; the night run reads them and
+The launcher (`ling-rs/src/night.rs`) adds, lists and drops tasks; the night run reads them and
 records what happened. Both sides change a task only under `tasks/<id>.lock` (flock on both sides)
 and replace its JSON file whole, so a `/night drop` and a status change never overwrite each other.
 See specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §4.
@@ -198,7 +198,7 @@ class NightShiftQueue:
         """
         Tells whether a night run holds `runner.lock` right now.
 
-        `mling-admin index`, `codex build` and `server start` ask this and refuse while it is
+        `ling-admin index`, `codex build` and `server start` ask this and refuse while it is
         true (spec §6.2): each of them is heavy enough to put the model server at risk.
 
         Args:

@@ -1,22 +1,22 @@
-"""Every `mling` TUI slash command, driven through a real terminal against the running model server,
+"""Every `ling` TUI slash command, driven through a real terminal against the running model server,
 and the command-line subcommands Mightling changes.
 
 The slash-command tests are live. They skip unless the model server answers at the configured vLLM
-URL and `mling` has been built (`mling-admin codex build`), so the ordinary suite stays offline.
+URL and `ling` has been built (`ling-admin codex build`), so the ordinary suite stays offline.
 The subcommand tests need only the built binary, since the launcher answers them before it looks
 for a server. With the server up, run the file on its own; the tests that make the model work take
 minutes:
 
     .venv/bin/python -m pytest tests/test_mightling_slash_commands.py -v
 
-Each command runs in a fresh session: `mling` on a pseudo-terminal, rendered by pyte, in a
+Each command runs in a fresh session: `ling` on a pseudo-terminal, rendered by pyte, in a
 throwaway git repository with a throwaway CODEX_HOME, so nothing touches the user's own sessions
 or config. The list of commands is read from the pinned Codex source, and every one of them must
 appear in CASES below. A command added by a submodule bump therefore fails here until someone
 decides how to drive it.
 
 Nothing here confirms an action with outside effects: pop-ups are closed with Esc, and neither
-`mling update` (which would replace the installed binaries) nor `mling app` (which opens a
+`ling update` (which would replace the installed binaries) nor `ling app` (which opens a
 desktop window) is run.
 """
 
@@ -79,13 +79,13 @@ def _served_model() -> Optional[str]:
 SERVED_MODEL = _served_model()
 
 needs_source = pytest.mark.skipif(not SLASH_SOURCE.is_file(), reason="codex submodule not checked out")
-needs_mightling = pytest.mark.skipif(not os.access(MIGHTLING, os.X_OK), reason=f"{MIGHTLING} is not built; run `mling-admin codex build`")
+needs_mightling = pytest.mark.skipif(not os.access(MIGHTLING, os.X_OK), reason=f"{MIGHTLING} is not built; run `ling-admin codex build`")
 needs_server = pytest.mark.skipif(SERVED_MODEL is None, reason=f"no model server answering at {VLLM_HOST}/v1/models")
 needs_terminal = pytest.mark.skipif(pexpect is None, reason="pexpect and pyte are not installed")
 
 
 def live(test: Callable) -> Callable:
-    """Marks a test that drives `mling` on a terminal against the running model server."""
+    """Marks a test that drives `ling` on a terminal against the running model server."""
     for mark in (needs_source, needs_mightling, needs_server, needs_terminal):
         test = mark(test)
     return test
@@ -146,7 +146,7 @@ class Case:
 
 def _agents_md_written(session: "Session", workspace: Path) -> None:
     # The local model sometimes ends /init's turn on "I'll create a concise AGENTS.md..." without
-    # the tool call (seen twice in the TUI on 2026-09-28/29; 6 of 6 `mling exec` runs of the same
+    # the tool call (seen twice in the TUI on 2026-09-28/29; 6 of 6 `ling exec` runs of the same
     # prompt wrote it, with or without an extra "act, don't announce" instruction). A user would say
     # "go ahead", so the test does too, once; it fails only if the file still does not appear.
     if not (workspace / "AGENTS.md").is_file():
@@ -264,7 +264,7 @@ def patched_slash_commands() -> Dict[str, str]:
 
 class Session:
     """
-    One `mling` process on a pseudo-terminal, with its screen rendered by pyte.
+    One `ling` process on a pseudo-terminal, with its screen rendered by pyte.
     """
 
     def __init__(self, workspace: Path, codex_home: Path, args: List[str]):
@@ -301,7 +301,7 @@ class Session:
     def wait_ready(self) -> None:
         # The launcher may first wait for the server, and a cold compile of the prompt takes time.
         ready = self.wait_for(lambda text: ">_ Mightling" in text and "›" in text, timeout=120)
-        assert ready, f"mling never reached its composer:\n{self.text()}"
+        assert ready, f"ling never reached its composer:\n{self.text()}"
         assert "Sign in with ChatGPT" not in self.text()
         # Which commands are offered depends on feature flags that load just after the composer
         # appears; typing sooner races them.
@@ -369,7 +369,7 @@ def workspace(tmp_path: Path) -> Path:
     (repo / "sub").mkdir(parents=True)
     (repo / "a.txt").write_text("a\n")
     (repo / "sub" / "b.txt").write_text("b\n")
-    git = ["git", "-c", "user.name=mightling-test", "-c", "user.email=mling@test"]
+    git = ["git", "-c", "user.name=mightling-test", "-c", "user.email=ling@test"]
     subprocess.run([*git, "init", "-q"], cwd=repo, check=True)
     subprocess.run([*git, "add", "."], cwd=repo, check=True)
     subprocess.run([*git, "commit", "-qm", "init"], cwd=repo, check=True)
@@ -423,7 +423,7 @@ def _run(name: str, case: Case, workspace: Path, codex_home: Path) -> None:
             session.wait_idle(timeout=600)
 
         screen = session.text()
-        assert session.child.isalive(), f"mling exited after /{name}:\n{screen}"
+        assert session.child.isalive(), f"ling exited after /{name}:\n{screen}"
         for marker in FAILURE_MARKERS:
             assert marker not in screen, f"/{name} produced {marker!r}:\n{screen}"
         for wanted in case.expect:
@@ -431,7 +431,7 @@ def _run(name: str, case: Case, workspace: Path, codex_home: Path) -> None:
             assert wanted in screen, f"/{name} did not show {wanted!r}:\n{screen}"
         if case.mode == "popup":
             session.child.send("\x1b")
-            assert session.pump(1.0), f"mling exited when /{name} was dismissed"
+            assert session.pump(1.0), f"ling exited when /{name} was dismissed"
         if case.check:
             case.check(session, workspace)
     finally:
@@ -471,7 +471,7 @@ def test_slash_command(name: str, workspace: Path, codex_home: Path):
 @live
 def test_a_fresh_home_opens_on_the_composer(tmp_path: Path, workspace: Path):
     # No pre-seeded provider: whatever the launcher writes must be enough to skip the ChatGPT
-    # sign-in screen, which is what a new user of `mling` would otherwise land on.
+    # sign-in screen, which is what a new user of `ling` would otherwise land on.
     home = tmp_path / "fresh-home"
     home.mkdir()
     (home / "config.toml").write_text(f'[projects."{workspace}"]\ntrust_level = "trusted"\n')
@@ -480,13 +480,13 @@ def test_a_fresh_home_opens_on_the_composer(tmp_path: Path, workspace: Path):
         reached = session.wait_for(
             lambda text: ("›" in text and ">_ Mightling" in text) or "Sign in with ChatGPT" in text, 120
         )
-        assert reached, f"mling showed neither its composer nor a sign-in screen:\n{session.text()}"
+        assert reached, f"ling showed neither its composer nor a sign-in screen:\n{session.text()}"
         # The first screen to match is not the answer: onboarding can replace the composer a moment
         # later, and a check at that instant passed while a new user still landed on the sign-in.
         session.pump(5.0)
         screen = session.text()
         assert "Sign in with ChatGPT" not in screen, f"a fresh CODEX_HOME lands on the ChatGPT sign-in screen:\n{screen}"
-        assert ">_ Mightling" in screen and "›" in screen, f"mling is not on its composer:\n{screen}"
+        assert ">_ Mightling" in screen and "›" in screen, f"ling is not on its composer:\n{screen}"
     finally:
         session.close()
 
@@ -510,7 +510,7 @@ def _mightling(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
 @needs_mightling
 def test_version_names_mightling(tmp_path: Path):
     result = _mightling(tmp_path, "--version")
-    assert result.returncode == 0 and result.stdout.startswith("mling "), result.stdout + result.stderr
+    assert result.returncode == 0 and result.stdout.startswith("ling "), result.stdout + result.stderr
 
 
 @needs_mightling
@@ -528,7 +528,7 @@ def test_openai_hosted_subcommands_are_refused(tmp_path: Path, name: str):
     # Refused by the launcher before Codex parses anything, so no sign-in or cloud request starts.
     result = _mightling(tmp_path, name)
     assert result.returncode != 0
-    assert f"`mling {name}` is not available" in result.stderr, result.stdout + result.stderr
+    assert f"`ling {name}` is not available" in result.stderr, result.stdout + result.stderr
 
 
 @needs_mightling
@@ -538,7 +538,7 @@ def test_refusal_is_not_bypassed_by_options_before_the_subcommand(tmp_path: Path
     # the OpenAI sign-in start.
     result = _mightling(tmp_path, *args)
     assert result.returncode != 0
-    assert f"`mling {args[-1]}` is not available" in result.stderr, result.stdout + result.stderr
+    assert f"`ling {args[-1]}` is not available" in result.stderr, result.stdout + result.stderr
 
 
 @needs_mightling
@@ -547,7 +547,7 @@ def test_offline_subcommands_do_not_wait_for_the_model_after_options(tmp_path: P
     # wait (up to ten minutes) for one; _mightling's 30 s timeout turns a wait into a failure.
     result = _mightling(tmp_path, "-m", "any-model", "completion", "bash")
     assert result.returncode == 0, result.stderr
-    assert "mling" in result.stdout and "Waiting for local vLLM" not in result.stderr
+    assert "ling" in result.stdout and "Waiting for local vLLM" not in result.stderr
 
 
 @needs_mightling
@@ -555,4 +555,4 @@ def test_offline_subcommands_do_not_wait_for_the_model_after_options(tmp_path: P
 def test_subcommand_usage_names_mightling(tmp_path: Path, subcommand: str):
     result = _mightling(tmp_path, subcommand, "--help")
     usage = next((line for line in result.stdout.splitlines() if line.startswith("Usage:")), "")
-    assert usage.startswith(f"Usage: mling {subcommand}"), result.stdout + result.stderr
+    assert usage.startswith(f"Usage: ling {subcommand}"), result.stdout + result.stderr

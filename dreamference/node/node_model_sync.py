@@ -1,6 +1,6 @@
 """
 Copying a model's files to another node (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.2):
-`mling-admin node sync-model <node> <model>`.
+`ling-admin node sync-model <node> <model>`.
 
 A second Spark that is to serve the model this one already has need not download tens of
 gigabytes again: the Hugging Face cache folders of the model and of its drafter are sent over the
@@ -106,11 +106,11 @@ class NodeModelSync:
         from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
         from dreamference.node.node_pairing import NodePairing
         if model_key not in ModelMatrixRegistry.MATRIX:
-            print(f"❌ {model_key} is not a key of the model matrix (`mling-admin model list`).")
+            print(f"❌ {model_key} is not a key of the model matrix (`ling-admin model list`).")
             return 1
         record: Optional[Dict[str, Any]] = NodePairing.find(name)
         if record is None:
-            print(f"❌ {name} is not a paired node. Pair once with: mling-admin node add {name}")
+            print(f"❌ {name} is not a paired node. Pair once with: ling-admin node add {name}")
             return 1
         if address:
             record = dict(record, address=address)
@@ -118,7 +118,7 @@ class NodeModelSync:
         folders = [hub / cls.folder_name(repo) for repo in cls.repos(model_key)]
         missing = [folder.name for folder in folders if not (folder / "snapshots").is_dir()]
         if missing:
-            print(f"❌ This machine does not have {', '.join(missing)}: `mling-admin model download {model_key}` "
+            print(f"❌ This machine does not have {', '.join(missing)}: `ling-admin model download {model_key}` "
                   f"here first, or on {record['name']}.")
             return 1
         size = cls.size(folders)
@@ -138,7 +138,7 @@ class NodeModelSync:
             return 1
         seconds = max(1.0, time.time() - started)
         print(f"✅ {record['name']} has {model_key} ({size / GIB / seconds * 8:.1f} Gbit/s over {seconds:.0f} s). "
-              f"Serve it there with: mling-admin node set {record['name']} --model {model_key}")
+              f"Serve it there with: ling-admin node set {record['name']} --model {model_key}")
         return 0
 
     # -- the node --------------------------------------------------------------------------------

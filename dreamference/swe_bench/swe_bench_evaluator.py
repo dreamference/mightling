@@ -52,7 +52,7 @@ class SweBenchEvaluator:
         free = shutil.disk_usage(swe_bench_settings.CACHE_DIR).free
         if free < reserve:
             return (f"{free / GIB:.0f} GiB of disk is free and the reserve is {reserve / GIB:.0f} "
-                    "(free some with `mling-admin swe-bench clean --images`)")
+                    "(free some with `ling-admin swe-bench clean --images`)")
         return None
 
     # -- validation ----------------------------------------------------------------------------

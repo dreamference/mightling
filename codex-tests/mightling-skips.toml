@@ -1,4 +1,4 @@
-# Codex tests that `mling-admin codex test` does not run, each with the reason.
+# Codex tests that `ling-admin codex test` does not run, each with the reason.
 #
 # Everything not listed here is expected to pass on Mightling's tree: the pinned `codex/` submodule
 # with `codex-patches/` applied and the launcher compiled in, built and tested by CodexTestRunner.
@@ -16,7 +16,7 @@ reason = "Does not compile at rust-v0.158.0: it builds a ToolDefinition without 
 
 # cli-name: 3 tests
 [[test]]
-reason = """Patch 0001 sets clap's name to `mling`, so usage lines read `Usage: mling ...` and `--version` prints `mling X.Y.Z`; these tests match `codex`."""
+reason = """Patch 0001 sets clap's name to `ling`, so usage lines read `Usage: ling ...` and `--version` prints `ling X.Y.Z`; these tests match `codex`."""
 filter = """
   (binary_id(codex-cli::bin/codex) & test(=exec_server_args_tests::exec_server_help_documents_remote_options))
 | (binary_id(codex-cli::bin/codex) & test(=tests::plugin_marketplace_help_uses_plugin_namespace))
@@ -105,7 +105,7 @@ filter = """
 
 # cli-refused: 8 tests
 [[test]]
-reason = """`mling login`, `logout` and `cloud` are refused before Codex parses its arguments (the launcher's REMOVED_COMMANDS, with patches 0005 and 0006): Mightling has no a cloud account. These tests run those commands."""
+reason = """`ling login`, `logout` and `cloud` are refused before Codex parses its arguments (the launcher's REMOVED_COMMANDS, with patches 0005 and 0006): Mightling has no a cloud account. These tests run those commands."""
 filter = """
   (binary_id(codex-cli::cloud_auth) & test(=cloud_list_only_allows_trusted_credential_destinations))
 | (binary_id(codex-cli::features) & test(=strict_config_is_not_supported_for_cloud_command))

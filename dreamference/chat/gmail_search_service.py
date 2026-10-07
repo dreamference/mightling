@@ -677,9 +677,9 @@ class GmailSearchService:
         if refused:
             return f"<h2>{name} access was not granted</h2><p>{html.escape(refused)}</p>"
         return (
-            f"<h2>{name} connected</h2><p>You can close this tab. In <code>mling</code>, choose "
+            f"<h2>{name} connected</h2><p>You can close this tab. In <code>ling</code>, choose "
             "<b>I've connected it</b> in <code>/apps</code>; the tools arrive when you restart it "
-            "or run <code>mling resume</code>.</p>"
+            "or run <code>ling resume</code>.</p>"
         )
 
     @classmethod
@@ -1162,7 +1162,7 @@ class GmailSearchService:
                       <button id="paste-btn" class="btn-secondary">Finish connecting</button>
                       <p id="paste-result" class="muted"></p>
                     </div>
-                    <p class="muted">Then return to <code>mling</code> and choose <b>I've connected it</b>.</p>
+                    <p class="muted">Then return to <code>ling</code> and choose <b>I've connected it</b>.</p>
                     <script>
                         document.getElementById('start-btn').onclick = async () => {{
                             const res = await fetch('/api/google/oauth/start?app={app}', {{ method: 'POST' }});

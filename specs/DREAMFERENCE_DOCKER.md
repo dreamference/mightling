@@ -22,9 +22,9 @@
 ### 1.1. Download Flow
 
 1. **Triggers:**
-   - `mling-admin init`;
-   - `mling-admin server start`, for the main model, `--draft-model`, and the recipe's drafter;
-   - `mling-admin model download [--model M | --all]`.
+   - `ling-admin init`;
+   - `ling-admin server start`, for the main model, `--draft-model`, and the recipe's drafter;
+   - `ling-admin model download [--model M | --all]`.
 
    `model list` only lists; it downloads nothing.
 2. **Resolution:** alias → HF repo via `ModelMatrixRegistry.resolve_hf_repo()` (also exposed as `dreamference.hardware.resolve_model_hf_repo`).
@@ -57,9 +57,9 @@
 
 ### 2.3. Clearing
 
-`mling-admin clear model-cache` runs `ModelDownloader.clear_cache()`, which removes exactly two directories:
+`ling-admin clear model-cache` runs `ModelDownloader.clear_cache()`, which removes exactly two directories:
 - the hub, `~/.cache/huggingface/hub` (or `$HF_HOME/hub`), leaving the stored HF token beside it;
-- the tensorizer cache, `~/.cache/dreamference/tensorizer`, leaving vLLM's compile cache, the `mling` build cache, fonts and logs.
+- the tensorizer cache, `~/.cache/dreamference/tensorizer`, leaving vLLM's compile cache, the `ling` build cache, fonts and logs.
 
 Anything a container wrote there as root survives the user's `rmtree`; the command then names the directory, prints the `sudo rm -rf` for it and exits 1. Until 2026-09-29 it removed both parents. Deleting individual `models--…` directories is the targeted alternative.
 
@@ -78,13 +78,13 @@ Tensorizer serializes weights into one `model.tensors` file for faster loading. 
 
 ### 3.2. Configuration
 
-- **CLI:** `mling-admin model download --tensorize|--no-tensorize`, `server start --tensorize|--no-tensorize`.
+- **CLI:** `ling-admin model download --tensorize|--no-tensorize`, `server start --tensorize|--no-tensorize`.
 - **Config key:** `use_tensorizer = true|false`; environment variable `DREAMFERENCE_USE_TENSORIZER`.
 - **Recipe:** `launch_overrides["use_tensorizer"]`.
 
 ### 3.3. Clearing
 
-`mling-admin clear tensorize-cache` runs `ModelDownloader.clear_tensorizer_cache()`, which removes `~/.cache/dreamference/tensorizer` and nothing else, reporting root-owned leftovers as in §2.3. Until 2026-09-29 it removed all of `~/.cache/dreamference`. See `DREAMFERENCE_CLI.md` §4.18.
+`ling-admin clear tensorize-cache` runs `ModelDownloader.clear_tensorizer_cache()`, which removes `~/.cache/dreamference/tensorizer` and nothing else, reporting root-owned leftovers as in §2.3. Until 2026-09-29 it removed all of `~/.cache/dreamference`. See `DREAMFERENCE_CLI.md` §4.18.
 
 ---
 
@@ -185,20 +185,20 @@ The diffusion sidecar, when diffusion is switched on, runs in the **main model's
 | Container | Started by | Notes |
 | --- | --- | --- |
 | `dreamference-diffusion-8001` | `server start`, before vLLM, **only with `DIFFUSION_ENABLED` on** (off since 2026-10-03; a leftover is removed) | `--memory=8g`, swap equal; `diffusion_openai_service.py` |
-| `mightling-api_server-1`, `mling-web_server-1`, `mightling-relational_db-1`, `mightling-nginx-1`, `mling-code-interpreter-1` | `mling-admin chat start` (Onyx Lite via `onyx-cli`) | Container names pinned to `mightling-*` in the lite overlay |
-| `dreamference-gmail`, `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `mling-admin chat configure` | Sidecars **created on** Onyx's network (not joined afterwards, see below); published on loopback only (gmail 8767, image search 8768, stt 8100) |
-| `dreamference-searxng` | `mling-admin searxng start` (`SearxngSidecar`) | `127.0.0.1:8888`; created on the project's own network `dreamference-sidecars`; `configure` joins it to Onyx's network, and first recreates one still on the default bridge |
-| `dreamference-openhands` | `mling-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, UI on **`127.0.0.1:3001`** (`OPENHANDS_HOST_PORT`): not 3000, which is Onyx's, and loopback only because the container mounts the Docker socket (`DREAMFERENCE_AGENTS.md` §5) |
-| `mightling-swe-<run>-<instance>` (one per SWE-bench instance, labelled `mling.swe-bench.run=<run>`) | `mling-admin swe-bench run` and `smoke` (`SweBenchInstanceRun`) | The instance's own image (third-party arm64 builds, `greynewell/swe-bench-arm64`); on the **internal** network `mightling-swe-bench` (`docker network create --internal`), which reaches the model server at the network's gateway and nothing else; `--memory` and `--memory-swap` at `[swe_bench] task_memory` (8G), `--cpus` 4, `--pids-limit 4096`; the relocated `mling` mounted read-only at `/opt/mling`. Grading containers are the upstream harness's own, capped afterwards at `eval_memory` (4G) with `docker update` |
+| `mightling-api_server-1`, `ling-web_server-1`, `mightling-relational_db-1`, `mightling-nginx-1`, `ling-code-interpreter-1` | `ling-admin chat start` (Onyx Lite via `onyx-cli`) | Container names pinned to `mightling-*` in the lite overlay |
+| `dreamference-gmail`, `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `ling-admin chat configure` | Sidecars **created on** Onyx's network (not joined afterwards, see below); published on loopback only (gmail 8767, image search 8768, stt 8100) |
+| `dreamference-searxng` | `ling-admin searxng start` (`SearxngSidecar`) | `127.0.0.1:8888`; created on the project's own network `dreamference-sidecars`; `configure` joins it to Onyx's network, and first recreates one still on the default bridge |
+| `dreamference-openhands` | `ling-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, UI on **`127.0.0.1:3001`** (`OPENHANDS_HOST_PORT`): not 3000, which is Onyx's, and loopback only because the container mounts the Docker socket (`DREAMFERENCE_AGENTS.md` §5) |
+| `mightling-swe-<run>-<instance>` (one per SWE-bench instance, labelled `ling.swe-bench.run=<run>`) | `ling-admin swe-bench run` and `smoke` (`SweBenchInstanceRun`) | The instance's own image (third-party arm64 builds, `greynewell/swe-bench-arm64`); on the **internal** network `mightling-swe-bench` (`docker network create --internal`), which reaches the model server at the network's gateway and nothing else; `--memory` and `--memory-swap` at `[swe_bench] task_memory` (8G), `--cpus` 4, `--pids-limit 4096`; the relocated `ling` mounted read-only at `/opt/ling`. Grading containers are the upstream harness's own, capped afterwards at `eval_memory` (4G) with `docker update` |
 
-**What `mling-admin node enable` changes** (`node/node_settings.py`; `DREAMFERENCE_MIGHTLING_NODE.md` §4). On a node that is advertised, SearXNG is published on every interface instead of `127.0.0.1:8888`, and so is the web UI's port 3000 unless the node was enabled with `--no-web`; `searxng start` and `mling configure` recreate a container that is published on the other address. Port 80 never leaves loopback, and neither do the Gmail, image-search and speech-to-text sidecars. `node disable` puts both back on loopback.
+**What `ling-admin node enable` changes** (`node/node_settings.py`; `DREAMFERENCE_MIGHTLING_NODE.md` §4). On a node that is advertised, SearXNG is published on every interface instead of `127.0.0.1:8888`, and so is the web UI's port 3000 unless the node was enabled with `--no-web`; `searxng start` and `ling configure` recreate a container that is published on the other address. Port 80 never leaves loopback, and neither do the Gmail, image-search and speech-to-text sidecars. `node disable` puts both back on loopback.
 
 **No sidecar is created on Docker's default bridge.** A container's DNS setup is fixed by the network it is *created* on, and joining another network later does not change it. On the default bridge it is a copy of the host's upstream DNS servers (`/run/systemd/resolve/resolv.conf`) taken at container start; on a user-defined network, lookups go through Docker's resolver to the host's stub resolver (`127.0.0.53`) at lookup time.
 
 - **What failed (2026-10-01):** after a reboot, Docker restarted `dreamference-searxng` and `dreamference-stt` at 18:14:10, and the Wi-Fi received its DNS server at 18:14:15. Both containers copied an empty list (`# NO EXTERNAL NAMESERVERS DEFINED` in their `/etc/resolv.conf`), so every lookup failed and each search engine reported "HTTP connection error" until a restart by hand. Both were also on Onyx's network, as a second network, which did not help. `dreamference-gmail`, created on Onyx's network, came through the same boot unharmed.
-- **The fix:** `SidecarNetwork` (`chat/sidecar_network.py`) creates `dreamference-sidecars` when needed and tells whether a container was created on the default bridge (`HostConfig.NetworkMode` `bridge` or `default`). SearXNG is created on that network, because it must work where the web UI is not installed; the speech-to-text server is created on Onyx's network, like the other `configure` sidecars. A container found on the default bridge is removed and created again: SearXNG by `mling-admin searxng start` or `configure`, speech-to-text by `configure`. Neither holds state outside its mount or named volume.
+- **The fix:** `SidecarNetwork` (`chat/sidecar_network.py`) creates `dreamference-sidecars` when needed and tells whether a container was created on the default bridge (`HostConfig.NetworkMode` `bridge` or `default`). SearXNG is created on that network, because it must work where the web UI is not installed; the speech-to-text server is created on Onyx's network, like the other `configure` sidecars. A container found on the default bridge is removed and created again: SearXNG by `ling-admin searxng start` or `configure`, speech-to-text by `configure`. Neither holds state outside its mount or named volume.
 - **No resolver is hard-coded.** A fixed `--dns` (8.8.8.8, say) would send every lookup past the machine's own resolver, and Docker's `--dns` replaces the host's list instead of adding to it.
-- **Checked on this machine:** both recreated containers show `# ExtServers: [host(127.0.0.53)]` and resolve names; `mling-search` returns results; Onyx's API server reaches `dreamference-searxng:8080` and `dreamference-stt:8000` by name. The boot race itself was not reproduced, since that needs a reboot with late DNS.
+- **Checked on this machine:** both recreated containers show `# ExtServers: [host(127.0.0.53)]` and resolve names; `ling-search` returns results; Onyx's API server reaches `dreamference-searxng:8080` and `dreamference-stt:8000` by name. The boot race itself was not reproduced, since that needs a reboot with late DNS.
 
 **OpenHands launch:**
 

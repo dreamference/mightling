@@ -6,19 +6,19 @@ This module provides the DesktopRunner class, which builds and launches the Taur
 
 The shell is deliberately thin: its window points straight at the Onyx deployment on this machine,
 so there is no bundled frontend to keep in step with the browser. The desktop app and the browser
-render the same server, which means every patch `mling-admin chat configure` applies -- the typography,
+render the same server, which means every patch `ling-admin chat configure` applies -- the typography,
 the white canvas, the hidden chrome -- shows up in both without being ported. What the desktop app
 adds is a window of its own: its own launcher entry and icon, no address bar, and no tab that gets
 lost among thirty others.
 
 That is the Chat window. Beside it the app now carries a second, the Work window (the coding agent
-on `mling app-server`, specs/DREAMFERENCE_MIGHTLING_DESKTOP.md), whose frontend *is* bundled: it is
+on `ling app-server`, specs/DREAMFERENCE_MIGHTLING_DESKTOP.md), whose frontend *is* bundled: it is
 built from `desktop/ui` before every Tauri build or dev run (`build_ui`). Chat is unchanged by it.
 
 It follows the same shape as the agent runners: check the service is healthy, provision the tooling
 if it is missing, then hand off to a subprocess. The health check is the one that matters -- a
 window opened against a stopped Onyx shows a connection error with no hint of what to start, so it
-is checked first and the user is told to run `mling-admin chat start` instead.
+is checked first and the user is told to run `ling-admin chat start` instead.
 """
 
 import json
@@ -50,12 +50,12 @@ HEALTH_TIMEOUT_SECONDS: Final[int] = 5
 # running from a source checkout, they belong in the XDG user directories instead.
 DESKTOP_ENTRY_DIR: Final[str] = os.path.expanduser("~/.local/share/applications")
 ICON_DIR: Final[str] = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps")
-DESKTOP_ENTRY_NAME: Final[str] = "mling-app.desktop"
-ICON_NAME: Final[str] = "mling-app"
+DESKTOP_ENTRY_NAME: Final[str] = "ling-app.desktop"
+ICON_NAME: Final[str] = "ling-app"
 
 # GNOME matches a running window to its desktop entry by `WM_CLASS`, and shows a generic icon when
 # nothing matches -- which is why the app appeared in the dock as an unnamed placeholder. Tao sets
-# the class from the binary name, so the window reports instance `mling-app` and class
+# the class from the binary name, so the window reports instance `ling-app` and class
 # `Mightling-app`; naming the file after the instance covers the automatic match and
 # `StartupWMClass` covers the explicit one.
 WINDOW_CLASS: Final[str] = "Mightling-app"
@@ -68,7 +68,7 @@ LEGACY_ENTRY_NAMES: Final[tuple] = ("puffin-desktop", "puffin-ui", "puffin-app")
 # WebKitGTK's HTTP cache, inside the webview's data directory. Onyx serves its stylesheets with
 # `immutable` and never changes their filenames, so a patched stylesheet is invisible to anything
 # holding a cached copy -- the browser needs a hard refresh, and the app kept showing UI from
-# before the last `mling-admin chat configure`. Emptying this on launch costs a few megabytes re-fetched
+# before the last `ling-admin chat configure`. Emptying this on launch costs a few megabytes re-fetched
 # over loopback and removes the whole class of bug. The sibling `cookies` file is left alone, which
 # is what keeps the session: deleting the data directory wholesale signs the user out.
 WEBVIEW_CACHE_DIR_NAME: Final[str] = "WebKitCache"
@@ -201,7 +201,7 @@ class DesktopRunner:
         print("❌ The desktop app is built from the repository's desktop/ project, which a release "
               "install does not have.")
         print("💡 Install the app from the release instead: the Mightling .deb or AppImage on the "
-              "release page puts `mling-app` in your launcher.")
+              "release page puts `ling-app` in your launcher.")
         return 1
 
     @classmethod
@@ -212,7 +212,7 @@ class DesktopRunner:
         Returns:
             int: The app's exit code, or 1 if it is not installed.
         """
-        installed = shutil.which("mling-app")
+        installed = shutil.which("ling-app")
         if installed is None:
             return cls._no_source()
         print("🚀 Opening the Mightling desktop window...")
@@ -231,7 +231,7 @@ class DesktopRunner:
         """
         if not cls.onyx_is_up(web_url):
             print(f"❌ Mightling is not answering at {web_url}.")
-            print("💡 Start it first: mling-admin chat start")
+            print("💡 Start it first: ling-admin chat start")
             return 1
         if not cls.has_source():
             return cls._run_installed()
@@ -331,7 +331,7 @@ class DesktopRunner:
         """
         for profile in ("release", "debug"):
             candidate = os.path.join(
-                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "mling-app"
+                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "ling-app"
             )
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
                 return candidate
@@ -430,6 +430,6 @@ class DesktopRunner:
         """
         serving = cls.onyx_is_up(web_url)
         print(f"{'✅' if serving else '❌'} Mightling server at {web_url}"
-              f"{'' if serving else ' — start it with: mling-admin chat start'}")
+              f"{'' if serving else ' — start it with: ling-admin chat start'}")
         complete, _ = DesktopInstaller.report()
         return 0 if serving and complete else 1

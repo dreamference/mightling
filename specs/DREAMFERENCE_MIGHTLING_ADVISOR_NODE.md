@@ -1,9 +1,9 @@
 # Mightling Advisor Node — a second GB10 that reviews the coder's work
 
-**Status:** on hold since 2026-10-03, until a suitable advisor model is found; nothing below is to be built before then. Proposed on 2026-10-02. Nothing here is implemented. The spec was written on the GB10 itself (`gx10-1a2b`), so the machine's memory, swap, earlyoom and sidecar figures in §2 were read there. One load-bearing mechanism was run live: a blocking `Stop` hook continuing a `mling exec` turn against the 27B (§2). The advisor model was **not** downloaded, loaded or run. There is one Spark here, its model server was serving other tasks, and the chosen checkpoint is a 133 GB download that needs the whole machine. Every figure about the advisor model is therefore published, not measured here, and §12 marks each one. Phase 0 (§10) is the measurement.
-**Target:** a second DGX Spark (GB10, SM121, 128 GB unified LPDDR5X, about 273 GB/s), bought to raise the quality of the code that `mling` on the first one writes.
+**Status:** on hold since 2026-10-03, until a suitable advisor model is found; nothing below is to be built before then. Proposed on 2026-10-02. Nothing here is implemented. The spec was written on the GB10 itself (`gx10-1a2b`), so the machine's memory, swap, earlyoom and sidecar figures in §2 were read there. One load-bearing mechanism was run live: a blocking `Stop` hook continuing a `ling exec` turn against the 27B (§2). The advisor model was **not** downloaded, loaded or run. There is one Spark here, its model server was serving other tasks, and the chosen checkpoint is a 133 GB download that needs the whole machine. Every figure about the advisor model is therefore published, not measured here, and §12 marks each one. Phase 0 (§10) is the measurement.
+**Target:** a second DGX Spark (GB10, SM121, 128 GB unified LPDDR5X, about 273 GB/s), bought to raise the quality of the code that `ling` on the first one writes.
 **Builds on:**
-- the client and `mightling-node` split, mDNS discovery, the TXT records, `node.json`, the SSH pairing and `mling-admin node set` ([MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md), §5, §6, §12, §15.1, §18.6);
+- the client and `mightling-node` split, mDNS discovery, the TXT records, `node.json`, the SSH pairing and `ling-admin node set` ([MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md), §5, §6, §12, §15.1, §18.6);
 - the launcher and its trusted-hook registration, which the compaction ledger already uses ([MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md) §4, [MIGHTLING_COMPACTION](./DREAMFERENCE_MIGHTLING_COMPACTION.md) §11);
 - the model matrix, the SGLang engine and the host-safety layer ([MODELS](./DREAMFERENCE_MODELS.md), [INFERENCE](./DREAMFERENCE_INFERENCE.md) §5.3, §7, [PREFIX_CACHE](./DREAMFERENCE_PREFIX_CACHE.md));
 - the benchmark runner and the prompt spec's list of its defects ([MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md) §12–§13, [MIGHTLING_PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md) §1.4, §6);
@@ -14,7 +14,7 @@
 1. **The advisor model is Qwen3.8-Flash-Next in NVIDIA's NVFP4 build, with thinking on.** It is the strongest model that one Spark can serve at 4 bits or better with a usable context (§3). It is **not a step change** over the 27B on the headline number: SWE-bench Pro is 62.5 against 61.7, a tie. The gain is in the repository-level and agentic scores: DeepSWE 58.7 against 42.2, SWE-bench Multilingual 81.0 against 73.8, NL2Repo 48.1 against 42.3, and the independent Artificial Analysis index 40 against 34. On top of that, the coder runs with reasoning set to `none`, so the advisor adds thinking as well as weights.
 2. **No DeepSeek model fits.** The user suggested DeepSeek, and the arithmetic is in §3.4. V3.2 is 671B, about 377 GB at 4 bits. V4-Flash is 284B and 167 GB as released; on one Spark it fits only at 2–3 bits, and even its full-precision SWE-bench Pro (52.6) is below the 27B's 61.7. V4.1-Flash is 552B plus 196B of lookup tables and does not fit two Sparks at FP4.
 3. **The advisor reviews; it does not code.** It reads the session and answers in text. It runs no commands, edits nothing, and its advice reaches the coder as a message the coder must check against the code and may reject (§4).
-4. **It is reached through Codex's own hooks and one launcher subcommand, with no Codex patch.** The automatic review "before done" is a `Stop` hook. It is **gated by rule**, so a question-and-answer turn is never reviewed, and it is consulted once per turn. The coder or the user can also ask explicitly with `mling advise "<question>"`. The "stuck" and "before the first edit" triggers are Phase 2 arms, not defaults.
+4. **It is reached through Codex's own hooks and one launcher subcommand, with no Codex patch.** The automatic review "before done" is a `Stop` hook. It is **gated by rule**, so a question-and-answer turn is never reviewed, and it is consulted once per turn. The coder or the user can also ask explicitly with `ling advise "<question>"`. The "stuck" and "before the first edit" triggers are Phase 2 arms, not defaults.
 5. **It fails open.** No advisor node, a node that is loading, a busy queue, a timeout or an answer that cannot be parsed all mean: no block, one line in the session's advisor log, and the coder carries on as it does today.
 6. **Nodes still have no roles** ([MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md) decision 7). "Advisor mode" is a property of the model assigned to the node. The matrix entry carries `role = "advisor"`, so the node advertises `advisor=1` and **not** `main=1`, and nobody sets or stores a role.
 7. **"Maxes memory" means a large resident model plus the page cache, not a larger arena.** About 73 GiB of the model stays resident, its 47.7 GiB n-gram table is memory-mapped from NVMe, and what earlyoom's line and the host reserve leave is given to the page cache for that table, never to the arena (§6). earlyoom stays on. A published recipe that reaches 94% of memory by disabling earlyoom is excluded for that reason.
@@ -25,7 +25,7 @@
 ## 1. Goals and non-goals
 
 **Goals**
-- A user with two Sparks types `mling` on the first and gets the same agent as today, whose work is reviewed by a stronger model on the second before it declares a task done, with nothing to configure beyond assigning the model.
+- A user with two Sparks types `ling` on the first and gets the same agent as today, whose work is reviewed by a stronger model on the second before it declares a task done, with nothing to configure beyond assigning the model.
 - Night Shift tasks and benchmark runs get the same review, recorded in their reports.
 - If the advisor is not there, nothing changes.
 - A measurement on this hardware that says whether the review helps, and by how much, per failure class.
@@ -50,7 +50,7 @@
 | Disk | 292 GB free on the one filesystem that holds the model caches |
 | Sidecars' host memory (`docker stats`) | speech-to-text 44 MiB; SearXNG 135 MiB; diffusion 295 MiB charged (8 GiB cap); image search 6 MiB; Gmail 16 MiB; web UI stack about 560 MiB (nginx 20, web 116, API 332, Postgres 66, code interpreter 25). GPU memory is **not** charged to a container's cgroup (MIGHTLING_NODE §13.8), so these are lower bounds for the two GPU sidecars |
 | Codex's `Stop` hook (`codex-rs/hooks/src/events/stop.rs`, pinned `rust-v0.158.0`) | Receives `session_id`, `turn_id`, `cwd`, `transcript_path`, `model`, `stop_hook_active` and `last_assistant_message`. `{"decision":"block","reason":…}` makes the reason a **continuation prompt**: the turn goes on with it as input |
-| **A blocking `Stop` hook in `mling exec`, run live** against the 27B (scratch `CODEX_HOME`, a stub hook, `--dangerously-bypass-hook-trust`) | **The turn continues.** The reason reaches the model as a **user** message wrapped in `<hook_prompt hook_run_id="stop:…">`. The second stop arrives with `stop_hook_active: true` and the same `turn_id`, and the stub's `{}` ends the turn. Two runs: (1) the reason asked for unrelated work (create `reviewed.txt`). The model **refused**: "`reviewed.txt` … isn't in your request, and stop-hook prompts can't add new work." (2) The reason was a finding about the task itself, framed as §4.5 frames it (`mean([])` raises `ZeroDivisionError`; check it; fix it or say why not). The model answered "Holds", fixed it, ran a check and finished, in 747 tokens. So the mechanism works in `exec`, and **the coder weighs hook text against the user's request on its own**, which is the behaviour the design wants, provided findings stay inside the task (§4.5) |
+| **A blocking `Stop` hook in `ling exec`, run live** against the 27B (scratch `CODEX_HOME`, a stub hook, `--dangerously-bypass-hook-trust`) | **The turn continues.** The reason reaches the model as a **user** message wrapped in `<hook_prompt hook_run_id="stop:…">`. The second stop arrives with `stop_hook_active: true` and the same `turn_id`, and the stub's `{}` ends the turn. Two runs: (1) the reason asked for unrelated work (create `reviewed.txt`). The model **refused**: "`reviewed.txt` … isn't in your request, and stop-hook prompts can't add new work." (2) The reason was a finding about the task itself, framed as §4.5 frames it (`mean([])` raises `ZeroDivisionError`; check it; fix it or say why not). The model answered "Holds", fixed it, ran a check and finished, in 747 tokens. So the mechanism works in `exec`, and **the coder weighs hook text against the user's request on its own**, which is the behaviour the design wants, provided findings stay inside the task (§4.5) |
 | Hook timeouts (`hooks/src/engine/discovery.rs`) | A command hook's `timeout_sec` defaults to **600 s** and is clamped only for `SessionEnd` and `Interrupt`. The ledger hook sets 10 s |
 | What the TUI shows while a hook runs | A hook may carry a `status_message`, which `tui/src/status_indicator_widget.rs` shows in the status line (read, not run) |
 | `PreToolUse` and `PostToolUse` | Both receive `transcript_path` and the tool's input. `PreToolUse` can deny the call with a reason; both can add `additionalContext` for the model (read from the event code and its tests) |
@@ -73,7 +73,7 @@
 ### 3.1 What "better than the 27B" has to mean
 
 - **SWE-bench Verified is no longer the yardstick.** the upstream vendor stopped reporting it in early 2026 for contamination (MIGHTLING_SWE_BENCH §8). Qwen's 2026 cards report SWE-bench Pro, DeepSWE, NL2Repo, Multilingual, LiveCodeBench and Terminal-Bench instead, and the 27B's card has **no Verified number**. The comparison below uses what both cards report, plus the Artificial Analysis Intelligence Index as the one independent figure.
-- **The coder on node 1 runs below its card.** `mling` sends reasoning effort `none`, so every turn of the 27B is answered without thinking (MODELS §1, INFERENCE §5.3), while the card's scores are with thinking. An advisor that thinks therefore brings two things: a stronger model, and the thinking the coder does without. §8 separates them with a control arm in which the advisor is the 27B itself at `xhigh`.
+- **The coder on node 1 runs below its card.** `ling` sends reasoning effort `none`, so every turn of the 27B is answered without thinking (MODELS §1, INFERENCE §5.3), while the card's scores are with thinking. An advisor that thinks therefore brings two things: a stronger model, and the thinking the coder does without. §8 separates them with a control arm in which the advisor is the 27B itself at `xhigh`.
 - **A review can only hand over what the reviewer has.** Anthropic's guidance says the same: "the advisor can only hand over capability the executor lacks". A model of equal strength is still useful as a second look, but the case for buying hardware rests on the gap.
 
 ### 3.2 The budget on one Spark
@@ -199,7 +199,7 @@ Link facts: 189.85 Gb/s across both rails in NVIDIA's own `ib_write_bw` example,
 | `role` | `advisor` (new field) | §5 |
 | `exclusive` | `true` (new field): no diffusion sidecar, and the node's other sidecars are stopped before the load | §6.4 |
 | `mmap_weights_gb` | 47.7 (new field) | the pre-flight counts it against disk and the page cache, not the arena (§6.3) |
-| tool-call parser | `qwen3_coder` | not needed by the advisor, but lets a user code with this model explicitly (`mling node use spark-2`) |
+| tool-call parser | `qwen3_coder` | not needed by the advisor, but lets a user code with this model explicitly (`ling node use spark-2`) |
 
 ---
 
@@ -219,13 +219,13 @@ What Mightling takes from these: the advisor sees the transcript, not a summary 
 | Point | Mechanism | Ships in |
 |---|---|---|
 | **Before declaring done** | `Stop` hook, gated by rule (§4.3). On "revise" it blocks with the advice as the continuation prompt | **Phase 1, on by default** |
-| **On request** | `mling advise "<question>"`: the user types it in a shell, or the model runs it (the prompt names it, §4.6) | **Phase 1** |
+| **On request** | `ling advise "<question>"`: the user types it in a shell, or the model runs it (the prompt names it, §4.6) | **Phase 1** |
 | **When stuck** | `PostToolUse` hook: a rule over the rollout's tail (the same failing command 3 times since the last consult, or 6 non-zero exits in a row, or 25 tool calls since the last file change after work began) consults and returns the advice as `additionalContext` | Phase 2, as an arm |
 | **Before committing to an approach** | `PreToolUse` hook on the turn's **first edit** (an `apply_patch` call, or a command that writes a tracked file): denies that one call with the advice as its reason, so the coder re-plans before anything lands | Phase 2, as an arm |
 
-The model-initiated route is the weakest. In the benchmark's code-index arm the model was handed `mling-code` and called it **0 times in 24 instances** (MIGHTLING_SWE_BENCH §13.5). The default is therefore the automatic `Stop` review, and the request route is measured, not relied on.
+The model-initiated route is the weakest. In the benchmark's code-index arm the model was handed `ling-code` and called it **0 times in 24 instances** (MIGHTLING_SWE_BENCH §13.5). The default is therefore the automatic `Stop` review, and the request route is measured, not relied on.
 
-All four are hooks or a launcher subcommand. **No Codex patch is needed.** The hooks are registered by the launcher in `config.toml` with their trust entries, exactly as `compaction.rs` registers the ledger hook (MIGHTLING_COMPACTION §11). Each runs the installed binary as `mling advise --hook <event>`.
+All four are hooks or a launcher subcommand. **No Codex patch is needed.** The hooks are registered by the launcher in `config.toml` with their trust entries, exactly as `compaction.rs` registers the ledger hook (MIGHTLING_COMPACTION §11). Each runs the installed binary as `ling advise --hook <event>`.
 
 ### 4.3 The `Stop` gate
 
@@ -246,9 +246,9 @@ The packet, in this order (fixed order and deterministic rendering, so a second 
 1. The advisor's system prompt (about 1,500 characters, §4.5).
 2. Every user message, verbatim.
 3. The session's items in order: assistant messages verbatim; each command or `apply_patch` verbatim; each output clipped to its first 1,000 and last 1,000 characters; any compaction summary, marked as such.
-4. The ledger (`mling ledger`): files changed, other files read, failed commands, the last test result.
+4. The ledger (`ling ledger`): files changed, other files read, failed commands, the last test result.
 5. **The current diff**: `git diff` against the session's starting commit, plus untracked files under 20 KB, capped at 40,000 characters, with the cut named.
-6. The question: for the `Stop` review, a fixed request; for `mling advise`, the asker's text.
+6. The question: for the `Stop` review, a fixed request; for `ling advise`, the asker's text.
 
 **Budget: 96K tokens.** It covers the recorded p99 whole, and its prefill takes under a minute (§4.7). **How it is counted without a tokenizer:** the launcher is standard-library Rust and ships no Qwen tokenizer, so the packet is cut at **300,000 characters**, about 3.1 characters per token. Code and command output tokenize at roughly 3–3.5 characters per token, so the estimate errs towards fewer tokens than the limit. Every response's `usage.prompt_tokens` is logged beside the packet's characters, and the ratio is recalibrated from those logs. If the engine still rejects a packet as too long, it is cut to two thirds and sent once more. The engine's own `/tokenize` endpoint was considered: it adds a round trip, and whether the pinned image exposes it is unchecked. Above the budget the cuts go, in order: oldest tool outputs to their first line, then oldest assistant messages to 500 characters. The first user message, the diff and the question are never cut. The packet records what was cut.
 
@@ -285,23 +285,23 @@ Telling the coder that it may reject a point, and asking it to say why, is the "
 
 **Findings must stay inside the user's request.** Codex delivers the text as a user message marked `<hook_prompt>`, and the coder judges it against what the user asked: in §2's live check it refused hook text that added unrelated work, and acted on a finding about the task itself. The advisor's system prompt therefore restricts findings to whether the change does what the user asked, and does it without breaking anything. "Also improve X" is out of scope. A suggestion the advisor thinks worth making beyond the task goes in `summary`, which is logged and shown to the user, not sent to the coder.
 
-### 4.6 `mling advise`
+### 4.6 `ling advise`
 
-A launcher subcommand, intercepted in `prepare_args` the way `night` and `ledger` are, so it costs no patch and lives in `mling-rs/src/advise.rs`:
+A launcher subcommand, intercepted in `prepare_args` the way `night` and `ledger` are, so it costs no patch and lives in `ling-rs/src/advise.rs`:
 
 | Form | Does |
 |---|---|
-| `mling advise "<question>"` | Finds the session from `CODEX_THREAD_ID` (set by Codex for every command) or `--session <id>`, builds the packet with the question at the end, waits for the answer and prints it. From the model's shell this is the "on request" route |
-| `mling advise --hook stop\|post-tool\|pre-tool` | The hook entry points: JSON on stdin, JSON on stdout, always exit 0 |
-| `mling advise status` | Which advisor node, its model and state, its queue, and this machine's level |
-| `mling advise log [<session>]` | The session's consults: when, how long, what was sent (sizes and cuts), the verdict, the findings, whether they were injected |
+| `ling advise "<question>"` | Finds the session from `CODEX_THREAD_ID` (set by Codex for every command) or `--session <id>`, builds the packet with the question at the end, waits for the answer and prints it. From the model's shell this is the "on request" route |
+| `ling advise --hook stop\|post-tool\|pre-tool` | The hook entry points: JSON on stdin, JSON on stdout, always exit 0 |
+| `ling advise status` | Which advisor node, its model and state, its queue, and this machine's level |
+| `ling advise log [<session>]` | The session's consults: when, how long, what was sent (sizes and cuts), the verdict, the findings, whether they were injected |
 
 When an advisor is resolved and the level is not `off`, the launcher appends a short block to the prompt:
 
 ```text
 # Advisor
 A stronger reviewer model runs on another machine. When you are unsure between approaches or stuck,
-run `mling advise "<your question>"`: it reads this session and answers in one to three minutes.
+run `ling advise "<your question>"`: it reads this session and answers in one to three minutes.
 It cannot run commands and can be wrong.
 ```
 
@@ -336,7 +336,7 @@ A slow, high-quality answer is acceptable here, within limits:
 
 | Case | What happens | Time lost by the coder |
 |---|---|---|
-| No advisor configured or found | the hook exits at once; `mling advise` prints "No advisor node on this network" | about 0 (one cached lookup) |
+| No advisor configured or found | the hook exits at once; `ling advise` prints "No advisor node on this network" | about 0 (one cached lookup) |
 | Advisor found, `state=loading` or `stopped` | no consult; status line `advisor not ready` | about 0 |
 | Address does not answer | connection timeout of 2 s, then as above | 2 s |
 | Queue too long | `advisor busy`, no consult (§4.8) | under 1 s |
@@ -348,12 +348,12 @@ Every case is logged in `$CODEX_HOME/advisor/<thread-id>.jsonl`. The hook never 
 
 ### 4.10 Where it runs
 
-- **Interactive `mling`:** as above, at the level the user sets.
-- **`mling exec`:** a blocking `Stop` hook continues an `exec` turn, checked live (§2).
-- **Night Shift:** each task's `mling exec` reviews itself before it returns. The morning report gains a column per task: the verdict, the findings, and whether the coder acted on each. The advisor's findings are thus also the reviewer's notes for the person reading the report, even where the coder rejected them.
-- **SWE-bench:** the agent's container sits on an internal Docker network that reaches only the host's gateway (MIGHTLING_SWE_BENCH §9). For a run with `--advisor`, the runner starts a TCP forwarder on the host, bound to the internal network's gateway address, which relays to the advisor node. The container gets `DREAMFERENCE_ADVISOR_HOST=http://<gateway>:8010`. The agent can then reach the coder's model server and the advisor, and nothing else, so the isolation the benchmark depends on holds. `mling advise` is part of the `mling` binary, so the relocated runtime needs nothing new. The manifest records the arm, the advisor's model id and revision, the node id, the effort, the gate's version and the system prompt's version.
+- **Interactive `ling`:** as above, at the level the user sets.
+- **`ling exec`:** a blocking `Stop` hook continues an `exec` turn, checked live (§2).
+- **Night Shift:** each task's `ling exec` reviews itself before it returns. The morning report gains a column per task: the verdict, the findings, and whether the coder acted on each. The advisor's findings are thus also the reviewer's notes for the person reading the report, even where the coder rejected them.
+- **SWE-bench:** the agent's container sits on an internal Docker network that reaches only the host's gateway (MIGHTLING_SWE_BENCH §9). For a run with `--advisor`, the runner starts a TCP forwarder on the host, bound to the internal network's gateway address, which relays to the advisor node. The container gets `DREAMFERENCE_ADVISOR_HOST=http://<gateway>:8010`. The agent can then reach the coder's model server and the advisor, and nothing else, so the isolation the benchmark depends on holds. `ling advise` is part of the `ling` binary, so the relocated runtime needs nothing new. The manifest records the arm, the advisor's model id and revision, the node id, the effort, the gate's version and the system prompt's version.
 - **The egress audit** names its model server and never browses (MIGHTLING_NODE §11). It sets the advisor level to `off`, unless run with `--advisor`, in which case the advisor's address joins the allow-list.
-- **`/airgapped`:** the advisor is a model server on the LAN, not the internet. The **hook** runs outside the command sandbox, as Codex's own model requests do, so it works at every level. The **shell form** `mling advise` is a command, so at level `on` patch `0019` takes its network away, and it says that the hook still reviews the turn.
+- **`/airgapped`:** the advisor is a model server on the LAN, not the internet. The **hook** runs outside the command sandbox, as Codex's own model requests do, so it works at every level. The **shell form** `ling advise` is a command, so at level `on` patch `0019` takes its network away, and it says that the hook still reviews the turn.
 
 ### 4.11 Configuration
 
@@ -386,11 +386,11 @@ The advisor is resolved separately from the coder's model server, first match wi
 1. `DREAMFERENCE_ADVISOR_HOST`.
 2. `advisor_host` in the configuration files the launcher already reads.
 3. **The remembered advisor**: an `advisor` object in `$CODEX_HOME/node.json` (`node` id, name, address, port, `last_seen`), found again by its id.
-4. **A browse** for `_mightling-node._tcp` records with `advisor=1`. One: it is used and remembered, with one line. Several: an interactive `mling` asks once; `exec` skips the advisor with a line naming `mling node use --advisor <name>`, and never refuses to run.
+4. **A browse** for `_mightling-node._tcp` records with `advisor=1`. One: it is used and remembered, with one line. Several: an interactive `ling` asks once; `exec` skips the advisor with a line naming `ling node use --advisor <name>`, and never refuses to run.
 
 **Unlike the coder's server, the advisor is browsed for even on a node.** MIGHTLING_NODE §6.1 tier 3 ("a GB10 never browses for itself") is about the node's own model; finding a *different* machine is the point here. The browse runs at launch only when nothing is remembered or the remembered advisor does not answer, alongside the wait for the coder's server, so it adds no time to a normal start.
 
-`mling node list` gains a role column. `mling node use --advisor <name|address>` and `mling node forget --advisor` manage the remembered advisor.
+`ling node list` gains a role column. `ling node use --advisor <name|address>` and `ling node forget --advisor` manage the remembered advisor.
 
 ---
 
@@ -432,7 +432,7 @@ The advisor is resolved separately from the coder's model server, first match wi
 | Speech-to-text, image search, Gmail service | **stopped** before the load | they serve the web UI and the agent on the coder's node |
 | Web UI stack (Onyx Lite) | **stopped**; `node enable` defaults to `--no-web` on such a node | about 0.6 GiB of host memory plus Postgres, and nobody chats on the advisor node (question 5 offers it as a second model in node 1's web UI instead) |
 | SearXNG | **stopped** | the advisor does no web search |
-| `mling-code` index runs, Night Shift, benchmark containers, script jobs (MIGHTLING_NODE §13) | **refused** while the advisor model is assigned | each assumes a coder's memory budget; a script job sent to an advisor node is refused with that reason |
+| `ling-code` index runs, Night Shift, benchmark containers, script jobs (MIGHTLING_NODE §13) | **refused** while the advisor model is assigned | each assumes a coder's memory budget; a script job sent to an advisor node is refused with that reason |
 | Desktop session | allowed, not budgeted beyond the 5.5–8 GiB above | the machine is a Spark, and someone may log in |
 
 `server start` with an `exclusive` model prints each sidecar it stops, and `server start` with a `main` model brings them back as today. Nothing is removed.
@@ -453,23 +453,23 @@ A 47.7 GiB file paged in from NVMe for every token is a new kind of load for thi
 The person has a working Spark (`spark-1`) and has bought a second (`spark-2`).
 
 1. **On `spark-2`:** the ordinary installer (MIGHTLING_NODE §9). It detects a GB10 and installs node and client. `install.sh --model qwen3.8-flash-next-advisor` names the model so the default 27B is not downloaded first; without it, the 27B arrives and is replaced in step 3.
-2. **On `spark-1`:** `mling-admin node add spark-2`, the existing pairing (MIGHTLING_NODE §13.2, §18.6). The node's password is typed once.
-3. **On `spark-1`:** `mling-admin node set spark-2 --model qwen3.8-flash-next-advisor`. This is the existing command: the node runs its own `main-model set`, `server stop`, `server start`, with its own pre-flight and watchdog. Because the entry is `exclusive`, that `server start` stops the sidecars of §6.4 by itself; the user never names them.
-   - **Shortcut on `spark-2` itself:** `mling-admin advisor enable` = `main-model set qwen3.8-flash-next-advisor`, `server start`, `node enable --no-web`. `advisor disable` restores the default model and the sidecars.
+2. **On `spark-1`:** `ling-admin node add spark-2`, the existing pairing (MIGHTLING_NODE §13.2, §18.6). The node's password is typed once.
+3. **On `spark-1`:** `ling-admin node set spark-2 --model qwen3.8-flash-next-advisor`. This is the existing command: the node runs its own `main-model set`, `server stop`, `server start`, with its own pre-flight and watchdog. Because the entry is `exclusive`, that `server start` stops the sidecars of §6.4 by itself; the user never names them.
+   - **Shortcut on `spark-2` itself:** `ling-admin advisor enable` = `main-model set qwen3.8-flash-next-advisor`, `server start`, `node enable --no-web`. `advisor disable` restores the default model and the sidecars.
 4. **First load:** the download is about 133 GB (NVIDIA's NVFP4 build; 140 GB of free disk recommended). That is about 22 minutes at 100 MB/s, 45 minutes at 50 MB/s, and two hours on a 150 Mbit/s line. A Spark that already holds the checkpoint can copy it over the QSFP link with MIGHTLING_NODE §12.2's `node sync-model` once that exists. Then the load and compile, reported at over 5 minutes before blazux's loading patches (Phase 0 measures it). The advert says `loading` throughout.
-5. **On `spark-1`:** nothing. The next `mling` finds the advisor by browsing (§5.2).
+5. **On `spark-1`:** nothing. The next `ling` finds the advisor by browsing (§5.2).
 
 ### 7.2 What the first node shows
 
 | Where | What |
 |---|---|
-| `mling` start | one line, once per session: `Advisor: spark-2 · Qwen3.8-Flash-Next · ready`, or `· loading`, or nothing when there is none |
+| `ling` start | one line, once per session: `Advisor: spark-2 · Qwen3.8-Flash-Next · ready`, or `· loading`, or nothing when there is none |
 | The status line during a review | `Advisor on spark-2 is reviewing this turn (about 2 min)` |
 | After a review | the advice as the next input when it blocks; otherwise a one-line verdict |
-| `mling advise status`, `mling advise log` | §4.6 |
-| `mling node list`, `mling-admin node list` | a role column: `main`, `advisor` |
+| `ling advise status`, `ling advise log` | §4.6 |
+| `ling node list`, `ling-admin node list` | a role column: `main`, `advisor` |
 | Night Shift's morning report | the advisor column (§4.10) |
-| `mling-admin swe-bench report` | the advisor arm and its consult statistics (§8) |
+| `ling-admin swe-bench report` | the advisor arm and its consult statistics (§8) |
 
 ---
 
@@ -497,7 +497,7 @@ This is an afternoon's work, needs no hooks, no second Spark and no benchmark ru
 
 ### 8.3 The A/B on the benchmark
 
-All arms on the same validated instances, the same `mling` build, the same coder model, **three runs each**:
+All arms on the same validated instances, the same `ling` build, the same coder model, **three runs each**:
 
 | Arm | Coder | Advisor | Triggers |
 |---|---|---|---|
@@ -529,13 +529,13 @@ A fixed set of about 20 tasks from this project's own backlog, each with a test 
 ## 9. Alternatives considered
 
 - **Codex's own `/review` with `review_model`.** It runs a full review thread, with tools, under another model name. But `spawn_review_thread` keeps the parent's provider (§2), so the review model must be served by the coder's own server, unless a patch adds a provider override. It is also user-invoked, not automatic. Rejected for Phase 1. A one-line provider override is a candidate Phase 3 patch if an agentic advisor (next item) measures better.
-- **An agentic advisor**: the advisor runs as `mling exec -s read-only` on the client, against the advisor node, and can open files and run `git` itself. It would review more accurately than a packet, at many requests and several times the latency. Codex's agent roles carry a `config_file` layer that could name the advisor's provider for a spawned subagent (read from `agent-roles/src`, not run). But the subagent route needs the model to choose to spawn one, and no recorded benchmark trajectory contains a subagent call (MIGHTLING_PROMPT §11.7). Kept as a Phase 2 arm, behind the packet.
+- **An agentic advisor**: the advisor runs as `ling exec -s read-only` on the client, against the advisor node, and can open files and run `git` itself. It would review more accurately than a packet, at many requests and several times the latency. Codex's agent roles carry a `config_file` layer that could name the advisor's provider for a spawned subagent (read from `agent-roles/src`, not run). But the subagent route needs the model to choose to spawn one, and no recorded benchmark trajectory contains a subagent call (MIGHTLING_PROMPT §11.7). Kept as a Phase 2 arm, behind the packet.
 - **A second coder with a judge** (best-of-N): doubles the code execution on the client and needs a selector; the advisor is cheaper and composes with it later.
 - **A front-door proxy that routes some requests to the advisor:** rejected for the same reasons as MIGHTLING_NODE §5.4, and a router cannot know when a review is due.
 - **A summary in place of the transcript:** the transcript fits (§4.4). Summaries lose the tool history (MIGHTLING_COMPACTION §9), and summarising costs the coder's time.
 - **The diffusion slot as the advisor:** the 0.5B sidecar failed every reasoning role it was tried in (MIGHTLING_COMPACTION §9.3).
 - **A cloud model as the advisor:** stronger, but Mightling's model traffic does not leave the LAN.
-- **A `/advisor` slash command now:** the patch series has 325 bytes left of its cap. Phase 3, if the TUI needs a switch the configuration and `mling advise` do not give.
+- **A `/advisor` slash command now:** the patch series has 325 bytes left of its cap. Phase 3, if the TUI needs a switch the configuration and `ling advise` do not give.
 
 ---
 
@@ -545,7 +545,7 @@ A fixed set of about 20 tasks from this project's own backlog, each with a test 
 |---|---|---|
 | 0a, this Spark, no second one | In a window with the 27B stopped: Flash-Next on SGLang with `--ple-offload-backend file` on SM121, and the blazux vLLM build if SGLang fails; resident memory, page cache, cgroup charge and PSI during the load and over a 100K-token run of consults; prefill at 8K, 32K and 96K; decode with thinking at `medium` and `xhigh`; MTP acceptance; prefix-cache hits on a second consult of the same session (PREFIX_CACHE's hybrid-GDN findings apply); the NVFP4 canary; download and load time; whether Esc ends a long `Stop` hook without killing the turn; a trusted `Stop` registration in the TUI; the character-to-token ratio of real packets | each has a measured answer recorded here, and the recipe's fraction and cache cap are set |
 | 0b | MIGHTLING_PROMPT §6.1's runner fixes and 100 validated instances; the offline replay of §8.2 with Flash-Next and with the 27B at `xhigh` | the replay's numbers are in §8.2; a go or no-go for the A/B |
-| 1 | `role`, `exclusive` and `mmap_weights_gb` in `ModelSpec`; the advisor entry and recipe; the pre-flight changes; `server start`'s exclusive profile; the `advisor` TXT record and `main` suppression; `mling advise` with the `Stop` hook, the gate, the packet, the schema, fail-open and the log; the client resolution and `node.json`'s `advisor` entry; `mling-admin advisor enable\|disable`; Night Shift's report column; `swe-bench run --advisor` with the forwarder and manifest fields | arms A, B, C and E run on two Sparks, and §8.3 is filled in |
+| 1 | `role`, `exclusive` and `mmap_weights_gb` in `ModelSpec`; the advisor entry and recipe; the pre-flight changes; `server start`'s exclusive profile; the `advisor` TXT record and `main` suppression; `ling advise` with the `Stop` hook, the gate, the packet, the schema, fail-open and the log; the client resolution and `node.json`'s `advisor` entry; `ling-admin advisor enable\|disable`; Night Shift's report column; `swe-bench run --advisor` with the forwarder and manifest fields | arms A, B, C and E run on two Sparks, and §8.3 is filled in |
 | 2 | The `stuck` and `first-edit` triggers and the prompt block as arm D; priority scheduling; the agentic advisor as an arm; the Night Shift comparison of §8.4 | arm D and the Night Shift set measured |
 | 3 | Only if the measurements support it: a `/advisor` command (patch, cap raise); `/review` with a provider override; the advisor as a second model in node 1's web UI; a stacked advisor (§3.8) | |
 
@@ -559,13 +559,13 @@ Offline, with no network, no second machine and no model:
 - **The answer:** the schema accepted; a malformed answer retried once, then logged without blocking; blocking only on `revise` with a `medium` or higher finding; the continuation text capped at 6,000 characters.
 - **Fail-open:** no advisor, `state=loading`, a refused port, a 2 s connect timeout, a queue too long, a 420 s timeout and an engine error. Each exits 0, writes nothing to stderr and blocks nothing, within its time bound, with a stand-in server.
 - **Registration:** the `Stop` hook written with its trust hash next to the ledger's (the same hash function, `compaction.rs`), the user's hooks untouched, removed at `off`.
-- **Discovery:** `advisor=1` advertised and `main` absent for the advisor entry; the choice rule unchanged with one `main` and one `advisor` node; the advisor browsed for on a node; several advisors skipped in `exec` with the hint; `mling node use --advisor`.
+- **Discovery:** `advisor=1` advertised and `main` absent for the advisor entry; the choice rule unchanged with one `main` and one `advisor` node; the advisor browsed for on a node; several advisors skipped in `exec` with the hint; `ling node use --advisor`.
 - **Node side:** `server start` with an `exclusive` model stops the listed sidecars and starts no diffusion sidecar (docker mocked, per the conftest rule); the pre-flight counts `mmap_weights_gb` against disk and not the arena; a script job and a Night Shift run refused while the advisor model is assigned.
 - **Benchmark:** the forwarder relays to a stand-in advisor and only to it; the manifest fields; resume keeps the arm.
 - **Night Shift:** the report column from a recorded consult.
 - **Egress audit:** sets the advisor level to `off` unless `--advisor`.
 
-Live, on two Sparks: the user's path of §7.1 end to end; a consult from a TUI session, from `exec`, from a Night Shift task and from a benchmark container; the advisor node stopped mid-consult; four consults at once with the queue rule; `mling-admin audit egress` still passing on the coder's node.
+Live, on two Sparks: the user's path of §7.1 end to end; a consult from a TUI session, from `exec`, from a Night Shift task and from a benchmark container; the advisor node stopped mid-consult; four consults at once with the queue rule; `ling-admin audit egress` still passing on the coder's node.
 
 ---
 
@@ -574,7 +574,7 @@ Live, on two Sparks: the user's path of §7.1 end to end; a consult from a TUI s
 | | Status |
 |---|---|
 | This machine's memory, swap, sysctl values, earlyoom arguments, free disk and sidecar footprints (§2) | **read here** on 2026-10-02 |
-| A blocking `Stop` hook continuing a `mling exec` turn; the `<hook_prompt>` user message; `stop_hook_active` on the second stop; the coder refusing out-of-scope hook text and acting on an in-scope finding (two runs, the live 27B, untrusted hook with the bypass flag) | **run here** on 2026-10-02 |
+| A blocking `Stop` hook continuing a `ling exec` turn; the `<hook_prompt>` user message; `stop_hook_active` on the second stop; the coder refusing out-of-scope hook text and acting on an in-scope finding (two runs, the live 27B, untrusted hook with the bypass flag) | **run here** on 2026-10-02 |
 | The same in the TUI; a trusted registration of a `Stop` hook (assumed to work as the ledger's `SessionStart` registration does) | **not run** |
 | Codex hook semantics: the 600 s default timeout, `status_message`, `PreToolUse` deny, `PostToolUse` context, `CODEX_THREAD_ID`; `/review`'s pinned provider | **read from the pinned source**, not run |
 | Flash-Next's parameters, architecture, NVFP4 composition, licence and scores; the 27B's scores; DeepSeek V4-Flash's and V4.1-Flash's sizes and scores; AA indexes of 40 and 34 | **read on the model cards and AA pages**, 2026-10-02 |
@@ -590,10 +590,10 @@ Live, on two Sparks: the user's path of §7.1 end to end; a consult from a TUI s
 ## 13. Open questions
 
 1. **Licence.** Flash-Next is under the Qwen Community License 1.0, with NVIDIA's Open Model License on the NVFP4 build. Neither text was reviewed here. The 27B is Apache 2.0, and Mightling is AGPL. The recipe would download the weights on the user's machine, as today. Is that acceptable, or should the advisor default to the 27B at `xhigh` (the runner-up) until the terms are read?
-2. **The TUI's default.** `auto` makes an interactive editing turn that ran tests or claims completion wait one to four minutes for review. `ask` leaves the review to `mling advise`. Which is the default in the TUI, given that unattended runs use `auto` either way?
+2. **The TUI's default.** `auto` makes an interactive editing turn that ran tests or claims completion wait one to four minutes for review. `ask` leaves the review to `ling advise`. Which is the default in the TUI, given that unattended runs use `auto` either way?
 3. **If arm E wins** (Flash-Next as the coder beats the 27B with an advisor): swap the coder, and look for an advisor larger than one Spark holds?
 4. **A stacked advisor** on two linked Sparks, three in all: wanted at about two index points for a third machine (§3.8), or only when a DeepSeek V4.1-class model fits two?
-5. **The advisor in the web UI.** Node 1's `mling-admin chat configure` could register the advisor's model as a second provider, so the chat UI can use the stronger model directly. Wanted?
+5. **The advisor in the web UI.** Node 1's `ling-admin chat configure` could register the advisor's model as a second provider, so the chat UI can use the stronger model directly. Wanted?
 6. **Morning review of night branches.** The advisor node is idle at night. Should Night Shift also send each finished branch's full diff for a second, slower review before the report is written, apart from the in-task review?
 7. **Telling the coder it will be reviewed** (§4.6): measure it as a separate arm, or leave it out?
 
@@ -603,12 +603,12 @@ Live, on two Sparks: the user's path of §7.1 end to end; a consult from a TUI s
 
 - [MODELS](./DREAMFERENCE_MODELS.md): the `role`, `exclusive` and `mmap_weights_gb` fields; the `qwen3.8-flash-next-advisor` entry and its rationale.
 - [INFERENCE](./DREAMFERENCE_INFERENCE.md): the recipe (§5); the pre-flight counting a memory-mapped table against disk and the page cache (§7); the exclusive profile of `server start`; the explicit cgroup cap for this engine.
-- [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md): the `advisor` TXT record and `main` derived from `role` (§5.1); the advisor's resolution and the `advisor` entry in `node.json` (§6.1–§6.2); `mling node use|forget --advisor`; `install.sh --model`; jobs refused on an advisor node (§13.4).
+- [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md): the `advisor` TXT record and `main` derived from `role` (§5.1); the advisor's resolution and the `advisor` entry in `node.json` (§6.1–§6.2); `ling node use|forget --advisor`; `install.sh --model`; jobs refused on an advisor node (§13.4).
 - [MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md): `advise.rs` among the launcher modules; the `Stop` hook registered beside the ledger's; the `# Advisor` prompt block.
 - [MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md): `[night] advisor` and the report column.
 - [MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md): `run --advisor`, the forwarder on the internal network, the manifest fields, and the advisor arm in `report --against`.
 - [MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md): the audit sets the advisor off unless `--advisor`, which adds its address to the allow-list.
-- [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md): the hook allowed at every level; `mling advise` from a command cut at `on`.
+- [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md): the hook allowed at every level; `ling advise` from a command cut at `on`.
 - [MIGHTLING_PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md): the advisor arms sit beside its §6.2 arms on the same fixed runner.
 - [README](./README.md): the index row, and the deployment line once a second node is supported.
 

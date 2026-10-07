@@ -1,11 +1,11 @@
 """
-Code search through `mling-code`, the code index router.
+Code search through `ling-code`, the code index router.
 
 This module provides the CodeIndexSearch class, which answers the MCP server's
 `workspace_search_code` from the router's index (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §8)
 instead of building the `dreamference` context engine. The router reads two SQLite files and
 exits in milliseconds; the context engine walks the workspace and loads an embedding model on
-first use. The engine remains the fallback where `mling-code` is not installed or the workspace
+first use. The engine remains the fallback where `ling-code` is not installed or the workspace
 has no index yet.
 """
 
@@ -16,27 +16,27 @@ from typing import Any, Dict, Final, List, Optional
 
 from dreamference.runner.codex_branded_builder import INSTALL_DIR
 
-# `mling-code` exits with this when the workspace has no index (and prints what to run).
+# `ling-code` exits with this when the workspace has no index (and prints what to run).
 NO_INDEX_EXIT: Final[int] = 3
 
 SEARCH_TIMEOUT_S: Final[int] = 20
 
 
 class CodeIndexSearch:
-    """Runs `mling-code search` and shapes its rows for MCP clients."""
+    """Runs `ling-code search` and shapes its rows for MCP clients."""
 
     @classmethod
     def executable(cls) -> Optional[str]:
         """
-        Locates the installed `mling-code`.
+        Locates the installed `ling-code`.
 
-        Only Mightling's own install directory counts, as for `mling`: a `mling-code` found on
+        Only Mightling's own install directory counts, as for `ling`: a `ling-code` found on
         PATH could be another build, whose answers this module would pass on unchecked.
 
         Returns:
             Optional[str]: Absolute path to the binary, or None if it has not been built.
         """
-        path = os.path.join(INSTALL_DIR, "bin", "mling-code")
+        path = os.path.join(INSTALL_DIR, "bin", "ling-code")
         return path if os.path.isfile(path) and os.access(path, os.X_OK) else None
 
     @classmethod
@@ -80,6 +80,6 @@ class CodeIndexSearch:
                 "line": row.get("line"),
                 "kind": kind,
                 "symbol": symbol,
-                "source": "mling-code",
+                "source": "ling-code",
             })
         return records

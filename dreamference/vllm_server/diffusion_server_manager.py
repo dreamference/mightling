@@ -14,7 +14,7 @@ the torch + transformers build for this architecture — with
 
 No PSI watchdog and no host-safety gate: the container runs under a fixed memory cap small
 enough that its worst case sits below any pressure threshold, which is the hardening a 0.6B
-model needs. `mling-admin server start` starts the sidecar *before* the vLLM launch on purpose —
+model needs. `ling-admin server start` starts the sidecar *before* the vLLM launch on purpose —
 vLLM's pre-flight reads current free memory, so a sidecar already resident is accounted for,
 where the reverse order lets a marginal KV check pass and then lose the sidecar's memory
 mid-load.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replays recorded `mling` rollouts to measure what fills the context.
+"""Replays recorded `ling` rollouts to measure what fills the context.
 
 This is Phase 0 of specs/DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md. It reads the session
 rollouts a SWE-bench run leaves under its scratch directory and needs nothing running.

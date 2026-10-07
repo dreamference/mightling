@@ -1,10 +1,10 @@
 """
 Applies the host settings `VLLMServerManager.check_host_safety()` demands
-(`mling-admin host check|setup`).
+(`ling-admin host check|setup`).
 
 It also checks, and fixes, one thing `check_host_safety()` does not look at, because it is the
 agent's prerequisite and not the model's: whether bubblewrap can create a sandbox from an ordinary
-login. `SandboxPrerequisite` asks about the same fix on every `mling-admin` run.
+login. `SandboxPrerequisite` asks about the same fix on every `ling-admin` run.
 
 `check_host_safety()` refuses to load a model on a machine without sysstat, an armed OOM handler,
 64 GB of swap and two raised sysctls, and until 2026-10-02 it only printed the `sudo` lines: a
@@ -83,13 +83,13 @@ class HostSafetySetup:
         """
         steps = cls.steps()
         if not steps:
-            print("✅ Host setup: nothing to do. This machine has what a model load and mling's sandbox need.")
+            print("✅ Host setup: nothing to do. This machine has what a model load and ling's sandbox need.")
             return True
         print(f"⚠️  Host setup: {len(steps)} thing(s) to fix on this machine.\n")
         for number, step in enumerate(steps, 1):
             cls._describe(number, step)
         if any("commands" in step for step in steps):
-            print("💡 `mling-admin host setup` runs the commands listed (sudo asks for your password).")
+            print("💡 `ling-admin host setup` runs the commands listed (sudo asks for your password).")
         return False
 
     @classmethod
@@ -102,12 +102,12 @@ class HostSafetySetup:
         """
         steps = cls.steps()
         if not steps:
-            print("✅ Host setup: nothing to do. This machine has what a model load and mling's sandbox need.")
+            print("✅ Host setup: nothing to do. This machine has what a model load and ling's sandbox need.")
             return True
         can_prompt = sys.stdin.isatty() and shutil.which("sudo") is not None
         if not can_prompt:
             print("⚠️  sudo cannot ask for a password here (no terminal), so nothing was changed.\n"
-                  "   Run `mling-admin host setup` in a terminal, or run these yourself:\n")
+                  "   Run `ling-admin host setup` in a terminal, or run these yourself:\n")
         for number, step in enumerate(steps, 1):
             cls._describe(number, step)
             if not can_prompt or step.get("manual"):
@@ -122,9 +122,9 @@ class HostSafetySetup:
             from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
             if SandboxPrerequisite.turned_off():
                 SandboxPrerequisite._forget()
-                print("💡 Night Shift was turned off for the sandbox; `mling-admin night enable` puts the timer back.")
+                print("💡 Night Shift was turned off for the sandbox; `ling-admin night enable` puts the timer back.")
         if not remaining:
-            print("✅ Host setup: this machine now has what a model load and mling's sandbox need.")
+            print("✅ Host setup: this machine now has what a model load and ling's sandbox need.")
             return True
         print(f"⚠️  {len(remaining)} thing(s) still to fix: "
               + "; ".join(step["name"] for step in remaining) + ".")
@@ -215,7 +215,7 @@ class HostSafetySetup:
             if used_gb > cls._mem_available_gb() - 4.0:
                 step["manual"] = (f"{used_gb:.1f} GB is swapped out now and would not fit back into memory, "
                                   f"so {SWAP_FILE} cannot be resized while this much is running. Stop the "
-                                  f"model server (`mling-admin server stop`) and run this again.")
+                                  f"model server (`ling-admin server stop`) and run this again.")
                 return step
             make.insert(0, ["swapoff", SWAP_FILE])
         step["commands"] = make
@@ -285,7 +285,7 @@ class HostSafetySetup:
     @classmethod
     def _sandbox_step(cls) -> Optional[Dict[str, Any]]:
         """
-        The one prerequisite here that is `mling`'s, not the model server's: its command sandbox.
+        The one prerequisite here that is `ling`'s, not the model server's: its command sandbox.
 
         Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, under which bubblewrap
         (and so Codex's sandbox, Night Shift's tasks and the code indexers) fails unless an
@@ -301,7 +301,7 @@ class HostSafetySetup:
             # system one, so it is installed, with the profile at the same time where it is needed.
             return {
                 "name": "install bubblewrap",
-                "why": "`mling`'s command sandbox, Night Shift tasks, node jobs and the code indexers all run in it",
+                "why": "`ling`'s command sandbox, Night Shift tasks, node jobs and the code indexers all run in it",
                 "commands": [["apt-get", "install", "-y", "bubblewrap"], *(SandboxPrerequisite.fix_commands() or [])],
             }
         if cls.sandbox_works() is not False:
@@ -309,7 +309,7 @@ class HostSafetySetup:
         step: Dict[str, Any] = {
             "name": "let bubblewrap create its sandbox",
             "why": "from an ordinary login `bwrap` is refused a user namespace, so every command "
-                   "`mling` runs in its sandbox fails, as do Night Shift tasks and the code indexers",
+                   "`ling` runs in its sandbox fails, as do Night Shift tasks and the code indexers",
         }
         commands = SandboxPrerequisite.fix_commands()
         if commands is None:

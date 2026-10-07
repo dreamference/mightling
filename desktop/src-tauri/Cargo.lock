@@ -2392,16 +2392,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "mling-airgapped"
+name = "ling-airgapped"
 version = "0.1.0"
 
 [[package]]
-name = "mling-app"
+name = "ling-app"
 version = "1.4.1"
 dependencies = [
  "mdns-sd",
- "mling-airgapped",
- "mling-desktop-bridge",
+ "ling-airgapped",
+ "ling-desktop-bridge",
  "serde",
  "serde_json",
  "tauri",
@@ -2409,7 +2409,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mling-desktop-bridge"
+name = "ling-desktop-bridge"
 version = "0.1.0"
 dependencies = [
  "serde_json",

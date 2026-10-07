@@ -37,30 +37,30 @@ DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
 DEFAULT_CAVE_MODE: Final[bool] = False
 DEFAULT_USE_TENSORIZER: Final[bool] = False
-# Whether the Mightling agent's prompt advertises `mling-admin gmail` when an account is connected.
+# Whether the Mightling agent's prompt advertises `ling-admin gmail` when an account is connected.
 # Read by the Rust launcher too (DREAMFERENCE_MIGHTLING_GMAIL, then `mightling_gmail` in the TOML file).
 DEFAULT_MIGHTLING_GMAIL: Final[bool] = True
 # Whether the Mightling agent is handed a rule-built ledger (files, failed commands, last test result)
 # after each compaction (specs/DREAMFERENCE_MIGHTLING_COMPACTION.md §10.1). Read by the Rust launcher
 # (DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER, then `mightling_compaction_ledger` in the TOML file); a test
-# keeps this default equal to LEDGER_DEFAULT in mling-rs/src/compaction.rs.
+# keeps this default equal to LEDGER_DEFAULT in ling-rs/src/compaction.rs.
 DEFAULT_MIGHTLING_COMPACTION_LEDGER: Final[bool] = True
 # How tersely the Mightling agent answers (`/cavemode`, specs/DREAMFERENCE_MIGHTLING_CAVE_MODE.md). Read by
 # the Rust launcher too (DREAMFERENCE_MIGHTLING_CAVE_MODE, then `mightling_cave_mode` in the TOML file);
-# a test keeps this default equal to DEFAULT_MIGHTLING_CAVE_MODE in mling-rs/src/cave.rs.
+# a test keeps this default equal to DEFAULT_MIGHTLING_CAVE_MODE in ling-rs/src/cave.rs.
 DEFAULT_MIGHTLING_CAVE_MODE: Final[str] = "ultra"
 MIGHTLING_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
 # How much of the internet a Mightling session may use (`/airgapped`,
 # specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md): everything or nothing. The Rust
-# side (mling-rs/airgapped) resolves it for the agent's commands; a test keeps this default equal
+# side (ling-rs/airgapped) resolves it for the agent's commands; a test keeps this default equal
 # to its DEFAULT_MIGHTLING_AIRGAPPED. Listed loosest first.
 DEFAULT_MIGHTLING_AIRGAPPED: Final[str] = "off"
 MIGHTLING_AIRGAPPED_LEVELS: Final[tuple] = ("off", "on")
-# The system prompt new mling sessions start with (`mling prompt`, specs/DREAMFERENCE_MIGHTLING_PROMPT.md):
+# The system prompt new ling sessions start with (`ling prompt`, specs/DREAMFERENCE_MIGHTLING_PROMPT.md):
 # `default` (Codex's own), `high-swe`, or a custom prompt in `$CODEX_HOME/system-prompts/<name>.md`.
 # The Rust launcher reads it too (DREAMFERENCE_MIGHTLING_PROMPT, then `mightling_prompt` in the TOML file)
 # and decides whether a name is installed; a test keeps this default equal to DEFAULT_PROMPT in
-# mling-rs/src/prompt.rs.
+# ling-rs/src/prompt.rs.
 DEFAULT_MIGHTLING_PROMPT: Final[str] = "default"
 MIGHTLING_PROMPT_NAME: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
@@ -327,7 +327,7 @@ class DreamferenceConfig:
         """
         Sets the model and records that it was chosen deliberately.
 
-        Assigning a model is what `mling-admin main-model set` does, and it is a pin by definition — the
+        Assigning a model is what `ling-admin main-model set` does, and it is a pin by definition — the
         caller named this model. That has to be remembered separately from the value itself, or
         save_config() cannot tell a deliberate choice from a value that merely matches today's
         default, and would drop the former on the floor.
@@ -353,7 +353,7 @@ class DreamferenceConfig:
         """
         Sets the diffusion model and records that it was chosen deliberately.
 
-        Assigning through this property is what `mling-admin diffusion-model set` does, and it is a pin
+        Assigning through this property is what `ling-admin diffusion-model set` does, and it is a pin
         by definition -- same contract as the main model's setter above.
 
         Args:
@@ -403,7 +403,7 @@ class DreamferenceConfig:
     def resolve_airgapped_level(cls, cwd: Optional[Path] = None) -> str:
         """
         Resolves the configured air-gap level the way the Rust side does for a command with no
-        session (`mling-rs/airgapped`, tiers 2 to 4): `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the
+        session (`ling-rs/airgapped`, tiers 2 to 4): `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the
         **stricter** of the two configuration files, then the default.
 
         The two files are the one `DREAMFERENCE_CONFIG_PATH` names (or `<cwd>/dreamference.toml`)

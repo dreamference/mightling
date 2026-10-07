@@ -1,10 +1,10 @@
 """
-`mling-admin node enable|disable|status`: offering this machine to the local network as a Mightling
+`ling-admin node enable|disable|status`: offering this machine to the local network as a Mightling
 node (specs/DREAMFERENCE_MIGHTLING_NODE.md §4, §5.2).
 
 Enabling does three things: it installs the Avahi service file that advertises the node, it
 publishes the web UI and SearXNG beyond loopback, and it records that it did so, so that a later
-`mling-admin chat configure` or `searxng start` keeps those addresses. Disabling undoes all
+`ling-admin chat configure` or `searxng start` keeps those addresses. Disabling undoes all
 three. Root is needed once, for the file under `/etc/avahi`; the command is printed before it
 runs and sudo prompts on the terminal.
 """
@@ -37,7 +37,7 @@ SHARING_NOTICE = (
 WEB_NOTICE = (
     "⚠️  The web UI has one account, shared by everyone who opens it: one chat history, the admin\n"
     "   panel, and the Gmail tool, which searches the mail connected on this node.\n"
-    "   `mling-admin node enable --no-web` keeps the web UI on this machine."
+    "   `ling-admin node enable --no-web` keeps the web UI on this machine."
 )
 
 
@@ -50,7 +50,7 @@ class NodeAdvertiser:
         Advertises this machine as a node and publishes what clients need.
 
         Args:
-            no_web: Keep the web UI on loopback; clients then get `mling` and web search only.
+            no_web: Keep the web UI on loopback; clients then get `ling` and web search only.
 
         Returns:
             bool: True when the service file is installed and the binds applied; False, with
@@ -81,7 +81,7 @@ class NodeAdvertiser:
         # the LAN but which nobody can find is the worst of both states.
         if not cls.install_service_file(text):
             NodeSettings.save(advertise=before["advertise"], web=before["web"])
-            print("⚠️  Nothing was published. Run `mling-admin node enable` from a terminal, where sudo "
+            print("⚠️  Nothing was published. Run `ling-admin node enable` from a terminal, where sudo "
                   "can ask for the password once.")
             return False
         print(SHARING_NOTICE)
@@ -130,14 +130,14 @@ class NodeAdvertiser:
         node_id = NodeIdentity.read()
         lines = [f"Node id: {node_id or 'none (this machine has not been a node yet)'}"]
         if not settings["advertise"]:
-            lines.append("Advertised: no (`mling-admin node enable` offers this node to the local network)")
+            lines.append("Advertised: no (`ling-admin node enable` offers this node to the local network)")
         else:
             lines.append("Advertised: yes" + ("" if settings["web"] else ", without the web UI (--no-web)"))
         records = NodeServiceFile.read()
         if records is None:
             lines.append(f"Service file: none at {NodeServiceFile.service_path}")
             if settings["advertise"]:
-                lines.append("  The node is enabled but not advertised: run `mling-admin node enable` again.")
+                lines.append("  The node is enabled but not advertised: run `ling-admin node enable` again.")
         else:
             shown = ", ".join(f"{key}={value}" for key, value in records.items())
             lines.append(f"Service file: {shown}")
@@ -182,7 +182,7 @@ class NodeAdvertiser:
 
     @classmethod
     def on_searxng_started(cls) -> None:
-        """Called when `mling-admin searxng start` has SearXNG running: an advertised node offers it."""
+        """Called when `ling-admin searxng start` has SearXNG running: an advertised node offers it."""
         if NodeSettings.advertised():
             cls._report(NodeServiceFile.update(search_port=cls.search_port()))
 
@@ -206,7 +206,7 @@ class NodeAdvertiser:
     def _report(cls, outcome: Optional[bool]) -> None:
         if outcome is False:
             print(f"⚠️  Could not update {NodeServiceFile.service_path}; clients may see a stale state. "
-                  "Run `mling-admin node enable` again.")
+                  "Run `ling-admin node enable` again.")
 
     # -- pieces, each a seam for the tests ---------------------------------------------------------
 
@@ -399,6 +399,6 @@ class NodeAdvertiser:
     def summary(cls) -> Dict[str, object]:
         """
         Returns:
-            Dict[str, object]: The settings and the node id, for `mling-admin status`.
+            Dict[str, object]: The settings and the node id, for `ling-admin status`.
         """
         return {"node": NodeIdentity.read(), **NodeSettings.load()}

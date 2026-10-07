@@ -20,7 +20,7 @@
 
 **Version:** `dreamference.__version__ == "1.2.0"`.
 
-**Architecture:** twelve subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `mling-rs/`, the web commands `mling-web-rs/`, the code index `mling-code-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
+**Architecture:** twelve subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `ling-rs/`, the web commands `ling-web-rs/`, the code index `ling-code-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
 
 **Dead shims:** the top-level `dreamference/<name>.py` modules (`cli.py`, `config.py`, `hardware.py`, …) contain `from dreamference.<name>.__init__ import *`. They **never execute**: Python resolves the same-named package directory first. Editing them has no effect.
 
@@ -37,14 +37,14 @@
 | `dreamference/config/` | 4-tier config resolution, config generation |
 | `dreamference/hardware/` | GB10 detection and telemetry, model matrix, HF downloads and tensorization |
 | `dreamference/vllm_server/` | Docker model-server lifecycle (vLLM and SGLang), launch arguments, chat-template patching, host-safety guards, diffusion sidecar |
-| `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, the `mling` builder, the Codex test runner |
+| `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, the `ling` builder, the Codex test runner |
 | `dreamference/chat/` | Onyx Lite (Mightling web UI) lifecycle and patches, Gmail, image search, the SearXNG sidecar and the sidecar network, desktop window |
 | `dreamference/context_engine/` | AST symbols, TF-IDF, FTS5 and dense retrieval |
-| `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, web tools, and code search through `mling-code` |
-| `dreamference/cli/` | `mling-admin`, deep model inspection, benchmark dataset, code-index tool setup |
+| `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, web tools, and code search through `ling-code` |
+| `dreamference/cli/` | `ling-admin`, deep model inspection, benchmark dataset, code-index tool setup |
 | `dreamference/night_shift/` | Night Shift: the overnight run of the `/night` queue, its timer and report |
-| `dreamference/swe_bench/` | `mling-admin swe-bench`: `mling` over SWE-bench instances, graded by the upstream harness |
-| `dreamference/audit/` | `mling-admin audit egress`: a traced `mling` session and a verdict on where it connected |
+| `dreamference/swe_bench/` | `ling-admin swe-bench`: `ling` over SWE-bench instances, graded by the upstream harness |
+| `dreamference/audit/` | `ling-admin audit egress`: a traced `ling` session and a verdict on where it connected |
 | `dreamference/node/` | The node half of the client/server split: the advertised service, the node id, what is published to the LAN, and managing other nodes over an SSH pairing |
 
 ---
@@ -54,14 +54,14 @@
 ```
 dreamference/
 ├── __init__.py                       # __version__ = "1.2.0" only (no re-exports)
-├── web_canvas.py                     # CanvasHandler + start_web_canvas_server (mling-admin web)
+├── web_canvas.py                     # CanvasHandler + start_web_canvas_server (ling-admin web)
 ├── {cli,config,context_engine,hardware,mcp_server,runner,vllm_server}.py   # dead shims (see §1)
 │
 ├── cli/
 │   ├── dreamference_cli_controller.py    # DreamferenceCLIController, main()
 │   ├── model_deep_inspector.py           # ModelDeepInspector (main-model inspect --deep)
 │   ├── sonnet_dataset.py                 # embedded Sonnet corpus for benchmark_server
-│   └── code_index_setup.py               # CodeIndexSetup, PinnedTool (mling-admin code setup)
+│   └── code_index_setup.py               # CodeIndexSetup, PinnedTool (ling-admin code setup)
 ├── config/
 │   ├── dreamference_config.py            # DreamferenceConfig: 4-tier resolution
 │   ├── config_path_resolver.py           # ConfigPathResolver
@@ -89,8 +89,8 @@ dreamference/
 │   └── diffusion_openai_service.py       # DiffusionModelRunner (runs inside the sidecar container)
 ├── runner/
 │   ├── codex_runner.py / codex_installer.py    # CodexRunner / CodexInstaller (default agent)
-│   ├── codex_branded_builder.py                 # CodexBrandedBuilder (builds mling, the web commands, mling-code)
-│   ├── codex_test_runner.py                     # CodexTestRunner (mling-admin codex test)
+│   ├── codex_branded_builder.py                 # CodexBrandedBuilder (builds ling, the web commands, ling-code)
+│   ├── codex_test_runner.py                     # CodexTestRunner (ling-admin codex test)
 │   ├── cline_runner.py / cline_installer.py
 │   ├── continue_runner.py / continue_installer.py
 │   ├── openhands_runner.py / openhands_installer.py
@@ -104,11 +104,11 @@ dreamference/
 │   ├── onyx_brand_assets.py                     # OnyxBrandAssets (logos, favicon, app icon)
 │   ├── gmail_search_service.py                  # GmailSearchService (container service)
 │   ├── gmail_credentials.py                     # GmailCredentials
-│   ├── gmail_client.py                          # GmailClient (mling-admin gmail)
+│   ├── gmail_client.py                          # GmailClient (ling-admin gmail)
 │   ├── image_search_service.py                  # ImageSearchService, HardenedFetcher, ImageStore, SearxngClient, SiglipClient, VisionRanker, FetchRejected
-│   ├── searxng_sidecar.py                       # SearxngSidecar (mling-admin searxng start)
+│   ├── searxng_sidecar.py                       # SearxngSidecar (ling-admin searxng start)
 │   ├── sidecar_network.py                       # SidecarNetwork (the user-defined network sidecars are created on)
-│   └── desktop_runner.py / desktop_installer.py # DesktopRunner / DesktopInstaller (mling-app)
+│   └── desktop_runner.py / desktop_installer.py # DesktopRunner / DesktopInstaller (ling-app)
 ├── context_engine/
 │   ├── context_engine.py                 # ContextEngine
 │   ├── ast_symbol_extractor.py           # ASTSymbolExtractor (Python ast)
@@ -121,12 +121,12 @@ dreamference/
 │   ├── mcp_server.py                     # MCPServer
 │   ├── mcp_tool_registry.py              # MCPToolRegistry
 │   ├── web_tools.py                      # WebTools (the MCP web_search / web_fetch tools)
-│   ├── code_index_search.py              # CodeIndexSearch (workspace_search_code through mling-code)
+│   ├── code_index_search.py              # CodeIndexSearch (workspace_search_code through ling-code)
 │   ├── ide_state.py                      # IDEState
 │   └── editor_selection.py               # EditorSelection
 ├── night_shift/
-│   ├── night_shift_runner.py             # NightShiftRunner (mling-admin night run: admission, scheduling)
-│   ├── night_shift_task_run.py           # NightShiftTaskRun (one task: worktree, mling exec, tests, commit)
+│   ├── night_shift_runner.py             # NightShiftRunner (ling-admin night run: admission, scheduling)
+│   ├── night_shift_task_run.py           # NightShiftTaskRun (one task: worktree, ling exec, tests, commit)
 │   ├── night_shift_queue.py              # NightShiftQueue (the files under $CODEX_HOME/night, the runner lock)
 │   ├── night_shift_host.py               # NightShiftHost (read-only probes of the server and the host)
 │   ├── night_shift_index.py              # NightShiftIndex (refreshes a repository's code index before its tasks)
@@ -134,25 +134,25 @@ dreamference/
 │   ├── night_shift_report.py             # NightShiftReport (the morning report)
 │   └── night_shift_scheduler.py          # NightShiftScheduler (the systemd user timer)
 ├── swe_bench/
-│   ├── swe_bench_command.py              # SweBenchCommand (mling-admin swe-bench: parser and dispatch)
+│   ├── swe_bench_command.py              # SweBenchCommand (ling-admin swe-bench: parser and dispatch)
 │   ├── swe_bench_settings.py             # SweBenchSettings (the [swe_bench] table, paths, pins)
 │   ├── swe_bench_harness.py              # SweBenchHarness (the upstream harness in its own virtualenv)
 │   ├── swe_bench_images.py               # SweBenchImages (arm64 instance images, the validated list)
-│   ├── swe_bench_runtime.py              # SweBenchRuntime (the relocated mling that starts in an instance image)
+│   ├── swe_bench_runtime.py              # SweBenchRuntime (the relocated ling that starts in an instance image)
 │   ├── swe_bench_docker.py               # SweBenchDocker (the one place the benchmark runs docker)
 │   ├── swe_bench_runner.py               # SweBenchRunner (swe-bench run: admission, scheduling, resume)
-│   ├── swe_bench_instance_run.py         # SweBenchInstanceRun (one instance: container, mling exec, prediction)
+│   ├── swe_bench_instance_run.py         # SweBenchInstanceRun (one instance: container, ling exec, prediction)
 │   ├── swe_bench_code_index.py           # SweBenchCodeIndex (--code-index universal: index on the host, mount read-only)
 │   ├── swe_bench_evaluator.py            # SweBenchEvaluator (validation and grading through the harness)
 │   ├── swe_bench_run_store.py            # SweBenchRunStore (one run's files)
 │   └── swe_bench_report.py               # SweBenchReport (a run's report, two runs compared)
 ├── audit/
-│   ├── egress_audit.py                   # EgressAudit (mling-admin audit egress: the traced session)
+│   ├── egress_audit.py                   # EgressAudit (ling-admin audit egress: the traced session)
 │   ├── strace_parser.py                  # StraceParser (reads the strace output)
 │   ├── egress_trace.py                   # EgressTrace (destinations, DNS names, processes)
 │   └── egress_verdict.py                 # EgressVerdict (pass, fail or trace failed, with reasons)
 └── node/
-    ├── node_advertiser.py                # NodeAdvertiser (mling-admin node enable|disable|status)
+    ├── node_advertiser.py                # NodeAdvertiser (ling-admin node enable|disable|status)
     ├── node_service_file.py              # NodeServiceFile (the Avahi service file, _mightling-node._tcp)
     ├── node_identity.py                  # NodeIdentity (the node's stable id)
     ├── node_settings.py                  # NodeSettings (~/.config/dreamference/node-advertise.json)
@@ -163,17 +163,17 @@ dreamference/
 
 scripts/                                  # at the repository root, not inside the package
 ├── install_gb10.sh                       # full installation
-├── run_vllm_gb10.sh                      # thin wrapper over mling-admin server start
+├── run_vllm_gb10.sh                      # thin wrapper over ling-admin server start
 ├── gen_admin_reference.py                # regenerates docs/admin.md from build_parser()
 └── cave_mode_bench/                      # the cave-mode benchmark and its level texts
 
-mling-rs/src/{lib,help,home,app,update,usage,cave,night,code_index,airgapped,node}.rs   # launcher compiled into mling
-mling-rs/airgapped/src/lib.rs                  # crate mling-airgapped: the three levels and their resolution (std only)
-mling-rs/node-locator/src/lib.rs               # crate mling-node-locator: where the node is (std only)
-mling-web-rs/src/{lib,search,fetch,html_text,airgapped,node_locator}.rs, src/bin/   # mling-search, mling-fetch
-mling-code-rs/src/                             # mling-code, the code index (router, SCIP stores, submodules, session, MCP)
+ling-rs/src/{lib,help,home,app,update,usage,cave,night,code_index,airgapped,node}.rs   # launcher compiled into ling
+ling-rs/airgapped/src/lib.rs                  # crate ling-airgapped: the three levels and their resolution (std only)
+ling-rs/node-locator/src/lib.rs               # crate ling-node-locator: where the node is (std only)
+ling-web-rs/src/{lib,search,fetch,html_text,airgapped,node_locator}.rs, src/bin/   # ling-search, ling-fetch
+ling-code-rs/src/                             # ling-code, the code index (router, SCIP stores, submodules, session, MCP)
 codex-patches/00NN-*.patch                      # patch series for the codex/ submodule (17 patches, 0001–0019)
-desktop/src-tauri/src/{main,discover,forwarder,node_locator}.rs   # Tauri shell (binary mling-app)
+desktop/src-tauri/src/{main,discover,forwarder,node_locator}.rs   # Tauri shell (binary ling-app)
 ```
 
 ---
@@ -210,9 +210,9 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float3
 `MCPServer` (stdio JSON-RPC) with the tools from `MCPToolRegistry`:
 - `ide_get_active_editor`, `ide_get_diagnostics`, `ide_get_open_files`, `ide_open_file`, `ide_apply_diff`;
 - `web_search`, `web_fetch`;
-- `workspace_search_code`, answered by `CodeIndexSearch` from `mling-code` when the workspace is indexed, and by the context engine otherwise.
+- `workspace_search_code`, answered by `CodeIndexSearch` from `ling-code` when the workspace is indexed, and by the context engine otherwise.
 
-`WebTools` is the MCP server's copy of what `mling-search` and `mling-fetch` do, and like them it follows the `/airgapped` level; those two are Rust (`mling-web-rs/`, `DREAMFERENCE_MIGHTLING_CODEX.md` §4.1), and the two implementations are kept in step by hand.
+`WebTools` is the MCP server's copy of what `ling-search` and `ling-fetch` do, and like them it follows the `/airgapped` level; those two are Rust (`ling-web-rs/`, `DREAMFERENCE_MIGHTLING_CODEX.md` §4.1), and the two implementations are kept in step by hand.
 
 ### 3.8. `cli/`
 
@@ -220,19 +220,19 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float3
 
 ### 3.9. `night_shift/`
 
-`NightShiftRunner.run()` is `mling-admin night run`: admission, then a scheduling loop that starts one `NightShiftTaskRun` per queued task, each in its own git worktree under a memory-capped systemd scope. `NightShiftQueue` reads and writes the task files the launcher (`mling-rs/src/night.rs`) creates, under the same per-task locks, and holds the runner lock, which records who holds it and which `mling-admin swe-bench` shares. `NightShiftIndex` refreshes each repository's code index before its tasks start. See `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md`.
+`NightShiftRunner.run()` is `ling-admin night run`: admission, then a scheduling loop that starts one `NightShiftTaskRun` per queued task, each in its own git worktree under a memory-capped systemd scope. `NightShiftQueue` reads and writes the task files the launcher (`ling-rs/src/night.rs`) creates, under the same per-task locks, and holds the runner lock, which records who holds it and which `ling-admin swe-bench` shares. `NightShiftIndex` refreshes each repository's code index before its tasks start. See `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md`.
 
 ### 3.10. `swe_bench/`
 
-`SweBenchCommand.dispatch()` is `mling-admin swe-bench`. `SweBenchRunner` runs the agent phase with Night Shift's admission and runner lock: one `SweBenchInstanceRun` per instance, each a `mling exec` inside that instance's container on an internal Docker network that reaches only the model server, using the relocated `mling` that `SweBenchRuntime` builds. `SweBenchEvaluator` validates instances and grades predictions through the upstream harness (`SweBenchHarness`); `SweBenchReport` prints a run and compares two. Every docker command goes through `SweBenchDocker`. See `DREAMFERENCE_MIGHTLING_SWE_BENCH.md`.
+`SweBenchCommand.dispatch()` is `ling-admin swe-bench`. `SweBenchRunner` runs the agent phase with Night Shift's admission and runner lock: one `SweBenchInstanceRun` per instance, each a `ling exec` inside that instance's container on an internal Docker network that reaches only the model server, using the relocated `ling` that `SweBenchRuntime` builds. `SweBenchEvaluator` validates instances and grades predictions through the upstream harness (`SweBenchHarness`); `SweBenchReport` prints a run and compares two. Every docker command goes through `SweBenchDocker`. See `DREAMFERENCE_MIGHTLING_SWE_BENCH.md`.
 
 ### 3.11. `audit/`
 
-`EgressAudit.run()` is `mling-admin audit egress`: one real `mling exec` under `strace`, in a throwaway repository and `CODEX_HOME`. `StraceParser` turns the trace into an `EgressTrace`, and `EgressVerdict` passes it only if the session reached nothing but the model server and the other allowlisted loopback services. See `DREAMFERENCE_MIGHTLING_EGRESS.md`.
+`EgressAudit.run()` is `ling-admin audit egress`: one real `ling exec` under `strace`, in a throwaway repository and `CODEX_HOME`. `StraceParser` turns the trace into an `EgressTrace`, and `EgressVerdict` passes it only if the session reached nothing but the model server and the other allowlisted loopback services. See `DREAMFERENCE_MIGHTLING_EGRESS.md`.
 
 ### 3.12. `node/`
 
-`NodeAdvertiser` is `mling-admin node enable|disable|status`, and `NodeRemote`, `NodePairing` and `NodeServe` are `node list|add|remove|set|start|stop` (other nodes are listed from their open model port and changed only over an SSH pairing). `NodeAdvertiser` installs the Avahi service file `NodeServiceFile` renders, publishes the web UI and SearXNG beyond loopback, and records both switches in `NodeSettings`. `NodeIdentity` is the id clients remember a node by. The client side is Rust: `mling-rs/src/node.rs` and the `mling-node-locator` crate, with byte-identical copies of the locator in `mling-web-rs/` and `desktop/src-tauri/` (a test compares them, as one does for the `mling-airgapped` copy in `mling-web-rs/`). See `DREAMFERENCE_MIGHTLING_NODE.md`.
+`NodeAdvertiser` is `ling-admin node enable|disable|status`, and `NodeRemote`, `NodePairing` and `NodeServe` are `node list|add|remove|set|start|stop` (other nodes are listed from their open model port and changed only over an SSH pairing). `NodeAdvertiser` installs the Avahi service file `NodeServiceFile` renders, publishes the web UI and SearXNG beyond loopback, and records both switches in `NodeSettings`. `NodeIdentity` is the id clients remember a node by. The client side is Rust: `ling-rs/src/node.rs` and the `ling-node-locator` crate, with byte-identical copies of the locator in `ling-web-rs/` and `desktop/src-tauri/` (a test compares them, as one does for the `ling-airgapped` copy in `ling-web-rs/`). See `DREAMFERENCE_MIGHTLING_NODE.md`.
 
 ---
 

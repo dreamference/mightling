@@ -1,4 +1,4 @@
-//! The Work window's side of `mling app-server` (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §4.3).
+//! The Work window's side of `ling app-server` (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §4.3).
 //!
 //! The window speaks Codex's app-server protocol: one JSON object per line on the server's stdin
 //! and stdout, without JSON-RPC's `"jsonrpc"` field. Everything the window sends passes
@@ -187,7 +187,7 @@ impl BusyTracker {
     }
 }
 
-/// `mling`'s home folder: `$CODEX_HOME`, else `~/.mightling` (`mling-rs/src/home.rs`).
+/// `ling`'s home folder: `$CODEX_HOME`, else `~/.mightling` (`ling-rs/src/home.rs`).
 pub fn codex_home() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(home));
@@ -210,7 +210,7 @@ pub fn served_model(codex_home: &Path) -> Option<String> {
     first.get("slug").or_else(|| first.get("id"))?.as_str().map(str::to_string)
 }
 
-/// The `mling` executable: `$MIGHTLING_BIN`, then `mling` on PATH, then `~/.local/bin/mling`.
+/// The `ling` executable: `$MIGHTLING_BIN`, then `ling` on PATH, then `~/.local/bin/ling`.
 /// Never a bare `codex`: the launcher is what brings Mightling's model server, prompt and home (§4.3).
 pub fn find_mightling() -> Option<PathBuf> {
     let is_file = |path: &Path| path.is_file();
@@ -218,12 +218,12 @@ pub fn find_mightling() -> Option<PathBuf> {
         return Some(explicit);
     }
     if let Some(found) = std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path).map(|dir| dir.join("mling")).find(|candidate| is_file(candidate))
+        std::env::split_paths(&path).map(|dir| dir.join("ling")).find(|candidate| is_file(candidate))
     }) {
         return Some(found);
     }
     std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".local/bin/mling"))
+        .map(|home| PathBuf::from(home).join(".local/bin/ling"))
         .filter(|path| is_file(path))
 }
 
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn the_marker_exists_exactly_while_a_turn_runs() {
-        let dir = std::env::temp_dir().join(format!("mling-desktop-bridge-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ling-desktop-bridge-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let marker = busy_marker(&dir, 4242);
         assert_eq!(marker, dir.join("night/busy/4242"));
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn the_served_model_is_the_catalogs_first() {
-        let dir = std::env::temp_dir().join(format!("mling-desktop-bridge-model-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ling-desktop-bridge-model-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         assert_eq!(served_model(&dir), None);
         let _ = std::fs::write(dir.join("model_catalog.json"), r#"{"models":[{"id":"x","slug":"RadixArk/Qwen3.8-27B-NVFP4"}]}"#);

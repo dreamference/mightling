@@ -376,17 +376,17 @@ class OnyxRunner:
 
         if not self.vllm_manager.check_health():
             print("⚠️  Local vLLM is not answering yet — Onyx will start, but its model provider")
-            print("   will not respond until `mling-admin server start` has the model serving.")
+            print("   will not respond until `ling-admin server start` has the model serving.")
 
         print("🚀 Deploying Onyx Lite (API server + web server + PostgreSQL)...")
         returncode = subprocess.call(command)
         if returncode != 0:
-            print("❌ Onyx Lite deployment failed. See the output above, or run: mling-admin chat logs")
+            print("❌ Onyx Lite deployment failed. See the output above, or run: ling-admin chat logs")
             return returncode
 
         print(f"✅ Onyx Lite is up — open {DEFAULT_ONYX_WEB_URL}")
         print("💡 The first account to sign up becomes the admin.")
-        print("💡 Then run `mling-admin chat configure` to point Onyx at the local vLLM model.")
+        print("💡 Then run `ling-admin chat configure` to point Onyx at the local vLLM model.")
         return 0
 
     def stop(self) -> int:
@@ -592,7 +592,7 @@ class OnyxRunner:
         if enable_web:
             self.enable_web_search(api, cookie)
 
-        # Registered here rather than only from `mling-admin chat gmail`, because the Connect button that
+        # Registered here rather than only from `ling-admin chat gmail`, because the Connect button that
         # obtains the Google credentials lives in the UI this tool belongs to. Waiting for consent
         # would mean a fresh install has no Gmail tool until someone had already finished a flow
         # they can only start from a page the tool is listed on.
@@ -950,7 +950,7 @@ class OnyxRunner:
     def bind_to_loopback(self) -> bool:
         """
         Publishes the web UI on 127.0.0.1 only, instead of on every network interface, unless
-        this node is advertised and shares it (`mling-admin node enable`), in which case port
+        this node is advertised and shares it (`ling-admin node enable`), in which case port
         3000 is published to the local network and port 80 stays on loopback.
 
         Does nothing when already in place, since applying it recreates the nginx container and
@@ -972,7 +972,7 @@ class OnyxRunner:
             print("🔒 Restricting the web UI to this machine (127.0.0.1)...")
         else:
             print("📡 Publishing the web UI to the local network (port 3000): this node is advertised "
-                  "(`mling-admin node enable`).")
+                  "(`ling-admin node enable`).")
         return self._recreate_service("nginx", wait_healthy=False)
 
     @classmethod
@@ -1600,7 +1600,7 @@ class OnyxRunner:
         """
         if not self._attach_searxng():
             print("⚠️  SearXNG is not running or could not join Onyx's network — skipping web setup.")
-            print("💡 Start it, then re-run: mling-admin chat configure")
+            print("💡 Start it, then re-run: ling-admin chat configure")
             return False
 
         payload = {
@@ -1779,7 +1779,7 @@ class OnyxRunner:
         if error:
             print(f"❌ Could not register an Onyx account: {error}")
             print("💡 If an account already exists, pass its credentials:")
-            print("   mling-admin chat configure --email you@example.com --password ...")
+            print("   ling-admin chat configure --email you@example.com --password ...")
             return None
 
         cookie = self._login(api, email, password)

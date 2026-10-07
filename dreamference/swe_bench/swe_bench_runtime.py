@@ -1,13 +1,13 @@
 """
-A copy of `mling` that starts inside a SWE-bench instance image
+A copy of `ling` that starts inside a SWE-bench instance image
 (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §12).
 
 The installed binary is linked against this machine's C library (glibc 2.39 on the GB10); the
 instance images are Ubuntu 22.04 with glibc 2.35, where it fails at load ("version `GLIBC_2.38'
-not found", measured 2026-10-01). The runtime is a directory mounted read-only at `/opt/mling`:
+not found", measured 2026-10-01). The runtime is a directory mounted read-only at `/opt/ling`:
 
 ```text
-bin/mling, bin/codex-code-mode-host   copies whose ELF interpreter and rpath point at lib/
+bin/ling, bin/codex-code-mode-host   copies whose ELF interpreter and rpath point at lib/
 lib/                                    the host's loader, libc, libm and libgcc_s
 ```
 
@@ -28,9 +28,9 @@ from dreamference.runner.codex_branded_builder import CODE_MODE_HOST_NAME, Codex
 from dreamference.swe_bench import swe_bench_settings
 
 # Where the runtime is mounted in every agent container.
-CONTAINER_MOUNT: Final[str] = "/opt/mling"
+CONTAINER_MOUNT: Final[str] = "/opt/ling"
 
-# The three libraries `ldd mling` always lists, besides the loader.
+# The three libraries `ldd ling` always lists, besides the loader.
 RUNTIME_LIBRARIES: Final[tuple] = ("libc.so.6", "libm.so.6", "libgcc_s.so.1")
 
 # Libraries a build may also be linked against, copied when `ldd` names them: the build of
@@ -57,10 +57,10 @@ class SweBenchRuntime:
         Identifies the installed binaries the runtime is copied from.
 
         Args:
-            mightling_bin: The installed `mling` executable.
+            mightling_bin: The installed `ling` executable.
 
         Returns:
-            str: SHA-256 over `mling` and `codex-code-mode-host`, hex.
+            str: SHA-256 over `ling` and `codex-code-mode-host`, hex.
         """
         digest = hashlib.sha256()
         for path in cls._binaries(mightling_bin):
@@ -86,7 +86,7 @@ class SweBenchRuntime:
         Builds the runtime unless the one on disk was made from the installed binaries.
 
         Args:
-            mightling_bin: The installed `mling` executable.
+            mightling_bin: The installed `ling` executable.
             patchelf: The `patchelf` executable (installed in the harness's virtualenv).
 
         Returns:
@@ -113,7 +113,7 @@ class SweBenchRuntime:
                     check=True, capture_output=True, text=True)
         except (OSError, subprocess.CalledProcessError, ValueError) as error:
             shutil.rmtree(staging, ignore_errors=True)
-            print(f"❌ Could not build the mling runtime for the instance images: {error}")
+            print(f"❌ Could not build the ling runtime for the instance images: {error}")
             return None
         (staging / STAMP_NAME).write_text(wanted + "\n")
         shutil.rmtree(target, ignore_errors=True)
@@ -126,7 +126,7 @@ class SweBenchRuntime:
         Finds the loader and libraries the installed binary is linked against, from `ldd`.
 
         Args:
-            mightling_bin: The installed `mling` executable.
+            mightling_bin: The installed `ling` executable.
 
         Returns:
             tuple: (loader path, [library paths]).
@@ -146,7 +146,7 @@ class SweBenchRuntime:
             if "=>" in words:
                 name, path = words[0], words[words.index("=>") + 1]
                 if name not in RUNTIME_LIBRARIES + OPTIONAL_RUNTIME_LIBRARIES:
-                    raise ValueError(f"mling needs {name}, which the runtime does not carry")
+                    raise ValueError(f"ling needs {name}, which the runtime does not carry")
                 names.append(name)
                 libraries.append(path)
             elif "ld-linux" in words[0]:
@@ -164,7 +164,7 @@ class SweBenchRuntime:
     def installed_mightling(cls) -> Optional[str]:
         """
         Returns:
-            Optional[str]: The installed branded `mling`, or None if it has not been built.
+            Optional[str]: The installed branded `ling`, or None if it has not been built.
         """
         path = CodexBrandedBuilder.executable_path()
         return path if os.path.exists(path) else None

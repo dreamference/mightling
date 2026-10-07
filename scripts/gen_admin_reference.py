@@ -1,5 +1,5 @@
 """
-Generates docs/admin.md, the `mling-admin` command reference on the product site.
+Generates docs/admin.md, the `ling-admin` command reference on the product site.
 
 The page is built from the real argparse parser, not typed by hand, so it cannot drift from the
 CLI: rerun this after adding or changing a subcommand and commit the result.
@@ -18,15 +18,15 @@ from dreamference.cli.dreamference_cli_controller import DreamferenceCLIControll
 
 OUTPUT: Final[str] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "admin.md")
 
-HEADER: Final[str] = """# `mling-admin` reference
+HEADER: Final[str] = """# `ling-admin` reference
 
-`mling-admin` runs everything around the agent: the model server, the web chat, the desktop app,
-models, and the mail commands the agent calls (`gmail`). The agent itself is `mling`, and its web
-commands are programs of their own, `mling-search` and `mling-fetch`; see [Terminal agent](mling.md).
+`ling-admin` runs everything around the agent: the model server, the web chat, the desktop app,
+models, and the mail commands the agent calls (`gmail`). The agent itself is `ling`, and its web
+commands are programs of their own, `ling-search` and `ling-fetch`; see [Terminal agent](ling.md).
 
 !!! note "Generated from the CLI"
-    This page is generated from `mling-admin`'s own argument parser by
-    `scripts/gen_admin_reference.py`. Run `mling-admin <command> --help` for the same text locally.
+    This page is generated from `ling-admin`'s own argument parser by
+    `scripts/gen_admin_reference.py`. Run `ling-admin <command> --help` for the same text locally.
 
 """
 
@@ -57,12 +57,12 @@ def render(parser: argparse.ArgumentParser, path: List[str], depth: int, out: Li
         seen = set()
         helps = {a.dest: a.help for a in group._choices_actions}
         for name, sub in group.choices.items():
-            if id(sub) in seen:  # aliases (e.g. `onyx` for `mling`) point at the same parser
+            if id(sub) in seen:  # aliases (e.g. `onyx` for `ling`) point at the same parser
                 continue
             seen.add(id(sub))
             aliases = [n for n, p in group.choices.items() if p is sub and n != name]
             full = path + [name]
-            out.append(f"{'#' * min(depth, 4)} `mling-admin {' '.join(full)}`\n")
+            out.append(f"{'#' * min(depth, 4)} `ling-admin {' '.join(full)}`\n")
             if helps.get(name):
                 out.append(f"{helps[name].strip()}.\n" if not helps[name].strip().endswith(".") else f"{helps[name].strip()}\n")
             if aliases:

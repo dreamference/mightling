@@ -1,10 +1,10 @@
-"""The Google service without the web UI: `mling-admin google start|stop|status`.
+"""The Google service without the web UI: `ling-admin google start|stop|status`.
 
 Specified in specs/DREAMFERENCE_MIGHTLING_APPS.md §5.1.
 
 The service (`gmail_search_service.py`, container `dreamference-gmail`) holds the Google tokens and
 answers `/status`, the connect pages and the read-only Gmail, Drive and Calendar endpoints on
-`127.0.0.1:8767`. Until Mightling's apps it was created only by `mling-admin chat configure`, so a
+`127.0.0.1:8767`. Until Mightling's apps it was created only by `ling-admin chat configure`, so a
 node without the web UI had none and `/apps` could not connect anything. It is now created here
 too, on the sidecar network (never Docker's default bridge, DOCKER §6), and started by default on a
 node by `server start` when it is absent. `configure` still creates its own on Onyx's network,

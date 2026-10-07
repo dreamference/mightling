@@ -1,7 +1,7 @@
-"""`mling-admin clear` removes model weights only, never what sits next to them.
+"""`ling-admin clear` removes model weights only, never what sits next to them.
 
 Both commands used to delete the *parent* of the directory they named: `clear tensorize-cache`
-removed all of `~/.cache/dreamference` (the mling build cache, vLLM's compile cache), and
+removed all of `~/.cache/dreamference` (the ling build cache, vLLM's compile cache), and
 `clear model-cache` also removed all of `~/.cache/huggingface`, including the login token.
 """
 

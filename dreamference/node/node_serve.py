@@ -1,10 +1,10 @@
 """
 What a paired key may ask this node for (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.4, §13.2).
 
-`mling-admin node serve-job` is the forced command of every paired key: sshd ignores what the
+`ling-admin node serve-job` is the forced command of every paired key: sshd ignores what the
 client asked to run and starts this instead, with the request in `SSH_ORIGINAL_COMMAND`. Anything
 that is not one of the operations below is refused, so the key cannot open a shell, and every
-operation is carried out by this node's own `mling-admin`, with its own host-safety checks.
+operation is carried out by this node's own `ling-admin`, with its own host-safety checks.
 Nothing sent from outside can skip them.
 """
 
@@ -27,7 +27,7 @@ from dreamference.node.node_pairing import KEY_COMMENT, NodePairing
 # a space, a slash or an option's leading dash ever reaches a command line.
 MODEL_KEY: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9._-]{1,80}")
 
-REFUSAL: Final[str] = ("mling-admin node serve-job: this key may only ask for Mightling node operations "
+REFUSAL: Final[str] = ("ling-admin node serve-job: this key may only ask for Mightling node operations "
                        "(info, status, start, stop, set-model <key>, model-receive <key>, unpair, jobs "
                        "and night tasks).")
 
@@ -51,13 +51,13 @@ class NodeServe:
     def admin_executable(cls) -> str:
         """
         Returns:
-            str: The absolute path of this node's `mling-admin`. sshd runs the forced command
+            str: The absolute path of this node's `ling-admin`. sshd runs the forced command
             with a minimal PATH, so the line names the program by path.
         """
-        linked = Path(os.path.expanduser("~/.local/bin/mling-admin"))
+        linked = Path(os.path.expanduser("~/.local/bin/ling-admin"))
         if linked.exists():
             return str(linked)
-        candidate = Path(sys.executable).parent / "mling-admin"
+        candidate = Path(sys.executable).parent / "ling-admin"
         return str(candidate if candidate.exists() else Path(sys.argv[0]).resolve())
 
     @classmethod
@@ -77,7 +77,7 @@ class NodeServe:
     def authorize(cls, public_key: str) -> bool:
         """
         Authorises a sender's key for `serve-job` only. Run on the node, by an ordinary SSH
-        login, during `mling-admin node add`.
+        login, during `ling-admin node add`.
 
         Args:
             public_key: The sender's public key.
@@ -193,13 +193,13 @@ class NodeServe:
         from dreamference.node.node_job import NodeJob
         match = GIT_PATH.fullmatch(path)
         if not match or ".." in path:
-            print("mling-admin node serve-job: only a job repository (jobs/<name>.git) can be pushed to or fetched from.",
+            print("ling-admin node serve-job: only a job repository (jobs/<name>.git) can be pushed to or fetched from.",
                   file=sys.stderr)
             return 2
         repo = NodeJob.repo_path(match.group(1))
         if not repo.is_dir():
             if service != "git-receive-pack":
-                print("mling-admin node serve-job: no such job repository.", file=sys.stderr)
+                print("ling-admin node serve-job: no such job repository.", file=sys.stderr)
                 return 2
             repo.parent.mkdir(parents=True, exist_ok=True)
             created = subprocess.run(["git", "init", "--quiet", "--bare", str(repo)], capture_output=True,
@@ -326,11 +326,11 @@ class NodeServe:
     @classmethod
     def run_admin(cls, arguments: List[str]) -> int:
         """
-        Runs this node's own `mling-admin`, from the home folder, with its output going back
+        Runs this node's own `ling-admin`, from the home folder, with its output going back
         over the connection.
 
         Args:
-            arguments: The command line after `mling-admin`.
+            arguments: The command line after `ling-admin`.
 
         Returns:
             int: Its exit code.
@@ -339,5 +339,5 @@ class NodeServe:
             return subprocess.run([cls.admin_executable(), *arguments], cwd=os.path.expanduser("~"),
                                   stdin=subprocess.DEVNULL, check=False).returncode
         except OSError as error:
-            print(f"❌ could not run mling-admin: {error}", file=sys.stderr)
+            print(f"❌ could not run ling-admin: {error}", file=sys.stderr)
             return 1

@@ -1,9 +1,9 @@
 """
 The systemd user timer that starts the night run (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.1):
-`mling-admin night enable|disable|status`.
+`ling-admin night enable|disable|status`.
 
 A user service has neither `~/.local/bin` nor the virtualenv on its PATH, so the unit names
-`mling-admin` by its absolute path and sets a PATH that reaches `mling-search`, `mling-fetch`
+`ling-admin` by its absolute path and sets a PATH that reaches `ling-search`, `ling-fetch`
 and Cargo for the agent's shell. Without lingering, a user timer stops at logout; `enable` says so.
 """
 
@@ -43,10 +43,10 @@ class NightShiftScheduler:
     def admin_executable(cls) -> str:
         """
         Returns:
-            str: The absolute path of this environment's `mling-admin`.
+            str: The absolute path of this environment's `ling-admin`.
         """
-        candidate = Path(sys.executable).parent / "mling-admin"
-        return str(candidate) if candidate.exists() else (shutil.which("mling-admin") or str(candidate))
+        candidate = Path(sys.executable).parent / "ling-admin"
+        return str(candidate) if candidate.exists() else (shutil.which("ling-admin") or str(candidate))
 
     @classmethod
     def render_units(cls, window: str, admin: str) -> tuple:
@@ -55,7 +55,7 @@ class NightShiftScheduler:
 
         Args:
             window: `HH:MM-HH:MM`.
-            admin: The absolute path of `mling-admin`.
+            admin: The absolute path of `ling-admin`.
 
         Returns:
             tuple: (timer text, service text).
@@ -141,7 +141,7 @@ class NightShiftScheduler:
             if next_run:
                 lines.append(f"Next: {next_run.split('  ')[0]}")
         else:
-            lines.append("Timer: not enabled (mling-admin night enable --window 01:00-07:00)")
+            lines.append("Timer: not enabled (ling-admin night enable --window 01:00-07:00)")
         if NightShiftQueue.runner_active():
             lines.append("A night run is in progress.")
         tasks = NightShiftQueue.tasks(NightShiftQueue.night_dir())

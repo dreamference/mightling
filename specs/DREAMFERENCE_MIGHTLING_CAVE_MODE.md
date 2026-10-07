@@ -1,10 +1,10 @@
 # Mightling Cave Mode — `/cavemode`
 
-**Status:** implemented (Phase 1) on 2026-10-01: `mling-rs/src/cave.rs`, the level texts in `mling-rs/cave/`, patch `0017-cave-mode`, `DreamferenceConfig.mightling_cave_mode`, and the tests of §8. The three Phase 1 checks ran against the live model (§10). The measurements in §1 were taken for it on 2026-09-30 and 2026-10-01; the §9 proposals that change a level's text are not in, because each needs a Phase 0 re-run first.
-**Goal:** `mling` answers tersely by default, so the model spends its slowest tokens (prose, 25.5 tok/s) and the user's reading time only on what the user needs. `/cavemode` switches the level at any moment, mid-turn included.
+**Status:** implemented (Phase 1) on 2026-10-01: `ling-rs/src/cave.rs`, the level texts in `ling-rs/cave/`, patch `0017-cave-mode`, `DreamferenceConfig.mightling_cave_mode`, and the tests of §8. The three Phase 1 checks ran against the live model (§10). The measurements in §1 were taken for it on 2026-09-30 and 2026-10-01; the §9 proposals that change a level's text are not in, because each needs a Phase 0 re-run first.
+**Goal:** `ling` answers tersely by default, so the model spends its slowest tokens (prose, 25.5 tok/s) and the user's reading time only on what the user needs. `/cavemode` switches the level at any moment, mid-turn included.
 **Builds on:**
 - Codex's World State sections and its extension registry: a `ContextContributor` can add a section that reaches the model's history only when its value changes, as the `git-attribution` extension does (`codex-rs/ext/git-attribution/src/world_state.rs`);
-- the launcher crate `mling-rs/`, which already holds the logic behind `/usage` (patch `0011`) and would hold the logic behind `/night` ([MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md));
+- the launcher crate `ling-rs/`, which already holds the logic behind `/usage` (patch `0011`) and would hold the logic behind `/night` ([MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md));
 - the configuration chain the launcher already reads for `vllm_host` and `mightling_gmail` (a `DREAMFERENCE_*` variable, then the TOML file, then the default);
 - the benchmark in `scripts/cave_mode_bench/`, which produced §1.1 and is re-run when the default model changes.
 
@@ -18,7 +18,7 @@ Measured on this GB10 with Qwen3.8-27B NVFP4 on SGLang (thinking off), before wr
 
 | What | Result |
 |---|---|
-| Where `mling`'s output goes (52 rollouts with tool calls in `~/.mightling/sessions`, 2026-09-29/30, counted with Qwen3.8's tokenizer) | **75.5%** tool-call arguments, **23.1%** final answers, **1.3%** commentary between tool calls. With thinking off the model barely narrates: the prose is the final answer |
+| Where `ling`'s output goes (52 rollouts with tool calls in `~/.mightling/sessions`, 2026-09-29/30, counted with Qwen3.8's tokenizer) | **75.5%** tool-call arguments, **23.1%** final answers, **1.3%** commentary between tool calls. With thinking off the model barely narrates: the prose is the final answer |
 | Final answers in those rollouts | median 108 tokens, p90 416, max 1,931. The long tail is how-to questions answered as tutorials: numbered options, a setup script for each, a closing offer |
 | What one token costs here | decode 25.5 tok/s for prose (50.3 code, 87.0 JSON); prefill ~1,700 tok/s. **One prose token costs the time of ~67 prompt tokens.** 81% of those sessions' input came from the prefix cache, so a few hundred tokens of rules cost a fraction of a second once, not (as with API billing) money on every call |
 | What reading costs | ~250 words a minute is ~5.5 tokens a second: the user reads about five times slower than the model writes. A 400-token answer is some 70 s of reading |
@@ -32,11 +32,11 @@ Outside evidence, in the same direction:
 - **CAVEWOMAN** (Adobe Research, 2026): output compression at L1 (telegraphic, function words dropped) cuts realised cost 1.4–2.4× per model with small accuracy changes; L2–L4 (keywords only, noun skeletons, 15-token budgets) collapse accuracy. **Input compression backfires**: models answer longer and less accurately when *they read* compressed text. Robustness does not follow model size; Qwen3.5-9B was the least robust of eight models.
 - **Concise CoT** (Renze & Guven, 2024): asking for concision cut response length 48.7% with negligible loss, except math on GPT-3.5 (−27.7%).
 - **Let Me Speak Freely?** (Tam et al., 2024): format restrictions degrade reasoning, the stricter the worse. With thinking off, Qwen3.8's visible answer is its only reasoning, which argues for constraining *what* it says over *how*.
-- **Chain of Draft** (Xu et al., 2025) compresses the *reasoning* channel to a few words a step (7.6% of CoT's tokens, accuracy kept). It does not apply: `mling` runs Qwen3.8 with thinking off (`enable_thinking: false`, effort `none`).
+- **Chain of Draft** (Xu et al., 2025) compresses the *reasoning* channel to a few words a step (7.6% of CoT's tokens, accuracy kept). It does not apply: `ling` runs Qwen3.8 with thinking off (`enable_thinking: false`, effort `none`).
 
 ### 1.1 The benchmark
 
-`scripts/cave_mode_bench/` (README there). Nine tasks in throwaway git workspaces, each with an automatic check. Four are coding tasks checked by tests: fix a failing test, implement a function from its docstring, rename a function across four files, add a CLI flag and its test. Five are questions checked for the facts the answer must contain: a question about the code in the workspace; a how-to (an immutable, hashable dataclass); a traceback to explain and fix; whether to run `git reset --hard HEAD~1` with uncommitted work to keep (the check also requires that nothing was run); an open how-to (a web-search tool in an MCP server). Each run is `mling exec` with a fresh `CODEX_HOME`, one run at a time, levels interleaved; the level text goes in as `developer_instructions`, which is what the World State fragment will be.
+`scripts/cave_mode_bench/` (README there). Nine tasks in throwaway git workspaces, each with an automatic check. Four are coding tasks checked by tests: fix a failing test, implement a function from its docstring, rename a function across four files, add a CLI flag and its test. Five are questions checked for the facts the answer must contain: a question about the code in the workspace; a how-to (an immutable, hashable dataclass); a traceback to explain and fix; whether to run `git reset --hard HEAD~1` with uncommitted work to keep (the check also requires that nothing was run); an open how-to (a web-search tool in an MCP server). Each run is `ling exec` with a fresh `CODEX_HOME`, one run at a time, levels interleaved; the level text goes in as `developer_instructions`, which is what the World State fragment will be.
 
 **Compare within a batch only.** The median `off` run took 15.5, 21.2, 22.7, 17.4 and 19.8 s in the five batches: the server's load moved over the night. Ratios are the geometric mean over tasks of (median at the level / median at `off`), with a 95% bootstrap interval. Even `off` against itself spans roughly [0.7, 1.4] on the questions, so only large effects are visible.
 
@@ -58,7 +58,7 @@ Outside evidence, in the same direction:
 
 `off` passed 154 of its 155 checks (once it transliterated "é" where the docstring said to replace it). Every miss at a cave level was at `ultra`, one each in batches 2, 3 and 5. v2 and v3 missed on the traceback task: one answered how without why, the other stated the rule ("never mutate a dict while iterating it") without the code that fixes it. v4 added "a fix shows the code or command" and passed that task 6 times of 6 in batch 4 and 4 of 4 in batch 5, but missed once on the open how-to: it wrote the example into a file nobody had asked for and answered in three sentences about the file. The cap displaced the content instead of shortening it (§9). One `B` full answer was re-scored as a pass after the check was widened to accept "iterated" as naming the cause.
 
-**Sessions.** Eight questions in one workspace through `mling exec` and `exec resume --last`: read code, how-to, make the change, a why, the difference between two library calls, write and run a test, a review, an explanation. Final-answer tokens per turn (the same questions in every row):
+**Sessions.** Eight questions in one workspace through `ling exec` and `exec resume --last`: read code, how-to, make the change, a why, the difference between two library calls, write and run a test, a review, an explanation. Final-answer tokens per turn (the same questions in every row):
 
 | Level | Rep | Turns 1–8 | Turns 1–4 | Turns 5–8 | Closing offers |
 |---|---|---|---|---|---|
@@ -88,7 +88,7 @@ Without a reminder, ultra's three-sentence cap was gone by turn 4 of the first s
 
 ### 1.3 Re-run of 2026-10-02: ultra v5 (both fixes), rejected
 
-**What was measured.** `ultra_v5` is v4 plus one line in the text ("Never move an answer into a file to stay under the cap: the answer goes in the message.") and one clause in the reminder (", unless the user's message asks for more"); both are in `scripts/cave_mode_bench/levels/history/`. The rule it had to pass was written into §9 before the first run. The harness changed first: every run sets `DREAMFERENCE_MIGHTLING_CAVE_MODE=off`, because since 2026-10-01 `mling` adds its own `ultra` section and the level under test would otherwise sit on top of it (the earlier batches predate the feature); `run.py` records the files a run created or changed (`wrote_files`, not counting what a task's setup leaves uncommitted) and `pass_strict`; `drift.py` always asks the ninth turn, "Give me the full explanation of your last answer.", and its `+RS` variant skips the reminder on a turn that asks for more detail. One binary for every run: `mling` built 2026-10-01 21:41 (sha256 `f64e000cbf7536d9…`), copied aside so the parallel rebuilds could not change it mid-batch.
+**What was measured.** `ultra_v5` is v4 plus one line in the text ("Never move an answer into a file to stay under the cap: the answer goes in the message.") and one clause in the reminder (", unless the user's message asks for more"); both are in `scripts/cave_mode_bench/levels/history/`. The rule it had to pass was written into §9 before the first run. The harness changed first: every run sets `DREAMFERENCE_MIGHTLING_CAVE_MODE=off`, because since 2026-10-01 `ling` adds its own `ultra` section and the level under test would otherwise sit on top of it (the earlier batches predate the feature); `run.py` records the files a run created or changed (`wrote_files`, not counting what a task's setup leaves uncommitted) and `pass_strict`; `drift.py` always asks the ninth turn, "Give me the full explanation of your last answer.", and its `+RS` variant skips the reminder on a turn that asks for more detail. One binary for every run: `ling` built 2026-10-01 21:41 (sha256 `f64e000cbf7536d9…`), copied aside so the parallel rebuilds could not change it mid-batch.
 
 **Load.** Several other jobs (a SWE-bench run, compaction measurements, builds) shared the model server: the median `off` run took 152.8 s, against 19.8 s in batch 5. Pass counts and token counts are what the rule uses; wall-time ratios from this batch mean little.
 
@@ -105,7 +105,7 @@ Against the rule (§9): (1) holds (36 of 36; reminded turns 5–8 at 0.26 of `of
 
 A fourth set measured v5's text with v4's reminder (`drift7`, three sessions with their own `off`): turns 5–8 at 0.36 of `off`, turn 9 at 0.52. That is the combination that would ship if only the file rule went in. It is not a pass: it is a different batch, and condition (2) failed on the text itself.
 
-**Where the skip goes, found while reading the extension API: no Codex patch is needed.** A `TurnInputContributor` (`codex-extension-api`, `contributors.rs`) receives each submitted turn's `user_input` together with the session, thread and turn stores, and `WorldStateContributionInput` carries the same `turn_store`. So `cave.rs` can register one more contributor beside the World State section, in its existing `install()`: it matches the user's message against the detail pattern (the benchmark uses `full explanation|in full|more detail|in detail|elaborate|explain more`) and marks the turn, and the section's render returns nothing instead of the reminder on a marked turn. That the turn-input contributors run before the turn's first World State step was not checked; it is the first thing to confirm when this is built, with `mling debug prompt-input` and one live session.
+**Where the skip goes, found while reading the extension API: no Codex patch is needed.** A `TurnInputContributor` (`codex-extension-api`, `contributors.rs`) receives each submitted turn's `user_input` together with the session, thread and turn stores, and `WorldStateContributionInput` carries the same `turn_store`. So `cave.rs` can register one more contributor beside the World State section, in its existing `install()`: it matches the user's message against the detail pattern (the benchmark uses `full explanation|in full|more detail|in detail|elaborate|explain more`) and marks the turn, and the section's render returns nothing instead of the reminder on a marked turn. That the turn-input contributors run before the turn's first World State step was not checked; it is the first thing to confirm when this is built, with `ling debug prompt-input` and one live session.
 
 **Not settled.** Whether the file rule is worth keeping at all: displacement happened once in 11 completed v4 open how-to runs and never in 12 with v5, which no sample of this size separates. Phase 2's real-session check (§7, due about 15 October) is where it would show.
 
@@ -134,7 +134,7 @@ And the irreversible-action question (batch 3, rep 8), where every level must st
 
 ## 3. The command
 
-`/cavemode` is a built-in slash command of the `mling` TUI. It edits one small file (§5.3) and prints a few lines; it never calls the model, so it answers instantly, including while a turn is running.
+`/cavemode` is a built-in slash command of the `ling` TUI. It edits one small file (§5.3) and prints a few lines; it never calls the model, so it answers instantly, including while a turn is running.
 
 | Form | Effect |
 |---|---|
@@ -155,9 +155,9 @@ More room: /cavemode full (this session) or /cavemode default full (new sessions
 ```
 
 **Rules:**
-- **The level belongs to the session.** `mling resume` keeps it; a new session, a fork, a side conversation and a subagent start at the default. (A subagent's text goes to the parent model, not to the user, and §4 already keeps text another model reads in normal prose.)
+- **The level belongs to the session.** `ling resume` keeps it; a new session, a fork, a side conversation and a subagent start at the default. (A subagent's text goes to the parent model, not to the user, and §4 already keeps text another model reads in normal prose.)
 - **The model cannot change it.** "Explain in detail" gets a full answer to that question (every level says so) but leaves the level alone. Only `/cavemode` and configuration change it.
-- **`mling exec` and scripts** take the default, or `DREAMFERENCE_MIGHTLING_CAVE_MODE=off mling exec …` for one run.
+- **`ling exec` and scripts** take the default, or `DREAMFERENCE_MIGHTLING_CAVE_MODE=off ling exec …` for one run.
 - **Only the terminal agent.** The web chat (Onyx) has its own assistant prompt (`MIGHTLING_ASSISTANT_INSTRUCTIONS`) and is not covered here.
 
 ---
@@ -187,7 +187,7 @@ The level is a developer message added to the conversation; `base_instructions()
 Codex keeps some model-visible state as **World State sections**: each has a value, and a developer message is added to the history only when the value changes (`record_step_world_state_if_changed`, before every model request). Extensions contribute sections through `ContextContributor::contribute_world_state`; `git-attribution` is a complete example in under two hundred lines. Cave mode is one more. Its value is the level and, for every level but `off`, the current turn's id, so that it changes once per user turn and carries the reminder:
 
 ```rust
-// mling-rs/src/cave.rs (sketch)
+// ling-rs/src/cave.rs (sketch)
 pub fn install<C: Sync>(registry: &mut ExtensionRegistryBuilder<C>) {
     registry.prompt_contributor(Arc::new(CaveMode));
 }
@@ -235,15 +235,15 @@ Why this mechanism:
 - **`off` costs nothing when never used.** A session that starts at `off` gets no fragment at all, so it is exactly upstream Codex. A session switched to `off` gets two lines saying the earlier rules no longer apply (the `DISABLED_INSTRUCTIONS` pattern of `git-attribution`).
 - **The model sees it where it sees other developer messages.** Qwen3.8's patched chat template turns a system message after the first into a `<system-reminder>` inside the user turn (registry `chat_template_patches`); the benchmark's reminder was placed the same way.
 
-**Registration** is one line after `codex_git_attribution::install(...)` in `codex-rs/app-server/src/extensions.rs`, the registry the TUI, `mling exec` (an in-process app server) and app-server clients all use; and one line in the registry `cli/src/main.rs` builds for `mling debug prompt-input`, so that command shows exactly what the model is sent (the tests use it, §8).
+**Registration** is one line after `codex_git_attribution::install(...)` in `codex-rs/app-server/src/extensions.rs`, the registry the TUI, `ling exec` (an in-process app server) and app-server clients all use; and one line in the registry `cli/src/main.rs` builds for `ling debug prompt-input`, so that command shows exactly what the model is sent (the tests use it, §8).
 
 ### 5.3 Where the level comes from
 
 Resolved before every model request, first match wins:
 
-1. **This session:** `$CODEX_HOME/cave_mode/<thread-id>`, a file holding the level name, written by `/cavemode <level>`. A file keyed by thread id survives `mling resume` and needs no channel between the TUI and the extension, which may run in another process (`/daemon`).
+1. **This session:** `$CODEX_HOME/cave_mode/<thread-id>`, a file holding the level name, written by `/cavemode <level>`. A file keyed by thread id survives `ling resume` and needs no channel between the TUI and the extension, which may run in another process (`/daemon`).
 2. **`DREAMFERENCE_MIGHTLING_CAVE_MODE`.**
-3. **`mightling_cave_mode`** in the TOML file the launcher already reads (`DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`; `config_file()` in `mling-rs/src/lib.rs`). `/cavemode default` writes here with `toml_edit`, creating the user-level file if there is none.
+3. **`mightling_cave_mode`** in the TOML file the launcher already reads (`DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then `~/.config/dreamference/config.toml`; `config_file()` in `ling-rs/src/lib.rs`). `/cavemode default` writes here with `toml_edit`, creating the user-level file if there is none.
 4. **`DEFAULT_MIGHTLING_CAVE_MODE`**, `"ultra"` (§1.2, item 6).
 
 An invalid value at any tier is skipped, and `/cavemode` names it and where it was. The Python side mirrors tiers 2–4 exactly as it does `mightling_gmail`: `DreamferenceConfig.mightling_cave_mode`, validated against the four names, written by `save_config()` only when it differs from the default. Session files older than 30 days are deleted by the launcher at start.
@@ -253,11 +253,11 @@ An invalid value at any tier is skipped, and `/cavemode` names it and where it w
 One more hook patch in `codex-patches/`, `0017-cave-mode`, modelled on `0011-usage-token-stats`:
 
 - `codex-rs/tui/src/slash_command.rs`: the variant `Cavemode` (strum's kebab-case gives `cavemode`), placed after `Model`, since both set how the model answers; its description, "set how terse Mightling's answers are"; membership in `supports_inline_args()` and `available_during_task()` (true).
-- `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: one arm in `dispatch_command` (no arguments) and one in `dispatch_command_with_args`, both calling `mling_launcher::cave::command(self.thread_id, args)` (generic over the id's `Display`, so each arm is one line), which returns the lines to print, added with `add_plain_history_lines` as `/usage` does; and `QueueDrain::Continue` in `queued_command_drain_result`, which is exhaustive.
-- `codex-rs/app-server/Cargo.toml` and `src/extensions.rs`: the `mling-launcher` path dependency and the `install` line (§5.2). `mling-launcher` gains `codex-extension-api` from the workspace.
+- `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: one arm in `dispatch_command` (no arguments) and one in `dispatch_command_with_args`, both calling `ling_launcher::cave::command(self.thread_id, args)` (generic over the id's `Display`, so each arm is one line), which returns the lines to print, added with `add_plain_history_lines` as `/usage` does; and `QueueDrain::Continue` in `queued_command_drain_result`, which is exhaustive.
+- `codex-rs/app-server/Cargo.toml` and `src/extensions.rs`: the `ling-launcher` path dependency and the `install` line (§5.2). `ling-launcher` gains `codex-extension-api` from the workspace.
 - `codex-rs/cli/src/main.rs`: the `install` line in the `debug prompt-input` registry. The CLI already depends on the launcher (patch `0002`).
 
-Everything else (parsing, the tiers, the files, the texts, the printed lines) lives in `mling-rs/src/cave.rs`, with its unit tests.
+Everything else (parsing, the tiers, the files, the texts, the printed lines) lives in `ling-rs/src/cave.rs`, with its unit tests.
 
 ### 5.5 Budget
 
@@ -287,7 +287,7 @@ The series was capped at 22,000 bytes (`test_the_patches_stay_small`) and stood 
 
 **Phase 0, measure (done for Qwen3.8, §1.1).** The default was chosen by the rule in §1.2, written before the confirmation batch ran. Re-run `scripts/cave_mode_bench` whenever the default model changes or a level text is edited, with `off` interleaved in the same batch, and apply the same rule.
 
-**Phase 1, build.** `mling-rs/src/cave.rs` (levels, texts, reminders, resolution, `command()`, the World State section), the hook patch with the cap raise, `mightling_cave_mode` in `DreamferenceConfig`, the tests of §8, and a paragraph in `specs/DREAMFERENCE_MIGHTLING_CODEX.md` and `docs/mling.md`. Three checks belong to this phase because the benchmark could not make them: that the reminder reaches the model as its own `<system-reminder>` before the model's first message of each turn (the benchmark placed it inside the user's message); that after `/compact` and one more turn the rollout holds the level's full text again, not only a reminder (§5.2); and what a compaction summary looks like at `ultra` (it must be normal prose, §4).
+**Phase 1, build.** `ling-rs/src/cave.rs` (levels, texts, reminders, resolution, `command()`, the World State section), the hook patch with the cap raise, `mightling_cave_mode` in `DreamferenceConfig`, the tests of §8, and a paragraph in `specs/DREAMFERENCE_MIGHTLING_CODEX.md` and `docs/ling.md`. Three checks belong to this phase because the benchmark could not make them: that the reminder reaches the model as its own `<system-reminder>` before the model's first message of each turn (the benchmark placed it inside the user's message); that after `/compact` and one more turn the rollout holds the level's full text again, not only a reminder (§5.2); and what a compaction summary looks like at `ultra` (it must be normal prose, §4).
 
 **Phase 2, look at real sessions.** After two weeks of use, the same split as §1's first row over `~/.mightling/sessions`: final-answer tokens (median, p90) before and after, how often `/cavemode` is used and to which level. Frequent switches to `full` or `off` mean the default is wrong for this user, whatever the benchmark said.
 
@@ -297,11 +297,11 @@ The series was capped at 22,000 bytes (`test_the_patches_stay_small`) and stood 
 
 ## 8. Tests
 
-- **Launcher unit tests** (`mling-rs/src/cave.rs`, run with the other launcher tests in the export directory): level parsing, case-insensitive, unknown names rejected with the usage line; the resolution order of §5.3, each tier shadowing the next; `command()`'s output for every form; the section's render table: absent + non-`off` → full text; absent + `off` → nothing; same level, same turn → nothing; same level, new turn → reminder; any switch → the new full text; switch to `off` → the off text; the retained matcher accepting the current level's full text only (not its reminder, not another level's text); each text under 500 estimated tokens and each reminder under 60 (characters / 4, which overestimates: full's 1,836 bytes are 459 by the estimate and 432 tokens by the tokenizer).
-- **Configuration** (`tests/`): `DreamferenceConfig.mightling_cave_mode` through all four tiers; an invalid value rejected; `save_config()` omitting the default; `DEFAULT_MIGHTLING_CAVE_MODE` equal to the default in `mling-rs/src/cave.rs` (read from the source, as other cross-language constants are).
+- **Launcher unit tests** (`ling-rs/src/cave.rs`, run with the other launcher tests in the export directory): level parsing, case-insensitive, unknown names rejected with the usage line; the resolution order of §5.3, each tier shadowing the next; `command()`'s output for every form; the section's render table: absent + non-`off` → full text; absent + `off` → nothing; same level, same turn → nothing; same level, new turn → reminder; any switch → the new full text; switch to `off` → the off text; the retained matcher accepting the current level's full text only (not its reminder, not another level's text); each text under 500 estimated tokens and each reminder under 60 (characters / 4, which overestimates: full's 1,836 bytes are 459 by the estimate and 432 tokens by the tokenizer).
+- **Configuration** (`tests/`): `DreamferenceConfig.mightling_cave_mode` through all four tiers; an invalid value rejected; `save_config()` omitting the default; `DEFAULT_MIGHTLING_CAVE_MODE` equal to the default in `ling-rs/src/cave.rs` (read from the source, as other cross-language constants are).
 - **Patch size:** `test_the_patches_stay_small` with the raised cap and a comment saying why.
-- **Prompt check** (needs the model server only for `/v1/models`; skipped without it): `mling debug prompt-input "hi"` contains exactly one `<cave_mode>` developer fragment, the default level's full text; with `DREAMFERENCE_MIGHTLING_CAVE_MODE=off`, none.
-- **Live, two turns** (`mling exec`, then `exec resume --last`): the rollout holds the full text before turn 1 and the reminder before the model's first message of turn 2, and nothing between tool calls of one turn. Then `/compact` and one more turn: the full text is in the history again.
+- **Prompt check** (needs the model server only for `/v1/models`; skipped without it): `ling debug prompt-input "hi"` contains exactly one `<cave_mode>` developer fragment, the default level's full text; with `DREAMFERENCE_MIGHTLING_CAVE_MODE=off`, none.
+- **Live, two turns** (`ling exec`, then `exec resume --last`): the rollout holds the full text before turn 1 and the reminder before the model's first message of turn 2, and nothing between tool calls of one turn. Then `/compact` and one more turn: the full text is in the history again.
 - **Live slash-command suite** (`tests/test_mightling_slash_commands.py` enumerates slash commands from the *submodule's* unpatched source, so a command a patch adds is not listed there and cannot get a case without failing its stale-case check; the checks below were run with the same pty harness from a script instead, §10): `/cavemode` lists the levels; `/cavemode full`, then a question, and the rollout holds full's text after ultra's; `/cavemode off` adds the off text and no reminder follows; `/cavemode loud` prints the usage line and changes nothing.
 - **The benchmark** (`scripts/cave_mode_bench`) is not part of the suite; it drives the real model for about an hour. Phase 0 says when to run it.
 
@@ -330,27 +330,27 @@ The series was capped at 22,000 bytes (`test_the_patches_stay_small`) and stood 
 - **Session files** are named by thread id and refused unless the id is alphanumeric with dashes, so nothing typed can escape `$CODEX_HOME/cave_mode/`. Files older than 30 days are deleted at launch.
 - **`/cavemode default <level>`** writes `mightling_cave_mode` with `toml_edit` to the file the launcher already reads (`DREAMFERENCE_CONFIG_PATH`, `./dreamference.toml`, then `~/.config/dreamference/config.toml`, created if absent) and also sets the current session.
 - **Before the first message** there may be no thread yet; `/cavemode <level>` then says so and points at `/cavemode default`.
-- **The texts are files**, `mling-rs/cave/*.txt`, byte-for-byte `scripts/cave_mode_bench/levels/` (a Python test compares them), included with `include_str!`; the markers are stripped at run time because the harness adds them back.
-- **The older `cave_mode` setting** (`mling-admin run --cave`, which writes a fixed prompt into Cline's `.clinerules`) is unrelated and unchanged.
+- **The texts are files**, `ling-rs/cave/*.txt`, byte-for-byte `scripts/cave_mode_bench/levels/` (a Python test compares them), included with `include_str!`; the markers are stripped at run time because the harness adds them back.
+- **The older `cave_mode` setting** (`ling-admin run --cave`, which writes a fixed prompt into Cline's `.clinerules`) is unrelated and unchanged.
 
-**Checked against the live model** (Qwen3.8-27B on SGLang), with the binary `mling-admin codex build` installed from the committed patches:
+**Checked against the live model** (Qwen3.8-27B on SGLang), with the binary `ling-admin codex build` installed from the committed patches:
 
 | Check | Result |
 |---|---|
-| `mling debug prompt-input "hi"` | One `<cave_mode>` item: ultra's full text, byte-identical to the measured file, as its own content item of the initial developer message. With `DREAMFERENCE_MIGHTLING_CAVE_MODE=off`: none. With `lite`: lite's text |
-| `mling exec`, then `exec resume --last` | Turn 1: the full text in the initial context, then two tool calls with nothing between them. Turn 2: one developer message, ultra's reminder, recorded before the user's message, so the model reads it before writing anything in that turn |
+| `ling debug prompt-input "hi"` | One `<cave_mode>` item: ultra's full text, byte-identical to the measured file, as its own content item of the initial developer message. With `DREAMFERENCE_MIGHTLING_CAVE_MODE=off`: none. With `lite`: lite's text |
+| `ling exec`, then `exec resume --last` | Turn 1: the full text in the initial context, then two tool calls with nothing between them. Turn 2: one developer message, ultra's reminder, recorded before the user's message, so the model reads it before writing anything in that turn |
 | TUI, `/cavemode` | The listing, `ultra (default)`, the marker on the level in force; `/cavemode loud` prints the usage line and changes nothing |
 | TUI, `/cavemode full`, two turns | full's full text before the first turn after the switch, full's reminder before the second |
 | TUI, `/cavemode off`, one turn | the off text once, and no reminder in the following turn |
 | TUI, `/cavemode ultra`, a turn, `/compact`, a turn | ultra's full text after the switch; after the compaction the history held no cave text, and the next turn's re-injected initial context carried ultra's **full text**, not a reminder (§5.2's expectation, now observed) |
 | TUI, typing `/cav` | the popup offers `/cavemode`, "set how terse Mightling's answers are" |
 | TUI, `/cavemode default full` | `mightling_cave_mode = "full"` appended to the configured TOML file with its other keys kept, the session file set to `full`, both reported |
-| TUI, `mling resume --last` after that | `/cavemode` reports `full (this session)`: the level belongs to the session and survives a resume |
+| TUI, `ling resume --last` after that | `/cavemode` reports `full (this session)`: the level belongs to the session and survives a resume |
 | The compaction summary at `ultra` | normal prose with headings ("**Task:** User sends single-word prompts; assistant replies with exactly that one word."), as §4 requires |
 
 Not checked: how Qwen3.8's chat template renders the per-turn developer message (§5.2 expects a `<system-reminder>` inside the user turn); the rollout shows it as its own developer message in the right place, but the rendered prompt at the server was not inspected.
 
-**Codex's own tests** (`mling-admin codex test`) were not re-run. A new slash command shifts the TUI's popup snapshots that list commands (for example `command_popup_default_items`), so those need Mightling snapshots accepted with `--accept-snapshots` and reviewed, which refuses anything but a name change: expect a handful of manual acceptances.
+**Codex's own tests** (`ling-admin codex test`) were not re-run. A new slash command shifts the TUI's popup snapshots that list commands (for example `command_popup_default_items`), so those need Mightling snapshots accepted with `--accept-snapshots` and reviewed, which refuses anything but a name change: expect a handful of manual acceptances.
 
 ## Sources
 
@@ -366,7 +366,7 @@ Not checked: how Qwen3.8's chat template renders the per-turn developer message 
 
 ## Appendix A. The level texts
 
-Verbatim, as `scripts/cave_mode_bench/levels/` holds them and as `mling-rs/src/cave.rs` will. The opening and closing `<cave_mode>` markers are the section's markers.
+Verbatim, as `scripts/cave_mode_bench/levels/` holds them and as `ling-rs/src/cave.rs` will. The opening and closing `<cave_mode>` markers are the section's markers.
 
 **lite** (271 tokens):
 

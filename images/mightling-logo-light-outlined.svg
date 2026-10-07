@@ -7,7 +7,7 @@
     <line x1="-4"  y1="120" x2="-44" y2="124" opacity=".3"/>
   </g>
 
-  <!-- faceted mling -->
+  <!-- faceted ling -->
   <g>
     <polygon points="96,64 52,14 78,16 134,56" fill="#242A32"/>
     <polygon points="96,64 78,16 134,56" fill="#2E3947"/>

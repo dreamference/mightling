@@ -2,7 +2,7 @@
   "name": "mightling-work",
   "private": true,
   "version": "0.1.0",
-  "description": "The Work window of mling-app: a client of mling app-server (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md).",
+  "description": "The Work window of ling-app: a client of ling app-server (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md).",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {

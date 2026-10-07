@@ -1,0 +1,16 @@
+# Where the Mightling node is, read from the file the launcher wrote: `$CODEX_HOME/node.json`
+# (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.2). No dependency beyond the standard library, so the
+# launcher, the web commands and the code index all answer the same way, and none of them but the
+# launcher needs multicast. The web crate carries a byte-identical copy of src/lib.rs
+# (ling-web-rs/src/node_locator.rs; a test compares them), because it is built on its own,
+# outside the Codex workspace.
+[package]
+name = "ling-node-locator"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_node_locator"
+path = "src/lib.rs"
