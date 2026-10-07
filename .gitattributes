@@ -1,0 +1,8 @@
+# Line endings that must survive a Windows checkout (core.autocrlf=true is the Windows default).
+# The patches are applied with `git apply` to an LF export of Codex: converted to CRLF they no
+# longer apply (specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md section 16.1).
+*.patch -text
+# Shell scripts run by bash, which reads a CR as part of the line.
+*.sh text eol=lf
+# Read by PowerShell 5.1, which accepts either; CRLF is what Windows editors write.
+*.ps1 text eol=crlf

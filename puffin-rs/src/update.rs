@@ -76,7 +76,25 @@ pub fn decide(current: Option<&str>, latest: &str) -> Decision {
 
 /// The Rust target triple the release assets are named after.
 pub fn target() -> String {
-    format!("{}-unknown-linux-gnu", std::env::consts::ARCH)
+    target_for(std::env::consts::ARCH, std::env::consts::OS)
+}
+
+/// [`target`] for a given architecture and operating system, as `std::env::consts` names them.
+pub fn target_for(arch: &str, os: &str) -> String {
+    match os {
+        "windows" => format!("{arch}-pc-windows-msvc"),
+        _ => format!("{arch}-unknown-linux-gnu"),
+    }
+}
+
+/// The Windows sandbox's helpers, which Codex looks for beside its own executable. Windows
+/// releases carry them; they are optional like the web commands.
+pub const WINDOWS_SANDBOX_HELPERS: [&str; 2] = ["codex-windows-sandbox-setup", "codex-command-runner"];
+
+/// The file name a command is installed under: `puffin-search.exe` on Windows. The release's
+/// `.gz` assets keep the bare name and hold the `.exe`.
+pub fn installed_name(name: &str) -> String {
+    format!("{name}{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// Asset names for a target: the two gzipped binaries and the checksum file.
@@ -130,8 +148,8 @@ fn github_token() -> Option<String> {
 
 /// Runs `puffin update`.
 pub async fn run() -> anyhow::Result<()> {
-    if !cfg!(target_os = "linux") {
-        bail!("`puffin update` only has Linux release builds to install");
+    if !cfg!(any(target_os = "linux", windows)) {
+        bail!("`puffin update` only has Linux and Windows release builds to install");
     }
     let repo = std::env::var("PUFFIN_RELEASE_REPO")
         .ok()
@@ -224,10 +242,15 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Everything is downloaded and verified before anything is replaced, so a failure part-way
     // leaves the installation as it was.
-    let mut wanted = vec![(puffin_asset, exe_name), (host_asset, CODE_MODE_HOST.to_string())];
-    for (asset, name) in optional_asset_names(&target).into_iter().zip(optional_commands()) {
+    let mut wanted = vec![(puffin_asset, exe_name), (host_asset, installed_name(CODE_MODE_HOST))];
+    let mut optional: Vec<&str> = optional_commands().to_vec();
+    if cfg!(windows) {
+        optional.extend(WINDOWS_SANDBOX_HELPERS);
+    }
+    for name in optional {
+        let asset = format!("{name}-{target}.gz");
         if assets.contains_key(asset.as_str()) {
-            wanted.push((asset, name.to_string()));
+            wanted.push((asset, installed_name(name)));
         } else {
             println!("ℹ️  release {tag} carries no {name}; keeping the installed one");
         }
@@ -251,15 +274,23 @@ pub async fn run() -> anyhow::Result<()> {
             link_onto_path(install_dir, &installed);
         }
     }
+    if cfg!(windows) {
+        println!("ℹ️  Windows builds are a preview and are not signed: Smart App Control must be off to run them.");
+    }
     println!("✅ Puffin {latest} installed in {}", install_dir.display());
     Ok(())
 }
 
 /// Links `~/.local/bin/<name>` to the installed command, as `puffin-admin codex build` does. Only
 /// a missing file or an existing link is replaced: a real file of that name belongs to something
-/// else, and is reported instead.
+/// else, and is reported instead. Nothing on Windows, where install.ps1 puts the install folder
+/// itself on PATH.
+#[cfg(windows)]
+fn link_onto_path(_install_dir: &Path, _name: &str) {}
+
+#[cfg(not(windows))]
 fn link_onto_path(install_dir: &Path, name: &str) {
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = puffin_node_locator::home_dir() else {
         return;
     };
     let bin = Path::new(&home).join(".local").join("bin");
@@ -280,6 +311,7 @@ fn link_onto_path(install_dir: &Path, name: &str) {
 
 /// Writes next to the target and renames over it, so a running `puffin` keeps its own file and a
 /// new one never starts from a half-written binary.
+#[cfg(unix)]
 fn replace(dir: &Path, name: &str, binary: &[u8]) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -291,9 +323,89 @@ fn replace(dir: &Path, name: &str, binary: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Windows cannot rename over a running `.exe`, but it can rename the running file itself. So the
+/// old file is moved aside to `<name>.old` (or `<name>.<n>.old` while an older one is still in
+/// use), the new one takes its name, and [`sweep_replaced_binaries`] deletes the leftovers at the
+/// next start.
+#[cfg(not(unix))]
+fn replace(dir: &Path, name: &str, binary: &[u8]) -> anyhow::Result<()> {
+    let staging = dir.join(format!(".{name}.update"));
+    std::fs::write(&staging, binary)
+        .with_context(|| format!("could not write to {}", dir.display()))?;
+    replace_aside(dir, name, &staging)
+}
+
+/// Puts `staging` in place of `dir/name`, moving any existing file aside first. Portable, so its
+/// test runs on Linux too.
+pub fn replace_aside(dir: &Path, name: &str, staging: &Path) -> anyhow::Result<()> {
+    let target = dir.join(name);
+    if target.exists() {
+        let mut aside = dir.join(format!("{name}{OLD_SUFFIX}"));
+        let mut copy = 1;
+        while aside.exists() && std::fs::remove_file(&aside).is_err() {
+            copy += 1;
+            aside = dir.join(format!("{name}.{copy}{OLD_SUFFIX}"));
+        }
+        std::fs::rename(&target, &aside).with_context(|| format!("could not move {} aside", target.display()))?;
+    }
+    std::fs::rename(staging, &target)?;
+    Ok(())
+}
+
+/// The suffix [`replace_aside`] gives a binary it moved aside.
+pub const OLD_SUFFIX: &str = ".old";
+
+/// Deletes the binaries a Windows update moved aside, now that they are no longer running. Called
+/// first thing at start; one still in use (another `puffin` running) stays until a later start.
+pub fn sweep_replaced_binaries() {
+    let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) else {
+        return;
+    };
+    sweep_old_in(&dir);
+}
+
+/// [`sweep_replaced_binaries`] for one folder.
+pub fn sweep_old_in(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().ends_with(OLD_SUFFIX) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_assets_are_named_for_the_msvc_targets() {
+        assert_eq!(target_for("aarch64", "windows"), "aarch64-pc-windows-msvc");
+        assert_eq!(target_for("x86_64", "windows"), "x86_64-pc-windows-msvc");
+        assert_eq!(target_for("aarch64", "linux"), "aarch64-unknown-linux-gnu");
+        assert_eq!(asset_names("aarch64-pc-windows-msvc")[0], "puffin-aarch64-pc-windows-msvc.gz");
+    }
+
+    #[test]
+    fn a_running_binary_is_moved_aside_and_swept_later() {
+        let dir = std::env::temp_dir().join(format!("puffin-update-aside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap_or_default();
+        std::fs::write(dir.join("puffin.exe"), b"old").unwrap_or_default();
+        std::fs::write(dir.join(".puffin.exe.update"), b"new").unwrap_or_default();
+        replace_aside(&dir, "puffin.exe", &dir.join(".puffin.exe.update")).unwrap_or_default();
+        assert_eq!(std::fs::read(dir.join("puffin.exe")).unwrap_or_default(), b"new");
+        assert_eq!(std::fs::read(dir.join("puffin.exe.old")).unwrap_or_default(), b"old");
+        // A second update before the next start finds the first leftover removable.
+        std::fs::write(dir.join(".puffin.exe.update"), b"newer").unwrap_or_default();
+        replace_aside(&dir, "puffin.exe", &dir.join(".puffin.exe.update")).unwrap_or_default();
+        assert_eq!(std::fs::read(dir.join("puffin.exe")).unwrap_or_default(), b"newer");
+        assert_eq!(std::fs::read(dir.join("puffin.exe.old")).unwrap_or_default(), b"new");
+        sweep_old_in(&dir);
+        assert!(!dir.join("puffin.exe.old").exists());
+        assert!(dir.join("puffin.exe").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn versions_decide_whether_to_install() {

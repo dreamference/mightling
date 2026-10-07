@@ -152,11 +152,24 @@ pub fn resolve_from(session: Option<&str>, environment: Option<&str>, configs: &
     Resolved { level, source, invalid }
 }
 
+/// The user's home folder: `HOME`, or `USERPROFILE` (Windows, where `HOME` is usually unset).
+/// The same rule as the node locator's, so the copies cannot disagree.
+pub fn home_dir() -> Option<PathBuf> {
+    home_from(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
+}
+
+/// [`home_dir`] on given values: the first that is set and not empty.
+pub fn home_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    home.filter(|home| !home.is_empty())
+        .or_else(|| userprofile.filter(|home| !home.is_empty()))
+        .map(PathBuf::from)
+}
+
 /// `$CODEX_HOME`, or `~/.puffin` when a shell-environment policy stripped the variable.
 pub fn codex_home() -> Option<PathBuf> {
     match std::env::var_os("CODEX_HOME") {
         Some(home) if !home.is_empty() => Some(PathBuf::from(home)),
-        _ => Some(PathBuf::from(std::env::var_os("HOME")?).join(".puffin")),
+        _ => Some(home_dir()?.join(".puffin")),
     }
 }
 
@@ -170,7 +183,7 @@ pub fn session_file(id: &str) -> Option<PathBuf> {
 
 /// The user-level configuration file, the one `/airgapped default` writes.
 pub fn user_config_file() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("HOME")?).join(".config/dreamference/config.toml"))
+    Some(home_dir()?.join(".config").join("dreamference").join("config.toml"))
 }
 
 /// The configuration files to read, in the order they are named when two agree: the one
@@ -190,9 +203,13 @@ pub fn config_files(cwd: &Path) -> Vec<PathBuf> {
 }
 
 /// The folders a sandboxed command can write under the workspace-write sandbox: the working
-/// directory, `/tmp` and `$TMPDIR`. (Folders the user adds as `writable_roots` are not known here.)
+/// directory, `/tmp` (not on Windows) and the temporary folder `tmpdir`. (Folders the user adds as
+/// `writable_roots` are not known here.)
 pub fn writable_roots(cwd: &Path, tmpdir: Option<&Path>) -> Vec<PathBuf> {
-    let mut roots = vec![cwd.to_path_buf(), PathBuf::from("/tmp")];
+    let mut roots = vec![cwd.to_path_buf()];
+    if !cfg!(windows) {
+        roots.push(PathBuf::from("/tmp"));
+    }
     if let Some(tmpdir) = tmpdir
         && !tmpdir.as_os_str().is_empty()
     {
@@ -201,6 +218,10 @@ pub fn writable_roots(cwd: &Path, tmpdir: Option<&Path>) -> Vec<PathBuf> {
     roots
 }
 
+/// The variables naming the temporary folders a command can write: `TMPDIR`, or on Windows `TEMP`
+/// and `TMP`.
+pub const TEMP_VARS: &[&str] = if cfg!(windows) { &["TEMP", "TMP"] } else { &["TMPDIR"] };
+
 /// Whether `path` lies in (or is) one of `roots`, comparing real paths where they exist.
 pub fn within(path: &Path, roots: &[PathBuf]) -> bool {
     let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -208,10 +229,18 @@ pub fn within(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(real(root)))
 }
 
-/// [`writable_roots`] for this process: its working directory and its `$TMPDIR`.
+/// [`writable_roots`] for this process: its working directory and its temporary folders.
 fn writable_roots_here() -> Vec<PathBuf> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    writable_roots(&cwd, std::env::var_os("TMPDIR").map(PathBuf::from).as_deref())
+    let mut roots = writable_roots(&cwd, None);
+    for var in TEMP_VARS {
+        if let Some(dir) = std::env::var_os(var).filter(|dir| !dir.is_empty()).map(PathBuf::from)
+            && !roots.contains(&dir)
+        {
+            roots.push(dir);
+        }
+    }
+    roots
 }
 
 /// Whether a sandboxed command started here could rewrite the files the level is read from:
@@ -225,7 +254,18 @@ pub fn level_files_exposed() -> bool {
 /// The user's runtime directory: `$XDG_RUNTIME_DIR`, or `/run/user/<uid>` when a shell-environment
 /// policy stripped the variable. systemd creates it per login, owned by the user, and the command
 /// sandbox mounts it read-only (measured 2026-10-02: a sandboxed `touch` there fails with
-/// "Read-only file system", from the home directory too).
+/// "Read-only file system", from the home directory too). On Windows, `%LOCALAPPDATA%\Puffin`:
+/// the sandbox runs commands as its own local accounts, which cannot write the user's profile
+/// (specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md §7.3).
+#[cfg(windows)]
+fn runtime_dir() -> Option<PathBuf> {
+    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA").filter(|dir| !dir.is_empty())?);
+    let dir = base.join("Puffin");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+#[cfg(not(windows))]
 fn runtime_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
         && dir.is_absolute()
@@ -506,6 +546,18 @@ mod tests {
     }
 
     #[test]
+    fn the_home_folder_falls_back_to_userprofile() {
+        use std::ffi::OsString;
+        let windows = Some(OsString::from(r"C:\Users\Jane Doe"));
+        // Windows: `HOME` is usually unset, and a user-level `puffin_airgapped` must still be read.
+        assert_eq!(home_from(None, windows.clone()), Some(PathBuf::from(r"C:\Users\Jane Doe")));
+        assert_eq!(home_from(Some(OsString::new()), windows.clone()), Some(PathBuf::from(r"C:\Users\Jane Doe")));
+        assert_eq!(home_from(Some(OsString::from("/home/u")), windows), Some(PathBuf::from("/home/u")));
+        assert_eq!(home_from(None, Some(OsString::new())), None);
+        assert_eq!(home_from(None, None), None);
+    }
+
+    #[test]
     fn a_path_is_within_a_writable_root_by_its_real_location() {
         let base = std::env::temp_dir().join(format!("puffin-airgapped-roots-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -514,7 +566,11 @@ mod tests {
         std::fs::create_dir_all(base.join("elsewhere")).unwrap_or_default();
         // `puffin` started in the home directory: `~/.puffin` is inside the working directory.
         let roots = writable_roots(&home, None);
-        assert_eq!(roots, vec![home.clone(), PathBuf::from("/tmp")]);
+        if cfg!(windows) {
+            assert_eq!(roots, vec![home.clone()]);
+        } else {
+            assert_eq!(roots, vec![home.clone(), PathBuf::from("/tmp")]);
+        }
         assert!(within(&home.join(".puffin"), &[home.clone()]));
         assert!(within(&home.join(".config/dreamference/config.toml"), &[home.clone()]));
         // Started in a project folder: it is not.
@@ -527,8 +583,9 @@ mod tests {
             let _ = std::os::unix::fs::symlink(&home, base.join("link"));
             assert!(within(&base.join("link").join(".puffin"), &[home.clone()]));
         }
-        assert_eq!(writable_roots(&home, Some(Path::new("/var/tmp/x"))).len(), 3);
-        assert_eq!(writable_roots(&home, Some(Path::new(""))).len(), 2);
+        let plain = writable_roots(&home, None).len();
+        assert_eq!(writable_roots(&home, Some(Path::new("/var/tmp/x"))).len(), plain + 1);
+        assert_eq!(writable_roots(&home, Some(Path::new(""))).len(), plain);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

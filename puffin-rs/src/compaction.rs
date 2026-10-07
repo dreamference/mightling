@@ -179,13 +179,26 @@ pub fn hook_command(exe: &Path) -> String {
 /// A hook's command line: `<exe> <subcommand>[ <argument>]`, the path quoted where it has to be.
 /// `argument` must be a plain word (letters, digits, `-`, `_`).
 pub fn hook_command_for(exe: &Path, hook: &SessionHook, argument: &str) -> String {
-    let path = exe.to_string_lossy();
-    let plain = path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c));
-    let program = if plain { path.to_string() } else { format!("'{}'", path.replace('\'', r"'\''")) };
+    let program = quote_program(&exe.to_string_lossy(), cfg!(windows));
     match argument {
         "" => format!("{program} {}", hook.subcommand),
         argument => format!("{program} {} {argument}", hook.subcommand),
     }
+}
+
+/// The program part of a hook's command line, quoted for the shell Codex runs hooks through.
+///
+/// A POSIX shell elsewhere: single quotes, only when the path is not plain. `cmd.exe` on Windows,
+/// which does not understand single quotes: the path always goes in double quotes (a Windows path
+/// is never plain, and `C:\Users\Jane Doe` splits at the space). Codex wraps the whole line in one
+/// more pair of quotes for `cmd /C` (`hooks/src/engine/command_runner.rs`), so cmd's quote stripping
+/// takes those and leaves these. A Windows path cannot contain `"`.
+pub fn quote_program(path: &str, windows: bool) -> String {
+    if windows {
+        return format!("\"{path}\"");
+    }
+    let plain = path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c));
+    if plain { path.to_string() } else { format!("'{}'", path.replace('\'', r"'\''")) }
 }
 
 /// The hash Codex compares with `hooks.state.<key>.trusted_hash` before it runs a hook
@@ -480,8 +493,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn a_path_the_shell_would_split_is_quoted() {
         assert_eq!(hook_command(Path::new("/opt/puffin/bin/puffin")), "/opt/puffin/bin/puffin ledger");
         assert_eq!(hook_command(Path::new("/home/a b/puffin")), "'/home/a b/puffin' ledger");
+    }
+
+    #[test]
+    fn a_windows_path_is_quoted_for_cmd() {
+        // cmd.exe does not understand single quotes, and a path with a space would split there.
+        assert_eq!(
+            quote_program(r"C:\Users\Jane Doe\AppData\Local\Programs\Puffin\bin\puffin.exe", true),
+            r#""C:\Users\Jane Doe\AppData\Local\Programs\Puffin\bin\puffin.exe""#
+        );
+        assert_eq!(quote_program(r"C:\Program Files (x86)\Puffin\puffin.exe", true), r#""C:\Program Files (x86)\Puffin\puffin.exe""#);
+        // The POSIX rule is unchanged.
+        assert_eq!(quote_program("/opt/puffin/bin/puffin", false), "/opt/puffin/bin/puffin");
+        assert_eq!(quote_program("/home/o'b/puffin", false), r"'/home/o'\''b/puffin'");
     }
 }

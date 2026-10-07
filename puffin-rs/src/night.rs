@@ -609,8 +609,8 @@ fn served_model_id() -> Option<String> {
 /// writes it on a marker line); without a timer, `[night] window` from the config file says what
 /// enabling would install.
 fn next_window_line() -> String {
-    let timer = std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".config/systemd/user/puffin-night.timer"))
+    let timer = puffin_node_locator::home_dir()
+        .map(|home| home.join(".config/systemd/user/puffin-night.timer"))
         .and_then(|path| std::fs::read_to_string(path).ok());
     if let Some(window) = timer.as_deref().and_then(window_from_timer) {
         return format!("Next window: {window}.");

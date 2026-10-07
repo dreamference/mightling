@@ -30,7 +30,10 @@ use std::process::Stdio;
 pub fn binary() -> Option<PathBuf> {
     let path = match std::env::var_os("PUFFIN_CODE_BIN") {
         Some(path) => PathBuf::from(path),
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".local/share/dreamference/puffin/bin/puffin-code"),
+        // On Windows `puffin.exe` is not a link but the installed file itself (install.ps1 puts
+        // its folder on PATH), so `puffin-code.exe` is its sibling.
+        None if cfg!(windows) => std::env::current_exe().ok()?.with_file_name("puffin-code.exe"),
+        None => puffin_node_locator::home_dir()?.join(".local/share/dreamference/puffin/bin/puffin-code"),
     };
     path.is_file().then_some(path)
 }
@@ -184,17 +187,24 @@ pub fn session_dir(user_args: &[String]) -> PathBuf {
 pub fn start_and_prompt_block(tools: bool, dir: &std::path::Path) -> String {
     let Some(binary) = binary() else { return String::new() };
     // Its own process group, so Ctrl-C in the TUI does not reach it; it exits with this process.
-    let _ = {
+    let mut command = Command::new(&binary);
+    command
+        .args(["session", "--parent-pid", &std::process::id().to_string()])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
         use std::os::unix::process::CommandExt;
-        Command::new(&binary)
-            .args(["session", "--parent-pid", &std::process::id().to_string()])
-            .current_dir(dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()
-    };
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(crate::DETACHED_PROCESS_FLAGS);
+    }
+    let _ = command.spawn();
     block_from(&binary, tools, dir)
 }
 

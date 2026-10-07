@@ -74,12 +74,42 @@ pub fn prune_session_files() {
     if let Some(dir) = puffin_airgapped::codex_home().map(|home| home.join(puffin_airgapped::SESSION_DIR)) {
         prune_older_than(&dir, SESSION_FILE_MAX_AGE, SystemTime::now());
     }
-    // Without /proc (not Linux) nothing can be told about a process, and nothing is pruned.
-    if let Some(dir) = puffin_airgapped::seal_dir()
-        && Path::new("/proc/self").exists()
-    {
-        prune_seals(&dir, |pid| Path::new(&format!("/proc/{pid}")).exists());
+    // Without /proc (not Linux) nothing can be told about a process, and nothing is pruned; on
+    // Windows the process table answers instead.
+    if let Some(dir) = puffin_airgapped::seal_dir() {
+        if cfg!(windows) {
+            prune_seals(&dir, process_alive);
+        } else if Path::new("/proc/self").exists() {
+            prune_seals(&dir, |pid| Path::new(&format!("/proc/{pid}")).exists());
+        }
     }
+}
+
+/// Whether process `pid` is running, from the Windows process table.
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Foundation::STILL_ACTIVE;
+    use windows_sys::Win32::System::Threading::GetExitCodeProcess;
+    use windows_sys::Win32::System::Threading::OpenProcess;
+    use windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
+    // SAFETY: the handle is checked before use and closed once; the exit code is written into a
+    // local the call owns for its duration.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            return false;
+        }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        ok && code == STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(not(windows))]
+fn process_alive(_pid: u32) -> bool {
+    false
 }
 
 /// Removes the seals whose writer is no longer running: "sealed until `puffin` is restarted".
@@ -198,6 +228,9 @@ pub fn run_cli(args: &[String]) -> i32 {
     i32::from(failed) * 2
 }
 
+/// What takes the network away from a sandboxed command at `on`.
+const ENFORCED_BY: &str = if cfg!(windows) { "the Windows sandbox's offline account" } else { "bwrap --unshare-net" };
+
 fn status_lines(resolved: &Resolved, in_session: bool, guard: &[String]) -> Vec<String> {
     let mut lines = vec![format!("Airgapped: {} ({})", resolved.level.name(), resolved.source.label())];
     for level in Level::ALL {
@@ -205,7 +238,7 @@ fn status_lines(resolved: &Resolved, in_session: bool, guard: &[String]) -> Vec<
         lines.push(format!("  {:<11} {}{marker}", level.name(), summary(level)));
     }
     if resolved.level == Level::On {
-        lines.push("Enforced: sandboxed commands run with no network (bwrap --unshare-net).".to_string());
+        lines.push(format!("Enforced: sandboxed commands run with no network ({}).", ENFORCED_BY));
         lines.push("NOT ENFORCED for: Full Access, a command you approve to run outside the sandbox, MCP servers, and puffin's own connection to the model server.".to_string());
     }
     lines.extend(guard.iter().cloned());

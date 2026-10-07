@@ -1,7 +1,8 @@
 //! The `from-<agent>` folders under `$CODEX_HOME/skills` (spec §3).
 //!
 //! A skill another agent installed stays in that agent's folder; `puffin` sees it through one
-//! symbolic link per skill, `skills/from-claude/<name> -> ~/.claude/skills/<name>`. The folders are
+//! symbolic link per skill, `skills/from-claude/<name> -> ~/.claude/skills/<name>`. On Windows the
+//! link is a directory junction, which needs neither Developer Mode nor administrator rights. The folders are
 //! the launcher's alone. They are rebuilt at every start, a folder that is already right is left
 //! untouched, and whatever else turns up under a `from-` name is moved to `skills/.quarantine/`:
 //! the agent can write `$CODEX_HOME/skills`, so a steered session could otherwise plant a folder of
@@ -129,7 +130,7 @@ fn holds_exactly(folder: &Path, set: &LinkSet) -> bool {
     let Ok(entries) = std::fs::read_dir(folder) else { return false };
     let mut found = BTreeMap::new();
     for entry in entries.flatten() {
-        let Ok(target) = std::fs::read_link(entry.path()) else { return false };
+        let Ok(target) = read_link(&entry.path()) else { return false };
         found.insert(entry.file_name().to_string_lossy().into_owned(), target);
     }
     found == set.links
@@ -149,7 +150,7 @@ fn set_aside_foreign(
         return set_aside(folder, quarantine, moved);
     }
     for entry in std::fs::read_dir(folder)?.flatten() {
-        let ours = std::fs::read_link(entry.path()).is_ok_and(|target| source.is_some_and(|source| source.holds(&target)));
+        let ours = read_link(&entry.path()).is_ok_and(|target| source.is_some_and(|source| source.holds(&target)));
         if !ours {
             set_aside(&entry.path(), &quarantine.join(entry.file_name()), moved)?;
         }
@@ -206,9 +207,34 @@ fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
+/// A directory junction: unlike a symbolic link it needs no privilege, so it works on a standard
+/// Windows 11 laptop with Developer Mode off (specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md §15).
 #[cfg(windows)]
 fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
-    std::os::windows::fs::symlink_dir(target, link)
+    junction::create(target, link)
+}
+
+/// Where a link points, in the plain form the wanted links are written in.
+fn read_link(path: &Path) -> io::Result<PathBuf> {
+    std::fs::read_link(path).map(|target| plain_path(&target))
+}
+
+/// `target` without Windows' verbatim prefix: a junction reads back as `\\?\C:\…` (or the NT
+/// form `\??\C:\…`), and the links it is compared with are written as `C:\…`. Anything else is
+/// returned as it is.
+pub fn plain_path(target: &Path) -> PathBuf {
+    let text = target.to_string_lossy();
+    for prefix in [r"\\?\UNC\", r"\??\UNC\"] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+    }
+    for prefix in [r"\\?\", r"\??\"] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            return PathBuf::from(rest);
+        }
+    }
+    target.to_path_buf()
 }
 
 /// Exchanges two directories in one step where the system can (`renameat2(RENAME_EXCHANGE)`).
@@ -241,6 +267,20 @@ fn two_step_swap(new: &Path, old: &Path) -> io::Result<()> {
     std::fs::rename(old, &parked)?;
     std::fs::rename(new, old)?;
     std::fs::rename(&parked, new)
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn a_junction_target_reads_back_in_its_plain_form() {
+        assert_eq!(plain_path(Path::new(r"\\?\C:\Users\Jane Doe\.claude\skills\a")), PathBuf::from(r"C:\Users\Jane Doe\.claude\skills\a"));
+        assert_eq!(plain_path(Path::new(r"\??\C:\Users\j\.claude\skills\a")), PathBuf::from(r"C:\Users\j\.claude\skills\a"));
+        assert_eq!(plain_path(Path::new(r"\\?\UNC\server\share\a")), PathBuf::from(r"\\server\share\a"));
+        assert_eq!(plain_path(Path::new("/home/u/.claude/skills/a")), PathBuf::from("/home/u/.claude/skills/a"));
+        assert_eq!(plain_path(Path::new(r"C:\plain")), PathBuf::from(r"C:\plain"));
+    }
 }
 
 // The tests compare inodes and make links freely, which needs a Unix.

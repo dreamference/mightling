@@ -114,9 +114,29 @@ pub fn git_z(dir: &Path, args: &[&str]) -> Result<Vec<String>> {
     Ok(git(dir, args)?.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
 }
 
-/// The user's home directory.
+/// The user's home directory: `HOME`, or `USERPROFILE` on Windows, where `HOME` is usually unset.
 pub fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    home_from(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
+}
+
+/// [`home`] on given values: the first that is set and not empty, else `/`.
+pub fn home_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ffi::OsString>) -> PathBuf {
+    home.filter(|home| !home.is_empty())
+        .or_else(|| userprofile.filter(|home| !home.is_empty()))
+        .map_or_else(|| PathBuf::from("/"), PathBuf::from)
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[test]
+    fn the_home_folder_falls_back_to_userprofile() {
+        use std::ffi::OsString;
+        assert_eq!(home_from(None, Some(OsString::from(r"C:\Users\Jane Doe"))), PathBuf::from(r"C:\Users\Jane Doe"));
+        assert_eq!(home_from(Some(OsString::from("/home/u")), Some(OsString::from(r"C:\x"))), PathBuf::from("/home/u"));
+        assert_eq!(home_from(Some(OsString::new()), None), PathBuf::from("/"));
+    }
 }
 
 /// Where Puffin installs its binaries and the pinned tools (spec §5).

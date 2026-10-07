@@ -46,6 +46,11 @@ toml_edit = { workspace = true }
 [target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
 openssl-sys = { workspace = true, features = ["vendored"] }
 
+# Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), the
+# same windows-sys release the Codex workspace already builds.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [dev-dependencies]
 clap = { workspace = true, features = ["derive"] }
 tar = { workspace = true }

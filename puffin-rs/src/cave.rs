@@ -288,7 +288,7 @@ fn write_session_file(path: &Path, level: Level) -> std::io::Result<()> {
 
 fn set_default(thread_id: Option<&str>, level: Level) -> Vec<String> {
     let path = crate::config_file().or_else(|| {
-        Some(PathBuf::from(std::env::var_os("HOME")?).join(".config/dreamference/config.toml"))
+        Some(puffin_node_locator::home_dir()?.join(".config").join("dreamference").join("config.toml"))
     });
     let Some(path) = path else {
         return vec!["Could not find a configuration file to write: HOME is not set.".to_string()];

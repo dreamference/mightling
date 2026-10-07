@@ -456,7 +456,7 @@ async fn show(prompt: &Prompt) -> i32 {
 /// Writes `puffin_prompt = "<name>"` to the configuration file. Returns the lines and the code.
 fn use_prompt(name: &str) -> (Vec<String>, i32) {
     let path = crate::config_file().or_else(|| {
-        Some(PathBuf::from(std::env::var_os("HOME")?).join(".config/dreamference/config.toml"))
+        Some(puffin_node_locator::home_dir()?.join(".config").join("dreamference").join("config.toml"))
     });
     let Some(path) = path else {
         return (vec!["Could not find a configuration file to write: HOME is not set.".to_string()], 1);

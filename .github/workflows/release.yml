@@ -48,6 +48,10 @@ on:
         options:
           - ubuntu-24.04-arm
           - ubuntu-24.04
+      build_windows:
+        description: "Also build the Windows client (Arm64 and x86-64; preview, unsigned). Off until its CI passes"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -118,6 +122,8 @@ jobs:
           # The installer for a machine with no checkout (README, "Install from a release"): it
           # downloads this release's other assets, so it travels with them.
           cp install.sh dist/
+          # Its Windows counterpart, for the Windows client's assets when the release carries them.
+          cp install.ps1 dist/
       - uses: actions/upload-artifact@v4
         with:
           name: python-dist
@@ -231,10 +237,19 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # The Windows client (specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md, Phase 1): the same workflow that
+  # runs on pushes to windows/** branches, with this release's version compiled in.
+  windows:
+    needs: [validate, test]
+    if: ${{ inputs.build_windows && !failure() && !cancelled() }}
+    uses: ./.github/workflows/windows.yml
+    with:
+      version: ${{ inputs.version }}
+
   release:
-    needs: [python-dist, desktop, puffin]
-    # `desktop` and `puffin` are skipped when their inputs are off; the release still goes out
-    # without them.
+    needs: [python-dist, desktop, puffin, windows]
+    # `desktop`, `puffin` and `windows` are skipped when their inputs are off; the release still
+    # goes out without them.
     if: ${{ !failure() && !cancelled() && needs.python-dist.result == 'success' }}
     runs-on: ubuntu-latest
     steps:

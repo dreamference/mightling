@@ -53,6 +53,11 @@ pub mod usage;
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
 
+/// `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`: a child the launcher starts on Windows outlives a
+/// Ctrl-C in this console, as `process_group(0)` does on Unix.
+#[cfg(windows)]
+pub const DETACHED_PROCESS_FLAGS: u32 = 0x0000_0200 | 0x0000_0008;
+
 /// The provider name the catalog and `config.toml` agree on.
 pub const PROVIDER: &str = "openai-custom";
 
@@ -549,9 +554,10 @@ pub(crate) fn config_file() -> Option<PathBuf> {
     if local.is_file() {
         return Some(local);
     }
-    let global = std::env::var_os("HOME")
-        .map(PathBuf::from)?
-        .join(".config/dreamference/config.toml");
+    let global = puffin_node_locator::home_dir()?
+        .join(".config")
+        .join("dreamference")
+        .join("config.toml");
     global.is_file().then_some(global)
 }
 

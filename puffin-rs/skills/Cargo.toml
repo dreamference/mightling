@@ -25,3 +25,7 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.182"
+
+# Directory junctions for the `from-*` links on Windows: no privilege needed, unlike symbolic links.
+[target.'cfg(windows)'.dependencies]
+junction = "1.2"
