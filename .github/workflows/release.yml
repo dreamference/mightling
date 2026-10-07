@@ -250,15 +250,76 @@ jobs:
     needs: [python-dist, desktop, ling]
     permissions:
       contents: write
+      # Build provenance: the OIDC token Sigstore certifies, and the right to store the attestation.
+      id-token: write
+      attestations: write
     # `desktop` and `ling` are skipped when their inputs are off; the release still goes out
     # without them.
     if: ${{ !failure() && !cancelled() && needs.python-dist.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      # Only the trusted keys and a key transition, if one is under way: the signature is checked
+      # against what `ling update` and install.sh will check it against before anything is published.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            ling-rs/release-signing.pub
+            ling-rs/release-key-transition.pub
+            ling-rs/release-key-transition.pub.sig
+          sparse-checkout-cone-mode: false
+          path: source
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
+      - name: Write and sign SHA256SUMS
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          # A key rotation ships the new key, signed by the old one, with every release until no
+          # older ling is left to need it (specs/DREAMFERENCE_RELEASE_SIGNING.md §5).
+          if [[ -f source/ling-rs/release-key-transition.pub ]]; then
+            cp source/ling-rs/release-key-transition.pub source/ling-rs/release-key-transition.pub.sig artifacts/
+          fi
+          # merge-multiple keeps each artifact's own subdirectories (deb/, appimage/), so collect the
+          # files themselves; handing gh a directory fails the upload after the release is created.
+          mapfile -t files < <(find artifacts -type f | sort)
+          # One checksum file for everything the release carries: the wheel, install.sh and the
+          # per-target sums files, which in turn list the binaries. Its signature is what
+          # `ling update` and install.sh trust, so it covers every file transitively.
+          for file in "${files[@]}"; do
+            (cd "$(dirname "$file")" && sha256sum "$(basename "$file")")
+          done > SHA256SUMS
+          if [[ -z "$RELEASE_SIGNING_KEY" ]]; then
+            echo "::error::The RELEASE_SIGNING_KEY secret is not set; releases from 1.5.0 on must be signed."
+            exit 1
+          fi
+          key="$(mktemp -d)/release-ed25519"
+          ( umask 077 && printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key" )
+          ssh-keygen -q -Y sign -f "$key" -n mightling-release SHA256SUMS
+          rm -f "$key"
+          # Check the signature the way the clients will: by a key in release-signing.pub, or by a
+          # key the transition names, endorsed by one that is. A secret that matches neither stops
+          # the release here instead of publishing one no installed ling would accept.
+          trusted="$(mktemp)"
+          grep -v '^#' source/ling-rs/release-signing.pub | awk 'NF {print "mightling-release " $1 " " $2}' > "$trusted"
+          if [[ -f artifacts/release-key-transition.pub ]]; then
+            cp "$trusted" endorsers
+            ssh-keygen -Y verify -f endorsers -I mightling-release -n mightling-release-key \
+              -s artifacts/release-key-transition.pub.sig < artifacts/release-key-transition.pub
+            grep -v '^#' artifacts/release-key-transition.pub | awk 'NF {print "mightling-release " $1 " " $2}' >> "$trusted"
+          fi
+          ssh-keygen -Y verify -f "$trusted" -I mightling-release -n mightling-release \
+            -s SHA256SUMS.sig < SHA256SUMS || {
+            echo "::error::SHA256SUMS.sig does not verify against ling-rs/release-signing.pub: RELEASE_SIGNING_KEY is not a release key."
+            exit 1
+          }
+          # Everything attested: each file the release carries, SHA256SUMS and its signature.
+          { cat SHA256SUMS; sha256sum SHA256SUMS SHA256SUMS.sig; } > attested.sha256
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: attested.sha256
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -266,14 +327,7 @@ jobs:
           flags=(--generate-notes --target "$GITHUB_SHA" --title "Mightling $TAG")
           [[ "${{ inputs.prerelease }}" == "true" ]] && flags+=(--prerelease)
           [[ "${{ inputs.draft }}" == "true" ]] && flags+=(--draft)
-          # merge-multiple keeps each artifact's own subdirectories (deb/, appimage/), so collect the
-          # files themselves; handing gh a directory fails the upload after the release is created.
           mapfile -t files < <(find artifacts -type f | sort)
-          # One checksum file for everything the release carries, the wheel included: install.sh
-          # checks the wheel against it (the binaries have their per-target sums files as well).
-          for file in "${files[@]}"; do
-            (cd "$(dirname "$file")" && sha256sum "$(basename "$file")")
-          done > SHA256SUMS
-          files+=(SHA256SUMS)
+          files+=(SHA256SUMS SHA256SUMS.sig)
           printf 'Uploading %s\n' "${files[@]}"
           gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" "${flags[@]}"

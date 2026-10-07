@@ -22,7 +22,7 @@ well, because it runs on every upgrade.
 | 5 | Medium | Agent, untrusted content | The `<untrusted>` wrapper around email and Drive text only defused one exact spelling of its closing tag; fetched web pages and search results carried no "this is untrusted" notice at all | Fixed |
 | 6 | Low | Node discovery | A second advert claiming the remembered node's id, at another address, could be followed with only a note | Fixed |
 | 7 | Low | Node pairing | The paired key's `authorized_keys` line named each forbidden capability instead of using `restrict` | Fixed |
-| 8 | Medium | Releases | Releases are not signed: the checksum files come from the same release they check | Documented |
+| 8 | Medium | Releases | Releases are not signed: the checksum files come from the same release they check | Fixed on `release/signing` (from 1.5.0; [RELEASE_SIGNING](./DREAMFERENCE_RELEASE_SIGNING.md)) |
 | 9 | Medium | Repository renames | Installed 1.4.x binaries look for releases under older repository names that now redirect | Documented (operational rule) |
 | 10 | — | Model server (port 8000) | Answers anyone on the local network, with no key | Accepted by design |
 | 11 | Low | Node discovery | The first node found on a network is trusted on first use | Accepted (trusted-LAN premise) |
@@ -113,13 +113,23 @@ which is the documented behaviour for a node that has moved (see 11).
 turns off tunnel forwarding and anything a future OpenSSH adds; the named options stay for
 readers. Lines written before keep their old options until the pairing is renewed.
 
-### 8. Unsigned releases (documented)
+### 8. Unsigned releases (fixed on `release/signing`)
 
 The checksum files protect against corrupted or swapped downloads, not against a compromised
 release: they are published by the same workflow, in the same release. Recommended next step:
 GitHub artifact attestations (`actions/attest-build-provenance` in the release job, verifiable with
 `gh attestation verify`), or a signing key held outside GitHub, checked by `ling update` and
 `install.sh`.
+
+Both were done on `release/signing`
+([DREAMFERENCE_RELEASE_SIGNING.md](./DREAMFERENCE_RELEASE_SIGNING.md)). The release job signs
+`SHA256SUMS`, which lists every file, with an Ed25519 key (OpenSSH signature format). `ling update`
+and `install.sh` refuse any release of 1.5.0 or later whose signature is missing or does not verify
+against the key compiled into them. Every file also gets a build-provenance attestation. 1.4.x
+binaries cannot verify a signature, so the step from 1.4.x to 1.5.0 is no stronger than before
+(§7 there). The key is a repository secret, so the review's other option, a key held outside
+GitHub, applies only partly. Restricting the secret to a reviewed `release` environment is
+recommended there.
 
 ### 9. Old repository names (operational rule)
 

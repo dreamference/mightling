@@ -45,6 +45,7 @@ pub mod night;
 pub mod node;
 pub mod notice;
 pub mod prompt;
+pub mod release_signature;
 pub mod rename;
 pub mod skills;
 
