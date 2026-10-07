@@ -80,7 +80,7 @@ other, by both verifiers.
 
 | Piece | Where |
 |---|---|
-| Private key | `~/.config/dreamference/release-signing/release-ed25519.key` on the maintainer's machine (mode 0600, folder 0700), plus the repository secret `RELEASE_SIGNING_KEY`. **Keep one copy offline** (a password manager or an encrypted USB key); losing it means a rotation that clients cannot follow (§5) |
+| Private key | `~/.config/dreamference/release-signing/release-ed25519.key` on the maintainer's machine (mode 0600, folder 0700), plus the `release` environment's secret `RELEASE_SIGNING_KEY`. **Keep one copy offline** (a password manager or an encrypted USB key); losing it means a rotation that clients cannot follow (§5) |
 | Public key(s) | `ling-rs/release-signing.pub`, which `ling` compiles in (`include_str!`). install.sh repeats the lines in `RELEASE_KEYS`, and a test keeps the two identical |
 | Signing | `.github/workflows/release.yml`, job `release`, step "Write and sign SHA256SUMS". The key is written to a 0600 temporary file only for the `ssh-keygen -Y sign` call. If the secret is missing, the release fails |
 | Self-check | Same step: the job verifies its own signature against `release-signing.pub` (and a transition, if one is present) before publishing. A secret that does not match the published key stops the release, rather than shipping one no client would install |
@@ -94,9 +94,11 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKIG5+J3RTa4AaoT0o2qIhVr7bGvaa+T5b84rDv31ptj
 SHA256:6cvnF/4G2TaHAHsimf1FkDSqhCwh1nzFetXN7Ksb54g
 ```
 
-**Recommended, not done:** move `RELEASE_SIGNING_KEY` from a repository secret to a `release`
-environment that requires a reviewer and allows only `main`. As things stand, anyone who can push
-a workflow to any branch can sign with the key.
+**Done 2026-10-07 (the user's decision):** `RELEASE_SIGNING_KEY` is an **environment secret** of the
+`release` environment, which allows only the branch `main` and requires the maintainer (`dgxcoder`)
+to approve each run; the repository-level secret was deleted. The `release` job declares
+`environment: release`, so a workflow pushed to any other branch cannot read the key, and every
+release waits for an "Approve" click on GitHub before it is signed and published.
 
 ## 5. Rotating the key
 
@@ -114,7 +116,7 @@ endorsement.
    This writes `ling-rs/release-key-transition.pub.sig`. Commit both files.
 3. Append the new key's line to `ling-rs/release-signing.pub` and to `RELEASE_KEYS` in install.sh.
    Keep the old line, because a client built now should trust both.
-4. Replace the secret: `gh secret set RELEASE_SIGNING_KEY -R dreamference/mightling < next.key`.
+4. Replace the secret: `gh secret set RELEASE_SIGNING_KEY --env release -R dreamference/mightling < next.key`.
    Move `next.key` to the key's folder and its offline copy.
 5. From then on, the release job signs with the new key and attaches the two transition files.
    An older `ling`, which knows only the old key, checks that the transition is signed by the old
