@@ -15,6 +15,12 @@ pub fn scratch(name: &str) -> PathBuf {
     dir.canonicalize().map(|dir| crate::links::plain_path(&dir)).unwrap_or(dir)
 }
 
+/// `path` as `std::fs::canonicalize` gives it, the form `[[skills.config]]` entries are written in
+/// because Codex's own loader identifies a skill by it (on Windows the verbatim `\\?\C:\…`).
+pub fn canonical(path: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&path).unwrap_or(path)
+}
+
 /// A program's file name as the system runs it by name: `gh.exe` on Windows, `gh` elsewhere.
 pub fn program_file(name: &str) -> String {
     format!("{name}{}", std::env::consts::EXE_SUFFIX)

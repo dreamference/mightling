@@ -58,7 +58,11 @@ fn meminfo(key: &str) -> u64 {
 }
 
 fn slice_cgroup() -> PathBuf {
+    #[cfg(unix)]
+    // SAFETY: getuid cannot fail and has no side effects.
     let uid = unsafe { libc::getuid() };
+    #[cfg(not(unix))]
+    let uid = 0;
     PathBuf::from(format!(
         "/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/puffin.slice/{SLICE}"
     ))
@@ -250,11 +254,14 @@ pub fn executing_lock(host: &dyn Host) -> Result<Option<File>> {
     Ok(flock(&lock, false).ok().map(|_| lock))
 }
 
-/// `flock(LOCK_EX)`, blocking or not.
+/// An exclusive lock on `file`, blocking or not: `flock(LOCK_EX)` on Linux, `LockFileEx` on
+/// Windows, through the standard library.
 pub fn flock(file: &File, block: bool) -> Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let flags = libc::LOCK_EX | if block { 0 } else { libc::LOCK_NB };
-    if unsafe { libc::flock(file.as_raw_fd(), flags) } != 0 {
+    if block {
+        if file.lock().is_err() {
+            bail!("lock is held");
+        }
+    } else if file.try_lock().is_err() {
         bail!("lock is held");
     }
     Ok(())

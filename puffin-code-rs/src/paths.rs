@@ -114,6 +114,29 @@ pub fn git_z(dir: &Path, args: &[&str]) -> Result<Vec<String>> {
     Ok(git(dir, args)?.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
 }
 
+/// Whether process `pid` is running. Only a Unix can be asked here; indexing, the one thing that
+/// asks, runs only there for now (specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md §12).
+#[cfg(unix)]
+pub fn process_alive(pid: i32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists and may be signalled.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+pub fn process_alive(_pid: i32) -> bool {
+    false
+}
+
+/// Indexing needs bubblewrap, systemd scopes and cgroups: a Linux host (§9). Elsewhere `index`
+/// and `session` say so, and queries read an index built on Linux.
+pub fn indexing_supported() -> anyhow::Result<()> {
+    if cfg!(target_os = "linux") {
+        Ok(())
+    } else {
+        anyhow::bail!("indexing runs on Linux only for now; on this system puffin-code answers queries from an existing index")
+    }
+}
+
 /// The user's home directory: `HOME`, or `USERPROFILE` on Windows, where `HOME` is usually unset.
 pub fn home() -> PathBuf {
     home_from(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))

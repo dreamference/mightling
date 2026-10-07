@@ -57,7 +57,7 @@ pub fn run(repo: Repo, settings: Settings, parent: Option<i32>) -> Result<()> {
     let mut ticks: u32 = 0;
     loop {
         if let Some(pid) = parent {
-            if unsafe { libc::kill(pid, 0) } != 0 {
+            if !crate::paths::process_alive(pid) {
                 return Ok(());
             }
         }

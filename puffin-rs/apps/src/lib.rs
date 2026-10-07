@@ -233,6 +233,12 @@ pub fn sealed_by(pid: u32) -> bool {
         .any(|entry| std::fs::read_to_string(entry.path()).is_ok_and(|text| text.trim() == own))
 }
 
+/// Whether any session holds a seal: what a caller that cannot name its session asks.
+pub fn any_sealed() -> bool {
+    let Some(dir) = puffin_airgapped::seal_dir() else { return false };
+    std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some())
+}
+
 /// Whether the air gap is `on` for the session process `pid`: the configured level, or a seal it
 /// wrote.
 pub fn air_gapped_for(pid: u32) -> bool {

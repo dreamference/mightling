@@ -446,7 +446,8 @@ mod tests {
         let text = config(&fixture);
         assert!(text.starts_with("model = \"m\"\n"), "{text}");
         assert!(text.contains("unavailable: for macos only\n[[skills.config]]\npath = "), "{text}");
-        assert!(text.contains(".agents/skills/mac-only/SKILL.md\"\nenabled = false\n"), "{text}");
+        // A Windows path is written with escaped backslashes.
+        assert!(text.replace("\\\\", "/").contains(".agents/skills/mac-only/SKILL.md\"\nenabled = false\n"), "{text}");
 
         // A second start changes nothing on disk.
         let modified = |path: &Path| path.metadata().and_then(|metadata| metadata.modified()).ok();

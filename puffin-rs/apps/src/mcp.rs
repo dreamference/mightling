@@ -45,8 +45,16 @@ impl Backend for Live {
         http::get(SERVICE_ADDR, path, Some(&secret), CALL_TIMEOUT)
     }
 
+    #[cfg(unix)]
     fn air_gapped(&self) -> bool {
         crate::air_gapped_for(std::os::unix::process::parent_id())
+    }
+
+    /// The standard library cannot name a parent process on Windows, so this fails closed: any
+    /// session's seal counts, not only the parent's (`/apps` is node-only on Windows for now).
+    #[cfg(not(unix))]
+    fn air_gapped(&self) -> bool {
+        puffin_airgapped::resolve(&[]).level == puffin_airgapped::Level::On || crate::any_sealed()
     }
 }
 

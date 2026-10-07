@@ -640,7 +640,7 @@ mod tests {
         assert!(plan.link_sets(&fixture.home).iter().all(|set| set.links.is_empty()));
         assert_eq!(
             plan.config_entries(),
-            vec![(fixture.home.join(".agents/skills/mac-only/SKILL.md"), "unavailable: for macos only".to_string())]
+            vec![(crate::testing::canonical(fixture.home.join(".agents/skills/mac-only/SKILL.md")), "unavailable: for macos only".to_string())]
         );
         assert!(!plan.offers_foreign_skill());
 
@@ -682,9 +682,9 @@ mod tests {
         assert_eq!(
             switched_off,
             vec![
-                fixture.home.join(".puffin/skills/lint/SKILL.md"),
-                fixture.home.join(".agents/skills/lint/SKILL.md"),
-                fixture.home.join(".puffin/skills/.system/pdf/SKILL.md"),
+                crate::testing::canonical(fixture.home.join(".puffin/skills/lint/SKILL.md")),
+                crate::testing::canonical(fixture.home.join(".agents/skills/lint/SKILL.md")),
+                crate::testing::canonical(fixture.home.join(".puffin/skills/.system/pdf/SKILL.md")),
             ]
         );
         let links: Vec<String> = plan.link_sets(&fixture.home).into_iter().flat_map(|set| set.links.into_keys()).collect();
