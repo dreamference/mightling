@@ -10,9 +10,10 @@
 //! optional, because earlier releases do not carry them (v1.3.0 has the web commands and no
 //! `puffin-code`); the installed ones are then kept.
 //!
-//! The repository is public, so no token is needed; one is sent when present (`GH_TOKEN`,
-//! `GITHUB_TOKEN`, or whatever `gh auth token` prints), which raises GitHub's rate limit and reads
-//! a private fork named by `PUFFIN_RELEASE_REPO`.
+//! The repository is public, so no token is needed. `GH_TOKEN` or `GITHUB_TOKEN` is sent when set,
+//! which raises GitHub's rate limit; a logged-in `gh`'s token is used only for a fork named by
+//! `PUFFIN_RELEASE_REPO`. A token only ever goes to `api.github.com`, never to a download URL
+//! the release names (security review 2026-10).
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -112,13 +113,30 @@ fn hex_sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn github_token() -> Option<String> {
+/// The only host a token is ever sent to. The release JSON names each asset's download URL, and
+/// a token must not follow such a URL anywhere else: a release that was tampered with, or an old
+/// repository name taken over by someone else, would otherwise collect the user's GitHub token.
+const GITHUB_API: &str = "https://api.github.com/";
+
+/// Whether a request to `url` may carry the token.
+fn sends_token(url: &str) -> bool {
+    url.starts_with(GITHUB_API)
+}
+
+/// The token to send, if any. `GH_TOKEN` and `GITHUB_TOKEN` are used when set; the token of a
+/// logged-in `gh` is asked for only when `PUFFIN_RELEASE_REPO` names another repository (a
+/// private fork). The public repository needs none, and a `gh` login usually carries far more
+/// access than reading a release.
+fn github_token(repo: &str) -> Option<String> {
     for name in ["GH_TOKEN", "GITHUB_TOKEN"] {
         if let Ok(token) = std::env::var(name)
             && !token.trim().is_empty()
         {
             return Some(token.trim().to_string());
         }
+    }
+    if repo == RELEASE_REPO {
+        return None;
     }
     let output = std::process::Command::new("gh")
         .args(["auth", "token"])
@@ -137,19 +155,21 @@ pub async fn run() -> anyhow::Result<()> {
         .ok()
         .filter(|repo| !repo.is_empty())
         .unwrap_or_else(|| RELEASE_REPO.to_string());
-    let token = github_token();
+    let token = github_token(&repo);
     let client = reqwest::Client::builder()
         .user_agent(format!("puffin/{}", PUFFIN_VERSION.unwrap_or("source")))
         .connect_timeout(Duration::from_secs(15))
         .build()?;
-    let authorized = |request: reqwest::RequestBuilder| match &token {
-        Some(token) => request.bearer_auth(token),
-        None => request,
+    let authorized = |url: &str, request: reqwest::RequestBuilder| match &token {
+        Some(token) if sends_token(url) => request.bearer_auth(token),
+        _ => request,
     };
 
+    let latest_url = format!("{GITHUB_API}repos/{repo}/releases/latest");
     let response = authorized(
+        &latest_url,
         client
-            .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
+            .get(&latest_url)
             .header("Accept", "application/vnd.github+json"),
     )
     .send()
@@ -199,9 +219,11 @@ pub async fn run() -> anyhow::Result<()> {
     }
 
     let download = |name: String| {
+        let url = assets[name.as_str()];
         let request = authorized(
+            url,
             client
-                .get(assets[name.as_str()])
+                .get(url)
                 .header("Accept", "application/octet-stream"),
         );
         async move {
@@ -302,6 +324,15 @@ mod tests {
         assert_eq!(decide(Some("1.4.0"), "1.3.0"), Decision::NewerThanRelease);
         assert_eq!(decide(Some("1.3.0-rc.1"), "1.3.0"), Decision::Install);
         assert_eq!(decide(None, "1.3.0"), Decision::Install);
+    }
+
+    #[test]
+    fn the_token_goes_to_the_github_api_and_nowhere_else() {
+        assert!(sends_token("https://api.github.com/repos/o/r/releases/assets/1"));
+        assert!(!sends_token("https://objects.githubusercontent.com/x"));
+        assert!(!sends_token("https://api.github.com.evil.example/repos/o/r"));
+        assert!(!sends_token("http://api.github.com/repos/o/r"));
+        assert!(!sends_token("https://evil.example/?https://api.github.com/"));
     }
 
     #[test]

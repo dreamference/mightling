@@ -594,3 +594,30 @@ def test_the_cli_has_the_host_commands(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 0
+
+
+# -- the token stays with the API (security review 2026-10) ----------------------------------------
+
+def test_the_token_is_not_sent_to_download_urls_on_another_host(tmp_path, release_server):
+    # The release JSON names where each asset downloads from. A token sent along to such a URL
+    # would reach whoever controls it: a tampered release, or an old repository name taken over.
+    downloads = release_server(binaries())
+    api = release_server(binaries())
+    api.document = lambda port: FakeRelease.document(api, downloads.server.server_address[1]).replace(
+        f'"url": "http://127.0.0.1:{downloads.server.server_address[1]}/repos/test/puffin/releases/1"',
+        f'"url": "{api.url}/repos/test/puffin/releases/1"')
+    result = run_install(tmp_path, api, "--role", "client", token="sekret")
+    assert result.returncode == 0, result.stderr
+    assert any(header == "Bearer sekret" for _, header in api.requests)
+    assert downloads.requests and all(header is None for _, header in downloads.requests)
+
+
+def test_a_wheel_that_does_not_match_the_release_sums_is_not_installed(tmp_path, release_server):
+    assets = binaries()
+    wheel = "dreamference-9.9.9-py3-none-any.whl"
+    assets[wheel] = b"not the wheel that was built"
+    assets["SHA256SUMS"] = f"{hashlib.sha256(b'the wheel that was built').hexdigest()}  {wheel}\n".encode()
+    result = run_install(tmp_path, release_server(assets), "--role", "node")
+    assert result.returncode == 1
+    assert "does not match its checksum in SHA256SUMS" in result.stderr
+    assert not (tmp_path / ".local/share/dreamference/venv").exists()

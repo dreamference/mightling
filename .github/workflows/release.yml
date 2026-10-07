@@ -49,8 +49,11 @@ on:
           - ubuntu-24.04-arm
           - ubuntu-24.04
 
+# Read-only by default; only the job that publishes the release may write (security review
+# 2026-10). Every action is pinned to a commit, with its tag in a comment, so a moved tag cannot
+# change what runs with that write token.
 permissions:
-  contents: write
+  contents: read
 
 # One release at a time; a second dispatch waits rather than racing the first for the tag.
 concurrency:
@@ -65,7 +68,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Check version format and that the tag is free
@@ -84,8 +87,8 @@ jobs:
     if: ${{ inputs.run_tests }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -105,8 +108,8 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       - name: Stamp version
@@ -118,7 +121,7 @@ jobs:
           # The installer for a machine with no checkout (README, "Install from a release"): it
           # downloads this release's other assets, so it travels with them.
           cp install.sh dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: python-dist
           path: dist/*
@@ -129,7 +132,7 @@ jobs:
     if: ${{ inputs.build_desktop && !failure() && !cancelled() }}
     runs-on: ${{ inputs.desktop_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # The same packages DesktopInstaller.LINUX_BUILD_PACKAGES installs locally; 4.1 is Tauri v2.
       - name: System packages
         run: |
@@ -137,11 +140,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
             build-essential pkg-config file
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: desktop/src-tauri
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
       - name: Tauri CLI
@@ -158,7 +163,7 @@ jobs:
       - name: Build bundles
         working-directory: desktop
         run: tauri build --config "{\"version\":\"$VERSION\"}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-bundles
           path: |
@@ -174,11 +179,11 @@ jobs:
       # Compiled into the launcher, so `puffin update` can tell whether a newer release exists.
       PUFFIN_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Only the pinned Codex fork; the fano submodule plays no part in the build.
       - name: Codex submodule
         run: git submodule update --init --depth 1 codex
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -187,7 +192,7 @@ jobs:
         run: pip install -e .
       # Only the registry is cached: Codex's target directory runs to many gigabytes, past what the
       # Actions cache holds. rustup fetches the toolchain codex-rs/rust-toolchain.toml pins.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -225,7 +230,7 @@ jobs:
             "puffin-search-$target.gz" "puffin-fetch-$target.gz" "puffin-code-$target.gz" \
             > "puffin-$target.sha256sums")
           ls -l dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: puffin-binaries
           path: dist/*
@@ -233,12 +238,14 @@ jobs:
 
   release:
     needs: [python-dist, desktop, puffin]
+    permissions:
+      contents: write
     # `desktop` and `puffin` are skipped when their inputs are off; the release still goes out
     # without them.
     if: ${{ !failure() && !cancelled() && needs.python-dist.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
@@ -252,5 +259,11 @@ jobs:
           # merge-multiple keeps each artifact's own subdirectories (deb/, appimage/), so collect the
           # files themselves; handing gh a directory fails the upload after the release is created.
           mapfile -t files < <(find artifacts -type f | sort)
+          # One checksum file for everything the release carries, the wheel included: install.sh
+          # checks the wheel against it (the binaries have their per-target sums files as well).
+          for file in "${files[@]}"; do
+            (cd "$(dirname "$file")" && sha256sum "$(basename "$file")")
+          done > SHA256SUMS
+          files+=(SHA256SUMS)
           printf 'Uploading %s\n' "${files[@]}"
           gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" "${flags[@]}"
