@@ -224,9 +224,41 @@ pub const TEMP_VARS: &[&str] = if cfg!(windows) { &["TEMP", "TMP"] } else { &["T
 
 /// Whether `path` lies in (or is) one of `roots`, comparing real paths where they exist.
 pub fn within(path: &Path, roots: &[PathBuf]) -> bool {
-    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = real(path);
-    roots.iter().any(|root| path.starts_with(real(root)))
+    let path = real_path(path);
+    roots.iter().any(|root| path.starts_with(real_path(root)))
+}
+
+/// `path` with its deepest existing ancestor resolved, links followed, and the rest appended as
+/// written: a file not created yet still compares with the folder it would be created in. On
+/// Windows, `canonicalize` gives the resolved part the verbatim prefix (`\\?\C:\…`) and nothing else
+/// has it, so it is removed.
+pub fn real_path(path: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut existing = path;
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(existing) {
+            let mut real = without_verbatim_prefix(resolved);
+            for part in rest.iter().rev() {
+                real.push(part);
+            }
+            return real;
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// `C:\…` for `\\?\C:\…`; any other path, a verbatim UNC one included, as it is.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => path,
+    }
 }
 
 /// [`writable_roots`] for this process: its working directory and its temporary folders.
@@ -546,6 +578,13 @@ mod tests {
     }
 
     #[test]
+    fn the_verbatim_prefix_is_removed_from_drive_paths_only() {
+        assert_eq!(without_verbatim_prefix(PathBuf::from(r"\\?\C:\Users\j")), PathBuf::from(r"C:\Users\j"));
+        assert_eq!(without_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share")), PathBuf::from(r"\\?\UNC\server\share"));
+        assert_eq!(without_verbatim_prefix(PathBuf::from("/home/u")), PathBuf::from("/home/u"));
+    }
+
+    #[test]
     fn the_home_folder_falls_back_to_userprofile() {
         use std::ffi::OsString;
         let windows = Some(OsString::from(r"C:\Users\Jane Doe"));
@@ -576,6 +615,9 @@ mod tests {
         // Started in a project folder: it is not.
         assert!(!within(&home.join(".puffin"), &[home.join("project")]));
         assert!(!within(&base.join("elsewhere"), &[home.clone()]));
+        // A file not created yet, under a folder not created yet, is inside the folder it would be in.
+        assert!(within(&home.join(".config").join("dreamference").join("config.toml"), &[home.clone()]));
+        assert!(!within(&base.join("elsewhere").join("not-yet"), &[home.clone()]));
         // A name that only shares a prefix is not inside, and a link is followed to where it leads.
         assert!(!within(&base.join("home2"), &[home.clone()]));
         #[cfg(unix)]

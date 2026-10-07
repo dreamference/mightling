@@ -17,7 +17,10 @@ runs and sudo prompts on the terminal. Where sudo cannot prompt, the commands ar
 """
 
 import getpass
-import grp
+try:
+    import grp
+except ImportError:  # Windows, where only the release builder imports this package
+    grp = None
 import os
 import shutil
 import subprocess
@@ -359,6 +362,8 @@ class HostSafetySetup:
             `docker` group, which counts before the next login makes it true for processes too.
         """
         if not os.path.exists(DOCKER_SOCKET) or os.access(DOCKER_SOCKET, os.W_OK):
+            return True
+        if grp is None:
             return True
         try:
             return cls._user() in grp.getgrnam("docker").gr_mem
