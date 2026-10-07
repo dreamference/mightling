@@ -50,8 +50,8 @@
     <div class="install">
       <div class="cmd has-copy"><button class="copy" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Copy</button>
 <pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
-      <div class="cmd"><pre><span class="p">$ </span>mling-admin server start      <span class="c"># downloads the model once (~20 GB), then serves it</span>
-<span class="p">$ </span>cd ~/your-project &amp;&amp; mling    <span class="c"># that's it</span></pre></div>
+      <div class="cmd"><pre><span class="p">$ </span>ling-admin server start      <span class="c"># downloads the model once (~20 GB), then serves it</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; ling    <span class="c"># that's it</span></pre></div>
       <p class="note">Works on the NVIDIA DGX Spark and every GB10 machine. The script verifies every download
         against the release's checksums and prints each <code>sudo</code> command before running it.
         <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Read it first</a> if you like.</p>
@@ -70,9 +70,9 @@
 <section id="try">
   <div class="wrap">
     <h2>Try these first</h2>
-    <div class="cmd"><pre><span class="p">$ </span>mling "explain this repository to me like I'm new on the team"
-<span class="p">$ </span>mling "the tests are failing: find out why and fix them"
-<span class="p">$ </span>mling "add input validation to the signup form, with tests"</pre></div>
+    <div class="cmd"><pre><span class="p">$ </span>ling "explain this repository to me like I'm new on the team"
+<span class="p">$ </span>ling "the tests are failing: find out why and fix them"
+<span class="p">$ </span>ling "add input validation to the signup form, with tests"</pre></div>
     <p class="sub after">Or queue work for tonight with <code>/night add &lt;task&gt;</code>: Mightling works
       through the queue while you sleep, each task on its own git branch, and you review the branches over coffee.</p>
   </div>
@@ -89,7 +89,7 @@
       <div>
         <p>One command runs a real Mightling session under <code>strace</code> and lists every network
           connection it made:</p>
-        <div class="cmd"><pre><span class="p">$ </span>mling-admin audit egress
+        <div class="cmd"><pre><span class="p">$ </span>ling-admin audit egress
 <span class="ok">✔ Egress audit: pass</span>
 Network destinations:
    127.0.0.1:8000     29x  model server
@@ -142,7 +142,7 @@ Networked git commands: none</pre></div>
           <li><b>No tuning:</b> model, context, kernels and speculative decoding are chosen for the GB10.</li>
           <li><b>It won't freeze your machine:</b> the host is checked and memory pressure watched during the load.</li>
           <li><b>Your other machines find it</b> on the local network.</li>
-          <li><b>Updates are one command:</b> <code>mling update</code>.</li>
+          <li><b>Updates are one command:</b> <code>ling update</code>.</li>
         </ul>
       </div>
     </div>
@@ -153,7 +153,7 @@ Networked git commands: none</pre></div>
   <div class="wrap">
     <h2>What you get</h2>
     <div class="features">
-      <div class="feature"><h3>🖥️ <code>mling</code>, the terminal agent</h3><p>Reads your repository, runs commands and tests, edits code, and asks before anything risky.</p></div>
+      <div class="feature"><h3>🖥️ <code>ling</code>, the terminal agent</h3><p>Reads your repository, runs commands and tests, edits code, and asks before anything risky.</p></div>
       <div class="feature"><h3>🌙 Night Shift</h3><p><code>/night add &lt;task&gt;</code> before bed; each task done on its own git branch by morning. Nothing is merged or pushed without you.</p></div>
       <div class="feature"><h3>🔎 Web search and fetch</h3><p>Through a private SearXNG on your own machine: no search account, no API key.</p></div>
       <div class="feature"><h3>🧭 A code index</h3><p>Definitions, callers and impact across your repository, so the agent finds code instead of grepping for it.</p></div>
@@ -176,7 +176,7 @@ Networked git commands: none</pre></div>
         <tr><td>Cost per token</td><td>Metered</td><td class="yes">Zero</td></tr>
         <tr><td>Rate limits</td><td>Yes</td><td class="yes">No</td></tr>
         <tr><td>Works with the network unplugged</td><td>No</td><td class="yes">Yes</td></tr>
-        <tr><td>You can verify what leaves</td><td>No</td><td class="yes"><code>mling-admin audit egress</code></td></tr>
+        <tr><td>You can verify what leaves</td><td>No</td><td class="yes"><code>ling-admin audit egress</code></td></tr>
       </table>
     </div>
   </div>
@@ -203,13 +203,13 @@ Networked git commands: none</pre></div>
         are on the way.</p></details>
     <details><summary>I installed Puffin. Is this it?</summary>
       <p>Yes: Puffin was renamed Mightling in 1.5. Run <code>puffin update</code> once, then <code>puffin</code> one
-        last time. It moves your sessions, settings and links over, and from then on the command is <code>mling</code>.</p></details>
+        last time. It moves your sessions, settings and links over, and from then on the command is <code>ling</code>.</p></details>
     <details><summary>Is it really free?</summary>
       <p>Yes. Mightling is open source under the AGPL, and the model's weights are free. Your only running cost is
         the electricity.</p></details>
     <details><summary>What do I need besides the machine?</summary>
       <p>The OS it ships with (DGX OS 7, or Ubuntu 24.04 where the vendor offers it), Docker with the NVIDIA Container
-        Toolkit, Python 3 and Git. On plain Ubuntu, <code>mling-admin host check</code> tells you what's missing.</p></details>
+        Toolkit, Python 3 and Git. On plain Ubuntu, <code>ling-admin host check</code> tells you what's missing.</p></details>
     <details><summary>Does anything ever reach the internet?</summary>
       <p>Only what you or the agent asks for, such as a web search through SearXNG on your own machine, and the
         first-time downloads. <code>/airgapped on</code> turns all of it off.</p></details>
