@@ -321,3 +321,41 @@ Browsers allow the microphone and the clipboard API only on HTTPS or `localhost`
 - **IMAGE_SEARCH:** an MCP tool instead of an Onyx custom tool; served by `ling web`.
 - **PUFFIN_EGRESS:** the `--web` mode.
 - **ARCHITECTURE, CLI, SETUP, CLAUDE.md:** the web UI is `ling web`; the `chat` command group shrinks, then goes.
+
+---
+
+## 16. What was built (Phase A, first part: branch `ask/phase-a`)
+
+Built: the bridge policy as data, Ask threads, and `ling web` with its credentials. Not built yet: the UI's Ask view, voice, images, `ling-docs`, and the Onyx steps.
+
+**The policy is data, and both hosts are held to the same cases.** `ling-rs/web/policy.json` holds the allow-lists, the dropped fields, the named prompts and the Ask rules. `ling-rs/web/vectors/outgoing.json` holds the conformance cases: 26 of them, each with fixed stubs (a prompt composes to `PROMPT:<name>`, folders are `SCRATCH/n`, threads `ask-*` are Ask threads). They live beside the crate, not in `desktop/bridge/`, because the build copies only `ling-rs/` into the Codex export. The desktop app should read the same file and run the same cases. Five things differ from §2.3 and §3.1, all found while checking the pinned protocol (`app-server-protocol/src/protocol/v2/thread.rs`):
+
+- **More fields are dropped from every thread opener.** Besides the five the desktop dropped, the policy removes `dynamicTools`, `environments`, `selectedCapabilityRoots`, `history` and `path`. Each loads tools, environments, plugins, a forged history or a rollout file.
+- **A prompt is chosen on `thread/start` only.** A resumed session keeps the prompt it recorded, so `prompt` on resume or fork is refused.
+- **An Ask folder is named after its thread once the thread exists.** The thread id does not exist when `thread/start` is vetted, and a running session's `cwd` cannot be renamed. So the folder is created as `~/.mightling/ask/q-<random>/`, and the server's answer makes `ask/<thread-id>` a link to it. The link is also how an Ask thread is recognised afterwards: a resume or fork of one keeps its folder and sandbox whatever the UI asks, and uploads land there.
+- **`runtimeWorkspaceRoots` is dropped, not set.** The field is experimental, so a client that has not opted in cannot send it. Without it the writable root is the `cwd`.
+- **The prompt text comes from a subprocess.** It is `ling prompt show <name> --composed`, run in the Ask root. `--composed` prints the text alone, exactly. The launcher's own composition is shared through `prompt::current_parts`.
+
+**`ling web`** is the crate `ling-rs/web` (`ling-web-server`); the launcher's `src/web.rs` only routes to it. Its pieces:
+
+- **Credentials.** Owner token, one-time login codes (two minutes), 8-digit pairing codes (ten minutes, one use; ten wrong codes withdraw every pending code), and device cookies stored by hash. Sessions from `ling web open` live in memory, so a restart means `ling web open` again.
+- **Request checks.** `Host` and `Origin` checks, and the CSP of §4.5 widened to what the UI's own `<meta>` allows.
+- **The relay.** One app-server connection per tab, on `$XDG_RUNTIME_DIR/mightling/app-server.sock`. `ling web` starts `ling -c features.code_mode_host=true app-server --listen unix://…` when nothing answers there, passing `DREAMFERENCE_VLLM_HOST` when this machine is a node or has the host configured.
+- **The browser bridge.** `/bridge.js` defines `window.electronBridge` and `mightlingWindowType = "web"` over the WebSocket, so the desktop UI runs unchanged.
+- **Uploads.** `/api/upload` writes into Ask folders only, within 20 MB for images and 100 MB for files.
+- **Night Shift.** The busy marker is kept per tab, and Night Shift now treats `web` as non-interactive.
+- **`ling web ask "<question>"`.** One Ask thread through the running server with the owner token, for scripts and for `ling-admin audit egress --web`. That mode traces `ling web serve`, and everything it starts, while the untraced client asks.
+
+**Not built in this part:**
+
+- **Unimplemented routes.** `/api/transcribe`, `/images/*` and `/api/apps` answer 501.
+- **The embedded UI.** `build.rs` embeds the UI from `LING_WEB_UI_DIST`, but no build sets it yet, so `/` serves a placeholder until the desktop branch's `desktop/ui` is merged and the builder points at its `dist`.
+- **Pairing extras.** No QR code, and no `ling-admin web enable`; `ling web start` writes and starts the user unit itself.
+- **The node advert.** It still says `web=3000` (Onyx); it moves to 3100 when Onyx stops being the default (§10, Phase B).
+
+**Verified on this machine (2026-10-07).**
+
+- **Web crate:** `cargo test` in a copy of `ling-rs/web`: 21 unit tests and 11 server tests. The server tests cover the credential on every route, pairing (one use, expiry, withdrawal after ten wrong codes), `Host` and `Origin`, upload caps, and a tab through the policy to a stand-in app-server on a Unix socket. They use no real network and no real `ling`.
+- **Launcher:** `cargo test -p ling-launcher -p ling-web-server` in an export of the pinned Codex with the patches applied: 163 launcher tests, including the `ask` prompt.
+- **Egress:** `ling-admin audit egress --web`, with a debug build from that export and the served Qwen3.8 model, **passes**. It connected only to the model server (3×) and the Gmail service (2×, the `ask` prompt's email block), sent no DNS query, and started `ling` three times: the server, `prompt show --composed`, and the app-server.
+- **A warning for anyone testing a build of this branch:** run it with a scratch `HOME`. On a machine still laid out for Puffin, its first run of any kind, `--help` included, performs the rename migration (RENAME_MIGHTLING §4.2).
