@@ -121,7 +121,7 @@ puffin-admin node enable          # publishes this machine to your local network
 Then on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple silicon or Intel):
 
 ```bash
-curl -fsSL https://github.com/dreamference/dgx-lunny/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash
 cd ~/my-project && puffin
 ```
 
