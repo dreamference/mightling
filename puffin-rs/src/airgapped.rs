@@ -192,6 +192,18 @@ pub fn command<T: std::fmt::Display>(thread_id: Option<T>, args: &str) -> Vec<St
     let thread_id = thread_id.map(|id| id.to_string());
     let thread_id = thread_id.as_deref();
     let words: Vec<&str> = args.split_whitespace().collect();
+    // On Windows only the elevated sandbox, set up, takes a command's network away (§7.4).
+    let wanted = match words.as_slice() {
+        [name] => Level::parse(name),
+        [default, name] if default.eq_ignore_ascii_case("default") => Level::parse(name),
+        _ => None,
+    };
+    if cfg!(windows)
+        && wanted == Some(Level::On)
+        && let Some(lines) = windows_on_refusal(windows_sandbox_of(&[], &config_layers()), windows_sandbox_set_up_now())
+    {
+        return lines;
+    }
     match words.as_slice() {
         [] => {
             let resolved = resolve(thread_id);
@@ -510,6 +522,159 @@ fn config_layers() -> Vec<(String, toml::Table)> {
         .collect()
 }
 
+/// The sandbox Codex runs commands in on Windows, as it resolves it (`resolve_windows_sandbox_mode`
+/// in core/src/windows_sandbox.rs). Only the elevated one can take a command's network away: it
+/// runs the command as a separate offline account that the firewall blocks (patch 0024;
+/// specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md §7.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsSandbox {
+    Elevated,
+    Unelevated,
+    Mxc,
+    None,
+}
+
+/// The legacy features that chose the Windows sandbox before `[windows] sandbox`.
+const ELEVATED_FEATURE: &str = "elevated_windows_sandbox";
+const UNELEVATED_FEATURES: [&str; 2] = ["experimental_windows_sandbox", "enable_experimental_windows_sandbox"];
+
+/// What to do about a Windows sandbox that cannot enforce `on`.
+const WINDOWS_SETUP: &str = "Set the Windows sandbox up: run install.ps1 again and accept the Administrator prompt";
+const WINDOWS_SELECT: &str = "Choose the elevated sandbox: [windows] sandbox = \"elevated\" in config.toml";
+
+/// The Windows sandbox these arguments and configuration files select: `[windows] sandbox`, else
+/// the legacy features, each from the last layer that sets it, with `-c` overrides last.
+pub fn windows_sandbox_of(user_args: &[String], layers: &[(String, toml::Table)]) -> WindowsSandbox {
+    let overrides = crate::option_values(user_args, &["-c", "--config"]).filter_map(override_table);
+    let tables: Vec<toml::Table> = layers.iter().map(|(_, table)| table.clone()).chain(overrides).collect();
+    let mut mode = None;
+    let mut features = std::collections::BTreeMap::new();
+    for table in &tables {
+        if let Some(chosen) = table.get("windows").and_then(|windows| windows.get("sandbox")).and_then(toml::Value::as_str) {
+            mode = Some(chosen.to_string());
+        }
+        for (key, value) in table.get("features").and_then(toml::Value::as_table).into_iter().flatten() {
+            if let Some(on) = value.as_bool() {
+                features.insert(key.clone(), on);
+            }
+        }
+    }
+    let enabled = |key: &str| features.get(key).copied().unwrap_or(false);
+    match mode.as_deref() {
+        Some("elevated") => WindowsSandbox::Elevated,
+        Some("unelevated") => WindowsSandbox::Unelevated,
+        Some("mxc") => WindowsSandbox::Mxc,
+        _ if enabled(ELEVATED_FEATURE) => WindowsSandbox::Elevated,
+        _ if UNELEVATED_FEATURES.iter().any(|key| enabled(key)) => WindowsSandbox::Unelevated,
+        _ => WindowsSandbox::None,
+    }
+}
+
+/// A `-c key.path=value` as the table it stands for. The value is read as TOML and, failing that,
+/// as a bare string, as Codex reads it.
+fn override_table(text: &str) -> Option<toml::Table> {
+    let (key, value) = text.split_once('=')?;
+    let mut node = toml::from_str::<toml::Table>(&format!("v = {value}"))
+        .ok()
+        .and_then(|table| table.get("v").cloned())
+        .unwrap_or_else(|| toml::Value::String(value.trim().to_string()));
+    for part in key.trim().split('.').rev() {
+        let mut table = toml::Table::new();
+        table.insert(part.trim().to_string(), node);
+        node = toml::Value::Table(table);
+    }
+    match node {
+        toml::Value::Table(table) => Some(table),
+        _ => None,
+    }
+}
+
+/// Why a command could keep the network at `on` with this Windows sandbox, and what to do, if it
+/// could. `set_up` is whether the elevated sandbox's accounts and firewall rules exist.
+fn windows_sandbox_gap(sandbox: WindowsSandbox, set_up: bool) -> Option<(&'static str, &'static str)> {
+    match sandbox {
+        WindowsSandbox::Elevated if set_up => None,
+        WindowsSandbox::Elevated => Some(("the Windows sandbox is not set up on this machine", WINDOWS_SETUP)),
+        WindowsSandbox::Unelevated => Some(("the non-admin sandbox cannot take a command's network away", WINDOWS_SELECT)),
+        WindowsSandbox::Mxc => Some(("the MXC sandbox is not a security boundary yet", WINDOWS_SELECT)),
+        WindowsSandbox::None if set_up => Some(("no Windows sandbox is selected, so commands run without one", WINDOWS_SELECT)),
+        WindowsSandbox::None => Some(("no Windows sandbox is set up, so commands run without one", WINDOWS_SETUP)),
+    }
+}
+
+/// Whether the elevated Windows sandbox is set up for this `CODEX_HOME`, as Codex itself checks.
+#[cfg(windows)]
+pub fn windows_sandbox_set_up(codex_home: &Path) -> bool {
+    codex_windows_sandbox::sandbox_setup_is_complete(codex_home)
+}
+
+#[cfg(not(windows))]
+pub fn windows_sandbox_set_up(_codex_home: &Path) -> bool {
+    false
+}
+
+fn windows_sandbox_set_up_now() -> bool {
+    puffin_airgapped::codex_home().is_some_and(|home| windows_sandbox_set_up(&home))
+}
+
+/// The reason `puffin` must not start with these arguments at a configured `on` on Windows, if
+/// there is one: the sandbox they select would leave commands their network (§7.4).
+pub fn windows_sandbox_conflict(user_args: &[String], level: Level) -> Option<String> {
+    if !cfg!(windows) || level != Level::On {
+        return None;
+    }
+    let sandbox = windows_sandbox_of(user_args, &config_layers());
+    let (gap, remedy) = windows_sandbox_gap(sandbox, windows_sandbox_set_up_now())?;
+    Some(format!(
+        "airgapped is on, and {gap}, so commands would keep the network. {remedy}, or puffin airgapped default off ({ENV_VAR}=off for one run)."
+    ))
+}
+
+/// What `puffin` says at every start on Windows when commands run without a sandbox (§7.1).
+pub fn windows_sandbox_lines(user_args: &[String]) -> Vec<String> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let sandbox = windows_sandbox_of(user_args, &config_layers());
+    windows_sandbox_notice(sandbox, windows_sandbox_set_up_now())
+}
+
+fn windows_sandbox_notice(sandbox: WindowsSandbox, set_up: bool) -> Vec<String> {
+    match (sandbox, windows_sandbox_gap(sandbox, set_up)) {
+        (WindowsSandbox::Elevated | WindowsSandbox::None, Some((gap, remedy))) => {
+            vec![format!("⚠️ {}{}; /airgapped on is refused until it is. {remedy}.", gap[..1].to_uppercase(), &gap[1..])]
+        }
+        // The non-admin and MXC sandboxes are the user's choice; only `on` is refused with them.
+        _ => Vec::new(),
+    }
+}
+
+/// `/airgapped on` refused on Windows when the configured sandbox cannot enforce it. Read from the
+/// configuration files: a `-c` given when the session started is not visible here.
+fn windows_on_refusal(sandbox: WindowsSandbox, set_up: bool) -> Option<Vec<String>> {
+    let (gap, remedy) = windows_sandbox_gap(sandbox, set_up)?;
+    Some(vec![
+        format!("Airgapped not changed: {gap}, so commands would keep the network."),
+        format!("{remedy}, then restart puffin."),
+    ])
+}
+
+/// Selects the elevated Windows sandbox in a `config.toml` that chooses none (§7.1), once setup
+/// has made it usable. A choice already in the file, new or legacy, is left alone.
+pub fn select_elevated_sandbox(doc: &mut toml_edit::DocumentMut) {
+    let chosen = doc.get("windows").and_then(|windows| windows.get("sandbox")).is_some()
+        || doc.get("features").is_some_and(|features| {
+            std::iter::once(ELEVATED_FEATURE).chain(UNELEVATED_FEATURES).any(|key| features.get(key).is_some())
+        });
+    if chosen {
+        return;
+    }
+    if !doc.get("windows").is_some_and(toml_edit::Item::is_table) {
+        doc.insert("windows", toml_edit::Item::Table(toml_edit::Table::new()));
+    }
+    doc["windows"]["sandbox"] = toml_edit::value("elevated");
+}
+
 /// Why the permissions picker offers Full Access disabled, if it does: this session is at `on`.
 /// The TUI asks for each built-in preset, by its id (patch 0019).
 pub fn full_access_refusal<T: std::fmt::Display>(thread_id: Option<T>, preset: &str) -> Option<String> {
@@ -713,6 +878,77 @@ mod tests {
 
     fn layers(files: &[(&str, &str)]) -> Vec<(String, toml::Table)> {
         files.iter().map(|(name, text)| (name.to_string(), text.parse().unwrap_or_default())).collect()
+    }
+
+    #[test]
+    fn the_windows_sandbox_is_read_as_codex_reads_it() {
+        let args = |words: &[&str]| words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+        assert_eq!(windows_sandbox_of(&[], &layers(&[])), WindowsSandbox::None);
+        let elevated = layers(&[("config.toml", "[windows]\nsandbox = \"elevated\"\n")]);
+        assert_eq!(windows_sandbox_of(&[], &elevated), WindowsSandbox::Elevated);
+        // `-c` comes last, as a key path or an inline table.
+        assert_eq!(windows_sandbox_of(&args(&["-c", "windows.sandbox=unelevated"]), &elevated), WindowsSandbox::Unelevated);
+        assert_eq!(windows_sandbox_of(&args(&["--config=windows={sandbox=\"mxc\"}"]), &elevated), WindowsSandbox::Mxc);
+        // The legacy features, when `[windows] sandbox` says nothing; it wins when it does.
+        let legacy = layers(&[("config.toml", "[features]\nexperimental_windows_sandbox = true\n")]);
+        assert_eq!(windows_sandbox_of(&[], &legacy), WindowsSandbox::Unelevated);
+        assert_eq!(windows_sandbox_of(&args(&["-c", "features.elevated_windows_sandbox=true"]), &legacy), WindowsSandbox::Elevated);
+        let both = layers(&[("a.toml", "[features]\nelevated_windows_sandbox = true\n"), ("b.toml", "[windows]\nsandbox = \"unelevated\"\n")]);
+        assert_eq!(windows_sandbox_of(&[], &both), WindowsSandbox::Unelevated);
+        // A later file overrides an earlier one.
+        let later = layers(&[("a.toml", "[windows]\nsandbox = \"unelevated\"\n"), ("b.toml", "[windows]\nsandbox = \"elevated\"\n")]);
+        assert_eq!(windows_sandbox_of(&[], &later), WindowsSandbox::Elevated);
+    }
+
+    #[test]
+    fn at_on_only_the_elevated_sandbox_set_up_is_accepted() {
+        assert_eq!(windows_sandbox_gap(WindowsSandbox::Elevated, true), None);
+        let refused = [
+            (WindowsSandbox::Elevated, false, "not set up", WINDOWS_SETUP),
+            (WindowsSandbox::Unelevated, true, "the non-admin sandbox cannot take a command's network away", WINDOWS_SELECT),
+            (WindowsSandbox::Mxc, true, "MXC", WINDOWS_SELECT),
+            (WindowsSandbox::None, false, "no Windows sandbox is set up", WINDOWS_SETUP),
+            (WindowsSandbox::None, true, "no Windows sandbox is selected", WINDOWS_SELECT),
+        ];
+        for (sandbox, set_up, reason, remedy) in refused {
+            let (gap, said) = windows_sandbox_gap(sandbox, set_up).unwrap_or_default();
+            assert!(gap.contains(reason) && said == remedy, "{sandbox:?} {set_up}: {gap}");
+            let lines = windows_on_refusal(sandbox, set_up).unwrap_or_default();
+            assert!(lines[0].starts_with("Airgapped not changed: ") && lines[1].starts_with(remedy));
+        }
+        assert_eq!(windows_on_refusal(WindowsSandbox::Elevated, true), None);
+    }
+
+    #[test]
+    fn every_start_says_when_commands_run_without_a_sandbox() {
+        assert_eq!(
+            windows_sandbox_notice(WindowsSandbox::None, false),
+            vec![format!("⚠️ No Windows sandbox is set up, so commands run without one; /airgapped on is refused until it is. {WINDOWS_SETUP}.")]
+        );
+        assert_eq!(windows_sandbox_notice(WindowsSandbox::Elevated, false).len(), 1);
+        // A sandbox the user chose, or the elevated one set up, says nothing at start.
+        assert!(windows_sandbox_notice(WindowsSandbox::Unelevated, true).is_empty());
+        assert!(windows_sandbox_notice(WindowsSandbox::Elevated, true).is_empty());
+        // Off Windows there is nothing to say and nothing to refuse.
+        if !cfg!(windows) {
+            assert!(windows_sandbox_lines(&[]).is_empty());
+            assert_eq!(windows_sandbox_conflict(&[], Level::On), None);
+        }
+    }
+
+    #[test]
+    fn the_elevated_sandbox_is_selected_only_where_nothing_is_chosen() {
+        let select = |text: &str| {
+            let mut doc: toml_edit::DocumentMut = text.parse().unwrap_or_default();
+            select_elevated_sandbox(&mut doc);
+            doc.to_string()
+        };
+        let written = select("model = \"x\"\n");
+        assert_eq!(written.parse::<toml::Table>().ok().and_then(|t| t["windows"]["sandbox"].as_str().map(str::to_string)).as_deref(), Some("elevated"));
+        assert!(written.starts_with("model = \"x\"\n"));
+        for chosen in ["[windows]\nsandbox = \"unelevated\"\n", "[features]\nexperimental_windows_sandbox = true\n", "[features]\nelevated_windows_sandbox = false\n"] {
+            assert_eq!(select(chosen), chosen);
+        }
     }
 
     #[test]

@@ -9,8 +9,11 @@ or, to pick a release:
 
 It installs `puffin.exe` and its commands (puffin-search, puffin-fetch, puffin-code, and the
 sandbox's helpers when the release carries them) into %LOCALAPPDATA%\Programs\Puffin\bin and puts
-that folder on your PATH. Nothing needs administrator rights. The model runs on a Puffin node on
-your network (a DGX Spark or another GB10): `puffin` finds it by itself.
+that folder on your PATH, with no administrator rights. Then Windows asks once for them, to set up
+the sandbox the agent's commands run in (which /airgapped on needs), to let puffin find nodes on
+Private networks, and to run the egress audit; -NoSandbox skips that, and declining leaves a working
+client without a sandbox. The model runs on a Puffin node on your network (a DGX Spark or another
+GB10): `puffin` finds it by itself.
 
 It downloads the same assets, by the same names and with the same checks, as `puffin update`
 (puffin-rs/src/update.rs), so a machine installed this way is updated by that command.
@@ -29,7 +32,8 @@ set, raises GitHub's rate limit and reads a private fork.
 #>
 param(
     [string]$Version = "",
-    [switch]$NoPath
+    [switch]$NoPath,
+    [switch]$NoSandbox
 )
 
 $ErrorActionPreference = "Stop"
@@ -168,6 +172,94 @@ if (-not $NoPath) {
         Say "Added $InstallDir to your PATH (new terminals see it)."
     }
     if (-not (($env:Path -split ";") -contains $InstallDir)) { $env:Path = "$env:Path;$InstallDir" }
+}
+
+# -- the sandbox, the firewall and the audit: one Administrator prompt ------------------------
+#
+# Codex's Windows sandbox runs commands as two local accounts that only an administrator can
+# create; the offline one is what takes a command's network away at /airgapped on. One elevation
+# sets them up for this user, lets puffin hear node announcements (mDNS, UDP 5353) on Private and
+# Domain networks, and runs the egress audit once (section 7.1, 10.2, 14 of the spec). Declining
+# leaves a working client whose commands run without a sandbox; puffin says so at every start.
+
+$Puffin = Join-Path $InstallDir "puffin.exe"
+if ($NoSandbox) {
+    Say ""
+    Say "Skipped the Windows sandbox (-NoSandbox): commands will run without one."
+} elseif (-not (Test-Path (Join-Path $InstallDir "codex-windows-sandbox-setup.exe"))) {
+    Say ""
+    Say "Release $Tag carries no sandbox setup for $Target: commands will run without a sandbox."
+} else {
+    # Named now, as the user who ran this: with an administrator's credentials typed over the
+    # shoulder of a standard user, the elevated process runs as that administrator instead.
+    $User = "$env:USERDOMAIN\$env:USERNAME"
+    $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".puffin" }
+    New-Item -ItemType Directory -Force -Path $CodexHome | Out-Null
+    $Step = Join-Path ([IO.Path]::GetTempPath()) ("puffin-elevated-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $Step | Out-Null
+    $Script = Join-Path $Step "elevated.ps1"
+    $Log = Join-Path $Step "elevated.log"
+    Set-Content -Path $Script -Encoding ASCII -Value @'
+param([string]$Puffin, [string]$User, [string]$CodexHome, [string]$InstallDir, [string]$Log)
+$ErrorActionPreference = "Continue"
+function Note([string]$Text) { Add-Content -Path $Log -Value $Text -Encoding UTF8 }
+& $Puffin sandbox setup --elevated --user $User --codex-home $CodexHome 2>&1 | ForEach-Object { Note "$_" }
+Note "sandbox-setup-exit=$LASTEXITCODE"
+try {
+    foreach ($Name in @("puffin", "puffin-app")) {
+        $Rule = "Puffin-mDNS-$Name"
+        Get-NetFirewallRule -Name $Rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+        New-NetFirewallRule -Name $Rule -DisplayName "Puffin node discovery (mDNS, $Name)" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 -Program (Join-Path $InstallDir "$Name.exe") -Profile Private, Domain | Out-Null
+    }
+    Note "firewall=ok"
+} catch {
+    Note "firewall=failed: $($_.Exception.Message)"
+}
+& $Puffin audit egress 2>&1 | ForEach-Object { Note "$_" }
+Note "audit-exit=$LASTEXITCODE"
+'@
+    $Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$Script`" -Puffin `"$Puffin`" -User `"$User`" -CodexHome `"$CodexHome`" -InstallDir `"$InstallDir`" -Log `"$Log`""
+    $Principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    Say ""
+    try {
+        if ($Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            Say "Setting up the Windows sandbox and the firewall rule (already running as Administrator)..."
+            Start-Process -FilePath "powershell.exe" -ArgumentList $Arguments -Wait -NoNewWindow
+        } else {
+            Say "Windows will ask once for Administrator rights: to set up the sandbox that runs the agent's"
+            Say "commands, to let puffin find nodes on Private networks, and to run the egress audit."
+            Start-Process -FilePath "powershell.exe" -ArgumentList $Arguments -Verb RunAs -Wait -WindowStyle Hidden
+        }
+    } catch {
+        Say "The Administrator prompt was declined or failed ($($_.Exception.Message))."
+    }
+    $Lines = @()
+    if (Test-Path $Log) { $Lines = @(Get-Content -Path $Log -Encoding UTF8) }
+    Remove-Item -Recurse -Force -Path $Step -ErrorAction SilentlyContinue
+    if ($Lines -contains "sandbox-setup-exit=0") {
+        Say "Windows sandbox: set up for $User."
+    } else {
+        Say "Windows sandbox: NOT set up. Commands will run without one, and /airgapped on is refused."
+        foreach ($Line in $Lines) { if ($Line -notmatch "^(firewall|audit-exit)=" -and $Line -notmatch "^sandbox-setup-exit=") { Say "  $Line" } }
+    }
+    if ($Lines -contains "firewall=ok") {
+        Say "Firewall: puffin may hear node announcements (UDP 5353) on Private and Domain networks."
+    } elseif ($Lines.Count -gt 0) {
+        Say "Firewall: the mDNS rule was not added; discovery may find nothing (puffin node use <address> still works)."
+    }
+    $AuditExit = $Lines | Where-Object { $_ -match "^audit-exit=" } | Select-Object -First 1
+    if ($AuditExit) {
+        Say "Egress audit:"
+        $InAudit = $false
+        foreach ($Line in $Lines) {
+            if ($Line -match "^firewall=") { $InAudit = $true; continue }
+            if ($Line -match "^audit-exit=") { break }
+            if ($InAudit) { Say "  $Line" }
+        }
+        if ($AuditExit -ne "audit-exit=0") {
+            Say "  (Run it again once puffin uses a node: puffin audit egress, in an Administrator terminal.)"
+        }
+    }
 }
 
 Say ""

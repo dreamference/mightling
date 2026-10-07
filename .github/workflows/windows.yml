@@ -140,10 +140,56 @@ jobs:
             Get-ChildItem $env:PUFFIN_INSTALL_DIR | Format-Table Name, Length
             $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
             if (-not (($userPath -split ";") -contains $env:PUFFIN_INSTALL_DIR)) { throw "the install folder is not on the user's PATH" }
+            # The runner is already an administrator, so install.ps1's one elevated step ran without
+            # a prompt: the sandbox's accounts and the mDNS rule must exist now.
+            Get-NetFirewallRule -Name "Puffin-mDNS-puffin" | Format-List Name, DisplayName, Profile, Enabled
+            Get-LocalUser | Where-Object { $_.Name -like "CodexSandbox*" } | Format-Table Name, Enabled
+            if (-not (Get-LocalUser | Where-Object { $_.Name -like "CodexSandboxOffline*" })) { throw "the sandbox's offline account was not created" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+      # Phase 2 (WINDOWS_ARM §7, §14, §18): the refusal at `on`, the offline account taking a
+      # sandboxed command's network away, and the egress audit over ETW, against a stand-in model
+      # server. The runner is an administrator, which both the sandbox and ETW need.
+      - name: Air gap and egress audit
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $puffin = Join-Path $env:RUNNER_TEMP "puffin-install\bin\puffin.exe"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList ".github\scripts\stub_model_server.py", "8799"
+          Start-Sleep -Seconds 3
+          # Native commands write to stderr; that is output here, not a terminating error.
+          $ErrorActionPreference = "Continue"
+          try {
+            # At `on`, a sandbox that cannot take the network away is refused before anything starts.
+            $env:DREAMFERENCE_PUFFIN_AIRGAPPED = "on"
+            $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8799"
+            $refused = & $puffin -c windows.sandbox=unelevated exec --skip-git-repo-check "hello" 2>&1 | Out-String
+            $refusedExit = $LASTEXITCODE
+            Write-Host "refusal: exit $refusedExit, $refused"
+            if ($refusedExit -eq 0 -or $refused -notmatch "non-admin sandbox") { throw "the non-admin sandbox was not refused at on" }
+            # The elevated sandbox: a command reaches the network at `off` and not at `on`.
+            $probe = @("sandbox", "-c", "sandbox_mode=workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--", "curl.exe", "-sS", "-m", "20", "-o", "NUL", "-w", "%{http_code}", "https://example.com")
+            $env:DREAMFERENCE_PUFFIN_AIRGAPPED = "off"
+            $off = & $puffin @probe 2>&1 | Out-String
+            $offExit = $LASTEXITCODE
+            Write-Host "off: exit $offExit, $off"
+            $env:DREAMFERENCE_PUFFIN_AIRGAPPED = "on"
+            $on = & $puffin @probe 2>&1 | Out-String
+            $onExit = $LASTEXITCODE
+            Write-Host "on: exit $onExit, $on"
+            Remove-Item Env:DREAMFERENCE_PUFFIN_AIRGAPPED
+            # The egress audit: one real session against the stand-in, traced over ETW.
+            & $puffin audit egress --host http://127.0.0.1:8799
+            $auditExit = $LASTEXITCODE
+            if ($offExit -ne 0) { throw "a sandboxed curl failed at off, so the result at on proves nothing" }
+            if ($onExit -eq 0) { throw "a sandboxed curl reached the network at on" }
+            if ($auditExit -ne 0) { throw "the egress audit did not pass (exit $auditExit)" }
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: puffin-windows-${{ matrix.target }}
           path: dist/*
@@ -151,9 +197,11 @@ jobs:
       # Last, so the smoke test, the packaging and install.ps1 run whatever the tests say. The same
       # export, V8 and target directory the build used, so the tests reuse its crates.
       - name: Launcher test environment
+        if: ${{ !cancelled() }}
         run: |
           python -c "import os; from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR as C, CodexBrandedBuilder as B; src = os.path.join(C, 'src'); env = dict(B.fetch_rusty_v8(src), PUFFIN_EXPORT=os.path.join(src, 'codex-rs'), CARGO_TARGET_DIR=os.path.join(C, 'target'), CARGO_PROFILE_RELEASE_DEBUG='none', CARGO_PROFILE_RELEASE_STRIP='debuginfo'); open(os.environ['GITHUB_ENV'], 'a').write(''.join(f'{k}={v}\n' for k, v in env.items()))"
       - name: Launcher tests
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           Set-Location $env:PUFFIN_EXPORT

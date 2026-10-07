@@ -34,6 +34,7 @@ use toml_edit::value;
 pub mod airgapped;
 pub mod app;
 pub mod apps;
+pub mod audit;
 pub mod cave;
 pub mod code_index;
 pub mod compaction;
@@ -246,6 +247,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(skills::run_cli(&user_args[index + 1..]).await);
     }
+    // `audit egress` traces one session's network use (audit.rs; on Windows only: the node's audit
+    // is `puffin-admin audit egress`).
+    if let Some(index) = subcommand
+        && user_args[index] == "audit"
+    {
+        std::process::exit(audit::run_cli(&user_args[index + 1..]));
+    }
     // `prompt` lists, shows and chooses the system prompt new sessions get (prompt.rs).
     if let Some(index) = subcommand
         && user_args[index] == "prompt"
@@ -259,6 +267,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let configured = airgapped::resolve(None);
     if let Some(reason) = airgapped::full_access_conflict(&user_args, configured.level) {
         bail!("{reason}");
+    }
+    // On Windows, `on` also needs the elevated sandbox, set up; without a sandbox, every start says so.
+    if let Some(reason) = airgapped::windows_sandbox_conflict(&user_args, configured.level) {
+        bail!("{reason}");
+    }
+    for line in airgapped::windows_sandbox_lines(&user_args) {
+        notice::say(&line);
     }
     // A session that starts at `on` says first whether that holds (airgapped.rs).
     for line in airgapped::startup_lines_now(&configured) {
@@ -806,6 +821,11 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
         let mut roots = toml_edit::Array::new();
         roots.push(home.join("skills").to_string_lossy().into_owned());
         sandbox.insert("writable_roots", value(roots));
+    }
+    // Windows: the elevated sandbox, once install.ps1 has set it up (WINDOWS_ARM §7.1). Not before:
+    // selected and not set up, the first command would ask for Administrator rights itself.
+    if cfg!(windows) && catalog_path.parent().is_some_and(airgapped::windows_sandbox_set_up) {
+        airgapped::select_elevated_sandbox(&mut doc);
     }
 
     Ok(doc.to_string())
