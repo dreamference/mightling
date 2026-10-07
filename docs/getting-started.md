@@ -110,6 +110,31 @@ puffin-admin desktop run
 
 After that, `puffin app` also opens it. See [Desktop app](desktop.md).
 
+## 6. Optional: your laptop as a client
+
+Your other computers can use the GB10's model. On the GB10, let them find it:
+
+```bash
+puffin-admin node enable          # publishes this machine to your local network (asks for sudo once)
+```
+
+Then on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple silicon or Intel):
+
+```bash
+curl -fsSL https://github.com/dreamference/puffin-ai/releases/latest/download/install.sh | bash
+cd ~/my-project && puffin
+```
+
+The script installs only the client: `puffin`, `puffin-search`, `puffin-fetch` and `puffin-code`.
+A Mac is never installed as a node. `puffin` finds the GB10 on the network by itself and asks before
+it uses a node it has not used before; `puffin node list` shows what it found. To name one yourself:
+`PUFFIN_NODE=<host> puffin`.
+
+!!! note "`/airgapped` on a Mac"
+    macOS's own sandbox enforces `/airgapped on`, but it is set once, when `puffin` starts: use
+    `puffin airgapped default on` (or `DREAMFERENCE_PUFFIN_AIRGAPPED=on puffin`) and restart. Typed
+    inside a running session, `/airgapped on` and `off` say so and change nothing.
+
 ## Known issues
 
 - **`puffin update` finds nothing yet.** It installs the latest published Puffin release, and none

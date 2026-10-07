@@ -290,13 +290,13 @@ Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/s
 | | Ubuntu | macOS | Windows |
 |---|---|---|---|
 | Command sandbox | bubblewrap, as on the node | Seatbelt (Codex's own) | Codex's Windows sandbox |
-| `/airgapped on` enforced by the kernel | yes (patch `0019` hooks the Linux sandbox helper) | **no: cooperative only** | **no: cooperative only** |
+| `/airgapped on` enforced by the kernel | yes (patch `0019` hooks the Linux sandbox helper) | **yes, for a level set before `puffin` starts** (Seatbelt; §8.4); a mid-session switch is refused | **no: cooperative only** (but see PUFFIN_WINDOWS_ARM §7) |
 | Discovery | `mdns-sd` | `mdns-sd`; local-network permission applies (below) | `mdns-sd`; Windows Firewall may ask once for UDP 5353 |
 | Installer | `.deb` / script | script, `.dmg` for the app | PowerShell script, `.msi` for the app |
 
 - **`/airgapped` off Linux.** The `on` level's guarantee comes from three lines in `linux-sandbox`. On macOS and Windows the level still switches off `puffin-search` and `puffin-fetch` and still tells the model, but a command can reach the network. `/airgapped` must print that on those systems, as it already prints its other holes. Extending the hook to Seatbelt and the Windows sandbox is that spec's work, and costs patch bytes.
 - **macOS local-network permission.** `puffin-app`'s bundle declares `NSLocalNetworkUsageDescription` and `NSBonjourServices` (`_puffin-node._tcp`), or the browse and the forwarder both fail silently. For `puffin` in a terminal the grant belongs to the terminal application; whether that covers multicast from a child process is unverified. If it does not, macOS falls back to the system's own DNS-SD (§5.3) or to `puffin node use <address>`.
-- **Unsigned binaries.** A script that downloads with `curl` sets no quarantine flag, so the command-line tools run unsigned. A `.dmg` or `.msi` opened from a browser meets Gatekeeper or SmartScreen; signing needs an Apple Developer ID and a Windows code-signing certificate (question 4).
+- **Unsigned binaries.** A script that downloads with `curl` sets no quarantine flag, so the command-line tools run unsigned. (Apple silicon still needs a signature to run anything; the Rust linker gives every `aarch64-apple-darwin` binary an ad-hoc one, which gzip preserves.) A `.dmg` or `.msi` opened from a browser meets Gatekeeper or SmartScreen; signing needs an Apple Developer ID and a Windows code-signing certificate (question 4).
 
 ### 8.3 Indexing on a client
 
@@ -310,6 +310,15 @@ Two hard-coded addresses name `localhost:3000`: the window's `url` in `desktop/s
 - **Windows:** the scip CLI has no Windows build, so there is no exact layer; the universal layer depends on a Windows build of codebase-memory-mcp, which was not confirmed (§2). Until it is, `puffin-code` on Windows answers by text search only and says so.
 - **The memory budget changes meaning.** On a node it protects the model server. On a client with no model server it is a plain cap (a quarter of RAM), and the freeze-while-the-model-is-busy rule does not apply.
 - **`puffin-code session`** is started by the launcher and uses the systemd user bus; off Linux it runs the static indexers as ordinary child processes at low priority.
+
+### 8.4 As built for x86-64 Linux and macOS (2026-10-07, branch `clients/x86-macos`)
+
+- **Builds.** `.github/workflows/build-clients.yml` builds `puffin`, `codex-code-mode-host`, `puffin-search`, `puffin-fetch` and `puffin-code` for `x86_64-unknown-linux-gnu` (`ubuntu-24.04`), `aarch64-apple-darwin` (`macos-15`) and `x86_64-apple-darwin` (`macos-15-intel`), each natively on its own runner with the same `CodexBrandedBuilder.build()` the node uses; only the builder's own imports are installed, not the node's Python dependencies. `host_target()` now names the Mac targets (`uname -m` says `arm64` where Rust and the V8 assets say `aarch64`), and the submodule's V8 manifest already pins a prebuilt V8 for all three. It runs on pushes to `clients/**`, by hand, and from `release.yml` behind `build_clients` (default off), whose artifacts are `puffin-client-<target>`. `scripts/package_puffin.sh` names the assets as `install.sh` and `puffin update` read them. `puffin-app` is not built for these targets yet (§7, the `.dmg`).
+- **`puffin update`** names its target by OS (`update::target_for`) and runs on Linux and macOS; elsewhere it says which builds exist.
+- **`install.sh`** installs the client on all four targets and refuses `--role node` on macOS before downloading anything. It needs nothing newer than macOS's bash 3.2.
+- **`/airgapped on` on macOS is enforced, with the level fixed at launch.** Codex's Seatbelt profile takes its network rule from `sandbox_workspace_write.network_access`, read once when the session starts. At a configured `on` (environment, either configuration file) the launcher adds `-c sandbox_workspace_write.network_access=false` (`airgapped::with_launch_policy`), so every sandboxed command is denied the network by Seatbelt; the read-only sandbox has none anyway, and Full Access stays refused at `on`. A user `-c` of the same key at `on` is refused rather than silently overridden. Inside a running session `/airgapped on|off` changes nothing on macOS and says so, with the command that does (`puffin airgapped default <level>`, then restart); the status names Seatbelt instead of bwrap. No patch was needed. Linux is unchanged.
+- **Verified in CI:** see the run recorded with this branch's report (each target built, the web commands' tests, `--version` and `--help` of every binary, and on both Macs a sandboxed `curl` that reaches the network with `network_access=true` and is blocked with `false`).
+- **Verified only on real machines, still to do:** the client against a GB10 node over a real network (discovery through `mdns-sd` under macOS's local-network permission, which belongs to the terminal app, §8.2); a whole `puffin` session at a configured `on` on a Mac (the CI check exercises Seatbelt's rule directly through `puffin sandbox`, not a session); `puffin update` replacing itself on a Mac; `puffin-code` indexing on a Mac (§8.3).
 
 ---
 
