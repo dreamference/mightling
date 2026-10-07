@@ -65,8 +65,14 @@ pub fn rebrand_command(mut command: Command) -> Command {
 ///
 /// "OpenAI Codex" and "Codex CLI" become "Puffin"; any other capitalised "Codex" as a word becomes
 /// "Puffin"; a lowercase `codex` becomes `puffin` only where it is the command a user types —
-/// a whole word not attached to a path, a variable or a longer identifier.
+/// a whole word not attached to a path, a variable or a longer identifier. A line that points at
+/// the upstream vendor's documentation (`openai.com`) is dropped: it documents another product.
 pub fn rebrand_text(text: &str) -> String {
+    let text = text
+        .lines()
+        .filter(|line| !line.to_ascii_lowercase().contains("openai.com"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let text = text.replace("OpenAI Codex", "Puffin").replace("Codex CLI", "Puffin");
     let text = replace_word(&text, "Codex", "Puffin", |_, _| true);
     replace_word(&text, "codex", "puffin", |before, after| {
@@ -115,6 +121,10 @@ mod tests {
         assert_eq!(rebrand_text("Run Codex non-interactively"), "Run Puffin non-interactively");
         assert_eq!(rebrand_text("a Codex-provided sandbox"), "a Puffin-provided sandbox");
         assert_eq!(rebrand_text("OpenAI Codex (v1)"), "Puffin (v1)");
+        assert_eq!(
+            rebrand_text("Export metrics.\n\nSee https://developers.openai.com/codex/x for more details."),
+            "Export metrics.\n"
+        );
     }
 
     #[test]
