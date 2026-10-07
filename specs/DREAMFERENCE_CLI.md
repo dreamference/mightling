@@ -550,7 +550,7 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_SEARXNG_URL` | `http://127.0.0.1:8888` | SearXNG instance used by `puffin-search` and the MCP server's `web_search` |
 | `CODEX_HOME` | `~/.puffin` | `puffin`'s home folder: sessions, config, skills (`skills/`), the Night Shift queue (`night/`), audit results (`audit/`) |
 | `PUFFIN_NODE` | (unset) | On a client: the node one `puffin` command uses, by name, address or id, instead of the remembered one |
-| `PUFFIN_RELEASE_REPO` | `dreamference/puffin-ai` | Where `puffin update` looks for releases, e.g. a fork |
+| `PUFFIN_RELEASE_REPO` | `dreamference/dgx-lunny` | Where `puffin update` looks for releases, e.g. a fork |
 | `HF_TOKEN` / `DREAMFERENCE_HF_TOKEN` | (unset) | HuggingFace token |
 | `HF_HOME` | `~/.cache/huggingface` | HF cache root (the hub cache is `$HF_HOME/hub`) |
 

@@ -1,11 +1,11 @@
 # Get started
 
 !!! tip "The quickest way: install a release"
-    Every [release](https://github.com/dreamference/puffin-ai/releases) carries `install.sh`, which
+    Every [release](https://github.com/dreamference/dgx-lunny/releases) carries `install.sh`, which
     installs the prebuilt binaries and, on a GB10, `puffin-admin` and the host settings:
 
     ```bash
-    curl -fsSLO https://github.com/dreamference/puffin-ai/releases/latest/download/install.sh
+    curl -fsSLO https://github.com/dreamference/dgx-lunny/releases/latest/download/install.sh
     bash install.sh
     ```
 
@@ -32,7 +32,7 @@
 ## 1. Install
 
 ```bash
-git clone --recurse-submodules https://github.com/dreamference/puffin-ai.git puffin
+git clone --recurse-submodules https://github.com/dreamference/dgx-lunny.git puffin
 cd puffin
 python3 -m venv .venv
 .venv/bin/pip install -e .
