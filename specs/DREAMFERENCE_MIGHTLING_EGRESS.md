@@ -271,3 +271,21 @@ The session bus is the one thing the interface opens that `exec` does not. It is
 - `--tui` without `pexpect` and `pyte`.
 - After a build: both sessions traced and recorded; no model server, no session and no wait; a failed trace does not hide a failing verdict; a broken audit is reported, not raised.
 - `codex build`: audited when a new binary was installed or `--force` was given; not when the build was current, failed, or `--no-audit` was given; its exit code is the build's whatever the audit returned.
+
+### 10.7 The desktop app, and route lookups (2026-10-07)
+
+`--app` traces the Electron desktop app (`ling-app`) in a hidden session of its own (DESKTOP_ELECTRON §6): Chat on the web UI, Work's `ling app-server`, then quit; scratch `HOME` and `CODEX_HOME`; the web UI's port 3000 joins the allowlist for that session alone.
+
+Its first trace failed on one destination, `[2001:4860:4860::8888]:443` (Google Public DNS), 9 times. A trace with socket labels (`strace -yy`) showed what it was: `connect()` on a **UDP** socket, failing with `ENETUNREACH` here, and nothing ever sent on it. Chromium's network log named it `HOST_RESOLVER_MANAGER_IPV6_REACHABILITY_CHECK`, run for every host resolution (207 for `localhost:3000`, 12 for the page's own requests to `localhost:8767`), IP literals included (`HostResolverManager::RequestImpl` starts in `STATE_IPV6_REACHABILITY` unconditionally). In Chromium's source the check is `StartGloballyReachableCheck`: `ConnectAsync` on a UDP socket to that address, port 443, then a look at the local address the kernel chose; the result is cached for one second. A UDP `connect()` puts no packet on any network: it asks the kernel for a route and fixes the socket's peer. No switch turns the check off: `EnableIPv6ReachabilityOverride` only changes how the result is used (measured: the probes stay), and mapping `localhost` to `127.0.0.1` (`--host-resolver-rules`) removed the `::1` attempts but not the check.
+
+So the audit now tells a route lookup from a connection, and still judges anything sent:
+
+- strace runs with **`-yy`**, which labels each descriptor with its socket kind and inode (`23<UDPv6:[10868489]>`), and traces **`write` and `writev`** besides the `send*` calls, because a connected UDP socket accepts a payload through either.
+- A `connect()` on a UDP socket still labelled by its inode (not connected before) to anything but port 53 is recorded under **`route_lookups`**, not `destinations`, and the report lists it on a line of its own ("Route lookups (UDP connect, nothing sent)").
+- The **first payload on that socket** (`send*`, `write`, `writev`; matched by inode, or by the peer in the label once strace prints one) puts its destination into `destinations`, where the verdict judges it like any other.
+- A TCP connect is never a route lookup (it sends a SYN), a UDP connect to port 53 stays a resolver connect (its payloads are read as queries), and a trace without labels keeps the old reading: every connect a destination.
+- With `-yy` a descriptor's label changes between connect and send (inode, then the peer), so resolver sockets are keyed by the descriptor's number alone.
+
+Cost, measured on the app session: 2.4 MB of trace and 10,522 lines for 25 seconds, finishing normally; the `exec` session's verdict and destinations are unchanged. Results on this machine: `--app` **pass** (loopback ports 3000, 8000 and 8767 only; 11 route lookups to the probe address, nothing sent), `exec` **pass**.
+
+Tests added (36 in all): the recorded probe line is a route lookup and the app session passes; a `write` or a `sendto` on that socket (labelled by inode, or by its peer) makes it a destination and fails; without labels it is a destination as before; a TCP connect is never a route lookup; a labelled resolver socket still yields its query's name; the app session runs hidden with a scratch `HOME` and needs a display and a build.

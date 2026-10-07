@@ -33,8 +33,10 @@ from dreamference.audit.tui_session import TuiSession
 DEFAULT_PROMPT: Final[str] = "Reply with exactly: pong"
 
 # The syscalls traced. `sendmmsg` is how glibc sends a lookup's queries (the spec's first list
-# had only sendto and sendmsg, which leaves a DNS query without its name).
-TRACED_SYSCALLS: Final[str] = "connect,sendto,sendmsg,sendmmsg,execve"
+# had only sendto and sendmsg, which leaves a DNS query without its name). `write` and `writev`
+# are there for one reason: a payload on a connected UDP socket, which is what turns a route
+# lookup (StraceParser) back into a destination.
+TRACED_SYSCALLS: Final[str] = "connect,sendto,sendmsg,sendmmsg,execve,write,writev"
 
 SESSION_TIMEOUT_S: Final[int] = 300
 
@@ -46,10 +48,19 @@ SEARXNG_PORT: Final[int] = 8888
 # fails on this machine. A connect there is exactly such a call.
 CHATGPT_BLACKHOLE_PORT: Final[int] = 9
 
-# The two kinds of session, and what the report calls them.
+# The three kinds of session, and what the report calls them.
 EXEC: Final[str] = "exec"
 TUI: Final[str] = "tui"
-SESSION_NAMES: Final[Dict[str, str]] = {EXEC: "`ling exec` session", TUI: "full-screen `ling` session"}
+APP: Final[str] = "app"
+SESSION_NAMES: Final[Dict[str, str]] = {EXEC: "`ling exec` session", TUI: "full-screen `ling` session",
+                                        APP: "desktop app session (`ling-app`, windows hidden)"}
+
+# The desktop app's session (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §6): `ling-app` is
+# started with `MIGHTLING_APP_AUDIT=<seconds>`, opens Chat on the web UI and Work with its
+# app-server, both hidden, and quits by itself after that many seconds. The web UI's loopback
+# port joins the allowlist for this kind of session alone.
+APP_SESSION_S: Final[int] = 40
+WEB_UI_PORT: Final[int] = 3000
 
 
 class EgressAudit:
@@ -60,19 +71,23 @@ class EgressAudit:
     tui_stage: str = ""
 
     @classmethod
-    def allowed_ports(cls, vllm_host: str) -> Dict[int, str]:
+    def allowed_ports(cls, vllm_host: str, session: str = EXEC) -> Dict[int, str]:
         """
         The loopback ports a session may connect to.
 
         Args:
             vllm_host (str): The model server's base URL.
+            session (str): `exec`, `tui` or `app`; the app's session may also reach the web UI.
 
         Returns:
             Dict[int, str]: Port to the service behind it.
         """
         parsed = urlparse(vllm_host if "://" in vllm_host else f"http://{vllm_host}")
         model_port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        return {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG"}
+        allowed = {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG"}
+        if session == APP:
+            allowed[WEB_UI_PORT] = "web UI (the Chat window)"
+        return allowed
 
     @classmethod
     def judge(cls, trace: EgressTrace, allowed: Dict[int, str], replied: bool) -> EgressVerdict:
@@ -117,7 +132,7 @@ class EgressAudit:
 
     @classmethod
     def trace_session(cls, mightling_bin: str, vllm_host: str, prompt: str, work_dir: str,
-                      session: str = EXEC) -> Tuple[EgressTrace, bool, str]:
+                      session: str = EXEC, app_bin: Optional[str] = None) -> Tuple[EgressTrace, bool, str]:
         """
         Runs one `ling` session under strace in a throwaway repository with a throwaway
         `CODEX_HOME`, so no login, history or config of the user's influences the result, and
@@ -132,12 +147,19 @@ class EgressAudit:
         throwaway config): its indexers run detached in their own network-less sandbox and
         outlive the session, so they are not part of what this trace can show.
 
+        An `app` session is the desktop app itself (`app_bin`) in its audit mode: both windows
+        hidden, Chat loading the web UI, Work starting `ling app-server` (the `ling` under test,
+        named in `MIGHTLING_BIN`), then quitting by itself. It "replied" when it ran to that end
+        and exited 0. Its HOME is a scratch folder, so Chromium's profile and the app's own data
+        folder are throwaway too.
+
         Args:
             mightling_bin (str): The `ling` executable.
             vllm_host (str): The model server's base URL.
             prompt (str): The prompt to send.
             work_dir (str): A scratch directory, owned by the caller.
-            session (str): `exec` or `tui`.
+            session (str): `exec`, `tui` or `app`.
+            app_bin (Optional[str]): The desktop app's executable, for an `app` session.
 
         Returns:
             Tuple[EgressTrace, bool, str]: The parsed trace, whether the session replied, and the
@@ -159,7 +181,9 @@ class EgressAudit:
         reply_path = os.path.join(work_dir, "reply.txt")
         env = dict(os.environ)
         env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
-        strace = ["strace", "-f", "-qq", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]
+        # `-yy` labels each descriptor with its socket kind and inode, which is what tells a UDP
+        # route lookup from a connection (StraceParser).
+        strace = ["strace", "-f", "-qq", "-yy", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]
         if session == TUI:
             TuiSession.trust(home, repo)
             try:
@@ -168,14 +192,21 @@ class EgressAudit:
                 outcome = {"replied": False, "stage": "start"}
             cls.tui_stage = str(outcome.get("stage", ""))
             return cls._read_trace(trace_path), bool(outcome["replied"]), trace_path
-        command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]
+        if session == APP:
+            scratch_home = os.path.join(work_dir, "home-dir")
+            os.makedirs(scratch_home)
+            env.update({"HOME": scratch_home, "MIGHTLING_APP_AUDIT": str(APP_SESSION_S), "MIGHTLING_BIN": mightling_bin})
+            command = strace[:-1] + [str(app_bin), "--work"]
+        else:
+            command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]
+        exited = None
         try:
             # Its own process group, so a session that never answers is stopped with everything
             # it started: strace alone, killed, would leave `ling` waiting for the server.
             process = subprocess.Popen(command, cwd=repo, env=env, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             try:
-                process.wait(timeout=SESSION_TIMEOUT_S)
+                exited = process.wait(timeout=SESSION_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 for sig in (signal.SIGTERM, signal.SIGKILL):
                     try:
@@ -186,8 +217,21 @@ class EgressAudit:
                         continue
         except OSError:
             pass
+        if session == APP:
+            return cls._read_trace(trace_path), exited == 0, trace_path
         replied = os.path.isfile(reply_path) and bool(open(reply_path, errors="replace").read().strip())
         return cls._read_trace(trace_path), replied, trace_path
+
+    @classmethod
+    def app_executable(cls) -> Optional[str]:
+        """
+        The desktop app to trace: the checkout's packaged build, else the installed `ling-app`.
+
+        Returns:
+            Optional[str]: Its path, or None when neither exists.
+        """
+        from dreamference.chat.desktop_runner import DesktopRunner
+        return DesktopRunner.binary_path() or shutil.which("ling-app")
 
     @classmethod
     def _read_trace(cls, trace_path: str) -> EgressTrace:
@@ -221,6 +265,8 @@ class EgressAudit:
             address = target.rpartition(":")[0].strip("[]")
             label = allowed.get(port, "not on the allowlist") if StraceParser.is_loopback(address) else "not on this machine"
             lines.append(f"   {target:<24} {count:>4}x  {label}")
+        lookups = ", ".join(f"{target} ({count}x)" for target, count in sorted(trace.route_lookups.items())) or "none"
+        lines.append(f"Route lookups (UDP connect, nothing sent): {lookups}")
         names = ", ".join(f"{name} ({count}x)" for name, count in sorted(trace.dns_names.items())) or "none"
         lines.append(f"DNS queries: {names}")
         sockets = ", ".join(sorted(trace.unix_sockets)) or "none"
@@ -286,7 +332,8 @@ class EgressAudit:
 
     @classmethod
     def run(cls, prompt: Optional[str] = None, write_json: bool = False,
-            mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False) -> int:
+            mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False,
+            app: bool = False, app_bin: Optional[str] = None) -> int:
         """
         Runs the audit and prints its report.
 
@@ -295,8 +342,11 @@ class EgressAudit:
             write_json (bool): Also write the full result to `$CODEX_HOME/audit/<timestamp>.json`.
             tui (bool): Trace the full-screen interface on a pseudo-terminal instead of
                 `ling exec`. Codex starts things there that `exec` never does.
+            app (bool): Trace the desktop app in its hidden audit session instead (needs a
+                display: `DISPLAY`, or `xvfb-run`; Electron's headless platform crashes here).
             mightling_bin (Optional[str]): The `ling` executable; the installed build by default.
             vllm_host (Optional[str]): The model server; the configured one by default.
+            app_bin (Optional[str]): The desktop app; the packaged or installed one by default.
 
         Returns:
             int: 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
@@ -311,7 +361,17 @@ class EgressAudit:
             print("⚠️  Egress audit: trace failed")
             print("   - ling is not built: run `ling-admin codex build` first.")
             return 2
-        session = TUI if tui else EXEC
+        session = APP if app else TUI if tui else EXEC
+        if app:
+            app_bin = app_bin or cls.app_executable()
+            if not app_bin:
+                print("⚠️  Egress audit: trace failed")
+                print("   - the desktop app is not built: run `ling-admin desktop build`, or install its .deb.")
+                return 2
+            if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                print("⚠️  Egress audit: trace failed")
+                print("   - the desktop app needs a display: set DISPLAY, or run this under xvfb-run.")
+                return 2
         missing = TuiSession.missing_modules() if tui else []
         if missing:
             print("⚠️  Egress audit: trace failed")
@@ -321,17 +381,19 @@ class EgressAudit:
         if vllm_host is None:
             from dreamference.config import DreamferenceConfig
             vllm_host = DreamferenceConfig().vllm_host
-        allowed = cls.allowed_ports(vllm_host)
+        allowed = cls.allowed_ports(vllm_host, session)
         print(f"🚀 Tracing one {SESSION_NAMES[session]} against {vllm_host} (throwaway repository and CODEX_HOME)...")
         work_dir = tempfile.mkdtemp(prefix="mightling-audit-")
         try:
-            trace, replied, _ = cls.trace_session(mightling_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session)
+            trace, replied, _ = cls.trace_session(mightling_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session, app_bin)
             verdict = cls.judge(trace, allowed, replied)
             for line in cls.render(trace, verdict, allowed):
                 print(line)
             if verdict.status == TRACE_FAILED:
                 if tui and cls.tui_stage == "composer":
                     print("💡 The interface opened and took the prompt, but no reply was recorded.")
+                if app:
+                    print("💡 The app did not run its audit session to the end: start it by hand on this display to see why.")
                 print(f"💡 The session needs the model server at {vllm_host}: `ling-admin server start`.")
             if write_json:
                 print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(mightling_bin), session)}")

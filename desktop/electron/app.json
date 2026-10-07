@@ -1,0 +1,27 @@
+{
+  "productName": "Mightling",
+  "identifier": "dev.dreamference.mightling",
+  "scheme": "mightling",
+  "executable": "Mightling",
+  "command": "ling-app",
+  "packageName": "mightling",
+  "chat": {
+    "label": "ling",
+    "title": "Mightling",
+    "url": "http://localhost:3000/app",
+    "width": 1280,
+    "height": 860,
+    "minWidth": 720,
+    "minHeight": 520,
+    "backgroundColor": "#ffffff"
+  },
+  "work": {
+    "label": "work",
+    "title": "Mightling — Work",
+    "width": 1280,
+    "height": 860,
+    "minWidth": 480,
+    "minHeight": 600
+  },
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' app: blob: data:; connect-src 'self'; frame-src 'self' http://localhost:3000 http://localhost:33000; worker-src 'self' blob:; base-uri 'none'; form-action 'none'"
+}

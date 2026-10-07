@@ -32,7 +32,7 @@ NON_INTERACTIVE: Final[frozenset] = frozenset({
 })
 
 # Where `ling-app` marks a `ling app-server` that is running a turn, under `$CODEX_HOME/night`
-# (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3); `desktop/src-tauri/src/bridge.rs` writes it.
+# (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3); `desktop/electron/src/server.ts` writes it.
 BUSY_DIR_NAME: Final[str] = "busy"
 
 GIB: Final[int] = 1024 ** 3

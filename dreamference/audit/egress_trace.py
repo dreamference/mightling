@@ -17,6 +17,9 @@ class EgressTrace:
     # often it was seen. A connect that returned EINPROGRESS or failed still counts: the attempt
     # is what an audit is for. Port 53 is listed under `dns_servers` instead.
     destinations: Dict[str, int] = field(default_factory=dict)
+    # `ip:port` of every UDP `connect` on which nothing was ever sent: a route lookup, which puts
+    # no packet on any network (Chromium's IPv6 reachability check is one). Listed, not judged.
+    route_lookups: Dict[str, int] = field(default_factory=dict)
     # Resolvers that were sent a query (`127.0.0.53:53` is systemd-resolved's stub).
     dns_servers: Dict[str, int] = field(default_factory=dict)
     # Every name asked of a resolver.

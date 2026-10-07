@@ -1,24 +1,19 @@
 """
 Mightling Desktop App Runner.
 
-This module provides the DesktopRunner class, which builds and launches the Tauri shell in
-`desktop/`.
+This module provides the DesktopRunner class, which builds and launches the Electron app in
+`desktop/electron` (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), built the way the Codex
+desktop app is built: Electron Forge, with `ling` bundled inside as `resources/ling`.
 
-The shell is deliberately thin: its window points straight at the Onyx deployment on this machine,
-so there is no bundled frontend to keep in step with the browser. The desktop app and the browser
-render the same server, which means every patch `ling-admin chat configure` applies -- the typography,
-the white canvas, the hidden chrome -- shows up in both without being ported. What the desktop app
-adds is a window of its own: its own launcher entry and icon, no address bar, and no tab that gets
-lost among thirty others.
+The app has two windows. Chat is a window on the Onyx deployment, so there is no bundled frontend
+to keep in step with the browser: every patch `ling-admin chat configure` applies shows up in
+both. Work drives `ling app-server` with a React UI that *is* bundled, built from `desktop/ui` by
+the same Vite build as the main process.
 
-That is the Chat window. Beside it the app now carries a second, the Work window (the coding agent
-on `ling app-server`, specs/DREAMFERENCE_MIGHTLING_DESKTOP.md), whose frontend *is* bundled: it is
-built from `desktop/ui` before every Tauri build or dev run (`build_ui`). Chat is unchanged by it.
-
-It follows the same shape as the agent runners: check the service is healthy, provision the tooling
-if it is missing, then hand off to a subprocess. The health check is the one that matters -- a
-window opened against a stopped Onyx shows a connection error with no hint of what to start, so it
-is checked first and the user is told to run `ling-admin chat start` instead.
+It follows the same shape as the agent runners: check the service is healthy, provision the
+tooling if it is missing, then hand off to a subprocess. The health check is the one that matters
+-- a window opened against a stopped Onyx shows a connection error with no hint of what to start,
+so it is checked first and the user is told to run `ling-admin chat start` instead.
 """
 
 import json
@@ -33,20 +28,27 @@ from typing import Final, List, Optional
 from dreamference.chat.desktop_installer import CARGO_BIN, DesktopInstaller
 from dreamference.chat.onyx_runner import DEFAULT_ONYX_WEB_URL
 
-# The Tauri project lives beside the Python package rather than inside it: it is a Rust crate with
-# its own build system, and `pip install -e .` has no business copying it around.
+# The project lives beside the Python package rather than inside it: it has its own build system,
+# and `pip install -e .` has no business copying it around.
 DESKTOP_PROJECT_DIR: Final[str] = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "desktop"
 )
 
-# The Work window's frontend (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §4.5): bundled into the binary
-# from `ui/dist`, which `tauri.conf.json` names as `frontendDist`.
+# The Electron project and Work's UI.
+ELECTRON_DIR: Final[Path] = Path(DESKTOP_PROJECT_DIR) / "electron"
 UI_DIR: Final[Path] = Path(DESKTOP_PROJECT_DIR) / "ui"
+
+# `app.json`: the product name, identifier, scheme and window settings the app and these tests read.
+APP_CONFIG: Final[Path] = ELECTRON_DIR / "app.json"
+
+# The binaries bundled into the app, copied here from the installed `ling` build before packaging.
+RESOURCES_DIR: Final[Path] = ELECTRON_DIR / "resources"
+BUNDLED_BINARIES: Final[tuple] = ("ling", "codex-code-mode-host")
 
 # How long to wait for Onyx to answer before deciding it is not running.
 HEALTH_TIMEOUT_SECONDS: Final[int] = 5
 
-# Where a desktop entry and its icon go for the current user. A deb would put these under /usr;
+# Where a desktop entry and its icon go for the current user. A deb puts these under /usr;
 # running from a source checkout, they belong in the XDG user directories instead.
 DESKTOP_ENTRY_DIR: Final[str] = os.path.expanduser("~/.local/share/applications")
 ICON_DIR: Final[str] = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps")
@@ -54,30 +56,24 @@ DESKTOP_ENTRY_NAME: Final[str] = "ling-app.desktop"
 ICON_NAME: Final[str] = "ling-app"
 
 # GNOME matches a running window to its desktop entry by `WM_CLASS`, and shows a generic icon when
-# nothing matches -- which is why the app appeared in the dock as an unnamed placeholder. Tao sets
-# the class from the binary name, so the window reports instance `ling-app` and class
-# `Mightling-app`; naming the file after the instance covers the automatic match and
-# `StartupWMClass` covers the explicit one.
-WINDOW_CLASS: Final[str] = "Mightling-app"
+# nothing matches. Electron sets the class from the app's name (`app.setName`), `Mightling`.
+WINDOW_CLASS: Final[str] = "Mightling"
 
 # Names the desktop binary had before, whose launcher entries and icons are removed on registration
 # so the applications grid does not show two of it, one pointing at a binary that no longer builds.
 # `puffin-app` is the name it had until the product became Mightling.
 LEGACY_ENTRY_NAMES: Final[tuple] = ("puffin-desktop", "puffin-ui", "puffin-app")
 
-# WebKitGTK's HTTP cache, inside the webview's data directory. Onyx serves its stylesheets with
+# Chromium's HTTP cache, inside the app's data directory. Onyx serves its stylesheets with
 # `immutable` and never changes their filenames, so a patched stylesheet is invisible to anything
-# holding a cached copy -- the browser needs a hard refresh, and the app kept showing UI from
-# before the last `ling-admin chat configure`. Emptying this on launch costs a few megabytes re-fetched
-# over loopback and removes the whole class of bug. The sibling `cookies` file is left alone, which
-# is what keeps the session: deleting the data directory wholesale signs the user out.
-WEBVIEW_CACHE_DIR_NAME: Final[str] = "WebKitCache"
-
+# holding a cached copy. Emptying this on launch costs a few megabytes re-fetched over loopback.
+# The `Cookies` file beside it is left alone, which is what keeps the session.
+WEBVIEW_CACHE_DIR_NAME: Final[str] = "Cache"
 
 
 class DesktopRunner:
     """
-    Builds and runs the Mightling desktop window.
+    Builds and runs the Mightling desktop app.
     """
 
     @classmethod
@@ -100,40 +96,15 @@ class DesktopRunner:
             return False
 
     @classmethod
-    def _tauri_command(cls, *args: str) -> Optional[List[str]]:
-        """
-        Builds the argument vector that invokes the Tauri CLI.
-
-        Args:
-            *args: Tauri subcommand and flags.
-
-        Returns:
-            Optional[List[str]]: The command, or None if no CLI is available.
-        """
-        import shutil
-
-        if shutil.which("cargo-tauri"):
-            return ["cargo-tauri", *args]
-        if shutil.which("npx"):
-            return ["npx", "--no-install", "tauri", *args]
-        return None
-
-    @classmethod
     def _environment(cls) -> dict:
         """
-        Returns the environment the Tauri CLI and the built binary run with.
+        Returns the environment the build tools and the app run with.
 
-        A rustup installed during this same run is on disk but absent from the inherited PATH, so a
-        build straight after a successful install would fail to find cargo.
-
-        The webview's own environment -- the DMABUF renderer and the GTK theme -- is deliberately
-        *not* set here. It lives in `src-tauri/src/main.rs` instead, because a `.desktop` entry, an
-        AppImage's AppRun or someone running the binary directly all bypass this launcher, and both
-        settings are load-bearing: without them the window either never appears or comes up in dark
-        mode showing none of Dreamference's styling.
+        `~/.cargo/bin` is put on PATH for the Codex build, which shares this helper; a rustup
+        installed during the same run is on disk but absent from the inherited PATH.
 
         Returns:
-            dict: A copy of the current environment with `~/.cargo/bin` on PATH.
+            dict: A copy of the current environment.
         """
         environment = dict(os.environ)
         if os.path.isdir(CARGO_BIN) and CARGO_BIN not in environment.get("PATH", ""):
@@ -141,44 +112,42 @@ class DesktopRunner:
         return environment
 
     @classmethod
-    def _ensure_toolchain(cls) -> bool:
+    def _ensure_toolchain(cls, build: bool = False) -> bool:
         """
-        Installs what can be installed without root, and reports what cannot.
+        Checks Node and npm are present (and, for the `.deb`, dpkg and fakeroot); nothing is
+        installed, since all of them come from the system.
+
+        Args:
+            build (bool): Whether the `.deb` is to be made.
 
         Returns:
-            bool: True if the toolchain is complete afterwards.
+            bool: True if the toolchain is complete.
         """
-        # System packages first: they are the step that needs a password, and asking for it after
-        # a several-hundred-megabyte Rust download would be a poor order to fail in.
-        if not DesktopInstaller.install_system_packages():
-            return False
-        if not DesktopInstaller.install_rust():
-            return False
-        if not DesktopInstaller.install_tauri_cli():
-            return False
-        return True
+        complete, _ = DesktopInstaller.report(build)
+        return complete
 
     @classmethod
-    def build_ui(cls) -> bool:
-        """Builds the Work window's bundle, `desktop/ui/dist`, which Tauri embeds in the binary.
-
-        The Chat window needs none of it: it is the Onyx page at its URL. But Tauri embeds
-        `frontendDist` at compile time, so every build and `tauri dev` needs it present. npm's
-        packages are installed from the committed lock file the first time.
-
-        Returns:
-            bool: True when the bundle was built.
-        """
+    def _npm(cls, args: List[str], cwd: Path) -> bool:
         npm = shutil.which("npm")
         if npm is None:
-            print("❌ npm is needed to build the Work window (desktop/ui): install Node.js 20 or later.")
+            print("❌ npm is needed to build the desktop app: install Node.js 20 or later.")
             return False
-        if not (UI_DIR / "node_modules").is_dir():
-            print("📦 Installing the Work window's packages (desktop/ui)...")
-            if subprocess.call([npm, "ci", "--no-audit", "--no-fund"], cwd=UI_DIR, env=cls._environment()) != 0:
+        return subprocess.call([npm, *args], cwd=cwd, env=cls._environment()) == 0
+
+    @classmethod
+    def install_packages(cls) -> bool:
+        """Installs the two projects' npm packages from their lock files, once.
+
+        Returns:
+            bool: True when both have their `node_modules`.
+        """
+        for directory, what in ((UI_DIR, "the Work window's packages (desktop/ui)"), (ELECTRON_DIR, "the app's packages (desktop/electron: Electron, Forge, Vite)")):
+            if (directory / "node_modules").is_dir():
+                continue
+            print(f"📦 Installing {what}...")
+            if not cls._npm(["ci", "--no-audit", "--no-fund"], directory):
                 return False
-        print("🔨 Building the Work window (desktop/ui)...")
-        return subprocess.call([npm, "run", "build"], cwd=UI_DIR, env=cls._environment()) == 0
+        return True
 
     @classmethod
     def has_source(cls) -> bool:
@@ -186,9 +155,9 @@ class DesktopRunner:
         Tells a checkout from a release install, which has the package but no `desktop/` project.
 
         Returns:
-            bool: True if the Tauri project is beside the package, i.e. the app can be built here.
+            bool: True if the Electron project is beside the package, i.e. the app can be built here.
         """
-        return os.path.isdir(os.path.join(DESKTOP_PROJECT_DIR, "src-tauri"))
+        return ELECTRON_DIR.is_dir() and (ELECTRON_DIR / "package.json").is_file()
 
     @classmethod
     def _no_source(cls) -> int:
@@ -200,8 +169,8 @@ class DesktopRunner:
         """
         print("❌ The desktop app is built from the repository's desktop/ project, which a release "
               "install does not have.")
-        print("💡 Install the app from the release instead: the Mightling .deb or AppImage on the "
-              "release page puts `ling-app` in your launcher.")
+        print("💡 Install the app from the release instead: the Mightling .deb on the release page "
+              "puts `ling-app` in your launcher.")
         return 1
 
     @classmethod
@@ -219,9 +188,34 @@ class DesktopRunner:
         return subprocess.call([installed], env=cls._environment())
 
     @classmethod
+    def copy_bundled_binaries(cls) -> bool:
+        """
+        Copies `ling` and `codex-code-mode-host` from the installed build into `resources/`, where
+        Forge packages them beside the app (the Codex app bundles its agent the same way). A
+        `rg` on PATH rides along too, for the agent's fuzzy file search.
+
+        Returns:
+            bool: True when `ling` was copied.
+        """
+        from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+        bin_dir = Path(CodexBrandedBuilder.executable_path()).parent
+        RESOURCES_DIR.mkdir(parents=True, exist_ok=True)
+        for name in BUNDLED_BINARIES:
+            source = bin_dir / name
+            if not source.is_file():
+                print(f"❌ {source} is not built: run `ling-admin codex build` first.")
+                return False
+            shutil.copy2(source, RESOURCES_DIR / name)
+        rg = shutil.which("rg")
+        if rg:
+            shutil.copy2(rg, RESOURCES_DIR / "rg")
+        return True
+
+    @classmethod
     def run(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> int:
         """
-        Opens the Mightling desktop window, building it first if necessary.
+        Opens the Mightling desktop window from the checkout (`electron-forge start`), building
+        the UI and the main process first.
 
         Args:
             web_url (str): Base URL of the Onyx web UI the window points at.
@@ -235,59 +229,61 @@ class DesktopRunner:
             return 1
         if not cls.has_source():
             return cls._run_installed()
-        if not cls._ensure_toolchain() or not cls.build_ui():
+        if not cls._ensure_toolchain() or not cls.install_packages():
             return 1
+        if not DesktopInstaller.userns_allowed():
+            print("⚠️  Chromium's sandbox needs a user namespace, which this machine refuses without an AppArmor")
+            print("   profile; from a plain terminal or the launcher the app would abort at start.")
+            print("💡 `ling-admin desktop install` writes the profile (sudo once).")
 
         # Only once something has been built -- on a first run there is no binary to point an
         # Exec line at yet, and `build()` registers it as soon as there is.
         if cls.binary_path():
             cls.install_desktop_entry()
 
-        # Onyx's stylesheets are served `immutable` under filenames that never change, so the
-        # webview would otherwise keep showing the UI as it was before the last configure.
         cls.clear_webview_cache()
-
-        command = cls._tauri_command("dev", "--no-watch")
-        if command is None:
-            print("❌ No Tauri CLI available.")
-            return 1
-
         print("🚀 Opening the Mightling desktop window...")
-        return subprocess.call(command, cwd=DESKTOP_PROJECT_DIR, env=cls._environment())
+        return subprocess.call([shutil.which("npm") or "npm", "start", "--", "--chat"], cwd=ELECTRON_DIR, env=cls._environment())
 
     @classmethod
     def build(cls) -> int:
         """
-        Builds a distributable desktop bundle.
+        Builds the distributable `.deb` (and a zip) with Electron Forge.
 
-        Unlike `run()`, this does not require Onyx to be up: the shell holds a URL, not a copy of
-        the UI, so there is nothing to fetch at build time.
+        Unlike `run()`, this does not require Onyx to be up: Chat holds a URL, not a copy of the
+        UI, so there is nothing to fetch at build time. `ling` must be built, because it is
+        bundled into the app.
 
         Returns:
             int: 0 on success, non-zero on failure.
         """
         if not cls.has_source():
             return cls._no_source()
-        if not cls._ensure_toolchain() or not cls.build_ui():
+        if not cls._ensure_toolchain(build=True) or not cls.install_packages():
+            return 1
+        if not cls.copy_bundled_binaries():
             return 1
 
-        command = cls._tauri_command("build")
-        if command is None:
-            print("❌ No Tauri CLI available.")
+        print("🔨 Building the Mightling desktop app (Vite, then Forge's .deb)...")
+        if not cls._npm(["run", "make"], ELECTRON_DIR):
             return 1
+        cls.install_desktop_entry()
+        bundle = ELECTRON_DIR / "out" / "make"
+        print(f"✅ Bundles written to {bundle}")
+        return 0
 
-        print("🔨 Building the Mightling desktop bundle (the first Rust build takes a while)...")
-        code = subprocess.call(command, cwd=DESKTOP_PROJECT_DIR, env=cls._environment())
-        if code == 0:
-            cls.install_desktop_entry()
-            bundle = os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "target", "release", "bundle")
-            print(f"✅ Bundles written to {bundle}")
-        return code
+    @classmethod
+    def _app_config(cls) -> dict:
+        try:
+            with open(APP_CONFIG) as handle:
+                return json.load(handle)
+        except (OSError, ValueError):
+            return {}
 
     @classmethod
     def _app_identifier(cls) -> Optional[str]:
         """
-        Reads the bundle identifier out of `tauri.conf.json`.
+        Reads the app's identifier out of `app.json`.
 
         Taken from the config rather than repeated here, so the data directory this points at
         cannot drift away from the one the app actually uses.
@@ -295,17 +291,12 @@ class DesktopRunner:
         Returns:
             Optional[str]: The identifier, or None if the config cannot be read.
         """
-        config = os.path.join(DESKTOP_PROJECT_DIR, "src-tauri", "tauri.conf.json")
-        try:
-            with open(config) as handle:
-                return json.load(handle).get("identifier")
-        except (OSError, ValueError):
-            return None
+        return cls._app_config().get("identifier")
 
     @classmethod
     def clear_webview_cache(cls) -> bool:
         """
-        Empties the webview's HTTP cache, leaving cookies and local storage in place.
+        Empties Chromium's HTTP cache, leaving cookies and local storage in place.
 
         Returns:
             bool: True if there was a cache and it was removed.
@@ -324,18 +315,37 @@ class DesktopRunner:
     @classmethod
     def binary_path(cls) -> Optional[str]:
         """
-        Locates the compiled desktop binary, preferring a release build.
+        Locates the packaged desktop binary (`electron-forge package` or `make` output).
 
         Returns:
             Optional[str]: Path to the binary, or None if it has not been built.
         """
-        for profile in ("release", "debug"):
-            candidate = os.path.join(
-                DESKTOP_PROJECT_DIR, "src-tauri", "target", profile, "ling-app"
-            )
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return candidate
+        config = cls._app_config()
+        name = config.get("productName", "Mightling")
+        executable = config.get("executable", "Mightling")
+        out = ELECTRON_DIR / "out"
+        if not out.is_dir():
+            return None
+        for folder in sorted(out.glob(f"{name}-*")):
+            candidate = folder / executable
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
         return None
+
+    @classmethod
+    def dev_binaries(cls) -> List[str]:
+        """
+        The Electron binaries a checkout runs: npm's prebuilt `electron` (for `desktop run`) and
+        the packaged app (for `desktop build`'s output). Both need the AppArmor profile.
+
+        Returns:
+            List[str]: Absolute paths that exist.
+        """
+        candidates = [str(ELECTRON_DIR / "node_modules" / "electron" / "dist" / "electron")]
+        packaged = cls.binary_path()
+        if packaged:
+            candidates.append(packaged)
+        return [path for path in candidates if os.path.isfile(path)]
 
     @classmethod
     def install_desktop_entry(cls) -> bool:
@@ -366,17 +376,18 @@ class DesktopRunner:
 
         OnyxBrandAssets.render_app_icon(icon, 256)
 
-        # No environment is set on Exec: the webview settings live in the binary itself, so a
-        # launcher-started window behaves exactly like one started from the shell.
+        scheme = cls._app_config().get("scheme", "mightling")
         entry = (
             "[Desktop Entry]\n"
             "Type=Application\n"
             "Name=Mightling\n"
             "Comment=Local AI assistant served from this machine\n"
-            f"Exec={binary}\n"
+            f"Exec={binary} %U\n"
             f"Icon={ICON_NAME}\n"
             "Terminal=false\n"
+            "StartupNotify=true\n"
             "Categories=Utility;Development;\n"
+            f"MimeType=x-scheme-handler/{scheme};\n"
             f"StartupWMClass={WINDOW_CLASS}\n"
         )
         try:
@@ -404,15 +415,18 @@ class DesktopRunner:
     @classmethod
     def install(cls) -> int:
         """
-        Installs everything the desktop app is built from, without building it.
+        Installs what the desktop app is built and run from, without building it: npm's packages
+        (Electron among them), and the AppArmor profile Chromium's sandbox needs on this machine.
 
         Returns:
             int: 0 if the toolchain is complete afterwards.
         """
         if not cls.has_source():
             return cls._no_source()
-        if not cls._ensure_toolchain():
+        if not cls._ensure_toolchain() or not cls.install_packages():
             return 1
+        if not DesktopInstaller.userns_allowed():
+            DesktopInstaller.install_apparmor_profile(cls.dev_binaries())
         if cls.binary_path():
             cls.install_desktop_entry()
         return 0
@@ -432,4 +446,7 @@ class DesktopRunner:
         print(f"{'✅' if serving else '❌'} Mightling server at {web_url}"
               f"{'' if serving else ' — start it with: ling-admin chat start'}")
         complete, _ = DesktopInstaller.report()
+        if not DesktopInstaller.userns_allowed():
+            print("⚠️  Chromium's sandbox cannot create a user namespace from an unconfined program here: "
+                  "`ling-admin desktop install` writes the AppArmor profile.")
         return 0 if serving and complete else 1
