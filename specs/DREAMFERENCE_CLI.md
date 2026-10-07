@@ -543,6 +543,7 @@ A `sandbox = …` line left in an older file is ignored: the option was removed 
 | `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUNNER` | `codex` | Agent runner (`codex`, `cline`, `continue`, `openhands`) |
 | `DREAMFERENCE_USE_TENSORIZER` | `false` | Tensorize after download |
 | `DREAMFERENCE_MIGHTLING_GMAIL` | `true` | Add the Gmail section to `ling`'s prompt when an account is connected |
+| `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW` | unset | The model's context window in tokens, overriding what the server reports (also `mightling_context_window` in the config file). Without either, `ling` reads `max_model_len`, `context_length` or `max_context_length` from `/v1/models`, then llama.cpp's `/props` `n_ctx`, then its `n_ctx_train`, else assumes 32,768. Ollama reports none, so set it there |
 | `DREAMFERENCE_MIGHTLING_CAVE_MODE` | `ultra` | Cave-mode level for new `ling` sessions (`off`, `lite`, `full`, `ultra`); also the config key `mightling_cave_mode` |
 | `DREAMFERENCE_MIGHTLING_PROMPT` | `default` | System prompt for new `ling` sessions (`default`, `high-swe`, or a custom one in `$CODEX_HOME/system-prompts/<name>.md`); also the config key `mightling_prompt`, which `ling prompt use` writes. An unknown name is skipped with a warning. A resumed session keeps the prompt it started with |
 | `DREAMFERENCE_MIGHTLING_AIRGAPPED` | `off` | How much of the internet a `ling` session may use (`off`, `on`); also the config key `mightling_airgapped` |
