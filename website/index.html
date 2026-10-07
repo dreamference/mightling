@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mightling — private AI on your DGX Spark</title>
+<meta name="description" content="A coding agent, a chat assistant and a desktop app running entirely on your own NVIDIA DGX Spark or GB10. No cloud, no account, no API bill, no telemetry — and an egress audit that proves it.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://mightling.com/">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mightling">
+<meta property="og:title" content="Mightling — private AI on your DGX Spark. One command.">
+<meta property="og:description" content="A fully local alternative to cloud coding agents. No cloud, no account, no API bill, no telemetry.">
+<meta property="og:url" content="https://mightling.com/">
+<meta property="og:image" content="https://mightling.com/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="assets/favicon.svg" alt="" width="34" height="34">Mightling</a>
+    <nav class="links">
+      <a href="#install">Install</a>
+      <a class="opt" href="#proof">Proof</a>
+      <a class="opt" href="#faq">FAQ</a>
+      <a href="https://github.com/dreamference/mightling">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <div class="hero" id="install">
+    <img class="logo logo-light" src="assets/mightling-logo-light.svg" alt="Mightling" width="300" height="181">
+    <img class="logo logo-dark" src="assets/mightling-logo-dark.svg" alt="Mightling" width="300" height="181">
+    <h1>Private AI on your DGX Spark.<br>One command.</h1>
+    <p class="lede"><strong>A fully local alternative to cloud coding agents.</strong> A coding agent, a chat assistant
+      and a desktop app, running entirely on your own GB10. No cloud. No account. No API bill. No telemetry.</p>
+
+    <div class="install">
+      <div class="cmd has-copy"><button class="copy" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Copy</button>
+<pre><span class="p">$ </span>curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash</pre></div>
+      <div class="cmd"><pre><span class="p">$ </span>mling-admin server start      <span class="c"># downloads the model once (~20 GB), then serves it</span>
+<span class="p">$ </span>cd ~/your-project &amp;&amp; mling    <span class="c"># that's it</span></pre></div>
+      <p class="note">Works on the NVIDIA DGX Spark and every GB10 machine. The script verifies every download
+        against the release's checksums and prints each <code>sudo</code> command before running it.
+        <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Read it first</a> if you like.</p>
+    </div>
+
+    <div class="numbers">
+      <div><b>0</b><span>phone-home connections, verified by the egress audit</span></div>
+      <div><b>87 tok/s</b><span>JSON on one GB10</span></div>
+      <div><b>$0</b><span>per token, forever</span></div>
+      <div><b>262K</b><span>tokens of context</span></div>
+    </div>
+  </div>
+
+</div>
+
+<section id="try">
+  <div class="wrap">
+    <h2>Try these first</h2>
+    <div class="cmd"><pre><span class="p">$ </span>mling "explain this repository to me like I'm new on the team"
+<span class="p">$ </span>mling "the tests are failing: find out why and fix them"
+<span class="p">$ </span>mling "add input validation to the signup form, with tests"</pre></div>
+    <p class="sub after">Or queue work for tonight with <code>/night add &lt;task&gt;</code>: Mightling works
+      through the queue while you sleep, each task on its own git branch, and you review the branches over coffee.</p>
+  </div>
+</section>
+
+<section id="proof">
+  <div class="wrap">
+    <h2>Your code never leaves your desk — and you can prove it</h2>
+    <p class="sub">Cloud coding agents send your source code to someone else's servers. Mightling sends it nowhere:
+      the model runs on your GB10, and nothing in Mightling phones home. No usage analytics, no metrics, no sign-in,
+      no "anonymous" crash reports. That makes it usable for code you're not allowed to upload: client work,
+      regulated data, unreleased products.</p>
+    <div class="proof">
+      <div>
+        <p>One command runs a real Mightling session under <code>strace</code> and lists every network
+          connection it made:</p>
+        <div class="cmd"><pre><span class="p">$ </span>mling-admin audit egress
+<span class="ok">✔ Egress audit: pass</span>
+Network destinations:
+   127.0.0.1:8000     29x  model server
+   127.0.0.1:8767      1x  Gmail search service
+DNS queries: none
+Networked git commands: none</pre></div>
+        <p>Everything stayed on <code>127.0.0.1</code>. Not one DNS lookup.</p>
+      </div>
+      <div>
+        <h3>Need a hard guarantee?</h3>
+        <p>Type <code>/airgapped on</code> and every command the agent runs gets an empty network namespace from
+          the Linux kernel. It isn't a polite request to the model: there is simply no network to reach.
+          Full Access, which would bypass the sandbox, is refused at the same time.</p>
+        <h3>What can leave, and when</h3>
+        <p>Only what you or the agent asks for: a web search (through a private SearXNG on your own machine),
+          a page fetch, a read-only request to a Google account you connected, or an update check.
+          At <code>/airgapped on</code>, none of it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <h2>Why Mightling</h2>
+    <div class="pillars">
+      <div class="pillar">
+        <h3>🔒 Confidential</h3>
+        <p>The model, your code, your prompts and your answers stay on the machine they're on.</p>
+        <ul>
+          <li>No account, no telemetry</li>
+          <li>Egress audit you can rerun</li>
+          <li><code>/airgapped on</code>, enforced by the kernel</li>
+        </ul>
+      </div>
+      <div class="pillar">
+        <h3>⚡ Fast, with no bill</h3>
+        <table>
+          <tr><td>Code</td><td class="num">50 tok/s</td></tr>
+          <tr><td>JSON</td><td class="num">87 tok/s</td></tr>
+          <tr><td>Prose</td><td class="num">25 tok/s</td></tr>
+          <tr><td>Reading code</td><td class="num">~1,700 tok/s</td></tr>
+          <tr><td>Context</td><td class="num">262K</td></tr>
+        </table>
+        <p class="note-small">Single stream on a GB10. Run four agents at once: no quota, no "please wait".</p>
+      </div>
+      <div class="pillar">
+        <h3>✨ Nothing to configure</h3>
+        <ul>
+          <li><b>No tuning:</b> model, context, kernels and speculative decoding are chosen for the GB10.</li>
+          <li><b>It won't freeze your machine:</b> the host is checked and memory pressure watched during the load.</li>
+          <li><b>Your other machines find it</b> on the local network.</li>
+          <li><b>Updates are one command:</b> <code>mling update</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>What you get</h2>
+    <div class="features">
+      <div class="feature"><h3>🖥️ <code>mling</code>, the terminal agent</h3><p>Reads your repository, runs commands and tests, edits code, and asks before anything risky.</p></div>
+      <div class="feature"><h3>🌙 Night Shift</h3><p><code>/night add &lt;task&gt;</code> before bed; each task done on its own git branch by morning. Nothing is merged or pushed without you.</p></div>
+      <div class="feature"><h3>🔎 Web search and fetch</h3><p>Through a private SearXNG on your own machine: no search account, no API key.</p></div>
+      <div class="feature"><h3>🧭 A code index</h3><p>Definitions, callers and impact across your repository, so the agent finds code instead of grepping for it.</p></div>
+      <div class="feature"><h3>🧩 Your existing skills</h3><p>Skills you already wrote for Claude Code, Gemini CLI, OpenClaw or Hermes work unchanged.</p></div>
+      <div class="feature"><h3>💬 Web chat</h3><p>A browser assistant with web search, voice input and image understanding, on the same local model.</p></div>
+      <div class="feature"><h3>🪟 Desktop app <span class="tag">preview</span></h3><p>The chat in a window of its own, plus a Work window for agent sessions with approvals, diffs and undo.</p></div>
+      <div class="feature"><h3>📬 Gmail, Drive, Calendar <span class="tag">preview</span></h3><p>Read-only, through a sign-in that stays on your machine. Switched off entirely at <code>/airgapped on</code>.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <h2>Mightling and cloud coding agents</h2>
+    <div class="tablewrap">
+      <table>
+        <tr><th></th><th>Cloud coding agents</th><th>Mightling</th></tr>
+        <tr><td>Where your code goes</td><td>Their servers</td><td class="yes">Nowhere</td></tr>
+        <tr><td>Account needed</td><td>Yes</td><td class="yes">No</td></tr>
+        <tr><td>Cost per token</td><td>Metered</td><td class="yes">Zero</td></tr>
+        <tr><td>Rate limits</td><td>Yes</td><td class="yes">No</td></tr>
+        <tr><td>Works with the network unplugged</td><td>No</td><td class="yes">Yes</td></tr>
+        <tr><td>You can verify what leaves</td><td>No</td><td class="yes"><code>mling-admin audit egress</code></td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="machines">
+  <div class="wrap">
+    <h2>Runs on every GB10</h2>
+    <ul class="machines">
+      <li>NVIDIA DGX Spark</li><li>Acer Veriton GN100</li><li>ASUS Ascent GX10</li><li>Dell Pro Max with GB10</li>
+      <li>Gigabyte AI TOP ATOM</li><li>HP ZGX Nano</li><li>Lenovo ThinkStation PGX</li><li>MSI EdgeXpert</li>
+    </ul>
+    <p class="sub flush">They share the chip, the 128 GB of unified memory and DGX OS 7, so one installer
+      covers them all. Mightling is developed and tested daily on the ASUS Ascent GX10; the others are covered by tests.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>FAQ</h2>
+    <details><summary>Do I need a GB10?</summary>
+      <p>Yes, to run the model. Another arm64 Linux machine on your network can use it as a client: the same install
+        command sets that up automatically. Clients for x86 Linux, macOS and Windows on Arm (the RTX Spark laptops)
+        are on the way.</p></details>
+    <details><summary>I installed Puffin. Is this it?</summary>
+      <p>Yes: Puffin was renamed Mightling in 1.5. Run <code>puffin update</code> once, then <code>puffin</code> one
+        last time. It moves your sessions, settings and links over, and from then on the command is <code>mling</code>.</p></details>
+    <details><summary>Is it really free?</summary>
+      <p>Yes. Mightling is open source under the AGPL, and the model's weights are free. Your only running cost is
+        the electricity.</p></details>
+    <details><summary>What do I need besides the machine?</summary>
+      <p>The OS it ships with (DGX OS 7, or Ubuntu 24.04 where the vendor offers it), Docker with the NVIDIA Container
+        Toolkit, Python 3 and Git. On plain Ubuntu, <code>mling-admin host check</code> tells you what's missing.</p></details>
+    <details><summary>Does anything ever reach the internet?</summary>
+      <p>Only what you or the agent asks for, such as a web search through SearXNG on your own machine, and the
+        first-time downloads. <code>/airgapped on</code> turns all of it off.</p></details>
+    <details><summary>Which model does it run?</summary>
+      <p>Qwen3.8-27B in NVIDIA's 4-bit NVFP4 format, served by SGLang with a DFlash2 drafter, chosen and tuned for the
+        GB10. About 20 GB of weights; roughly 38 GB of the machine's memory stays free while it serves.</p></details>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>Keep your code on your desk</h2>
+    <p class="sub centered">If you believe code should stay on the desk it was written on, star the repository:
+      it's how other GB10 owners find Mightling.</p>
+    <div class="buttons">
+      <a class="btn primary" href="https://github.com/dreamference/mightling">Star on GitHub</a>
+      <a class="btn ghost" href="https://github.com/dreamference/mightling/releases/latest">Latest release</a>
+      <a class="btn ghost" href="https://github.com/dreamference/mightling/blob/main/docs/getting-started.md">Docs</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <div>
+        <p><b>Mightling by Dreamference.</b> Dreamference builds confidential AI that runs on your own hardware.</p>
+        <p>Open source under the GNU AGPL v3. NVIDIA, GB10, DGX and DGX Spark are trademarks of NVIDIA Corporation;
+          other names are trademarks of their owners. Mightling and Dreamference are not affiliated with them.</p>
+        <p>This site makes no third-party requests: no trackers, no analytics, no external fonts.</p>
+      </div>
+      <div>
+        <p><a href="https://github.com/dreamference/mightling">GitHub</a> ·
+          <a href="https://github.com/dreamference/mightling/issues">Issues</a> ·
+          <a href="https://github.com/dreamference/mightling/blob/main/LICENSE">License</a></p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="copy.js"></script>
+</body>
+</html>
