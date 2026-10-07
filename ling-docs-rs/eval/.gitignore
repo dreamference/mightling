@@ -1,0 +1,12 @@
+# Rebuilt by fetch.py and the bench scripts; never committed (sizes and licences).
+corpus/
+reference/
+hostile/
+chunks/
+emb/
+models/
+hf/
+venv/
+rustpdf/target/
+results/pdf-*.json
+!results/pdf-summary.json

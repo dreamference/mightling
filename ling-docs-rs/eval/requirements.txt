@@ -1,0 +1,12 @@
+# The Phase 0 measurement environment (a throwaway virtualenv; nothing here ships with ling-docs).
+# pdftotext is Poppler 24.02 from the distribution; the two Rust crates are built from rustpdf/.
+beautifulsoup4==4.15.0
+fastembed==0.8.1
+numpy==2.5.3
+onnxruntime==1.30.0
+pdfminer.six==20260107
+pymupdf==1.28.2
+pypdf==6.19.0
+pypdfium2==5.14.0
+python-docx==1.2.0
+tokenizers==0.23.2
