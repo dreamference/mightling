@@ -539,6 +539,22 @@ Run on the night of 2026-10-03 for PUFFIN_PROMPT §6.5, which has the full table
 
 ---
 
+## 14. Refine, then fix (`--refine`, 2026-10-07)
+
+**Why.** In the index-on round of 2026-10-06 (17 of 24 resolved), the agent edited a file the reference patch edits in 6 of its 7 failures; what failed was the change. The fix covered the issue's example but not its stated use case (django 15957, a limit "from each category" applied once overall), stopped at direct parents where grandparents also apply (15563), guarded a symptom instead of fixing the rule (scikit-learn 25747, django 16454), or missed a second code path the hidden test checks (13512, the admin's read-only display). A first step that only studies the issue targets these.
+
+**What it does.** `swe-bench run --refine` (a new run only, recorded as `refine` in the manifest) runs each instance in two `puffin exec` sessions in the same container:
+
+1. **Refine** (`REFINE_PROMPT`, at most `REFINE_TIMEOUT_S`, 15 minutes): read, run and test, change nothing under `/testbed`, and write `/puffin-scratch/refined.md` in six sections: intent, requirements as observable results, every code path (by callers and references), edge cases, what must not change, acceptance checks. With the code index the prompt names `code_callers` and `code_refs` for the paths.
+2. The runner records whether the step changed the tree (it is told not to; this is measured), then puts `/testbed` back to the tree the agent started from (`RESET_SCRIPT`: `git read-tree -u --reset` to the recorded base tree, `git clean -fd`), keeping the description.
+3. **Fix** (`FIX_PROMPT`, a new session, the full task timeout): the issue verbatim, then the description, marked as possibly wrong. The issue is authoritative where they disagree; no guard that only hides the symptom; every acceptance check is run before stopping. Nudges apply to this session as before.
+
+The instance's state keeps `refine`: the description (up to 40,000 characters), its size, both steps' times, the first step's outcome and session, whether it changed the tree, and the log offset where the fixing session starts, so the report counts each step's tokens apart. `report` prints a "Refine first" line, and `--against` lists `refine` among the differing fields.
+
+**Measured:** pending (the `im-refine` round on the 24-instance sample, then the 100-instance sample with and without the option).
+
+---
+
 ## Sources
 
 Fetched on 2026-10-01.

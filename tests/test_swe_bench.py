@@ -26,8 +26,8 @@ from dreamference.swe_bench import (
 )
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATCH
-from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, PREPARE_SCRIPT,
-                                                          SCRUB_SCRIPT)
+from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, NO_REFINED,
+                                                          PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT, SCRUB_SCRIPT)
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -163,6 +163,19 @@ class FakeDocker:
         stdout.write((json.dumps({"type": "thread.started", "thread_id": session}) + "\n").encode())
         stdout.flush()
         say = lambda text: (box["scratch"] / "last.txt").write_text(text)
+        if "This is the first of two steps" in prompt:
+            # The refine arm's first step: writes the description, unless told to write nothing;
+            # `refine_edits` also changes the tree it was told to leave alone.
+            if mode != "refine_silent":
+                (box["scratch"] / "refined.md").write_text(f"1. Intent: widget() returns 2 ({instance}).\n")
+            if mode == "refine_edits":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 99  # EXPLORING\n")
+                (box["repo"] / "stray.py").write_text("print('scratch')\n")
+            stdout.write((json.dumps({"type": "turn.completed", "usage": {
+                "input_tokens": 300, "cached_input_tokens": 0, "output_tokens": 30}}) + "\n").encode())
+            stdout.flush()
+            say("Wrote the description.")
+            return FakeProcess(0)
         if mode == "hang":
             (box["repo"] / "partial.py").write_text("# half done\n")
             process = FakeProcess(0, hang=True)
@@ -179,7 +192,8 @@ class FakeDocker:
         stdout.write((json.dumps({"type": "turn.completed", "usage": {
             "input_tokens": 1000, "cached_input_tokens": 900, "output_tokens": 50}}) + "\n").encode())
         stdout.flush()
-        acts = mode in ("change", "binary") or (mode == "stall_then_act" and prompt == NUDGE)
+        acts = mode in ("change", "binary", "refine_edits", "refine_silent") or \
+            (mode == "stall_then_act" and prompt == NUDGE)
         if acts:
             (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX\n")
             if mode == "binary":
@@ -345,6 +359,83 @@ def test_the_prompt_holds_the_issue_and_nothing_else_from_the_row(bench):
     assert "SECRET" not in everything_the_container_gets
     scratch = SweBenchRunStore("r1").directory / "scratch" / "acme__widget-1"
     assert "SECRET" not in "".join(p.read_text(errors="replace") for p in scratch.rglob("*") if p.is_file())
+
+
+# -- the refine arm ---------------------------------------------------------------------------------
+
+def puffin_prompts(docker):
+    """Every `puffin exec` call's prompt and whether it resumed a session, in order."""
+    calls = [call for call in docker.calls if call[0] == "exec" and len(call) > 2 and call[2].endswith("/puffin")]
+    return [(call[-1], "resume" in call) for call in calls]
+
+
+def prediction(name, instance_id):
+    store = SweBenchRunStore(name)
+    entries = [json.loads(line) for line in store.predictions_path.read_text().splitlines()]
+    return next(entry["model_patch"] for entry in entries if entry["instance_id"] == instance_id)
+
+
+def test_the_fix_prompt_keeps_the_issue_first_and_says_it_is_authoritative():
+    issue = "The widget is broken."
+    prompt = SweBenchInstanceRun.compose_fix_prompt(issue, "1. Intent: widget() returns 2.")
+    assert prompt.index(issue) < prompt.index("1. Intent: widget() returns 2.")
+    assert "the issue is authoritative" in prompt and "acceptance check" in prompt
+    assert "code_" not in prompt
+    assert CODE_INDEX_HINT in SweBenchInstanceRun.compose_fix_prompt(issue, "x", code_index=True)
+    assert NO_REFINED in SweBenchInstanceRun.compose_fix_prompt(issue, "  \n")
+    refine = SweBenchInstanceRun.compose_refine_prompt(issue)
+    assert "/puffin-scratch/refined.md" in refine and "Do not fix anything yet" in refine and refine.endswith(issue)
+    assert REFINE_CODE_INDEX_HINT in SweBenchInstanceRun.compose_refine_prompt(issue, code_index=True)
+
+
+def test_refine_runs_two_fresh_sessions_and_hands_the_description_over(bench):
+    assert run(bench, instances=["acme__widget-1"], refine=True) == 0
+    prompts = puffin_prompts(bench["docker"])
+    issue = "The widget is broken in acme__widget-1."
+    described = "1. Intent: widget() returns 2 (acme__widget-1).\n"
+    assert prompts == [(SweBenchInstanceRun.compose_refine_prompt(issue), False),
+                       (SweBenchInstanceRun.compose_fix_prompt(issue, described), False)]
+    store = SweBenchRunStore("r1")
+    assert store.manifest()["refine"] is True
+    state = store.states()["acme__widget-1"]
+    assert state["status"] == "done"
+    assert state["refine"]["refined"] == described and state["refine"]["refine_edited"] is False
+    assert state["refine"]["refine_exec"] == "ok" and "fix_s" in state["refine"]
+    assert "FIX" in prediction("r1", "acme__widget-1")
+
+
+def test_refine_discards_what_the_first_step_changed_and_records_it(bench):
+    bench["docker"].modes["acme__widget-1"] = "refine_edits"
+    assert run(bench, instances=["acme__widget-1"], refine=True) == 0
+    patch = prediction("r1", "acme__widget-1")
+    assert "FIX" in patch
+    assert "EXPLORING" not in patch and "stray.py" not in patch
+    assert SweBenchRunStore("r1").states()["acme__widget-1"]["refine"]["refine_edited"] is True
+
+
+def test_a_first_step_that_wrote_nothing_leaves_the_fix_step_the_issue_alone(bench):
+    bench["docker"].modes["acme__widget-1"] = "refine_silent"
+    assert run(bench, instances=["acme__widget-1"], refine=True) == 0
+    (fix_prompt, resumed), = puffin_prompts(bench["docker"])[1:]
+    assert NO_REFINED in fix_prompt and not resumed
+    assert SweBenchRunStore("r1").states()["acme__widget-1"]["refine"]["refined_bytes"] == 0
+    assert "FIX" in prediction("r1", "acme__widget-1")
+
+
+def test_the_report_counts_the_refine_steps_apart(bench):
+    ids = ["acme__widget-1", "acme__widget-2"]
+    assert run(bench, instances=ids, refine=True, evaluate=True) == 0
+    assert run(bench, instances=ids, name="r2", evaluate=True) == 0
+    summary = SweBenchReport.summary(SweBenchRunStore("r1"))
+    assert summary["refine"]["instances"] == 2
+    # The first step's tokens alone: the stand-in spends 300 in and 30 out on it, 1000 and 50 on a fix.
+    assert summary["refine"]["refine_tokens"] == {"input_tokens": 600, "cached_input_tokens": 0, "output_tokens": 60}
+    assert summary["tokens"]["input_tokens"] == 2 * (300 + 1000)
+    text = SweBenchReport.render(SweBenchRunStore("r1"))
+    assert "Refine first        on:" in text and "changed the tree in 0 of 2" in text
+    assert "Refine first" not in SweBenchReport.render(SweBenchRunStore("r2"))
+    compared = SweBenchReport.against(SweBenchRunStore("r1"), SweBenchRunStore("r2"))
+    assert "differs: refine: True | False" in compared
 
 
 def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
