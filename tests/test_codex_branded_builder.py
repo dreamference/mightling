@@ -97,6 +97,32 @@ def test_the_build_key_changes_with_the_launcher_source(tmp_path):
         assert CodexBrandedBuilder.build_key() != first
 
 
+def test_the_export_reports_puffins_version_not_the_upstream_tag(tmp_path, monkeypatch):
+    # Every banner reads CARGO_PKG_VERSION, so the workspace version is what `puffin --version`, the
+    # session header and the status card show; it is stamped into the export, never the submodule.
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[workspace]\nmembers = ["cli"]\n\n[workspace.package]\nversion = "0.158.0"\n'
+                        'edition = "2024"\n\n[workspace.dependencies]\nfoo = { version = "1" }\n')
+    assert CodexBrandedBuilder.stamp_version(str(manifest), "1.4.1")
+    text = manifest.read_text()
+    assert '[workspace.package]\nversion = "1.4.1"\n' in text and 'foo = { version = "1" }' in text
+    assert not CodexBrandedBuilder.stamp_version(str(manifest), "not a version")
+
+    monkeypatch.setenv("PUFFIN_VERSION", "2.0.0-rc.1")
+    assert CodexBrandedBuilder.puffin_version() == "2.0.0-rc.1"
+    monkeypatch.delenv("PUFFIN_VERSION")
+    from dreamference import __version__
+    assert CodexBrandedBuilder.puffin_version() == __version__
+
+
+def test_the_build_key_changes_with_the_version(monkeypatch):
+    with patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
+        monkeypatch.setenv("PUFFIN_VERSION", "1.4.1")
+        first = CodexBrandedBuilder.build_key()
+        monkeypatch.setenv("PUFFIN_VERSION", "1.4.2")
+        assert CodexBrandedBuilder.build_key() != first
+
+
 def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     calls = []
 
