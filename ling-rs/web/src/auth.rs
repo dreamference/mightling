@@ -3,7 +3,13 @@
 //!
 //! - **This machine:** `ling web open` writes a one-time login code into the state folder and opens
 //!   the browser on `/login?code=…`; the server trades it for a session cookie and deletes it. The
-//!   owner token (`token`, 0600) also works as `Authorization: Bearer …` for the CLI.
+//!   owner token (`token`, 0600) works as `Authorization: Bearer …` on `/healthz` alone, for
+//!   `ling web status`.
+//! - **What a sandboxed command can read is no credential.** Codex's sandbox limits writes, not
+//!   reads, so a command the agent runs can read everything here. The token therefore opens
+//!   nothing but the health check, pending codes are kept under their SHA-256 (a listing shows no
+//!   code), and devices are kept as hashes. Signing in needs a code, and writing one needs the
+//!   user's own shell: the sandbox cannot write this folder.
 //! - **Another device:** `ling web pair` writes an 8-digit code valid for ten minutes, for one
 //!   device. The device enters it on `/pair` and gets a long-lived device cookie; only its hash is
 //!   kept, in `devices.json`. `ling web revoke <device>` ends it.
@@ -111,9 +117,9 @@ pub fn owner_token(state: &Path) -> std::io::Result<String> {
     }
 }
 
-/// A code waiting in `logins/` or `pairing/`, with when it stops being good.
+/// A code waiting in `logins/` or `pairing/`, kept under its hash, with when it stops being good.
 fn issue_code(dir: &Path, code: &str, lifetime: Duration) -> std::io::Result<()> {
-    write_private(&dir.join(code), &json!({ "expires": now_secs() + lifetime.as_secs() }).to_string())
+    write_private(&dir.join(sha256_hex(code)), &json!({ "expires": now_secs() + lifetime.as_secs() }).to_string())
 }
 
 /// Takes a code: true when it existed and had not expired. It is deleted either way (one use).
@@ -121,7 +127,7 @@ fn take_code(dir: &Path, code: &str) -> bool {
     if code.is_empty() || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
-    let path = dir.join(code);
+    let path = dir.join(sha256_hex(code));
     let Ok(text) = std::fs::read_to_string(&path) else { return false };
     let _ = std::fs::remove_file(&path);
     serde_json::from_str::<Value>(&text)
@@ -324,9 +330,25 @@ mod tests {
     fn an_expired_code_is_refused_and_deleted() {
         let state = scratch("expired");
         let dir = state.join("pairing");
-        write_private(&dir.join("12345678"), &json!({"expires": now_secs() - 1}).to_string()).unwrap();
+        let file = dir.join(sha256_hex("12345678"));
+        write_private(&file, &json!({"expires": now_secs() - 1}).to_string()).unwrap();
         assert!(!take_pairing_code(&state, "12345678"));
-        assert!(!dir.join("12345678").exists());
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn a_listing_of_the_pending_codes_shows_no_code() {
+        // A sandboxed command can read this folder; it must not find a code it could use.
+        let state = scratch("listing");
+        let login = issue_login_code(&state).unwrap();
+        let pairing = issue_pairing_code(&state).unwrap();
+        for dir in ["logins", "pairing"] {
+            for entry in std::fs::read_dir(state.join(dir)).unwrap() {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                assert!(name != login && name != pairing && !name.contains(&pairing), "{name}");
+            }
+        }
+        assert!(take_login_code(&state, &login) && take_pairing_code(&state, &pairing));
     }
 
     #[test]

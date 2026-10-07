@@ -115,9 +115,10 @@ impl Server {
         self.next_tab.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Whether a request carries a valid credential: this machine's session cookie, a paired
-    /// device's cookie, or the owner token as a bearer token.
-    pub fn authenticated(&self, headers: &HeaderMap) -> bool {
+    /// Whether a request carries a valid credential: this machine's session cookie or a paired
+    /// device's cookie. The owner token counts only on `/healthz`: a sandboxed command can read
+    /// the token file, so it must open nothing else (auth.rs).
+    pub fn authenticated(&self, path: &str, headers: &HeaderMap) -> bool {
         let cookies = header_str(headers, header::COOKIE);
         if let Some(token) = auth::cookie(cookies, auth::SESSION_COOKIE)
             && self.sessions.lock().unwrap_or_else(|p| p.into_inner()).contains(&auth::sha256_hex(token))
@@ -129,9 +130,10 @@ impl Server {
         {
             return true;
         }
-        header_str(headers, header::AUTHORIZATION)
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .is_some_and(|token| auth::same_secret(token.trim(), &self.owner_token))
+        path == "/healthz"
+            && header_str(headers, header::AUTHORIZATION)
+                .and_then(|value| value.strip_prefix("Bearer "))
+                .is_some_and(|token| auth::same_secret(token.trim(), &self.owner_token))
     }
 
     fn new_session(&self) -> String {
@@ -221,7 +223,7 @@ async fn guard(State(server): State<Arc<Server>>, request: Request, next: Next) 
     }
     let path = request.uri().path();
     let public = matches!(path, "/login" | "/pair" | "/pair.css");
-    if !public && !server.authenticated(headers) {
+    if !public && !server.authenticated(path, headers) {
         let response = if path == "/" || path == "/index.html" {
             html(StatusCode::UNAUTHORIZED, assets::LOCKED_HTML)
         } else {

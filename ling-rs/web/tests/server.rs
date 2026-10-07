@@ -145,7 +145,7 @@ async fn every_route_but_the_sign_in_pages_needs_a_credential_on_loopback_too() 
 }
 
 #[tokio::test]
-async fn the_owner_token_works_as_a_bearer_token_and_nothing_else_does() {
+async fn the_owner_token_opens_the_health_check_and_nothing_else() {
     let scratch = scratch("bearer");
     let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
     let token = std::fs::read_to_string(server.config.state_dir.join("token")).unwrap();
@@ -155,6 +155,15 @@ async fn the_owner_token_works_as_a_bearer_token_and_nothing_else_does() {
     let (status, _, _) =
         call(&server, request("GET", "/healthz").header(header::AUTHORIZATION, "Bearer wrong").body(Body::empty()).unwrap()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // A command inside the agent's sandbox can read the token file: it must not open the bridge,
+    // the page or an upload with it.
+    for (method, uri) in [("GET", "/ws"), ("GET", "/"), ("POST", "/api/upload?thread=t&kind=file")] {
+        let bearer = request(method, uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::ORIGIN, ORIGIN)
+            .header(header::UPGRADE, "websocket");
+        assert_eq!(call(&server, bearer.body(Body::empty()).unwrap()).await.0, StatusCode::UNAUTHORIZED, "{method} {uri}");
+    }
 }
 
 #[tokio::test]
@@ -504,7 +513,7 @@ async fn with_nothing_listening_the_server_starts_the_app_server_and_reports_why
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ling_web_ask_runs_one_ask_thread_with_the_owner_token() {
+async fn ling_web_ask_signs_in_like_a_browser_and_runs_one_ask_thread() {
     let scratch = scratch("askcli");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

@@ -3,7 +3,8 @@
 //! The server owns no agent of its own. Each tab opens a connection to the user's `ling
 //! app-server` over its Unix socket, and everything the page sends passes the bridge policy
 //! (`policy.json`, shared with the desktop app and held to the cases in `vectors/`). Every request
-//! needs a credential, loopback included; the LAN is served only on an advertised node. It calls
+//! needs a credential, loopback included, and nothing a sandboxed command can read is one; the LAN
+//! is served only on an advertised node. It calls
 //! nothing on any network: its one outbound connection is the app-server's socket, and the only
 //! processes it starts are `ling app-server` and `ling prompt show --composed`.
 

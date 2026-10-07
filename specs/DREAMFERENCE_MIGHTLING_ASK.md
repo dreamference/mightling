@@ -338,13 +338,19 @@ Built: the bridge policy as data, Ask threads, and `ling web` with its credentia
 
 **`ling web`** is the crate `ling-rs/web` (`ling-web-server`); the launcher's `src/web.rs` only routes to it. Its pieces:
 
-- **Credentials.** Owner token, one-time login codes (two minutes), 8-digit pairing codes (ten minutes, one use; ten wrong codes withdraw every pending code), and device cookies stored by hash. Sessions from `ling web open` live in memory, so a restart means `ling web open` again.
+- **Credentials.** One-time login codes (two minutes), 8-digit pairing codes (ten minutes, one use; ten wrong codes withdraw every pending code), and device cookies. Sessions from `ling web open` live in memory, so a restart means `ling web open` again.
+- **Nothing a sandboxed command can read is a credential.** Codex's sandbox limits writes, not reads, so a command the agent runs can read everything under `~/.mightling/web/`. Three consequences:
+  - The owner token (`token`) opens `/healthz` alone, for `ling web status`.
+  - Pending codes are stored under their SHA-256, so listing the folder reveals none.
+  - Devices are stored as hashes.
+
+  Signing in needs a code written by the user's own shell; the sandbox cannot write that folder. An earlier draft also accepted the token as `Bearer` on `/ws`, which would have let an injected command open the bridge.
 - **Request checks.** `Host` and `Origin` checks, and the CSP of §4.5 widened to what the UI's own `<meta>` allows.
 - **The relay.** One app-server connection per tab, on `$XDG_RUNTIME_DIR/mightling/app-server.sock`. `ling web` starts `ling -c features.code_mode_host=true app-server --listen unix://…` when nothing answers there, passing `DREAMFERENCE_VLLM_HOST` when this machine is a node or has the host configured.
 - **The browser bridge.** `/bridge.js` defines `window.electronBridge` and `mightlingWindowType = "web"` over the WebSocket, so the desktop UI runs unchanged.
 - **Uploads.** `/api/upload` writes into Ask folders only, within 20 MB for images and 100 MB for files.
 - **Night Shift.** The busy marker is kept per tab, and Night Shift now treats `web` as non-interactive.
-- **`ling web ask "<question>"`.** One Ask thread through the running server with the owner token, for scripts and for `ling-admin audit egress --web`. That mode traces `ling web serve`, and everything it starts, while the untraced client asks.
+- **`ling web ask "<question>"`.** One Ask thread through the running server, for scripts and for `ling-admin audit egress --web`. It signs in like a browser: it writes a login code and trades it for a session cookie. That mode traces `ling web serve`, and everything it starts, while the untraced client asks.
 
 **Not built in this part:**
 
@@ -355,7 +361,7 @@ Built: the bridge policy as data, Ask threads, and `ling web` with its credentia
 
 **Verified on this machine (2026-10-07).**
 
-- **Web crate:** `cargo test` in a copy of `ling-rs/web`: 21 unit tests and 11 server tests. The server tests cover the credential on every route, pairing (one use, expiry, withdrawal after ten wrong codes), `Host` and `Origin`, upload caps, and a tab through the policy to a stand-in app-server on a Unix socket. They use no real network and no real `ling`.
+- **Web crate:** `cargo test` in a copy of `ling-rs/web`: 22 unit tests and 11 server tests. The server tests cover the credential on every route, pairing (one use, expiry, withdrawal after ten wrong codes), `Host` and `Origin`, upload caps, and a tab through the policy to a stand-in app-server on a Unix socket. They also check that the owner token opens nothing but `/healthz`. They use no real network and no real `ling`.
 - **Launcher:** `cargo test -p ling-launcher -p ling-web-server` in an export of the pinned Codex with the patches applied: 163 launcher tests, including the `ask` prompt.
 - **Egress:** `ling-admin audit egress --web`, with a debug build from that export and the served Qwen3.8 model, **passes**. It connected only to the model server (3×) and the Gmail service (2×, the `ask` prompt's email block), sent no DNS query, and started `ling` three times: the server, `prompt show --composed`, and the app-server.
 - **A warning for anyone testing a build of this branch:** run it with a scratch `HOME`. On a machine still laid out for Puffin, its first run of any kind, `--help` included, performs the rename migration (RENAME_MIGHTLING §4.2).
