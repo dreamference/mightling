@@ -1051,7 +1051,9 @@ class DreamferenceCLIController:
         audit_subparsers = audit_parser.add_subparsers(dest="audit_command")
         audit_egress_parser = audit_subparsers.add_parser(
             "egress", help="Trace one real ling session and list every network destination and process, with a verdict")
-        audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
+        audit_egress_mode = audit_egress_parser.add_mutually_exclusive_group()
+        audit_egress_mode.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
+        audit_egress_mode.add_argument("--web", action="store_true", help="Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
 
@@ -2340,7 +2342,7 @@ class DreamferenceCLIController:
             from dreamference.audit import EgressAudit
             if args.audit_command == "egress":
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
-                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui))
+                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui, web=args.web))
             print("usage: ling-admin audit {egress}")
             sys.exit(2)
 

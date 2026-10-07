@@ -6,6 +6,8 @@
 //! - `open`: signs this machine's browser in with a one-time link.
 //! - `pair`: an eight-digit code for another device, for ten minutes.
 //! - `devices`, `revoke <device>`: paired devices, and ending one.
+//! - `ask [--port N] <question>`: one Ask thread through the running server, for scripts and the
+//!   egress audit (ask_client.rs).
 //!
 //! `--lan` is refused unless this machine is an advertised node (`ling-admin node enable`), the
 //! one case in which Mightling offers anything to the network.
@@ -31,7 +33,7 @@ use crate::server::Server;
 
 pub const UNIT_NAME: &str = "mightling-web.service";
 
-const USAGE: &str = "Usage: ling web start [--lan] | stop | status | open | pair | devices | revoke <device> | serve [--lan] [--port N]";
+const USAGE: &str = "Usage: ling web start [--lan] | stop | status | open | pair | devices | revoke <device> | serve [--lan] [--port N] | ask [--port N] <question>";
 
 /// What the launcher tells `ling web`.
 #[derive(Clone, Debug)]
@@ -192,6 +194,7 @@ pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
         Some("open") => open(&state, words.contains(&"--no-browser")),
         Some("pair") => pair(&state),
         Some("devices") => devices(&state),
+        Some("ask") => ask_command(&args[1..], &state).await,
         Some("revoke") => match words.get(1) {
             Some(which) => revoke(&state, which),
             None => {
@@ -382,6 +385,40 @@ fn pair(state: &Path) -> i32 {
         println!("On the other device, open {} and type the code.", urls.join(" or "));
     }
     0
+}
+
+async fn ask_command(args: &[String], state: &Path) -> i32 {
+    let mut port = running_port(state);
+    let mut words = Vec::new();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        if arg == "--port" {
+            match rest.next().map(|value| value.parse::<u16>()) {
+                Some(Ok(value)) => port = value,
+                _ => {
+                    eprintln!("--port takes a port number");
+                    return 2;
+                }
+            }
+        } else {
+            words.push(arg.as_str());
+        }
+    }
+    if words.is_empty() {
+        eprintln!("Usage: ling web ask [--port N] <question>");
+        return 2;
+    }
+    match crate::ask_client::ask(state, port, &words.join(" "), Duration::from_secs(15 * 60)).await {
+        Ok(answer) if !answer.trim().is_empty() => 0,
+        Ok(_) => {
+            eprintln!("The answer was empty.");
+            1
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    }
 }
 
 fn devices(state: &Path) -> i32 {

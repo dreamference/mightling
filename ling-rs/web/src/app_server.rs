@@ -19,6 +19,7 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 use tokio_tungstenite::WebSocketStream;
 
 /// A connection to the app-server.
@@ -38,10 +39,16 @@ pub struct Launch {
     pub log: PathBuf,
 }
 
+/// A server this process started, and the task copying its stderr, which ends with its last line.
+struct Running {
+    child: Child,
+    stderr: Option<JoinHandle<Option<String>>>,
+}
+
 pub struct AppServer {
     socket: PathBuf,
     launch: Launch,
-    child: Mutex<Option<Child>>,
+    child: Mutex<Option<Running>>,
     stderr: broadcast::Sender<String>,
 }
 
@@ -98,7 +105,7 @@ impl AppServer {
             return Ok((upstream, false));
         }
         let running = match child.as_mut() {
-            Some(process) => matches!(process.try_wait(), Ok(None)),
+            Some(running) => matches!(running.child.try_wait(), Ok(None)),
             None => false,
         };
         if !running {
@@ -109,12 +116,18 @@ impl AppServer {
             if let Ok(upstream) = self.connect_once().await {
                 return Ok((upstream, true));
             }
-            if let Some(process) = child.as_mut()
-                && let Ok(Some(status)) = process.try_wait()
+            if let Some(running) = child.as_mut()
+                && let Ok(Some(status)) = running.child.try_wait()
             {
+                // Its last words say why; the copy ends with the pipe, soon after the exit.
+                let last = match running.stderr.take() {
+                    Some(task) => tokio::time::timeout(Duration::from_secs(5), task).await.ok().and_then(Result::ok).flatten(),
+                    None => None,
+                };
                 *child = None;
+                let last = last.map(|line| format!(": {line}")).unwrap_or_default();
                 return Err(format!(
-                    "ling app-server exited ({status}) before it listened; see {}",
+                    "ling app-server exited ({status}) before it listened{last} (see {})",
                     self.launch.log.display()
                 ));
             }
@@ -125,7 +138,7 @@ impl AppServer {
         }
     }
 
-    fn spawn(&self) -> Result<Child, String> {
+    fn spawn(&self) -> Result<Running, String> {
         prepare_socket_dir(&self.socket).map_err(|err| format!("could not prepare {}: {err}", self.socket.display()))?;
         let listen = format!("unix://{}", self.socket.display());
         let mut command = Command::new(&self.launch.ling);
@@ -139,27 +152,33 @@ impl AppServer {
             .kill_on_drop(true);
         let mut child =
             command.spawn().map_err(|err| format!("could not start {} app-server: {err}", self.launch.ling.display()))?;
-        if let Some(stderr) = child.stderr.take() {
+        let stderr = child.stderr.take().map(|stderr| {
             let sender = self.stderr.clone();
             let log = self.launch.log.clone();
             tokio::spawn(async move {
                 let mut file = tokio::fs::OpenOptions::new().create(true).append(true).open(&log).await.ok();
                 let mut lines = tokio::io::BufReader::new(stderr).lines();
+                let mut last = None;
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let Some(file) = file.as_mut() {
                         let _ = file.write_all(format!("{line}\n").as_bytes()).await;
                     }
-                    let _ = sender.send(line);
+                    let _ = sender.send(line.clone());
+                    last = Some(line);
                 }
-            });
-        }
-        Ok(child)
+                if let Some(file) = file.as_mut() {
+                    let _ = file.flush().await;
+                }
+                last
+            })
+        });
+        Ok(Running { child, stderr })
     }
 
     /// Stops a server this process started; one started elsewhere is left alone.
     pub async fn stop_child(&self) {
-        if let Some(mut child) = self.child.lock().await.take() {
-            let _ = child.kill().await;
+        if let Some(mut running) = self.child.lock().await.take() {
+            let _ = running.child.kill().await;
         }
     }
 }

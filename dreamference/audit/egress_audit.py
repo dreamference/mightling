@@ -3,7 +3,8 @@
 (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3)
 
 This module provides the EgressAudit class. It runs one real `ling` session under `strace`
-(`ling exec`, or with `--tui` the full-screen interface on a pseudo-terminal), in a throwaway
+(`ling exec`; with `--tui` the full-screen interface on a pseudo-terminal; with `--web` the web
+server, `ling web serve`, answering one Ask thread asked through it), in a throwaway
 repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked
 of a resolver and every process the session started, with a verdict. It makes "your code stays on your machine" something a user can check and re-check
 after each Codex bump, instead of a promise.
@@ -18,9 +19,11 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import asdict
 from typing import Any, Dict, Final, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -46,10 +49,18 @@ SEARXNG_PORT: Final[int] = 8888
 # fails on this machine. A connect there is exactly such a call.
 CHATGPT_BLACKHOLE_PORT: Final[int] = 9
 
-# The two kinds of session, and what the report calls them.
+# The kinds of session, and what the report calls them.
 EXEC: Final[str] = "exec"
 TUI: Final[str] = "tui"
-SESSION_NAMES: Final[Dict[str, str]] = {EXEC: "`ling exec` session", TUI: "full-screen `ling` session"}
+WEB: Final[str] = "web"
+SESSION_NAMES: Final[Dict[str, str]] = {
+    EXEC: "`ling exec` session",
+    TUI: "full-screen `ling` session",
+    WEB: "`ling web` server answering an Ask thread",
+}
+
+# How long `ling web serve` may take to listen.
+WEB_START_TIMEOUT_S: Final[int] = 30
 
 
 class EgressAudit:
@@ -160,6 +171,9 @@ class EgressAudit:
         env = dict(os.environ)
         env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
         strace = ["strace", "-f", "-qq", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]
+        if session == WEB:
+            replied = cls._web_session(strace, mightling_bin, repo, env, work_dir, home, prompt)
+            return cls._read_trace(trace_path), replied, trace_path
         if session == TUI:
             TuiSession.trust(home, repo)
             try:
@@ -188,6 +202,75 @@ class EgressAudit:
             pass
         replied = os.path.isfile(reply_path) and bool(open(reply_path, errors="replace").read().strip())
         return cls._read_trace(trace_path), replied, trace_path
+
+    @classmethod
+    def _web_session(cls, strace: List[str], mightling_bin: str, repo: str, env: Dict[str, str], work_dir: str,
+                     home: str, prompt: str) -> bool:
+        """
+        Traces `ling web serve` on a free loopback port while `ling web ask`, untraced, asks it
+        one question through the bridge (specs/DREAMFERENCE_MIGHTLING_ASK.md §13). Everything the
+        server starts is traced with it: the app-server it launches on its own socket, and
+        `ling prompt show ask --composed`. `HOME` and `XDG_RUNTIME_DIR` are scratch too, so the
+        server finds no advertised node, no user unit and no app-server of the user's to join.
+
+        Args:
+            strace (List[str]): The strace command line, ending with the `ling` executable.
+            mightling_bin (str): The `ling` executable, for the untraced client.
+            repo (str): The throwaway repository, used as the working directory.
+            env (Dict[str, str]): The session's environment; updated in place.
+            work_dir (str): The scratch directory.
+            home (str): The throwaway `CODEX_HOME`.
+            prompt (str): The question.
+
+        Returns:
+            bool: Whether the Ask thread answered.
+        """
+        run_dir = os.path.join(work_dir, "run")
+        user_home = os.path.join(work_dir, "user")
+        os.makedirs(run_dir, mode=0o700)
+        os.makedirs(user_home)
+        env.update({"HOME": user_home, "XDG_RUNTIME_DIR": run_dir})
+        port = cls.free_port()
+        server_file = os.path.join(home, "web", "server.json")
+        try:
+            server = subprocess.Popen(strace + ["web", "serve", "--port", str(port)], cwd=repo, env=env,
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            return False
+        replied = False
+        try:
+            deadline = time.monotonic() + WEB_START_TIMEOUT_S
+            while not os.path.isfile(server_file) and server.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.2)
+            if os.path.isfile(server_file):
+                try:
+                    ask = subprocess.run([mightling_bin, "web", "ask", "--port", str(port), prompt], cwd=repo, env=env,
+                                         stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                         timeout=SESSION_TIMEOUT_S, check=False)
+                    replied = ask.returncode == 0 and bool(ask.stdout.strip())
+                except (OSError, subprocess.TimeoutExpired):
+                    replied = False
+        finally:
+            # SIGTERM first: the server stops the app-server it started and removes its marker.
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(server.pid, sig)
+                    server.wait(timeout=20)
+                    break
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    continue
+        return replied
+
+    @classmethod
+    def free_port(cls) -> int:
+        """
+        Returns:
+            int: A loopback port nothing listens on now.
+        """
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            return int(probe.getsockname()[1])
 
     @classmethod
     def _read_trace(cls, trace_path: str) -> EgressTrace:
@@ -286,7 +369,8 @@ class EgressAudit:
 
     @classmethod
     def run(cls, prompt: Optional[str] = None, write_json: bool = False,
-            mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False) -> int:
+            mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False,
+            web: bool = False) -> int:
         """
         Runs the audit and prints its report.
 
@@ -295,6 +379,7 @@ class EgressAudit:
             write_json (bool): Also write the full result to `$CODEX_HOME/audit/<timestamp>.json`.
             tui (bool): Trace the full-screen interface on a pseudo-terminal instead of
                 `ling exec`. Codex starts things there that `exec` never does.
+            web (bool): Trace `ling web serve` answering one Ask thread instead.
             mightling_bin (Optional[str]): The `ling` executable; the installed build by default.
             vllm_host (Optional[str]): The model server; the configured one by default.
 
@@ -311,7 +396,7 @@ class EgressAudit:
             print("⚠️  Egress audit: trace failed")
             print("   - ling is not built: run `ling-admin codex build` first.")
             return 2
-        session = TUI if tui else EXEC
+        session = WEB if web else (TUI if tui else EXEC)
         missing = TuiSession.missing_modules() if tui else []
         if missing:
             print("⚠️  Egress audit: trace failed")

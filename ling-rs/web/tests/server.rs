@@ -487,7 +487,8 @@ async fn with_nothing_listening_the_server_starts_the_app_server_and_reports_why
     let (sink, stream) = websocket.split();
     let mut browser = Browser { sink, stream, next: 0 };
     let started = browser.call(json!({ "type": "work/start" })).await;
-    assert!(started["error"].as_str().unwrap().contains("exited"), "{started}");
+    let error = started["error"].as_str().unwrap();
+    assert!(error.contains("exited") && error.contains("unexpected: -c features.code_mode_host=true"), "{started}");
     // The stand-in was asked for exactly the desktop app's command, on the private socket.
     let log = std::fs::read_to_string(&server.config.launch.log).unwrap();
     let socket = server.config.socket.display().to_string();
@@ -498,6 +499,51 @@ async fn with_nothing_listening_the_server_starts_the_app_server_and_reports_why
         let mode = std::fs::metadata(server.config.socket.parent().unwrap()).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
     }
+    let _ = stop.send(());
+    serving.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ling_web_ask_runs_one_ask_thread_with_the_owner_token() {
+    let scratch = scratch("askcli");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let config = config(&scratch.dir, port, Vec::new());
+    let mut app_server = fake_app_server(&config.socket).await;
+    let server = Server::new(config).unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn(server::serve(server.clone(), vec![listener], async move {
+        let _ = stopped.await;
+    }));
+    // The stand-in answers like the app-server: a thread, then a streamed reply.
+    let seen = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        loop {
+            let (frame, reply) = next_frame(&mut app_server).await;
+            seen.push(frame.clone());
+            let id = frame.get("id").cloned();
+            match frame.get("method").and_then(Value::as_str) {
+                Some("initialize") => reply.send(json!({ "id": id, "result": {} })).unwrap(),
+                Some("thread/start") => reply.send(json!({ "id": id, "result": { "thread": { "id": "thr-cli" } } })).unwrap(),
+                Some("turn/start") => {
+                    reply.send(json!({ "id": id, "result": {} })).unwrap();
+                    for delta in ["o", "k"] {
+                        reply.send(json!({ "method": "item/agentMessage/delta", "params": { "threadId": "thr-cli", "delta": delta } })).unwrap();
+                    }
+                    reply.send(json!({ "method": "turn/completed", "params": { "threadId": "thr-cli", "turn": {} } })).unwrap();
+                    return seen;
+                }
+                _ => {}
+            }
+        }
+    });
+    let answer = ling_web_server::ask_client::ask(&server.config.state_dir, port, "Say ok", Duration::from_secs(10)).await.unwrap();
+    assert_eq!(answer, "ok");
+    let seen = seen.await.unwrap();
+    let start = seen.iter().find(|frame| frame["method"] == "thread/start").unwrap();
+    assert!(start["params"]["baseInstructions"].as_str().unwrap().starts_with("COMPOSED:ask:"));
+    assert_eq!(seen.iter().find(|frame| frame["method"] == "turn/start").unwrap()["params"]["input"][0]["text"], "Say ok");
+    assert!(seen.iter().any(|frame| frame["method"] == "initialized"));
     let _ = stop.send(());
     serving.await.unwrap().unwrap();
 }
