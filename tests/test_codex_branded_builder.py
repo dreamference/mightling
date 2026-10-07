@@ -71,8 +71,12 @@ def test_the_patches_stay_small():
     # On 2026-10-05 the user approved a ceiling of 38,500 for the Desktop Work window's hook. Raised
     # to 37,500 on 2026-10-06 for 0023's air-gap check in the app server (1,220 bytes: a dependency
     # line, and a validator on the config's permission constraint that refuses Full Access at `on`
-    # for every client of the app server); 37,288 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 37_500
+    # for every client of the app server); 37,288 after. On 2026-10-07 the user approved a ceiling of
+    # 39,500 for Windows' `/airgapped on`. Raised to 39,500 for 0024 (2,042 bytes: a dependency line,
+    # a helper that clears a command's network when its session is sealed, and the two elevated
+    # Windows sandbox entry points calling it, so the command runs as the offline account); 39,330
+    # after.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 39_500
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):

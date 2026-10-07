@@ -375,11 +375,16 @@ pub fn resolve_guarded(
 /// Resolves the level for the first of `ids` that has a session file, reading every tier and the
 /// seals.
 pub fn resolve(ids: &[&str]) -> Resolved {
+    resolve_with(ids, std::env::var(ENV_VAR).ok())
+}
+
+/// [`resolve`] with the environment tier's value given, for a command whose environment is not
+/// this process's.
+pub fn resolve_with(ids: &[&str], environment: Option<String>) -> Resolved {
     let session = ids
         .iter()
         .filter_map(|id| session_file(id))
         .find_map(|path| std::fs::read_to_string(path).ok());
-    let environment = std::env::var(ENV_VAR).ok();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let configs: Vec<(PathBuf, String)> = config_files(&cwd)
         .into_iter()
@@ -402,6 +407,18 @@ pub fn resolve_for_command() -> Resolved {
 /// the command's own environment, once per command.
 pub fn sealed_for_command() -> bool {
     resolve_for_command().level == Level::On
+}
+
+/// [`sealed_for_command`] for a command whose environment is in hand rather than inherited. Codex's
+/// Windows sandbox resolves a command's permissions in its own process before the command starts,
+/// with the command's environment as a map (patch 0024; specs/DREAMFERENCE_PUFFIN_WINDOWS_ARM.md
+/// §7.3). `get` looks a variable up in that map; the level variable falls back to this process's,
+/// which the command inherits.
+pub fn sealed_for_env(get: impl Fn(&str) -> Option<String>) -> bool {
+    let thread = get("CODEX_THREAD_ID").unwrap_or_default();
+    let session = get("CODEX_SESSION_ID").unwrap_or_default();
+    let environment = get(ENV_VAR).or_else(|| std::env::var(ENV_VAR).ok());
+    resolve_with(&[thread.as_str(), session.as_str()], environment).level == Level::On
 }
 
 /// What Codex is told when it may not take a permission profile: the allowed set of its error.
@@ -575,6 +592,20 @@ mod tests {
         assert_eq!(refusal(false, &run, false, Some(seals), false), None);
         assert_eq!(refusal(false, &project, true, Some(seals), true), None);
         assert_eq!(refusal(false, &run, true, None, true), None);
+    }
+
+    #[test]
+    fn a_commands_environment_map_decides_its_level() {
+        // The level variable in the command's map wins over this process's and the files'.
+        let map = |var: &'static str, value: &'static str| move |key: &str| (key == var).then(|| value.to_string());
+        assert!(sealed_for_env(map(ENV_VAR, "on")));
+        assert!(!sealed_for_env(map(ENV_VAR, "off")));
+        // Ids that are not ids name no session file and no seal.
+        assert!(!sealed_for_env(|key: &str| match key {
+            "CODEX_THREAD_ID" => Some("../x".to_string()),
+            ENV_VAR => Some("off".to_string()),
+            _ => None,
+        }));
     }
 
     #[test]
