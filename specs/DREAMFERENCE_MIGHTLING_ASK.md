@@ -312,7 +312,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 1. ~~Port~~ **Decided 2026-10-07:** 3100 for now (the user may revisit it; keep the port in one constant and the node advert, so a change is one edit).
 2. ~~Voice from phones~~ **Decided 2026-10-07:** text only from other devices' browsers; voice through the desktop app (§4.4).
 3. ~~Onyx history export~~ **Decided 2026-10-07:** not needed; a clean start. Phase B drops the export.
-4. **Phase A's scope:** all of §10's row A in one release, or Ask and `ling web` first, with `ling-docs` in a release of its own?
+4. ~~Phase A's scope~~ **Decided 2026-10-07:** `ling-docs` ships on its own as soon as it is ready (agent and command line); Ask and `ling web` pick it up when they land.
 
 ---
 
