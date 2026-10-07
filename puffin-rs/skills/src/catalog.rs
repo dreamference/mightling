@@ -691,7 +691,8 @@ mod tests {
         assert_eq!(links, vec!["only-here".to_string()]);
 
         // `disable` withholds the winner; the next in line is then offered.
-        let pdf = fixture.home.join(".puffin").join("skills").join("pdf");
+        // The folder as the catalog found it, the key `puffin skill disable` writes.
+        let pdf = fixture.machine().skills_root().join("pdf");
         let settings = Settings { disabled: [pdf.to_string_lossy().into_owned()].into(), ..Settings::default() };
         let plan = super::plan(&fixture.machine(), &settings);
         assert_eq!(plan.find("pdf").map(|entry| entry.skill.origin.label()), Some("Claude Code".to_string()));
