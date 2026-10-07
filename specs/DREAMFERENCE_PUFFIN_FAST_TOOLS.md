@@ -93,7 +93,7 @@ The fast model is weaker on code than an autoregressive model of its class (Diff
 
 ### 4.3 Phase 2: a fast subagent
 
-Codex already lets the main model spawn subagents and name their model (`spawn_agent`'s `model`, `[agents.<role>] config_file`, `default_subagent_model`). A role's config layer can set `model` but **not** `model_provider` (`core/src/agent/role.rs`), so the fast model must be reachable through the main provider's URL. Phase 2 adds a small router (loopback, stdlib, beside the Gmail sidecar pattern) that dispatches OpenAI requests by `model` field: the served main model to SGLang, `puffin-fast` to the diffusion server; the launcher points the provider at the router and adds `puffin-fast` to the model catalog, and a role `[agents.fast_worker]` whose layer sets `model = "puffin-fast"`. The subagent then runs a whole mundane task with tools (DiffusionGemma's tool calling works through vLLM's `gemma4` parser). Gated on §7's Responses-API check.
+Codex already lets the main model spawn subagents and name their model (`spawn_agent`'s `model`, `[agents.<role>] config_file`, `default_subagent_model`). A role's config layer can set `model` but **not** `model_provider` (`core/src/agent/role.rs`), so the fast model must be reachable through the main provider's URL. Phase 2 adds a small router (loopback, stdlib, beside the Gmail sidecar pattern) that dispatches /v1 requests by `model` field: the served main model to SGLang, `puffin-fast` to the diffusion server; the launcher points the provider at the router and adds `puffin-fast` to the model catalog, and a role `[agents.fast_worker]` whose layer sets `model = "puffin-fast"`. The subagent then runs a whole mundane task with tools (DiffusionGemma's tool calling works through vLLM's `gemma4` parser). Gated on §7's Responses-API check.
 
 ### 4.4 Not proposed
 
@@ -136,7 +136,7 @@ If (1) fails, the fallback is a smaller diffusion model or running the fast mode
 
 ## 8. Tests
 
-- Launcher unit tests for each `puffin fast` verb against a stub OpenAI server: request shape, gate enforcement (syntax, AST preservation, scope, repetition, token-0 run), report format.
+- Launcher unit tests for each `puffin fast` verb against a stub /v1 server: request shape, gate enforcement (syntax, AST preservation, scope, repetition, token-0 run), report format.
 - The prompt block is added only when the fast model answers and meets the capability floor.
 - `DiffusionServerManager` builds the vLLM diffusion command from the registry recipe (flags, digest, loopback, telemetry off, memory cap).
 - conftest keeps these tests off the running stack (the docker guard of 2026-09-29).

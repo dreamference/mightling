@@ -141,7 +141,7 @@ These are recorded here because the spec used to promise otherwise.
 | `test_image_search_service.py` | Image search sidecar |
 | `test_desktop.py` | Desktop window (`puffin-app`) install and launch |
 | `test_codex_test_runner.py` | `puffin-admin codex test`: Codex's own tests on the patched export, the skip list |
-| `test_puffin_privacy.py` | No usage analytics or OpenAI channels from `puffin` |
+| `test_puffin_privacy.py` | No usage analytics or the upstream vendor channels from `puffin` |
 | `test_web_commands.py` | `puffin-search` and `puffin-fetch` are Rust binaries, not console scripts |
 | `test_cave_mode.py` | Cave mode's Python side: the setting, and the level texts matching the benchmark's |
 | `test_code_index.py` | `puffin-admin code setup`, and `server start` stopping index runs before a load |

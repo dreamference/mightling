@@ -268,7 +268,7 @@ It is **not** registered with `puffin`; see `DREAMFERENCE_PUFFIN_CODEX.md` for w
 
 It prints two tables:
 
-1. **Available endpoints (OpenAI-compatible):**
+1. **Available endpoints (Standard /v1):**
    - `/v1/models` (GET)
    - `/v1/chat/completions` (POST)
    - `/v1/completions` (POST)

@@ -182,7 +182,7 @@ The router is not compiled into `puffin`. It is a separate program, installed an
 
 A submodule is indexed only when it belongs to the same organisation as the repository that contains it, or when the user asks for that submodule by name. Everything else is left out, and every answer says so.
 
-**"Belongs to the same organisation" is two tests, because the URL alone is not enough.** In this repository both submodules live under `github.com/dgxcoder/`, but only one is ours (§2): `fano` is written by the superproject's own author, while `codex` is a fork of OpenAI's Codex, pinned at an upstream tag and authored upstream. A rule on the URL alone would index the 8,670-file submodule this spec was written to leave out.
+**"Belongs to the same organisation" is two tests, because the URL alone is not enough.** In this repository both submodules live under `github.com/dgxcoder/`, but only one is ours (§2): `fano` is written by the superproject's own author, while `codex` is a fork of Codex, pinned at an upstream tag and authored upstream. A rule on the URL alone would index the 8,670-file submodule this spec was written to leave out.
 
 - **Namespace.** The submodule's host and owner equal the superproject's.
   - **The submodule's URL** is the effective one: `git config submodule.<name>.url` (what `git submodule init` wrote, including the user's own override), else `.gitmodules`. It is expanded through `git ls-remote --get-url`, which applies `url.<base>.insteadOf` and makes no network request (3 ms, §2).
@@ -766,7 +766,7 @@ Not run: `puffin-code submodules include` typed inside Codex's own sandbox (the 
 
 **The finding.** The index was close to unused: the agent queried it in none of 24 SWE-bench instances that offered it, and a parse of the 146 sessions recorded on this machine found one real query. It was not a wording problem alone. Four causes, in the order they mattered:
 
-1. **No MCP tool ever reached the model.** Codex declares an MCP server's tools as one `{"type": "namespace"}` entry, a tool type of OpenAI's Responses API. SGLang and vLLM render only `{"type": "function"}` entries into the prompt and drop the rest silently. A recorded request showed `mcp__code` declared; the model, asked to call `code_def`, answered that no such tool exists. This holds for **every** MCP server configured in `puffin`, the user's own included.
+1. **No MCP tool ever reached the model.** Codex declares an MCP server's tools as one `{"type": "namespace"}` entry, a tool type of the Responses API. SGLang and vLLM render only `{"type": "function"}` entries into the prompt and drop the rest silently. A recorded request showed `mcp__code` declared; the model, asked to call `code_def`, answered that no such tool exists. This holds for **every** MCP server configured in `puffin`, the user's own included.
 2. **Codex's prompt teaches the opposite habit:** "When you search for text or files, you reach first for `rg`". And `rg` is not installed on the GB10 or in the SWE-bench images, so sessions began with a failed command.
 3. **The prompt block said what the index offers, not when to use it.** Its one instruction, "before changing a signature, renaming or deleting, run `puffin-code refs`", never applies to a bug fix.
 4. **`search` could not answer a task phrased as a symptom.** It matched names and documentation only (codebase-memory's full-text table), so the words of a bug report ("wall time", "until") found specs, not code.

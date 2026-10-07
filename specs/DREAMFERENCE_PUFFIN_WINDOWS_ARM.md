@@ -100,7 +100,7 @@ The default model, `qwen3.8-27b-nvfp4-dflash2`, is served by SGLang with `--mem-
 
 | Question | Result |
 |---|---|
-| Does upstream Codex build for Windows Arm64? | Yes. `codex/.github/workflows/rust-release-windows.yml` builds `aarch64-pc-windows-msvc` in three bundles: `codex`, `codex-code-mode-host` and `codex-responses-api-proxy`; the sandbox helpers `codex-windows-sandbox-setup`, `codex-windows-sandbox-service` and `codex-command-runner`; and `codex-app-server`. It runs on OpenAI's own larger runners, linking with LLVM through `.github/actions/setup-msvc-env`. |
+| Does upstream Codex build for Windows Arm64? | Yes. `codex/.github/workflows/rust-release-windows.yml` builds `aarch64-pc-windows-msvc` in three bundles: `codex`, `codex-code-mode-host` and `codex-responses-api-proxy`; the sandbox helpers `codex-windows-sandbox-setup`, `codex-windows-sandbox-service` and `codex-command-runner`; and `codex-app-server`. It runs on the upstream vendor's own larger runners, linking with LLVM through `.github/actions/setup-msvc-env`. |
 | Is there a prebuilt V8 for it? | Yes. `third_party/v8/rusty_v8_150_4_0_release_manifests.sha256` pins `rusty_v8_ptrcomp_sandbox_release_aarch64-pc-windows-msvc`. On Windows the archive is `rusty_v8_<profile>_<target>.lib.gz` with no `lib` prefix (`.github/actions/setup-rusty-v8/action.yml` line 26), not the `librusty_v8_…a.gz` the builder asks for. |
 | What does Codex's Windows sandbox do? | Three levels (`protocol/src/config_types.rs`: `Disabled`, `RestrictedToken`, `Elevated`; config `[windows] sandbox = "unelevated" \| "elevated" \| "mxc"`). **The default is `Disabled`**, and the TUI asks once to set one up. *Elevated* creates two local accounts, `CodexSandboxOffline` and `CodexSandboxOnline` (`windows-sandbox-rs/src/setup.rs:53`), and installs firewall rules and WFP filters that block the offline account's non-loopback traffic, plus its loopback traffic except proxy ports (`setup_provisioning/firewall.rs`, `wfp.rs`). *Unelevated* uses a restricted token, and its "no network" is only environment variables pointing proxies at `127.0.0.1:9` (`env.rs`, `apply_no_network_to_env`). *MXC* is Microsoft Execution Containers (AppContainer), pinned from `github.com/microsoft/mxc`. |
 | How does Codex run hooks on Windows? | Through `cmd.exe` (`COMSPEC`); `hooks/src/engine/command_runner_tests.rs` tests a quoted hook command path there. |
@@ -118,7 +118,7 @@ The default model, `qwen3.8-27b-nvfp4-dflash2`, is served by SGLang with `--mem-
 
 **Goals**
 - A person with an RTX Spark laptop runs `irm …/install.ps1 | iex`, and then `puffin` works: against a DGX Spark on their LAN, or against the laptop's own GPU.
-- The privacy story holds on Windows: no OpenAI channel, `/airgapped on` enforced by the kernel, and an egress audit that proves it (§14).
+- The privacy story holds on Windows: no the upstream vendor channel, `/airgapped on` enforced by the kernel, and an egress audit that proves it (§14).
 - The same agent, prompts, skills, code index answers and `/apps` as on Linux.
 - Nothing new for Linux users: every change is gated by `cfg(windows)` or is a portable fix that Linux tests cover.
 
@@ -209,7 +209,7 @@ The resolution tiers need one change: today "a node → loopback" means a machin
 
 ### 7.2 What the elevated sandbox gives, read from source
 
-- Commands run as `CodexSandboxOnline` or `CodexSandboxOffline`, local accounts that setup creates. **They are shared with any upstream Codex on the same machine**: `service_identity.rs` keeps "each packaged channel's service and pipe separate while accounts remain shared". A Puffin install and an OpenAI Codex install coexist, and neither sees the other's `CODEX_HOME`.
+- Commands run as `CodexSandboxOnline` or `CodexSandboxOffline`, local accounts that setup creates. **They are shared with any upstream Codex on the same machine**: `service_identity.rs` keeps "each packaged channel's service and pipe separate while accounts remain shared". A Puffin install and an Codex install coexist, and neither sees the other's `CODEX_HOME`.
 - **Filesystem:** writes are allowed only to roots that setup grants to the sandbox accounts through ACLs (`workspace_acl.rs`, `acl.rs`); reads are granted per policy (`core/src/windows_sandbox_read_grants.rs`).
 - **Network:** the offline account is blocked by Windows Firewall rules scoped to its SID and by WFP filters on `ALE_USER_ID` (`setup_provisioning/firewall.rs`, `wfp.rs`). Both are kernel-enforced and persistent. Rule names say "Codex Sandbox Offline …" in the firewall's interface. Renaming them would be a patch for no protection, so this spec leaves them.
 
@@ -456,7 +456,7 @@ Uninstall is `puffin uninstall`. It removes the install directory, the PATH entr
 |---|---|---|
 | Sandbox | bubblewrap namespaces | separate local accounts, ACLs, firewall and WFP; set up with Administrator rights once |
 | `on` | no network namespace | offline account (§7.3); unelevated and no sandbox refused (§7.4) |
-| OpenAI channels | closed by `0013`, `0015`, `0016`; audited | the same patches; **verify by audit** that nothing Windows-only (the sandbox setup's telemetry counters in `windows_sandbox_prompts.rs`, Windows-only update paths) reaches the network |
+| The upstream vendor channels | closed by `0013`, `0015`, `0016`; audited | the same patches; **verify by audit** that nothing Windows-only (the sandbox setup's telemetry counters in `windows_sandbox_prompts.rs`, Windows-only update paths) reaches the network |
 | OS telemetry | DGX OS's own services, outside the audit | Windows telemetry and Defender sample submission, outside the audit, stated in the report (§14) |
 | Local accounts | none | `CodexSandboxOffline` and `CodexSandboxOnline` exist machine-wide after setup, shared with upstream Codex |
 | Model weights | in the HF cache | the same under `%USERPROFILE%\.cache\huggingface`, or in the WSL VHD for W2 |

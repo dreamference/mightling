@@ -6,7 +6,7 @@
 
 ---
 
-Puffin is OpenAI's Codex CLI running an open model on an NVIDIA GB10, with no cloud model, no OpenAI account and no phone-home, plus a browser chat assistant and a desktop app on the same local model. This is its first public release.
+Puffin is Codex CLI running an open model on an NVIDIA GB10, with no cloud model, no a cloud account and no phone-home, plus a browser chat assistant and a desktop app on the same local model. This is its first public release.
 
 **Install** on a GB10 (arm64 Ubuntu, Docker with the NVIDIA Container Toolkit):
 
@@ -21,7 +21,7 @@ On any other Linux machine the same script installs the client only. Already on 
 
 ## Highlights
 
-- **Preview: Gmail, Google Drive and Calendar in `/apps`.** Codex's `/apps` works without an OpenAI sign-in and lists Puffin's own three apps; Connect goes through a local Google sign-in, so tokens stay on your machine. Connected apps reach the model as read-only tools, each answer framed as untrusted text, and none is offered at `/airgapped on`.
+- **Preview: Gmail, Google Drive and Calendar in `/apps`.** Codex's `/apps` works without a cloud sign-in and lists Puffin's own three apps; Connect goes through a local Google sign-in, so tokens stay on your machine. Connected apps reach the model as read-only tools, each answer framed as untrusted text, and none is offered at `/airgapped on`.
 - **Preview: the desktop app has a Work window.** `puffin app --work` (or `puffin app <folder>`) drives `puffin` sessions: threads by project, streaming commands and diffs, approvals in the conversation, Stop, steer and undo, context use with Compress. The app server itself refuses Full Access at `/airgapped on`, for every client (patch `0023`).
 - **Long sessions can mask old tool output** (off by default). Past 85% of the context, older outputs are replaced by a placeholder naming a saved copy, and any one output is capped at 8,000 tokens.
 - **`/airgapped` is two levels and holds.** `off` or `on`; the DuckDuckGo-only level is gone (its engine answered with a CAPTCHA). At `on` a session is held by a seal outside the folders its commands can write, Full Access is refused together with `on` (at launch, in `/permissions`, and `/airgapped on` inside a Full Access session), Gmail is not offered, and `puffin update` keeps working from your own shell.
@@ -101,7 +101,7 @@ On any other Linux machine the same script installs the client only. Already on 
 - The default model's SGLang image is pulled by `server start`, but the 122B fallbacks need a custom vLLM image that it cannot yet build for you (`Dockerfile.dflash`, then `Dockerfile.dense`).
 
 ## Licence
-Puffin is AGPL-3.0-or-later. `puffin` is built from OpenAI's Codex (Apache 2.0, `codex-LICENSE.txt` and `codex-NOTICE.txt` in the assets).
+Puffin is AGPL-3.0-or-later. `puffin` is built from Codex (Apache 2.0, `codex-LICENSE.txt` and `codex-NOTICE.txt` in the assets).
 
 ---
 

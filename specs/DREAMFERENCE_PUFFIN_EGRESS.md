@@ -21,7 +21,7 @@ Make "your code stays on your machine" something a user can check, not a promise
 **Why it matters.**
 - **Developers care:** 81% of developers report security and privacy concerns about AI coding agents.
 - **Toggles are not enough:** at least one commercial agent was found uploading whole repositories over a channel that ignored its privacy toggle.
-- **Our own record:** tracing puffin found five channels to OpenAI or GitHub. One needed a ChatGPT login; four needed none: Statsig metrics, featured plugins, a startup `git ls-remote` and the TUI announcement tip. All five are closed (`0013`, `0015`), and traced `exec` and TUI sessions now reach only `127.0.0.1:8000` (vLLM) and `127.0.0.1:8767` (the Gmail service). Phase 1 makes that trace a command anyone can rerun; Phase 2 makes a regression fail locally instead of leaking.
+- **Our own record:** tracing puffin found five channels to the upstream vendor or GitHub. One needed a ChatGPT login; four needed none: Statsig metrics, featured plugins, a startup `git ls-remote` and the TUI announcement tip. All five are closed (`0013`, `0015`), and traced `exec` and TUI sessions now reach only `127.0.0.1:8000` (vLLM) and `127.0.0.1:8767` (the Gmail service). Phase 1 makes that trace a command anyone can rerun; Phase 2 makes a regression fail locally instead of leaking.
 
 **Non-goals:**
 - **Calling it air-gapped.** Web search and `puffin-fetch` reach the internet by design (§5), and the docs must never say "air-gapped" for a mode that allows them. The command `/airgapped` keeps to this: only its `on` level, which allows neither, carries the word ([PUFFIN_AIRGAPPED §1](./DREAMFERENCE_PUFFIN_AIRGAPPED.md)).

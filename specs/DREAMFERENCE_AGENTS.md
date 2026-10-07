@@ -65,7 +65,7 @@ See `DREAMFERENCE_PUFFIN_CODEX.md` for the full description.
 2. Require `code` or `codium` on `PATH`; exit 1 with a hint otherwise.
 3. Install the extension if missing (`code --install-extension saoudrizwan.claude-dev`).
 4. Rewrite `.clinerules` in the workspace on every launch, with local/offline guidance plus Cave Mode text when `--cave` is set.
-5. Print the connection details (OpenAI-compatible provider, base URL, API key `gb10-local-token`, model).
+5. Print the connection details (Standard /v1 provider, base URL, API key `gb10-local-token`, model).
 6. Open VS Code on the workspace.
 
 The prompt is printed, not submitted to Cline. The model and endpoint must be entered in Cline's UI by hand; they do not propagate to the extension.

@@ -72,7 +72,7 @@
 
 ### 3.1 What "better than the 27B" has to mean
 
-- **SWE-bench Verified is no longer the yardstick.** OpenAI stopped reporting it in early 2026 for contamination (PUFFIN_SWE_BENCH §8). Qwen's 2026 cards report SWE-bench Pro, DeepSWE, NL2Repo, Multilingual, LiveCodeBench and Terminal-Bench instead, and the 27B's card has **no Verified number**. The comparison below uses what both cards report, plus the Artificial Analysis Intelligence Index as the one independent figure.
+- **SWE-bench Verified is no longer the yardstick.** the upstream vendor stopped reporting it in early 2026 for contamination (PUFFIN_SWE_BENCH §8). Qwen's 2026 cards report SWE-bench Pro, DeepSWE, NL2Repo, Multilingual, LiveCodeBench and Terminal-Bench instead, and the 27B's card has **no Verified number**. The comparison below uses what both cards report, plus the Artificial Analysis Intelligence Index as the one independent figure.
 - **The coder on node 1 runs below its card.** `puffin` sends reasoning effort `none`, so every turn of the 27B is answered without thinking (MODELS §1, INFERENCE §5.3), while the card's scores are with thinking. An advisor that thinks therefore brings two things: a stronger model, and the thinking the coder does without. §8 separates them with a control arm in which the advisor is the 27B itself at `xhigh`.
 - **A review can only hand over what the reviewer has.** Anthropic's guidance says the same: "the advisor can only hand over capability the executor lacks". A model of equal strength is still useful as a second look, but the case for buying hardware rests on the gap.
 
