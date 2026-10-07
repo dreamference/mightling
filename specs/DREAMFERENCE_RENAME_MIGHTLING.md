@@ -54,6 +54,10 @@ environment variables and `dreamference.toml` keep their names.
 - **Build caches** `~/.cache/dreamference/puffin-codex`, `puffin-web`, `puffin-code-build`: renaming them discards hours of compiled dependencies.
 - **The web chat's image route** `/puffin-images/` and its nginx markers: chat history already stores URLs under that path.
 - **SWE-bench's stored JSON keys** (`puffin_version`, `puffin_code_calls`): earlier runs are read by the same report code.
+- **The AppArmor profile** `/etc/apparmor.d/puffin-bwrap`: root installed it once on every node, and a new name would make each `mling-admin` run ask for sudo to fix a sandbox that works.
+- **The SCIP stores' own tables** (`puffin_names`, `puffin_relationships`, `puffin_meta`, and the schema filter that skips them): every index already built carries them, and a rename would make each unreadable until rebuilt (minutes to an hour per repository).
+
+Found while testing the rename: the desktop runner's list of earlier launcher names, and each installed skill's `.puffin-origin.toml` (renamed by the migration, §4.2), hold old names on purpose.
 
 ## 3. What exists on a 1.4.x machine
 
