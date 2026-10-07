@@ -20,9 +20,21 @@ such any all some each per via vs also only more most less least very much many 
 
 
 def norm(s):
-    """Letters and digits only, lower-cased, NFKC: robust to hyphenation, ligatures and line breaks."""
+    """Letters and digits only (any script), lower-cased, NFKC: robust to hyphenation, ligatures and line
+    breaks. Until the multilingual pass this kept Latin only, which made every Cyrillic, CJK or Arabic
+    snippet normalise to the empty string (a trivial hit)."""
     s = unicodedata.normalize("NFKC", s).lower()
-    return re.sub(r"[^0-9a-zÀ-ɏ]+", "", s)
+    return re.sub(r"[\W_]+", "", s)
+
+
+CJK_RUN = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿]+")
+
+
+def query_terms(q):
+    """Word terms of a query in any script (stop words of English dropped), and its CJK runs apart:
+    unicode61 has no word segmentation for Chinese or Japanese, so those go to the trigram table."""
+    words = [t for t in re.findall(r"[^\W_]+", CJK_RUN.sub(" ", q.lower())) if t not in STOP and len(t) > 1]
+    return words, CJK_RUN.findall(q)
 
 
 # ---------- extraction: a document becomes units {loc, heading, text} ----------
@@ -185,9 +197,12 @@ def extract(root, rel, pdf_pages=None):
 # ---------- chunking ----------
 
 class Counter:
-    def __init__(self):
+    """Token counts in the embedding model's tokenizer family (§7.2). The default is the XLM-R
+    SentencePiece vocabulary shared by multilingual-e5 and paraphrase-multilingual-MiniLM; the English
+    runs used bge-small's WordPiece."""
+    def __init__(self, name="intfloat/multilingual-e5-small"):
         from tokenizers import Tokenizer
-        self.tok = Tokenizer.from_pretrained("BAAI/bge-small-en-v1.5")
+        self.tok = Tokenizer.from_pretrained(name)
 
     def __call__(self, text):
         return len(self.tok.encode(text, add_special_tokens=False).ids)
@@ -264,20 +279,39 @@ def is_hit(chunk_text, snippet):
 # ---------- search backends ----------
 
 class BM25:
-    def __init__(self, chunks):
+    """SQLite FTS5 BM25 over title, heading and text (porter + unicode61). With `trigram`, a second
+    FTS5 table (the built-in trigram tokenizer) answers the CJK runs of a query, and the two rankings
+    are fused by RRF: unicode61 makes a whole run of Chinese or Japanese one token, so a query matches
+    only if it repeats a run between punctuation marks verbatim."""
+    def __init__(self, chunks, trigram=False):
         self.db = sqlite3.connect(":memory:")
         self.db.execute("CREATE VIRTUAL TABLE c USING fts5(title, heading, text, tokenize='porter unicode61')")
-        self.db.executemany("INSERT INTO c(rowid, title, heading, text) VALUES (?,?,?,?)",
-                            [(i, c["title"], c["heading"], c["text"]) for i, c in enumerate(chunks)])
+        rows = [(i, c["title"], c["heading"], c["text"]) for i, c in enumerate(chunks)]
+        self.db.executemany("INSERT INTO c(rowid, title, heading, text) VALUES (?,?,?,?)", rows)
+        self.trigram = trigram
+        if trigram:
+            self.db.execute("CREATE VIRTUAL TABLE t USING fts5(title, heading, text, tokenize='trigram')")
+            self.db.executemany("INSERT INTO t(rowid, title, heading, text) VALUES (?,?,?,?)",
+                                [r for r in rows if CJK_RUN.search(r[1] + r[2] + r[3])])
 
     def search(self, q, k=100):
-        terms = [t for t in re.findall(r"[0-9A-Za-zÀ-ɏ]+", q.lower()) if t not in STOP and len(t) > 1]
-        if not terms:
-            return []
-        query = " OR ".join(f'"{t}"' for t in terms)
-        rows = self.db.execute("SELECT rowid FROM c WHERE c MATCH ? ORDER BY bm25(c, 2.0, 1.0, 1.0) LIMIT ?",
-                               (query, k)).fetchall()
-        return [r[0] for r in rows]
+        words, runs = query_terms(q)
+        ranked = []
+        if not self.trigram:
+            words = words + [r for r in runs if len(r) > 1]
+        if words:
+            query = " OR ".join(f'"{t}"' for t in words)
+            ranked = [r[0] for r in self.db.execute(
+                "SELECT rowid FROM c WHERE c MATCH ? ORDER BY bm25(c, 2.0, 1.0, 1.0) LIMIT ?", (query, k))]
+        if self.trigram and runs:
+            grams = sorted({r[i:i + 3] for r in runs for i in range(max(1, len(r) - 2))})
+            grams = [g for g in grams if len(g) == 3]
+            if grams:
+                query = " OR ".join(f'"{g}"' for g in grams)
+                tri = [r[0] for r in self.db.execute(
+                    "SELECT rowid FROM t WHERE t MATCH ? ORDER BY bm25(t, 2.0, 1.0, 1.0) LIMIT ?", (query, k))]
+                ranked = rrf(ranked, tri, top=k) if ranked else tri
+        return ranked
 
 
 class Dense:
@@ -306,7 +340,7 @@ def metrics(results, questions, chunks):
     out = {"n": len(questions)}
     hits5 = hits10 = docs10 = 0
     rr = 0.0
-    by_kind, by_fmt = {}, {}
+    by_kind, by_fmt, by_lang, by_group = {}, {}, {}, {}
     for q, ranked in zip(questions, results):
         first = next((r for r, i in enumerate(ranked[:10]) if chunks[i]["doc"] == q["doc"]
                       and is_hit(chunks[i]["text"], q["snippet"])), None)
@@ -315,13 +349,17 @@ def metrics(results, questions, chunks):
         hits5 += first is not None and first < 5
         rr += 1.0 / (first + 1) if h10 else 0.0
         docs10 += any(chunks[i]["doc"] == q["doc"] for i in ranked[:10])
-        for key, bucket in ((q["kind"], by_kind), (q["doc"].split("/")[0], by_fmt)):
+        group = ("en" if q.get("lang", "en") == "en" else "other") + "-" + q["kind"]
+        for key, bucket in ((q["kind"], by_kind), (q["doc"].split("/")[0], by_fmt), (q.get("lang", "en"), by_lang),
+                            (group, by_group)):
             b = bucket.setdefault(key, [0, 0])
             b[0] += h10; b[1] += 1
     n = len(questions)
     out.update(recall5=hits5 / n, recall10=hits10 / n, mrr10=rr / n, doc_recall10=docs10 / n,
                by_kind={k: f"{a}/{b}" for k, (a, b) in by_kind.items()},
-               by_format={k: f"{a}/{b}" for k, (a, b) in by_fmt.items()})
+               by_format={k: f"{a}/{b}" for k, (a, b) in by_fmt.items()},
+               by_lang={k: f"{a}/{b}" for k, (a, b) in by_lang.items()},
+               by_group={k: f"{a}/{b}" for k, (a, b) in by_group.items()})
     return out
 
 

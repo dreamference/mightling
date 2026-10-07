@@ -7,6 +7,34 @@ import subprocess
 import sys
 import time
 
+def is_rtl(ch):
+    """Hebrew, Arabic, Syriac, Thaana, N'Ko and the Arabic presentation forms."""
+    o = ord(ch)
+    return 0x0590 <= o <= 0x08FF or 0xFB1D <= o <= 0xFDFF or 0xFE70 <= o <= 0xFEFF
+
+
+def rtl_line(runs):
+    """A line holding right-to-left script: every glyph of the line in visual order (left to right,
+    a space where the gap is a word gap), then the Unicode bidi algorithm turns the visual string
+    back into logical order (reversing right-to-left runs is its own inverse, and left-to-right runs
+    such as numbers keep their order). Stream order cannot be trusted here: Chromium's PDFs draw
+    Arabic glyphs in visual order, and PDFium's own text (get_text_bounded) reverses some words and
+    not others. ling-docs would use the unicode-bidi crate (MIT OR Apache-2.0)."""
+    from bidi.algorithm import get_display
+    glyphs = sorted((g for r in runs for g in r[5]), key=lambda g: g[0])
+    h = max(r[3] - r[1] for r in runs)
+    out, prev = [], None
+    for left, right, ch in glyphs:
+        if prev is not None and left - prev > 0.2 * h:
+            out.append(" ")
+        out.append(ch)
+        prev = right if prev is None else max(prev, right)
+    visual = "".join(out)
+    n_rtl = sum(1 for c in visual if is_rtl(c))
+    n_ltr = sum(1 for c in visual if c.isalpha() and not is_rtl(c))
+    return get_display(visual, base_dir="R" if n_rtl >= n_ltr else "L")
+
+
 def ordered_page(page):
     """PDFium's text with out-of-place runs put back: what ling-docs would do with pdfium-render's
     characters. Stream order is kept for lines; only a run drawn later than the line it sits in
@@ -51,15 +79,20 @@ def ordered_page(page):
                 cur[4] += " "
             continue
         h = top - bottom
+        rtl = is_rtl(ch)
         if cur is not None:
             centre = (bottom + top) / 2
             same_line = cur[1] - 0.2 * h <= centre <= cur[3] + 0.2 * h
-            if same_line and cur[2] - 0.5 * h <= left <= cur[2] + 3 * h:
-                cur[2] = max(cur[2], right); cur[1] = min(cur[1], bottom); cur[3] = max(cur[3], top)
+            # Right-to-left script is drawn leftwards: a glyph just left of the run continues it.
+            if same_line and (cur[2] - 0.5 * h <= left <= cur[2] + 3 * h or
+                              (rtl and cur[0] - 3 * h <= right <= cur[0] + 0.5 * h)):
+                cur[0] = min(cur[0], left); cur[2] = max(cur[2], right)
+                cur[1] = min(cur[1], bottom); cur[3] = max(cur[3], top)
                 cur[4] += ch
+                cur[5].append((left, right, ch))
                 continue
             segs.append(cur)
-        cur = [left, bottom, right, top, ch]
+        cur = [left, bottom, right, top, ch, [(left, right, ch)]]
     if cur:
         segs.append(cur)
     segs = [tuple(s) for s in segs if s[4].strip()]
@@ -75,7 +108,7 @@ def ordered_page(page):
         centre = (s[1] + s[3]) / 2
         home = None
         if lines and lines[-1][0] - 0.2 * (s[3] - s[1]) <= centre <= lines[-1][1] + 0.2 * (s[3] - s[1]) \
-                and s[0] >= lines[-1][2] - (s[3] - s[1]):
+                and (s[0] >= lines[-1][2] - (s[3] - s[1]) or any(is_rtl(c) for c in s[4])):
             home = lines[-1]
         else:
             for ln in reversed(lines[-80:]):
@@ -93,6 +126,9 @@ def ordered_page(page):
     text = []
     for ln in lines:
         runs = sorted(ln[4], key=lambda r: r[0])
+        if any(is_rtl(c) for r in runs for c in r[4]):
+            text.append(rtl_line(runs))
+            continue
         parts, prev = [], None
         for r in runs:
             if prev is not None and r[0] - prev > 0.15 * (r[3] - r[1]) and not parts[-1].endswith(" ") \

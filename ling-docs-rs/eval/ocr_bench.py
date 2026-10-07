@@ -1,12 +1,16 @@
 """OCR on the scanned fixtures: ocr_bench.py <engine> -> results/ocr-<engine>.json. Engines:
   v6-tiny, v6-small, v6-medium   RapidOCR PP-OCRv6, one multilingual model for every script
   v5-oracle                      RapidOCR PP-OCRv5 mobile with the per-script model of the page's real script
-  v5-detect                      the same, with the script detected from a v6-tiny pass (cost included)
+  v5-all                         every PP-OCRv5 recognition model on every page, each timed alone (the
+                                 per-page selection rules are replayed from these by ocr_report.py)
   tesseract                      Tesseract 5.3.4, tessdata_fast, the page's language given
   osd                            Tesseract's script detection alone (--psm 0), for the selection question
 Run by run_ocr.sh in a memory-capped scope with no network, four X925 cores, four threads.
-Per page: seconds, word recall against the source's text layer (multiset; characters for Chinese and
-Japanese), character error rate, detected script, every recognised word with its confidence."""
+Per page: seconds, word recall against the source's text layer (multiset; characters for Chinese, Japanese
+and Korean, whose OCR output drops or moves the spaces), character error rate (order-sensitive: a two-column page read in another order scores badly
+at full recall), detected script, mean confidence, every recognised word with its confidence.
+(A v5-detect engine that read the script from a v6-tiny pass was dropped: v6 reads Cyrillic, Hangul and
+Arabic pages as Latin garbage, so it detected Latin for exactly the pages that needed another model.)"""
 import collections
 import json
 import os
@@ -39,7 +43,7 @@ def norm(s):
 
 
 def is_cjk(c):
-    return "一" <= c <= "鿿" or "぀" <= c <= "ヿ"
+    return "一" <= c <= "鿿" or "぀" <= c <= "ヿ" or "가" <= c <= "힯"
 
 
 def tokens(s, chars):
@@ -129,47 +133,61 @@ def run_tess(img, lang, psm="3"):
 
 
 # Warm the engines this run will use, so the first page's time is not a model load.
-warm = Image.new("RGB", (64, 64), "white")
+V5_ALL = ["Latin", "Cyrillic", "Han", "Hangul", "Arabic"]  # Japanese shares the Chinese model in v5
 if engine.startswith("v6-"):
     rapid(engine)
-elif engine == "v5-detect":
-    rapid("v6-tiny")
+elif engine == "v5-all":
+    for k in V5_ALL:
+        rapid(k)
+
+
+def score(fx, text, words):
+    chars = fx["tess_lang"] in ("chi_sim", "jpn", "kor")
+    want, got = collections.Counter(tokens(fx["text"], chars)), collections.Counter(tokens(text, chars))
+    vocab = set(want)
+    scored = [(s, all(x in vocab for x in tw)) for w, s in words if (tw := tokens(w, chars))]
+    return dict(word_recall=round(sum((want & got).values()) / max(1, sum(want.values())), 3),
+                cer=round(Levenshtein.normalized_distance(norm(fx["text"]), norm(text)), 3), words=scored,
+                mean_conf=round(float(np.mean([s for _, s in words])), 3) if words else 0.0, n_words=len(words))
+
+
 pages = {}
 for fid, fx in truth.items():
     img = load(fx)
     real = SCRIPT_OF[fx["tess_lang"]]
-    detected = None
+    rec = {"kind": fx["kind"], "lang": fx["tess_lang"], "script": real, "pixels": img.width * img.height}
+    if engine == "v5-all":
+        # Every PP-OCRv5 recognition model on every page, each timed alone: the report replays the
+        # selection rules (oracle, best confidence, v6 then fallback below a threshold) from these.
+        rec["models"] = {}
+        for k in V5_ALL:
+            t = time.perf_counter()
+            text, words = run_rapid(k, img)
+            secs = time.perf_counter() - t
+            s = score(fx, text, words)
+            s.pop("words")
+            rec["models"][k] = {"seconds": round(secs, 2), **s}
+        pages[fid] = rec
+        print(engine, fid, {k: (v["word_recall"], v["mean_conf"]) for k, v in rec["models"].items()}, flush=True)
+        continue
     t = time.perf_counter()
+    detected = None
     if engine.startswith("v6-"):
         text, words = run_rapid(engine, img)
         detected = script_of_text(text)
     elif engine == "v5-oracle":
-        text, words = run_rapid(real, img)
-    elif engine == "v5-detect":
-        probe, _ = run_rapid("v6-tiny", img)
-        detected = script_of_text(probe)
-        t_detect = time.perf_counter() - t
-        rapid(detected)  # a newly needed model's load is not page time
-        t2 = time.perf_counter()
-        text, words = run_rapid(detected, img)
-        t = time.perf_counter() - (time.perf_counter() - t2) - t_detect  # page time = detection + recognition
+        text, words = run_rapid(real if real != "Japanese" else "Han", img)
     elif engine == "tesseract":
         text, words = run_tess(img, fx["tess_lang"])
     elif engine == "osd":
         detected, words = run_tess(img, None, psm="0")
         text = ""
     secs = time.perf_counter() - t
-    chars = fx["tess_lang"] in ("chi_sim", "jpn")
-    rec = {"kind": fx["kind"], "lang": fx["tess_lang"], "script": real, "seconds": round(secs, 2),
-           "detected_script": detected, "pixels": img.width * img.height}
+    rec.update(seconds=round(secs, 2), detected_script=detected)
     if engine != "osd":
-        want, got = collections.Counter(tokens(fx["text"], chars)), collections.Counter(tokens(text, chars))
-        vocab = set(want)
-        scored = [(s, all(x in vocab for x in tw)) for w, s in words if (tw := tokens(w, chars))]
-        rec.update(word_recall=round(sum((want & got).values()) / max(1, sum(want.values())), 3),
-                   cer=round(Levenshtein.normalized_distance(norm(fx["text"]), norm(text)), 3), words=scored)
+        rec.update(score(fx, text, words))
     pages[fid] = rec
-    print(engine, fid, f"{secs:.1f}s", rec.get("word_recall"), detected, flush=True)
+    print(engine, fid, f"{secs:.1f}s", rec.get("word_recall"), rec.get("mean_conf"), detected, flush=True)
 
 ru = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 kids = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024

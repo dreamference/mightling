@@ -1,7 +1,8 @@
 #!/bin/bash
-# Every candidate on the 512-token PDFium chunks, one at a time.
+# Every candidate that fits the 4 GB cap on the 512-token chunks (ordered PDFium, XLM-R counts), one at a time.
 D="$(dirname "$(readlink -f "$0")")"
-for m in minishlab/potion-retrieval-32M BAAI/bge-small-en-v1.5 snowflake/snowflake-arctic-embed-s \
-         nomic-ai/nomic-embed-text-v1.5-Q nomic-ai/nomic-embed-text-v1.5; do
-  bash "$D/run_embed.sh" "$m" pdfium-512 2>&1 | grep -v -i warning | tail -2
+for m in minishlab/potion-multilingual-128M sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+         intfloat/multilingual-e5-small-int8 ibm-granite/granite-embedding-107m-multilingual \
+         intfloat/multilingual-e5-small intfloat/multilingual-e5-base Snowflake/snowflake-arctic-embed-m-v2.0-int8; do
+  bash "$D/run_embed.sh" "$m" pdfium-ordered-512 2>&1 | grep -v -i warn | tail -1 | cut -c1-300
 done

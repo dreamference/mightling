@@ -3,7 +3,7 @@
  "licences": {
   "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified": 11,
   "Public domain (work of the U.S. federal government, 17 U.S.C. 105)": 8,
-  "CC BY-SA 4.0 (Wikipedia contributors)": 79,
+  "CC BY-SA 4.0 (Wikipedia contributors)": 103,
   "MIT OR Apache-2.0 (The Rust Programming Language)": 50,
   "Public domain or CC0-1.0 (stated in each PEP)": 10,
   "http://creativecommons.org/licenses/by/4.0/": 15,
@@ -1371,6 +1371,198 @@
    "bytes": 240640,
    "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
    "source": "Wikipedia: Information_retrieval (revision 1375036430)"
+  },
+  {
+   "path": "corpus/html-multi/de-Coffee.html",
+   "url": "https://de.wikipedia.org/api/rest_v1/page/html/Kaffee/270967792",
+   "sha256": "74cc134f55b6ff83081962c43a95059c68c071253366209d389e754c1b0a3696",
+   "bytes": 615213,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (de): Kaffee (revision 270967792)"
+  },
+  {
+   "path": "corpus/html-multi/fr-Coffee.html",
+   "url": "https://fr.wikipedia.org/api/rest_v1/page/html/Caf%C3%A9/239848976",
+   "sha256": "b74ba3dc1712a511c343c9c0605dd2fc8b2c4ffa6c7ce24edda337a922136a72",
+   "bytes": 836916,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (fr): Caf\u00e9 (revision 239848976)"
+  },
+  {
+   "path": "corpus/html-multi/es-Coffee.html",
+   "url": "https://es.wikipedia.org/api/rest_v1/page/html/Caf%C3%A9/175492772",
+   "sha256": "a97df66ccd4d4a315064ed0b434d592d7eaf372a7148e6691f7a837198f724e8",
+   "bytes": 685930,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (es): Caf\u00e9 (revision 175492772)"
+  },
+  {
+   "path": "corpus/html-multi/sv-Coffee.html",
+   "url": "https://sv.wikipedia.org/api/rest_v1/page/html/Kaffe/59617007",
+   "sha256": "a9e353eb91da68f1f0885861d04b2ee32b6a0cf67c467525746e89fd36d36bd2",
+   "bytes": 190454,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (sv): Kaffe (revision 59617007)"
+  },
+  {
+   "path": "corpus/html-multi/ru-Coffee.html",
+   "url": "https://ru.wikipedia.org/api/rest_v1/page/html/%D0%9A%D0%BE%D1%84%D0%B5/153564774",
+   "sha256": "5b3bcd6622e2eba92063d62e70cf6b1497d205fee76705356ee9e1a9f7a93f4f",
+   "bytes": 522137,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ru): \u041a\u043e\u0444\u0435 (revision 153564774)"
+  },
+  {
+   "path": "corpus/html-multi/zh-Coffee.html",
+   "url": "https://zh.wikipedia.org/api/rest_v1/page/html/%E5%92%96%E5%95%A1/94531274",
+   "sha256": "90912d69d895e9beeadd284e7dce6aa40919b0eaf8c49e1dd55fd82ceba25f0a",
+   "bytes": 559216,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (zh): \u5496\u5561 (revision 94531274)"
+  },
+  {
+   "path": "corpus/html-multi/ja-Coffee.html",
+   "url": "https://ja.wikipedia.org/api/rest_v1/page/html/%E3%82%B3%E3%83%BC%E3%83%92%E3%83%BC/111165450",
+   "sha256": "7b22279e5f0de26dafe7c671ca752757c46f6bc6ee3bbfacaedc7fe0ba614193",
+   "bytes": 571308,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ja): \u30b3\u30fc\u30d2\u30fc (revision 111165450)"
+  },
+  {
+   "path": "corpus/html-multi/ar-Coffee.html",
+   "url": "https://ar.wikipedia.org/api/rest_v1/page/html/%D9%82%D9%87%D9%88%D8%A9/76778148",
+   "sha256": "1df48bee7edb4222d341c2ac65e0a4dbd9d27bd7a38df4d638fec5ad2f3cbc0e",
+   "bytes": 238849,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ar): \u0642\u0647\u0648\u0629 (revision 76778148)"
+  },
+  {
+   "path": "corpus/html-multi/de-Volcano.html",
+   "url": "https://de.wikipedia.org/api/rest_v1/page/html/Vulkan/266300685",
+   "sha256": "3d20ce233b78817165826f1fe8a5608930eea10568acac5f05a0950f0038744b",
+   "bytes": 94642,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (de): Vulkan (revision 266300685)"
+  },
+  {
+   "path": "corpus/html-multi/fr-Volcano.html",
+   "url": "https://fr.wikipedia.org/api/rest_v1/page/html/Volcan/240006238",
+   "sha256": "a49e44f0eadda6a39ba1e8aa000c25a58dc72e2cc096bab0e7aaccfe2413b818",
+   "bytes": 335739,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (fr): Volcan (revision 240006238)"
+  },
+  {
+   "path": "corpus/html-multi/es-Volcano.html",
+   "url": "https://es.wikipedia.org/api/rest_v1/page/html/Volc%C3%A1n/175596091",
+   "sha256": "7181c4f04bb8d6eb59626e0a997cfde942aeeb97e94ec74ffa95f6e4a2b83287",
+   "bytes": 201823,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (es): Volc\u00e1n (revision 175596091)"
+  },
+  {
+   "path": "corpus/html-multi/sv-Volcano.html",
+   "url": "https://sv.wikipedia.org/api/rest_v1/page/html/Vulkan/59368407",
+   "sha256": "361a03a3894af46b3f0526483b9548d1d0275062aeea82ab1dc89d4c0223b691",
+   "bytes": 154217,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (sv): Vulkan (revision 59368407)"
+  },
+  {
+   "path": "corpus/html-multi/ru-Volcano.html",
+   "url": "https://ru.wikipedia.org/api/rest_v1/page/html/%D0%92%D1%83%D0%BB%D0%BA%D0%B0%D0%BD/152848546",
+   "sha256": "dcbbf894ebda15ffe8c2df4d38fb8c79efff6bdd3758c7043ed36c59758489fe",
+   "bytes": 209101,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ru): \u0412\u0443\u043b\u043a\u0430\u043d (revision 152848546)"
+  },
+  {
+   "path": "corpus/html-multi/zh-Volcano.html",
+   "url": "https://zh.wikipedia.org/api/rest_v1/page/html/%E7%81%AB%E5%B1%B1/94173037",
+   "sha256": "fd09567631ec89cc0d88a8eff0547df72cc28e0ca47ce21c9bb45c777eefd303",
+   "bytes": 293465,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (zh): \u706b\u5c71 (revision 94173037)"
+  },
+  {
+   "path": "corpus/html-multi/ja-Volcano.html",
+   "url": "https://ja.wikipedia.org/api/rest_v1/page/html/%E7%81%AB%E5%B1%B1/111291750",
+   "sha256": "e5edce8cbbc43ac34092012733ced8cd1453ed199423a899ed82c2db3ec0ebc4",
+   "bytes": 258428,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ja): \u706b\u5c71 (revision 111291750)"
+  },
+  {
+   "path": "corpus/html-multi/ar-Volcano.html",
+   "url": "https://ar.wikipedia.org/api/rest_v1/page/html/%D8%A8%D8%B1%D9%83%D8%A7%D9%86/75531035",
+   "sha256": "3d3cd0b0b6832913af4a776a73d7266cb2e83ec3885cb17359bf9cc0777a0617",
+   "bytes": 211936,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ar): \u0628\u0631\u0643\u0627\u0646 (revision 75531035)"
+  },
+  {
+   "path": "corpus/html-multi/de-Photosynthesis.html",
+   "url": "https://de.wikipedia.org/api/rest_v1/page/html/Photosynthese/268891481",
+   "sha256": "f695849eb21de1f7b8e7d4f8e59bd5cec7d24824678c157af400a5ca63e4575c",
+   "bytes": 445503,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (de): Photosynthese (revision 268891481)"
+  },
+  {
+   "path": "corpus/html-multi/fr-Photosynthesis.html",
+   "url": "https://fr.wikipedia.org/api/rest_v1/page/html/Photosynth%C3%A8se/238282939",
+   "sha256": "b0d0f4beb351b9818fbf678a46b243df67bec79fea1430d88e38b0bc252a739b",
+   "bytes": 519046,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (fr): Photosynth\u00e8se (revision 238282939)"
+  },
+  {
+   "path": "corpus/html-multi/es-Photosynthesis.html",
+   "url": "https://es.wikipedia.org/api/rest_v1/page/html/Fotos%C3%ADntesis/175633842",
+   "sha256": "9eb1d436387c0d8e93804ffe82a1dec9555ed07ddffc445dda57232a6dbefee0",
+   "bytes": 212949,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (es): Fotos\u00edntesis (revision 175633842)"
+  },
+  {
+   "path": "corpus/html-multi/sv-Photosynthesis.html",
+   "url": "https://sv.wikipedia.org/api/rest_v1/page/html/Fotosyntes/59710231",
+   "sha256": "fdadc6dee804f3866493c6ec9d41996494b2d2eae3b86519aaba1a81eb784007",
+   "bytes": 79662,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (sv): Fotosyntes (revision 59710231)"
+  },
+  {
+   "path": "corpus/html-multi/ru-Photosynthesis.html",
+   "url": "https://ru.wikipedia.org/api/rest_v1/page/html/%D0%A4%D0%BE%D1%82%D0%BE%D1%81%D0%B8%D0%BD%D1%82%D0%B5%D0%B7/154852829",
+   "sha256": "ed66832d691569e3480e6dfe3bc2f850111df2f7543f784d8ed667c3a57cb50b",
+   "bytes": 223705,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ru): \u0424\u043e\u0442\u043e\u0441\u0438\u043d\u0442\u0435\u0437 (revision 154852829)"
+  },
+  {
+   "path": "corpus/html-multi/zh-Photosynthesis.html",
+   "url": "https://zh.wikipedia.org/api/rest_v1/page/html/%E5%85%89%E5%90%88%E4%BD%9C%E7%94%A8/94770718",
+   "sha256": "393234bfd908500f16cc4c04323e0017c5f02e8c633900d81c96f7735041386e",
+   "bytes": 564982,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (zh): \u5149\u5408\u4f5c\u7528 (revision 94770718)"
+  },
+  {
+   "path": "corpus/html-multi/ja-Photosynthesis.html",
+   "url": "https://ja.wikipedia.org/api/rest_v1/page/html/%E5%85%89%E5%90%88%E6%88%90/111243995",
+   "sha256": "dde33391beabcbaa53b6840cefd3e601fb661d58b1c635c1f1a78a8fb27128ba",
+   "bytes": 360320,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ja): \u5149\u5408\u6210 (revision 111243995)"
+  },
+  {
+   "path": "corpus/html-multi/ar-Photosynthesis.html",
+   "url": "https://ar.wikipedia.org/api/rest_v1/page/html/%D8%AA%D8%B1%D9%83%D9%8A%D8%A8_%D8%B6%D9%88%D8%A6%D9%8A/76808234",
+   "sha256": "f4d0bb68492335af71f84ffc27e4c5925c72c3857f603395942ddc0709ca796b",
+   "bytes": 303074,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ar): \u062a\u0631\u0643\u064a\u0628_\u0636\u0648\u0626\u064a (revision 76808234)"
   },
   {
    "path": "reference/rfc9110.txt",

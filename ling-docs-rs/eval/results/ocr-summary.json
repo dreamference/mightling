@@ -1,0 +1,727 @@
+{
+ "note": "word recall: multiset of the source text layer's words (characters for Chinese, Japanese and Korean) found in the OCR output; Arabic truth in logical order (after the bidi fix); 39 pages = 13 sources x scan (200 dpi), phone photo (170 dpi, perspective, shading, blur, JPEG) and poor (100 dpi, noise, low contrast)",
+ "engines": {
+  "v6-tiny": {
+   "peak_rss_mb": 598,
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.985,
+     "photo": 0.984,
+     "poor": 0.181
+    },
+    "Cyrillic": {
+     "scan": 0.193,
+     "photo": 0.186,
+     "poor": 0.07
+    },
+    "CJK": {
+     "scan": 0.662,
+     "photo": 0.657,
+     "poor": 0.357
+    },
+    "Hangul": {
+     "scan": 0.0,
+     "photo": 0.0,
+     "poor": 0.0
+    },
+    "Arabic": {
+     "scan": 0.242,
+     "photo": 0.247,
+     "poor": 0.0
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.679,
+   "recall_poor_all_scripts": 0.163,
+   "seconds_per_page_mean": 0.771,
+   "seconds_per_page_max": 1.62
+  },
+  "v6-small": {
+   "peak_rss_mb": 780,
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.985,
+     "photo": 0.995,
+     "poor": 0.484
+    },
+    "Cyrillic": {
+     "scan": 0.186,
+     "photo": 0.181,
+     "poor": 0.103
+    },
+    "CJK": {
+     "scan": 1.0,
+     "photo": 1.0,
+     "poor": 0.863
+    },
+    "Hangul": {
+     "scan": 0.0,
+     "photo": 0.0,
+     "poor": 0.0
+    },
+    "Arabic": {
+     "scan": 0.233,
+     "photo": 0.233,
+     "poor": 0.0
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.733,
+   "recall_poor_all_scripts": 0.409,
+   "seconds_per_page_mean": 3.029,
+   "seconds_per_page_max": 6.35
+  },
+  "v6-medium": {
+   "peak_rss_mb": 1652,
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.991,
+     "photo": 0.994,
+     "poor": 0.565
+    },
+    "Cyrillic": {
+     "scan": 0.187,
+     "photo": 0.178,
+     "poor": 0.121
+    },
+    "CJK": {
+     "scan": 1.0,
+     "photo": 1.0,
+     "poor": 0.912
+    },
+    "Hangul": {
+     "scan": 0.0,
+     "photo": 0.0,
+     "poor": 0.0
+    },
+    "Arabic": {
+     "scan": 0.233,
+     "photo": 0.233,
+     "poor": 0.004
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.734,
+   "recall_poor_all_scripts": 0.463,
+   "seconds_per_page_mean": 7.061,
+   "seconds_per_page_max": 13.0
+  },
+  "v5-oracle": {
+   "peak_rss_mb": 836,
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.953,
+     "photo": 0.978,
+     "poor": 0.439
+    },
+    "Cyrillic": {
+     "scan": 0.77,
+     "photo": 0.843,
+     "poor": 0.177
+    },
+    "CJK": {
+     "scan": 0.976,
+     "photo": 0.996,
+     "poor": 0.657
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.7,
+     "photo": 0.736,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.917,
+   "recall_poor_all_scripts": 0.421,
+   "seconds_per_page_mean": 2.451,
+   "seconds_per_page_max": 4.74
+  },
+  "tesseract": {
+   "peak_rss_mb": 110,
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.984,
+     "photo": 0.688,
+     "poor": 0.314
+    },
+    "Cyrillic": {
+     "scan": 0.835,
+     "photo": 0.772,
+     "poor": 0.227
+    },
+    "CJK": {
+     "scan": 0.93,
+     "photo": 0.846,
+     "poor": 0.408
+    },
+    "Hangul": {
+     "scan": 0.973,
+     "photo": 0.871,
+     "poor": 0.0
+    },
+    "Arabic": {
+     "scan": 0.608,
+     "photo": 0.59,
+     "poor": 0.282
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.827,
+   "recall_poor_all_scripts": 0.289,
+   "seconds_per_page_mean": 1.421,
+   "seconds_per_page_max": 4.09
+  }
+ },
+ "model_mb": {
+  "rapidocr": {
+   "PP-OCRv6_det_medium.onnx": 59.2,
+   "PP-OCRv6_det_small.onnx": 9.5,
+   "PP-OCRv6_det_tiny.onnx": 1.7,
+   "PP-OCRv6_rec_medium.onnx": 73.1,
+   "PP-OCRv6_rec_small.onnx": 20.3,
+   "PP-OCRv6_rec_tiny.onnx": 4.3,
+   "arabic_PP-OCRv5_rec_mobile.onnx": 7.7,
+   "ch_PP-OCRv5_det_mobile.onnx": 4.6,
+   "ch_PP-OCRv5_rec_mobile.onnx": 15.9,
+   "ch_ppocr_mobile_v2.0_cls_mobile.onnx": 0.6,
+   "cyrillic_PP-OCRv5_rec_mobile.onnx": 7.7,
+   "eslav_PP-OCRv5_rec_mobile.onnx": 7.5,
+   "korean_PP-OCRv5_rec_mobile.onnx": 12.9,
+   "latin_PP-OCRv5_rec_mobile.onnx": 7.5
+  },
+  "tessdata_fast": {
+   "ara.traineddata": 1.4,
+   "chi_sim.traineddata": 2.4,
+   "configs": 0.0,
+   "deu.traineddata": 1.5,
+   "eng.traineddata": 3.9,
+   "fra.traineddata": 1.1,
+   "jpn.traineddata": 2.4,
+   "kor.traineddata": 1.6,
+   "osd.traineddata": 10.1,
+   "rus.traineddata": 3.7,
+   "swe.traineddata": 4.0,
+   "ukr.traineddata": 3.6
+  },
+  "rapidocr_v5_mobile_all_scripts_mb": 64.4,
+  "rapidocr_v6_small_mb": 29.8
+ },
+ "model_selection": {
+  "best-of-5 by mean_conf": {
+   "script_right": "32/39",
+   "seconds_per_page_mean": 10.816,
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.953,
+     "photo": 0.978,
+     "poor": 0.432
+    },
+    "Cyrillic": {
+     "scan": 0.77,
+     "photo": 0.843,
+     "poor": 0.123
+    },
+    "CJK": {
+     "scan": 0.976,
+     "photo": 0.996,
+     "poor": 0.0
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.7,
+     "photo": 0.736,
+     "poor": 0.0
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.917,
+   "recall_poor_all_scripts": 0.306
+  },
+  "best-of-5 by conf_mass": {
+   "script_right": "28/39",
+   "seconds_per_page_mean": 10.816,
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.935,
+     "photo": 0.946,
+     "poor": 0.413
+    },
+    "Cyrillic": {
+     "scan": 0.434,
+     "photo": 0.165,
+     "poor": 0.177
+    },
+    "CJK": {
+     "scan": 0.976,
+     "photo": 0.996,
+     "poor": 0.657
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.7,
+     "photo": 0.736,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.826,
+   "recall_poor_all_scripts": 0.407
+  },
+  "oracle (real script's v5 model)": {
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.953,
+     "photo": 0.978,
+     "poor": 0.439
+    },
+    "Cyrillic": {
+     "scan": 0.77,
+     "photo": 0.843,
+     "poor": 0.177
+    },
+    "CJK": {
+     "scan": 0.976,
+     "photo": 0.996,
+     "poor": 0.657
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.7,
+     "photo": 0.736,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.917,
+   "recall_poor_all_scripts": 0.421,
+   "seconds_per_page_mean": 2.119,
+   "seconds_per_page_max": 5.21
+  },
+  "Tesseract OSD then v5": {
+   "script_right": "30/39",
+   "osd_seconds_mean": 0.641,
+   "osd_detected": {
+    "en-prose-scan": "Latin",
+    "en-prose-photo": "Latin",
+    "en-prose-poor": "Arabic",
+    "en-twocol-scan": "Latin",
+    "en-twocol-photo": "Latin",
+    "en-twocol-poor": "Latin",
+    "en-table-scan": "Latin",
+    "en-table-photo": "Latin",
+    "en-table-poor": "Latin",
+    "en-rfc-scan": "Latin",
+    "en-rfc-photo": "Latin",
+    "en-rfc-poor": "Latin",
+    "de-wiki-scan": "Latin",
+    "de-wiki-photo": "Latin",
+    "de-wiki-poor": "Arabic",
+    "sv-wiki-scan": "Latin",
+    "sv-wiki-photo": "Latin",
+    "sv-wiki-poor": "Arabic",
+    "fr-wiki-scan": "Latin",
+    "fr-wiki-photo": "Latin",
+    "fr-wiki-poor": "Arabic",
+    "ru-wiki-scan": "Cyrillic",
+    "ru-wiki-photo": "Cyrillic",
+    "ru-wiki-poor": "Latin",
+    "zh-wiki-scan": "Han",
+    "zh-wiki-photo": "Han",
+    "zh-wiki-poor": "Latin",
+    "ja-wiki-scan": "Japanese",
+    "ja-wiki-photo": "Japanese",
+    "ja-wiki-poor": "Arabic",
+    "ko-wiki-scan": "Korean",
+    "ko-wiki-photo": "Korean",
+    "ko-wiki-poor": "none",
+    "ar-wiki-scan": "Arabic",
+    "ar-wiki-photo": "Arabic",
+    "ar-wiki-poor": "Arabic",
+    "uk-wiki-scan": "Cyrillic",
+    "uk-wiki-photo": "Cyrillic",
+    "uk-wiki-poor": "Arabic"
+   },
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.953,
+     "photo": 0.978,
+     "poor": 0.263
+    },
+    "Cyrillic": {
+     "scan": 0.77,
+     "photo": 0.843,
+     "poor": 0.079
+    },
+    "CJK": {
+     "scan": 0.976,
+     "photo": 0.996,
+     "poor": 0.0
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.0
+    },
+    "Arabic": {
+     "scan": 0.7,
+     "photo": 0.736,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.917,
+   "recall_poor_all_scripts": 0.156,
+   "seconds_per_page_mean": 2.757,
+   "seconds_per_page_max": 6.05
+  },
+  "Tesseract OSD, then v6-small (Latin, CJK) or the v5 script model": {
+   "script_right": "30/39",
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.985,
+     "photo": 0.995,
+     "poor": 0.298
+    },
+    "Cyrillic": {
+     "scan": 0.77,
+     "photo": 0.843,
+     "poor": 0.088
+    },
+    "CJK": {
+     "scan": 1.0,
+     "photo": 1.0,
+     "poor": 0.441
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.0
+    },
+    "Arabic": {
+     "scan": 0.7,
+     "photo": 0.736,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.932,
+   "recall_poor_all_scripts": 0.244,
+   "seconds_per_page_mean": 3.334,
+   "seconds_per_page_max": 7.19
+  },
+  "v6-small, fallback below mean confidence 0.80": {
+   "pages_falling_back": "8/39",
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.985,
+     "photo": 0.995,
+     "poor": 0.484
+    },
+    "Cyrillic": {
+     "scan": 0.186,
+     "photo": 0.181,
+     "poor": 0.177
+    },
+    "CJK": {
+     "scan": 1.0,
+     "photo": 1.0,
+     "poor": 0.863
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.233,
+     "photo": 0.233,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.799,
+   "recall_poor_all_scripts": 0.477,
+   "seconds_per_page_mean": 4.153,
+   "seconds_per_page_max": 11.94
+  },
+  "v6-small, fallback below mean confidence 0.85": {
+   "pages_falling_back": "12/39",
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.985,
+     "photo": 0.995,
+     "poor": 0.468
+    },
+    "Cyrillic": {
+     "scan": 0.186,
+     "photo": 0.181,
+     "poor": 0.177
+    },
+    "CJK": {
+     "scan": 1.0,
+     "photo": 1.0,
+     "poor": 0.863
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.233,
+     "photo": 0.233,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.799,
+   "recall_poor_all_scripts": 0.469,
+   "seconds_per_page_mean": 4.531,
+   "seconds_per_page_max": 11.94
+  },
+  "v6-small, fallback below mean confidence 0.90": {
+   "pages_falling_back": "14/39",
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.985,
+     "photo": 0.995,
+     "poor": 0.468
+    },
+    "Cyrillic": {
+     "scan": 0.186,
+     "photo": 0.181,
+     "poor": 0.177
+    },
+    "CJK": {
+     "scan": 1.0,
+     "photo": 1.0,
+     "poor": 0.863
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.233,
+     "photo": 0.736,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.819,
+   "recall_poor_all_scripts": 0.469,
+   "seconds_per_page_mean": 4.721,
+   "seconds_per_page_max": 11.94
+  },
+  "v6-small, fallback below mean confidence 0.93": {
+   "pages_falling_back": "17/39",
+   "recall_by_script": {
+    "Latin": {
+     "scan": 0.985,
+     "photo": 0.995,
+     "poor": 0.468
+    },
+    "Cyrillic": {
+     "scan": 0.186,
+     "photo": 0.181,
+     "poor": 0.177
+    },
+    "CJK": {
+     "scan": 1.0,
+     "photo": 1.0,
+     "poor": 0.863
+    },
+    "Hangul": {
+     "scan": 0.891,
+     "photo": 0.83,
+     "poor": 0.711
+    },
+    "Arabic": {
+     "scan": 0.7,
+     "photo": 0.736,
+     "poor": 0.022
+    }
+   },
+   "recall_scan_photo_all_scripts": 0.837,
+   "recall_poor_all_scripts": 0.469,
+   "seconds_per_page_mean": 5.01,
+   "seconds_per_page_max": 11.94
+  }
+ },
+ "confidence_routing": {
+  "v6-small": {
+   "word_auc": 0.908,
+   "words_right": 10500,
+   "words_wrong": 1550,
+   "page_threshold_sweep": {
+    "0.80": {
+     "bad_caught": "8/19",
+     "good_sent": "0/20"
+    },
+    "0.85": {
+     "bad_caught": "11/19",
+     "good_sent": "1/20"
+    },
+    "0.88": {
+     "bad_caught": "11/19",
+     "good_sent": "2/20"
+    },
+    "0.90": {
+     "bad_caught": "12/19",
+     "good_sent": "2/20"
+    },
+    "0.92": {
+     "bad_caught": "15/19",
+     "good_sent": "2/20"
+    },
+    "0.94": {
+     "bad_caught": "15/19",
+     "good_sent": "2/20"
+    },
+    "0.96": {
+     "bad_caught": "19/19",
+     "good_sent": "2/20"
+    }
+   }
+  },
+  "v5-oracle": {
+   "word_auc": 0.809,
+   "words_right": 11312,
+   "words_wrong": 1947,
+   "page_threshold_sweep": {
+    "0.80": {
+     "bad_caught": "8/17",
+     "good_sent": "0/22"
+    },
+    "0.85": {
+     "bad_caught": "9/17",
+     "good_sent": "0/22"
+    },
+    "0.88": {
+     "bad_caught": "10/17",
+     "good_sent": "0/22"
+    },
+    "0.90": {
+     "bad_caught": "10/17",
+     "good_sent": "0/22"
+    },
+    "0.92": {
+     "bad_caught": "14/17",
+     "good_sent": "1/22"
+    },
+    "0.94": {
+     "bad_caught": "15/17",
+     "good_sent": "2/22"
+    },
+    "0.96": {
+     "bad_caught": "17/17",
+     "good_sent": "4/22"
+    }
+   }
+  },
+  "tesseract": {
+   "word_auc": 0.944,
+   "words_right": 10421,
+   "words_wrong": 2168,
+   "page_threshold_sweep": {
+    "0.80": {
+     "bad_caught": "16/21",
+     "good_sent": "0/18"
+    },
+    "0.85": {
+     "bad_caught": "17/21",
+     "good_sent": "4/18"
+    },
+    "0.88": {
+     "bad_caught": "17/21",
+     "good_sent": "7/18"
+    },
+    "0.90": {
+     "bad_caught": "19/21",
+     "good_sent": "7/18"
+    },
+    "0.92": {
+     "bad_caught": "19/21",
+     "good_sent": "10/18"
+    },
+    "0.94": {
+     "bad_caught": "20/21",
+     "good_sent": "13/18"
+    },
+    "0.96": {
+     "bad_caught": "21/21",
+     "good_sent": "18/18"
+    }
+   }
+  },
+  "v5 (right script's model)": {
+   "page_threshold_sweep": {
+    "0.80": {
+     "bad_caught": "8/17",
+     "good_sent": "0/22"
+    },
+    "0.85": {
+     "bad_caught": "9/17",
+     "good_sent": "0/22"
+    },
+    "0.88": {
+     "bad_caught": "10/17",
+     "good_sent": "0/22"
+    },
+    "0.90": {
+     "bad_caught": "11/17",
+     "good_sent": "0/22"
+    },
+    "0.92": {
+     "bad_caught": "15/17",
+     "good_sent": "1/22"
+    },
+    "0.94": {
+     "bad_caught": "15/17",
+     "good_sent": "3/22"
+    },
+    "0.96": {
+     "bad_caught": "17/17",
+     "good_sent": "4/22"
+    }
+   }
+  },
+  "recommended route (OSD, v6-small or v5 script model)": {
+   "page_threshold_sweep": {
+    "0.80": {
+     "bad_caught": "11/16",
+     "good_sent": "0/23"
+    },
+    "0.85": {
+     "bad_caught": "12/16",
+     "good_sent": "0/23"
+    },
+    "0.88": {
+     "bad_caught": "12/16",
+     "good_sent": "1/23"
+    },
+    "0.90": {
+     "bad_caught": "13/16",
+     "good_sent": "1/23"
+    },
+    "0.92": {
+     "bad_caught": "14/16",
+     "good_sent": "2/23"
+    },
+    "0.94": {
+     "bad_caught": "14/16",
+     "good_sent": "3/23"
+    },
+    "0.96": {
+     "bad_caught": "16/16",
+     "good_sent": "4/23"
+    }
+   }
+  }
+ }
+}

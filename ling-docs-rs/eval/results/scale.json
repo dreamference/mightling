@@ -1,0 +1,80 @@
+{
+ "chunks": 50000,
+ "fts_build_seconds": 2.2,
+ "bm25_ms": {
+  "p50": 4.07,
+  "p95": 12.4
+ },
+ "models": {
+  "ibm-granite/granite-embedding-107m-multilingual": {
+   "dim": 384,
+   "dense_plus_fusion_ms": {
+    "p50": 2.5,
+    "p95": 2.66
+   },
+   "query_embed_ms_p95": 2.4,
+   "end_to_end_ms_p95_upper": 17.4,
+   "vector_mb": 73
+  },
+  "intfloat/multilingual-e5-base": {
+   "dim": 768,
+   "dense_plus_fusion_ms": {
+    "p50": 4.99,
+    "p95": 5.43
+   },
+   "query_embed_ms_p95": 14.8,
+   "end_to_end_ms_p95_upper": 32.6,
+   "vector_mb": 146
+  },
+  "intfloat/multilingual-e5-small-int8": {
+   "dim": 384,
+   "dense_plus_fusion_ms": {
+    "p50": 2.55,
+    "p95": 2.72
+   },
+   "query_embed_ms_p95": 2.5,
+   "end_to_end_ms_p95_upper": 17.6,
+   "vector_mb": 73
+  },
+  "intfloat/multilingual-e5-small": {
+   "dim": 384,
+   "dense_plus_fusion_ms": {
+    "p50": 2.54,
+    "p95": 2.67
+   },
+   "query_embed_ms_p95": 13.9,
+   "end_to_end_ms_p95_upper": 29.0,
+   "vector_mb": 73
+  },
+  "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": {
+   "dim": 384,
+   "dense_plus_fusion_ms": {
+    "p50": 2.53,
+    "p95": 2.72
+   },
+   "query_embed_ms_p95": 4.7,
+   "end_to_end_ms_p95_upper": 19.8,
+   "vector_mb": 73
+  },
+  "minishlab/potion-multilingual-128M": {
+   "dim": 256,
+   "dense_plus_fusion_ms": {
+    "p50": 1.73,
+    "p95": 1.89
+   },
+   "query_embed_ms_p95": 0.1,
+   "end_to_end_ms_p95_upper": 14.4,
+   "vector_mb": 49
+  },
+  "Snowflake/snowflake-arctic-embed-m-v2.0-int8": {
+   "dim": 768,
+   "dense_plus_fusion_ms": {
+    "p50": 4.94,
+    "p95": 5.19
+   },
+   "query_embed_ms_p95": 6.7,
+   "end_to_end_ms_p95_upper": 24.3,
+   "vector_mb": 146
+  }
+ }
+}

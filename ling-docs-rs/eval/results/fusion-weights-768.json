@@ -1,0 +1,67 @@
+[
+ {
+  "bm25_weight": 0.0,
+  "recall10": 0.856,
+  "recall5": 0.801,
+  "mrr10": 0.638,
+  "by_group": {
+   "en-lexical": "51/54",
+   "en-paraphrase": "49/55",
+   "other-lexical": "23/24",
+   "other-paraphrase": "23/24",
+   "other-crosslingual": "9/24"
+  }
+ },
+ {
+  "bm25_weight": 0.25,
+  "recall10": 0.867,
+  "recall5": 0.801,
+  "mrr10": 0.687,
+  "by_group": {
+   "en-lexical": "52/54",
+   "en-paraphrase": "51/55",
+   "other-lexical": "24/24",
+   "other-paraphrase": "23/24",
+   "other-crosslingual": "7/24"
+  }
+ },
+ {
+  "bm25_weight": 0.5,
+  "recall10": 0.873,
+  "recall5": 0.818,
+  "mrr10": 0.681,
+  "by_group": {
+   "en-lexical": "53/54",
+   "en-paraphrase": "50/55",
+   "other-lexical": "24/24",
+   "other-paraphrase": "24/24",
+   "other-crosslingual": "7/24"
+  }
+ },
+ {
+  "bm25_weight": 0.75,
+  "recall10": 0.878,
+  "recall5": 0.823,
+  "mrr10": 0.69,
+  "by_group": {
+   "en-lexical": "53/54",
+   "en-paraphrase": "50/55",
+   "other-lexical": "24/24",
+   "other-paraphrase": "24/24",
+   "other-crosslingual": "8/24"
+  }
+ },
+ {
+  "bm25_weight": 1.0,
+  "recall10": 0.873,
+  "recall5": 0.823,
+  "mrr10": 0.712,
+  "by_group": {
+   "en-lexical": "53/54",
+   "en-paraphrase": "49/55",
+   "other-lexical": "24/24",
+   "other-paraphrase": "24/24",
+   "other-crosslingual": "8/24"
+  }
+ }
+]

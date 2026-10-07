@@ -16,12 +16,12 @@ D = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, D)
 import evallib  # noqa: E402
 
-base = json.load(open(f"{D}/chunks/pdfium-512.json"))["chunks"]
+base = json.load(open(f"{D}/chunks/pdfium-ordered-512.json"))["chunks"]
 questions = [json.loads(line) for line in open(f"{D}/questions.jsonl")]
 REP = -(-50_000 // len(base))
 big = [c for _ in range(REP) for c in base][:50_000]
 t = time.perf_counter()
-bm = evallib.BM25(big)
+bm = evallib.BM25(big, trigram=True)
 fts_build = time.perf_counter() - t
 
 
@@ -36,7 +36,7 @@ for q in questions:
     bm_lat.append((time.perf_counter() - t) * 1000)
 out = {"chunks": len(big), "fts_build_seconds": round(fts_build, 1), "bm25_ms": pct(bm_lat), "models": {}}
 rng = np.random.default_rng(0)
-for info_path in sorted(glob.glob(f"{D}/emb/pdfium-512__*.json")):
+for info_path in sorted(glob.glob(f"{D}/emb/pdfium-ordered-512__*.json")):
     info = json.load(open(info_path))
     prefix = info_path[:-5]
     v = np.load(f"{prefix}.docs.npy")

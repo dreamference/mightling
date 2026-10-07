@@ -36,13 +36,15 @@ def emit(method, ranked, lat_ms=None, extra=None):
     return row
 
 
-bm = evallib.BM25(chunks)
-bm_ranked, bm_lat = [], []
-for q in questions:
-    t = time.perf_counter()
-    bm_ranked.append(bm.search(q["question"]))
-    bm_lat.append((time.perf_counter() - t) * 1000)
-emit("bm25", bm_ranked, bm_lat)
+for trigram in (False, True):
+    bm = evallib.BM25(chunks, trigram=trigram)
+    bm_ranked, bm_lat = [], []
+    for q in questions:
+        t = time.perf_counter()
+        bm_ranked.append(bm.search(q["question"]))
+        bm_lat.append((time.perf_counter() - t) * 1000)
+    emit("bm25+trigram" if trigram else "bm25", bm_ranked, bm_lat)
+# Hybrid fuses with the trigram variant: the one ling-docs would ship.
 
 for p in prefixes:
     info = json.load(open(f"{p}.json"))

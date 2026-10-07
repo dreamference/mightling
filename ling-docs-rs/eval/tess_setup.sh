@@ -7,7 +7,10 @@ mkdir -p "$T/debs" "$T/root" "$T/tessdata"
 cd "$T/debs" || exit 1
 apt-get download tesseract-ocr=5.3.4-1build5 libtesseract5=5.3.4-1build5 liblept5 2>&1 | tail -1
 for f in *.deb; do dpkg -x "$f" "$T/root"; done
-for l in eng deu swe fra chi_sim osd; do
+# The output configs (tsv, hocr …) live beside the system tessdata; TESSDATA_PREFIX points here instead,
+# and without them "tesseract … tsv" prints nothing (the first Tesseract run scored 0 everywhere).
+cp -r "$T/root/usr/share/tesseract-ocr/5/tessdata/configs" "$T/tessdata/"
+for l in eng deu swe fra rus chi_sim osd; do
   [ -f "$T/tessdata/$l.traineddata" ] || curl -sL -o "$T/tessdata/$l.traineddata" \
     "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$l.traineddata"
 done
