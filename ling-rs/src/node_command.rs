@@ -13,6 +13,8 @@
 //! terminal in raw mode, which suits an editor but not a password prompt (Enter sends `\r`, so a
 //! line never ends) or a progress table (no carriage returns), so [`Run::execute`] puts the
 //! terminal in cooked mode with `stty sane` for the child and restores the saved settings after.
+//! Cooked mode also turns Ctrl-C into SIGINT for the whole foreground process group, `ling`
+//! included, so `ling` ignores it until the user is back (the child keeps the default).
 //!
 //! `/node` is allowed at `/airgapped on`: the user trusts the local network, and the command is the
 //! user's own, run outside the agent's sandbox, like a `!` command. It says so before it runs.
@@ -162,12 +164,10 @@ impl Run {
             let _ = writeln!(out, "{notice}");
         }
         let _ = out.flush();
-        let status = Command::new(&self.argv[0])
-            .args(&self.argv[1..])
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status();
+        let mut command = Command::new(&self.argv[0]);
+        command.args(&self.argv[1..]).stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        let interrupts = Interrupts::for_child(&mut command);
+        let status = command.status();
         let summary = match &status {
             Ok(status) if status.success() => format!("node {}: done (exit 0)", self.label),
             Ok(status) => match status.code() {
@@ -180,6 +180,8 @@ impl Run {
         let _ = out.flush();
         let mut line = String::new();
         let _ = enter.read_line(&mut line);
+        // Held until here: Ctrl-C at "Press Enter" must not end the session either.
+        drop(interrupts);
         drop(saved);
         self.notice.into_iter().chain(std::iter::once(summary)).collect()
     }
@@ -205,6 +207,66 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         if let Some(saved) = &self.saved {
             let _ = stty(&[saved.as_str()]);
+        }
+    }
+}
+
+/// Ctrl-C and Ctrl-\ while the command runs. In cooked mode the terminal turns them into SIGINT and
+/// SIGQUIT for its whole foreground process group, which is `ling` as well as the child: without
+/// this, Ctrl-C at a password prompt ended the session (seen in tmux). `ling` ignores both until
+/// dropped, and the child gets the default back before it starts, so it can still be interrupted.
+struct Interrupts {
+    #[cfg(unix)]
+    saved: Vec<(libc::c_int, libc::sigaction)>,
+}
+
+#[cfg(unix)]
+const INTERRUPTS: [libc::c_int; 2] = [libc::SIGINT, libc::SIGQUIT];
+
+impl Interrupts {
+    #[cfg(unix)]
+    fn for_child(command: &mut Command) -> Self {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: the closure runs between fork and exec and calls only signal(), which is
+        // async-signal-safe.
+        unsafe {
+            command.pre_exec(|| {
+                for signal in INTERRUPTS {
+                    libc::signal(signal, libc::SIG_DFL);
+                }
+                Ok(())
+            });
+        }
+        let mut saved = Vec::new();
+        for signal in INTERRUPTS {
+            // SAFETY: sigaction with a zeroed, then filled, action; the old one is kept to restore.
+            unsafe {
+                let mut ignore: libc::sigaction = std::mem::zeroed();
+                ignore.sa_sigaction = libc::SIG_IGN;
+                libc::sigemptyset(&mut ignore.sa_mask);
+                let mut old: libc::sigaction = std::mem::zeroed();
+                if libc::sigaction(signal, &ignore, &mut old) == 0 {
+                    saved.push((signal, old));
+                }
+            }
+        }
+        Interrupts { saved }
+    }
+
+    #[cfg(not(unix))]
+    fn for_child(_command: &mut Command) -> Self {
+        Interrupts {}
+    }
+}
+
+impl Drop for Interrupts {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        for (signal, old) in &self.saved {
+            // SAFETY: restores the action saved in for_child.
+            unsafe {
+                libc::sigaction(*signal, old, std::ptr::null_mut());
+            }
         }
     }
 }
@@ -309,5 +371,15 @@ mod tests {
         assert_eq!(failed.run_with(&mut enter(), false), ["node add spark-1: failed (exit 1)"]);
         let missing = Run { argv: vec!["/nonexistent/ling-admin".into()], notice: None, label: "list".into() };
         assert!(missing.run_with(&mut enter(), false)[0].starts_with("node list: could not start /nonexistent/ling-admin"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_child_can_still_be_interrupted_while_ling_ignores_ctrl_c() {
+        // A shell started with SIGINT ignored would survive this and exit 0.
+        let enter = || std::io::Cursor::new(b"\n".to_vec());
+        let argv = ["sh", "-c", "kill -INT $$; exit 0"].map(OsString::from).to_vec();
+        let interrupted = Run { argv, notice: None, label: "provision".into() };
+        assert_eq!(interrupted.run_with(&mut enter(), false), ["node provision: stopped by a signal"]);
     }
 }

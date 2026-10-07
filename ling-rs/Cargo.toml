@@ -46,6 +46,10 @@ toml_edit = { workspace = true }
 [target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
 openssl-sys = { workspace = true, features = ["vendored"] }
 
+# `/node` ignores Ctrl-C while its child has the terminal (src/node_command.rs).
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 clap = { workspace = true, features = ["derive"] }
 tar = { workspace = true }
