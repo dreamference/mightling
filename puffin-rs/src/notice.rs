@@ -27,7 +27,7 @@ use sha2::Sha256;
 use crate::compaction::SessionHook;
 
 /// The hook: `<this binary> notice <hash>`, at the start of a new or resumed session.
-pub const NOTICE_HOOK: SessionHook = SessionHook { subcommand: "notice", matcher: "startup|resume", timeout: 5 };
+pub const NOTICE_HOOK: SessionHook = SessionHook::session_start("notice", "startup|resume", 5);
 
 /// Notice files older than this are deleted at the next launch.
 const KEEP: Duration = Duration::from_secs(7 * 24 * 3600);

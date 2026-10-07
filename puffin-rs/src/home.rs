@@ -46,6 +46,8 @@ const CARRY_OVER_DB_PREFIXES: &[&str] =
 ///
 /// An explicit `CODEX_HOME` is respected, so tests and users can still choose a folder.
 pub fn use_puffin_home() {
+    // Refine mode's `--refine`/`--no-refine` become its variable here, for the same reason.
+    crate::refine::export_flag();
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return;
     };

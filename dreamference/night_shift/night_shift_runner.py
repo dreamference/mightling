@@ -322,7 +322,8 @@ class NightShiftRunner:
                     deadline = min(end_ts, time.time() + settings.task_timeout_s)
                     run = NightShiftTaskRun(night_dir, task, settings, puffin_bin, deadline, model_host=lane["host"],
                                             context_budget=lane["budget"],
-                                            model_node=lane["name"] if lane.get("node") else None)
+                                            model_node=lane["name"] if lane.get("node") else None,
+                                            window_end=end_ts)
                     run.lane_host = lane["host"]
                     thread = threading.Thread(target=run.run, name=f"night-{task['id']}", daemon=True)
                     thread.start()

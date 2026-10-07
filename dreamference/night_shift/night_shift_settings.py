@@ -62,6 +62,10 @@ class NightShiftSettings:
         # the prompt it started with whatever this says, because a session keeps its prompt.
         prompt = table.get("prompt")
         self.prompt: Optional[str] = prompt.strip() if isinstance(prompt, str) and prompt.strip() else None
+        # Refine mode for night tasks (specs/DREAMFERENCE_PUFFIN_REFINE.md §5.3): `true` or `false`
+        # here, absent for the configured `puffin_refine` (`refine_enabled`).
+        refine = table.get("refine")
+        self.refine: Optional[bool] = refine if isinstance(refine, bool) else None
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
         # Where a task's session compacts, passed to every `puffin exec` of the task (compaction
         # spec §4.1). Absent (None, the default): the task's share of the KV pool, so the tasks of
@@ -77,6 +81,19 @@ class NightShiftSettings:
         # Other nodes' model servers a run may also use (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3):
         # "paired" (every paired node serving the same model), "none", or a list of names.
         self.nodes: Any = table.get("nodes", "paired")
+
+    def refine_enabled(self) -> bool:
+        """
+        Whether night tasks are refined first: `[night] refine`, then `puffin_refine` through its
+        own tiers (`DREAMFERENCE_PUFFIN_REFINE`, the config file, the default).
+
+        Returns:
+            bool: True when each new task gets a study step before the one that does it.
+        """
+        if self.refine is not None:
+            return self.refine
+        from dreamference.config.dreamference_config import DreamferenceConfig
+        return DreamferenceConfig().puffin_refine
 
     @classmethod
     def read_table(cls, path: Optional[Path] = None, section: str = "night") -> Dict[str, Any]:

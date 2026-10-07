@@ -1109,6 +1109,16 @@ def test_masking_is_off_unless_asked_and_two_runs_are_told_apart_by_it(bench, mo
     assert "differs: masking: off | on" in text
 
 
+def test_the_launchers_own_refine_mode_is_off_in_the_container_in_both_arms(bench, monkeypatch):
+    # specs/DREAMFERENCE_PUFFIN_REFINE.md §5.4: the runner orchestrates `--refine` itself, so the
+    # container's launcher must never add a study step of its own, whatever the host's setting.
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_REFINE", "on")
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="refined", instances=["acme__widget-1"], refine=True) == 0
+    runs = [call for call in bench["docker"].calls if call[0] == "run"]
+    assert len(runs) == 2 and all("DREAMFERENCE_PUFFIN_REFINE=off" in call for call in runs)
+
+
 def test_a_built_in_prompt_needs_no_file_and_two_prompts_are_told_apart(bench, monkeypatch):
     monkeypatch.delenv("DREAMFERENCE_PUFFIN_PROMPT", raising=False)
     assert run(bench, name="a", instances=["acme__widget-1"]) == 0

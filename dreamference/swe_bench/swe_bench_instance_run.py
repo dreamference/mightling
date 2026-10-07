@@ -19,6 +19,8 @@ from typing import Any, Dict, Final, List, Optional
 
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_task_run import NUDGE, NightShiftTaskRun
+from dreamference.night_shift.refine_prompt import (FIX_RULES, NO_REFINED as NO_REFINED_PIECE, REFINED_HEADING,
+                                                    STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS, RefinePrompt)
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
@@ -51,62 +53,45 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
 # guard instead of a rule, a second code path never looked at.
 REFINED_FILE: Final[str] = "refined.md"
 
-REFINE_PROMPT: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
-where something is unclear, make the reasonable choice.
+# Both prompts are built from the pieces refine mode shares with the product
+# (dreamference/night_shift/refine_prompt.py, puffin-rs/prompts/refine.md), with "issue" for the
+# task; a test pins them byte for byte to the prompts the `im-refine` round was measured with.
+UNATTENDED: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
+where something is unclear, make the reasonable choice."""
 
-This is the first of two steps. Do not fix anything yet: study the issue below and write a precise
-description of the problem for the second step, which will make the fix.
+REFINE_PROMPT: Final[str] = (
+    UNATTENDED + "\n\n" + RefinePrompt.subject(STUDY_INTRO, "issue") + """
 
 - You may read the code, run it and run the repository's tests. Do not change any file under
   /testbed: every change there is discarded when this step ends. Put scratch files in /tmp.
 - There is no network.
 {code_index}
 Write the description to {refined_path}, in six sections:
-1. Intent: what the reporter is trying to achieve, from the title and their use case, not only
-   from the example they give.
-2. Requirements: the behaviour the fix must produce, as observable results ("for input X the
-   result is Y"). Never "it no longer raises": say what it returns or prints.
-3. Code paths: every place in the repository that produces the behaviour in question, found by
-   following callers and references, not only the one the example reaches. Name each by file and
-   function.
-4. Edge cases: inputs the example does not cover that the same fix must handle (other types,
-   subclasses, ancestors, empty input, a sibling function with the same flaw).
-5. Must not change: behaviour that other code or the existing tests rely on.
-6. Acceptance checks: commands or short scripts that will show the fix is complete, each with
-   its expected output.
-
-Keep it factual: say what you checked in the code and what you are inferring. When the file is
+""" + STUDY_SECTIONS + """ When the file is
 written, stop.
 
 Issue:
-{problem_statement}"""
+{problem_statement}""")
 
 # The first step's code-index sentence: it is there to find every path, not one.
-REFINE_CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools: `code_search` with the issue's words, then
-  `code_callers` and `code_refs` to find every other path that produces the same behaviour.
-"""
+REFINE_CODE_INDEX_HINT: Final[str] = RefinePrompt.subject(STUDY_CODE_INDEX, "issue") + "\n"
 
-FIX_PROMPT: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
-where something is unclear, make the reasonable choice.
+FIX_PROMPT: Final[str] = (
+    UNATTENDED + """
 
 - Fix the issue below by changing the repository's source files.
 - You may run the repository's tests. There is no network.
 - Do not commit. Your changes are collected when you stop.
-{code_index}- A first step studied the issue and wrote the refined description that follows it. Use it to
-  see the whole problem, but the issue is authoritative: where the two disagree, follow the issue.
-- Fix the cause, not the symptom: no guard (a length check, a try/except, an early return) that
-  only hides the reported failure.
-- Before you stop, run every acceptance check in the refined description and confirm that each
-  gives its expected result.
+{code_index}""" + RefinePrompt.subject(FIX_RULES, "issue") + """
 
 Issue:
 {problem_statement}
 
-Refined description (written by the first step; it may be incomplete or wrong):
-{refined}"""
+""" + REFINED_HEADING + """
+{refined}""")
 
 # What the second step is told when the first wrote nothing.
-NO_REFINED: Final[str] = "(The first step wrote no description: work from the issue alone.)"
+NO_REFINED: Final[str] = RefinePrompt.subject(NO_REFINED_PIECE, "issue")
 
 # The first step's own time limit; the second then gets the full task timeout, as an instance of
 # the arm without it does, so the two arms' fixing steps have the same budget.

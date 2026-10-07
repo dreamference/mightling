@@ -63,6 +63,13 @@ PUFFIN_AIRGAPPED_LEVELS: Final[tuple] = ("off", "on")
 # puffin-rs/src/prompt.rs.
 DEFAULT_PUFFIN_PROMPT: Final[str] = "default"
 PUFFIN_PROMPT_NAME: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+# Refine mode (specs/DREAMFERENCE_PUFFIN_REFINE.md): each new task is first studied by a session
+# that changes nothing and writes a refined description, then done by a fresh session given the
+# task and that description, in `puffin exec`, the interactive session and Night Shift alike. Off
+# until the 100-task SWE-bench pair decides (spec §3); switching it on is this line and DEFAULT in
+# puffin-rs/src/refine.rs, which a test keeps equal. The launcher reads the same tiers
+# (DREAMFERENCE_PUFFIN_REFINE, then `puffin_refine` in the TOML file), after its `--refine` flag.
+DEFAULT_PUFFIN_REFINE: Final[bool] = False
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -100,6 +107,7 @@ class DreamferenceConfig:
         puffin_cave_mode: Optional[str] = None,
         puffin_airgapped: Optional[str] = None,
         puffin_prompt: Optional[str] = None,
+        puffin_refine: Optional[bool] = None,
     ):
         """
         Initializes DreamferenceConfig by loading file defaults and overriding with environment variables and parameters.
@@ -312,6 +320,17 @@ class DreamferenceConfig:
                 self.puffin_prompt = name
                 break
 
+        # Refine mode, through the same tiers and the same reading of a value as the launcher's:
+        # an empty variable counts as unset, anything else is on only if it says so.
+        env_refine = os.getenv("DREAMFERENCE_PUFFIN_REFINE")
+        if puffin_refine is not None:
+            self.puffin_refine: bool = puffin_refine
+        elif env_refine:
+            self.puffin_refine = env_refine.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            file_refine = self.file_data.get("puffin_refine", DEFAULT_PUFFIN_REFINE)
+            self.puffin_refine = file_refine if isinstance(file_refine, bool) else DEFAULT_PUFFIN_REFINE
+
     @property
     def model(self) -> str:
         """
@@ -481,6 +500,7 @@ class DreamferenceConfig:
         if self.puffin_cave_mode != DEFAULT_PUFFIN_CAVE_MODE: data["puffin_cave_mode"] = self.puffin_cave_mode
         if self.puffin_airgapped != DEFAULT_PUFFIN_AIRGAPPED: data["puffin_airgapped"] = self.puffin_airgapped
         if self.puffin_prompt != DEFAULT_PUFFIN_PROMPT: data["puffin_prompt"] = self.puffin_prompt
+        if self.puffin_refine != DEFAULT_PUFFIN_REFINE: data["puffin_refine"] = self.puffin_refine
 
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

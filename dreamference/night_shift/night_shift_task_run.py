@@ -29,6 +29,7 @@ from dreamference.config.dreamference_config import DreamferenceConfig, PUFFIN_A
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
+from dreamference.night_shift.refine_prompt import NIGHT_WRITES, RefinePrompt
 
 PREAMBLE: Final[str] = """This is a Night Shift task. It runs unattended overnight, in a git worktree of {repo} on branch {branch}, and nobody will answer questions: where something is unclear, make the reasonable choice and say which you made.
 
@@ -58,6 +59,9 @@ AIRGAPPED_KEY: Final[str] = "puffin_airgapped"
 SEALED: Final[str] = PUFFIN_AIRGAPPED_LEVELS[-1]
 # The system prompt a new session starts with (specs/DREAMFERENCE_PUFFIN_PROMPT.md §7); `[night] prompt`.
 PROMPT_ENV: Final[str] = "DREAMFERENCE_PUFFIN_PROMPT"
+# Refine mode (specs/DREAMFERENCE_PUFFIN_REFINE.md §5.3). The runner runs the study step itself, so
+# every `puffin exec` it starts is told to stay one session whatever the configuration says.
+REFINE_ENV: Final[str] = "DREAMFERENCE_PUFFIN_REFINE"
 TEST_TAIL_LINES: Final[int] = 200
 
 
@@ -74,7 +78,8 @@ class NightShiftTaskRun:
 
     def __init__(self, night_dir: Path, task: Dict[str, Any], settings: NightShiftSettings,
                  puffin_bin: str, deadline: float, model_host: Optional[str] = None,
-                 context_budget: Optional[int] = None, model_node: Optional[str] = None) -> None:
+                 context_budget: Optional[int] = None, model_node: Optional[str] = None,
+                 window_end: Optional[float] = None) -> None:
         """
         Args:
             night_dir: The queue directory.
@@ -89,6 +94,9 @@ class NightShiftTaskRun:
                 every `puffin exec` as its compaction limit. None falls back to `[night] compact_at`.
             model_node: The paired node whose model server `model_host` is, when it is not this
                 machine's (a replica lane); recorded in the result.
+            window_end: `time.time()` at which the night's window closes. With refine mode the
+                step that does the task gets a full task timeout of its own after the study step,
+                as in SWE-bench's `--refine` arm, but never past the window.
         """
         self.model_host = model_host
         self.model_node = model_node
@@ -113,6 +121,9 @@ class NightShiftTaskRun:
         self.settings = settings
         self.puffin_bin = puffin_bin
         self.deadline = deadline
+        self.window_end = window_end
+        # The study step's record, when refine mode ran one (`_refine`); kept in the result.
+        self.refine_record: Optional[Dict[str, Any]] = None
         self.worktree = night_dir / "worktrees" / self.task_id
         self.log_path = night_dir / "logs" / f"{self.task_id}.jsonl"
         self.last_message_path = night_dir / "logs" / f"{self.task_id}.last.txt"
@@ -163,7 +174,22 @@ class NightShiftTaskRun:
             return self._cleanup_and_finish("cancelled")
         self._fix_level()
 
-        prompt = RESUME if self.session else self.compose_prompt(test_command)
+        # Refine mode: a new task is studied first, by a session of its own whose worktree changes
+        # are put back. A task resumed from an earlier night has its working session already.
+        refined: Optional[str] = None
+        if not self.session and self.refine_enabled():
+            refined = self._refine()
+            if refined is None:
+                return self._interrupted()
+            if self._cancelled():
+                return self._cleanup_and_finish("cancelled")
+
+        if self.session:
+            prompt = RESUME
+        else:
+            prompt = self.compose_prompt(test_command)
+            if refined is not None:
+                prompt = RefinePrompt.compose_fix(prompt, refined)
         outcome = self._exec(prompt, resume=bool(self.session))
         if outcome == "interrupted":
             return self._interrupted()
@@ -228,9 +254,65 @@ class NightShiftTaskRun:
                      if test_command else "")
         return PREAMBLE.format(repo=self.repo, branch=self.branch, test_line=test_line, task=self.text)
 
-    def _exec(self, prompt: str, resume: bool) -> str:
-        """Runs one `puffin exec` turn; returns `ok`, `error` or `interrupted`."""
-        command = [self.puffin_bin, "exec", "--json", "-o", str(self.last_message_path),
+    def refine_enabled(self) -> bool:
+        """Whether this task is studied first (`[night] refine`, then `puffin_refine`)."""
+        check = getattr(self.settings, "refine_enabled", None)
+        return bool(check()) if callable(check) else False
+
+    def _refine(self) -> Optional[str]:
+        """
+        Refine mode's first step (specs/DREAMFERENCE_PUFFIN_REFINE.md §5.3): a session that studies
+        the task and answers with a refined description, under the task's own deadline and no
+        limit of its own. Whatever it changed in the worktree is then put back (it is told not to
+        change anything; whether it did is measured and recorded), and the step that does the
+        task gets a fresh task timeout, within the window.
+
+        Returns:
+            Optional[str]: The description (empty when the step wrote none), or None when the
+            window or a stop ended the step.
+        """
+        started = time.time()
+        refined_path = (self.home / "refined.txt") if self.remote \
+            else self.night_dir / "logs" / f"{self.task_id}.refined.txt"
+        refined_path.parent.mkdir(parents=True, exist_ok=True)
+        refined_path.unlink(missing_ok=True)
+        offset = self.log_path.stat().st_size if self.log_path.exists() else 0
+        outcome = self._exec(RefinePrompt.compose_study(self.text, NIGHT_WRITES), resume=False,
+                             last_message=refined_path, record_session=False)
+        record: Dict[str, Any] = {"study_exit": outcome, "study_s": int(time.time() - started)}
+        session = self.thread_id_in(self.log_path, offset)
+        if session:
+            record["study_session"] = session
+        self.refine_record = record
+        if outcome == "interrupted":
+            return None
+        try:
+            refined = refined_path.read_text(errors="replace").strip()
+        except OSError:
+            refined = ""
+        record["refined_chars"] = len(refined)
+        record["study_edited"] = self._has_changes()
+        if record["study_edited"]:
+            # The worktree is the runner's own, at the task's base commit: nothing in it is the user's.
+            self._git(self.worktree, "reset", "-q", "--hard", "HEAD")
+            self._git(self.worktree, "clean", "-fdq")
+        if self.window_end is not None:
+            self.deadline = min(self.window_end, time.time() + self.settings.task_timeout_s)
+        return refined
+
+    def _exec(self, prompt: str, resume: bool, last_message: Optional[Path] = None,
+              record_session: bool = True) -> str:
+        """
+        Runs one `puffin exec` turn; returns `ok`, `error` or `interrupted`.
+
+        Args:
+            prompt: The prompt.
+            resume: Whether the task's session is resumed.
+            last_message: Where the final message goes; None for the task's own file.
+            record_session: Whether a new session becomes the task's (refine mode's study step
+                is a session of its own, never resumed).
+        """
+        command = [self.puffin_bin, "exec", "--json", "-o", str(last_message or self.last_message_path),
                    "-C", str(self.worktree), "-s", "workspace-write", "--skip-git-repo-check"]
         if self.context_budget:
             # The task's share of the KV pool. On the command line it beats the launcher's own limit,
@@ -245,7 +327,7 @@ class NightShiftTaskRun:
         finally:
             self.in_model = False
         session = self.thread_id_in(self.log_path, offset)
-        if session and session != self.session:
+        if record_session and session and session != self.session:
             self.session = session
             NightShiftQueue.transition(self.night_dir, self.task_id, "running", session=session)
         if code == "timeout":
@@ -370,6 +452,8 @@ class NightShiftTaskRun:
                                   "wall_s": int(time.time() - self.started)}
         if self.model_node:
             timing["model_node"] = self.model_node
+        if self.refine_record:
+            timing["refine"] = dict(self.refine_record)
         return timing
 
     # -- processes ---------------------------------------------------------------------------
@@ -404,6 +488,7 @@ class NightShiftTaskRun:
         if self.model_host:
             env["DREAMFERENCE_VLLM_HOST"] = self.model_host
         env["GIT_TERMINAL_PROMPT"] = "0"
+        env[REFINE_ENV] = "off"
         if self.airgapped:
             env[AIRGAPPED_ENV] = self.airgapped
         if getattr(self.settings, "prompt", None):
@@ -465,7 +550,7 @@ class NightShiftTaskRun:
         binaries = os.path.dirname(os.path.realpath(self.puffin_bin))
         variables = {
             "PATH": f"{binaries}:/usr/local/bin:/usr/bin:/bin", "CODEX_HOME": str(self.home),
-            NIGHT_RUN_ENV: "1", "GIT_TERMINAL_PROMPT": "0",
+            NIGHT_RUN_ENV: "1", "GIT_TERMINAL_PROMPT": "0", REFINE_ENV: "off",
             # Gmail is this node's owner's; a task from another machine is never told about it.
             "DREAMFERENCE_PUFFIN_GMAIL": "false",
         }

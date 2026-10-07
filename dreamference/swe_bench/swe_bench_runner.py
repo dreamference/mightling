@@ -364,7 +364,10 @@ class SweBenchRunner:
                          "DREAMFERENCE_PUFFIN_AIRGAPPED": "off",
                          "DREAMFERENCE_PUFFIN_PROMPT": run_prompt,
                          # A run made before masking existed has no key: it ran unmasked.
-                         "DREAMFERENCE_PUFFIN_MASK": str(manifest.get("masking") or "off")}
+                         "DREAMFERENCE_PUFFIN_MASK": str(manifest.get("masking") or "off"),
+                         # The runner orchestrates `--refine` itself; the launcher's own refine mode
+                         # would turn each step into two sessions, whatever the setting says.
+                         "DREAMFERENCE_PUFFIN_REFINE": "off"}
             # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
             # the text a later session of the same instance would start from.
             custom_prompt = cls.prompt_file(run_prompt)

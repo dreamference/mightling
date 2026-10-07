@@ -39,7 +39,8 @@ FAKE_PUFFIN = textwrap.dedent("""\
     with open(os.environ["FAKE_PUFFIN_CALLS"], "a") as log:
         log.write(json.dumps(args) + "\\n")
     with open(os.environ["FAKE_PUFFIN_CALLS"] + ".env", "a") as log:
-        log.write(json.dumps({{"DREAMFERENCE_PUFFIN_PROMPT": os.environ.get("DREAMFERENCE_PUFFIN_PROMPT")}}) + "\\n")
+        log.write(json.dumps({{name: os.environ.get(name) for name in
+                               ("DREAMFERENCE_PUFFIN_PROMPT", "DREAMFERENCE_PUFFIN_REFINE")}}) + "\\n")
     cwd = args[args.index("-C") + 1]
     out = args[args.index("-o") + 1]
     resume = "resume" in args
@@ -54,11 +55,18 @@ FAKE_PUFFIN = textwrap.dedent("""\
         time.sleep(600)
     if mode == "error":
         sys.exit(1)
+    if mode == "refine" and prompt.startswith("This is the first of two steps"):
+        # Refine mode's study step: leaves a scratch file it was told not to, and answers.
+        with open(os.path.join(cwd, "scratch.txt"), "w") as handle:
+            handle.write("notes\\n")
+        say("1. Intent: greet.\\n6. Acceptance checks: test -f hello.txt")
+        print(json.dumps({{"type": "turn.completed"}}), flush=True)
+        sys.exit(0)
     if mode == "loosen":
         with open(os.path.join(cwd, "dreamference.toml"), "w") as handle:
             handle.write('puffin_airgapped = "off"\\n')
         say("Loosened the level.")
-    acts = mode == "change" or (mode == "stall_then_act" and prompt == {nudge!r}) \\
+    acts = mode in ("change", "refine") or (mode == "stall_then_act" and prompt == {nudge!r}) \\
         or (mode == "act_on_resume" and resume)
     if acts:
         with open(os.path.join(cwd, "hello.txt"), "w") as handle:
@@ -171,6 +179,63 @@ def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup
     assert status == "done"
     seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
     assert seen and all(entry["DREAMFERENCE_PUFFIN_PROMPT"] is None for entry in seen)
+
+
+def refined_run(setup, monkeypatch, settings, **queue_args):
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "refine")
+    record = queue(setup["night"], setup["repo"], **queue_args)
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings(settings), setup["puffin"],
+                            deadline=time.time() + 60, window_end=time.time() + 3600)
+    status = run.run()
+    return status, NightShiftQueue.read(setup["night"], record["id"]), run
+
+
+def test_refine_studies_a_new_task_first_and_puts_the_worktree_back(setup, monkeypatch):
+    # specs/DREAMFERENCE_PUFFIN_REFINE.md §5.3: a study session, then a fresh one that does the task.
+    status, record, run = refined_run(setup, monkeypatch, {"refine": True}, test="test -f hello.txt")
+    assert status == "done"
+    study, fix = calls(setup)
+    assert study[-1].startswith("This is the first of two steps") and study[-1].endswith("Task:\nAdd hello.txt")
+    assert "every change there is discarded" in study[-1] and "resume" not in study
+    assert study[study.index("-o") + 1].endswith(".refined.txt")
+    assert fix[-1].startswith("This is a Night Shift task.") and "resume" not in fix
+    assert fix[-1].index("Task:\nAdd hello.txt") < fix[-1].index("Refined description (written by the first step")
+    assert fix[-1].endswith("1. Intent: greet.\n6. Acceptance checks: test -f hello.txt")
+    # The study step's scratch file was put back, and only the task's change was committed.
+    assert record["result"]["diff_stat"].splitlines()[-1].strip().startswith("1 file changed")
+    refine = record["result"]["refine"]
+    assert refine["study_edited"] is True and refine["refined_chars"] > 0 and refine["study_exit"] == "ok"
+    # The task's session is the doing step's, never the study's: a resume continues the work.
+    assert record["session"] and record["session"] != refine["study_session"]
+    # Every `puffin exec` the runner starts is told not to refine again on its own.
+    seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
+    assert seen and all(entry["DREAMFERENCE_PUFFIN_REFINE"] == "off" for entry in seen)
+    text = NightShiftReport.render(datetime.now().astimezone(), [record], [])
+    assert "- Refine: studied first for" in text and "which was put back" in text
+
+
+def test_refine_follows_the_configured_setting_unless_night_says_otherwise(setup, monkeypatch):
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_REFINE", "on")
+    status, record, _ = refined_run(setup, monkeypatch, {})
+    assert status == "done" and len(calls(setup)) == 2 and "refine" in record["result"]
+    setup["calls"].unlink()
+    status, record, _ = refined_run(setup, monkeypatch, {"refine": False}, task_id="20261001-0100-def")
+    assert status == "done" and len(calls(setup)) == 1 and "refine" not in record["result"]
+    setup["calls"].unlink()
+    monkeypatch.setenv("DREAMFERENCE_PUFFIN_REFINE", "off")
+    status, _, _ = refined_run(setup, monkeypatch, {}, task_id="20261001-0100-ghi")
+    assert status == "done" and len(calls(setup)) == 1
+
+
+def test_a_resumed_task_is_not_studied_again(setup, monkeypatch):
+    monkeypatch.setenv("FAKE_PUFFIN_MODE", "refine")
+    record = queue(setup["night"], setup["repo"])
+    record["session"] = "11111111-2222-3333-4444-555555555555"
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"refine": True}), setup["puffin"],
+                            deadline=time.time() + 60)
+    run.run()
+    only, = calls(setup)
+    assert "resume" in only and "This is the first of two steps" not in only[-1]
 
 
 def test_what_the_test_run_leaves_behind_is_not_committed(setup, monkeypatch):
