@@ -539,6 +539,35 @@ Run on the night of 2026-10-03 for PUFFIN_PROMPT §6.5, which has the full table
 
 ---
 
+## 14. Refine, then fix (`--refine`, 2026-10-07)
+
+**Why.** In the index-on round of 2026-10-06 (17 of 24 resolved), the agent edited a file the reference patch edits in 6 of its 7 failures; what failed was the change. The fix covered the issue's example but not its stated use case (django 15957, a limit "from each category" applied once overall), stopped at direct parents where grandparents also apply (15563), guarded a symptom instead of fixing the rule (scikit-learn 25747, django 16454), or missed a second code path the hidden test checks (13512, the admin's read-only display). A first step that only studies the issue targets these.
+
+**What it does.** `swe-bench run --refine` (a new run only, recorded as `refine` in the manifest) runs each instance in two `puffin exec` sessions in the same container:
+
+1. **Refine** (`REFINE_PROMPT`, at most `REFINE_TIMEOUT_S`, 15 minutes): read, run and test, change nothing under `/testbed`, and write `/puffin-scratch/refined.md` in six sections: intent, requirements as observable results, every code path (by callers and references), edge cases, what must not change, acceptance checks. With the code index the prompt names `code_callers` and `code_refs` for the paths.
+2. The runner records whether the step changed the tree (it is told not to; this is measured), then puts `/testbed` back to the tree the agent started from (`RESET_SCRIPT`: `git read-tree -u --reset` to the recorded base tree, `git clean -fd`), keeping the description.
+3. **Fix** (`FIX_PROMPT`, a new session, the full task timeout): the issue verbatim, then the description, marked as possibly wrong. The issue is authoritative where they disagree; no guard that only hides the symptom; every acceptance check is run before stopping. Nudges apply to this session as before.
+
+The instance's state keeps `refine`: the description (up to 40,000 characters), its size, both steps' times, the first step's outcome and session, whether it changed the tree, and the log offset where the fixing session starts, so the report counts each step's tokens apart. `report` prints a "Refine first" line, and `--against` lists `refine` among the differing fields.
+
+**Measured (2026-10-07, `im-refine`, the 24-instance sample, code index universal, prompt default, masking off): 20 of 24 resolved**, against 17 for `im-index-on`, the same configuration without `--refine`. It resolved every instance `im-index-on` did, plus django 13512, 15957 and 16454. McNemar exact p = 0.250 (95% interval −0.7 to +25.7 points), so one 24-instance pair does not settle it. Against the two index-off rounds: 16 (p = 0.125) and 17 (p = 0.375). Against all eleven earlier rounds of this sample (14 to 17 resolved each), 20 is the highest. 13512 had been resolved in none of them, and 15957 in one.
+
+- **Cost.** Agent time was 6 h 15 min against 3 h 55 min, and the median per instance 16 min 22 s against 4 min 7 s. The first step took 3 h 35 min in all (median 7 min 33 s); the second took 2 h 36 min, a third less than the whole of `im-index-on`. Tokens: 52.0 M in against 46.7 M, and 443 K out against 290 K. **The first step's tokens are undercounted**: 5 of the 24 first steps hit the 15-minute limit, and a stopped session writes no `turn.completed` event, so the log has no usage for them. 4 of those 5 had already written `refined.md`.
+- **The first step changed the tree in 0 of 24.** It named every file the reference patch changes in 22 of 24 instances.
+- **What the description did for the seven earlier failures:**
+  - 15957: captured "a limit per parent" ("3 posts for EACH category, total 9"); resolved.
+  - 16454: required that a user's own parser class be kept; resolved.
+  - 13512: did not name the admin's read-only display. It named the model field's `get_prep_value` as a second path, for the stored JSON, and `display_for_field` calls that path, so it was resolved by that route.
+  - 15563: captured multi-level parent chains; the fix changed the right files and still failed.
+  - 16502: misled the fix. The description required Content-Length to stay, but called `WSGIHandler` "the ONLY WSGI path runserver uses" and placed the fix there; the hidden test drives `basehttp`'s handler with a plain WSGI app.
+  - scikit-learn 25747: wrote down the symptom guard as a requirement ("matching length still overrides").
+  - sympy 13798: raised the number-separator question and answered it the other way from the reference.
+
+  So a wrong description is followed, and the "the issue is authoritative" sentence did not prevent it.
+
+---
+
 ## Sources
 
 Fetched on 2026-10-01.

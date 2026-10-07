@@ -44,6 +44,77 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
   what else uses it and so which tests to run.
 """
 
+# The refine arm (`--refine`) runs two sessions. The first studies the issue and writes a refined
+# description without changing the repository; the second, a fresh session, fixes it with the
+# issue and that description in its prompt. Measured because the default agent's failures were
+# mostly a right file with a wrong or partial fix: an example fixed instead of a requirement, a
+# guard instead of a rule, a second code path never looked at.
+REFINED_FILE: Final[str] = "refined.md"
+
+REFINE_PROMPT: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
+where something is unclear, make the reasonable choice.
+
+This is the first of two steps. Do not fix anything yet: study the issue below and write a precise
+description of the problem for the second step, which will make the fix.
+
+- You may read the code, run it and run the repository's tests. Do not change any file under
+  /testbed: every change there is discarded when this step ends. Put scratch files in /tmp.
+- There is no network.
+{code_index}
+Write the description to {refined_path}, in six sections:
+1. Intent: what the reporter is trying to achieve, from the title and their use case, not only
+   from the example they give.
+2. Requirements: the behaviour the fix must produce, as observable results ("for input X the
+   result is Y"). Never "it no longer raises": say what it returns or prints.
+3. Code paths: every place in the repository that produces the behaviour in question, found by
+   following callers and references, not only the one the example reaches. Name each by file and
+   function.
+4. Edge cases: inputs the example does not cover that the same fix must handle (other types,
+   subclasses, ancestors, empty input, a sibling function with the same flaw).
+5. Must not change: behaviour that other code or the existing tests rely on.
+6. Acceptance checks: commands or short scripts that will show the fix is complete, each with
+   its expected output.
+
+Keep it factual: say what you checked in the code and what you are inferring. When the file is
+written, stop.
+
+Issue:
+{problem_statement}"""
+
+# The first step's code-index sentence: it is there to find every path, not one.
+REFINE_CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools: `code_search` with the issue's words, then
+  `code_callers` and `code_refs` to find every other path that produces the same behaviour.
+"""
+
+FIX_PROMPT: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
+where something is unclear, make the reasonable choice.
+
+- Fix the issue below by changing the repository's source files.
+- You may run the repository's tests. There is no network.
+- Do not commit. Your changes are collected when you stop.
+{code_index}- A first step studied the issue and wrote the refined description that follows it. Use it to
+  see the whole problem, but the issue is authoritative: where the two disagree, follow the issue.
+- Fix the cause, not the symptom: no guard (a length check, a try/except, an early return) that
+  only hides the reported failure.
+- Before you stop, run every acceptance check in the refined description and confirm that each
+  gives its expected result.
+
+Issue:
+{problem_statement}
+
+Refined description (written by the first step; it may be incomplete or wrong):
+{refined}"""
+
+# What the second step is told when the first wrote nothing.
+NO_REFINED: Final[str] = "(The first step wrote no description: work from the issue alone.)"
+
+# The first step's own time limit; the second then gets the full task timeout, as an instance of
+# the arm without it does, so the two arms' fixing steps have the same budget.
+REFINE_TIMEOUT_S: Final[int] = 900
+
+# Kept in the instance's state; a longer description is cut there, never in the prompt.
+REFINED_STATE_LIMIT: Final[int] = 40000
+
 # The image's default PATH puts conda's *base* environment first, which has none of the
 # repository's dependencies; `conda activate testbed` only happens in the grading script. Without
 # this the agent's `python -m pytest` fails on imports and it spends its budget on a non-problem.
@@ -101,6 +172,17 @@ git read-tree HEAD
 [ "$tree" != "$(cat "$SCRATCH/base-tree")" ]
 """
 
+# Puts the working tree back to the tree the agent started from, between the refine arm's two
+# steps: whatever the first step changed is discarded, files it added included. The index goes
+# back to HEAD afterwards, as PREPARE_SCRIPT leaves it.
+RESET_SCRIPT: Final[str] = r"""
+cd "${TESTBED:-/testbed}" || exit 3
+base=$(cat "$SCRATCH/base-tree")
+git read-tree -u --reset "$base" || exit 4
+git clean -fdq || exit 5
+git read-tree HEAD
+"""
+
 # Writes the agent's changes as a patch against the tree it started from. Binary files are left
 # out and named: a "Binary files differ" stub makes `git apply` reject the whole patch.
 COLLECT_SCRIPT: Final[str] = r"""
@@ -125,7 +207,7 @@ class SweBenchInstanceRun:
                  settings: "swe_bench_settings.SweBenchSettings", runtime_dir: Path, model_url: str,
                  deadline: float, extra_env: Optional[Dict[str, str]] = None,
                  code_index: Optional[Dict[str, Any]] = None,
-                 extra_mounts: Optional[List[str]] = None) -> None:
+                 extra_mounts: Optional[List[str]] = None, refine: bool = False) -> None:
         """
         Args:
             store: The run's files.
@@ -141,6 +223,7 @@ class SweBenchInstanceRun:
             code_index: How the container is given a code index (`mounts`, `env`, `path`, and
                 the index's `record`); None for the arm without one.
             extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
+            refine: Run the refine arm's two steps: study and describe, then fix.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -155,6 +238,7 @@ class SweBenchInstanceRun:
         self.extra_env = dict(extra_env or {})
         self.code_index = code_index
         self.extra_mounts: List[str] = list(extra_mounts or [])
+        self.refine = refine
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -196,6 +280,39 @@ class SweBenchInstanceRun:
         """
         return PROMPT.format(problem_statement=problem_statement,
                              code_index=CODE_INDEX_HINT if code_index else "")
+
+    @classmethod
+    def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False) -> str:
+        """
+        Builds the refine arm's first prompt: study the issue and write the refined description.
+
+        Args:
+            problem_statement: The dataset row's `problem_statement`.
+            code_index: Whether the agent has the code index, which adds `REFINE_CODE_INDEX_HINT`.
+
+        Returns:
+            str: The prompt.
+        """
+        return REFINE_PROMPT.format(problem_statement=problem_statement,
+                                    refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
+                                    code_index=REFINE_CODE_INDEX_HINT if code_index else "")
+
+    @classmethod
+    def compose_fix_prompt(cls, problem_statement: str, refined: str, code_index: bool = False) -> str:
+        """
+        Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
+
+        Args:
+            problem_statement: The dataset row's `problem_statement`.
+            refined: What the first step wrote; empty when it wrote nothing.
+            code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
+
+        Returns:
+            str: The prompt.
+        """
+        return FIX_PROMPT.format(problem_statement=problem_statement,
+                                 refined=refined.strip() or NO_REFINED,
+                                 code_index=CODE_INDEX_HINT if code_index else "")
 
     def run(self) -> str:
         """
@@ -250,12 +367,25 @@ class SweBenchInstanceRun:
                               f"{(prepared.stderr or prepared.stdout).strip()[-300:]}")
             return "error", ""
 
-        outcome = self._exec(self.compose_prompt(self.problem_statement, bool(self.code_index)), resume=False)
+        if self.refine:
+            refined, problem = self._refine(state)
+            if problem:
+                self.notes.append(problem)
+                return "error", ""
+            if self.stop_event.is_set():
+                return "interrupted", ""
+            prompt = self.compose_fix_prompt(self.problem_statement, refined, bool(self.code_index))
+        else:
+            prompt = self.compose_prompt(self.problem_statement, bool(self.code_index))
+        fix_started = time.time()
+        outcome = self._exec(prompt, resume=False)
         while outcome == "ok" and self.nudges_used < self.settings.nudges and not self._changed() \
                 and NightShiftTaskRun.announces_work(self._last_message()):
             self.nudges_used += 1
             outcome = self._exec(NUDGE, resume=True)
         state["exec"] = outcome
+        if self.refine:
+            state["refine"]["fix_s"] = int(time.time() - fix_started)
 
         if self.stop_event.is_set():
             return "interrupted", ""
@@ -275,6 +405,48 @@ class SweBenchInstanceRun:
         if outcome == "error":
             return "error", ""
         return ("stalled" if NightShiftTaskRun.announces_work(self._last_message()) else "empty"), ""
+
+    def _refine(self, state: Dict[str, Any]) -> tuple:
+        """
+        The refine arm's first step: a session that studies the issue and writes the refined
+        description, under its own time limit. The tree is then put back as it was, and the
+        second step's clock starts. Records the step in `state["refine"]`.
+
+        Returns:
+            tuple: `(refined, problem)`, the description (empty when none was written) and why
+            the instance cannot go on, or None.
+        """
+        started = time.time()
+        task_deadline = self.deadline
+        self.deadline = min(task_deadline, started + REFINE_TIMEOUT_S)
+        try:
+            outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index)),
+                                 resume=False)
+        finally:
+            self.deadline = task_deadline
+        record: Dict[str, Any] = {"refine_exec": outcome, "refine_s": int(time.time() - started),
+                                  "refine_session": self.session}
+        state["refine"] = record
+        if self.stop_event.is_set():
+            return "", None
+        if outcome == "timeout":
+            # The container was stopped to end the step; the second step needs it running.
+            SweBenchDocker.run(["start", self.container], timeout=120)
+        refined = self._read(self.scratch / REFINED_FILE)
+        record["refined_bytes"] = len(refined.encode())
+        record["refined"] = refined[:REFINED_STATE_LIMIT]
+        # Measured, not assumed: the first step was told not to edit, and may have.
+        record["refine_edited"] = self._changed()
+        reset = self._script(RESET_SCRIPT, timeout=600)
+        if reset.returncode != 0:
+            return refined, f"resetting /testbed after the refine step failed ({reset.returncode}): " \
+                            f"{(reset.stderr or reset.stdout).strip()[-300:]}"
+        # Where the second step's events start in the log, so the report can split the tokens.
+        record["log_offset"] = self.log_path.stat().st_size if self.log_path.exists() else 0
+        # The second step is a new session with the full task budget, like the arm without refine.
+        self.session = None
+        self.deadline = time.time() + self.settings.task_timeout_s
+        return refined, None
 
     # -- steps ---------------------------------------------------------------------------------
 
