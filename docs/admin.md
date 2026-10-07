@@ -353,6 +353,7 @@ Trace one real ling session and list every network destination and process, with
 | Option | Description |
 |---|---|
 | `--tui` | Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte) |
+| `--web` | Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
 | `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
 
