@@ -545,7 +545,7 @@ Run on the night of 2026-10-03 for PUFFIN_PROMPT §6.5, which has the full table
 
 **What it does.** `swe-bench run --refine` (a new run only, recorded as `refine` in the manifest) runs each instance in two `puffin exec` sessions in the same container:
 
-1. **Refine** (`REFINE_PROMPT`, at most `REFINE_TIMEOUT_S`, 15 minutes): read, run and test, change nothing under `/testbed`, and write `/puffin-scratch/refined.md` in six sections: intent, requirements as observable results, every code path (by callers and references), edge cases, what must not change, acceptance checks. With the code index the prompt names `code_callers` and `code_refs` for the paths.
+1. **Refine** (`REFINE_PROMPT`, at most `REFINE_TIMEOUT_S`: 15 minutes in the 24-task round; since 2026-10-07 `None`, the task's own limit, to match the product's uncapped study): read, run and test, change nothing under `/testbed`, and write `/puffin-scratch/refined.md` in six sections: intent, requirements as observable results, every code path (by callers and references), edge cases, what must not change, acceptance checks. With the code index the prompt names `code_callers` and `code_refs` for the paths.
 2. The runner records whether the step changed the tree (it is told not to; this is measured), then puts `/testbed` back to the tree the agent started from (`RESET_SCRIPT`: `git read-tree -u --reset` to the recorded base tree, `git clean -fd`), keeping the description.
 3. **Fix** (`FIX_PROMPT`, a new session, the full task timeout): the issue verbatim, then the description, marked as possibly wrong. The issue is authoritative where they disagree; no guard that only hides the symptom; every acceptance check is run before stopping. Nudges apply to this session as before.
 

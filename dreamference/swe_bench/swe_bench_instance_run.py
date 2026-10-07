@@ -95,7 +95,9 @@ NO_REFINED: Final[str] = RefinePrompt.subject(NO_REFINED_PIECE, "issue")
 
 # The first step's own time limit; the second then gets the full task timeout, as an instance of
 # the arm without it does, so the two arms' fixing steps have the same budget.
-REFINE_TIMEOUT_S: Final[int] = 900
+# The study step's own limit, or None for the task's limit (the product's study has none; the
+# user chose that on 2026-10-07, so the benchmark measures it bounded only by the task timeout).
+REFINE_TIMEOUT_S: Final[Optional[int]] = None
 
 # Kept in the instance's state; a longer description is cut there, never in the prompt.
 REFINED_STATE_LIMIT: Final[int] = 40000
@@ -403,7 +405,8 @@ class SweBenchInstanceRun:
         """
         started = time.time()
         task_deadline = self.deadline
-        self.deadline = min(task_deadline, started + REFINE_TIMEOUT_S)
+        if REFINE_TIMEOUT_S is not None:
+            self.deadline = min(task_deadline, started + REFINE_TIMEOUT_S)
         try:
             outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index)),
                                  resume=False)

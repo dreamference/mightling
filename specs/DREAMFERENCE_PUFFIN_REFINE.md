@@ -131,7 +131,7 @@ The thread that does the task is therefore fresh in the benchmark's sense: at th
 
 ## 6. Limits and open questions
 
-- **The benchmark's study step has a 15-minute limit; the product's has none.** 5 of 24 study steps hit that limit (4 had written their description). The 100-task pair, as run today, measures the capped form. If the product's form is what is to be decided, the arm should run with `REFINE_TIMEOUT_S` raised; that is the user's call, and nothing here changes the benchmark.
+- **The benchmark's study step had a 15-minute limit; the product's has none.** Since 2026-10-07 (the user's decision of no cap) `REFINE_TIMEOUT_S` is `None`: the study is bounded only by the task's 45-minute limit, and the fix step still gets a fresh one. Before that: 5 of 24 study steps hit that limit (4 had written their description). The 100-task pair, as run today, measures the capped form. If the product's form is what is to be decided, the arm should run with `REFINE_TIMEOUT_S` raised; that is the user's call, and nothing here changes the benchmark.
 - **The study step runs read-only in `exec` and the TUI.** A test suite that must write (caches, build directories, `/tmp` if the sandbox does not allow it) fails there; the prompt says that is expected. The benchmark's and Night Shift's study steps may write, because their trees are put back. Whether the read-only form studies as well is not measured.
 - **Read-only also means no network** for the study step, whatever the `/airgapped` level.
 - **Every first prompt is studied, a question included.** "What does this repository do?" as the first message costs a study step. The hook cannot tell a question from a task; `puffin --no-refine` is the way out for such a session.
