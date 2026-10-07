@@ -1,0 +1,32 @@
+# `ling web`, the Mightling web server (specs/DREAMFERENCE_MIGHTLING_ASK.md §4): serves the Mightling
+# UI to a browser and relays it to the user's `ling app-server` through the bridge policy, with a
+# credential on every request, loopback included. A crate of its own so its tests run without
+# compiling the Codex workspace (`cargo test` in a copy of this folder beside `../airgapped`); the
+# launcher (`../src/lib.rs`) only routes `ling web …` here and supplies the composed prompts.
+# Versions are the Codex workspace's, so building inside it adds no second copy of any crate.
+[package]
+name = "ling-web-server"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_web_server"
+path = "src/lib.rs"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query", "form"] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
+ling-airgapped = { path = "../airgapped" }
+rand = "0.9"
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.182"
+
+[dev-dependencies]
+tower = { version = "0.5", default-features = false, features = ["util"] }

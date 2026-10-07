@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pair device</title>
+<link rel="stylesheet" href="/pair.css">
+</head>
+<body>
+<main>
+<h1>Pair this device with Mightling</h1>
+<p>On the Mightling machine, run <code>ling web pair</code> and type the eight-digit code it shows. A code works once, for ten minutes.</p>
+<!--MESSAGE-->
+<form method="post" action="/pair">
+<label for="code">Pairing code</label>
+<input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{8}" maxlength="8" required autofocus>
+<label for="name">Name for this device</label>
+<input id="name" name="name" maxlength="64" placeholder="My phone">
+<button type="submit">Pair</button>
+</form>
+</main>
+</body>
+</html>
