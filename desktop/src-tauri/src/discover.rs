@@ -48,7 +48,16 @@ fn local_web_ui_answers() -> bool {
 /// The decision, with the browse's answers given.
 pub fn decide(remembered: Option<Node>, found: Vec<Node>) -> Upstream {
     if let Some(remembered) = remembered {
-        let seen = found.iter().find(|node| !remembered.node.is_empty() && node.node == remembered.node);
+        // An id is only what an advert claims. With two claimants the one at the remembered
+        // address is the node; if neither is there, the remembered address is used rather than
+        // a guess (security review 2026-10, as the launcher does).
+        let same: Vec<&Node> =
+            found.iter().filter(|node| !remembered.node.is_empty() && node.node == remembered.node).collect();
+        let seen = same
+            .iter()
+            .find(|node| node.address == remembered.address)
+            .copied()
+            .or_else(|| if same.len() == 1 { same.first().copied() } else { None });
         return match seen {
             Some(node) => web_ui(node),
             // Nothing answered: its last address. Others answered but not this one: still the
@@ -177,6 +186,16 @@ mod tests {
         assert_eq!(decide(Some(remembered.clone()), Vec::new()), Upstream::Node("192.168.50.105:3000".to_string()));
         let other = node("spark-2", "2222", "192.168.50.106");
         assert_eq!(decide(Some(remembered), vec![other]), Upstream::Node("192.168.50.105:3000".to_string()));
+    }
+
+    #[test]
+    fn a_second_advert_claiming_the_remembered_id_is_not_followed() {
+        let remembered = node("spark-1", "1111", "192.168.50.105");
+        let impostor = node("spark-1", "1111", "192.168.50.66");
+        let real = node("spark-1", "1111", "192.168.50.105");
+        assert_eq!(decide(Some(remembered.clone()), vec![impostor.clone(), real]), Upstream::Node("192.168.50.105:3000".to_string()));
+        let other = node("spark-1", "1111", "192.168.50.67");
+        assert_eq!(decide(Some(remembered), vec![impostor, other]), Upstream::Node("192.168.50.105:3000".to_string()));
     }
 
     #[test]

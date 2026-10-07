@@ -17,8 +17,11 @@ from dreamference.node.node_browser import NodeBrowser
 
 KEY_NAME: Final[str] = "puffin-node_ed25519"
 
-# What the restricted key may not do, beside running anything but the forced command.
-KEY_RESTRICTIONS: Final[str] = "no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc"
+# What the restricted key may not do, beside running anything but the forced command. `restrict`
+# (OpenSSH 7.2+; every GB10 OS has 9.x) turns off every capability, including ones a future
+# OpenSSH adds and tunnel forwarding, which the named options below do not cover; they stay so a
+# reader sees them (security review 2026-10).
+KEY_RESTRICTIONS: Final[str] = "restrict,no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc"
 
 # The marker that tells Puffin's lines in `authorized_keys` from the user's own.
 KEY_COMMENT: Final[str] = "puffin-node"

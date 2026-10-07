@@ -410,7 +410,7 @@ def test_the_authorised_line_forces_one_command_and_forbids_the_rest():
     from dreamference.node import NodePairing
     line = NodePairing.authorized_line(PUBLIC_KEY, "/home/u/.local/bin/puffin-admin node serve-job --key abc")
     assert line.startswith('command="/home/u/.local/bin/puffin-admin node serve-job --key abc",')
-    for restriction in ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding", "no-user-rc"):
+    for restriction in ("restrict", "no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding", "no-user-rc"):
         assert restriction in line.split(" ssh-ed25519 ")[0]
     assert line.endswith(" puffin-node")                       # the sender's own comment is not kept
     assert "owner@laptop" not in line
