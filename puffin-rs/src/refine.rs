@@ -440,7 +440,8 @@ pub fn around_exec(command: &Command, original: &[OsString], prepared: Vec<OsStr
     let Some(study) = study_args(command, original, &out, false) else { return with_prompt(prepared, &position, &task) };
     let dir = crate::code_index::session_dir(&user_args);
     let before = tree_fingerprint(&dir);
-    eprintln!("refine: studying the task first, in a separate read-only session ({}); then a fresh session does it.", source_now());
+    let kind = if has_full_access(&user_args) { "separate session with Full Access" } else { "separate read-only session" };
+    eprintln!("refine: studying the task first, in a {kind} ({}); then a fresh session does it.", source_now());
     // The study step's stdout goes to this process's stderr: stdout is the doing step's alone.
     let stdout = std::io::stderr().as_fd().try_clone_to_owned().map_or_else(|_| Stdio::inherit(), Stdio::from);
     let result = run_study(&study, &task, &out, stdout, Stdio::inherit());
