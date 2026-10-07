@@ -129,3 +129,30 @@ The patches' added lines name the launcher's crates (`puffin_launcher::…`, `pu
 - **The web and code crates' tests.**
 - **A full build of `mling`** in a separate export and target directory.
 - **A migration dry run** of the built binary in a scratch HOME.
+
+## 8. Branches started before the rename
+
+**The problem.** Work branched from `main` before the rename (the Windows client, the x86 and macOS
+clients, the SCIP-only index, the refine-then-fix benchmark, the validation and names-stripped
+runs) still says Puffin. `scripts/rename_mightling.py` is the rename itself, kept for exactly this.
+
+**Merge those branches into `main` first, as they are,** then bring `main` into
+`rename/mightling`:
+
+```bash
+git checkout rename/mightling
+git merge main                      # git follows the renamed folders; conflicts are mostly names
+# resolve each conflict by taking the incoming change, then rename what the merge brought in:
+.venv/bin/python scripts/rename_mightling.py --paths $(git diff --name-only ORIG_HEAD HEAD)
+git grep -n -i puffin -- ':!codex' ':!specs/DREAMFERENCE_RELEASE_1.4.*'   # read every hit
+```
+
+**What the script does and does not touch:**
+- **A run over a file it already renamed changes nothing.** That's checked with `--dry` over the whole tree.
+- **Lines about the rename itself are left alone,** as are the kept internal names (§2) and the files whose job is to know the old names:
+  - the migration;
+  - the transition assets in `release.yml` and `install.sh`;
+  - this spec and the release notes.
+- **New `puffin_*` keys or `PUFFIN_*` variables** an incoming branch adds become `mightling_*` / `MIGHTLING_*`. New crates become `mling-*`.
+
+**Then run all of §7 again.**
