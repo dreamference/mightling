@@ -14,7 +14,7 @@
   <text x="410" y="24" text-anchor="middle" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" fill="#8B95A5">your GB10 · no cloud · no account</text>
 
   <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'DejaVu Sans Mono',monospace" font-size="15">
-    <text x="24" y="74"><tspan fill="#FF7A47">$</tspan><tspan fill="#F4F7FB"> curl -fsSL …/puffin/releases/latest/download/install.sh | bash</tspan></text>
+    <text x="24" y="74"><tspan fill="#FF7A47">$</tspan><tspan fill="#F4F7FB"> curl -fsSL …/puffin-ai/releases/latest/download/install.sh | bash</tspan></text>
     <text x="24" y="106"><tspan fill="#FF7A47">$</tspan><tspan fill="#F4F7FB"> puffin-admin server start</tspan><tspan fill="#5C6878">        # the model, on your machine</tspan></text>
     <text x="24" y="138"><tspan fill="#FF7A47">$</tspan><tspan fill="#F4F7FB"> cd ~/your-project &amp;&amp; puffin "fix the flaky login test"</tspan></text>
     <text x="24" y="182"><tspan fill="#FF7A47">$</tspan><tspan fill="#F4F7FB"> puffin-admin audit egress</tspan><tspan fill="#5C6878">        # what left the machine?</tspan></text>

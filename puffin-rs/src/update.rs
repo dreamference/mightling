@@ -25,7 +25,7 @@ use sha2::Digest;
 use sha2::Sha256;
 
 /// Where releases are published. `PUFFIN_RELEASE_REPO` overrides it, e.g. for a fork.
-pub const RELEASE_REPO: &str = "dreamference/puffin";
+pub const RELEASE_REPO: &str = "dreamference/puffin-ai";
 
 /// The Puffin release this binary was built as. The release workflow sets `PUFFIN_VERSION` when it
 /// builds; a local `puffin-admin codex build` does not, and such a binary counts as a source build.

@@ -10,12 +10,12 @@
 **A fully local alternative to cloud coding agents.** A coding agent, a chat assistant and a desktop
 app, running entirely on your own GB10. No cloud. No account. No API bill. No telemetry.
 
-[**Install**](#install) · [**Try it**](#try-these-first) · [**Proof**](#-your-code-never-leaves-your-desk) · [**Docs**](docs/getting-started.md) · [**Releases**](https://github.com/dreamference/puffin/releases)
+[**Install**](#install) · [**Try it**](#try-these-first) · [**Proof**](#-your-code-never-leaves-your-desk) · [**Docs**](docs/getting-started.md) · [**Releases**](https://github.com/dreamference/puffin-ai/releases)
 
-[![Latest release](https://img.shields.io/github/v/release/dreamference/puffin?label=release&color=FF6B35)](https://github.com/dreamference/puffin/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/dreamference/puffin-ai?label=release&color=FF6B35)](https://github.com/dreamference/puffin-ai/releases/latest)
 [![Telemetry: none](https://img.shields.io/badge/telemetry-none-242A32)](docs/privacy.md)
 [![Runs on any GB10](https://img.shields.io/badge/runs%20on-any%20GB10%20%C2%B7%20128%20GB-555555)](#runs-on-every-gb10)
-[![GitHub stars](https://img.shields.io/github/stars/dreamference/puffin?style=flat&color=FFB400)](https://github.com/dreamference/puffin/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/dreamference/puffin-ai?style=flat&color=FFB400)](https://github.com/dreamference/puffin-ai/stargazers)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue)](LICENSE)
 
 <img src="images/puffin-hero.svg" alt="Install Puffin, start the model, run the agent, then audit what left the machine: every connection on 127.0.0.1, no DNS queries" width="760">
@@ -29,7 +29,7 @@ app, running entirely on your own GB10. No cloud. No account. No API bill. No te
 ## Install
 
 ```bash
-curl -fsSL https://github.com/dreamference/puffin/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/dreamference/puffin-ai/releases/latest/download/install.sh | bash
 ```
 
 Then start the model and point Puffin at a project:
@@ -46,7 +46,7 @@ each `sudo` command before running it. [Read it first](install.sh) if you like.
 Already using a coding agent? Paste this into it:
 
 ```text
-Install Puffin on this GB10 from https://github.com/dreamference/puffin (one-line installer in the README), then run puffin-admin server start.
+Install Puffin on this GB10 from https://github.com/dreamference/puffin-ai (one-line installer in the README), then run puffin-admin server start.
 ```
 
 ## Try these first
@@ -169,7 +169,7 @@ vendor offers it), Docker with the NVIDIA Container Toolkit, Python 3 and Git. O
 **Does anything ever reach the internet?** Only what you or the agent asks for, such as a web search.
 The full list is below, and `/airgapped on` turns all of it off.
 
-**I found a bug, or something the egress audit flagged.** Please [open an issue](https://github.com/dreamference/puffin/issues).
+**I found a bug, or something the egress audit flagged.** Please [open an issue](https://github.com/dreamference/puffin-ai/issues).
 Reports from the audit are the most valuable ones we get.
 
 <details>
@@ -226,7 +226,7 @@ set up in [Get started](docs/getting-started.md).
 <summary><b>Build from source</b></summary>
 
 ```bash
-git clone --recurse-submodules https://github.com/dreamference/puffin.git puffin
+git clone --recurse-submodules https://github.com/dreamference/puffin-ai.git puffin
 cd puffin
 python3 -m venv .venv && .venv/bin/pip install -e .
 export PATH="$PWD/.venv/bin:$PATH"   # the agent runs puffin-admin, so keep it on PATH
@@ -246,15 +246,15 @@ and [How it works](docs/architecture.md) explains the pieces.
 
 ## Star history
 
-<a href="https://star-history.com/#dreamference/puffin&Date"><img src="https://api.star-history.com/svg?repos=dreamference/puffin&type=Date" alt="Star history of dreamference/puffin" width="600"></a>
+<a href="https://star-history.com/#dreamference/puffin-ai&Date"><img src="https://api.star-history.com/svg?repos=dreamference/puffin-ai&type=Date" alt="Star history of dreamference/puffin" width="600"></a>
 
 ## Spread the word
 
 Know someone with a DGX Spark? Send them this page. If you believe code should stay on the desk
-it was written on, **[star the repo](https://github.com/dreamference/puffin/stargazers)**: it's how
+it was written on, **[star the repo](https://github.com/dreamference/puffin-ai/stargazers)**: it's how
 other GB10 owners find Puffin.
-[Share on X](https://x.com/intent/post?text=Private%20AI%20coding%20agent%20that%20runs%20entirely%20on%20my%20DGX%20Spark.%20No%20cloud%2C%20no%20account%2C%20no%20telemetry.&url=https%3A%2F%2Fgithub.com%2Fdreamference%2Fpuffin)
-· [Share on LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fdreamference%2Fpuffin)
+[Share on X](https://x.com/intent/post?text=Private%20AI%20coding%20agent%20that%20runs%20entirely%20on%20my%20DGX%20Spark.%20No%20cloud%2C%20no%20account%2C%20no%20telemetry.&url=https%3A%2F%2Fgithub.com%2Fdreamference%2Fpuffin-ai)
+· [Share on LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fdreamference%2Fpuffin-ai)
 
 Issues and pull requests are welcome, especially anything the egress audit turns up.
 
