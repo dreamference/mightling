@@ -43,7 +43,7 @@ home `~/.mightling`, crates `ling-*`). Until the rename lands, read `puffin` for
   `ling-code` covers when the folder is a git repository with a code index (§5.2).
 - Multi-user permissions. Mightling is one person's machine; every collection is visible to that
   person's sessions and web UI (§10.3 for remote clients).
-- OCR of scanned documents and images (Phase 3, §13).
+- OCR of scanned documents and images (Phase 2, §13; RapidOCR, decided 2026-10-07).
 
 ## 3. User stories
 
@@ -272,8 +272,8 @@ other launcher settings.
 |---|---|---|
 | 0 | Measurements: PDFium text quality vs the Python reference (PyMuPDF) on the eval PDFs; the two embedding candidates' quality, speed and memory on 4 cores of the GB10 and on an Apple Silicon laptop; chunk-size sweep | Choices recorded here with numbers |
 | 1 | `ling-docs` with text/Markdown/PDF; collections; hybrid search; CLI; MCP tools; prompt block; admission; egress scenario | §12 acceptance on text + PDF |
-| 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening | Same, all formats |
-| 3 | OCR for scanned PDFs and images (Tesseract, sandboxed, opt-in per collection), XLSX, per-collection session scoping if wanted | OCR recall measured on scanned fixtures |
+| 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening; **OCR of scanned PDFs and images with RapidOCR** (Apache-2.0, its PP-OCR ONNX models, CPU, sandboxed); pages with low recognition confidence queued for **Qwen3.8's vision** in Night Shift's idle hours, and any page read by Qwen3.8 on demand when the user asks about it | Same, all formats; OCR recall measured on scanned fixtures |
+| 3 | XLSX; anything left from Phase 2 | Same |
 
 Phase 1 depends on nothing in the Onyx-retirement plan; the Ask threads and web UI consume it when
 they land.
@@ -288,7 +288,7 @@ they land.
    sandboxed reading). `~/Downloads` in particular holds installers, archives and disk images:
    files of types the index doesn't read are skipped without being opened, and the first index
    of both runs in the background under the shared memory budget.
-2. Should a collection be searchable from every session, or only from sessions in chosen folders?
-3. Is OCR (Phase 3) wanted early, i.e. are scanned documents a common case?
+2. ~~Visibility~~ **Decided 2026-10-07:** every collection is searchable from every session (coding sessions and Ask threads alike).
+3. ~~OCR~~ **Decided 2026-10-07:** OCR moves to Phase 2 with **RapidOCR** (Apache-2.0 code and models; small ONNX models on the CPU). Tesseract was the alternative; Surya was set aside because its weights are free only below $5M of funding or revenue, which every larger customer would inherit. Qwen3.8 (the served model has a vision encoder) handles the hard pages overnight and on demand, so no larger OCR model is downloaded. Phase 0 measures RapidOCR on the scanned fixtures, against Tesseract as a reference.
 4. Languages: English-only embeddings are smaller and faster; a multilingual model costs speed.
    Which languages do the user's documents use?
