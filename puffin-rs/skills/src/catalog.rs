@@ -778,7 +778,8 @@ mod tests {
     }
 
     fn trust(fixture: &Fixture, root: &Path) {
-        let config = format!("[projects.\"{}\"]\ntrust_level = \"trusted\"\n", root.display());
+        // A literal string: a Windows path's backslashes are not TOML escapes there.
+        let config = format!("[projects.'{}']\ntrust_level = \"trusted\"\n", root.display());
         std::fs::write(fixture.codex_home.join("config.toml"), config).unwrap_or_default();
     }
 

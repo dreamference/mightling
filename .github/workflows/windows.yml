@@ -76,6 +76,9 @@ jobs:
     env:
       # Compiled into the launcher, so `puffin update` can tell whether a newer release exists.
       PUFFIN_VERSION: ${{ inputs.version }}
+      # The builder prints emoji, which the runner's cp1252 console cannot encode.
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - name: Long paths
         run: git config --global core.longpaths true

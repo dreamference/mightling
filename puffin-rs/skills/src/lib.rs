@@ -538,7 +538,7 @@ mod tests {
         let lines = start(&machine, false, "t2").lines;
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with("Skills: 1 item was found under a from-* name that puffin did not put there; moved to "), "{lines:?}");
-        assert!(lines[0].ends_with("skills/.quarantine/t2"), "{lines:?}");
+        assert!(lines[0].replace('\\', "/").ends_with("skills/.quarantine/t2"), "{lines:?}");
         assert!(fixture.codex_home.join("skills/.quarantine/t2/from-claude/planted/SKILL.md").is_file());
         // A planted skill is never offered, even before the rebuild removes it.
         let plan = catalog::plan(&machine, &Settings::default());

@@ -48,8 +48,10 @@ impl Source {
         if target.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
             return false;
         }
+        let target = plain_path(target);
+        let target = target.as_path();
         match self {
-            Source::Folder(folder) => target.starts_with(folder),
+            Source::Folder(folder) => target.starts_with(plain_path(folder)),
             Source::AnyRepository(folder) => {
                 let wanted: Vec<_> = Path::new(folder).components().collect();
                 let parts: Vec<_> = target.components().collect();
@@ -133,7 +135,8 @@ fn holds_exactly(folder: &Path, set: &LinkSet) -> bool {
         let Ok(target) = read_link(&entry.path()) else { return false };
         found.insert(entry.file_name().to_string_lossy().into_owned(), target);
     }
-    found == set.links
+    let wanted: BTreeMap<String, PathBuf> = set.links.iter().map(|(name, target)| (name.clone(), plain_path(target))).collect();
+    found == wanted
 }
 
 /// Moves to `quarantine` everything at `folder` that the launcher would not have put there: the
