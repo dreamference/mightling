@@ -779,3 +779,12 @@ Built on one GB10 with no second machine, no root and no Mac or Windows machine.
 
 **Not run:** anything between two machines, a real `node sync-model`, and a real hand-off over SSH. The launcher change is in the build of `258c3b5` (2026-10-03): `ling night --help` there lists `/night add [--test "<cmd>"] [--on <node>] <task>`; no task was queued with `--on`, since there is no second node.
 
+
+### 18.9 Added on 2026-10-07: `/node` in the TUI
+
+`/node provision [host…]`, `/node add <name>`, `/node list`, `/node status [<name>]` and `/node remove <name>` do what `ling-admin node …` does, without leaving `ling`; `/node` alone prints a short help. The command is the TUI's and never reaches the model, and no turn starts. Patch `0025-node-slash-command` (3,382 bytes; `0024` is left to Windows Phase 2) adds the variant, its description, two capability lists, two dispatch arms that send an app event, and that event's arm, which suspends the TUI with `Tui::with_restored` (the external editor's mechanism) and calls `ling_launcher::node_command`. That module (`ling-rs/src/node_command.rs`) finds `ling-admin` as the launcher's links do (`~/.local/bin/ling-admin`, then `PATH`), puts the terminal in cooked mode (`with_restored` keeps raw mode, in which `getpass` and SSH's prompt never see the end of a line), runs `ling-admin node …` with the terminal's own stdin, stdout and stderr, outside the agent's sandbox, waits for Enter, and restores the terminal. The conversation keeps one line, `node <args>: done (exit 0)` or `failed (exit N)`; nothing the command prints or is typed at its prompts, a password included, passes through the TUI, the session, its history or its rollout.
+
+- **At `/airgapped on`** it runs, after printing `airgapped is on: /node talks to machines on your local network only` (kept in the history too); the user trusts the local network. AIRGAPPED §5.2 records the exception.
+- **Without a terminal** (the app server, `ling exec`) it refuses and says to run `ling-admin node …` in a shell. Without `ling-admin` it says so. `add` and `remove` with no name are refused before anything runs; every other argument is `ling-admin`'s to judge.
+- **Not available during a turn** (it takes the terminal), and queued behind one like `/model`. No subcommand completion: the popup lists `/node` with its description only.
+- `node provision` itself comes from the fleet/provision branch; until it is merged `ling-admin` answers `/node provision` with its own usage error.

@@ -1,0 +1,55 @@
+diff --git a/codex-rs/tui/src/app/event_dispatch.rs b/codex-rs/tui/src/app/event_dispatch.rs
+--- a/codex-rs/tui/src/app/event_dispatch.rs
++++ b/codex-rs/tui/src/app/event_dispatch.rs
+@@ -2153,2 +2153,6 @@
+             }
++            AppEvent::LingNode(args, thread_id) => {
++                let lines = match ling_launcher::node_command::plan(&args, thread_id) { Ok(run) => tui.with_restored(|| run.execute()).await, Err(lines) => lines };
++                self.chat_widget.add_plain_history_lines(lines.into_iter().map(ratatui::text::Line::from).collect());
++            }
+             AppEvent::RefreshWindowsSandbox { thread_id } => {
+diff --git a/codex-rs/tui/src/app_event.rs b/codex-rs/tui/src/app_event.rs
+--- a/codex-rs/tui/src/app_event.rs
++++ b/codex-rs/tui/src/app_event.rs
+@@ -1486,2 +1486,5 @@
+ 
++    /// Mightling: `/node <args>`, run in the terminal while the TUI is suspended.
++    LingNode(String, Option<ThreadId>),
++
+     /// Async update of the current git branch for status line rendering.
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -540,2 +540,3 @@
+             SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command("", &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Node => self.app_event_tx.send(AppEvent::LingNode(String::new(), self.thread_id)),
+             SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, "", matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
+@@ -785,2 +786,3 @@
+             SlashCommand::Night => self.add_plain_history_lines(ling_launcher::night::command(trimmed, &self.config.cwd).into_iter().map(ratatui::text::Line::from).collect()),
++            SlashCommand::Node => self.app_event_tx.send(AppEvent::LingNode(trimmed.to_string(), self.thread_id)),
+             SlashCommand::Airgapped => self.add_plain_history_lines(ling_launcher::airgapped::session_command(self.thread_id, trimmed, matches!(self.config.permissions.permission_profile(), PermissionProfile::Disabled)).into_iter().map(ratatui::text::Line::from).collect()),
+@@ -1279,2 +1281,3 @@
+             | SlashCommand::Tui
++            | SlashCommand::Node
+             | SlashCommand::Pets => QueueDrain::Stop,
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -46,2 +46,3 @@
+     Night,
++    Node,
+     Agents,
+@@ -142,2 +143,3 @@
+             SlashCommand::Night => "queue a task for the overnight run",
++            SlashCommand::Node => "provision, pair and check Mightling nodes",
+             SlashCommand::Airgapped => "set how much of the internet this session may use",
+@@ -182,2 +184,3 @@
+                 | SlashCommand::Night
++                | SlashCommand::Node
+                 | SlashCommand::Airgapped
+@@ -271,3 +274,4 @@
+             | SlashCommand::MemoryDrop
+-            | SlashCommand::MemoryUpdate => false,
++            | SlashCommand::MemoryUpdate
++            | SlashCommand::Node => false,
+             SlashCommand::Diff

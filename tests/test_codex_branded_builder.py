@@ -71,8 +71,12 @@ def test_the_patches_stay_small():
     # On 2026-10-05 the user approved a ceiling of 38,500 for the Desktop Work window's hook. Raised
     # to 37,500 on 2026-10-06 for 0023's air-gap check in the app server (1,220 bytes: a dependency
     # line, and a validator on the config's permission constraint that refuses Full Access at `on`
-    # for every client of the app server); 37,288 after.
-    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 37_500
+    # for every client of the app server); 37,288 after. Raised to 41,000 on 2026-10-07 for 0025's
+    # `/node` hooks (3,382 bytes: the variant, its description, two capability lists, two dispatch
+    # arms sending an app event, and the event's arm, which suspends the TUI with `with_restored` and
+    # runs ling-admin node in the terminal); approved by the user on 2026-10-07 up to ~41 KB for
+    # /node; 40,693 after. 0024 is left to Windows Phase 2.
+    assert sum(os.path.getsize(p) for p in CodexBrandedBuilder.patches()) < 41_000
 
 
 def test_the_build_key_changes_with_the_patches(tmp_path):
