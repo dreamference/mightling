@@ -4,6 +4,8 @@
 //! - `setup --number +… [--voice] [--port N] [--dry-run]`: install, register, pair, start (§3, §4.1)
 //! - `status`: what the running bridge reports (`/run/mightling-signal/status.json`)
 //! - `start`, `stop`: the system unit
+//! - `trust`: accept the owner's new safety number after comparing it (§5.3)
+//! - `remove [--dry-run]`: undo setup; the Ask threads stay
 //! - `unit`: print the unit file
 //!
 //! As the bridge's own account (setup runs these through `sudo -u mightling-signal`):
@@ -11,6 +13,7 @@
 //! - `init --state DIR --account +… --node NAME --port N --signal-cli PATH --version V [--env K=V]… [--vision]`
 //! - `pair --state DIR --port N --code CODE`: trade a `ling web pair` code for the device cookie
 //! - `bind --state DIR`: a fresh six-digit code that makes its first sender the owner
+//! - `trust-owner --state DIR`: §5.3 on the bridge's data, with the unit stopped
 
 use std::io::BufRead;
 use std::io::Write;
@@ -29,7 +32,7 @@ use ling_signal::state;
 use ling_signal::state::Config;
 use ling_signal::unit;
 
-const USAGE: &str = "Usage: ling-signal setup --number +NUMBER [--voice] [--port N] [--dry-run] | status | start | stop | unit\n       ling-signal serve --state DIR [--runtime DIR]   (what the system unit runs)";
+const USAGE: &str = "Usage: ling-signal setup --number +NUMBER [--voice] [--port N] [--dry-run] | status | start | stop | trust | remove [--dry-run] | unit\n       ling-signal serve --state DIR [--runtime DIR]   (what the system unit runs)";
 
 fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
@@ -46,6 +49,19 @@ fn main() {
         Some("init") => run_init(&args[1..]),
         Some("pair") => run_pair(&args[1..]),
         Some("bind") => run_bind(&args[1..]),
+        Some("trust-owner") => run_trust_owner(&args[1..]),
+        Some("account") => match Config::load(Path::new(&flag(&args[1..], "--state").unwrap_or_else(|| unit::STATE_DIR.to_string()))) {
+            Ok(config) => {
+                println!("{}", config.account);
+                0
+            }
+            Err(err) => {
+                eprintln!("{err}");
+                1
+            }
+        },
+        Some("trust") => run_trust(),
+        Some("remove") => run_remove(&args[1..]),
         Some("setup") => run_setup(&args[1..]),
         Some("status") => run_status(&args[1..]),
         Some("start") => systemctl(&["enable", "--now", unit::UNIT_NAME]),
@@ -397,4 +413,124 @@ fn run_setup(args: &[String]) -> i32 {
     }
     println!("⚠️  No code arrived in ten minutes. Run `sudo -u {} {} bind` for a new one, then restart the unit.", unit::ACCOUNT, unit::BRIDGE_PATH);
     1
+}
+
+/// The bridge's settings, read through its own account (the state folder is 0700).
+fn bridge_account_of_setup() -> Option<String> {
+    let output = run(&setup::as_bridge(&[unit::BRIDGE_PATH.to_string(), "account".to_string(), "--state".to_string(), unit::STATE_DIR.to_string()]), None).ok()?;
+    let account = output.trim().to_string();
+    setup::valid_number(&account).then_some(account)
+}
+
+fn run_remove(args: &[String]) -> i32 {
+    let arch = std::env::consts::ARCH;
+    // A dry run starts nothing as root: the number is looked up only for a real removal.
+    let dry_run = has(args, "--dry-run");
+    let account = if dry_run { None } else { bridge_account_of_setup() };
+    let plan = setup::remove_plan(arch, account.as_deref());
+    println!("This removes Mightling over Signal from this machine. Your Ask threads stay. It runs:\n");
+    for step in &plan {
+        if !step.what.is_empty() {
+            println!("  • {}", step.what);
+        }
+        println!("      {}", step.display());
+    }
+    if dry_run {
+        println!("\n(A real removal also takes the bridge's number off Signal with `unregister` before deleting its data.)");
+        return 0;
+    }
+    if prompt("\nRemove it? [y/N]").to_ascii_lowercase() != "y" {
+        println!("Nothing was changed.");
+        return 1;
+    }
+    let mut failed = false;
+    for step in &plan {
+        let mut command = step.command.clone();
+        if step.root {
+            command.insert(0, "sudo".to_string());
+        }
+        if let Err(output) = run(&command, None) {
+            eprintln!("⚠️  {} failed:\n{output}", step.display());
+            failed = true;
+        }
+    }
+    if failed { 1 } else { 0 }
+}
+
+/// `trust`, as the user: stops the bridge, runs `trust-owner` as its account, starts it again.
+fn run_trust() -> i32 {
+    if systemctl(&["stop", unit::UNIT_NAME]) != 0 {
+        return 1;
+    }
+    let status = Command::new("sudo")
+        .args(["-u", unit::ACCOUNT, unit::BRIDGE_PATH, "trust-owner", "--state", unit::STATE_DIR])
+        .status()
+        .map(|s| s.code().unwrap_or(1))
+        .unwrap_or(1);
+    let started = systemctl(&["start", unit::UNIT_NAME]);
+    if status == 0 && started == 0 { 0 } else { 1 }
+}
+
+/// §5.3 on the bridge's data: shows the owner's current safety number, and after the user has
+/// compared it with their phone, trusts that key and records its fingerprint.
+fn run_trust_owner(args: &[String]) -> i32 {
+    let state_dir = PathBuf::from(flag(args, "--state").unwrap_or_else(|| unit::STATE_DIR.to_string()));
+    let mut config = match Config::load(&state_dir) {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("{err}");
+            return 1;
+        }
+    };
+    let Some(owner) = config.owner.clone() else {
+        eprintln!("No owner is paired yet; `ling-signal setup` pairs one.");
+        return 1;
+    };
+    let base = |extra: &[&str]| -> Vec<String> {
+        let mut command = vec!["env".to_string()];
+        command.extend(config.signal_cli_env.iter().map(|(k, v)| format!("{k}={v}")));
+        command.push(config.signal_cli.to_string_lossy().into_owned());
+        command.extend(["--config".to_string(), state_dir.join("signal-cli").to_string_lossy().into_owned(), "-o".to_string(), "json".to_string()]);
+        command.extend(["-a".to_string(), config.account.clone()]);
+        command.extend(extra.iter().map(|s| s.to_string()));
+        command
+    };
+    let identities = match run(&base(&["listIdentities", "-n", &owner.aci]), None) {
+        Ok(output) => serde_json::from_str::<serde_json::Value>(output.trim()).unwrap_or_default(),
+        Err(output) => {
+            eprintln!("❌ {output}");
+            return 1;
+        }
+    };
+    let Some(current) = identities.as_array().and_then(|list| list.iter().find(|i| i.get("uuid").and_then(|u| u.as_str()) == Some(owner.aci.as_str()))) else {
+        eprintln!("signal-cli knows no key for the owner.");
+        return 1;
+    };
+    let safety = current.get("safetyNumber").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let fingerprint = current.get("fingerprint").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    if fingerprint == owner.fingerprint {
+        println!("The owner's key has not changed; nothing to do.");
+        return 0;
+    }
+    println!("The owner's safety number is now:\n\n    {safety}\n");
+    println!("On your phone: Signal → the conversation with Mightling → View safety number.");
+    if prompt("Do the numbers match? [y/N]").to_ascii_lowercase() != "y" {
+        println!("Not trusted. Messages from that account stay refused.");
+        return 1;
+    }
+    if let Err(output) = run(&base(&["trust", &owner.aci, "-v", &safety]), None) {
+        eprintln!("❌ {output}");
+        return 1;
+    }
+    config.owner = Some(gate::Owner { aci: owner.aci, fingerprint });
+    match config.save(&state_dir) {
+        Ok(()) => {
+            println!("✅ Trusted. The bridge accepts the owner's messages again.");
+            0
+        }
+        Err(err) => {
+            eprintln!("Could not write bridge.json: {err}");
+            1
+        }
+    }
 }

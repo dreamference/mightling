@@ -123,6 +123,25 @@ pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool
     steps
 }
 
+/// `remove` (§6): stop and disable the unit, take the number off Signal, delete the bridge's data,
+/// the unit, the installed files and the account. The Ask threads stay. `unregister` needs the
+/// network and a working account, so a failure there is reported and the rest still runs.
+pub fn remove_plan(arch: &str, account: Option<&str>) -> Vec<Step> {
+    let mut steps = vec![Step::root("Stop and disable the bridge", &["systemctl", "disable", "--now", unit::UNIT_NAME])];
+    if let Some(account) = account {
+        let command = signal_cli_command(arch, account, &["unregister"]);
+        // `signal_cli_command` already starts with sudo -u; run it as given.
+        steps.push(Step { what: format!("Take {account} off Signal (unregister)"), command, root: false, stdin: None });
+    }
+    steps.push(Step::user("End the bridge's pairing with `ling web`", &["ling", "web", "revoke", crate::agent::DEVICE_NAME]));
+    steps.push(Step::root("Delete the bridge's data: keys, state, the device cookie", &["rm", "-rf", "--one-file-system", unit::STATE_DIR]));
+    steps.push(Step::root("Delete the unit", &["rm", "-f", &format!("/etc/systemd/system/{}", unit::UNIT_NAME)]));
+    steps.push(Step::root("", &["systemctl", "daemon-reload"]));
+    steps.push(Step::root("Delete signal-cli and the bridge binary", &["rm", "-rf", "--one-file-system", &signal_cli_home().to_string_lossy(), unit::BRIDGE_PATH]));
+    steps.push(Step::root("Delete the system account", &["userdel", unit::ACCOUNT]));
+    steps
+}
+
 /// A command run as the bridge's account, e.g. signal-cli on its data.
 pub fn as_bridge(command: &[String]) -> Vec<String> {
     let mut full = vec!["sudo".to_string(), "-u".to_string(), unit::ACCOUNT.to_string()];
@@ -204,6 +223,26 @@ mod tests {
         let text = command.join(" ");
         assert!(text.starts_with("sudo -u mightling-signal env JAVA_HOME=/usr/lib/jvm/java-25-openjdk-arm64 JAVA_OPTS=-Djava.library.path=/opt/mightling/signal-cli-0.14.9/lib/native "));
         assert!(text.ends_with("--config /var/lib/mightling-signal/signal-cli -a +15550000 register --voice"));
+    }
+
+    #[test]
+    fn remove_deletes_only_what_setup_made() {
+        let plan = remove_plan("aarch64", Some("+15550000"));
+        let shown: Vec<String> = plan.iter().map(Step::display).collect();
+        assert_eq!(shown[0], "sudo systemctl disable --now mightling-signal.service");
+        assert!(shown[1].starts_with("sudo -u mightling-signal env ") && shown[1].ends_with("-a +15550000 unregister"), "{}", shown[1]);
+        for line in &shown {
+            if line.contains("rm ") {
+                assert!(
+                    line.contains("/var/lib/mightling-signal") || line.contains("/etc/systemd/system/mightling-signal.service") || line.contains("/opt/mightling/signal-cli-0.14.9"),
+                    "{line}"
+                );
+                assert!(!line.contains(" /home") && !line.contains(".mightling/ask"), "the Ask threads stay: {line}");
+            }
+        }
+        assert!(shown.contains(&"ling web revoke signal-bridge".to_string()));
+        assert_eq!(shown.last().unwrap(), "sudo userdel mightling-signal");
+        assert!(!remove_plan("aarch64", None).iter().any(|s| s.display().contains("unregister")));
     }
 
     #[test]
