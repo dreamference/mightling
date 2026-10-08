@@ -67,6 +67,11 @@ struct Daemon {
     next_attempt_ms: u64,
     last_owner_message_ms: Option<u64>,
     last_error: Option<String>,
+    /// Whether `ling web` has told the bridge the air-gap level yet. Until it has, messages are
+    /// held, not acted on: at a user-level `on` the bridge must send nothing, not even a receipt,
+    /// and it cannot know the level any other way (§11).
+    airgap_known: bool,
+    held: Vec<Value>,
 }
 
 /// Runs until signal-cli exits or the process is stopped. Returns an error to make systemd restart it.
@@ -103,7 +108,10 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
         next_attempt_ms: 0,
         last_owner_message_ms: None,
         last_error: None,
+        airgap_known: false,
+        held: Vec::new(),
     };
+    daemon.poll_airgap().await;
     eprintln!("ling-signal {}: started ({} mode)", env!("CARGO_PKG_VERSION"), match daemon.config.mode { Mode::Dedicated => "dedicated", Mode::Linked { .. } => "linked" });
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut airgap = tokio::time::interval(AIRGAP_EVERY);
@@ -115,7 +123,11 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
                     daemon.write_status(false);
                     return Err("signal-cli exited".to_string());
                 };
-                daemon.on_signal(params).await;
+                if daemon.airgap_known {
+                    daemon.on_signal(params).await;
+                } else {
+                    daemon.held.push(params);
+                }
             }
             incoming = async {
                 match daemon.agent.as_mut() {
@@ -136,12 +148,7 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
                     daemon.write_status(true);
                 }
             }
-            _ = airgap.tick() => {
-                if let Ok(on) = agent::airgap_level(daemon.config.port, &daemon.cookie).await {
-                    let actions = daemon.bridge.on_airgap(on, now_ms());
-                    daemon.carry_out(actions).await;
-                }
-            }
+            _ = airgap.tick() => daemon.poll_airgap().await,
             _ = stop.recv() => {
                 daemon.save_conversation();
                 daemon.write_status(false);
@@ -153,6 +160,19 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
 }
 
 impl Daemon {
+    /// Asks `ling web` for the air-gap level; the first answer also releases held messages.
+    async fn poll_airgap(&mut self) {
+        let Ok(on) = agent::airgap_level(self.config.port, &self.cookie).await else { return };
+        let actions = self.bridge.on_airgap(on, now_ms());
+        self.carry_out(actions).await;
+        if !self.airgap_known {
+            self.airgap_known = true;
+            for params in std::mem::take(&mut self.held) {
+                self.on_signal(params).await;
+            }
+        }
+    }
+
     async fn connect(&mut self) {
         match Connection::open(self.config.port, &self.cookie).await {
             Ok((mut connection, incoming)) => {

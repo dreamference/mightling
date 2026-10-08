@@ -27,7 +27,7 @@
    - **Dedicated (Phase 1):** a second Signal account (prepaid SIM or landline) that the owner talks to like a contact.
    - **Linked (Phase 2):** the bridge becomes a linked device of the owner's account, and the owner talks to it in **Note to Self**. It costs nothing, but the bridge then receives every message of the owner's account. That is why it waits for Phase 0's measurements and comes with a warning (§4.2).
 6. **Signal needs the internet, so the bridge runs only at `/airgapped off`.**
-   - **Never at `on`:** at a user-level `on` the bridge refuses to start. A running bridge stops answering, and says why once, when the level changes.
+   - **Never at `on`:** at a user-level `on` the bridge acts on nothing and sends nothing, not even a read receipt. It learns the level from `ling web` (§11), and until the first answer arrives it holds incoming messages rather than act on them. When the level drops back to `off`, it says once what was missed.
    - **One external exception:** the bridge is the one Mightling component that talks to an outside service on its own. It talks only to Signal's servers, and only when the user turned it on. `ling-admin audit egress` names it as an enabled exception instead of passing silently (§10).
 7. **Off by default.** No installer step turns it on. `ling signal setup` is the only way in, and it says what it changes before any sudo.
 8. **signal-cli first, a native client later.**
@@ -484,4 +484,15 @@ It checks:
 - **Egress audit:** `audit egress --signal`, the trace of the unit's own connections. The note is built: when `mightling-signal.service` is enabled, every `ling-admin audit egress` report ends with "ℹ️ Declared exception: Signal bridge enabled …" (`EgressAudit.declared_exceptions`, tested).
 - **Phase 2:** everything in §14.
 
-**Not verified:** anything against Signal itself. That needs a dedicated number, and the owner's phone for the code.
+A second end-to-end test runs the daemon with `ling web` answering `on`. The owner's message then gets no send, no receipt and no typing, and no thread or turn is requested.
+
+**Not verified:**
+- **Anything against Signal itself.** That needs a dedicated number, and the owner's phone for the code.
+- **The JSON-RPC parameter shapes beyond the man page:**
+  - `sendReceipt` with a single `recipient` string and `targetTimestamp` as an array;
+  - `sendTyping` with a `recipient` array;
+  - the field names of `listIdentities` (`uuid`, `fingerprint`, `safetyNumber`, `trustLevel` with `TRUSTED_VERIFIED`/`TRUSTED_UNVERIFIED`).
+
+  The stand-in accepts any shape. A mismatch would show up only as a logged error, or, for `listIdentities`, as the owner's messages being refused.
+
+**Verified without installing anything:** the Java home `setup` uses, `/usr/lib/jvm/java-25-openjdk-arm64`, is the directory Ubuntu 24.04's `openjdk-25-jre-headless` 25.0.4.1 (arm64) installs to. This was read from the package's contents with `apt-get download` and `dpkg -c`.

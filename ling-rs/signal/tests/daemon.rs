@@ -60,15 +60,26 @@ fn event(payload: Value) -> Message {
 
 /// A stand-in for `ling web`'s `/ws`: answers every call, and plays one turn for `turn/start`.
 /// Records what the bridge asked for on `seen`.
-async fn fake_ling_web(seen: tokio::sync::mpsc::UnboundedSender<Value>) -> u16 {
+async fn fake_ling_web(seen: tokio::sync::mpsc::UnboundedSender<Value>, airgap: &'static str) -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
             let seen = seen.clone();
             tokio::spawn(async move {
-                // Plain HTTP (the air-gap poll) is not a WebSocket: the handshake fails and the
-                // connection drops, which the bridge treats as "level unknown".
+                // The air-gap poll is plain HTTP: answer it with `off`. Anything else is the bridge.
+                let mut peek = [0u8; 32];
+                let read = stream.peek(&mut peek).await.unwrap_or(0);
+                if peek[..read].starts_with(b"GET /api/airgapped") {
+                    use tokio::io::AsyncWriteExt;
+                    let mut stream = stream;
+                    let mut request = vec![0u8; 4096];
+                    let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut request).await;
+                    let body = format!(r#"{{"level":"{airgap}","source":"test"}}"#);
+                    let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    let _ = stream.write_all(reply.as_bytes()).await;
+                    return;
+                }
                 let Ok(mut socket) = tokio_tungstenite::accept_async(stream).await else { return };
                 while let Some(Ok(Message::Text(text))) = socket.next().await {
                     let frame: Value = serde_json::from_str(text.as_str()).unwrap();
@@ -109,7 +120,7 @@ async fn the_owners_question_is_answered_through_ling_web_and_a_strangers_is_not
     std::fs::create_dir_all(&state).unwrap();
     let log = dir.0.join("signal-cli.log");
     let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel();
-    let port = fake_ling_web(seen_tx).await;
+    let port = fake_ling_web(seen_tx, "off").await;
     Config {
         mode: Mode::Dedicated,
         account: "+15550000".to_string(),
@@ -176,5 +187,48 @@ async fn the_owners_question_is_answered_through_ling_web_and_a_strangers_is_not
     let status = std::fs::read_to_string(runtime.join("status.json")).unwrap();
     assert!(status.contains(r#""strangersIgnored":1"#), "{status}");
     assert!(!status.contains("stranger\"") && !status.contains("2+2"), "no ids or text in the status: {status}");
+    daemon.abort();
+}
+
+#[tokio::test]
+async fn at_air_gap_on_the_owner_gets_nothing_not_even_a_receipt() {
+    let dir = Scratch(std::env::temp_dir().join(format!("ling-signal-airgap-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    let state = dir.0.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log = dir.0.join("signal-cli.log");
+    let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel();
+    let port = fake_ling_web(seen_tx, "on").await;
+    Config {
+        mode: Mode::Dedicated,
+        account: "+15550000".to_string(),
+        own_uuid: None,
+        owner: Some(Owner { aci: "owner".to_string(), fingerprint: "fp-owner".to_string() }),
+        binding: None,
+        port,
+        node: "test-node".to_string(),
+        signal_cli: fake_signal_cli(&dir.0, &log),
+        signal_cli_env: vec![],
+        signal_cli_version: "0.14.9".to_string(),
+        vision: false,
+    }
+    .save(&state)
+    .unwrap();
+    ling_signal::state::save_cookie(&state, "mightling_device=test").unwrap();
+    let daemon = {
+        let state = state.clone();
+        tokio::spawn(async move { ling_signal::serve::serve(&state, None).await })
+    };
+    // The owner's message arrives after two seconds; give the bridge time to (not) answer it.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let all = std::fs::read_to_string(&log).unwrap_or_default();
+    for method in ["\"send\"", "\"sendReceipt\"", "\"sendTyping\""] {
+        assert!(!all.contains(&format!("\"method\":{method}")), "nothing may be sent at air gap on, saw:\n{all}");
+    }
+    let mut asked = Vec::new();
+    while let Ok(message) = seen.try_recv() {
+        asked.push(message);
+    }
+    assert!(!asked.iter().any(|m| m["message"]["method"] == "turn/start" || m["message"]["method"] == "thread/start"), "{asked:?}");
     daemon.abort();
 }
