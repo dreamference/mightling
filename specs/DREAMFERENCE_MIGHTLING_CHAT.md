@@ -137,7 +137,7 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 - **Why tuwunel:** one Rust process with an embedded RocksDB, no PostgreSQL, a small memory footprint, and simplified sliding sync (`/sync` v5), which Element X needs.
 - **Why not the others:** Synapse would need PostgreSQL and much more memory, and Dendrite is archived.
 
-`ling-admin chat matrix start` (Python, beside the other sidecars, DOCKER §6):
+`ling-admin matrix start` (Python, beside the other sidecars, DOCKER §6):
 - **The container:** `dreamference-matrix`, image pinned by digest, memory capped at `--memory=1g` (swap equal), data in the volume `dreamference-matrix-data`.
 - **Its configuration** (environment):
   - `TUWUNEL_SERVER_NAME`: the server name (§5.3);
@@ -146,8 +146,8 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
   - `TUWUNEL_TRUSTED_SERVERS=[]`;
   - `TUWUNEL_URL_PREVIEW_DOMAIN_EXPLICIT_ALLOWLIST=[]`.
 - **Its accounts:** creates the bot account `@mightling:<server name>` and stores its access token for the bridge.
-- **`ling-admin chat matrix add-user <name>`** creates a user account with a generated password, printed once on the terminal and never stored, and adds the user to the bridge's allow-list.
-- **`ling-admin chat matrix status`** reports the container, the address, the Tailscale state, the accounts and the allow-list. **`ling-admin chat matrix stop`** stops the container and keeps the volume.
+- **`ling-admin matrix add-user <name>`** creates a user account with a generated password, printed once on the terminal and never stored, and adds the user to the bridge's allow-list.
+- **`ling-admin matrix status`** reports the container, the address, the Tailscale state, the accounts and the allow-list. **`ling-admin matrix stop`** stops the container and keeps the volume.
 
 ### 5.2 No route out
 
@@ -155,7 +155,7 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 - **No way out:**
   - an internal network has no route to anything but the host;
   - with federation off there is nothing to contact anyway.
-- **The host reaches it through a loopback proxy.** Docker publishes no ports for a container on an internal network, and `tailscale serve` may refuse a backend that is not on loopback. So `ling-admin chat matrix start` also installs two user units:
+- **The host reaches it through a loopback proxy.** Docker publishes no ports for a container on an internal network, and `tailscale serve` may refuse a backend that is not on loopback. So `ling-admin matrix start` also installs two user units:
   - `mightling-matrix-proxy.socket`, listening on `127.0.0.1:6167`;
   - `mightling-matrix-proxy.service`, running systemd's own `systemd-socket-proxyd 172.31.231.10:6167`.
 
@@ -164,18 +164,18 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
   - **Element X's push gateway is unreachable.** The homeserver cannot reach it (sygnal at matrix.org, then Google or Apple), so the phone is notified only while Element X keeps its own connection.
   - **Android:** that works in the background.
   - **iOS:** it works only while the app is open, or briefly after.
-  - **The opt-in:** `ling-admin chat matrix push on` moves the container to the sidecar network, so pushes go out. A push carries the event id only (Element X's `event_id_only` format), so no message content leaves the machine, but metadata does: that a message arrived, and when. It is off by default.
+  - **The opt-in:** `ling-admin matrix push on` moves the container to the sidecar network, so pushes go out. A push carries the event id only (Element X's `event_id_only` format), so no message content leaves the machine, but metadata does: that a message arrived, and when. It is off by default.
 
 ### 5.3 Reaching it from the phone
 
 - **With Tailscale (the decided route).**
-  - **The setup check:** `ling-admin chat matrix start` finds Tailscale running and signed in (`tailscale status --json`). It takes the node's tailnet name (`Self.DNSName` without its trailing dot, for example `gx10-1a2b.tail1234.ts.net`) as the **server name**, and runs `tailscale serve --bg --https=443 http://127.0.0.1:6167`.
-  - **The server name is permanent.** Every account's id ends in it (`@owner:gx10-1a2b.tail1234.ts.net`), and Matrix has no way to rename a server. It is chosen once, stored in `matrix.json`, and passed to the container on every start. Renaming the machine, or moving it to another tailnet, changes its tailnet name: from then on `start` refuses, naming both names. The user either renames the machine back, or removes the homeserver (`ling-admin chat matrix remove`, which deletes the volume) and starts again with new accounts.
+  - **The setup check:** `ling-admin matrix start` finds Tailscale running and signed in (`tailscale status --json`). It takes the node's tailnet name (`Self.DNSName` without its trailing dot, for example `gx10-1a2b.tail1234.ts.net`) as the **server name**, and runs `tailscale serve --bg --https=443 http://127.0.0.1:6167`.
+  - **The server name is permanent.** Every account's id ends in it (`@owner:gx10-1a2b.tail1234.ts.net`), and Matrix has no way to rename a server. It is chosen once, stored in `matrix.json`, and passed to the container on every start. Renaming the machine, or moving it to another tailnet, changes its tailnet name: from then on `start` refuses, naming both names. The user either renames the machine back, or removes the homeserver (`ling-admin matrix remove`, which deletes the volume) and starts again with new accounts.
   - **Signing in:** the phone, with Tailscale installed and signed in to the same tailnet, signs in to `https://<tailnet name>` in Element X.
   - **The certificate:** a real one, issued by Let's Encrypt through Tailscale. This needs HTTPS turned on once in the tailnet's admin console, and the command says so when it is off.
   - **The privacy cost:** the tailnet name appears in public Certificate Transparency logs. The name is public; nothing about messages is.
 - **Without Tailscale: not in Phase 1.** `start` refuses and prints how to install Tailscale. A LAN-only mode (the `.local` name over plain HTTP) waits for Phase 0 to show whether Element X accepts a homeserver without HTTPS at all.
-- **Installing Tailscale is left to the user.** `ling-admin chat matrix start` does not install it: it needs root, and signing in to a tailnet is an interactive step with the user's account. The command prints the two install lines and stops. Headscale (self-hosted coordination) works the same way and is named as the fully self-hosted alternative.
+- **Installing Tailscale is left to the user.** `ling-admin matrix start` does not install it: it needs root, and signing in to a tailnet is an interactive step with the user's account. The command prints the two install lines and stops. Headscale (self-hosted coordination) works the same way and is named as the fully self-hosted alternative.
 
 ### 5.4 Rooms and encryption
 
@@ -216,7 +216,7 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 ```
 ling chat start | stop | status | serve          the bridge (user unit mightling-chat.service)
 ling chat telegram setup | pair | users | remove <id> | off
-ling-admin chat matrix start | stop | status | add-user <name> | push on|off | remove
+ling-admin matrix start | stop | status | add-user <name> | push on|off | remove
 ```
 
 - **`ling chat status`** reports:
@@ -224,7 +224,7 @@ ling-admin chat matrix start | stop | status | add-user <name> | push on|off | r
   - the paired users;
   - the threads with a running turn.
 - **`ling chat start`** refuses when no adapter is configured, and says which command configures one.
-- **The homeserver commands are `ling-admin`'s,** because containers are (DOCKER §6). The bridge reads `matrix.json`, which they write.
+- **The homeserver commands are `ling-admin`'s,** because containers are (DOCKER §6). The bridge reads `matrix.json`, which they write. They are `ling-admin matrix …`, not `ling-admin chat matrix …`: `ling-admin chat` is already the web UI's command (Onyx's alias).
 
 ## 8. Egress
 
@@ -238,7 +238,7 @@ ling-admin chat matrix start | stop | status | add-user <name> | push on|off | r
 ## 9. Night Shift, nodes and clients
 
 - **Night Shift:** a chat turn counts as a person at a terminal (§2).
-- **Where it runs:** on a node. On a client (a laptop), `ling chat` works against that client's own `ling web`, but the homeserver belongs on the node, which is always on. `ling-admin chat matrix start` refuses on a machine without a node id.
+- **Where it runs:** on a node. On a client (a laptop), `ling chat` works against that client's own `ling web`, but the homeserver belongs on the node, which is always on. `ling-admin matrix start` refuses on a machine without a node id.
 
 ## 10. Configuration
 
@@ -293,7 +293,7 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
   - reactions and `yes`/`no` answer approvals;
   - typing is renewed;
   - `next_batch` persists across restarts.
-- **`ling-admin chat matrix`,** with Docker and Tailscale mocked:
+- **`ling-admin matrix`,** with Docker and Tailscale mocked:
   - the internal network and fixed address, and the proxy units;
   - the server name stored once, and `start` refusing when Tailscale's name has changed;
   - federation off and the registration token set;
@@ -306,7 +306,7 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
 
 - **Phase 1 (this branch):**
   - the bridge, both adapters, and `ling chat` with its user unit;
-  - `ling-admin chat matrix`;
+  - `ling-admin matrix`;
   - the tests above.
 - **Phase 2:**
   - photos and files, through `/api/upload` into the thread's folder;

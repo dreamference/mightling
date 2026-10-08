@@ -697,6 +697,46 @@ Remove the Google service container; connected accounts stay stored.
 
 Show whether it runs and which accounts hold which apps.
 
+### `ling-admin matrix`
+
+Manage the private Matrix homeserver for chatting with Mightling from a phone.
+
+#### `ling-admin matrix start`
+
+Start the homeserver (no route out), its loopback proxy and `tailscale serve`.
+
+#### `ling-admin matrix stop`
+
+Stop the homeserver; accounts and messages are kept.
+
+#### `ling-admin matrix status`
+
+Show the server name, the container, Tailscale and the accounts.
+
+#### `ling-admin matrix add-user`
+
+Create an account for the phone and allow it to talk to Mightling.
+
+| Option | Description |
+|---|---|
+| `name` | The user name (lowercase letters, digits, . _ = -) |
+
+#### `ling-admin matrix push`
+
+Let push notifications leave the machine (event ids only), or not.
+
+| Option | Description |
+|---|---|
+| `state` | One of: `on`, `off`. |
+
+#### `ling-admin matrix remove`
+
+Delete the homeserver, every account and every message.
+
+| Option | Description |
+|---|---|
+| `--yes` | Confirm the deletion. |
+
 ### `ling-admin web`
 
 Launch Web Canvas UI interactive pair-programming pane.

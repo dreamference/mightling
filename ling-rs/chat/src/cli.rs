@@ -7,7 +7,7 @@
 //! - `telegram pair`: an 8-digit code to send the bot as `/pair <code>`, ten minutes, one use.
 //! - `telegram users`, `telegram remove <id>`, `telegram off`.
 //!
-//! The Matrix homeserver is `ling-admin chat matrix …`'s, because containers are; it writes
+//! The Matrix homeserver is `ling-admin matrix …`'s, because containers are; it writes
 //! `matrix.json`, which `serve` reads.
 
 use std::path::Path;
@@ -33,7 +33,7 @@ pub const TELEGRAM_WARNING: &str = "Telegram is the less private way to reach Mi
 - everything you send the bot, and every answer, passes through Telegram's servers, unencrypted;\n\
 - answers can include what the agent reads for you: mail, files, code;\n\
 - Telegram keeps the chat's history until you delete it.\n\
-For a private chat, use Matrix instead (`ling-admin chat matrix start`).";
+For a private chat, use Matrix instead (`ling-admin matrix start`).";
 
 /// What the launcher tells `ling chat`.
 #[derive(Clone, Debug)]
@@ -174,7 +174,7 @@ async fn serve(environment: &Environment) -> i32 {
     let telegram_config = TelegramConfig::load(&dir);
     let matrix_config = MatrixConfig::load(&dir);
     if telegram_config.is_none() && matrix_config.is_none() {
-        eprintln!("No messenger is set up: run `ling chat telegram setup`, or `ling-admin chat matrix start`.");
+        eprintln!("No messenger is set up: run `ling chat telegram setup`, or `ling-admin matrix start`.");
         return 1;
     }
     let (agent, commands) = AgentHandle::channel();
@@ -203,7 +203,7 @@ async fn serve(environment: &Environment) -> i32 {
                 adapters += 1;
                 eprintln!("ling chat: Matrix: answering as {}", config.user_id);
             }
-            Err(err) => eprintln!("ling chat: the Matrix homeserver is not answering ({err}); is `ling-admin chat matrix start` done?"),
+            Err(err) => eprintln!("ling chat: the Matrix homeserver is not answering ({err}); is `ling-admin matrix start` done?"),
         }
     }
     if adapters == 0 {
@@ -222,7 +222,7 @@ async fn serve(environment: &Environment) -> i32 {
 fn start(environment: &Environment) -> i32 {
     let dir = environment.dir();
     if TelegramConfig::load(&dir).is_none() && MatrixConfig::load(&dir).is_none() {
-        eprintln!("No messenger is set up yet: run `ling chat telegram setup` (less private) or `ling-admin chat matrix start` (private) first.");
+        eprintln!("No messenger is set up yet: run `ling chat telegram setup` (less private) or `ling-admin matrix start` (private) first.");
         return 1;
     }
     let unit = environment.home.join(".config/systemd/user").join(UNIT_NAME);
@@ -255,7 +255,7 @@ fn status(dir: &Path) -> i32 {
     }
     match MatrixConfig::load(dir) {
         Some(config) => println!("Matrix: on (private), as {}, {} allowed user(s)", config.user_id, config.allowed.len()),
-        None => println!("Matrix: off (`ling-admin chat matrix start`)"),
+        None => println!("Matrix: off (`ling-admin matrix start`)"),
     }
     0
 }

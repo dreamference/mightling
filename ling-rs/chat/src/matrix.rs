@@ -1,5 +1,5 @@
 //! The Matrix adapter (MIGHTLING_CHAT §5): the private messenger. The homeserver runs on this
-//! machine with no route out (`ling-admin chat matrix`), and the phone reaches it over Tailscale.
+//! machine with no route out (`ling-admin matrix`), and the phone reaches it over Tailscale.
 //!
 //! The adapter is the bot account `@mightling:<server name>`. It opens an unencrypted direct room
 //! with each allowed user (everything is on this machine, so end-to-end encryption would protect

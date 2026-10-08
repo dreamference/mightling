@@ -56,6 +56,8 @@ libc = { workspace = true }
 # `ling web`: the web server, a crate of its own so its tests run without the Codex workspace
 # (src/web.rs). Unix only: it reaches the app-server over a Unix socket; Windows has no `ling web` yet.
 ling-web-server = { path = "web" }
+# `ling chat`: the messenger bridge, a client of `ling web` (src/chat.rs). Unix only, for the same reason.
+ling-chat = { path = "chat" }
 
 # Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), the
 # same windows-sys release the Codex workspace already builds.

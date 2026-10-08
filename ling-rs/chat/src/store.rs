@@ -1,7 +1,7 @@
 //! What the bridge keeps (MIGHTLING_CHAT §6), in `~/.mightling/chat/` (0700):
 //!
 //! - `telegram.json`: the bot token, when the user consented, and the paired Telegram user ids;
-//! - `matrix.json`: written by `ling-admin chat matrix` (the homeserver, the bot's account and
+//! - `matrix.json`: written by `ling-admin matrix` (the homeserver, the bot's account and
 //!   token, the allow-list); the bridge only reads it;
 //! - `matrix-state.json`: the bridge's own Matrix state (`next_batch`, the room per user);
 //! - `threads.json`: which thread each chat is on, and its recent threads;
@@ -72,7 +72,7 @@ impl TelegramConfig {
     }
 }
 
-/// `matrix.json`, as `ling-admin chat matrix` writes it.
+/// `matrix.json`, as `ling-admin matrix` writes it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MatrixConfig {
     /// Where the bridge reaches the homeserver: the loopback proxy, `http://127.0.0.1:6167`.
