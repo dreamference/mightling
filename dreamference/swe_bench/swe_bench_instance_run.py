@@ -212,6 +212,9 @@ class SweBenchInstanceRun:
             # Built before the agent started and outside its time limit; recorded beside it.
             record = self.code_index.get("record", {})
             state["index"] = {key: record.get(key) for key in ("layers", "seconds", "cached", "bytes")}
+            if record.get("layers") == ["exact"]:
+                # Which stores the agent had, the indexers that did not finish, and their memory.
+                state["index"].update({key: record.get(key) for key in ("stores", "failed", "peak_mb")})
         self.store.write_state(self.instance_id, state)
         patch = ""
         try:

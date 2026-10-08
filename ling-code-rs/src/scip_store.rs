@@ -322,6 +322,34 @@ impl ScipStore {
         Ok(out)
     }
 
+    /// The definitions of one file that have an enclosing range, outermost first: `(start, end,
+    /// symbol)`, 1-based and inclusive. What `outline` lists, and what a body match of `search`
+    /// is attributed to, when the graph is off (`layers = exact`).
+    pub fn definitions_in(&self, repo_path: &str) -> Result<Vec<(u32, u32, String)>> {
+        let Some(doc) = self.doc_path(repo_path) else { return Ok(Vec::new()) };
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT r.start_line, r.end_line, g.symbol FROM defn_enclosing_ranges r
+             JOIN documents d ON d.id = r.document_id JOIN global_symbols g ON g.id = r.symbol_id
+             WHERE d.relative_path = ?1 ORDER BY r.start_line, r.end_line DESC",
+        )?;
+        let rows = stmt.query_map([doc], |r| Ok((r.get::<_, u32>(0)? + 1, r.get::<_, u32>(1)? + 1, r.get::<_, String>(2)?)))?;
+        let mut out: Vec<(u32, u32, String)> = rows.collect::<rusqlite::Result<_>>()?;
+        out.retain(|(_, _, symbol)| !symbol.starts_with("local "));
+        out.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1 && a.2 == b.2);
+        Ok(out)
+    }
+
+    /// Symbols whose descriptor name contains `word` (ASCII case ignored), at most `limit`.
+    pub fn symbols_containing(&self, word: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+        let pattern = format!("%{}%", word.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT g.id, g.symbol FROM puffin_names n JOIN global_symbols g ON g.id = n.symbol_id
+             WHERE n.name LIKE ?1 ESCAPE '\\' LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// The store's documents, repository-relative.
     pub fn documents(&self) -> BTreeSet<String> {
         self.docs.keys().cloned().collect()

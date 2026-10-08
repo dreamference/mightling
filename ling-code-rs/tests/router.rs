@@ -537,3 +537,39 @@ fn impact_of_a_diff_starts_from_every_definition_it_touches() {
     let (_, out) = f.run(&["impact", "--diff"]);
     assert!(out.contains("touches no definition"), "{out}");
 }
+
+#[test]
+fn layers_exact_answers_from_scip_alone() {
+    // `MIGHTLING_CODE_LAYERS=exact`: the graph is never read, so nothing is tagged heuristic unless
+    // it came from the text search, and `search` and `outline` answer from the SCIP stores.
+    let f = fixture();
+    let exact = [("MIGHTLING_CODE_LAYERS", "exact")];
+    let (_, out) = f.run_env(&["status"], &exact);
+    assert!(out.contains("universal: off (layers = exact)"), "{out}");
+    let (_, out) = f.run_env(&["search", "circle"], &exact);
+    assert!(out.contains("shapes/geometry.py:26  function shapes.geometry.make_circle"), "{out}");
+    assert!(out.contains("shapes/geometry.py:6  type shapes.geometry.Circle"), "{out}");
+    let (_, out) = f.run_env(&["search", "max", "shape"], &exact);
+    assert!(out.contains("shapes/report.py:12  function shapes.report.largest  (body: line 13)"), "{out}");
+    let (_, out) = f.run_env(&["outline", "shapes/report.py"], &exact);
+    assert!(out.contains("shapes/report.py:6  function shapes.report.summary (to 9)"), "{out}");
+    let (_, out) = f.run_env(&["refs", "make_circle"], &exact);
+    assert_eq!(rows(&out, "exact").len(), 6, "{out}");
+    assert!(rows(&out, "heuristic").is_empty() && out.contains("heuristic = text search (layers = exact)"), "{out}");
+    let (_, out) = f.run_env(&["callers", "geometry.Circle.area"], &exact);
+    assert!(out.contains("exact shapes/report.py:9  in shapes.report.summary"), "{out}");
+    // Where SCIP has nothing, the text search stands in and the answer says so.
+    let (_, out) = f.run_env(&["def", "nothing_here"], &exact);
+    assert!(out.contains("layers = exact, so no graph stands in"), "{out}");
+    f.write("shapes/extra.py", "from shapes.geometry import make_circle\n\n\ndef fresh():\n    return make_circle(5.0)\n");
+    let (_, out) = f.run_env(&["refs", "make_circle"], &exact);
+    assert!(out.contains("heuristic (text) shapes/extra.py:5"), "{out}");
+    // The setting also comes from the settings file, and the variable wins over it.
+    let config = f.dir.path().join("exact.toml");
+    std::fs::write(&config, "mightling_code_layers = \"exact\"\n").unwrap();
+    let config = config.to_string_lossy().to_string();
+    let (_, out) = f.run_env(&["status"], &[("DREAMFERENCE_CONFIG_PATH", config.as_str())]);
+    assert!(out.contains("universal: off (layers = exact)"), "{out}");
+    let (_, out) = f.run_env(&["status"], &[("DREAMFERENCE_CONFIG_PATH", config.as_str()), ("MIGHTLING_CODE_LAYERS", "all")]);
+    assert!(!out.contains("layers = exact"), "{out}");
+}

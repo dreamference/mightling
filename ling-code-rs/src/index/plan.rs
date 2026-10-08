@@ -493,10 +493,14 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
             // An empty environment file: no package of the repository's venv is read, and nothing
             // from it runs (§6.1).
             let environment = scratch.join("environment.json");
+            let ceiling = settings.small_ceiling_mb << 20;
             let command = format!(
-                "echo '[]' > {env} && {node} {js} index --quiet --project-name {name} --target-only {root} --environment {env} --output {out} {convert}",
+                "echo '[]' > {env} && {node} --max-old-space-size={heap} {js} index --quiet --project-name {name} --target-only {root} --environment {env} --output {out} {convert}",
                 env = sh_quote(&environment.to_string_lossy()),
                 node = sh_quote(&node_real.to_string_lossy()),
+                // Node's heap below the cgroup's cap, as for scip-typescript: Node's own default
+                // stopped sympy's package on 2026-10-02 well short of the cap.
+                heap = (ceiling >> 20) * 3 / 4,
                 js = sh_quote(&js.to_string_lossy()),
                 // A root inside a submodule has a `/` in it, which a project name must not.
                 name = sh_quote(&if target.root.is_empty() { "root".to_string() } else { target.root.replace('/', "-") }),
@@ -516,7 +520,7 @@ pub fn exact_run(repo: &Repo, settings: &Settings, tools: &Tools, target: &Targe
                 scip.parent().unwrap().to_path_buf(),
                 this.parent().unwrap().to_path_buf(),
             ];
-            (command, env, read_only, "0.6.6", settings.small_ceiling_mb << 20)
+            (command, env, read_only, "0.6.6", ceiling)
         }
         "rust-analyzer" => {
             let (ra, rustup_home, toolchain_bin) = tools.rust_analyzer.clone()?;
@@ -860,9 +864,13 @@ pub fn build_with(repo: &Repo, settings: &Settings, exact: bool, on_demand: bool
     let graph = crate::manifest::GraphSnapshot::load(&repo.scip_dir());
     let mut runs = Vec::new();
     let mut skipped = Vec::new();
-    match universal_run(repo, settings, &tools, graph.map(|g| g.peak_rss_mb).unwrap_or(0)) {
-        Some(run) => runs.push(run),
-        None => skipped.push("codebase-memory-mcp is not installed (`ling-admin code setup`)".to_string()),
+    if settings.exact_only() {
+        skipped.push("codebase-memory: off (layers = exact)".to_string());
+    } else {
+        match universal_run(repo, settings, &tools, graph.map(|g| g.peak_rss_mb).unwrap_or(0)) {
+            Some(run) => runs.push(run),
+            None => skipped.push("codebase-memory-mcp is not installed (`ling-admin code setup`)".to_string()),
+        }
     }
     let trusted = crate::config::is_trusted(&repo.main_root);
     skipped.extend(root_python_note(root_python_files(repo).1, ""));
@@ -1017,6 +1025,8 @@ mod tests {
         let tools = Tools { scip_python: Some((_dir.path().join("node/bin/node"), _dir.path().join("indexers/index.js"))), ..fake_tools(_dir.path()) };
         let run = run_for(&repo, &tools, Target::new(Kind::Static, "scip-python", "setup.py"));
         assert!(run.spec.argv[2].contains("--target-only 'setup.py'"), "{}", run.spec.argv[2]);
+        // Node's heap is sized to three quarters of the run's memory cap (4 GiB by default).
+        assert!(run.spec.argv[2].contains("--max-old-space-size=3072 "), "{}", run.spec.argv[2]);
         assert_eq!(run.path_prefix, "setup.py/");
         assert_eq!(crate::scip_store::join_normalized(&run.path_prefix, ""), "setup.py");
         assert_eq!(crate::scip_store::join_normalized(&run.path_prefix, "../pkg/__init__.py"), "pkg/__init__.py");

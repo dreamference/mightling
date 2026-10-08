@@ -260,8 +260,9 @@ class SweBenchRunner:
             keep_images: With `evaluate`, False works one repository at a time and removes its
                 images once it is graded, to make room for the next repository's.
             require_smoke: Refuse to run unless a smoke has passed on this machine.
-            code_index: `off`, or `universal` to index each instance's repository on the host
-                and give the agent `ling-code` (a new run only; a resumed run keeps its arm).
+            code_index: `off`, `universal` to index each instance's repository on the host
+                and give the agent `ling-code`, or `exact` for the same with the SCIP stores
+                alone (a new run only; a resumed run keeps its arm).
             prompt: The system prompt the agent starts with (prompt spec §6.2); None takes the
                 configured one. A new run only, like `code_index`.
             mask: `on` masks old tool outputs in the agent's requests (context budget spec
@@ -379,18 +380,23 @@ class SweBenchRunner:
                 # resumed run may use another build, so each start appends its own line.
                 with open(store.directory / "ling-code.sha256", "a") as record:
                     record.write(f"{code_hash}  {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n")
-                print(f"🗂️  Indexing {len(pending)} repositories on the host (universal layer)...", flush=True)
+                arm = manifest["code_index"]
+                layer = "SCIP stores only" if arm == "exact" else "universal layer"
+                print(f"🗂️  Indexing {len(pending)} repositories on the host ({layer})...", flush=True)
                 for instance_id in pending:
                     image = manifest["images"][instance_id]["image"]
-                    record = SweBenchCodeIndex.ensure(rows[instance_id], image) \
+                    record = SweBenchCodeIndex.ensure(rows[instance_id], image, arm) \
                         if SweBenchDocker.ensure_image(image) else None
                     if record is None:
                         print(f"❌ {instance_id} has no index, and a run measures one arm: not started.")
                         return 1
                     indexes[instance_id] = dict(
-                        SweBenchCodeIndex.container_arguments(rows[instance_id], record), record=record)
+                        SweBenchCodeIndex.container_arguments(rows[instance_id], record, arm), record=record)
+                    extra = (f", {len(record.get('stores', []))} store(s), peak {record.get('peak_mb', 0)} MiB"
+                             + (f", not finished: {', '.join(sorted(record['failed']))}" if record.get("failed") else "")) \
+                        if arm == "exact" else ""
                     print(f"   {instance_id}: index {'cached' if record['cached'] else 'built'} "
-                          f"({record['seconds']:.0f} s)", flush=True)
+                          f"({record['seconds']:.0f} s{extra})", flush=True)
             print(f"🏁 SWE-bench run {store.name}: {len(pending)} instance(s) to run, "
                   f"{len(finished)} done, {len(manifest.get('excluded', {}))} excluded; "
                   f"up to {parallel} at once on {served[0]}.")

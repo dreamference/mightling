@@ -278,6 +278,20 @@ def bench(tmp_path, monkeypatch):
 
     def fake_mightling_code(command, **kwargs):
         index_calls.append((list(command), kwargs.get("cwd"), dict(kwargs.get("env") or {})))
+        if "index" in command and kwargs["env"].get("MIGHTLING_CODE_LAYERS") == "exact":
+            environment = kwargs["env"]
+            assert Path(kwargs["cwd"], "widget.py").is_file(), "indexed in the copy of /testbed"
+            assert "MIGHTLING_CODE_INDEXERS_DIR" not in environment, "the real SCIP indexers run"
+            assert 'mightling_code_layers = "exact"' in Path(environment["DREAMFERENCE_CONFIG_PATH"]).read_text()
+            scip = Path(environment["MIGHTLING_CODE_STATE_DIR"]) / "scip"
+            scip.mkdir(parents=True, exist_ok=True)
+            (scip / "scip-python-acme.db").write_text("store")
+            runs = {"scip-python:acme": {"indexer": "scip-python", "root": "acme", "path_prefix": "acme/",
+                                         "status": "ok", "store": "scip-python-acme.db", "peak_rss_mb": 1700},
+                    "scip-typescript:web": {"indexer": "scip-typescript", "root": "web", "path_prefix": "web/",
+                                            "status": "failed: heap", "store": "", "peak_rss_mb": 0}}
+            (scip / "manifest.json").write_text(json.dumps({"runs": runs}))
+            return subprocess.CompletedProcess(command, 0, "scip-python: ok\n", "")
         if "index" in command:
             environment = kwargs["env"]
             assert Path(kwargs["cwd"], "widget.py").is_file(), "indexed in the copy of /testbed"
@@ -823,7 +837,66 @@ def test_a_run_whose_index_cannot_be_built_does_not_start(bench, monkeypatch, ca
     assert run(bench, instances=["acme__widget-1"], code_index="universal") == 1
     assert "a run measures one arm" in capsys.readouterr().out
     assert not any(call[0] == "run" for call in bench["docker"].calls)
-    assert run(bench, name="x", instances=["acme__widget-1"], code_index="exact") == 1
+    assert run(bench, name="x", instances=["acme__widget-1"], code_index="bogus") == 1
+
+
+def test_the_exact_arm_mounts_scip_stores_alone_and_names_what_did_not_finish(bench, monkeypatch):
+    monkeypatch.setattr(SweBenchCodeIndex, "sleep", staticmethod(lambda seconds: None))
+    assert run(bench, instances=["acme__widget-1"], code_index="exact") == 0
+    [(command, cwd, environment)] = [call for call in bench["index_calls"] if "index" in call[0]]
+    assert command[1:] == ["index", "--wait"] and environment["MIGHTLING_CODE_LAYERS"] == "exact"
+    directory = SweBenchCodeIndex.index_dir(row("acme__widget-1"), "exact")
+    assert directory != SweBenchCodeIndex.index_dir(row("acme__widget-1")), "a cache of its own"
+    assert not (directory / "testbed").exists()
+    created = next(call for call in bench["docker"].calls if call[0] == "run")
+    mounts = [created[i + 1] for i, word in enumerate(created) if word == "-v"]
+    assert f"{directory}:/mightling-index:ro" in mounts
+    env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
+    assert env["MIGHTLING_CODE_LAYERS"] == "exact" and env["MIGHTLING_CODE_STATE_DIR"] == "/mightling-index/state"
+    assert "MIGHTLING_CODE_GRAPH_DB" not in env
+    # Codex hands the MCP server only the variables it is told to: the layer setting is one.
+    agent = next(call for call in bench["docker"].calls if call[0] == "exec" and "ling" in call[2])
+    overrides = [agent[i + 1] for i, word in enumerate(agent) if word == "-c"]
+    assert '"MIGHTLING_CODE_LAYERS"' in next(o for o in overrides if o.startswith("mcp_servers.ling_code.env_vars="))
+    store = SweBenchRunStore("r1")
+    index = store.state("acme__widget-1")["index"]
+    assert index["layers"] == ["exact"] and index["stores"] == ["scip-python:acme"] and index["peak_mb"] == 1700
+    assert index["failed"] == {"scip-typescript:web": "failed: heap"}
+    report = SweBenchReport.render(store)
+    assert "Code index          exact (SCIP stores only, no graph; peak 1700 MiB" in report
+    assert "1 instance(s) with an indexer that did not finish, 0 with no store at all" in report
+    # A second run reuses the stores.
+    run(bench, name="again", instances=["acme__widget-1"], code_index="exact")
+    assert len([call for call in bench["index_calls"] if "index" in call[0]]) == 1
+    assert SweBenchRunStore("again").state("acme__widget-1")["index"]["cached"] is True
+
+
+def test_the_exact_arm_retries_a_run_the_busy_model_deferred(bench, monkeypatch):
+    monkeypatch.setattr(SweBenchCodeIndex, "sleep", staticmethod(lambda seconds: None))
+    attempts = []
+
+    def deferred_then_ok(command, **kwargs):
+        if "index" in command:
+            attempts.append(command)
+            scip = Path(kwargs["env"]["MIGHTLING_CODE_STATE_DIR"]) / "scip"
+            scip.mkdir(parents=True, exist_ok=True)
+            (scip / "s.db").write_text("store")
+            status = "deferred: busy" if len(attempts) == 1 else "ok"
+            (scip / "manifest.json").write_text(json.dumps(
+                {"runs": {"scip-python:acme": {"status": status, "store": "" if len(attempts) == 1 else "s.db"}}}))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(SweBenchCodeIndex, "execute", staticmethod(deferred_then_ok))
+    assert run(bench, instances=["acme__widget-1"], code_index="exact") == 0
+    assert len(attempts) == 2
+    assert SweBenchRunStore("r1").state("acme__widget-1")["index"]["stores"] == ["scip-python:acme"]
+
+
+def test_a_mightling_code_under_test_gets_a_runtime_of_its_own(monkeypatch, tmp_path):
+    monkeypatch.delenv("DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE", raising=False)
+    installed = SweBenchCodeIndex.runtime_dir()
+    monkeypatch.setenv("DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE", str(tmp_path / "ling-code"))
+    assert SweBenchCodeIndex.runtime_dir() != installed
 
 
 def test_a_resumed_run_keeps_its_arm(bench):

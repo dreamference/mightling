@@ -86,6 +86,20 @@ fn nothing_inside_the_repository_grants_trust() {
 }
 
 #[test]
+fn layers_exact_builds_no_graph() {
+    let _env = env();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(root.join("pkg")).unwrap();
+    std::fs::write(root.join("pkg/__init__.py"), "def f():\n    return 1\n").unwrap();
+    let repo = git_repo(&root);
+    let settings = ling_code::config::Settings { layers: ling_code::config::Layers::Exact, ..Default::default() };
+    let (plan, skipped) = plan::build(&repo, &settings, false);
+    assert!(plan.runs.iter().all(|r| r.indexer != "codebase-memory"), "{:?}", plan.runs.iter().map(|r| &r.indexer).collect::<Vec<_>>());
+    assert!(skipped.iter().any(|s| s == "codebase-memory: off (layers = exact)"), "{skipped:?}");
+}
+
+#[test]
 fn the_sandbox_holds_against_a_hostile_build_script() {
     let env = env();
     let tools = plan::Tools::find();

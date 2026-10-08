@@ -825,3 +825,16 @@ The first SWE-bench arm with the tools (SWE_BENCH §13.6) found one defect in ho
 
 The two `ling-code` fixes were made after the arm started and are **not measured**: the arm ran the installed `ling-code` (`a2343be2…`).
 
+
+## 16. SCIP alone: `layers = exact` (2026-10-07)
+
+`MIGHTLING_CODE_LAYERS=exact` (or `mightling_code_layers = "exact"` in the settings file; the variable wins) turns the graph off. The default is `all`.
+
+- **Queries.** The graph is never opened, so no row comes from it. `refs`, `callers`, `callees`, `impl` and `impact` answer from the SCIP stores as before. Where the stores have nothing, the text search of the changed files stands in. So does the text search of the tracked source files no store covers, which at `exact` count as "not indexed", like the files an ignore rule keeps from the graph. Every answer says so in a note, and the legend reads `heuristic = text search (layers = exact)`.
+- **`search` and `outline` have SCIP versions:**
+  - `outline` lists a file's definitions from `defn_enclosing_ranges`;
+  - `search` lists definitions whose name holds the query's words (from `puffin_names`, ranked by rarity), then the same body search as before, with each matching line attributed to its innermost SCIP definition.
+- **`status`** reports `universal: off (layers = exact)`.
+- **Indexing.** At `exact` the plan has no codebase-memory run and says why (`codebase-memory: off (layers = exact)`).
+- **Forwarding.** The launcher forwards `MIGHTLING_CODE_LAYERS` to `ling-code mcp`, since Codex passes an MCP server only the variables it is told to. That takes effect at the next `codex build`.
+- **scip-python's Node heap** is now three quarters of the run's memory cap (`code_index_small_ceiling_mb`), as scip-typescript's already was. Node's own default is what stopped sympy's package on 2026-10-02 (§14, SWE-bench spec §13.2).
