@@ -1,6 +1,6 @@
 # Mightling Desktop — the Codex desktop app's shape, on `ling app-server`, grown from today's `ling-app`
 
-**Status:** proposed on 2026-10-03, revised the same day after an advisor review. **Phase 1's code is written** (branch `desktop/work-window`, §15) but not yet built into `ling-app` or watched live; the rest is proposed. §1 was read from the upstream vendor's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`). §2 lists the Codex app's features from the launch announcement (read from the Wayback Machine's copy; the page itself answers 403 and its videos could not be analysed, only their captions) and the upstream vendor's documentation and third-party write-ups. **§5 records what was measured on this GB10 on 2026-10-03** by driving the installed `ling app-server` over stdio from a script; everything else about behaviour is marked as read, not run.
+**Status:** proposed on 2026-10-03, revised the same day after review. **Phase 1's code is written** (branch `desktop/work-window`, §15) but not yet built into `ling-app` or watched live; the rest is proposed. §1 was read from the upstream vendor's own Linux package (`chatgpt_arm64.deb` 26.930.31730, unpacked, not installed or run) and from the pinned Codex source (`rust-v0.158.0`). §2 lists the Codex app's features from the launch announcement (read from the Wayback Machine's copy; the page itself answers 403 and its videos could not be analysed, only their captions) and the upstream vendor's documentation and third-party write-ups. **§5 records what was measured on this GB10 on 2026-10-03** by driving the installed `ling app-server` over stdio from a script; everything else about behaviour is marked as read, not run.
 
 **Goal:** make Mightling's desktop app work the way Codex desktop app does — a desktop client that drives the agent through Codex's **app-server** (JSON-RPC over stdio), with the same projects → threads → turns model, the same composer, approvals, diffs, review, worktrees and terminal — and **get there by growing today's `ling-app` in place, never breaking it**. Today `ling-app` (`desktop/`) is a window on the Onyx web chat with no coding agent in it. That window stays exactly as it is and becomes the app's **Chat** window; the coding agent arrives beside it as the **Work** window.
 
@@ -122,7 +122,7 @@ Generated from the `ling` binary the release ships: `ling app-server generate-ts
 
 ### 4.5 Work's frontend
 
-React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinned Node toolchain; `node_modules` not committed. Diff rendering, the terminal (xterm.js) and Markdown/Mermaid rendering use MIT or Apache-2.0 libraries bundled into the app, never loaded from a CDN. Every Onyx-side lesson in CLAUDE.md still applies to Chat; for Work, §9 lists the WebKitGTK ones.
+React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinned Node toolchain; `node_modules` not committed. Diff rendering, the terminal (xterm.js) and Markdown/Mermaid rendering use MIT or Apache-2.0 libraries bundled into the app, never loaded from a CDN. Every Onyx-side lesson in AGENTS.md still applies to Chat; for Work, §9 lists the WebKitGTK ones.
 
 ### 4.6 Running the upstream vendor's app on `ling` — rejected as the product
 
@@ -325,7 +325,7 @@ Threads the app starts are ordinary Codex sessions in `~/.mightling/sessions`. T
 
 ## 9. The webview: what `desktop/` already learned
 
-Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (CLAUDE.md, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
+Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (AGENTS.md, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
 
 ---
 

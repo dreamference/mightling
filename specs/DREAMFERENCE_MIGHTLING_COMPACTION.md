@@ -292,7 +292,7 @@ No role for Tiny-A2D (§9.3, §1). If the slot gets a capable model, §4.6's two
 
 ### 10.7 Where the ideas came from
 
-Asked for ideas before the measurements, the advisor proposed: scoring the **stock prompt** with the identifier test rather than only compressors, and doing it against the chat endpoint from a rollout instead of resuming a real session; the **hook-delivered rule-built ledger** (§10.1); the **night-time audit** (§10.3); testing the sidecar as an **extractor and verifier** against a regular expression (§9.3); and recording the 20,000-token verbatim user messages and the false summary prefix (§7.3, §7.6). The structured candidate's sections follow its suggestion and Claude Code's published prompt. Found while measuring, not proposed by anyone: that no recorded session was usable, that an untrusted hook is skipped silently, that the model overlooked the injected ledger in the same turn, and the 9K–14K floor.
+Ideas considered before the measurements: scoring the **stock prompt** with the identifier test rather than only compressors, and doing it against the chat endpoint from a rollout instead of resuming a real session; the **hook-delivered rule-built ledger** (§10.1); the **night-time audit** (§10.3); testing the sidecar as an **extractor and verifier** against a regular expression (§9.3); and recording the 20,000-token verbatim user messages and the false summary prefix (§7.3, §7.6). The structured candidate's sections follow that list and Claude Code's published prompt. Found while measuring, not proposed beforehand: that no recorded session was usable, that an untrusted hook is skipped silently, that the model overlooked the injected ledger in the same turn, and the 9K–14K floor.
 
 ---
 

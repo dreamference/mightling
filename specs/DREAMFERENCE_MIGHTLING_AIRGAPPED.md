@@ -255,7 +255,7 @@ Stated in the command's own output (§2), so nobody takes `on` for more than it 
 - The `on` and `duckduckgo` fragments against the live model with `ling debug prompt-input` and `ling exec`: at `on`, asked for today's weather, the model answers that it has no network in this session and does not run a web command or ask for one outside the sandbox.
 - DuckDuckGo alone, 50 varied queries through SearXNG over a day: how many are answered, and what the failures say. If fewer than nine in ten are answered, the level's line in `/airgapped` says so.
 
-**Phase 1, build.** `airgapped.rs`, patch `0019` with the cap raise, the level module and messages in `ling-web-rs/`, `mightling_airgapped` in `DreamferenceConfig`, the one clause in `WEB_ACCESS_INSTRUCTIONS`, the Night Shift test wrapper, `WebTools`, and the docs: [MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md), `README.md`, `CLAUDE.md`, `docs/`.
+**Phase 1, build.** `airgapped.rs`, patch `0019` with the cap raise, the level module and messages in `ling-web-rs/`, `mightling_airgapped` in `DreamferenceConfig`, the one clause in `WEB_ACCESS_INSTRUCTIONS`, the Night Shift test wrapper, `WebTools`, and the docs: [MIGHTLING_CODEX](./DREAMFERENCE_MIGHTLING_CODEX.md), `README.md`, `AGENTS.md`, `docs/`.
 
 **Phase 2, the airlock for `on`** ([MIGHTLING_EGRESS §4](./DREAMFERENCE_MIGHTLING_EGRESS.md)), after which the cases of §5.3 are closed and the status line at `on` has no exceptions to list.
 

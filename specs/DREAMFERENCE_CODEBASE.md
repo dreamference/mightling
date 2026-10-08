@@ -199,7 +199,7 @@ Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessW
 
 ### 3.5. `chat/`
 
-The Mightling web UI and its companions: Onyx deployment and configuration, the four kinds of UI patch (CSS, fonts, labels, scripts) plus brand assets, the Gmail service and client, the image-search sidecar, the SearXNG sidecar with the user-defined network the sidecars are created on, and the Tauri desktop window. See `DREAMFERENCE_ONYX.md` and `CLAUDE.md`.
+The Mightling web UI and its companions: Onyx deployment and configuration, the four kinds of UI patch (CSS, fonts, labels, scripts) plus brand assets, the Gmail service and client, the image-search sidecar, the SearXNG sidecar with the user-defined network the sidecars are created on, and the Tauri desktop window. See `DREAMFERENCE_ONYX.md` and `AGENTS.md`.
 
 ### 3.6. `context_engine/`
 

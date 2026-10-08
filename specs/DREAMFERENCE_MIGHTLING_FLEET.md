@@ -275,7 +275,7 @@ What it **never** changes: `sshd`, netplan or NetworkManager, the firewall, user
 What a node needs is computed **here**, from the matrix entry of the model assigned to it: the main repository at its pinned revision, a drafter if the recipe names one, the diffusion model, the embedding model, and the recipe's image (plus SearXNG, and the web UI's images with `--web`).
 
 - **Weights:** `rsync -aH --partial` of each `~/.cache/huggingface/hub/models--<org>--<name>/` directory, over the session.
-  - The cache is a tree of symbolic links into `blobs/`, so `-a`'s link handling matters, and `refs/` travels with it, so a pinned revision resolves offline (the SGLang trap in CLAUDE.md).
+  - The cache is a tree of symbolic links into `blobs/`, so `-a`'s link handling matters, and `refs/` travels with it, so a pinned revision resolves offline (the SGLang trap in AGENTS.md).
   - It resumes after an interruption, and a second run copies nothing.
   - The node's own `HF_HOME` is respected through `ModelDownloader`'s resolution.
 - **Images built locally** (the fallback's `dreamference-vllm-dflash:…` tags), 40.7 GB each, exist nowhere else: `docker save <tag> | zstd -T0 -3 | ssh … 'zstd -d | docker load'`.

@@ -31,7 +31,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 
 \title{Mightling: A Vendor-Free Coding Agent on a Single Unified-Memory Workstation, Built on
-OpenAI Codex}
+the Codex CLI}
 
 \author{dgxcoder\\ \texttt{dgxcoder@dreamference.ai}}
 
@@ -41,7 +41,7 @@ OpenAI Codex}
 \maketitle
 
 \begin{abstract}
-Terminal coding agents such as OpenAI's Codex CLI are open source, but they are built around a
+Terminal coding agents such as the Codex CLI are open source, but they are built around a
 hosted model, a vendor account and a cloud of companion services. We describe \emph{Mightling}, a
 coding agent whose model runs on one NVIDIA GB10 workstation (128\,GB of CPU--GPU unified memory):
 a 27B-parameter model (Qwen3.8-27B, NVFP4) served locally through SGLang with a block-diffusion
@@ -138,16 +138,16 @@ to upstream engines through SearXNG, and they can contain fragments of code or c
 
 \section{Background}
 
-\paragraph{The Codex CLI.} OpenAI's Codex CLI \cite{openai2026codex} is a Rust workspace of about
+\paragraph{The Codex CLI.} The Codex CLI \cite{openai2026codex} is an open-source Rust workspace of about
 160 crates. It includes a terminal UI, a non-interactive \code{exec} mode, session
 resume and fork, a platform sandbox (Bubblewrap on Linux) and an approval model for tool calls. It
 also has \emph{Code Mode}, in which the model is given a single \code{exec} tool and writes short
 JavaScript programs. A separate V8-based host process (\code{codex-code-mode-host}) runs these
 programs, and within them every other tool, including Model Context Protocol (MCP)
 \cite{mcp2025spec} tools, is callable as a function. Codex can talk to ``open-source'' providers
-(\code{-{}-oss}) through an OpenAI-compatible endpoint. Many product surfaces, however, assume a
-ChatGPT account: login, cloud tasks, connectors, usage limits and feedback upload. The
-self-updater needs no account, but it installs from OpenAI's distribution channels.
+(\code{-{}-oss}) through a standard chat-completions endpoint. Many product surfaces, however, assume an
+account with the vendor's hosted service: login, cloud tasks, connectors, usage limits and feedback upload. The
+self-updater needs no account, but it installs from the vendor's distribution channels.
 
 \paragraph{The machine.} The NVIDIA GB10 pairs an Arm CPU with a Blackwell GPU (compute capability
 12.1) over 128\,GB of shared LPDDR5X. No memory is reserved for the GPU. Model weights, KV cache,
@@ -200,7 +200,7 @@ removed with its images. The vLLM launcher remains, so the method does not depen
   \draw[->] (user) -- (launcher);
   \draw[->] (launcher) -- (codex);
   \draw[->] (codex) -- (host);
-  \draw[->] (codex) -- node[lbl, below=3pt, align=center] {OpenAI-compatible\\HTTP API} (vllm);
+  \draw[->] (codex) -- node[lbl, below=3pt, align=center] {chat-completions\\HTTP API} (vllm);
   \draw[->] (watch) -- node[lbl, right=2pt] {kill on pressure} (vllm);
   \draw[->] (launcher) -- node[lbl, left=2pt, align=right] {shell commands\\described in prompt} (tools);
   \draw[->] (tools) -- (svc);
@@ -293,7 +293,7 @@ the workspace manifest, and the binary is renamed at install time rather than in
 \cref{tab:patches} shows. Examples: return \code{false} from a slash command's visibility predicate,
 mark a subcommand \code{hide = true}, or send a subcommand's dispatch into the launcher. The
 largest remaining hunks are presentation strings (patch 0001) and \code{/usage} (0011), which
-repurposes a ChatGPT-plan screen as local token statistics.
+repurposes a hosted-plan usage screen as local token statistics.
 
 \paragraph{New features cost a hook, not a diff.} The series reached its smallest size, about
 9\,KB, when the four techniques above were done; everything since has been hooks. Up to 0016 they
@@ -328,7 +328,7 @@ Patch & Files & $+/-$ & Purpose \\
 0007 hide-remote-control & 1 & 2/0 & Hide \code{remote-control} \\
 0008 mightling-update & 1 & 2/2 & Send \code{update} to the launcher's release updater \\
 0009 remove-feedback & 2 & 3/1 & Remove \code{/feedback} (uploads session logs) \\
-0010 hide-voice & 1 & 4/1 & Hide \code{/voice} (hosted realtime API) and \code{/pets} (art fetched from OpenAI's CDN) \\
+0010 hide-voice & 1 & 4/1 & Hide \code{/voice} (hosted realtime API) and \code{/pets} (art fetched from the vendor's CDN) \\
 0011 usage-token-stats & 4 & 7/17 & \code{/usage} shows local token statistics \\
 0012 hide-auto-review & 1 & 2/0 & Hide \code{/approve} (defaults to a hosted review model) \\
 0013 disable-usage-analytics & 1 & 2/1 & Construct the analytics client disabled \\
@@ -356,11 +356,11 @@ column counts it once per patch.}
 
 \subsection{Build-reproducibility details}
 
-Three upstream build assumptions did not hold outside OpenAI's release pipeline.
+Three upstream build assumptions did not hold outside upstream's release pipeline.
 \begin{itemize}
   \item \textbf{V8 flavour.} Code Mode links V8 built with pointer compression and the V8 sandbox.
     The \code{v8} crate's build script downloads a matching prebuilt library \cite{rustyv8}, but that
-    flavour is not published for \code{aarch64-unknown-linux-gnu}, so the download fails. OpenAI
+    flavour is not published for \code{aarch64-unknown-linux-gnu}, so the download fails. Upstream
     publishes it on its own release page, and the submodule carries a manifest of those files'
     SHA-256 digests. Our builder fetches the archive and its bindings, verifies each against the
     committed manifest, and passes them to Cargo, which mirrors upstream's CI.
@@ -378,7 +378,7 @@ Three upstream build assumptions did not hold outside OpenAI's release pipeline.
 \section{Cutting the cloud cord}
 \label{sec:cloud}
 
-We audited every subcommand and slash command of Codex 0.158.0 for a dependency on OpenAI-hosted
+We audited every subcommand and slash command of Codex 0.158.0 for a dependency on vendor-hosted
 services. \Cref{tab:cloud} lists what we changed. We used four treatments, deliberately
 distinguished:
 \begin{itemize}
@@ -389,9 +389,9 @@ distinguished:
   \item \emph{Remove}: the command is invisible and unreachable.
 \end{itemize}
 Hiding alone is not a security boundary: a hidden clap subcommand still parses. Four commands are
-therefore also refused in the launcher: \code{login} and \code{logout}, which start or end an
-OpenAI sign-in, and \code{cloud} and \code{cloud-tasks}, which browse tasks on OpenAI's servers.
-\code{remote-control}, \code{/voice} and \code{/approve} are only hidden. Each needs an OpenAI
+therefore also refused in the launcher: \code{login} and \code{logout}, which start or end a
+vendor sign-in, and \code{cloud} and \code{cloud-tasks}, which browse tasks on the vendor's servers.
+\code{remote-control}, \code{/voice} and \code{/approve} are only hidden. Each needs a vendor
 account that Mightling does not have, so none of them can succeed.
 The refusal finds the subcommand the way Codex will: it reads Codex's own clap definitions to learn
 which options consume the next token, so \code{ling -c k=v cloud} is refused too. An earlier
@@ -407,9 +407,9 @@ under \code{strace -f -e trace=connect,execve}, with the HTTP client's debug log
 URLs. With the model served on the loopback interface, anything else in the trace is traffic we
 did not intend.
 
-The first traces were not clean, although no ChatGPT login was present. Codex exported OpenTelemetry
+The first traces were not clean, although no vendor login was present. Codex exported OpenTelemetry
 metrics to Statsig at \code{ab.chatgpt.com}, the default in release builds, with an API key compiled
-in; it ran \code{git ls-remote https://github.com/openai/plugins.git} to sync OpenAI's curated
+in; it ran \code{git ls-remote https://github.com/openai/plugins.git} to sync the vendor's curated
 plugins; it requested \code{chatgpt.com/backend-api/plugins/featured}; and the interactive
 interface fetched an announcement from \code{raw.githubusercontent.com} on every start. Two further
 channels needed the login that an earlier upstream installation had left in the shared
@@ -420,7 +420,7 @@ reopen it. The analytics client and the metrics exporter resolve to ``disabled''
 and the two fetches return before any request, and Mightling keeps its state in
 \code{\textasciitilde/.mightling}, copying sessions and settings across but never the login. As a
 second line, the launcher points Codex's \code{chatgpt\_base\_url} at a closed local port, so any
-ChatGPT-backend call we did not find fails on the machine. Re-traced, both sessions contacted only
+vendor-backend call we did not find fails on the machine. Re-traced, both sessions contacted only
 two loopback services: the model server and the local mail service. The lesson is general: for a
 vendor client, the list of what it sends is an empirical question, and has to be re-measured after
 every upstream update.
@@ -454,22 +454,22 @@ a CAPTCHA, so the level searched nothing.
 \toprule
 Surface & Why it does not fit a vendor-free agent & Treatment \\
 \midrule
-\code{login}, \code{logout}, \code{/logout} & ChatGPT / API-key sign-in; no account exists & refuse + hide \\
-\code{cloud}, \code{cloud-tasks} & Browses tasks on OpenAI's servers & refuse + hide \\
-\code{remote-control} & Relays sessions through OpenAI's servers & hide \\
+\code{login}, \code{logout}, \code{/logout} & Vendor-account / API-key sign-in; no account exists & refuse + hide \\
+\code{cloud}, \code{cloud-tasks} & Browses tasks on the vendor's servers & refuse + hide \\
+\code{remote-control} & Relays sessions through the vendor's servers & hide \\
 \code{update} & Installs upstream Codex over Mightling & replace (verified release download) \\
-\code{/feedback} & Uploads session logs to OpenAI & remove \\
-\code{/voice} & OpenAI realtime voice API & hide \\
-\code{/usage} & ChatGPT plan usage and limit resets & replace (local token statistics) \\
+\code{/feedback} & Uploads session logs to the vendor & remove \\
+\code{/voice} & Hosted realtime voice API & hide \\
+\code{/usage} & Hosted-plan usage and limit resets & replace (local token statistics) \\
 \code{/approve} (auto-review) & Defaults to a hosted review model & hide \\
-\code{app} & Opens OpenAI's closed-source desktop app & replace (opens Mightling's own window) \\
-update check at start-up & Compares against \code{openai/codex} releases & disabled in config \\
+\code{app} & Opens the vendor's closed-source desktop app & replace (opens Mightling's own window) \\
+update check at start-up & Compares against upstream Codex releases & disabled in config \\
 \midrule
 \multicolumn{3}{@{}l}{\emph{Found only by tracing a session (\S\ref{sec:egress})}} \\
-usage analytics & Posted to \code{chatgpt.com} whenever a ChatGPT login is present & disabled \\
-shared \code{\textasciitilde/.codex} & Inherited an upstream ChatGPT login and its token refresh & own \code{\textasciitilde/.mightling} \\
+usage analytics & Posted to \code{chatgpt.com} whenever a vendor login is present & disabled \\
+shared \code{\textasciitilde/.codex} & Inherited an upstream vendor login and its token refresh & own \code{\textasciitilde/.mightling} \\
 OTEL metrics & Exported to Statsig (\code{ab.chatgpt.com}) by default in release builds & disabled \\
-curated plugin sync & \code{git ls-remote} of OpenAI's plugin repository on GitHub at start-up & removed \\
+curated plugin sync & \code{git ls-remote} of the vendor's plugin repository on GitHub at start-up & removed \\
 featured plugins & Request for featured plugins to \code{chatgpt.com} & removed \\
 announcement tip & TUI fetch from GitHub's content host on every start & removed \\
 \bottomrule
@@ -704,7 +704,7 @@ USE'' are skipped. An earlier run, before the fixes in this paper, had three fai
 diagnosed from the session transcript.
 \begin{enumerate}
   \item \emph{Fresh-home start}: with an empty configuration directory, \code{ling} opened on
-    Codex's ``Sign in with ChatGPT'' screen. The start-up account check reads the configured
+    Codex's vendor sign-in screen. The start-up account check reads the configured
     \code{model\_provider}, not \code{--oss}; the launcher now also passes
     \code{-c model\_provider=\ldots}, and the test passes.
   \item \code{/btw}: an alias of \code{/side}, unavailable until a conversation exists. The test
