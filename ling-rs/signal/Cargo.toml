@@ -1,0 +1,28 @@
+# `ling signal`, Mightling over Signal (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md): a bridge that drives
+# signal-cli over JSON-RPC and is one more paired client of `ling web`, so a message from the owner's
+# phone becomes a turn in an Ask thread. A crate of its own so its tests run without compiling the
+# Codex workspace (`cargo test` in a copy of this folder), and so the daemon is a small binary the
+# system account `mightling-signal` can run from /usr/local/lib/mightling without the 300 MB `ling`.
+# Versions are the Codex workspace's and `ling-web-server`'s, so building inside it adds no second
+# copy of any crate.
+[package]
+name = "ling-signal"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_signal"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ling-signal"
+path = "src/main.rs"
+
+[dependencies]
+futures = { version = "0.3", default-features = false, features = ["std"] }
+rand = "0.9"
+serde_json = "1"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
