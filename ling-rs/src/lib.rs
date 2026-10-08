@@ -54,6 +54,7 @@ pub mod skills;
 
 pub mod update;
 pub mod usage;
+#[cfg(unix)]
 pub mod web;
 
 /// Where Dreamference serves its model unless configured otherwise.
@@ -283,7 +284,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     if let Some(index) = subcommand
         && user_args[index] == "web"
     {
+        #[cfg(unix)]
         std::process::exit(web::run_cli(&user_args[index + 1..]).await);
+        #[cfg(not(unix))]
+        {
+            eprintln!("`ling web` is not available on Windows yet: the web server reaches the app-server over a Unix socket.");
+            std::process::exit(2);
+        }
     }
     // `refine` shows refine mode's setting, and `refine hook` is its hook in the TUI (refine.rs).
     if let Some(index) = subcommand

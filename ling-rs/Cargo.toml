@@ -35,8 +35,6 @@ ling-masking = { path = "masking" }
 ling-node-locator = { path = "node-locator" }
 # Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
 ling-skills = { path = "skills" }
-# `ling web`: the web server, a crate of its own so its tests run without the Codex workspace (src/web.rs).
-ling-web-server = { path = "web" }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 semver = { workspace = true }
@@ -55,6 +53,9 @@ openssl-sys = { workspace = true, features = ["vendored"] }
 # `/node` ignores Ctrl-C while its child has the terminal (src/node_command.rs).
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+# `ling web`: the web server, a crate of its own so its tests run without the Codex workspace
+# (src/web.rs). Unix only: it reaches the app-server over a Unix socket; Windows has no `ling web` yet.
+ling-web-server = { path = "web" }
 
 # Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), the
 # same windows-sys release the Codex workspace already builds.
