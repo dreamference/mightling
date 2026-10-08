@@ -12,6 +12,8 @@ export interface ShellActions {
 
 export function installMenu(actions: ShellActions): void {
   const template: Electron.MenuItemConstructorOptions[] = [
+    // On a Mac the first menu is the application's (About, Hide, Quit), named after it.
+    ...(process.platform === "darwin" ? [{ role: "appMenu" } as const] : []),
     {
       label: "File",
       submenu: [
@@ -41,8 +43,10 @@ export function showContextMenu(window: BrowserWindow, request: { x: number; y: 
 let tray: Tray | null = null;
 
 export function installTray(iconsDir: string, actions: ShellActions): void {
-  const icon = nativeImage.createFromPath(path.join(iconsDir, "32x32.png"));
+  let icon = nativeImage.createFromPath(path.join(iconsDir, "32x32.png"));
   if (icon.isEmpty()) return;
+  // The macOS menu bar is 22 points tall; the 32-pixel image would be drawn 32 points high there.
+  if (process.platform === "darwin") icon = icon.resize({ height: 18 });
   tray = new Tray(icon);
   tray.setToolTip("Mightling");
   tray.setContextMenu(

@@ -1,0 +1,212 @@
+# The Mightling desktop app for macOS, as an unsigned preview (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md
+# §10): the Electron app of desktop/electron, with the macOS `ling` and `codex-code-mode-host` from
+# build-clients.yml inside, in a `.dmg` per architecture. On a Mac the app is a client: it finds a
+# GB10 node on the network, as `ling` does.
+#
+# Not signed with a Developer ID and not notarized: the bundle is signed ad hoc only (Apple silicon
+# runs nothing without at least that), so Gatekeeper refuses it until the user allows it once
+# (docs/desktop.md says how).
+#
+# Runs on pushes to desktop/mac** branches (CI), by hand, and from release.yml
+# (`build_mac_preview`), which publishes the dmgs with the release. It builds no `ling`: it takes the
+# mightling-client-<target> artifacts of build-clients.yml, from the calling run when the release
+# calls it, else from the run named by `client_run_id`, else from the newest run that has them.
+name: Mac preview
+
+on:
+  push:
+    branches: ["desktop/mac**"]
+  workflow_dispatch:
+    inputs:
+      client_run_id:
+        description: "Run whose mightling-client-<target> artifacts are bundled; empty: the newest such run; none: package without ling"
+        type: string
+        default: ""
+      version:
+        description: "Version stamped into the app and the dmg's name; empty: desktop/electron/package.json's"
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version stamped into the app and the dmg's name"
+        type: string
+        default: ""
+      client_run_id:
+        description: "this: the calling run's build-clients artifacts (the release)"
+        type: string
+        default: this
+
+# Reading another run's artifacts needs actions: read; a caller must grant it (release.yml does).
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: Mac preview - ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The runners build-clients.yml builds these targets on.
+          - arch: arm64
+            target: aarch64-apple-darwin
+            runner: macos-15
+          - arch: x64
+            target: x86_64-apple-darwin
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      CLIENT_RUN_ID: ${{ inputs.client_run_id }}
+      INPUT_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Version
+        run: |
+          version="$INPUT_VERSION"
+          [[ -n "$version" ]] || version="$(node -p 'require("./desktop/electron/package.json").version')"
+          echo "MIGHTLING_VERSION=$version" >> "$GITHUB_ENV"
+          echo "DMG=Mightling-$version-${{ matrix.arch }}-preview.dmg" >> "$GITHUB_ENV"
+          echo "version $version"
+
+      # The release: this run's own artifacts (a reusable workflow shares its caller's run).
+      - name: Client binaries (this run)
+        if: ${{ inputs.client_run_id == 'this' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mightling-client-${{ matrix.target }}
+          path: clients
+      # Otherwise another run's: the one named, or the newest that has them.
+      - name: Client binaries (another run)
+        if: ${{ inputs.client_run_id != 'this' }}
+        run: |
+          name="mightling-client-${{ matrix.target }}"
+          run="$CLIENT_RUN_ID"
+          if [[ "$run" == "none" ]]; then
+            echo "::warning::Packaging without ling, as asked (client_run_id=none)"
+            exit 0
+          fi
+          if [[ -z "$run" ]]; then
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$name&per_page=1" --jq '.artifacts[0].workflow_run.id // empty')"
+            if [[ -z "$run" ]]; then
+              echo "::warning::No run has a $name artifact yet; packaging without ling"
+              exit 0
+            fi
+          fi
+          echo "Taking $name from run $run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run"
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" -n "$name" -D clients
+      - name: Bundled binaries
+        run: |
+          mkdir -p desktop/electron/resources
+          if [[ ! -d clients ]]; then
+            echo "BUNDLED=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          ls -l clients
+          # Checked against the build's own sums file before anything is unpacked.
+          (cd clients && shasum -a 256 -c "ling-${{ matrix.target }}.sha256sums")
+          # Named exactly: `ling-*` would also match ling-search, ling-fetch and ling-code.
+          for name in ling codex-code-mode-host; do
+            gunzip -c "clients/$name-${{ matrix.target }}.gz" > "desktop/electron/resources/$name"
+            chmod 755 "desktop/electron/resources/$name"
+          done
+          file desktop/electron/resources/*
+          desktop/electron/resources/ling --version
+          echo "BUNDLED=true" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Work window frontend
+        working-directory: desktop/ui
+        run: |
+          npm ci
+          npm test
+      # As the Linux job, but `package` instead of `make`: the dmg is made below, after the checks.
+      # Forge writes out/Mightling-darwin-<arch>/Mightling.app, flips the fuses and signs it ad hoc.
+      - name: Build the app
+        working-directory: desktop/electron
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run package
+          npx vitest run src/credentials.test.ts
+          echo "APP=$PWD/out/Mightling-darwin-${{ matrix.arch }}/Mightling.app" >> "$GITHUB_ENV"
+
+      # What the bundle is, in the log: the layout, each binary's architecture, the signature
+      # (ad hoc, no Developer ID, so Gatekeeper's assessment is expected to refuse it) and the fuses.
+      - name: Inspect the bundle
+        run: |
+          cd "$APP/.."
+          find Mightling.app -maxdepth 3 | sort | sed -n 1,80p
+          ls -l Mightling.app/Contents/Resources
+          plutil -p Mightling.app/Contents/Info.plist
+          file Mightling.app/Contents/MacOS/Mightling "Mightling.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+          for binary in Mightling.app/Contents/Resources/ling Mightling.app/Contents/Resources/codex-code-mode-host; do
+            [[ -f "$binary" ]] || continue
+            file "$binary"
+            otool -l "$binary" | grep -A4 LC_BUILD_VERSION || true
+            codesign -dv "$binary" 2>&1 || true
+          done
+          codesign -dvv Mightling.app 2>&1
+          # Must hold: Apple silicon kills a binary whose signature does not verify.
+          codesign --verify --deep --strict --verbose=2 Mightling.app
+          echo "Gatekeeper (expected to reject an ad-hoc signed app):"
+          spctl -a -t exec -vv Mightling.app 2>&1 || true
+          npx --prefix "$GITHUB_WORKSPACE/desktop/electron" @electron/fuses read --app "$APP" || true
+          du -sh Mightling.app Mightling.app/Contents/Resources/* Mightling.app/Contents/Frameworks
+
+      # The app really starts: the audit's session (hidden windows, Work's app-server started with the
+      # bundled ling, quit after a few seconds) in a scratch HOME, the model server named so nothing
+      # browses the network.
+      - name: Start the app
+        run: |
+          scratch="$(mktemp -d)"
+          mkdir -p "$scratch/home"
+          set +e
+          HOME="$scratch/home" CODEX_HOME="$scratch/home/.mightling" MIGHTLING_APP_AUDIT=8 \
+            DREAMFERENCE_VLLM_HOST=http://127.0.0.1:9 \
+            "$APP/Contents/MacOS/Mightling" > "$scratch/out.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::the app did not quit after its audit session"
+            kill -9 "$pid"
+            cat "$scratch/out.log"
+            exit 1
+          fi
+          wait "$pid"
+          status=$?
+          cat "$scratch/out.log"
+          echo "exit status $status"
+          exit "$status"
+
+      # HFS+ rather than APFS, so the image can be listed and unpacked off a Mac (7z) as well.
+      - name: Make the dmg
+        run: |
+          staging="$(mktemp -d)/Mightling"
+          mkdir -p "$staging"
+          ditto "$APP" "$staging/Mightling.app"
+          ln -s /Applications "$staging/Applications"
+          mkdir -p dist
+          hdiutil create -volname "Mightling $MIGHTLING_VERSION" -srcfolder "$staging" -fs HFS+ -format UDZO -ov "dist/$DMG"
+          hdiutil verify "dist/$DMG"
+          # The image's copy is what a user gets: verify it again.
+          mount="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "dist/$DMG"
+          codesign --verify --deep --strict "$mount/Mightling.app" && echo "the dmg's app verifies"
+          hdiutil detach "$mount"
+          ls -l dist
+          [[ "$BUNDLED" == "true" ]] || echo "::warning::$DMG has no ling inside"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-mac-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error

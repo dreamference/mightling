@@ -56,6 +56,10 @@ on:
         description: "Also build the client for Intel/AMD Linux and macOS (build-clients.yml)"
         type: boolean
         default: false
+      build_mac_preview:
+        description: "Also build the Mac desktop app (.dmg, Apple silicon and Intel; preview, unsigned). Needs build_clients, whose macOS ling it bundles"
+        type: boolean
+        default: false
 
 # Read-only by default; only the job that publishes the release may write (security review
 # 2026-10). Every action is pinned to a commit, with its tag in a comment, so a moved tag cannot
@@ -279,8 +283,23 @@ jobs:
     with:
       version: ${{ inputs.version }}
 
+  # The Mac desktop app, an unsigned preview (signed ad hoc only): the Electron app with the macOS
+  # ling of `ling-clients` inside, one dmg per architecture, named Mightling-<version>-<arch>-preview.dmg.
+  desktop-mac:
+    needs: [validate, test, ling-clients]
+    if: ${{ inputs.build_mac_preview && inputs.build_clients && !failure() && !cancelled() }}
+    # The called workflow declares actions: read (for another run's artifacts); a caller must grant
+    # at least what it asks. Here it reads only this run's.
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/mac-preview.yml
+    with:
+      version: ${{ inputs.version }}
+      client_run_id: this
+
   release:
-    needs: [python-dist, desktop, ling, windows, ling-clients]
+    needs: [python-dist, desktop, ling, windows, ling-clients, desktop-mac]
     permissions:
       contents: write
       # Build provenance: the OIDC token Sigstore certifies, and the right to store the attestation.
@@ -367,5 +386,17 @@ jobs:
           # files themselves; handing gh a directory fails the upload after the release is created.
           mapfile -t files < <(find artifacts -type f | sort)
           files+=(SHA256SUMS SHA256SUMS.sig)
+          # The Mac app is a preview and is not notarized: say so above the generated notes.
+          if printf '%s\n' "${files[@]}" | grep -q -- '-preview\.dmg$'; then
+            {
+              echo "### Mac desktop app (preview, unsigned)"
+              echo
+              echo "\`Mightling-${VERSION}-arm64-preview.dmg\` (Apple silicon) and \`Mightling-${VERSION}-x64-preview.dmg\` (Intel) are a preview of the desktop app for macOS 12 or later, a client of a Mightling node on your network. They are signed ad hoc only, with no Apple Developer ID and no notarization, so macOS refuses to open the app the first time."
+              echo "Drag Mightling to Applications, try to open it once, then allow it in System Settings → Privacy & Security → Open Anyway (on macOS 14 and earlier, Control-click the app and choose Open instead)."
+              echo "Or, in Terminal: \`xattr -dr com.apple.quarantine /Applications/Mightling.app\`. Check the dmg against SHA256SUMS first; steps in docs/desktop.md."
+              echo
+            } > notes.md
+            flags+=(--notes-file notes.md)
+          fi
           printf 'Uploading %s\n' "${files[@]}"
           gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" "${flags[@]}"

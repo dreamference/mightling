@@ -18,6 +18,11 @@ const extraResource = ["ling", "codex-code-mode-host", "rg"]
   .map((name) => path.join(resources, name))
   .filter((file) => fs.existsSync(file));
 
+// The Mac preview (§10): the packager wants an `.icns`, which `generateAssets` below makes from
+// icons/icon.png with the system's own `sips` and `iconutil`, into the git-ignored `resources/`
+// (so it stays out of the asar, which carries icons/ for the tray).
+const darwin = process.platform === "darwin";
+
 module.exports = {
   packagerConfig: {
     name: app.productName,
@@ -25,8 +30,19 @@ module.exports = {
     appBundleId: app.identifier,
     appCopyright: "Copyright (C) 2026 Dreamference contributors. AGPL-3.0-or-later.",
     asar: true,
-    icon: path.join(__dirname, "icons", "icon"),
+    icon: darwin ? path.join(resources, "icon") : path.join(__dirname, "icons", "icon"),
     extraResource,
+    // macOS only (the packager ignores these elsewhere). The scheme, so `mightling://` links reach
+    // `open-url`; the category; and the Local Network entries macOS 15 asks about before the app
+    // (or the bundled `ling` it starts) may browse for a node or connect to one on the LAN.
+    protocols: [{ name: app.productName, schemes: [app.scheme] }],
+    appCategoryType: "public.app-category.developer-tools",
+    extendInfo: {
+      NSLocalNetworkUsageDescription:
+        "Mightling finds your Mightling node (a GB10) on the local network and talks to its model server and web UI.",
+      // src/node_locator.ts SERVICE_TYPE, without the domain.
+      NSBonjourServices: ["_mightling-node._tcp"],
+    },
     // The asar holds what the app loads: the Vite build (main, preload, Work's page, with
     // multicast-dns bundled in), the icons and package.json. Sources, configs, tests, the staged
     // binaries (extra resources above) and node_modules stay out.
@@ -97,6 +113,23 @@ module.exports = {
     },
   ],
   hooks: {
+    // The Mac icon (see `darwin` above); nothing to do elsewhere or when it is already there.
+    generateAssets: async () => {
+      if (!darwin || fs.existsSync(path.join(resources, "icon.icns"))) return;
+      const { execFileSync } = require("node:child_process");
+      const iconset = path.join(resources, "icon.iconset");
+      fs.rmSync(iconset, { recursive: true, force: true });
+      fs.mkdirSync(iconset, { recursive: true });
+      const source = path.join(__dirname, "icons", "icon.png");
+      for (const size of [16, 32, 128, 256, 512]) {
+        for (const [scale, suffix] of [[1, ""], [2, "@2x"]]) {
+          const pixels = String(Math.min(size * scale, 512));
+          execFileSync("sips", ["-z", pixels, pixels, source, "--out", path.join(iconset, `icon_${size}x${size}${suffix}.png`)], { stdio: "ignore" });
+        }
+      }
+      execFileSync("iconutil", ["-c", "icns", iconset, "-o", path.join(resources, "icon.icns")]);
+      fs.rmSync(iconset, { recursive: true, force: true });
+    },
     // The version the release stamps (`MIGHTLING_VERSION`), else the package's.
     prePackage: async (forgeConfig) => {
       forgeConfig.packagerConfig.appVersion = process.env.MIGHTLING_VERSION || pkg.version;
@@ -108,9 +141,13 @@ module.exports = {
         // Not shipped: the SUID sandbox helper. The AppArmor profile of linux/postinst grants the
         // user namespace Chromium's sandbox uses instead, as the Codex app does.
         fs.rmSync(path.join(outputPath, "chrome-sandbox"), { force: true });
-        await flipFuses(path.join(outputPath, app.executable), {
+        // On a Mac the fuses live in the bundle (fuses finds the framework from the `.app`), and
+        // flipping them breaks the ad-hoc signature Apple silicon will not run without, so fuses
+        // re-signs it ad hoc; the workflow then signs the whole bundle ad hoc (§10).
+        const binary = darwin ? path.join(outputPath, `${app.productName}.app`) : path.join(outputPath, app.executable);
+        await flipFuses(binary, {
           version: FuseVersion.V1,
-          resetAdHocDarwinSignature: false,
+          resetAdHocDarwinSignature: darwin,
           [FuseV1Options.RunAsNode]: false,
           [FuseV1Options.EnableCookieEncryption]: true,
           [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
