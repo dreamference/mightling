@@ -355,6 +355,7 @@ Trace one real puffin session and list every network destination and process, wi
 | `--tui` | Trace the full-screen interface on a pseudo-terminal instead of `puffin exec` (needs pexpect and pyte) |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
 | `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
+| `--docs` | Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing. |
 
 ### `puffin-admin node`
 
@@ -633,6 +634,14 @@ Show which accounts are connected.
 | Option | Description |
 |---|---|
 | `--json` | Emit raw JSON. |
+
+### `puffin-admin docs`
+
+Manage the local file index's run-time files (ling-docs).
+
+#### `puffin-admin docs setup`
+
+Install PDFium, ONNX Runtime and the embedding model ling-docs loads (pinned, checked).
 
 ### `puffin-admin searxng`
 

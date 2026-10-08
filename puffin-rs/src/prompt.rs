@@ -292,6 +292,8 @@ pub struct Parts {
     pub email: String,
     /// The code-navigation block from `puffin-code prompt-block`, when it is installed.
     pub code: String,
+    /// The `# Your documents` block from `ling-docs prompt-block`, when a collection exists.
+    pub docs: String,
     /// The skills glossary. Not a prompt block: the skills list reaches every prompt, so its
     /// glossary does too.
     pub glossary: String,
@@ -323,6 +325,8 @@ pub fn compose(prompt: &Prompt, parts: &Parts) -> String {
     if prompt.blocks.code {
         text.push_str(&parts.code);
     }
+    // Every collection is visible to every session (local index spec §14.2), whatever the prompt.
+    text.push_str(&parts.docs);
     text.push_str(&parts.glossary);
     text.push_str(&parts.masking);
     text
@@ -441,7 +445,8 @@ async fn show(prompt: &Prompt) -> i32 {
         String::new()
     };
     let code = if prompt.blocks.code { code_index::prompt_block(code_index::tools_enabled(), &dir) } else { String::new() };
-    let parts = Parts { email, code, rg_installed: code_index::rg_installed(), ..Default::default() };
+    let docs = crate::docs_index::prompt_block(crate::docs_index::enabled(crate::config_file()));
+    let parts = Parts { email, code, docs, rg_installed: code_index::rg_installed(), ..Default::default() };
     let text = compose(prompt, &parts);
     println!("{text}");
     eprintln!(

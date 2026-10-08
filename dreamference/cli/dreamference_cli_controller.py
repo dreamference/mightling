@@ -1054,6 +1054,8 @@ class DreamferenceCLIController:
         audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `puffin exec` (needs pexpect and pyte)")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
+        audit_egress_parser.add_argument("--docs", action="store_true", help="Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing")
+        audit_egress_parser.add_argument("--ling-docs-bin", default=None, help=argparse.SUPPRESS)
 
         # Command: puffin-admin node (offer this machine to the local network as a Puffin node)
         node_parser = subparsers.add_parser("node", help="Advertise this machine on the local network so clients find it with no address typed")
@@ -1233,6 +1235,11 @@ class DreamferenceCLIController:
         gmail_status_parser = gmail_subparsers.add_parser("status", help="Show which accounts are connected")
         gmail_status_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
 
+        # Command: puffin-admin docs (what the local file index, ling-docs, loads at run time)
+        docs_parser = subparsers.add_parser("docs", help="Manage the local file index's run-time files (ling-docs)")
+        docs_subparsers = docs_parser.add_subparsers(dest="docs_command")
+        docs_subparsers.add_parser("setup", help="Install PDFium, ONNX Runtime and the embedding model ling-docs loads (pinned, checked)")
+
         # Command: puffin-admin searxng (the search container behind puffin-search and the web UI)
         searxng_parser = subparsers.add_parser("searxng", help="Manage the local SearXNG search container")
         searxng_subparsers = searxng_parser.add_subparsers(dest="searxng_command")
@@ -1267,6 +1274,7 @@ class DreamferenceCLIController:
             "onyx": (onyx_parser, "onyx_command"),
             "desktop": (desktop_parser, "desktop_command"),
             "searxng": (searxng_parser, "searxng_command"),
+            "docs": (docs_parser, "docs_command"),
             "google": (google_parser, "google_command"),
         }
         if diffusion_model_parser is not None:
@@ -2330,6 +2338,9 @@ class DreamferenceCLIController:
         elif args.command == "audit":
             from dreamference.audit import EgressAudit
             if args.audit_command == "egress":
+                if args.docs:
+                    from dreamference.audit import DocsEgressAudit
+                    sys.exit(DocsEgressAudit.run(ling_docs=args.ling_docs_bin))
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
                 sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui))
             print("usage: puffin-admin audit {egress}")
@@ -2539,6 +2550,13 @@ class DreamferenceCLIController:
             console.print(f"[bold green]✅ Workspace Indexed![/bold green]")
             console.print(f"   Files Indexed: {summary['total_indexed_files']}")
             console.print(f"   AST Symbols:   {summary['total_ast_symbols']}")
+
+        elif args.command == "docs":
+            if args.docs_command == "setup":
+                from dreamference.runner.docs_index_setup import DocsIndexSetup
+                sys.exit(0 if DocsIndexSetup.install() else 1)
+            print("usage: puffin-admin docs {setup}")
+            sys.exit(2)
 
         elif args.command == "searxng":
             if args.searxng_command == "start":
