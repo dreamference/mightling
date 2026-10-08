@@ -25,9 +25,12 @@ from dreamference.swe_bench import (
     SweBenchRuntime, SweBenchSettings,
 )
 from dreamference.swe_bench import swe_bench_settings
+from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS
 from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATCH
-from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, NO_REFINED,
-                                                          PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT, SCRUB_SCRIPT)
+from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, COMPLETION_NUDGE,
+                                                          NO_REFINED, PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT,
+                                                          SCRUB_SCRIPT, TASK_RULES)
+from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -192,6 +195,28 @@ class FakeDocker:
         stdout.write((json.dumps({"type": "turn.completed", "usage": {
             "input_tokens": 1000, "cached_input_tokens": 900, "output_tokens": 50}}) + "\n").encode())
         stdout.flush()
+        if mode == "midwork":
+            # Edits, then ends its turn mid-reasoning; finishes when told to.
+            if prompt == COMPLETION_NUDGE:
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX\n")
+                say("Finished: widget() returns 2, and the widget tests pass.")
+            else:
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # HALF\n")
+                say("Changed widget.py.\n\nThe caller in api.py needs the same. Let me check what calls widget():")
+            return FakeProcess(0)
+        if mode == "summary_with_plan":
+            # A finished summary that mentions a plan early on and ends with "Let me know".
+            (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX\n")
+            say("I'll describe the fix. " + "widget() now returns 2 as the issue asks. " * 12
+                + "\n\nLet me know if anything else is needed.")
+            return FakeProcess(0)
+        if mode in ("with_tests", "tests_only"):
+            if mode == "with_tests":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX\n")
+            (box["repo"] / "tests").mkdir(exist_ok=True)
+            (box["repo"] / "tests" / "test_widget.py").write_text("def test_widget():\n    assert True  # FIX\n")
+            say("Fixed widget() and added a test.")
+            return FakeProcess(0)
         acts = mode in ("change", "binary", "refine_edits", "refine_silent") or \
             (mode == "stall_then_act" and prompt == NUDGE)
         if acts:
@@ -1426,3 +1451,353 @@ def test_strip_names_is_a_command_line_switch(monkeypatch):
     assert seen["strip_names"] is True
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
     assert seen["strip_names"] is False
+
+
+# -- the failure analysis's harness fixes (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §5, §6) --
+
+# The eval script's trace around the test patch in django 16877 of `im100-default`, verbatim: the
+# agent had created the file the test patch adds.
+REJECTED_16877 = """+ git checkout 98f6ada0e2058d67d91fb6c16482411ec2ca0967 tests/template_tests/filter_tests/test_escapeseq.py
+error: pathspec 'tests/template_tests/filter_tests/test_escapeseq.py' did not match any file(s) known to git
++ git apply -v -
+Checking patch tests/template_tests/filter_tests/test_escapeseq.py...
+error: tests/template_tests/filter_tests/test_escapeseq.py: already exists in working directory
++ : '>>>>> Start Test Output'
++ ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 template_tests.filter_tests.test_escapeseq
++ : '>>>>> End Test Output'
++ git checkout 98f6ada0e2058d67d91fb6c16482411ec2ca0967 tests/template_tests/filter_tests/test_escapeseq.py
+error: pathspec 'tests/template_tests/filter_tests/test_escapeseq.py' did not match any file(s) known to git
+"""
+
+# And django 13837's: the reset aborted, so the agent's edit stayed and the hunk did not match.
+REJECTED_13837 = """+ git checkout 415f50298f97fb17f841a9df38d995ccf347dfcc tests/utils_tests/test_autoreload.py tests/utils_tests/test_module/__main__.py
+error: pathspec 'tests/utils_tests/test_module/__main__.py' did not match any file(s) known to git
++ git apply -v -
+Checking patch tests/utils_tests/test_autoreload.py...
+error: while searching for:
+
++ : '>>>>> Start Test Output'
+"""
+
+# A test patch that applied, after a reset that failed: the reset's error is not the patch's.
+APPLIED_AFTER_PATHSPEC_ERROR = """+ git checkout 415f50298f97fb17f841a9df38d995ccf347dfcc tests/a.py tests/new.py
+error: pathspec 'tests/new.py' did not match any file(s) known to git
++ git apply -v -
+Checking patch tests/a.py...
+Applied patch tests/a.py cleanly.
++ : '>>>>> Start Test Output'
+ERROR: test_something (a.Tests) error: the test's own output may say error:
++ : '>>>>> End Test Output'
++ git checkout 415f50298f97fb17f841a9df38d995ccf347dfcc tests/a.py tests/new.py
+error: pathspec 'tests/new.py' did not match any file(s) known to git
+"""
+
+
+def test_every_git_apply_refusal_of_the_test_patch_counts_and_nothing_else_does(tmp_path):
+    assert SweBenchHarness.test_patch_rejected(REJECTED_16877)
+    assert SweBenchHarness.test_patch_rejected(REJECTED_13837)
+    assert not SweBenchHarness.test_patch_rejected(APPLIED_AFTER_PATHSPEC_ERROR)
+    assert SweBenchHarness.test_patch_rejected("error: patch failed: a.py:3\n")  # the phrases still count
+    # Read from where the harness writes it.
+    model = "mightling-x/test-model"
+    for instance_id, text in (("django__django-16877", REJECTED_16877), ("ok-1", APPLIED_AFTER_PATHSPEC_ERROR)):
+        directory = tmp_path / "logs/run_evaluation" / "r1-1" / model.replace("/", "__") / instance_id
+        directory.mkdir(parents=True)
+        (directory / "test_output.txt").write_text(text)
+    assert SweBenchHarness.test_patch_failed(tmp_path, "r1-1", model, "django__django-16877") is True
+    assert SweBenchHarness.test_patch_failed(tmp_path, "r1-1", model, "ok-1") is False
+    assert SweBenchHarness.test_patch_failed(tmp_path, "r1-1", model, "absent") is False
+
+
+def eval_script(base, files):
+    """The shape of an upstream eval script: reset, apply the test patch, test, reset."""
+    reset = f"git checkout {base} {' '.join(files)}"
+    return "\n".join(["#!/bin/bash", "set -uxo pipefail", "cd /testbed", "git status", reset,
+                      "git apply -v - <<'EOF_1'", "PATCH", "EOF_1", ": '>>>>> Start Test Output'",
+                      "./tests/runtests.py a", ": '>>>>> End Test Output'", reset])
+
+
+def test_the_dataset_file_resets_each_test_file_on_its_own(tmp_path):
+    source = dict(row("acme__widget-1"), base_commit="0123abc",
+                  eval_script=eval_script("0123abc", ["tests/a.py", "tests/new.py"]))
+    path = tmp_path / "dataset.jsonl"
+    SweBenchHarness.write_dataset_file(path, [source], {"acme__widget-1": "repo:acme-widget-1"})
+    [entry] = [json.loads(line) for line in path.read_text().splitlines()]
+    lines, original = entry["eval_script"].split("\n"), source["eval_script"].split("\n")
+    assert len(lines) == len(original)
+    changed = [index for index, (new, old) in enumerate(zip(lines, original)) if new != old]
+    assert changed == [4, 11], "both resets, and nothing else"
+    assert lines[4] == lines[11] and lines[4].startswith("for f in tests/a.py tests/new.py; do ")
+    # A row without a base commit or script is passed through as it is.
+    assert SweBenchHarness.per_file_reset("git checkout other tests/a.py", "0123abc") == "git checkout other tests/a.py"
+
+
+def test_the_per_file_reset_restores_edited_tests_and_removes_added_ones_where_the_upstream_one_does_not(tmp_path):
+    repo = tmp_path / "testbed"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "config", "user.name", "t")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "a.py").write_text("def test_a():\n    assert 1 == 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    base = git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    def agent_edits():
+        # The agent rewrote an existing assertion and created the file the test patch adds.
+        (repo / "tests" / "a.py").write_text("def test_a():\n    assert 2 == 2  # AGENT\n")
+        (repo / "tests" / "new.py").write_text("# AGENT\n")
+
+    files = ["tests/a.py", "tests/new.py"]
+    upstream = f"git checkout {base} {' '.join(files)}"
+    agent_edits()
+    subprocess.run(["bash", "-c", upstream], cwd=repo, capture_output=True)
+    assert "AGENT" in (repo / "tests" / "a.py").read_text(), "the upstream reset aborts and resets nothing"
+
+    fixed = SweBenchHarness.per_file_reset(upstream, base)
+    result = subprocess.run(["bash", "-c", fixed], cwd=repo, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (repo / "tests" / "a.py").read_text() == "def test_a():\n    assert 1 == 1\n"
+    assert not (repo / "tests" / "new.py").exists()
+    # The benchmark's test patch now applies: it adds tests/new.py and changes tests/a.py.
+    test_patch = ("diff --git a/tests/a.py b/tests/a.py\n--- a/tests/a.py\n+++ b/tests/a.py\n@@ -1,2 +1,2 @@\n"
+                  " def test_a():\n-    assert 1 == 1\n+    assert 1 == 1  # BENCHMARK\n"
+                  "diff --git a/tests/new.py b/tests/new.py\nnew file mode 100644\n--- /dev/null\n+++ b/tests/new.py\n"
+                  "@@ -0,0 +1 @@\n+# BENCHMARK\n")
+    applied = subprocess.run(["git", "apply", "-v", "-"], cwd=repo, input=test_patch, capture_output=True, text=True)
+    assert applied.returncode == 0, applied.stderr
+    assert "BENCHMARK" in (repo / "tests" / "new.py").read_text()
+
+
+def test_the_grader_names_the_reset_so_a_run_graded_before_it_is_graded_again(bench):
+    run(bench, instances=["acme__widget-1"])
+    store = SweBenchRunStore("r1")
+    SweBenchEvaluator.grade(store, bench["settings"])
+    assert store.grading(1)["grader"]["eval_reset"] == "per-file"
+    # A grading made with the upstream reset.
+    record = store.grading(1)
+    del record["grader"]["eval_reset"]
+    store.write_grading(1, record)
+    SweBenchEvaluator.grade(store, bench["settings"])
+    assert store.gradings() == [1, 2]
+
+
+def test_a_turn_that_changed_the_tree_and_stopped_mid_work_is_nudged_to_finish(bench):
+    bench["docker"].default_mode = "midwork"
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    store = SweBenchRunStore("r1")
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done" and state["nudges"] == 1 and state["nudge_kinds"] == ["completion"]
+    turns = mightling_prompts(bench["docker"])
+    assert turns[1] == (COMPLETION_NUDGE, True)
+    assert "FIX" in prediction("r1", "acme__widget-1") and "HALF" not in prediction("r1", "acme__widget-1")
+    SweBenchEvaluator.grade(store, bench["settings"])
+    assert "Nudges              stall 0     completion 1" in SweBenchReport.render(store)
+
+
+def test_a_finished_summary_is_not_nudged_and_a_stall_keeps_its_own_nudge(bench):
+    bench["docker"].modes = {"acme__widget-1": "summary_with_plan", "acme__widget-2": "stall_then_act"}
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("r1")
+    assert store.state("acme__widget-1")["nudges"] == 0 and store.state("acme__widget-1")["nudge_kinds"] == []
+    assert store.state("acme__widget-2")["nudge_kinds"] == ["stall"]
+
+
+def test_what_counts_as_stopping_mid_work():
+    stopped = SweBenchInstanceRun.stopped_mid_work
+    # The two mid-work stops of `im100-default` (django 11885 and 15563), as they ended.
+    assert stopped("`WhereNode` doesn't have `__or__`. Let me check what happens when we pass a `WhereNode` "
+                   "as a positional arg to `filter()`:\n\nThe `Q.__init__` does `children=[*args]`, so `Q(w)` "
+                   "creates a `Q` with `[w]` as children. Then `add_q` iterates children. For `W")
+    assert stopped("compiler.py`.\n\nLet me do it now.\n\nI'll run the Python script.\n\nOK, running it now.\n\nI ")
+    assert not stopped("Fixed widget() in widget.py; the widget tests pass.")
+    assert not stopped("I'll summarise. " + "The fix is in widget.py. " * 30 + "Let me know if you need more.")
+    assert not stopped("")
+
+
+def test_the_test_discipline_rules_are_an_arm_and_the_plain_prompt_is_unchanged(bench):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    assert SweBenchInstanceRun.compose_prompt(issue, task_rules=[]) == plain
+    with_rules = SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests"])
+    assert with_rules.replace(TASK_RULES["tests"], "") == plain and with_rules.endswith(issue)
+    for words in ("Never change an existing test", "in /tmp", "compare the failing tests by name"):
+        assert words in TASK_RULES["tests"]
+    assert TASK_RULES["tests"] in SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["tests"])
+    with pytest.raises(KeyError):
+        SweBenchInstanceRun.compose_prompt(issue, task_rules=["contract-not-built"])
+
+    assert run(bench, name="plain", instances=["acme__widget-1"]) == 0
+    assert run(bench, name="rules", instances=["acme__widget-1"], task_rules=["tests"]) == 0
+    prompts = [prompt for prompt, _ in mightling_prompts(bench["docker"])]
+    assert prompts == [SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1."),
+                       SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["tests"])]
+    assert SweBenchRunStore("plain").manifest()["task_rules"] == []
+    assert SweBenchRunStore("rules").manifest()["task_rules"] == ["tests"]
+    # A resumed run keeps the rules it started with.
+    assert run(bench, name="rules", instances=["acme__widget-2"]) == 0
+    for name in ("plain", "rules"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("rules"), SweBenchRunStore("plain"))
+    assert "differs: task_rules: ['tests'] | []" in text
+    assert "Task rules          tests" in SweBenchReport.render(SweBenchRunStore("rules"))
+
+
+def test_an_unknown_task_rule_is_refused_and_the_option_reaches_the_runner(bench, monkeypatch, capsys):
+    assert run(bench, instances=["acme__widget-1"], task_rules=["everything"]) == 1
+    assert "--task-rules takes: tests" in capsys.readouterr().out
+    assert not SweBenchRunStore("r1").manifest_path.exists()
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--task-rules", "tests", "--name", "x"])) == 0
+    assert seen["task_rules"] == ["tests"]
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["task_rules"] is None
+
+
+def test_which_paths_are_test_files():
+    is_test = SweBenchPatchFilter.is_test_path
+    for path in ("tests/test_a.py", "pkg/tests/sub/helpers.py", "testing/util.py", "sympy/testing/runtests.py",
+                 "test_widget.py", "pkg/widget_test.py", "app/tests.py", "conftest.py", "pkg/conftest.py",
+                 "tests/fixtures/data.json"):
+        assert is_test(path), path
+    for path in ("django/test/client.py", "widget.py", "attest.py", "contest.py", "pkg/testsuite.py",
+                 "pkg/tests_helpers/x.py", "doc/testing.rst"):
+        assert not is_test(path), path
+
+
+TEST_AND_SOURCE = """diff --git a/acme/widget.py b/acme/widget.py
+index 1111111..2222222 100644
+--- a/acme/widget.py
++++ b/acme/widget.py
+@@ -1,2 +1,2 @@
+ def widget():
+-    return 1
++    return 2
+diff --git a/tests/test_widget.py b/tests/test_widget.py
+index 3333333..4444444 100644
+--- a/tests/test_widget.py
++++ b/tests/test_widget.py
+@@ -1 +1 @@
+-assert widget() == 1
++assert widget() == 2
+diff --git a/tests/__init__.py b/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/acme/old_test.py b/acme/moved.py
+similarity index 100%
+rename from acme/old_test.py
+rename to acme/moved.py
+diff --git a/acme/gone.py b/acme/gone.py
+deleted file mode 100644
+index 5555555..0000000
+--- a/acme/gone.py
++++ /dev/null
+@@ -1 +0,0 @@
+-x = 1
+"""
+
+
+def test_dropping_test_hunks_keeps_every_source_section_byte_for_byte():
+    patch, dropped = SweBenchPatchFilter.drop_test_hunks(TEST_AND_SOURCE)
+    assert dropped == ["tests/test_widget.py", "tests/__init__.py", "acme/moved.py"]
+    sections = SweBenchPatchFilter.sections(TEST_AND_SOURCE)
+    assert "".join(sections) == TEST_AND_SOURCE
+    assert patch == sections[0] + sections[4]
+    assert SweBenchPatchFilter.drop_test_hunks(sections[1]) == ("", ["tests/test_widget.py"])
+    assert SweBenchPatchFilter.drop_test_hunks("") == ("", [])
+
+
+def test_the_regrade_drops_test_files_in_a_series_of_its_own_and_leaves_the_plain_grading_alone(bench, monkeypatch):
+    from dreamference.night_shift.night_shift_host import NightShiftHost
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 1 << 50))
+    bench["docker"].modes = {"acme__widget-1": "with_tests", "acme__widget-2": "tests_only"}
+    run(bench, instances=["acme__widget-1", "acme__widget-2", "beta__gadget-7"], evaluate=True)
+    store = SweBenchRunStore("r1")
+    plain = json.loads((store.grading_dir(1) / "grading.json").read_text())
+    calls = len(bench["harness"].calls)
+
+    assert SweBenchCommand.evaluate("r1", DROP_TEST_HUNKS) == 0
+    [call] = bench["harness"].calls[calls:]
+    assert call[call.index("--run-id") + 1] == "r1-drop-test-hunks-1"
+    assert [call[i + 1] for i, word in enumerate(call) if word == "-i"] == ["acme__widget-1"]
+    graded = [json.loads(line) for line in Path(call[call.index("-p") + 1]).read_text().splitlines()]
+    assert "widget.py" in graded[0]["model_patch"] and "tests/" not in graded[0]["model_patch"]
+    results = store.grading(1, DROP_TEST_HUNKS)["results"]
+    assert results["acme__widget-1"]["resolved"] is True
+    assert results["acme__widget-1"]["dropped"] == ["tests/test_widget.py"]
+    # A patch of test files alone is empty once they go, and is never handed to the harness.
+    assert results["acme__widget-2"] == {"resolved": False, "empty": True, "dropped": ["tests/test_widget.py"]}
+    # A patch without test files is the one the plain grading graded: its verdict is taken over.
+    assert results["beta__gadget-7"]["reused"] == "plain grading 1" and results["beta__gadget-7"]["resolved"] is True
+    assert results["beta__gadget-7"]["dropped"] == []
+    # The run's predictions and its plain grading are untouched.
+    assert "tests/test_widget.py" in prediction("r1", "acme__widget-1")
+    assert json.loads((store.grading_dir(1) / "grading.json").read_text()) == plain
+    assert store.gradings() == [1] and store.gradings(DROP_TEST_HUNKS) == [1]
+    assert store.grading(1, DROP_TEST_HUNKS)["grader"]["patch"] == "test files dropped"
+    # Grading the plain series again neither regrades it nor the other.
+    SweBenchEvaluator.grade(store, bench["settings"])
+    assert len(bench["harness"].calls) == calls + 1 and store.gradings(DROP_TEST_HUNKS) == [1]
+
+    text = SweBenchReport.render(store, DROP_TEST_HUNKS)
+    assert "Test files dropped" in text and "2 patch(es) changed, 1 left empty" in text
+    SweBenchReport.write(store, DROP_TEST_HUNKS)
+    assert (store.directory / "report-drop-test-hunks.md").is_file()
+    compared = SweBenchReport.against(store, store, DROP_TEST_HUNKS)
+    assert compared.startswith("r1 [drop-test-hunks] against r1: 3 instance(s) graded in both")
+    assert "Resolved only by r1 (1): acme__widget-2" in compared
+
+
+def test_eval_and_report_take_the_drop_test_hunks_switch(monkeypatch):
+    import argparse
+    seen = []
+    monkeypatch.setattr(SweBenchCommand, "evaluate", classmethod(lambda cls, *a: seen.append(("eval", a)) or 0))
+    monkeypatch.setattr(SweBenchCommand, "report", classmethod(lambda cls, *a: seen.append(("report", a)) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    for words in (["eval", "r", "--drop-test-hunks", "--remove-images"], ["eval", "r"],
+                  ["report", "r", "--drop-test-hunks", "--against", "r"]):
+        assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", *words])) == 0
+    assert seen == [("eval", ("r", DROP_TEST_HUNKS, True)), ("eval", ("r", None, False)),
+                    ("report", ("r", "r", DROP_TEST_HUNKS))]
+
+
+def test_eval_with_remove_images_grades_one_repository_at_a_time_and_removes_what_it_pulled(bench, monkeypatch):
+    from dreamference.night_shift.night_shift_host import NightShiftHost
+    monkeypatch.setattr(NightShiftHost, "mem_available_bytes", classmethod(lambda cls: 1 << 50))
+    bench["docker"].modes = {"acme__widget-1": "with_tests", "beta__gadget-7": "with_tests"}
+    run(bench, instances=["acme__widget-1", "beta__gadget-7"], evaluate=True)
+    docker, harness = bench["docker"], bench["harness"]
+    docker.present.clear()
+    calls = len(harness.calls)
+    assert SweBenchCommand.evaluate("r1", DROP_TEST_HUNKS, remove_images=True) == 0
+    graded = [[call[i + 1] for i, word in enumerate(call) if word == "-i"] for call in harness.calls[calls:]]
+    assert sorted(graded) == [["acme__widget-1"], ["beta__gadget-7"]]  # predictions are in finish order
+    assert docker.present == set()
+    assert sorted(SweBenchRunStore("r1").grading(1, DROP_TEST_HUNKS)["results"]) == ["acme__widget-1", "beta__gadget-7"]
+
+
+def test_with_cycled_images_the_index_pass_removes_what_it_pulled(bench):
+    docker = bench["docker"]
+    # Validated ahead of the run, with the images removed afterwards (scripts/swe_bench_fresh.py).
+    SweBenchEvaluator.validate("verified", IDS, bench["settings"])
+    docker.present.clear()
+    before = len(docker.calls)
+    assert run(bench, code_index="universal", evaluate=True, keep_images=False) == 0
+    image = f"{REPOSITORY}:acme-widget-1"
+    events = [call[0] for call in docker.calls[before:]
+              if (call[0] in ("pull", "rmi") and call[-1] == image) or (call[0] == "run" and image in call)]
+    # Pulled to index and removed at once; pulled again when the instance starts, removed after grading.
+    assert events == ["pull", "rmi", "pull", "run", "rmi"], events
+    assert docker.present == set()
+
+
+def test_without_cycling_the_index_pass_keeps_the_images(bench):
+    assert run(bench, code_index="universal") == 0
+    assert not any(call[0] == "rmi" for call in bench["docker"].calls)
+    assert len(bench["docker"].present) == 3

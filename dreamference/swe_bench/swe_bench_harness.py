@@ -16,6 +16,7 @@ work on arm64, neither of which touches how a patch is graded:
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -36,6 +37,16 @@ FORBIDDEN_FIELDS: Final[tuple] = ("hints_text", "patch", "test_patch", "FAIL_TO_
 
 # The harness's own layout under the directory it is run in.
 HARNESS_LOG_DIR: Final[str] = "logs/run_evaluation"
+
+# How the eval script's trace (`set -x`) shows the test patch being applied, and the line that
+# opens the test output; `git apply`'s refusals fall between the two.
+TEST_PATCH_APPLY: Final[str] = "+ git apply"
+TEST_OUTPUT_START: Final[str] = ">>>>> Start Test Output"
+
+# How the eval script resets the test patch's files (`per_file_reset`); part of the grader, so a
+# run graded with the upstream single-command reset is graded again rather than read from the
+# harness's cache.
+EVAL_RESET: Final[str] = "per-file"
 
 # Fetches a dataset's `test` split with the harness's own `datasets` package and prints its rows
 # sorted by instance id, with the snapshot's revision on the first line.
@@ -200,7 +211,8 @@ class SweBenchHarness:
                            images: Dict[str, str]) -> List[str]:
         """
         Writes the dataset file one harness call grades against: the given rows, each with its
-        `image` replaced by the image this machine runs.
+        `image` replaced by the image this machine runs and its `eval_script`'s test-file reset
+        made per file (`per_file_reset`).
 
         Args:
             path: Where to write it (`.jsonl`).
@@ -217,9 +229,48 @@ class SweBenchHarness:
                 image = images.get(row["instance_id"])
                 if not image:
                     continue
-                handle.write(json.dumps(dict(row, image=image)) + "\n")
+                changed = dict(row, image=image)
+                if row.get("eval_script") and row.get("base_commit"):
+                    changed["eval_script"] = cls.per_file_reset(row["eval_script"], row["base_commit"])
+                handle.write(json.dumps(changed) + "\n")
                 written.append(row["instance_id"])
         return written
+
+    @classmethod
+    def per_file_reset(cls, eval_script: str, base_commit: str) -> str:
+        """
+        Makes the eval script's test-file reset survive a test patch that creates a file.
+
+        The upstream script resets the test patch's files with one command,
+        `git checkout <base> <file>…`, before applying the test patch and again after the tests.
+        A file the test patch creates is not in the base commit, so git refuses the whole command
+        and resets nothing: the agent's own edits to those test files stay, and the benchmark's
+        tests may not apply or may not be the ones that run (failure analysis §5.2: django 13837
+        and 16877). Each file is now reset on its own, and a file the base commit does not have
+        is removed, so the test patch always lands on the base commit's test files. Every other
+        line is left as it is.
+
+        Args:
+            eval_script: The dataset row's `eval_script`.
+            base_commit: The row's `base_commit`.
+
+        Returns:
+            str: The script with each such reset line replaced.
+        """
+        prefix = f"git checkout {base_commit} "
+        lines = eval_script.split("\n")
+        for index, line in enumerate(lines):
+            if not line.startswith(prefix):
+                continue
+            files = line[len(prefix):].split()
+            if not files or any(name.startswith("-") for name in files):
+                continue
+            quoted = " ".join(shlex.quote(name) for name in files)
+            lines[index] = (f"for f in {quoted}; do "
+                            f"if git cat-file -e {base_commit}:\"$f\" 2>/dev/null; "
+                            f"then git checkout {base_commit} -- \"$f\"; "
+                            "else rm -f -- \"$f\"; fi; done")
+        return "\n".join(lines)
 
     # -- grading -------------------------------------------------------------------------------
 
@@ -312,6 +363,12 @@ class SweBenchHarness:
         Tells whether the instance's test patch failed to apply on top of the model's, the case
         §5.1 keeps visible instead of stripping test files from the model's patch.
 
+        `git apply` words its refusals in several ways (`patch does not apply`, `already exists in
+        working directory`, `while searching for:`), so any `error:` line the eval script prints
+        between its `git apply` of the test patch and the start of the test output counts. The
+        reset's own `error: pathspec …` lines come before that window and after it, and do not
+        (failure analysis §5.1: django 16877 was recorded as applied).
+
         Returns:
             bool: True when the test output shows `git apply` rejecting the test patch.
         """
@@ -321,4 +378,26 @@ class SweBenchHarness:
             text = path.read_text(errors="replace")
         except OSError:
             return False
+        return cls.test_patch_rejected(text)
+
+    @classmethod
+    def test_patch_rejected(cls, text: str) -> bool:
+        """
+        Reads an eval script's output for a rejected test patch.
+
+        Args:
+            text: The harness's `test_output.txt`.
+
+        Returns:
+            bool: True when an `error:` line falls between the test patch's `git apply` and the
+            start of the test output, or the output has one of `git apply`'s failure phrases.
+        """
+        applying = False
+        for line in text.splitlines():
+            if line.startswith(TEST_PATCH_APPLY):
+                applying = True
+            elif TEST_OUTPUT_START in line:
+                applying = False
+            elif applying and line.startswith("error:"):
+                return True
         return "error: patch failed" in text or "patch does not apply" in text

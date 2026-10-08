@@ -28,7 +28,7 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
-from dreamference.swe_bench.swe_bench_instance_run import SCRATCH_MOUNT, SweBenchInstanceRun
+from dreamference.swe_bench.swe_bench_instance_run import SCRATCH_MOUNT, TASK_RULES, SweBenchInstanceRun
 from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
 from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
@@ -140,7 +140,8 @@ class SweBenchRunner:
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
                        runtime_hash: str, mightling_bin: str, parallel: int,
                        code_index: str = "off", prompt: Optional[str] = None,
-                       mask: str = "off", strip_names: bool = False, refine: bool = False) -> Dict[str, Any]:
+                       mask: str = "off", strip_names: bool = False, refine: bool = False,
+                       task_rules: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -198,6 +199,7 @@ class SweBenchRunner:
             "issue_text": "names stripped" if strip_names else "verbatim",
             **({"stripped_issues": stripped} if strip_names else {}),
             "refine": refine,
+            "task_rules": sorted(set(task_rules or [])),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
             "task_memory": settings.task_memory,
@@ -260,6 +262,7 @@ class SweBenchRunner:
             code_index: str = "off", prompt: Optional[str] = None, mask: str = "off",
             strip_names: bool = False,
             refine: bool = False,
+            task_rules: Optional[List[str]] = None,
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
@@ -290,6 +293,8 @@ class SweBenchRunner:
                 a refined description without changing the repository, then a fresh session
                 that fixes it with the issue and the description. A new run only, like
                 `code_index`.
+            task_rules: Names of the rules added to the task prompt (`TASK_RULES`: `tests`, the
+                failure analysis's test discipline). A new run only, like `code_index`.
             settings: Benchmark settings; defaults to the config file's.
 
         Returns:
@@ -310,6 +315,10 @@ class SweBenchRunner:
                 print(f"❌ No prompt named {prompt}: it is not built in ({', '.join(BUILT_IN_PROMPTS)}) "
                       f"and {custom} does not exist.")
                 return 1
+        unknown_rules = sorted(set(task_rules or []) - set(TASK_RULES))
+        if unknown_rules:
+            print(f"❌ --task-rules takes: {', '.join(TASK_RULES)} (not {', '.join(unknown_rules)}).")
+            return 1
         if require_smoke and not cls.smoke_passed():
             print("❌ No smoke has passed on this machine with this harness version: "
                   "run `ling-admin swe-bench smoke` first.")
@@ -360,7 +369,7 @@ class SweBenchRunner:
                 excluded = {i: problem for i, problem in problems.items() if problem}
                 manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
                                               served, runtime_hash, mightling_bin, parallel, code_index,
-                                              prompt, mask, strip_names, refine)
+                                              prompt, mask, strip_names, refine, task_rules)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                 print(f"❌ Run {store.name} was started with another ling build or model "
@@ -409,10 +418,18 @@ class SweBenchRunner:
                 arm = manifest["code_index"]
                 layer = "SCIP stores only" if arm == "exact" else "universal layer"
                 print(f"🗂️  Indexing {len(pending)} repositories on the host ({layer})...", flush=True)
+                # With `--eval --remove-images` the images are cycled one repository at a time; an
+                # image this pass pulled only to index goes again at once, and the instance pulls
+                # it back when it starts. Otherwise every image of the run would be on disk before
+                # the first agent starts (about 2.3 GB each), past the disk reserve on a 50-task run.
+                cycling = evaluate and not keep_images
                 for instance_id in pending:
                     image = manifest["images"][instance_id]["image"]
+                    pulled = cycling and SweBenchDocker.image_digest(image) is None
                     record = SweBenchCodeIndex.ensure(rows[instance_id], image, arm) \
                         if SweBenchDocker.ensure_image(image) else None
+                    if pulled:
+                        SweBenchImages.remove([image])
                     if record is None:
                         print(f"❌ {instance_id} has no index, and a run measures one arm: not started.")
                         return 1
@@ -570,7 +587,8 @@ class SweBenchRunner:
                             lane.get("model_url") or model_url, time.time() + settings.task_timeout_s, extra_env,
                             (indexes or {}).get(instance_id), extra_mounts,
                             issue=(manifest.get("stripped_issues") or {}).get(instance_id),
-                            refine=bool(manifest.get("refine", False)))
+                            refine=bool(manifest.get("refine", False)),
+                            task_rules=manifest.get("task_rules") or [])
                         run.lane_host = lane["host"]
                         if lane.get("node"):
                             run.notes.append(f"model server: {lane['name']} (a replica of this machine's model)")

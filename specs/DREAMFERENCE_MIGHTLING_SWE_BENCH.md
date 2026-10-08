@@ -590,3 +590,7 @@ The third arm indexes each instance with the SCIP stores alone and runs the agen
 - **Caching.** The stores are cached per repository and commit under `index-exact/`, apart from the universal cache.
 - **Failures.** An instance whose indexers did not all finish still runs. Its state records `stores`, `failed` and `peak_mb`, and the report counts such instances and those with no store at all.
 - **A `ling-code` under test** (`DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE`) is relocated into a runtime directory of its own, so preparing it never replaces the one a running arm has mounted.
+
+## 15. Fixes from the failure analysis (2026-10-08)
+
+[MIGHTLING_SWE_BENCH_FAILURES §8](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md) records them. The eval script's test-file reset is made per file in the dataset file each harness call gets, so a test patch that adds a file no longer leaves the agent's test edits in place (the grader records `eval_reset: per-file`, so a run graded before is graded again). "Test patch failed" counts every refusal of the test patch. A turn that changed the tree and stopped mid-work gets a completion nudge. `run --task-rules tests` is the test-discipline arm. `eval --drop-test-hunks` regrades a run's predictions with their test files left out, as a separate grading series, and `eval --remove-images` cycles images by repository. With `run --eval --remove-images` the code-index pass no longer keeps every image it pulled.

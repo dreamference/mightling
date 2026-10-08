@@ -9,7 +9,7 @@ import math
 import statistics
 from typing import Any, Dict, Final, List, Optional
 
-from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
+from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 
 CAVEATS: Final[str] = (
@@ -22,23 +22,26 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit",
 )
 # What a manifest written before a field existed ran with.
-MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False}
+MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
+                               "task_rules": []}
 
 
 class SweBenchReport:
     """Renders reports."""
 
     @classmethod
-    def summary(cls, store: SweBenchRunStore) -> Optional[Dict[str, Any]]:
+    def summary(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Counts a run.
 
         Args:
             store: The run.
+            variant: The grading series the verdicts come from; None for the plain one
+                (`drop-test-hunks`: the same predictions with their test files left out).
 
         Returns:
             Optional[Dict[str, Any]]: The counts and per-instance verdicts; None when the run
@@ -47,7 +50,7 @@ class SweBenchReport:
         manifest = store.manifest()
         if manifest is None:
             return None
-        number, grader, results = SweBenchEvaluator.results(store)
+        number, grader, results = SweBenchEvaluator.results(store, variant)
         states = store.states()
         instances: List[str] = manifest.get("instances", [])
         finished = set(store.finished())
@@ -68,7 +71,7 @@ class SweBenchReport:
             counts[1] += 1
             counts[0] += 1 if instance_id in resolved else 0
         return {
-            "manifest": manifest, "grading": number, "grader": grader, "results": results,
+            "manifest": manifest, "grading": number, "grader": grader, "results": results, "variant": variant,
             "validated": len(instances), "excluded": len(manifest.get("excluded", {})),
             "finished": len(finished & set(instances)), "graded": len(graded),
             "resolved": len(resolved), "resolved_ids": resolved, "statuses": statuses,
@@ -81,7 +84,33 @@ class SweBenchReport:
             "puffin_code_calls": sum(entry["puffin_code_calls"] for entry in stats.values()),
             "puffin_code_users": sum(1 for entry in stats.values() if entry["puffin_code_calls"]),
             "refine": cls.refine_summary(store, manifest, states, finished & set(instances)),
+            "nudges_fired": cls.nudge_counts(states, finished & set(instances)),
+            "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
         }
+
+    @classmethod
+    def nudge_counts(cls, states: Dict[str, Any], finished: Any) -> Dict[str, int]:
+        """
+        Counts the nudges that fired, by kind: `stall` (the tree unchanged and the last message
+        announcing work) and `completion` (the tree changed and the turn ended mid-work).
+
+        Args:
+            states: The instances' states.
+            finished: The instances that have a prediction.
+
+        Returns:
+            Dict[str, int]: Kind to the number of times it fired. A state written before the
+            kinds were recorded counts its nudges as `stall`, the only kind there was.
+        """
+        counts: Dict[str, int] = {}
+        for instance_id in finished:
+            state = states.get(instance_id) or {}
+            kinds = state.get("nudge_kinds")
+            if kinds is None:
+                kinds = ["stall"] * int(state.get("nudges") or 0)
+            for kind in kinds:
+                counts[kind] = counts.get(kind, 0) + 1
+        return counts
 
     @classmethod
     def refine_summary(cls, store: SweBenchRunStore, manifest: Dict[str, Any], states: Dict[str, Any],
@@ -119,17 +148,18 @@ class SweBenchReport:
         }
 
     @classmethod
-    def render(cls, store: SweBenchRunStore) -> Optional[str]:
+    def render(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> Optional[str]:
         """
         Renders a run's report.
 
         Args:
             store: The run.
+            variant: The grading series to report; None for the plain one.
 
         Returns:
             Optional[str]: The report text; None when the run does not exist.
         """
-        summary = cls.summary(store)
+        summary = cls.summary(store, variant)
         if summary is None:
             return None
         manifest = summary["manifest"]
@@ -147,7 +177,11 @@ class SweBenchReport:
             f"Empty patch         {statuses.get('empty', 0)}     Stalled {statuses.get('stalled', 0)}     "
             f"Timeout {statuses.get('timeout', 0)}     Agent error {statuses.get('error', 0)}",
             f"Patch broke test_patch application     {summary['test_patch_failed']}",
+            f"Nudges              stall {summary['nudges_fired'].get('stall', 0)}     "
+            f"completion {summary['nudges_fired'].get('completion', 0)}",
         ]
+        if manifest.get("task_rules"):
+            lines.append(f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)")
         not_run = validated - summary["finished"]
         not_graded = summary["finished"] - summary["graded"]
         if not_run or not_graded:
@@ -171,9 +205,15 @@ class SweBenchReport:
         if summary["grading"] is not None:
             grader = summary["grader"]
             lines.append(f"Grading {summary['grading']}: harness {grader.get('harness')}, dataset revision "
-                         f"{str(grader.get('dataset_revision'))[:12]}")
+                         f"{str(grader.get('dataset_revision'))[:12]}"
+                         + (f", test files reset {grader['eval_reset']}" if grader.get("eval_reset") else ""))
+            if variant == DROP_TEST_HUNKS:
+                emptied = sum(1 for result in summary["results"].values() if result.get("empty") and result.get("dropped"))
+                lines.append(f"Test files dropped  regrade of the same predictions with every test file left out of each "
+                             f"patch: {len(summary['dropped'])} patch(es) changed, {emptied} left empty")
         else:
-            lines.append("Not graded yet: run `ling-admin swe-bench eval " + store.name + "`")
+            flag = f" --{variant}" if variant else ""
+            lines.append(f"Not graded yet: run `ling-admin swe-bench eval{flag} " + store.name + "`")
         lines += ["", "Per repository (resolved / validated):"]
         for repo, (resolved, total) in sorted(summary["per_repo"].items()):
             lines.append(f"  {repo:<28} {resolved} / {total}")
@@ -234,55 +274,61 @@ class SweBenchReport:
                 f"of {refine['instances']} (discarded before fixing)")
 
     @classmethod
-    def write(cls, store: SweBenchRunStore) -> Optional[str]:
+    def write(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> Optional[str]:
         """
-        Renders a run's report and writes it to `report.md` in the run directory.
+        Renders a run's report and writes it to `report.md` in the run directory
+        (`report-<variant>.md` for another grading series).
 
         Args:
             store: The run.
+            variant: The grading series to report; None for the plain one.
 
         Returns:
             Optional[str]: The report text; None when the run does not exist.
         """
-        text = cls.render(store)
+        text = cls.render(store, variant)
         if text is not None:
-            (store.directory / "report.md").write_text(text)
+            (store.directory / (f"report-{variant}.md" if variant else "report.md")).write_text(text)
         return text
 
     @classmethod
-    def against(cls, store: SweBenchRunStore, other: SweBenchRunStore) -> str:
+    def against(cls, store: SweBenchRunStore, other: SweBenchRunStore, variant: Optional[str] = None) -> str:
         """
         Compares two runs instance by instance.
 
         Args:
             store: The run being reported.
-            other: The run it is compared with.
+            other: The run it is compared with (it may be the same run).
+            variant: The grading series of `store`'s verdicts; `other`'s are always the plain
+                grading's, so `report X --drop-test-hunks --against X` says what dropping the
+                test files changes.
 
         Returns:
             str: The comparison, or the reason the two cannot be compared.
         """
-        ours, theirs = cls.summary(store), cls.summary(other)
+        ours, theirs = cls.summary(store, variant), cls.summary(other)
         if ours is None or theirs is None:
             return f"No such run: {store.name if ours is None else other.name}\n"
+        name = f"{store.name} [{variant}]" if variant else store.name
         a, b = ours["manifest"], theirs["manifest"]
         if a.get("dataset") != b.get("dataset") or a.get("dataset_revision") != b.get("dataset_revision"):
-            return (f"Not compared: {store.name} and {other.name} use different datasets "
+            return (f"Not compared: {name} and {other.name} use different datasets "
                     f"({a.get('dataset')}@{str(a.get('dataset_revision'))[:8]} against "
                     f"{b.get('dataset')}@{str(b.get('dataset_revision'))[:8]}).\n")
         if sorted(a.get("instances", [])) != sorted(b.get("instances", [])):
-            return (f"Not compared: {store.name} and {other.name} cover different instances "
+            return (f"Not compared: {name} and {other.name} cover different instances "
                     f"({len(a.get('instances', []))} against {len(b.get('instances', []))}). "
                     "A difference between them would say nothing about the configurations.\n")
         both = [i for i in a["instances"] if i in ours["results"] and i in theirs["results"]]
         only_ours = sorted(i for i in both if ours["results"][i].get("resolved") and not theirs["results"][i].get("resolved"))
         only_theirs = sorted(i for i in both if theirs["results"][i].get("resolved") and not ours["results"][i].get("resolved"))
-        lines = [f"{store.name} against {other.name}: {len(both)} instance(s) graded in both"]
+        lines = [f"{name} against {other.name}: {len(both)} instance(s) graded in both"]
         for field in COMPARED_FIELDS:
             # Runs made before the code-index arm or named prompts existed have no such field.
             first, second = (m.get(field, MISSING_FIELDS.get(field)) for m in (a, b))
             if first != second:
                 lines.append(f"  differs: {field}: {first} | {second}")
-        lines.append(f"Resolved only by {store.name} ({len(only_ours)}): {', '.join(only_ours) or 'none'}")
+        lines.append(f"Resolved only by {name} ({len(only_ours)}): {', '.join(only_ours) or 'none'}")
         lines.append(f"Resolved only by {other.name} ({len(only_theirs)}): {', '.join(only_theirs) or 'none'}")
         if both:
             low, high = cls.paired_interval(len(only_ours), len(only_theirs), len(both))
@@ -292,7 +338,7 @@ class SweBenchReport:
                          f"(95% interval {100 * low:+.1f} to {100 * high:+.1f}; McNemar exact p = {p_value:.3f})")
             if low <= 0 <= high:
                 lines.append("No measurable difference.")
-        lines += cls.arms(store.name, ours, other.name, theirs, both)
+        lines += cls.arms(name, ours, other.name, theirs, both)
         lines += ["", CAVEATS]
         return "\n".join(lines) + "\n"
 
@@ -332,6 +378,8 @@ class SweBenchReport:
                 "code index": summary["code_index"],
                 "issue text": summary["manifest"].get("issue_text", "verbatim"),
                 "refine first": "on" if summary["refine"] is not None else "off",
+                "task rules": ",".join(summary["manifest"].get("task_rules") or []) or "none",
+                "grading": "test files dropped" if summary.get("variant") == DROP_TEST_HUNKS else "plain",
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
                 "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",
                 "agent time": cls.duration(sum(walls)),

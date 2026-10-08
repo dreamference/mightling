@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
-from dreamference.night_shift.night_shift_task_run import NUDGE, NightShiftTaskRun
+from dreamference.night_shift.night_shift_task_run import ANNOUNCES_WORK, NUDGE, NightShiftTaskRun
 from dreamference.night_shift.refine_prompt import (FIX_RULES, NO_REFINED as NO_REFINED_PIECE, REFINED_HEADING,
                                                     STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS, RefinePrompt)
 from dreamference.swe_bench import swe_bench_settings
@@ -33,7 +33,7 @@ where something is unclear, make the reasonable choice.
 - Fix the issue below by changing the repository's source files.
 - You may run the repository's tests. There is no network.
 - Do not commit. Your changes are collected when you stop.
-{code_index}
+{code_index}{task_rules}
 Issue:
 {problem_statement}"""
 
@@ -45,6 +45,21 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
   `code_show` or `code_def`. Before you edit a function, `code_impact` (or `code_callers`) says
   what else uses it and so which tests to run.
 """
+
+# Rules a run may add to the task prompt (`--task-rules`), each an arm of its own, recorded in the
+# manifest as `task_rules`. `tests` is the test discipline of the failure analysis (§6.1): in the
+# 100-task round the easy losses came from how the agent treated tests (an existing assertion
+# rewritten to match a wrong change, a regression hidden in a count, the agent's own test file
+# colliding with the benchmark's), not from finding the bug. In the task prompt, not the system
+# prompt, as `CODE_INDEX_HINT` is: long system prompts cost this model (MIGHTLING_PROMPT §1.5).
+TASK_RULES: Final[Dict[str, str]] = {
+    "tests": """- Never change an existing test. If a test that passed before your change fails after it, your
+  change is wrong: fix the source.
+- Put any test or script of your own in /tmp, not in the repository.
+- Before you stop, run the test files of every module you changed, with and without your change
+  (git stash, then git stash pop), and compare the failing tests by name.
+""",
+}
 
 # The refine arm (`--refine`) runs two sessions. The first studies the issue and writes a refined
 # description without changing the repository; the second, a fresh session, fixes it with the
@@ -82,7 +97,7 @@ FIX_PROMPT: Final[str] = (
 - Fix the issue below by changing the repository's source files.
 - You may run the repository's tests. There is no network.
 - Do not commit. Your changes are collected when you stop.
-{code_index}""" + RefinePrompt.subject(FIX_RULES, "issue") + """
+{code_index}{task_rules}""" + RefinePrompt.subject(FIX_RULES, "issue") + """
 
 Issue:
 {problem_statement}
@@ -183,6 +198,21 @@ while IFS= read -r file; do set -- "$@" ":(exclude,literal)$file"; done < "$SCRA
 git -c core.fileMode=false diff --cached --no-color --no-ext-diff "$base" -- "$@" > "$SCRATCH/patch.diff"
 """
 
+# What a turn that ended mid-work is resumed with (failure analysis §5.3, §6.4). Night Shift's
+# `NUDGE` is for an agent that announced a change and never made one; this one is for an agent that
+# changed the tree and then stopped mid-reasoning ("Let me check …", "Wait, let me re-read").
+COMPLETION_NUDGE: Final[str] = ("You stopped in the middle of your work. Finish the fix, run the tests for the "
+                                "modules you changed, and end with a short summary.")
+
+# A closing that announces nothing: "Let me know if …" ends many finished summaries.
+LET_ME_KNOW: Final[re.Pattern] = re.compile(r"\blet me know\b", re.IGNORECASE)
+
+# How much of the end of a last message is read for an announcement once the tree has changed.
+# Both mid-work stops of the 100-task round (django 11885 and 15563) announced their next step
+# within their last 400 characters. Read back over six earlier rounds (219 finished instances),
+# the rule fires 6 times, each on a message that ends mid-work, and on no summary.
+MID_WORK_TAIL: Final[int] = 400
+
 STOP_GRACE_S: Final[int] = 30
 LAST_MESSAGE_LIMIT: Final[int] = 2000
 
@@ -195,7 +225,8 @@ class SweBenchInstanceRun:
                  deadline: float, extra_env: Optional[Dict[str, str]] = None,
                  code_index: Optional[Dict[str, Any]] = None,
                  extra_mounts: Optional[List[str]] = None,
-                 issue: Optional[Dict[str, Any]] = None, refine: bool = False) -> None:
+                 issue: Optional[Dict[str, Any]] = None, refine: bool = False,
+                 task_rules: Optional[List[str]] = None) -> None:
         """
         Args:
             store: The run's files.
@@ -214,6 +245,7 @@ class SweBenchInstanceRun:
             issue: In a `--strip-names` run, the issue as the agent sees it: `text`, and the
                 names `replaced` (name to phrase). None gives the agent the dataset's text.
             refine: Run the refine arm's two steps: study and describe, then fix.
+            task_rules: Names of `TASK_RULES` added to the prompt that fixes the issue.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -230,12 +262,14 @@ class SweBenchInstanceRun:
         self.code_index = code_index
         self.extra_mounts: List[str] = list(extra_mounts or [])
         self.refine = refine
+        self.task_rules: List[str] = list(task_rules or [])
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
         self.user: str = f"{os.getuid()}:{os.getgid()}"
         self.session: Optional[str] = None
         self.nudges_used = 0
+        self.nudge_kinds: List[str] = []
         self.started = time.time()
         self.notes: List[str] = []
         # What Night Shift's start check reads from a running task: whether it is waiting on the
@@ -258,19 +292,40 @@ class SweBenchInstanceRun:
         return "mightling-swe-" + re.sub(r"[^a-zA-Z0-9_.-]", "-", f"{run}-{instance_id}".lower())
 
     @classmethod
-    def compose_prompt(cls, problem_statement: str, code_index: bool = False) -> str:
+    def compose_prompt(cls, problem_statement: str, code_index: bool = False,
+                       task_rules: Optional[List[str]] = None) -> str:
         """
         Builds the prompt: the fixed preamble and the issue text, verbatim.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
             code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
+            task_rules: Names of `TASK_RULES` to add, in `TASK_RULES`' order.
 
         Returns:
             str: The prompt.
         """
         return PROMPT.format(problem_statement=problem_statement,
-                             code_index=CODE_INDEX_HINT if code_index else "")
+                             code_index=CODE_INDEX_HINT if code_index else "",
+                             task_rules=cls.task_rules_text(task_rules))
+
+    @classmethod
+    def task_rules_text(cls, task_rules: Optional[List[str]]) -> str:
+        """
+        Args:
+            task_rules: Names of `TASK_RULES`.
+
+        Returns:
+            str: Their lines, in `TASK_RULES`' order; empty for none.
+
+        Raises:
+            KeyError: For a name `TASK_RULES` does not have.
+        """
+        wanted = set(task_rules or [])
+        unknown = wanted - set(TASK_RULES)
+        if unknown:
+            raise KeyError(f"unknown task rules: {', '.join(sorted(unknown))}")
+        return "".join(text for name, text in TASK_RULES.items() if name in wanted)
 
     @classmethod
     def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False) -> str:
@@ -289,7 +344,8 @@ class SweBenchInstanceRun:
                                     code_index=REFINE_CODE_INDEX_HINT if code_index else "")
 
     @classmethod
-    def compose_fix_prompt(cls, problem_statement: str, refined: str, code_index: bool = False) -> str:
+    def compose_fix_prompt(cls, problem_statement: str, refined: str, code_index: bool = False,
+                           task_rules: Optional[List[str]] = None) -> str:
         """
         Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
 
@@ -297,13 +353,34 @@ class SweBenchInstanceRun:
             problem_statement: The dataset row's `problem_statement`.
             refined: What the first step wrote; empty when it wrote nothing.
             code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
+            task_rules: Names of `TASK_RULES` to add, in `TASK_RULES`' order.
 
         Returns:
             str: The prompt.
         """
         return FIX_PROMPT.format(problem_statement=problem_statement,
                                  refined=refined.strip() or NO_REFINED,
-                                 code_index=CODE_INDEX_HINT if code_index else "")
+                                 code_index=CODE_INDEX_HINT if code_index else "",
+                                 task_rules=cls.task_rules_text(task_rules))
+
+    @classmethod
+    def stopped_mid_work(cls, message: str) -> bool:
+        """
+        Tells whether a turn that changed the tree ended in the middle of the work: the end of
+        its last message announces a next step ("Let me check …", "I'll run the script.")
+        instead of reporting. Only the last `MID_WORK_TAIL` characters count, because both
+        mid-work stops of the 100-task round ended cut off mid-sentence, a few lines after their
+        last announcement, while a summary that mentions a plan does so earlier; and "let me
+        know" announces nothing.
+
+        Args:
+            message: The agent's last message.
+
+        Returns:
+            bool: True when the message ends mid-work.
+        """
+        tail = (message or "").strip()[-MID_WORK_TAIL:]
+        return bool(tail) and bool(ANNOUNCES_WORK.search(LET_ME_KNOW.sub("", tail)))
 
     def run(self) -> str:
         """
@@ -339,7 +416,7 @@ class SweBenchInstanceRun:
             SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
         if self.stop_event.is_set():
             status = "interrupted"
-        state.update(status=status, session=self.session, nudges=self.nudges_used,
+        state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
                      wall_s=int(time.time() - self.started), patch_bytes=len(patch.encode()),
                      last_message=self._last_message()[:LAST_MESSAGE_LIMIT], notes=self.notes)
         if status != "interrupted":
@@ -373,15 +450,19 @@ class SweBenchInstanceRun:
                 return "error", ""
             if self.stop_event.is_set():
                 return "interrupted", ""
-            prompt = self.compose_fix_prompt(self.problem_statement, refined, bool(self.code_index))
+            prompt = self.compose_fix_prompt(self.problem_statement, refined, bool(self.code_index),
+                                             self.task_rules)
         else:
-            prompt = self.compose_prompt(self.problem_statement, bool(self.code_index))
+            prompt = self.compose_prompt(self.problem_statement, bool(self.code_index), self.task_rules)
         fix_started = time.time()
         outcome = self._exec(prompt, resume=False)
-        while outcome == "ok" and self.nudges_used < self.settings.nudges and not self._changed() \
-                and NightShiftTaskRun.announces_work(self._last_message()):
+        while outcome == "ok" and self.nudges_used < self.settings.nudges:
+            kind = self._nudge_kind()
+            if kind is None:
+                break
             self.nudges_used += 1
-            outcome = self._exec(NUDGE, resume=True)
+            self.nudge_kinds.append(kind)
+            outcome = self._exec(NUDGE if kind == "stall" else COMPLETION_NUDGE, resume=True)
         state["exec"] = outcome
         if self.refine:
             state["refine"]["fix_s"] = int(time.time() - fix_started)
@@ -529,6 +610,21 @@ class SweBenchInstanceRun:
         if code == "timeout":
             return "timeout"
         return "ok" if code == 0 else "error"
+
+    def _nudge_kind(self) -> Optional[str]:
+        """
+        Decides whether a turn that ended normally is resumed, and with which nudge: `stall`
+        when the tree is unchanged and the last message announces work (Night Shift's rule),
+        `completion` when the tree changed and the last message stopped mid-work (failure
+        analysis §5.3: the stall rule alone could not fire once the agent had edited anything).
+
+        Returns:
+            Optional[str]: `stall`, `completion`, or None for no nudge.
+        """
+        message = self._last_message()
+        if not self._changed():
+            return "stall" if NightShiftTaskRun.announces_work(message) else None
+        return "completion" if self.stopped_mid_work(message) else None
 
     def _changed(self) -> bool:
         return self._script(CHANGED_SCRIPT, timeout=300).returncode == 0
