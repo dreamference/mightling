@@ -29,6 +29,7 @@ from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_instance_run import SCRATCH_MOUNT, SweBenchInstanceRun
+from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
 from dreamference.swe_bench.swe_bench_relay import SweBenchRelay
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
@@ -139,7 +140,7 @@ class SweBenchRunner:
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
                        runtime_hash: str, mightling_bin: str, parallel: int,
                        code_index: str = "off", prompt: Optional[str] = None,
-                       mask: str = "off") -> Dict[str, Any]:
+                       mask: str = "off", strip_names: bool = False) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -157,6 +158,17 @@ class SweBenchRunner:
             alias = model_key_for_served_id(served_id, config.model)
         except Exception:
             alias = None
+        stripped: Dict[str, Dict[str, Any]] = {}
+        if strip_names:
+            # The text each agent will see, fixed when the run starts: a resumed run, a later
+            # change to the stripping, or another machine's word list cannot change it.
+            rows = {row["instance_id"]: row for row in SweBenchHarness.rows(dataset)}
+            for instance_id in selected:
+                if instance_id in excluded or instance_id not in rows:
+                    continue
+                text, replaced = SweBenchNameStripper.strip(rows[instance_id]["problem_statement"],
+                                                            rows[instance_id].get("patch", ""))
+                stripped[instance_id] = {"text": text, "replaced": replaced}
         return {
             "name": name,
             "started": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -183,6 +195,8 @@ class SweBenchRunner:
             "airgapped": "off (the container has no network; see the spec's §12)",
             "code_index": code_index,
             "masking": mask,
+            "issue_text": "names stripped" if strip_names else "verbatim",
+            **({"stripped_issues": stripped} if strip_names else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
             "task_memory": settings.task_memory,
@@ -243,6 +257,7 @@ class SweBenchRunner:
             evaluate: bool = False, until: Optional[str] = None, idle_minutes: Optional[float] = None,
             ignore_sessions: bool = False, keep_images: bool = True, require_smoke: bool = True,
             code_index: str = "off", prompt: Optional[str] = None, mask: str = "off",
+            strip_names: bool = False,
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
@@ -267,6 +282,8 @@ class SweBenchRunner:
                 configured one. A new run only, like `code_index`.
             mask: `on` masks old tool outputs in the agent's requests (context budget spec
                 §4.1), `off` does not. A new run only, like `code_index`.
+            strip_names: Take the names the gold patch touches out of each issue's text
+                (`SweBenchNameStripper`). A new run only, like `code_index`.
             settings: Benchmark settings; defaults to the config file's.
 
         Returns:
@@ -337,7 +354,7 @@ class SweBenchRunner:
                 excluded = {i: problem for i, problem in problems.items() if problem}
                 manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
                                               served, runtime_hash, mightling_bin, parallel, code_index,
-                                              prompt, mask)
+                                              prompt, mask, strip_names)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                 print(f"❌ Run {store.name} was started with another ling build or model "
@@ -542,7 +559,8 @@ class SweBenchRunner:
                             store, rows[instance_id], manifest["images"][instance_id]["image"],
                             manifest["model_name_or_path"], settings, SweBenchRuntime.directory(),
                             lane.get("model_url") or model_url, time.time() + settings.task_timeout_s, extra_env,
-                            (indexes or {}).get(instance_id), extra_mounts)
+                            (indexes or {}).get(instance_id), extra_mounts,
+                            issue=(manifest.get("stripped_issues") or {}).get(instance_id))
                         run.lane_host = lane["host"]
                         if lane.get("node"):
                             run.notes.append(f"model server: {lane['name']} (a replica of this machine's model)")
