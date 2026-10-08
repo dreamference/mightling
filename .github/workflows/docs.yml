@@ -11,6 +11,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "website/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
@@ -42,6 +43,14 @@ jobs:
       - name: Build (strict)
         run: mkdocs build --strict
 
+      # One Pages site per repository: the one-page website (website/, static) at the root and the
+      # MkDocs documentation under /docs/. website/CNAME carries the custom domain.
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp -r website/. _site/
+          cp -r site _site/docs
+
       - name: Is Pages enabled?
         id: pages
         env:
@@ -61,7 +70,7 @@ jobs:
       - if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
-          path: site
+          path: _site
 
   deploy:
     needs: build
