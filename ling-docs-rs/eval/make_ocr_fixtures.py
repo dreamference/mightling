@@ -3,7 +3,7 @@ ground truth); it is rendered with PDFium and degraded three ways:
   scan   200 dpi greyscale, 0.6° skew, sensor noise, JPEG q60, wrapped as an image-only PDF
   photo  phone photo of paper: perspective, uneven light, slight blur, JPEG q80 (.jpg)
   poor   100 dpi, 2.5° skew, blur, heavy noise, JPEG q35 (image-only PDF): the case to hand on
-Sources: English pages from the corpus (prose, two columns, a table, an RFC) and the Atlantic ling
+Sources: English pages from the corpus (prose, two columns, a table, an RFC) and the Atlantic puffin
 article as Wikipedia renders it in German, Swedish, French, Russian, Ukrainian, Chinese, Japanese, Korean
 and Arabic (CC BY-SA 4.0).
 make_ocr_fixtures.py -> ocr/fixtures/*.{pdf,jpg} and ocr/truth.json"""

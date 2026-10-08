@@ -148,6 +148,7 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
             patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True), \
             patch.object(CodexBrandedBuilder, "build_web_tools", return_value=True), \
             patch.object(CodexBrandedBuilder, "build_code_index", return_value=True), \
+            patch.object(CodexBrandedBuilder, "build_docs_index", return_value=True), \
             patch.object(builder_module.subprocess, "call", side_effect=fake_call):
         assert CodexBrandedBuilder.build() is False
 
@@ -277,8 +278,11 @@ def test_the_web_commands_are_built_even_when_codex_is_current(monkeypatch):
     monkeypatch.setattr(
         CodexBrandedBuilder, "build_code_index", classmethod(lambda cls, force=False: built.append(("code", force)) or True)
     )
+    monkeypatch.setattr(
+        CodexBrandedBuilder, "build_docs_index", classmethod(lambda cls, force=False: built.append(("docs", force)) or True)
+    )
     assert CodexBrandedBuilder.build() is True
-    assert built == [("web", False), ("code", False)]
+    assert built == [("web", False), ("code", False), ("docs", False)]
 
 
 def test_mightling_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_path, monkeypatch):
@@ -311,6 +315,42 @@ def test_mightling_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_pa
     # Current now: nothing is compiled again.
     assert CodexBrandedBuilder.build_code_index() is True
     assert len(calls) == 1
+
+
+def test_ling_docs_builds_from_its_own_crate_installs_its_runtime_and_is_linked(tmp_path, monkeypatch):
+    calls, setups = [], []
+
+    def fake_call(command, cwd=None, env=None):
+        calls.append((command, cwd, env))
+        release = tmp_path / "cache" / "target" / "release"
+        release.mkdir(parents=True, exist_ok=True)
+        (release / "ling-docs").write_text("#!/bin/sh\n")
+        (release / "ling-docs").chmod(0o755)
+        return 0
+
+    from dreamference.runner.docs_index_setup import DocsIndexSetup
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setattr(builder_module, "DOCS_BUILD_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
+    monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
+    monkeypatch.setattr(CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "ling")))
+    monkeypatch.setattr(DocsIndexSetup, "install", classmethod(lambda cls, machine=None: setups.append(1) or True))
+
+    assert CodexBrandedBuilder.build_docs_index() is True
+    (command, cwd, env), = calls
+    assert cwd == builder_module.DOCS_CRATE_DIR
+    assert command == ["cargo", "build", "--release", "--locked", "--bin", "ling-docs"]
+    installed = tmp_path / "install" / "bin" / "ling-docs"
+    assert os.readlink(builder_module.DOCS_PATH_LINK) == str(installed)
+    assert setups == [1], "the run-time files are installed after the build"
+    # A failed download does not fail the build.
+    monkeypatch.setattr(DocsIndexSetup, "install", classmethod(lambda cls, machine=None: False))
+    assert CodexBrandedBuilder.build_docs_index(force=True) is True
+
+
+def test_the_docs_index_crate_is_committed_with_its_lockfile():
+    assert os.path.isfile(os.path.join(builder_module.DOCS_CRATE_DIR, "Cargo.lock"))
+    assert os.path.isfile(os.path.join(builder_module.DOCS_CRATE_DIR, "rust-toolchain.toml"))
 
 
 def test_the_code_index_crate_is_committed_with_its_lockfile():

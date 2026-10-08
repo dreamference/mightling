@@ -38,6 +38,7 @@ pub mod audit;
 pub mod cave;
 pub mod code_index;
 pub mod compaction;
+pub mod docs_index;
 pub mod help;
 pub mod home;
 pub mod ledger;
@@ -273,6 +274,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(audit::run_cli(&user_args[index + 1..]));
     }
+    // `docs` is the local file index, `ling-docs` (docs_index.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "docs"
+    {
+        std::process::exit(docs_index::run_cli(&user_args[index + 1..]));
+    }
     // `prompt` lists, shows and chooses the system prompt new sessions get (prompt.rs).
     if let Some(index) = subcommand
         && user_args[index] == "prompt"
@@ -371,6 +378,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // The code index: its session process starts here, outside the sandbox, and its prompt block
     // joins the others (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §4.2).
     let code_block = code_index::start_and_prompt_block(code_index::tools_enabled(), &code_index::session_dir(&user_args));
+    // The local file index: its session process, and its block when a collection exists
+    // (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §8.2).
+    let docs_block = docs_index::start_and_prompt_block(docs_index::enabled(config_file()));
     // Skills other agents installed are linked in, and the glossary of their tool names joins the
     // prompt when one is offered (specs/DREAMFERENCE_MIGHTLING_SKILLS.md §3, §5).
     let glossary = skills::start(&codex_home, interactive, model.max_model_len).to_string();
@@ -380,6 +390,7 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let parts = prompt::Parts {
         email,
         code: code_block.clone(),
+        docs: docs_block.clone(),
         glossary,
         rg_installed: code_index::rg_installed(),
         masking: mask::instruction(masking).to_string(),
@@ -404,6 +415,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     } else {
         args
     };
+    // `docs_search` and `docs_read`, when a collection exists (docs_index.rs).
+    let args = docs_index::with_tools(args, &docs_block);
     // One MCP server per declared app (apps.rs).
     let args = apps::with_servers(args, &declared_apps);
     // `default` is `model_catalog.json`, already named in `config.toml`; another prompt's catalog

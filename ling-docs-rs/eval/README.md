@@ -17,7 +17,7 @@ licence, and `fetch.py` rebuilds the corpus from it. Only redistributable source
 | Email | 1 `.mbox` (30 messages) + 10 `.eml` | Authored for this set, fictional company (CC0) |
 | CSV | 5 | Authored and seeded (CC0) |
 | Hostile PDFs | 10 | Synthetic (CC0): empty, truncated, garbage, bad xref, flate bomb (1 GB of spaces in 1 MB), 100,000-deep nesting, page-tree loop, 20,000 pages, 2 million text operators, AES-256 encrypted |
-| OCR fixtures | 39 pages | One page each of an English prose, two-column, table and RFC page and of Wikipedia's ling article in German, Swedish, French, Russian, Ukrainian, Chinese, Japanese, Korean and Arabic (CC BY-SA 4.0, `ocr/sources.json`), each as a 200 dpi scan, a 170 dpi phone photo and a poor 100 dpi copy (`make_ocr_fixtures.py`); the source's text layer is the ground truth |
+| OCR fixtures | 39 pages | One page each of an English prose, two-column, table and RFC page and of Wikipedia's puffin article in German, Swedish, French, Russian, Ukrainian, Chinese, Japanese, Korean and Arabic (CC BY-SA 4.0, `ocr/sources.json`), each as a 200 dpi scan, a 170 dpi phone photo and a poor 100 dpi copy (`make_ocr_fixtures.py`); the source's text layer is the ground truth |
 
 210 documents plus the 10 hostile files. `questions.jsonl` has 181 questions, each with the expected
 document, the locator (page, line range, section, message id or row range) and an answer snippet:
@@ -47,6 +47,9 @@ bash tess_setup.sh && venv/bin/python ocr_models.py && venv/bin/python make_ocr_
 bash run_ocr.sh v6-tiny v6-small v6-medium v5-oracle v5-all tesseract osd && venv/bin/python ocr_report.py
 venv/bin/python make_downloads.py corpus downloads && venv/bin/python filter_bench.py
 venv/bin/python first_index_probe.py synthetic corpus downloads
+# Phase 1 (spec §16): ling-docs itself. <wrapper> runs the built ling-docs with a throwaway HOME
+# whose only collection is corpus/ (`ling-docs add corpus --name corpus`, then `ling-docs index`).
+venv/bin/python phase1_acceptance.py <wrapper> results/phase1-acceptance.json [--scale <50k-chunk wrapper>]
 ```
 
 Every extraction runs in `bwrap --unshare-all` (no network, home hidden) inside a

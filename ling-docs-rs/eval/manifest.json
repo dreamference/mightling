@@ -125,12 +125,12 @@
    "source": "US government report with tables"
   },
   {
-   "path": "corpus/html/Atlantic_mightling.html",
-   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Atlantic_mightling/1375007520",
+   "path": "corpus/html/Atlantic_puffin.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Atlantic_puffin/1375007520",
    "sha256": "939e9369ca31d70169687cbf66873d014f85511decbad0aeb9ca176f7c8218a1",
    "bytes": 422872,
    "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
-   "source": "Wikipedia: Atlantic_mightling (revision 1375007520)"
+   "source": "Wikipedia: Atlantic_puffin (revision 1375007520)"
   },
   {
    "path": "corpus/html/Transport_Layer_Security.html",
@@ -421,12 +421,12 @@
    "source": "Wikipedia: Graphics_processing_unit (revision 1376564485)"
   },
   {
-   "path": "corpus/pdf/wikipedia-Mightling.pdf",
-   "url": "https://en.wikipedia.org/api/rest_v1/page/pdf/Mightling",
+   "path": "corpus/pdf/wikipedia-Puffin.pdf",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/pdf/Puffin",
    "sha256": "6356ac2f971f2fbc7216a92dc01635480d9fff3c9452d8be03445fda9fe6ddcb",
    "bytes": 777823,
    "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
-   "source": "Wikipedia PDF rendering: Mightling (current revision 1374797011 at collection time)"
+   "source": "Wikipedia PDF rendering: Puffin (current revision 1374797011 at collection time)"
   },
   {
    "path": "corpus/pdf/wikipedia-Auk.pdf",

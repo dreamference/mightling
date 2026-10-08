@@ -95,6 +95,16 @@ CODE_BUILD_STAMP_NAME: Final[str] = "code-build-key"
 CODE_BIN_NAMES: Final[tuple] = ("ling-code",)
 CODE_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-code")
 
+# The local file index, `ling-docs` (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §6): a crate of
+# its own built the same way. It loads PDFium, ONNX Runtime and its embedding model at run time;
+# `DocsIndexSetup` installs those beside it, pinned, since ling-docs itself opens no socket. It
+# runs its indexing in systemd scopes inside bwrap, so it is built on Linux only.
+DOCS_CRATE_DIR: Final[str] = os.path.join(REPO_ROOT, "ling-docs-rs")
+DOCS_BUILD_CACHE_DIR: Final[str] = os.path.expanduser("~/.cache/dreamference/ling-docs-build")
+DOCS_BUILD_STAMP_NAME: Final[str] = "docs-build-key"
+DOCS_BIN_NAMES: Final[tuple] = ("ling-docs",)
+DOCS_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-docs")
+
 # Windows (specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md §16.1). Every executable carries `.exe`, and
 # there are no `~/.local/bin` links: install.ps1 puts the install directory itself on the user's
 # PATH. The sandbox's helpers are built with `ling`, under the names Codex looks for beside its
@@ -561,7 +571,8 @@ class CodexBrandedBuilder:
         # Codex must not keep them from updating, nor they it.
         web_ok = cls.build_web_tools(force=force)
         code_ok = cls.build_code_index(force=force)
-        return cls._build_codex(force=force) and web_ok and code_ok
+        docs_ok = cls.build_docs_index(force=force)
+        return cls._build_codex(force=force) and web_ok and code_ok and docs_ok
 
     @classmethod
     def _release_install_report(cls) -> bool:
@@ -834,6 +845,32 @@ class CodexBrandedBuilder:
         )
 
     @classmethod
+    def build_docs_index(cls, force: bool = False) -> bool:
+        """
+        Builds `ling-docs` from `ling-docs-rs/` unless it is current, then installs what it loads
+        at run time (PDFium, ONNX Runtime, the embedding model) if any of it is missing.
+
+        Linux only: elsewhere there is nothing to build and this succeeds.
+
+        Args:
+            force (bool): Rebuild even if the installed binary matches the source.
+
+        Returns:
+            bool: True if it is installed and current afterwards. A failed download of the run-time
+            files does not fail the build: `ling-docs` then says indexing waits for them.
+        """
+        if not sys.platform.startswith("linux"):
+            return True
+        built = cls.build_crate(
+            DOCS_CRATE_DIR, DOCS_BUILD_CACHE_DIR, DOCS_BUILD_STAMP_NAME, DOCS_BIN_NAMES, force=force
+        )
+        if built:
+            from dreamference.runner.docs_index_setup import DocsIndexSetup
+            if not DocsIndexSetup.install():
+                print("💡 `ling-admin docs setup` retries the download; until then ling-docs indexes nothing.")
+        return built
+
+    @classmethod
     def console_script_path(cls, name: str) -> Optional[str]:
         """
         Returns a console script of the Python environment running this code, if it has one.
@@ -850,8 +887,8 @@ class CodexBrandedBuilder:
     @classmethod
     def link_onto_path(cls) -> None:
         """
-        Points `~/.local/bin/ling`, `ling-admin`, `ling-search`, `ling-fetch` and
-        `ling-code` at their executables.
+        Points `~/.local/bin/ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code` and
+        `ling-docs` at their executables.
 
         `ling` so it works from any shell; the others so the model can run the web and mail
         commands its prompt names from the shell `ling` gives it. A web command is linked only
@@ -868,6 +905,7 @@ class CodexBrandedBuilder:
             ("ling-search", SEARCH_PATH_LINK),
             ("ling-fetch", FETCH_PATH_LINK),
             ("ling-code", CODE_PATH_LINK),
+            ("ling-docs", DOCS_PATH_LINK),
         ):
             binary = os.path.join(INSTALL_DIR, "bin", name)
             if os.access(binary, os.X_OK):

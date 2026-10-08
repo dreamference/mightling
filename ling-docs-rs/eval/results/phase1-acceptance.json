@@ -1,0 +1,44 @@
+{
+ "questions": 56,
+ "merged": {
+  "n": 56,
+  "recall5": 0.946,
+  "recall10": 1.0,
+  "mrr10": 0.832,
+  "by_group": {
+   "md-lexical": "5/5",
+   "md-paraphrase": "6/6",
+   "pdf-lexical": "17/17",
+   "pdf-paraphrase": "17/17",
+   "rst-lexical": "2/2",
+   "rst-paraphrase": "4/4",
+   "txt-lexical": "2/2",
+   "txt-paraphrase": "3/3"
+  },
+  "query_ms_p50": 15.1,
+  "query_ms_p95": 19.3
+ },
+ "per_chunk": {
+  "n": 56,
+  "recall5": 0.929,
+  "recall10": 0.946,
+  "mrr10": 0.732,
+  "by_group": {
+   "md-lexical": "5/5",
+   "md-paraphrase": "6/6",
+   "pdf-lexical": "17/17",
+   "pdf-paraphrase": "14/17",
+   "rst-lexical": "2/2",
+   "rst-paraphrase": "4/4",
+   "txt-lexical": "2/2",
+   "txt-paraphrase": "3/3"
+  },
+  "query_ms_p50": 14.3,
+  "query_ms_p95": 18.0
+ },
+ "scale_50k": {
+  "queries": 181,
+  "query_ms_p50": 69.6,
+  "query_ms_p95": 94.0
+ }
+}
