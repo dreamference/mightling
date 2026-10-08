@@ -1390,6 +1390,9 @@ class DreamferenceCLIController:
                     download_all_models(hf_token=config.hf_token, auto_tensorize=auto_t)
                 else:
                     target_model = args.model or config.model
+                    if ModelMatrixRegistry.removed_in(target_model):
+                        print(f"❌ {ModelMatrixRegistry.removed_message(target_model, configured=not args.model)}")
+                        sys.exit(1)
                     if target_model and not ModelMatrixRegistry.is_offered(target_model):
                         print(f"❌ '{target_model}' is not a model Mightling offers.")
                         sys.exit(1)
@@ -1431,6 +1434,9 @@ class DreamferenceCLIController:
                 # A diffusion checkpoint pointed at vLLM fails only at launch, with an error that
                 # never mentions the real problem. Refuse it here, where the fix is nameable.
                 from dreamference.hardware import model_is_diffusion
+                if ModelMatrixRegistry.removed_in(args.model_name):
+                    print(f"❌ {ModelMatrixRegistry.removed_message(args.model_name)}")
+                    sys.exit(1)
                 if not ModelMatrixRegistry.is_offered(args.model_name):
                     out_console.print(f"[bold red]❌ '{args.model_name}' is not a model Mightling offers.[/bold red]")
                     sys.exit(1)
@@ -2156,7 +2162,13 @@ class DreamferenceCLIController:
                 cls.display_header()
                 # An explicit --model wins; otherwise the configured main model serves, so
                 # `main-model set` and `server start` can never disagree again.
+                from_config = not args.model
                 args.model = args.model or config.model
+                # A model a release removed would otherwise be taken for a HuggingFace repository
+                # name and fail at download, after the host checks; say so before anything starts.
+                if ModelMatrixRegistry.removed_in(args.model):
+                    print(f"❌ {ModelMatrixRegistry.removed_message(args.model, configured=from_config)}")
+                    sys.exit(1)
                 vllm_mgr = VLLMServerManager(host=f"http://localhost:{args.port}")
                 # A machine that loads a model is a node; an advertised one says `loading`.
                 from dreamference.node import NodeAdvertiser

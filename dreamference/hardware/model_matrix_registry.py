@@ -30,6 +30,31 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
 # 2026-10-07: Mightling serves this one model.
 DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.8-27b-nvfp4-dflash2"
 
+# Models Puffin served once and removed, keyed by every name an older configuration could hold for
+# them (alias, HuggingFace repository, display name, all lowercase), each naming the release that
+# removed it. Unknown keys are otherwise taken as raw HuggingFace repositories, so without this a
+# 1.4.1 dreamference.toml naming a removed alias was accepted by `main-model set`, and `model
+# download` and `server start` tried to fetch a repository of that name.
+REMOVED_MODELS: Final[Dict[str, str]] = {
+    name: "1.4.2"
+    for name in (
+        "qwen3.5-122b-a10b-hybrid-dflash",
+        "qwen 3.5 122b-a10b (int4+fp8 hybrid + dflash + dense-bandwidth stack)",
+        "qwen3.5-122b-a10b-int4-dflash",
+        "qwen 3.5 122b-a10b (int4 autoround + dflash)",
+        "intel/qwen3.5-122b-a10b-int4-autoround",
+        "qwen3.5-122b-a10b-nvfp4",
+        "qwen 3.5 122b-a10b (nvfp4)",
+        "nvidia/qwen3.5-122b-a10b-nvfp4",
+        "qwen3.6-35b-a3b-nvfp4",
+        "qwen 3.6 35b-a3b (nvfp4)",
+        "nvidia/qwen3.6-35b-a3b-nvfp4",
+        "qwen3.5-122b-a10b-dflash-draft",
+        "qwen 3.5 122b-a10b dflash drafter (draft model)",
+        "z-lab/qwen3.5-122b-a10b-dflash",
+    )
+}
+
 # The diffusion model served beside the main one. A separate default rather than a mode of the
 # main model, because the two run in parallel: every configuration names both, and `ling-admin server
 # start` launches both.
@@ -375,9 +400,44 @@ class ModelMatrixRegistry:
             model_key (str): Short model alias, HF repo ID, or display name.
 
         Returns:
-            bool: False only for a diffusion model with diffusion switched off.
+            bool: False for a removed model, and for a diffusion model with diffusion switched off.
         """
+        if cls.removed_in(model_key):
+            return False
         return cls.diffusion_enabled() or not cls.is_diffusion(model_key)
+
+    @classmethod
+    def removed_in(cls, model_key: Optional[str]) -> Optional[str]:
+        """
+        Names the release that removed a model, if `model_key` names one Puffin no longer serves.
+
+        Args:
+            model_key (Optional[str]): Short model alias, HF repo ID, or display name.
+
+        Returns:
+            Optional[str]: The release that removed it, or None for any other key.
+        """
+        if not model_key:
+            return None
+        return REMOVED_MODELS.get(model_key.strip().lower())
+
+    @classmethod
+    def removed_message(cls, model_key: str, configured: bool = False) -> str:
+        """
+        What to tell a user whose command or configuration names a removed model.
+
+        Args:
+            model_key (str): The removed model's name, as the user gave it.
+            configured (bool): True when it came from the configuration rather than the command
+                line, so the message says where it is set.
+
+        Returns:
+            str: Two lines: what happened, and the command that fixes it.
+        """
+        where = " (it is the model in your Puffin configuration)" if configured else ""
+        return (f"'{model_key}' was removed in Puffin {cls.removed_in(model_key)}{where}: Puffin "
+                f"serves one model, {DEFAULT_MODEL_ALIAS}.\n"
+                f"   Switch to it: puffin-admin main-model set {DEFAULT_MODEL_ALIAS}")
 
     @classmethod
     def declares_own_quantization(cls, model_key: str) -> bool:
