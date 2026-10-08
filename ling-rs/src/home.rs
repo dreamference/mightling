@@ -55,10 +55,18 @@ pub fn use_mightling_home() {
     let Some(home) = ling_node_locator::home_dir() else {
         return;
     };
-    // Puffin became Mightling: an installation of the old name is moved over once (rename.rs).
+    // Puffin became Mightling: an installation of the old name is moved over once (rename.rs), by an
+    // installed binary only, never by one run from a build or a scratch copy (`rename::allowed`).
+    // The home's carry-over below only copies and leaves the old home as it was, so it is not gated.
     let cwd = std::env::current_dir().unwrap_or_else(|_| home.clone());
     let config_path = std::env::var_os("DREAMFERENCE_CONFIG_PATH").map(PathBuf::from);
-    let mut renamed = crate::rename::migrate(&home, &cwd, config_path.as_deref());
+    let exe = std::env::current_exe().ok();
+    let choice = std::env::var_os(crate::rename::OPT_IN_ENV);
+    let mut renamed = if crate::rename::allowed(&home, exe.as_deref(), choice.as_deref()) {
+        crate::rename::migrate(&home, &cwd, config_path.as_deref())
+    } else {
+        crate::rename::Report::default()
+    };
     let Some(mightling_home) = resolve(std::env::var_os("CODEX_HOME").as_deref(), &home) else {
         if !renamed.is_empty() {
             eprint!("{}", renamed.notice());
