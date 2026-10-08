@@ -260,7 +260,7 @@ print("pong")
     assert code == 0 and "✅ Egress audit: pass" in out and "`ling web` server" in out
     call = json.loads(calls.read_text())
     port = call["args"][-1]
-    assert call["args"][8:] == [str(ling), "web", "serve", "--port", port]
+    assert call["args"][9:] == [str(ling), "web", "serve", "--port", port]
     assert json.loads(asked.read_text()) == ["web", "ask", "--port", port, "Reply with exactly: pong"]
     # The server's HOME and runtime folder are scratch: no advertised node, no user's app-server.
     for key in ("HOME", "XDG_RUNTIME_DIR", "CODEX_HOME"):
