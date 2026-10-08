@@ -5,28 +5,25 @@ This module provides the DesktopRunner class, which builds and launches the Elec
 `desktop/electron` (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), built the way the Codex
 desktop app is built: Electron Forge, with `ling` bundled inside as `resources/ling`.
 
-The app has two windows. Chat is a window on the Onyx deployment, so there is no bundled frontend
-to keep in step with the browser: every patch `ling-admin chat configure` applies shows up in
-both. Work drives `ling app-server` with a React UI that *is* bundled, built from `desktop/ui` by
-the same Vite build as the main process.
+The app has two windows, both the Mightling UI built from `desktop/ui`. Work drives
+`ling app-server` with the UI bundled by the same Vite build as the main process. Ask (the menu's
+former Chat, which showed the Onyx web UI until 2026-10-08) is the same UI served by `ling web` on
+this machine, which the app starts itself when nothing answers on its port
+(specs/DREAMFERENCE_MIGHTLING_ASK.md §10). Neither needs Onyx, so nothing is checked before the
+window opens: each window says on its own start-up screen what it is waiting for.
 
-It follows the same shape as the agent runners: check the service is healthy, provision the
-tooling if it is missing, then hand off to a subprocess. The health check is the one that matters
--- a window opened against a stopped Onyx shows a connection error with no hint of what to start,
-so it is checked first and the user is told to run `ling-admin chat start` instead.
+It follows the same shape as the agent runners: provision the tooling if it is missing, then hand
+off to a subprocess.
 """
 
 import json
 import os
 import shutil
 import subprocess
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Final, List, Optional
 
 from dreamference.chat.desktop_installer import CARGO_BIN, DesktopInstaller
-from dreamference.chat.onyx_runner import DEFAULT_ONYX_WEB_URL
 
 # The project lives beside the Python package rather than inside it: it has its own build system,
 # and `pip install -e .` has no business copying it around.
@@ -45,9 +42,6 @@ APP_CONFIG: Final[Path] = ELECTRON_DIR / "app.json"
 RESOURCES_DIR: Final[Path] = ELECTRON_DIR / "resources"
 BUNDLED_BINARIES: Final[tuple] = ("ling", "codex-code-mode-host")
 
-# How long to wait for Onyx to answer before deciding it is not running.
-HEALTH_TIMEOUT_SECONDS: Final[int] = 5
-
 # Where a desktop entry and its icon go for the current user. A deb puts these under /usr;
 # running from a source checkout, they belong in the XDG user directories instead.
 DESKTOP_ENTRY_DIR: Final[str] = os.path.expanduser("~/.local/share/applications")
@@ -64,10 +58,9 @@ WINDOW_CLASS: Final[str] = "Mightling"
 # `puffin-app` is the name it had until the product became Mightling.
 LEGACY_ENTRY_NAMES: Final[tuple] = ("puffin-desktop", "puffin-ui", "puffin-app")
 
-# Chromium's HTTP cache, inside the app's data directory. Onyx serves its stylesheets with
-# `immutable` and never changes their filenames, so a patched stylesheet is invisible to anything
-# holding a cached copy. Emptying this on launch costs a few megabytes re-fetched over loopback.
-# The `Cookies` file beside it is left alone, which is what keeps the session.
+# Chromium's HTTP cache, inside the app's data directory, emptied on launch so a window never
+# shows a page from before an upgrade. Emptying it costs little: the UI is bundled, and `ling web`
+# is on loopback. The `Cookies` file beside it is left alone.
 WEBVIEW_CACHE_DIR_NAME: Final[str] = "Cache"
 
 
@@ -75,25 +68,6 @@ class DesktopRunner:
     """
     Builds and runs the Mightling desktop app.
     """
-
-    @classmethod
-    def onyx_is_up(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> bool:
-        """
-        Reports whether the Onyx deployment is answering.
-
-        Args:
-            web_url (str): Base URL of the Onyx web UI.
-
-        Returns:
-            bool: True if the server responded.
-        """
-        try:
-            with urllib.request.urlopen(
-                f"{web_url.rstrip('/')}/api/health", timeout=HEALTH_TIMEOUT_SECONDS
-            ) as response:
-                return response.status == 200
-        except (urllib.error.URLError, OSError, ValueError):
-            return False
 
     @classmethod
     def _environment(cls) -> dict:
@@ -212,23 +186,16 @@ class DesktopRunner:
         return True
 
     @classmethod
-    def run(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> int:
+    def run(cls) -> int:
         """
         Opens the Mightling desktop window from the checkout: packages the app (`electron-forge
         package`: Vite builds the main process, the preload and Work's page; `ling` is bundled)
         and runs the packaged binary, so what opens is what the `.deb` ships. Not
         `electron-forge start`, whose dev server Work's `app://` page does not use.
 
-        Args:
-            web_url (str): Base URL of the Onyx web UI the window points at.
-
         Returns:
             int: 0 on success, non-zero on failure.
         """
-        if not cls.onyx_is_up(web_url):
-            print(f"❌ Mightling is not answering at {web_url}.")
-            print("💡 Start it first: ling-admin chat start")
-            return 1
         if not cls.has_source():
             return cls._run_installed()
         if not cls._ensure_toolchain() or not cls.install_packages():
@@ -258,9 +225,8 @@ class DesktopRunner:
         """
         Builds the distributable `.deb` (and a zip) with Electron Forge.
 
-        Unlike `run()`, this does not require Onyx to be up: Chat holds a URL, not a copy of the
-        UI, so there is nothing to fetch at build time. `ling` must be built, because it is
-        bundled into the app.
+        `ling` must be built, because it is bundled into the app: Work's server and Ask's
+        (`ling web`) are both that binary.
 
         Returns:
             int: 0 on success, non-zero on failure.
@@ -440,21 +406,20 @@ class DesktopRunner:
         return 0
 
     @classmethod
-    def status(cls, web_url: str = DEFAULT_ONYX_WEB_URL) -> int:
+    def status(cls) -> int:
         """
-        Reports whether the desktop app can be built and whether Onyx is up.
-
-        Args:
-            web_url (str): Base URL of the Onyx web UI.
+        Reports whether the desktop app can be built, and whether the `ling` it bundles is built.
 
         Returns:
-            int: 0 if the app could be launched right now, 1 otherwise.
+            int: 0 if the app could be built and launched right now, 1 otherwise.
         """
-        serving = cls.onyx_is_up(web_url)
-        print(f"{'✅' if serving else '❌'} Mightling server at {web_url}"
-              f"{'' if serving else ' — start it with: ling-admin chat start'}")
+        from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+        ling = CodexBrandedBuilder.executable_path()
+        built = os.path.isfile(ling)
+        print(f"{'✅' if built else '❌'} ling, which the app bundles for Work and Ask"
+              f"{f' ({ling})' if built else ' — build it with: ling-admin codex build'}")
         complete, _ = DesktopInstaller.report()
         if not DesktopInstaller.userns_allowed():
             print("⚠️  Chromium's sandbox cannot create a user namespace from an unconfined program here: "
                   "`ling-admin desktop install` writes the AppArmor profile.")
-        return 0 if serving and complete else 1
+        return 0 if built and complete else 1

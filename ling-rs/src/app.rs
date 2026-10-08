@@ -2,43 +2,37 @@
 //!
 //! Upstream `codex app` opens the upstream vendor's closed-source desktop app, and is compiled only
 //! on macOS and Windows. Mightling's own window is the Electron app in `desktop/electron`
-//! (`ling-app`, specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), which renders the local Onyx web
-//! UI, so the launcher answers `app` itself before Codex parses the command line.
-//! It does what `ling-admin desktop run` does before opening the window, minus building it:
-//! check Onyx is answering and empty the webview's HTTP cache.
+//! (`ling-app`, specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), so the launcher answers `app`
+//! itself before Codex parses the command line. It does what `ling-admin desktop run` does before
+//! opening the window, minus building it: empty the webview's HTTP cache.
 //!
-//! The window has a second half, Work: the coding agent on `ling app-server`
-//! (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md). `ling app --work`, `ling app <folder>` and
-//! `ling app --thread <id>` open it; `ling app` alone still opens the chat, until Work passes
-//! its Phase 1 acceptance. Work does not need Onyx, and waits for the model server on its own
-//! start-up screen rather than refusing.
+//! The app has two windows. Ask (the former Chat, which showed the Onyx web UI until 2026-10-08)
+//! is the Mightling UI on `ling web`, which the app starts itself when nothing answers
+//! (specs/DREAMFERENCE_MIGHTLING_ASK.md §10); `ling app` alone opens it. Work is the coding agent
+//! on `ling app-server` (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md): `ling app --work`,
+//! `ling app <folder>` and `ling app --thread <id>` open it. Neither needs Onyx, and both wait for
+//! the model server on their own start-up screen rather than refusing.
 
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::time::Duration;
-
-/// Where the window's Onyx deployment answers; `ling-app` is pointed at the same address.
-const ONYX_WEB_URL: &str = "http://localhost:3000";
 
 /// The executable and the desktop entry `ling-admin desktop install` registers for it.
 const EXECUTABLE: &str = "ling-app";
 const DESKTOP_ENTRY: &str = "ling-app.desktop";
 
 /// The app's data directory, named after its identifier (`desktop/electron/app.json`). Its HTTP
-/// cache is emptied on every launch: Onyx serves stylesheets as `immutable` under names that never
-/// change, so a cached copy would hide the last `ling-admin chat configure`. The app empties it
-/// too before opening Chat; this covers a window that was already open. Chromium's `Cookies` file
-/// beside it is left alone, which is what keeps the user signed in.
+/// cache is emptied when Ask is opened, so a window never shows a page from before an upgrade.
+/// Chromium's `Cookies` file beside it is left alone.
 const WEBVIEW_DATA_DIR: &str = "dev.dreamference.mightling";
 const WEBVIEW_CACHE_DIR: &str = "Cache";
 
-/// Which window `ling app` opens: Chat (the Onyx web UI), or Work with the arguments
-/// `ling-app` takes for it (`--work`, `--cwd <folder>`, `--thread <id>`).
+/// Which window `ling app` opens: Ask (the Mightling UI on `ling web`), or Work with the
+/// arguments `ling-app` takes for it (`--work`, `--cwd <folder>`, `--thread <id>`).
 #[derive(Debug, PartialEq)]
 pub enum Window {
-    Chat,
+    Ask,
     Work(Vec<String>),
 }
 
@@ -46,13 +40,14 @@ pub enum Window {
 /// `ling-app` starts in its own working directory.
 pub fn window(args: &[String]) -> Result<Window, String> {
     let mut work = false;
-    let mut chat = false;
+    let mut ask = false;
     let mut forwarded = Vec::new();
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--work" => work = true,
-            "--chat" => chat = true,
+            // `--chat` is the name Ask had while it showed the Onyx web UI.
+            "--ask" | "--chat" => ask = true,
             "--thread" => {
                 let id = rest.next().ok_or("--thread needs a thread id")?;
                 forwarded.extend(["--thread".to_string(), id.clone()]);
@@ -67,21 +62,21 @@ pub fn window(args: &[String]) -> Result<Window, String> {
             }
         }
     }
-    if chat && (work || !forwarded.is_empty()) {
-        return Err("--chat opens the chat window, which takes no folder or thread".to_string());
+    if ask && (work || !forwarded.is_empty()) {
+        return Err("--ask opens the Ask window, which takes no folder or thread".to_string());
     }
     if work || !forwarded.is_empty() {
         forwarded.insert(0, "--work".to_string());
         return Ok(Window::Work(forwarded));
     }
-    Ok(Window::Chat)
+    Ok(Window::Ask)
 }
 
 /// Handles `ling app [args...]` and returns the process exit code.
 pub async fn open(args: &[String]) -> i32 {
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
         println!("Open Mightling's desktop window (ling-app).\n");
-        println!("Usage: ling app [--chat]               the chat, on the local Onyx web UI");
+        println!("Usage: ling app [--ask]                Ask: questions with no project, on ling web");
         println!("       ling app --work [<folder>]      the coding agent (Work), on a project folder");
         println!("       ling app --thread <id>          a thread in Work");
         return 0;
@@ -99,17 +94,9 @@ pub async fn open(args: &[String]) -> i32 {
         eprintln!("💡 Build and register it with: ling-admin desktop build");
         return 1;
     };
-    // On a node, checked first: a window opened against a stopped server shows a bare connection
-    // error with no hint of what to start. On a client the web UI is the node's: `ling-app`
-    // finds it and forwards this address to it, and says in its own window when it cannot
-    // (specs/DREAMFERENCE_MIGHTLING_NODE.md §7), so there is nothing on this machine to check.
-    // Work needs neither Onyx nor its stylesheets.
-    if window == Window::Chat {
-        if ling_node_locator::is_node() && !onyx_is_up(ONYX_WEB_URL).await {
-            eprintln!("❌ Mightling is not answering at {ONYX_WEB_URL}.");
-            eprintln!("💡 Start it first: ling-admin chat start");
-            return 1;
-        }
+    // Nothing to check first: the app starts `ling web` for Ask itself, and says in its window
+    // what it is waiting for.
+    if window == Window::Ask {
         if let Some(home) = home_dir() {
             let _ = std::fs::remove_dir_all(
                 home.join(".local/share").join(WEBVIEW_DATA_DIR).join(WEBVIEW_CACHE_DIR),
@@ -174,20 +161,6 @@ pub fn exec_path(entry: &str) -> Option<PathBuf> {
     (!program.is_empty()).then(|| PathBuf::from(program))
 }
 
-async fn onyx_is_up(web_url: &str) -> bool {
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-    else {
-        return false;
-    };
-    client
-        .get(format!("{}/api/health", web_url.trim_end_matches('/')))
-        .send()
-        .await
-        .is_ok_and(|response| response.status().is_success())
-}
-
 fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -222,9 +195,10 @@ mod tests {
     }
 
     #[test]
-    fn mightling_app_alone_still_opens_the_chat() {
-        assert_eq!(window(&[]), Ok(Window::Chat));
-        assert_eq!(window(&args("--chat")), Ok(Window::Chat));
+    fn mightling_app_alone_opens_ask() {
+        assert_eq!(window(&[]), Ok(Window::Ask));
+        assert_eq!(window(&args("--ask")), Ok(Window::Ask));
+        assert_eq!(window(&args("--chat")), Ok(Window::Ask));
     }
 
     #[test]
@@ -241,6 +215,7 @@ mod tests {
         assert!(window(&args("--yolo")).is_err());
         assert!(window(&args("/no/such/folder/anywhere")).is_err());
         assert!(window(&args("--chat --work")).is_err());
+        assert!(window(&args("--ask --thread t1")).is_err());
         assert!(window(&args("Cargo.toml")).is_err() || !std::path::Path::new("Cargo.toml").exists());
     }
 }

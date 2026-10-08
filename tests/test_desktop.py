@@ -21,11 +21,11 @@ def electron_sources() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted((ELECTRON / "src").glob("*.ts")))
 
 
-def test_window_points_at_the_local_deployment_rather_than_a_bundled_copy():
-    # The desktop app and the browser render the same server, which is what keeps every patch
-    # `ling-admin chat configure` applies showing up in both without being ported.
+def test_the_ask_window_points_at_ling_web_on_this_machine():
+    # Ask (the menu's former Chat) is the Mightling UI on `ling web`, the same page a browser gets,
+    # with the policy layer Ask threads need (specs/DREAMFERENCE_MIGHTLING_ASK.md §10). Not Onyx.
     config = app_config()
-    assert config["chat"]["url"].startswith("http://localhost:3000")
+    assert config["chat"]["url"] == "http://127.0.0.1:3100/"
     assert config["productName"] == "Mightling"
     assert config["identifier"] == "dev.dreamference.mightling"
     assert config["command"] == "ling-app" and config["scheme"] == "mightling"
@@ -97,20 +97,16 @@ def test_the_checkouts_profile_has_the_same_shape():
     assert profile.count("userns,") == 2
 
 
-def test_run_refuses_when_the_server_is_down():
-    # A window opened against a stopped Onyx shows a connection error with no hint of what to
-    # start, so the health check comes before the toolchain.
-    with patch.object(DesktopRunner, "onyx_is_up", return_value=False), \
-         patch.object(DesktopRunner, "_ensure_toolchain") as toolchain, \
-         patch("subprocess.call") as call:
-        assert DesktopRunner.run() == 1
-        toolchain.assert_not_called()
-        call.assert_not_called()
+def test_the_app_no_longer_waits_for_onyx():
+    # Ask (the former Chat) is the Mightling UI on `ling web`, which the app starts itself; Work
+    # never needed Onyx. Nothing checks port 3000 before a window opens.
+    assert not hasattr(DesktopRunner, "onyx_is_up")
+    source = (Path(DESKTOP_PROJECT_DIR).parent / "dreamference" / "chat" / "desktop_runner.py").read_text(encoding="utf-8")
+    assert "onyx_is_up" not in source and "3000" not in source and "chat start" not in source
 
 
 def test_run_stops_when_the_packages_cannot_be_installed():
-    with patch.object(DesktopRunner, "onyx_is_up", return_value=True), \
-         patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
+    with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
          patch.object(DesktopRunner, "install_packages", return_value=False), \
          patch("subprocess.call") as call:
         assert DesktopRunner.run() == 1
@@ -148,16 +144,14 @@ def test_the_profile_install_is_announced_before_sudo_runs(capsys):
 
 
 def test_build_does_not_require_the_server():
-    # Chat holds a URL, not a copy of the UI, so there is nothing to fetch at build time.
+    # Ask is served by the bundled `ling` itself, so there is nothing to fetch at build time.
     commands = []
     with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
          patch.object(DesktopRunner, "install_packages", return_value=True), \
          patch.object(DesktopRunner, "copy_bundled_binaries", return_value=True), \
          patch.object(DesktopRunner, "install_desktop_entry"), \
-         patch.object(DesktopRunner, "_npm", side_effect=lambda args, cwd: commands.append((args, cwd)) or True), \
-         patch.object(DesktopRunner, "onyx_is_up") as up:
+         patch.object(DesktopRunner, "_npm", side_effect=lambda args, cwd: commands.append((args, cwd)) or True):
         assert DesktopRunner.build() == 0
-        up.assert_not_called()
     assert commands == [(["run", "make"], ELECTRON_DIR)]
 
 
@@ -266,8 +260,7 @@ def test_entry_exec_carries_no_environment():
 
 
 def test_cache_is_cleared_without_signing_the_user_out():
-    # Onyx serves stylesheets `immutable` under filenames that never change, so a patched sheet is
-    # invisible to a cached copy. Only Chromium's HTTP cache goes -- `Cookies` sits beside it.
+    # Only Chromium's HTTP cache goes -- `Cookies` sits beside it.
     from dreamference.chat.desktop_runner import WEBVIEW_CACHE_DIR_NAME
 
     assert WEBVIEW_CACHE_DIR_NAME == "Cache"
@@ -300,8 +293,7 @@ def test_run_packages_the_app_and_opens_the_packaged_binary():
     # Not `electron-forge start`: Work's page is served by app:// from the built renderer, which a
     # dev server run does not produce; the window that opens is the one the .deb ships.
     commands = []
-    with patch.object(DesktopRunner, "onyx_is_up", return_value=True), \
-         patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
+    with patch.object(DesktopRunner, "_ensure_toolchain", return_value=True), \
          patch.object(DesktopRunner, "install_packages", return_value=True), \
          patch.object(DesktopInstaller, "userns_allowed", return_value=True), \
          patch.object(DesktopRunner, "copy_bundled_binaries", return_value=True), \

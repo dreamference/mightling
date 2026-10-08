@@ -1,10 +1,11 @@
 // The windows and the one IPC channel between Work's page and this process
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3). Every message from the page is checked to
-// come from Work's own window before it is acted on: Chat is Onyx's page and has no business with
-// the agent, and it has no preload to send anything anyway.
+// come from Work's own window before it is acted on. The Ask window (the menu's former Chat) is
+// the Mightling UI on `ling web` (chat.ts, web.ts): it has no preload and talks to that server,
+// never to this process.
 
 import path from "node:path";
-import { BrowserWindow, app, ipcMain, nativeTheme, session, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, app, ipcMain, nativeTheme, type IpcMainInvokeEvent } from "electron";
 
 import { CHANNEL_CHUNK_ACK, CHANNEL_FOR_VIEW, CHANNEL_FROM_VIEW, Reassembler, chunked, isChunk, type ForView, type FromView } from "./api";
 import { airgapped } from "./airgapped";
@@ -14,14 +15,13 @@ import { findLing } from "./bridge";
 import { openChat } from "./chat";
 import { AppServer } from "./server";
 import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
+import { WebServer } from "./web";
 import { openWork } from "./work";
 
 export interface MainOptions {
-  /** The forwarder's port on a client; `null` on a node. */
-  port: number | null;
-  /** What `ling app` asked for: Work with a folder or thread, or `null` for Chat. */
+  /** What `ling app` asked for: Work with a folder or thread, or `null` for Ask. */
   work: WorkTarget | null;
-  /** The audit's session: hidden windows, Chat and Work both opened, quit after this many seconds. */
+  /** The audit's session: hidden windows, Ask and Work both opened, quit after this many seconds. */
   audit: number | null;
 }
 
@@ -51,15 +51,21 @@ export async function main(options: MainOptions): Promise<void> {
     },
   });
 
+  // Ask runs on `ling web`, which reaches its app-server over a Unix socket: Windows has no
+  // `ling web` yet, so there the menu's Ask opens Work.
+  const ling = findLing(resourcesPath());
+  const web = ling && process.platform !== "win32" ? WebServer.for(ling) : null;
   const showChat = () => {
+    if (!web) {
+      showWork();
+      return;
+    }
     if (chat && !chat.isDestroyed()) {
       chat.show();
       chat.focus();
       return;
     }
-    // Chromium keeps Onyx's immutable stylesheets; empty the cache so the last `chat configure` shows.
-    void session.defaultSession.clearCache();
-    chat = openChat({ port: options.port, show });
+    chat = openChat({ server: web, show });
     chat.on("closed", () => (chat = null));
   };
   const showWork = () => {
@@ -145,9 +151,13 @@ export async function main(options: MainOptions): Promise<void> {
   });
   app.on("window-all-closed", () => {
     server.stop();
+    web?.stop();
     app.quit();
   });
-  app.on("before-quit", () => server.stop());
+  app.on("before-quit", () => {
+    server.stop();
+    web?.stop();
+  });
 
   if (options.audit !== null) {
     showChat();

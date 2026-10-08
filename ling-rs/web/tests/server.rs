@@ -202,7 +202,7 @@ async fn the_embedded_ui_is_served_with_the_bridge_first() {
         let (status, headers, _) = call(&server, request("GET", path).header(header::COOKIE, &cookie).body(Body::empty()).unwrap()).await;
         assert_eq!(status, StatusCode::OK, "{path}");
         let kind = headers[header::CONTENT_TYPE].to_str().unwrap();
-        assert!(kind.starts_with("text/javascript") || kind.starts_with("text/css"), "{path}: {kind}");
+        assert!(kind.starts_with("text/javascript") || kind.starts_with("text/css") || kind == "image/png", "{path}: {kind}");
     }
 }
 
