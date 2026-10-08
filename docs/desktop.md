@@ -27,6 +27,50 @@ ling app
 
 `ling-admin desktop status` reports whether everything needed to build and run it is present.
 
+## On a Mac (preview)
+
+The release page carries the app for macOS as a preview: `Mightling-<version>-arm64-preview.dmg`
+for Apple silicon and `Mightling-<version>-x64-preview.dmg` for Intel Macs. On a Mac the app is a
+client: Chat shows the web chat of the GB10 on your network, and Work runs the `ling` bundled in the
+app against that GB10's model. It finds the GB10 the way `ling` does (the node must have run
+`ling-admin node enable`); with several on the network, choose one with `ling node use <name>`.
+
+**It is not signed with an Apple Developer ID and not notarized.** The app carries an ad-hoc
+signature only (Apple silicon runs nothing without one), which proves nothing about who built it, so
+macOS refuses to open it the first time. Check the download first: its SHA-256 is listed in the
+release's `SHA256SUMS`, which is signed.
+
+```bash
+shasum -a 256 ~/Downloads/Mightling-*-preview.dmg    # compare with the line in SHA256SUMS
+```
+
+Then:
+
+1. Open the dmg and drag **Mightling** onto **Applications**. Run it from there, not from the dmg.
+2. Open it once (double-click). macOS says it cannot verify the app; click **Done** (or **OK**).
+3. Open **System Settings → Privacy & Security**, scroll to *Security*, and click **Open Anyway**
+   next to the line about Mightling. Confirm with your password. From then on it opens normally.
+
+On macOS 14 (Sonoma) and earlier there is a shorter way: **Control-click** (or right-click)
+Mightling in Applications, choose **Open**, then **Open** again in the dialog. macOS 15 (Sequoia)
+removed that shortcut; use step 3 there.
+
+Or, in Terminal, remove the quarantine mark the browser put on the download, which is what makes
+macOS ask:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Mightling.app
+```
+
+The first time the app looks for your GB10, macOS asks whether Mightling may find devices on your
+local network: allow it, or the app cannot reach the node (System Settings → Privacy & Security →
+Local Network turns it back on). Because the signature is ad hoc, macOS may ask again after each
+update.
+
+What the preview does not do yet: `ling app` in a Mac terminal does not open it (open it from
+Applications or Spotlight), it does not update itself (download the new dmg), and closing its last
+window quits it, as on Linux.
+
 ## The Work window
 
 **Work** drives the terminal agent from a desktop window, on your GB10. It talks to one

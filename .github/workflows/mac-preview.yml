@@ -112,6 +112,9 @@ jobs:
           for name in ling codex-code-mode-host; do
             gunzip -c "clients/$name-${{ matrix.target }}.gz" > "desktop/electron/resources/$name"
             chmod 755 "desktop/electron/resources/$name"
+            # Ad hoc, like the rest of the bundle: the arm64 build carries only the linker's
+            # signature, and the x86-64 one none at all.
+            codesign --force --sign - "desktop/electron/resources/$name"
           done
           file desktop/electron/resources/*
           desktop/electron/resources/ling --version
@@ -149,7 +152,7 @@ jobs:
           for binary in Mightling.app/Contents/Resources/ling Mightling.app/Contents/Resources/codex-code-mode-host; do
             [[ -f "$binary" ]] || continue
             file "$binary"
-            otool -l "$binary" | grep -A4 LC_BUILD_VERSION || true
+            otool -l "$binary" | grep -A4 -E "LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX" || true
             codesign -dv "$binary" 2>&1 || true
           done
           codesign -dvv Mightling.app 2>&1
@@ -160,32 +163,43 @@ jobs:
           npx --prefix "$GITHUB_WORKSPACE/desktop/electron" @electron/fuses read --app "$APP" || true
           du -sh Mightling.app Mightling.app/Contents/Resources/* Mightling.app/Contents/Frameworks
 
-      # The app really starts: the audit's session (hidden windows, Work's app-server started with the
-      # bundled ling, quit after a few seconds) in a scratch HOME, the model server named so nothing
-      # browses the network.
+      # The app really starts: the audit's session (hidden windows, Chat and Work opened, Work's
+      # app-server started with the bundled ling, quit after a few seconds), with a scratch
+      # CODEX_HOME and the model server named so nothing browses the network. Chromium's mock
+      # keychain: the runner's keychain may not answer the cookie-encryption key without a dialog.
       - name: Start the app
         run: |
           scratch="$(mktemp -d)"
-          mkdir -p "$scratch/home"
           set +e
-          HOME="$scratch/home" CODEX_HOME="$scratch/home/.mightling" MIGHTLING_APP_AUDIT=8 \
+          CODEX_HOME="$scratch/codex-home" MIGHTLING_APP_AUDIT=8 ELECTRON_ENABLE_LOGGING=1 \
             DREAMFERENCE_VLLM_HOST=http://127.0.0.1:9 \
-            "$APP/Contents/MacOS/Mightling" > "$scratch/out.log" 2>&1 &
+            "$APP/Contents/MacOS/Mightling" --use-mock-keychain > "$scratch/out.log" 2>&1 &
           pid=$!
+          ling_seen=false
           for _ in $(seq 1 90); do
             kill -0 "$pid" 2>/dev/null || break
+            if pgrep -f "Contents/Resources/ling" >/dev/null; then
+              if [[ "$ling_seen" == false ]]; then ps -o pid,ppid,command -p "$(pgrep -f "Contents/Resources/ling" | tr '\n' ',' | sed 's/,$//')"; fi
+              ling_seen=true
+            fi
             sleep 1
           done
           if kill -0 "$pid" 2>/dev/null; then
             echo "::error::the app did not quit after its audit session"
+            ps -ax -o pid,ppid,stat,command | grep -i mightling | grep -v grep
+            sample "$pid" 2 -mayDie 2>&1 | sed -n 1,120p
             kill -9 "$pid"
+            sleep 1
             cat "$scratch/out.log"
             exit 1
           fi
           wait "$pid"
           status=$?
           cat "$scratch/out.log"
-          echo "exit status $status"
+          echo "exit status $status; the bundled ling ran: $ling_seen"
+          if [[ "$BUNDLED" == "true" && "$ling_seen" != "true" ]]; then
+            echo "::warning::no bundled ling process was seen during the session"
+          fi
           exit "$status"
 
       # HFS+ rather than APFS, so the image can be listed and unpacked off a Mac (7z) as well.
