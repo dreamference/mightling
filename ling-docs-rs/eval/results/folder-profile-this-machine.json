@@ -1,0 +1,58 @@
+{
+ "~/Documents": {
+  "supported .md": {
+   "files": 1,
+   "mb": 0.1
+  }
+ },
+ "~/Downloads": {
+  "archive": {
+   "files": 10,
+   "mb": 497.6
+  },
+  "image": {
+   "files": 163,
+   "mb": 15.0
+  },
+  "installer": {
+   "files": 2,
+   "mb": 560.6
+  },
+  "office (not v1)": {
+   "files": 16,
+   "mb": 0.4
+  },
+  "other": {
+   "files": 1766,
+   "mb": 49.0
+  },
+  "supported .csv": {
+   "files": 9,
+   "mb": 9.6
+  },
+  "supported .docx": {
+   "files": 8,
+   "mb": 0.7
+  },
+  "supported .eml": {
+   "files": 1,
+   "mb": 0.0
+  },
+  "supported .md": {
+   "files": 2,
+   "mb": 0.0
+  },
+  "supported .pdf": {
+   "files": 149,
+   "mb": 115.2
+  },
+  "supported .tex": {
+   "files": 4,
+   "mb": 0.2
+  },
+  "supported .txt": {
+   "files": 17,
+   "mb": 0.0
+  }
+ }
+}

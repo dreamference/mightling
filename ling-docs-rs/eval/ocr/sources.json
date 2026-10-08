@@ -1,0 +1,56 @@
+[
+ {
+  "path": "ocr/sources/wikipedia-de.pdf",
+  "url": "https://de.wikipedia.org/api/rest_v1/page/pdf/Papageitaucher",
+  "sha256": "476ce993733207ce318cd822236c0ae45d43a309c60b8599f06793f427f2771c",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-sv.pdf",
+  "url": "https://sv.wikipedia.org/api/rest_v1/page/pdf/Lunnef%C3%A5gel",
+  "sha256": "1af36fe8ac523b499a916581641665e1c874d63fbc4b2964e503ab0e59eb85b7",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-fr.pdf",
+  "url": "https://fr.wikipedia.org/api/rest_v1/page/pdf/Macareux_moine",
+  "sha256": "aab6048506f63d3c379ef50865c1d2fc60ec2a094da71c6bf88dc466f415f812",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-ru.pdf",
+  "url": "https://ru.wikipedia.org/api/rest_v1/page/pdf/%D0%A2%D1%83%D0%BF%D0%B8%D0%BA_%28%D0%BF%D1%82%D0%B8%D1%86%D0%B0%29",
+  "sha256": "341e69e168b64f7117994e367069463491df9ba536c0b9ebe76f62bcf0234c5e",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-zh.pdf",
+  "url": "https://zh.wikipedia.org/api/rest_v1/page/pdf/%E5%8C%97%E6%9E%81%E6%B5%B7%E9%B9%A6",
+  "sha256": "4fc6deba9dc812b83d29e7601641e2ac1acc3e57d45cc727aa3fcb633de3792a",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-ja.pdf",
+  "url": "https://ja.wikipedia.org/api/rest_v1/page/pdf/%E3%83%8B%E3%82%B7%E3%83%84%E3%83%8E%E3%83%A1%E3%83%89%E3%83%AA",
+  "sha256": "0217242b6355a903da594056d561c75caf426521660553f0b64c3cf1cca1c90e",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-ko.pdf",
+  "url": "https://ko.wikipedia.org/api/rest_v1/page/pdf/%EC%BD%94%EB%BF%94%EB%B0%94%EB%8B%A4%EC%98%A4%EB%A6%AC",
+  "sha256": "ac29c14fafc59bc26735c07f9936f722de7f690c6e252451fcdb1f9758c7af6e",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-ar.pdf",
+  "url": "https://ar.wikipedia.org/api/rest_v1/page/pdf/%D8%A8%D9%81%D9%86_%D8%A3%D8%B7%D9%84%D8%B3%D9%8A",
+  "sha256": "4aa786e358c86c001765f49dd95d381839da340784137904e9cc8b5a3fcb6912",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ },
+ {
+  "path": "ocr/sources/wikipedia-uk.pdf",
+  "url": "https://uk.wikipedia.org/api/rest_v1/page/pdf/%D0%86%D0%BF%D0%B0%D1%82%D0%BA%D0%B0_%D0%B0%D1%82%D0%BB%D0%B0%D0%BD%D1%82%D0%B8%D1%87%D0%BD%D0%B0",
+  "sha256": "68f6b6bdad976ad7c5f2d3246d05455130310a192481c4b6d253b04909a94869",
+  "licence": "CC BY-SA 4.0 (Wikipedia contributors)"
+ }
+]

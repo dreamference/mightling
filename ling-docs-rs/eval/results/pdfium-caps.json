@@ -1,0 +1,17 @@
+{
+ "flate-bomb.pdf @ 2G": {
+  "result": "exit -15: ",
+  "seconds": 2.6,
+  "peak_rss_mb": null
+ },
+ "flate-bomb.pdf @ 3G": {
+  "result": "ok",
+  "seconds": 3.9,
+  "peak_rss_mb": 2070
+ },
+ "text-ops.pdf @ 2G": {
+  "result": "ok",
+  "seconds": 5.7,
+  "peak_rss_mb": 1420
+ }
+}

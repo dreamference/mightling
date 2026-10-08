@@ -1,0 +1,17 @@
+{
+ "label": "synthetic",
+ "files_seen": 632,
+ "indexable_unique": 201,
+ "duplicates": 113,
+ "extension_lies": 2,
+ "skipped_unopened_gib": 10.4,
+ "filter_dedupe_seconds": 0.96,
+ "extract_seconds": 34.5,
+ "pdf_files": 31,
+ "pdf_pages": 1439,
+ "failed": 0,
+ "text_mchars": 9.95,
+ "est_chunks_512": 6246,
+ "pdf_peak_rss_mb_median": 24,
+ "pdf_peak_rss_mb_max": 96
+}

@@ -1,0 +1,8 @@
+{
+ "wikipedia-ar.pdf": {
+  "reference_words": 603,
+  "pdfium_plain": 0.29,
+  "pdfium_ordered_with_bidi": 0.922,
+  "pdfium_ordered_before_bidi": 0.012
+ }
+}

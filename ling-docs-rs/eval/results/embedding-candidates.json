@@ -1,0 +1,1779 @@
+{
+ "ibm-granite/granite-embedding-107m-multilingual": {
+  "probe-batch-1": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 1,
+   "load_seconds": 0.93,
+   "embed_seconds": 4.59,
+   "chunks_per_second": 34.86,
+   "embed_cpu_seconds": 18.35,
+   "chunks_per_cpu_second": 8.72,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.73,
+   "query_ms_p95": 2.2,
+   "rss_after_load_mb": 886.34,
+   "maxrss_mb": 886.34,
+   "dim": 384,
+   "loadavg_at_end": [
+    "3.24",
+    "2.98",
+    "4.37"
+   ]
+  },
+  "probe-batch-16": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 16,
+   "load_seconds": 0.91,
+   "embed_seconds": 6.26,
+   "chunks_per_second": 25.56,
+   "embed_cpu_seconds": 24.97,
+   "chunks_per_cpu_second": 6.41,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.74,
+   "query_ms_p95": 2.19,
+   "rss_after_load_mb": 886.28,
+   "maxrss_mb": 1783.11,
+   "dim": 384,
+   "loadavg_at_end": [
+    "4.13",
+    "3.19",
+    "4.42"
+   ]
+  },
+  "probe-batch-4": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 4,
+   "load_seconds": 0.91,
+   "embed_seconds": 5.63,
+   "chunks_per_second": 28.4,
+   "embed_cpu_seconds": 22.49,
+   "chunks_per_cpu_second": 7.11,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.71,
+   "query_ms_p95": 2.19,
+   "rss_after_load_mb": 886.34,
+   "maxrss_mb": 1061.95,
+   "dim": 384,
+   "loadavg_at_end": [
+    "3.97",
+    "3.15",
+    "4.41"
+   ]
+  },
+  "full-1024": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 3800,
+   "probe": false,
+   "chunk_tokens": 1024,
+   "batch": 16,
+   "load_seconds": 0.89,
+   "embed_seconds": 146.55,
+   "chunks_per_second": 25.93,
+   "embed_cpu_seconds": 585.01,
+   "chunks_per_cpu_second": 6.5,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.74,
+   "query_ms_p95": 2.23,
+   "rss_after_load_mb": 884.65,
+   "maxrss_mb": 1820.59,
+   "dim": 384,
+   "loadavg_at_end": [
+    "4.79",
+    "5.12",
+    "5.51"
+   ]
+  },
+  "full-256": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 14081,
+   "probe": false,
+   "chunk_tokens": 256,
+   "batch": 16,
+   "load_seconds": 0.89,
+   "embed_seconds": 242.22,
+   "chunks_per_second": 58.13,
+   "embed_cpu_seconds": 968.69,
+   "chunks_per_cpu_second": 14.54,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.77,
+   "query_ms_p95": 2.26,
+   "rss_after_load_mb": 889.69,
+   "maxrss_mb": 1667.77,
+   "dim": 384,
+   "loadavg_at_end": [
+    "6.00",
+    "5.69",
+    "5.92"
+   ]
+  },
+  "full-384": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 9735,
+   "probe": false,
+   "chunk_tokens": 384,
+   "batch": 16,
+   "load_seconds": 0.92,
+   "embed_seconds": 268.86,
+   "chunks_per_second": 36.21,
+   "embed_cpu_seconds": 1075.06,
+   "chunks_per_cpu_second": 9.06,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.75,
+   "query_ms_p95": 2.26,
+   "rss_after_load_mb": 887.46,
+   "maxrss_mb": 2196.41,
+   "dim": 384,
+   "loadavg_at_end": [
+    "5.48",
+    "5.43",
+    "5.74"
+   ]
+  },
+  "full-512": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 7477,
+   "probe": false,
+   "chunk_tokens": 512,
+   "batch": 16,
+   "load_seconds": 0.94,
+   "embed_seconds": 310.29,
+   "chunks_per_second": 24.1,
+   "embed_cpu_seconds": 1217.67,
+   "chunks_per_cpu_second": 6.14,
+   "cpu_share_of_4_cores": 0.98,
+   "query_ms_p50": 1.86,
+   "query_ms_p95": 2.38,
+   "rss_after_load_mb": 886.38,
+   "maxrss_mb": 1869.09,
+   "dim": 384,
+   "loadavg_at_end": [
+    "10.32",
+    "11.12",
+    "8.59"
+   ]
+  },
+  "full-768": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 5018,
+   "probe": false,
+   "chunk_tokens": 768,
+   "batch": 16,
+   "load_seconds": 0.93,
+   "embed_seconds": 193.1,
+   "chunks_per_second": 25.99,
+   "embed_cpu_seconds": 770.49,
+   "chunks_per_cpu_second": 6.51,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.75,
+   "query_ms_p95": 2.24,
+   "rss_after_load_mb": 885.14,
+   "maxrss_mb": 1842.18,
+   "dim": 384,
+   "loadavg_at_end": [
+    "5.50",
+    "5.35",
+    "5.64"
+   ]
+  },
+  "probe": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "load_seconds": 0.89,
+   "embed_seconds": 6.34,
+   "chunks_per_second": 25.23,
+   "embed_cpu_seconds": 25.31,
+   "chunks_per_cpu_second": 6.32,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.87,
+   "query_ms_p95": 2.48,
+   "rss_after_load_mb": 886.42,
+   "maxrss_mb": 1783.17,
+   "dim": 384,
+   "loadavg_at_end": [
+    "3.86",
+    "1.89",
+    "4.08"
+   ]
+  },
+  "quality": {
+   "pdfium-ordered-1024 dense": {
+    "recall10": 0.674,
+    "recall5": 0.591,
+    "mrr10": 0.451,
+    "doc_recall10": 0.884,
+    "by_kind": {
+     "lexical": "60/78",
+     "paraphrase": "55/79",
+     "crosslingual": "7/24"
+    },
+    "by_lang": {
+     "en": "83/109",
+     "ar": "6/9",
+     "de": "4/9",
+     "es": "4/9",
+     "fr": "8/9",
+     "ja": "4/9",
+     "ru": "4/9",
+     "sv": "3/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "43/54",
+     "en-paraphrase": "40/55",
+     "other-lexical": "17/24",
+     "other-paraphrase": "15/24",
+     "other-crosslingual": "7/24"
+    }
+   },
+   "pdfium-ordered-1024 hybrid": {
+    "recall10": 0.845,
+    "recall5": 0.757,
+    "mrr10": 0.605,
+    "doc_recall10": 0.895,
+    "by_kind": {
+     "lexical": "75/78",
+     "paraphrase": "71/79",
+     "crosslingual": "7/24"
+    },
+    "by_lang": {
+     "en": "99/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "6/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "51/54",
+     "en-paraphrase": "48/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "7/24"
+    }
+   },
+   "pdfium-ordered-256 dense": {
+    "recall10": 0.79,
+    "recall5": 0.68,
+    "mrr10": 0.562,
+    "doc_recall10": 0.884,
+    "by_kind": {
+     "lexical": "72/78",
+     "paraphrase": "59/79",
+     "crosslingual": "12/24"
+    },
+    "by_lang": {
+     "en": "92/109",
+     "ar": "6/9",
+     "de": "7/9",
+     "es": "6/9",
+     "fr": "7/9",
+     "ja": "7/9",
+     "ru": "4/9",
+     "sv": "6/9",
+     "zh": "8/9"
+    },
+    "by_group": {
+     "en-lexical": "50/54",
+     "en-paraphrase": "42/55",
+     "other-lexical": "22/24",
+     "other-paraphrase": "17/24",
+     "other-crosslingual": "12/24"
+    }
+   },
+   "pdfium-ordered-256 hybrid": {
+    "recall10": 0.834,
+    "recall5": 0.768,
+    "mrr10": 0.65,
+    "doc_recall10": 0.906,
+    "by_kind": {
+     "lexical": "77/78",
+     "paraphrase": "66/79",
+     "crosslingual": "8/24"
+    },
+    "by_lang": {
+     "en": "98/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "7/9",
+     "fr": "8/9",
+     "ja": "5/9",
+     "ru": "6/9",
+     "sv": "5/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "45/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "21/24",
+     "other-crosslingual": "8/24"
+    }
+   },
+   "pdfium-ordered-384 dense": {
+    "recall10": 0.779,
+    "recall5": 0.696,
+    "mrr10": 0.552,
+    "doc_recall10": 0.895,
+    "by_kind": {
+     "lexical": "70/78",
+     "paraphrase": "58/79",
+     "crosslingual": "13/24"
+    },
+    "by_lang": {
+     "en": "90/109",
+     "ar": "7/9",
+     "de": "7/9",
+     "es": "4/9",
+     "fr": "7/9",
+     "ja": "8/9",
+     "ru": "5/9",
+     "sv": "5/9",
+     "zh": "8/9"
+    },
+    "by_group": {
+     "en-lexical": "50/54",
+     "en-paraphrase": "40/55",
+     "other-lexical": "20/24",
+     "other-paraphrase": "18/24",
+     "other-crosslingual": "13/24"
+    }
+   },
+   "pdfium-ordered-384 hybrid": {
+    "recall10": 0.845,
+    "recall5": 0.773,
+    "mrr10": 0.663,
+    "doc_recall10": 0.895,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "68/79",
+     "crosslingual": "7/24"
+    },
+    "by_lang": {
+     "en": "100/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "5/9",
+     "ru": "6/9",
+     "sv": "6/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "46/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "7/24"
+    }
+   },
+   "pdfium-ordered-512 dense": {
+    "recall10": 0.79,
+    "recall5": 0.696,
+    "mrr10": 0.537,
+    "doc_recall10": 0.89,
+    "by_kind": {
+     "lexical": "72/78",
+     "paraphrase": "59/79",
+     "crosslingual": "12/24"
+    },
+    "by_lang": {
+     "en": "91/109",
+     "ar": "8/9",
+     "de": "7/9",
+     "es": "5/9",
+     "fr": "7/9",
+     "ja": "7/9",
+     "ru": "5/9",
+     "sv": "6/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "50/54",
+     "en-paraphrase": "41/55",
+     "other-lexical": "22/24",
+     "other-paraphrase": "18/24",
+     "other-crosslingual": "12/24"
+    }
+   },
+   "pdfium-ordered-512 hybrid": {
+    "recall10": 0.851,
+    "recall5": 0.785,
+    "mrr10": 0.656,
+    "doc_recall10": 0.895,
+    "by_kind": {
+     "lexical": "77/78",
+     "paraphrase": "70/79",
+     "crosslingual": "7/24"
+    },
+    "by_lang": {
+     "en": "100/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "6/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "47/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "7/24"
+    }
+   },
+   "pdfium-ordered-768 dense": {
+    "recall10": 0.729,
+    "recall5": 0.669,
+    "mrr10": 0.501,
+    "doc_recall10": 0.89,
+    "by_kind": {
+     "lexical": "66/78",
+     "paraphrase": "57/79",
+     "crosslingual": "9/24"
+    },
+    "by_lang": {
+     "en": "89/109",
+     "ar": "7/9",
+     "de": "5/9",
+     "es": "3/9",
+     "fr": "7/9",
+     "ja": "5/9",
+     "ru": "4/9",
+     "sv": "5/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "47/54",
+     "en-paraphrase": "42/55",
+     "other-lexical": "19/24",
+     "other-paraphrase": "15/24",
+     "other-crosslingual": "9/24"
+    }
+   },
+   "pdfium-ordered-768 hybrid": {
+    "recall10": 0.845,
+    "recall5": 0.773,
+    "mrr10": 0.627,
+    "doc_recall10": 0.884,
+    "by_kind": {
+     "lexical": "77/78",
+     "paraphrase": "70/79",
+     "crosslingual": "6/24"
+    },
+    "by_lang": {
+     "en": "99/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "6/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "46/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "24/24",
+     "other-crosslingual": "6/24"
+    }
+   }
+  }
+ },
+ "Snowflake/snowflake-arctic-embed-m-v2.0-int8": {
+  "probe-batch-1": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 1,
+   "load_seconds": 0.74,
+   "embed_seconds": 12.49,
+   "chunks_per_second": 12.81,
+   "embed_cpu_seconds": 49.93,
+   "chunks_per_cpu_second": 3.2,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 5.27,
+   "query_ms_p95": 6.67,
+   "rss_after_load_mb": 709.74,
+   "maxrss_mb": 877.02,
+   "dim": 768,
+   "loadavg_at_end": [
+    "1.59",
+    "2.69",
+    "4.34"
+   ]
+  },
+  "probe-batch-16": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 16,
+   "load_seconds": 0.74,
+   "embed_seconds": 16.1,
+   "chunks_per_second": 9.94,
+   "embed_cpu_seconds": 64.29,
+   "chunks_per_cpu_second": 2.49,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 5.34,
+   "query_ms_p95": 6.67,
+   "rss_after_load_mb": 709.75,
+   "maxrss_mb": 3295.11,
+   "dim": 768,
+   "loadavg_at_end": [
+    "3.00",
+    "2.93",
+    "4.36"
+   ]
+  },
+  "probe-batch-4": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 4,
+   "load_seconds": 0.74,
+   "embed_seconds": 15.66,
+   "chunks_per_second": 10.22,
+   "embed_cpu_seconds": 62.58,
+   "chunks_per_cpu_second": 2.56,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 5.22,
+   "query_ms_p95": 6.64,
+   "rss_after_load_mb": 709.43,
+   "maxrss_mb": 1526.42,
+   "dim": 768,
+   "loadavg_at_end": [
+    "2.50",
+    "2.84",
+    "4.36"
+   ]
+  },
+  "full-256": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 14081,
+   "probe": false,
+   "chunk_tokens": 256,
+   "batch": 1,
+   "load_seconds": 0.77,
+   "embed_seconds": 565.73,
+   "chunks_per_second": 24.89,
+   "embed_cpu_seconds": 2262.23,
+   "chunks_per_cpu_second": 6.22,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 5.45,
+   "query_ms_p95": 6.81,
+   "rss_after_load_mb": 712.6,
+   "maxrss_mb": 970.92,
+   "dim": 768,
+   "loadavg_at_end": [
+    "6.11",
+    "5.47",
+    "5.07"
+   ]
+  },
+  "full-512": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 7477,
+   "probe": false,
+   "chunk_tokens": 512,
+   "batch": 16,
+   "load_seconds": 0.74,
+   "embed_seconds": 737.24,
+   "chunks_per_second": 10.14,
+   "embed_cpu_seconds": 2947.05,
+   "chunks_per_cpu_second": 2.54,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 5.31,
+   "query_ms_p95": 6.73,
+   "rss_after_load_mb": 709.74,
+   "maxrss_mb": 3917.25,
+   "dim": 768,
+   "loadavg_at_end": [
+    "5.05",
+    "5.07",
+    "5.87"
+   ]
+  },
+  "full-768": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 5018,
+   "probe": false,
+   "chunk_tokens": 768,
+   "batch": 1,
+   "load_seconds": 0.77,
+   "embed_seconds": 459.28,
+   "chunks_per_second": 10.93,
+   "embed_cpu_seconds": 1833.75,
+   "chunks_per_cpu_second": 2.74,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 5.33,
+   "query_ms_p95": 6.69,
+   "rss_after_load_mb": 708.57,
+   "maxrss_mb": 944.0,
+   "dim": 768,
+   "loadavg_at_end": [
+    "5.25",
+    "4.86",
+    "4.71"
+   ]
+  },
+  "probe": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "load_seconds": 0.86,
+   "embed_seconds": 17.7,
+   "chunks_per_second": 9.04,
+   "embed_cpu_seconds": 70.67,
+   "chunks_per_cpu_second": 2.26,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 5.47,
+   "query_ms_p95": 6.84,
+   "rss_after_load_mb": 709.67,
+   "maxrss_mb": 3294.89,
+   "dim": 768,
+   "loadavg_at_end": [
+    "9.13",
+    "3.77",
+    "4.56"
+   ]
+  },
+  "quality": {
+   "pdfium-ordered-256 dense": {
+    "recall10": 0.873,
+    "recall5": 0.807,
+    "mrr10": 0.676,
+    "doc_recall10": 0.934,
+    "by_kind": {
+     "lexical": "76/78",
+     "paraphrase": "71/79",
+     "crosslingual": "11/24"
+    },
+    "by_lang": {
+     "en": "103/109",
+     "ar": "5/9",
+     "de": "8/9",
+     "es": "8/9",
+     "fr": "9/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "8/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "50/55",
+     "other-lexical": "23/24",
+     "other-paraphrase": "21/24",
+     "other-crosslingual": "11/24"
+    }
+   },
+   "pdfium-ordered-256 hybrid": {
+    "recall10": 0.878,
+    "recall5": 0.807,
+    "mrr10": 0.693,
+    "doc_recall10": 0.912,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "73/79",
+     "crosslingual": "8/24"
+    },
+    "by_lang": {
+     "en": "104/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "7/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "7/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "50/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "8/24"
+    }
+   },
+   "pdfium-ordered-512 dense": {
+    "recall10": 0.901,
+    "recall5": 0.851,
+    "mrr10": 0.699,
+    "doc_recall10": 0.939,
+    "by_kind": {
+     "lexical": "76/78",
+     "paraphrase": "73/79",
+     "crosslingual": "14/24"
+    },
+    "by_lang": {
+     "en": "104/109",
+     "ar": "8/9",
+     "de": "8/9",
+     "es": "8/9",
+     "fr": "9/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "8/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "51/55",
+     "other-lexical": "23/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "14/24"
+    }
+   },
+   "pdfium-ordered-512 hybrid": {
+    "recall10": 0.867,
+    "recall5": 0.812,
+    "mrr10": 0.733,
+    "doc_recall10": 0.906,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "71/79",
+     "crosslingual": "8/24"
+    },
+    "by_lang": {
+     "en": "102/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "7/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "7/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "48/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "8/24"
+    }
+   },
+   "pdfium-ordered-768 dense": {
+    "recall10": 0.856,
+    "recall5": 0.801,
+    "mrr10": 0.638,
+    "doc_recall10": 0.912,
+    "by_kind": {
+     "lexical": "74/78",
+     "paraphrase": "72/79",
+     "crosslingual": "9/24"
+    },
+    "by_lang": {
+     "en": "100/109",
+     "ar": "6/9",
+     "de": "8/9",
+     "es": "8/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "7/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "51/54",
+     "en-paraphrase": "49/55",
+     "other-lexical": "23/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "9/24"
+    }
+   },
+   "pdfium-ordered-768 hybrid": {
+    "recall10": 0.873,
+    "recall5": 0.823,
+    "mrr10": 0.712,
+    "doc_recall10": 0.901,
+    "by_kind": {
+     "lexical": "77/78",
+     "paraphrase": "73/79",
+     "crosslingual": "8/24"
+    },
+    "by_lang": {
+     "en": "102/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "7/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "7/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "49/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "24/24",
+     "other-crosslingual": "8/24"
+    }
+   }
+  }
+ },
+ "intfloat/multilingual-e5-small-int8": {
+  "full-1024": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 3800,
+   "probe": false,
+   "chunk_tokens": 1024,
+   "batch": 16,
+   "load_seconds": 0.51,
+   "embed_seconds": 137.09,
+   "chunks_per_second": 27.72,
+   "embed_cpu_seconds": 546.73,
+   "chunks_per_cpu_second": 6.95,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.74,
+   "query_ms_p95": 2.28,
+   "rss_after_load_mb": 523.02,
+   "maxrss_mb": 1831.47,
+   "dim": 384,
+   "loadavg_at_end": [
+    "4.58",
+    "5.46",
+    "5.67"
+   ]
+  },
+  "full-256": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 14081,
+   "probe": false,
+   "chunk_tokens": 256,
+   "batch": 16,
+   "load_seconds": 0.54,
+   "embed_seconds": 221.48,
+   "chunks_per_second": 63.58,
+   "embed_cpu_seconds": 882.47,
+   "chunks_per_cpu_second": 15.96,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.8,
+   "query_ms_p95": 2.32,
+   "rss_after_load_mb": 528.03,
+   "maxrss_mb": 2133.66,
+   "dim": 384,
+   "loadavg_at_end": [
+    "6.32",
+    "5.93",
+    "5.76"
+   ]
+  },
+  "full-384": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 9735,
+   "probe": false,
+   "chunk_tokens": 384,
+   "batch": 16,
+   "load_seconds": 0.54,
+   "embed_seconds": 260.07,
+   "chunks_per_second": 37.43,
+   "embed_cpu_seconds": 1026.15,
+   "chunks_per_cpu_second": 9.49,
+   "cpu_share_of_4_cores": 0.99,
+   "query_ms_p50": 1.75,
+   "query_ms_p95": 2.28,
+   "rss_after_load_mb": 525.88,
+   "maxrss_mb": 2225.34,
+   "dim": 384,
+   "loadavg_at_end": [
+    "7.58",
+    "6.26",
+    "5.87"
+   ]
+  },
+  "full-512": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 7477,
+   "probe": false,
+   "chunk_tokens": 512,
+   "batch": 16,
+   "load_seconds": 0.56,
+   "embed_seconds": 288.96,
+   "chunks_per_second": 25.88,
+   "embed_cpu_seconds": 1138.36,
+   "chunks_per_cpu_second": 6.57,
+   "cpu_share_of_4_cores": 0.98,
+   "query_ms_p50": 1.94,
+   "query_ms_p95": 2.52,
+   "rss_after_load_mb": 524.78,
+   "maxrss_mb": 2238.5,
+   "dim": 384,
+   "loadavg_at_end": [
+    "13.78",
+    "10.00",
+    "7.15"
+   ]
+  },
+  "full-768": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 5018,
+   "probe": false,
+   "chunk_tokens": 768,
+   "batch": 16,
+   "load_seconds": 0.53,
+   "embed_seconds": 180.8,
+   "chunks_per_second": 27.75,
+   "embed_cpu_seconds": 721.19,
+   "chunks_per_cpu_second": 6.96,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.74,
+   "query_ms_p95": 2.29,
+   "rss_after_load_mb": 523.59,
+   "maxrss_mb": 1877.48,
+   "dim": 384,
+   "loadavg_at_end": [
+    "5.18",
+    "5.96",
+    "5.85"
+   ]
+  },
+  "probe": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "load_seconds": 0.55,
+   "embed_seconds": 6.1,
+   "chunks_per_second": 26.24,
+   "embed_cpu_seconds": 24.28,
+   "chunks_per_cpu_second": 6.59,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 1.9,
+   "query_ms_p95": 2.49,
+   "rss_after_load_mb": 524.65,
+   "maxrss_mb": 1781.1,
+   "dim": 384,
+   "loadavg_at_end": [
+    "2.82",
+    "1.63",
+    "4.02"
+   ]
+  },
+  "quality": {
+   "pdfium-ordered-1024 dense": {
+    "recall10": 0.713,
+    "recall5": 0.669,
+    "mrr10": 0.525,
+    "doc_recall10": 0.867,
+    "by_kind": {
+     "lexical": "65/78",
+     "paraphrase": "62/79",
+     "crosslingual": "2/24"
+    },
+    "by_lang": {
+     "en": "83/109",
+     "ar": "6/9",
+     "de": "5/9",
+     "es": "6/9",
+     "fr": "7/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "6/9",
+     "zh": "5/9"
+    },
+    "by_group": {
+     "en-lexical": "44/54",
+     "en-paraphrase": "39/55",
+     "other-lexical": "21/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "2/24"
+    }
+   },
+   "pdfium-ordered-1024 hybrid": {
+    "recall10": 0.801,
+    "recall5": 0.724,
+    "mrr10": 0.631,
+    "doc_recall10": 0.867,
+    "by_kind": {
+     "lexical": "74/78",
+     "paraphrase": "66/79",
+     "crosslingual": "5/24"
+    },
+    "by_lang": {
+     "en": "93/109",
+     "ar": "7/9",
+     "de": "7/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "7/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "51/54",
+     "en-paraphrase": "42/55",
+     "other-lexical": "23/24",
+     "other-paraphrase": "24/24",
+     "other-crosslingual": "5/24"
+    }
+   },
+   "pdfium-ordered-256 dense": {
+    "recall10": 0.768,
+    "recall5": 0.68,
+    "mrr10": 0.588,
+    "doc_recall10": 0.878,
+    "by_kind": {
+     "lexical": "77/78",
+     "paraphrase": "56/79",
+     "crosslingual": "6/24"
+    },
+    "by_lang": {
+     "en": "89/109",
+     "ar": "6/9",
+     "de": "6/9",
+     "es": "7/9",
+     "fr": "7/9",
+     "ja": "5/9",
+     "ru": "5/9",
+     "sv": "8/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "36/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "20/24",
+     "other-crosslingual": "6/24"
+    }
+   },
+   "pdfium-ordered-256 hybrid": {
+    "recall10": 0.834,
+    "recall5": 0.773,
+    "mrr10": 0.643,
+    "doc_recall10": 0.895,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "66/79",
+     "crosslingual": "7/24"
+    },
+    "by_lang": {
+     "en": "98/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "7/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "44/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "7/24"
+    }
+   },
+   "pdfium-ordered-384 dense": {
+    "recall10": 0.768,
+    "recall5": 0.696,
+    "mrr10": 0.567,
+    "doc_recall10": 0.862,
+    "by_kind": {
+     "lexical": "75/78",
+     "paraphrase": "60/79",
+     "crosslingual": "4/24"
+    },
+    "by_lang": {
+     "en": "89/109",
+     "ar": "5/9",
+     "de": "7/9",
+     "es": "6/9",
+     "fr": "7/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "7/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "51/54",
+     "en-paraphrase": "38/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "4/24"
+    }
+   },
+   "pdfium-ordered-384 hybrid": {
+    "recall10": 0.834,
+    "recall5": 0.746,
+    "mrr10": 0.653,
+    "doc_recall10": 0.89,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "67/79",
+     "crosslingual": "6/24"
+    },
+    "by_lang": {
+     "en": "98/109",
+     "ar": "7/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "6/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "44/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "6/24"
+    }
+   },
+   "pdfium-ordered-512 dense": {
+    "recall10": 0.812,
+    "recall5": 0.724,
+    "mrr10": 0.609,
+    "doc_recall10": 0.89,
+    "by_kind": {
+     "lexical": "76/78",
+     "paraphrase": "66/79",
+     "crosslingual": "5/24"
+    },
+    "by_lang": {
+     "en": "96/109",
+     "ar": "5/9",
+     "de": "7/9",
+     "es": "6/9",
+     "fr": "7/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "8/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "52/54",
+     "en-paraphrase": "44/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "5/24"
+    }
+   },
+   "pdfium-ordered-512 hybrid": {
+    "recall10": 0.823,
+    "recall5": 0.757,
+    "mrr10": 0.668,
+    "doc_recall10": 0.884,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "66/79",
+     "crosslingual": "5/24"
+    },
+    "by_lang": {
+     "en": "98/109",
+     "ar": "6/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "6/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "44/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "5/24"
+    }
+   },
+   "pdfium-ordered-768 dense": {
+    "recall10": 0.773,
+    "recall5": 0.713,
+    "mrr10": 0.587,
+    "doc_recall10": 0.862,
+    "by_kind": {
+     "lexical": "73/78",
+     "paraphrase": "62/79",
+     "crosslingual": "5/24"
+    },
+    "by_lang": {
+     "en": "91/109",
+     "ar": "5/9",
+     "de": "7/9",
+     "es": "5/9",
+     "fr": "7/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "7/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "50/54",
+     "en-paraphrase": "41/55",
+     "other-lexical": "23/24",
+     "other-paraphrase": "21/24",
+     "other-crosslingual": "5/24"
+    }
+   },
+   "pdfium-ordered-768 hybrid": {
+    "recall10": 0.796,
+    "recall5": 0.74,
+    "mrr10": 0.658,
+    "doc_recall10": 0.867,
+    "by_kind": {
+     "lexical": "77/78",
+     "paraphrase": "61/79",
+     "crosslingual": "6/24"
+    },
+    "by_lang": {
+     "en": "93/109",
+     "ar": "6/9",
+     "de": "7/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "6/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "40/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "21/24",
+     "other-crosslingual": "6/24"
+    }
+   }
+  }
+ },
+ "intfloat/multilingual-e5-base": {
+  "full-512": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 7477,
+   "probe": false,
+   "chunk_tokens": 512,
+   "batch": 16,
+   "load_seconds": 1.86,
+   "embed_seconds": 1844.62,
+   "chunks_per_second": 4.05,
+   "embed_cpu_seconds": 7328.29,
+   "chunks_per_cpu_second": 1.02,
+   "cpu_share_of_4_cores": 0.99,
+   "query_ms_p50": 11.82,
+   "query_ms_p95": 14.76,
+   "rss_after_load_mb": 1903.2,
+   "maxrss_mb": 2675.49,
+   "dim": 768,
+   "loadavg_at_end": [
+    "4.80",
+    "5.00",
+    "6.86"
+   ]
+  },
+  "probe": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "load_seconds": 1.78,
+   "embed_seconds": 40.25,
+   "chunks_per_second": 3.98,
+   "embed_cpu_seconds": 160.67,
+   "chunks_per_cpu_second": 1.0,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 12.86,
+   "query_ms_p95": 16.0,
+   "rss_after_load_mb": 1903.21,
+   "maxrss_mb": 2552.69,
+   "dim": 768,
+   "loadavg_at_end": [
+    "6.42",
+    "2.75",
+    "4.27"
+   ]
+  },
+  "quality": {
+   "pdfium-ordered-512 dense": {
+    "recall10": 0.873,
+    "recall5": 0.79,
+    "mrr10": 0.67,
+    "doc_recall10": 0.901,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "72/79",
+     "crosslingual": "8/24"
+    },
+    "by_lang": {
+     "en": "103/109",
+     "ar": "6/9",
+     "de": "7/9",
+     "es": "7/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "9/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "49/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "23/24",
+     "other-crosslingual": "8/24"
+    }
+   },
+   "pdfium-ordered-512 hybrid": {
+    "recall10": 0.851,
+    "recall5": 0.796,
+    "mrr10": 0.703,
+    "doc_recall10": 0.89,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "70/79",
+     "crosslingual": "6/24"
+    },
+    "by_lang": {
+     "en": "102/109",
+     "ar": "6/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "7/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "48/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "6/24"
+    }
+   }
+  }
+ },
+ "intfloat/multilingual-e5-small": {
+  "full-512": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 7477,
+   "probe": false,
+   "chunk_tokens": 512,
+   "batch": 16,
+   "load_seconds": 0.99,
+   "embed_seconds": 687.96,
+   "chunks_per_second": 10.87,
+   "embed_cpu_seconds": 2490.29,
+   "chunks_per_cpu_second": 3.0,
+   "cpu_share_of_4_cores": 0.9,
+   "query_ms_p50": 8.86,
+   "query_ms_p95": 13.89,
+   "rss_after_load_mb": 927.16,
+   "maxrss_mb": 1836.43,
+   "dim": 384,
+   "loadavg_at_end": [
+    "13.61",
+    "12.28",
+    "10.69"
+   ]
+  },
+  "probe": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "load_seconds": 0.98,
+   "embed_seconds": 12.23,
+   "chunks_per_second": 13.08,
+   "embed_cpu_seconds": 48.71,
+   "chunks_per_cpu_second": 3.28,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 3.65,
+   "query_ms_p95": 4.57,
+   "rss_after_load_mb": 926.99,
+   "maxrss_mb": 1787.89,
+   "dim": 384,
+   "loadavg_at_end": [
+    "2.36",
+    "1.52",
+    "4.00"
+   ]
+  },
+  "quality": {
+   "pdfium-ordered-512 dense": {
+    "recall10": 0.851,
+    "recall5": 0.768,
+    "mrr10": 0.622,
+    "doc_recall10": 0.901,
+    "by_kind": {
+     "lexical": "77/78",
+     "paraphrase": "71/79",
+     "crosslingual": "6/24"
+    },
+    "by_lang": {
+     "en": "102/109",
+     "ar": "5/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "7/9",
+     "ja": "6/9",
+     "ru": "6/9",
+     "sv": "8/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "53/54",
+     "en-paraphrase": "49/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "6/24"
+    }
+   },
+   "pdfium-ordered-512 hybrid": {
+    "recall10": 0.823,
+    "recall5": 0.801,
+    "mrr10": 0.684,
+    "doc_recall10": 0.878,
+    "by_kind": {
+     "lexical": "78/78",
+     "paraphrase": "66/79",
+     "crosslingual": "5/24"
+    },
+    "by_lang": {
+     "en": "99/109",
+     "ar": "6/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "4/9",
+     "sv": "6/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "54/54",
+     "en-paraphrase": "45/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "21/24",
+     "other-crosslingual": "5/24"
+    }
+   }
+  }
+ },
+ "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": {
+  "full-512": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 7477,
+   "probe": false,
+   "chunk_tokens": 512,
+   "load_seconds": 0.7,
+   "embed_seconds": 104.2,
+   "chunks_per_second": 71.75,
+   "embed_cpu_seconds": 414.0,
+   "chunks_per_cpu_second": 18.06,
+   "cpu_share_of_4_cores": 0.99,
+   "query_ms_p50": 2.9,
+   "query_ms_p95": 4.7,
+   "rss_after_load_mb": 644.49,
+   "maxrss_mb": 820.23,
+   "dim": 384,
+   "loadavg_at_end": [
+    "11.21",
+    "6.68",
+    "5.51"
+   ]
+  },
+  "probe": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "load_seconds": 0.64,
+   "embed_seconds": 2.16,
+   "chunks_per_second": 74.07,
+   "embed_cpu_seconds": 8.62,
+   "chunks_per_cpu_second": 18.56,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 2.81,
+   "query_ms_p95": 4.57,
+   "rss_after_load_mb": 644.3,
+   "maxrss_mb": 752.55,
+   "dim": 384,
+   "loadavg_at_end": [
+    "1.61",
+    "1.34",
+    "3.98"
+   ]
+  },
+  "quality": {
+   "pdfium-ordered-512 dense": {
+    "recall10": 0.547,
+    "recall5": 0.481,
+    "mrr10": 0.347,
+    "doc_recall10": 0.862,
+    "by_kind": {
+     "lexical": "49/78",
+     "paraphrase": "40/79",
+     "crosslingual": "10/24"
+    },
+    "by_lang": {
+     "en": "67/109",
+     "ar": "5/9",
+     "de": "1/9",
+     "es": "2/9",
+     "fr": "7/9",
+     "ja": "3/9",
+     "ru": "3/9",
+     "sv": "6/9",
+     "zh": "5/9"
+    },
+    "by_group": {
+     "en-lexical": "36/54",
+     "en-paraphrase": "31/55",
+     "other-lexical": "13/24",
+     "other-paraphrase": "9/24",
+     "other-crosslingual": "10/24"
+    }
+   },
+   "pdfium-ordered-512 hybrid": {
+    "recall10": 0.768,
+    "recall5": 0.691,
+    "mrr10": 0.532,
+    "doc_recall10": 0.912,
+    "by_kind": {
+     "lexical": "68/78",
+     "paraphrase": "63/79",
+     "crosslingual": "8/24"
+    },
+    "by_lang": {
+     "en": "85/109",
+     "ar": "6/9",
+     "de": "8/9",
+     "es": "6/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "5/9",
+     "sv": "9/9",
+     "zh": "6/9"
+    },
+    "by_group": {
+     "en-lexical": "44/54",
+     "en-paraphrase": "41/55",
+     "other-lexical": "24/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "8/24"
+    }
+   }
+  }
+ },
+ "minishlab/potion-multilingual-128M": {
+  "full-512": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 7477,
+   "probe": false,
+   "chunk_tokens": 512,
+   "load_seconds": 1.68,
+   "embed_seconds": 4.95,
+   "chunks_per_second": 1511.88,
+   "embed_cpu_seconds": 17.53,
+   "chunks_per_cpu_second": 426.46,
+   "cpu_share_of_4_cores": 0.89,
+   "query_ms_p50": 0.08,
+   "query_ms_p95": 0.13,
+   "rss_after_load_mb": 1172.95,
+   "maxrss_mb": 1231.35,
+   "dim": 256,
+   "loadavg_at_end": [
+    "7.30",
+    "4.29",
+    "4.68"
+   ]
+  },
+  "probe": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "load_seconds": 1.64,
+   "embed_seconds": 0.13,
+   "chunks_per_second": 1243.36,
+   "embed_cpu_seconds": 0.4,
+   "chunks_per_cpu_second": 401.1,
+   "cpu_share_of_4_cores": 0.77,
+   "query_ms_p50": 0.07,
+   "query_ms_p95": 0.11,
+   "rss_after_load_mb": 1172.98,
+   "maxrss_mb": 1181.66,
+   "dim": 256,
+   "loadavg_at_end": [
+    "1.32",
+    "1.28",
+    "3.98"
+   ]
+  },
+  "quality": {
+   "pdfium-ordered-512 dense": {
+    "recall10": 0.608,
+    "recall5": 0.519,
+    "mrr10": 0.399,
+    "doc_recall10": 0.773,
+    "by_kind": {
+     "lexical": "61/78",
+     "paraphrase": "46/79",
+     "crosslingual": "3/24"
+    },
+    "by_lang": {
+     "en": "69/109",
+     "ar": "6/9",
+     "de": "7/9",
+     "es": "3/9",
+     "fr": "7/9",
+     "ja": "5/9",
+     "ru": "3/9",
+     "sv": "5/9",
+     "zh": "5/9"
+    },
+    "by_group": {
+     "en-lexical": "42/54",
+     "en-paraphrase": "27/55",
+     "other-lexical": "19/24",
+     "other-paraphrase": "19/24",
+     "other-crosslingual": "3/24"
+    }
+   },
+   "pdfium-ordered-512 hybrid": {
+    "recall10": 0.773,
+    "recall5": 0.669,
+    "mrr10": 0.528,
+    "doc_recall10": 0.834,
+    "by_kind": {
+     "lexical": "75/78",
+     "paraphrase": "60/79",
+     "crosslingual": "5/24"
+    },
+    "by_lang": {
+     "en": "90/109",
+     "ar": "6/9",
+     "de": "7/9",
+     "es": "5/9",
+     "fr": "8/9",
+     "ja": "6/9",
+     "ru": "4/9",
+     "sv": "7/9",
+     "zh": "7/9"
+    },
+    "by_group": {
+     "en-lexical": "52/54",
+     "en-paraphrase": "38/55",
+     "other-lexical": "23/24",
+     "other-paraphrase": "22/24",
+     "other-crosslingual": "5/24"
+    }
+   }
+  }
+ },
+ "BAAI/bge-m3": {
+  "probe": {
+   "licence": "MIT",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 4,
+   "load_seconds": 1.18,
+   "embed_seconds": 120.08,
+   "chunks_per_second": 1.33,
+   "embed_cpu_seconds": 480.26,
+   "chunks_per_cpu_second": 0.33,
+   "cpu_share_of_4_cores": 1.0,
+   "query_ms_p50": 36.29,
+   "query_ms_p95": 45.53,
+   "rss_after_load_mb": 1567.11,
+   "maxrss_mb": 3295.91,
+   "dim": 1024,
+   "loadavg_at_end": [
+    "4.67",
+    "5.05",
+    "5.43"
+   ]
+  }
+ },
+ "Snowflake/snowflake-arctic-embed-m-v2.0": {
+  "probe": {
+   "licence": "Apache-2.0",
+   "threads": 4,
+   "chunks": 160,
+   "probe": true,
+   "chunk_tokens": 512,
+   "batch": 4,
+   "load_seconds": 1.8,
+   "embed_seconds": 44.65,
+   "chunks_per_second": 3.58,
+   "embed_cpu_seconds": 177.0,
+   "chunks_per_cpu_second": 0.9,
+   "cpu_share_of_4_cores": 0.99,
+   "query_ms_p50": 15.33,
+   "query_ms_p95": 19.37,
+   "rss_after_load_mb": 2014.96,
+   "maxrss_mb": 2419.78,
+   "dim": 768,
+   "loadavg_at_end": [
+    "4.63",
+    "5.35",
+    "5.62"
+   ]
+  }
+ }
+}

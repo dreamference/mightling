@@ -1,0 +1,110 @@
+[
+ {
+  "id": "2610.06018v1",
+  "base": "2610.06018",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Investigating Query-Insensitive Behavior in Spatio-Temporal Video Grounding"
+ },
+ {
+  "id": "2610.07070v1",
+  "base": "2610.07070",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Turnslide: Scalable Multi-Turn Data Synthesis by Walking a Finite-State Machine"
+ },
+ {
+  "id": "2610.05978v1",
+  "base": "2610.05978",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Byte Language Models: Scaling, Emergent Abstractions, and Information Allocation"
+ },
+ {
+  "id": "2610.05976v1",
+  "base": "2610.05976",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Can Language Models Learn to Reject Their Own Bad Reasoning Steps?"
+ },
+ {
+  "id": "2610.05966v1",
+  "base": "2610.05966",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "HuatuoGPT-3: RL-Only Domain Adaptation from Base Models"
+ },
+ {
+  "id": "2610.05894v1",
+  "base": "2610.05894",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Noise Out, Bias In: Targeted Bias Injection in Diffusion Language Models via Closed-Loop Activation Steering"
+ },
+ {
+  "id": "2610.07062v1",
+  "base": "2610.07062",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Learning to Simulate Individuals from Macro Social Signals"
+ },
+ {
+  "id": "2610.05879v1",
+  "base": "2610.05879",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Learning to Learn a Language"
+ },
+ {
+  "id": "2610.05872v1",
+  "base": "2610.05872",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Off-Policy Merging Beats On-Policy Self-Distillation for Continual Learning"
+ },
+ {
+  "id": "2610.05842v1",
+  "base": "2610.05842",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "HLA: Expressive Hybrid Linear Attention via Chunk-Wise Dynamic Mixing"
+ },
+ {
+  "id": "2610.05831v1",
+  "base": "2610.05831",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Selecting Long-Horizon Trajectories for Reliable and Efficient Terminal-Agent Training"
+ },
+ {
+  "id": "2610.05817v1",
+  "base": "2610.05817",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Nash Equilibrium Text: A Game-Theoretic Decoding Framework for Text Generation"
+ },
+ {
+  "id": "2610.05815v1",
+  "base": "2610.05815",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Plan Canvas: Fixed Reasoning Regions for Continuous Language Flows"
+ },
+ {
+  "id": "2610.05783v1",
+  "base": "2610.05783",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "CLARA: Can AI Assess Developmental Appropriateness in Children&#39;s Stories?"
+ },
+ {
+  "id": "2610.05774v1",
+  "base": "2610.05774",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "AdaSpark: Adaptive DSpark with Online Learning for Tree Verification and N-gram Fill"
+ },
+ {
+  "id": "2610.05700v1",
+  "base": "2610.05700",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Voltic: Distinguishing Volatility from Stochasticity in Recurrent Memory"
+ },
+ {
+  "id": "2610.05681v1",
+  "base": "2610.05681",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Automatic Speech Recognition for Low-Resource Sinhala: A Critical Review of Methods, Challenges, and Future Directions"
+ },
+ {
+  "id": "2610.05630v1",
+  "base": "2610.05630",
+  "license": "http://creativecommons.org/licenses/by/4.0/",
+  "title": "Atomic Visual Entailment: Enhancing Zero-Shot Vision-Language Reasoning through Atomic Fact Decomposition and Learned Selection"
+ }
+]

@@ -1,0 +1,1856 @@
+{
+ "note": "Fetched documents are downloaded by fetch.py and checked against sha256; generated ones are written by generate.py / make_hostile.py. Nothing here is redistributed in the repository.",
+ "licences": {
+  "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified": 11,
+  "Public domain (work of the U.S. federal government, 17 U.S.C. 105)": 8,
+  "CC BY-SA 4.0 (Wikipedia contributors)": 103,
+  "MIT OR Apache-2.0 (The Rust Programming Language)": 50,
+  "Public domain or CC0-1.0 (stated in each PEP)": 10,
+  "http://creativecommons.org/licenses/by/4.0/": 15,
+  "CC0 (authored for this set; people and companies are fictional)": 16,
+  "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)": 15,
+  "CC0 (synthetic)": 10
+ },
+ "fetched": [
+  {
+   "path": "corpus/pdf/rfc9110.pdf",
+   "url": "https://www.rfc-editor.org/rfc/rfc9110.pdf",
+   "sha256": "60b30efa1048900833d1758440247fe8ac85a3134f2327388dcb24e07d814c89",
+   "bytes": 2858365,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 9110"
+  },
+  {
+   "path": "corpus/pdf/rfc9293.pdf",
+   "url": "https://www.rfc-editor.org/rfc/rfc9293.pdf",
+   "sha256": "8a941db70b484c13f684c0814292a844305fb8355ac54538d397dbf0db0c7ffa",
+   "bytes": 879498,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 9293"
+  },
+  {
+   "path": "corpus/pdf/rfc9114.pdf",
+   "url": "https://www.rfc-editor.org/rfc/rfc9114.pdf",
+   "sha256": "ecc538dc3d8e9cb3f8d73c3c10189f91bdc7b81f80c570ce658760e5d6f5db84",
+   "bytes": 1186221,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 9114"
+  },
+  {
+   "path": "corpus/txt/rfc5321.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc5321.txt",
+   "sha256": "7d560eddff1b213c17d4e1e5f95005728b2f05bc2b3947f0fcc91717c6707634",
+   "bytes": 225929,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 5321"
+  },
+  {
+   "path": "corpus/txt/rfc2616.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc2616.txt",
+   "sha256": "10211d2885196b97b1c78e1672f3f68ae97c294596ef2b7fd890cbd30a3427bf",
+   "bytes": 422279,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 2616"
+  },
+  {
+   "path": "corpus/txt/rfc7540.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc7540.txt",
+   "sha256": "6a67e8d7fdfa7b5272fc55f8fba62b266f932031c7f39e29c52f83e129bc2967",
+   "bytes": 209580,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 7540"
+  },
+  {
+   "path": "corpus/txt/rfc6455.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc6455.txt",
+   "sha256": "765775326aee0ecca9b04bde3fd1f52932d498e33e34e428bd61b8a24da0fa3b",
+   "bytes": 162067,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 6455"
+  },
+  {
+   "path": "corpus/txt/rfc4648.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc4648.txt",
+   "sha256": "84e14418f795d503be5f34bf23ce4ebaa119e9ec7c9f667d8caeb111385b178f",
+   "bytes": 35491,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 4648"
+  },
+  {
+   "path": "corpus/pdf/nist-sp-800-63b.pdf",
+   "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-63b.pdf",
+   "sha256": "ccfce7510a1267933f912d023306c6e7d485f21be63d271108b61aad6139127e",
+   "bytes": 1480377,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "NIST"
+  },
+  {
+   "path": "corpus/pdf/nist-cswp-29-csf-2.pdf",
+   "url": "https://nvlpubs.nist.gov/nistpubs/CSWP/NIST.CSWP.29.pdf",
+   "sha256": "3c31f46fee98cac0c4323453e5109291a213b4de7fef8c058af9bf67f717433c",
+   "bytes": 1518858,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "NIST"
+  },
+  {
+   "path": "corpus/pdf/nist-sp-800-207.pdf",
+   "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf",
+   "sha256": "0290d6ece24874287316f4bf430fef770aa4ec08a2227c8f2c1e5b2ff975e03d",
+   "bytes": 966908,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "NIST"
+  },
+  {
+   "path": "corpus/pdf/nist-fips-197-upd1.pdf",
+   "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf",
+   "sha256": "62c86eb567f13edb8f71826e985da870b04ef6381634f303cdb16e84d47becd1",
+   "bytes": 1184436,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "NIST"
+  },
+  {
+   "path": "corpus/pdf/nist-sp-800-88r1.pdf",
+   "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-88r1.pdf",
+   "sha256": "acd2315cb1823d51db93b180d898fabfdf5e964e3fcb41cf44d14b4c3ec8c5c4",
+   "bytes": 714563,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "NIST"
+  },
+  {
+   "path": "corpus/pdf/bls-empsit-2025-09.pdf",
+   "url": "https://www.bls.gov/news.release/archives/empsit_09052025.pdf",
+   "sha256": "d91f1329ce9e7a13c875cdaf56ebafd1cda360a13162800833c46888fa3d0516",
+   "bytes": 559888,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "US government report with tables"
+  },
+  {
+   "path": "corpus/html/Atlantic_mightling.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Atlantic_mightling/1375007520",
+   "sha256": "939e9369ca31d70169687cbf66873d014f85511decbad0aeb9ca176f7c8218a1",
+   "bytes": 422872,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Atlantic_mightling (revision 1375007520)"
+  },
+  {
+   "path": "corpus/html/Transport_Layer_Security.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Transport_Layer_Security/1378409942",
+   "sha256": "12c9912f05652c741e56a32749e610700fd40f2730280b96fd2ade67cd147d71",
+   "bytes": 1300668,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Transport_Layer_Security (revision 1378409942)"
+  },
+  {
+   "path": "corpus/html/Rust_(programming_language).html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Rust_%28programming_language%29/1378876146",
+   "sha256": "250987e28921f1c372a45a3a614a7ebf758f9d036840181db6e9e6494ce268f7",
+   "bytes": 924315,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Rust_(programming_language) (revision 1378876146)"
+  },
+  {
+   "path": "corpus/html/Python_(programming_language).html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Python_%28programming_language%29/1378728329",
+   "sha256": "03d6863ca4dc5302a3e3167f472d247ab0bde1eee47bda33d81b86f746d42986",
+   "bytes": 876373,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Python_(programming_language) (revision 1378728329)"
+  },
+  {
+   "path": "corpus/html/SQLite.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/SQLite/1378624739",
+   "sha256": "a4660d7b990877213e5b85dd2f9a2a8aa2c6d26ccc34fa1a46fc566cff69f96e",
+   "bytes": 275155,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: SQLite (revision 1378624739)"
+  },
+  {
+   "path": "corpus/html/Unicode.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Unicode/1378057700",
+   "sha256": "c6525ac10d4747763c7f398bc6e524e3fc934d8d114840c00de7b3f1efc466fe",
+   "bytes": 813325,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Unicode (revision 1378057700)"
+  },
+  {
+   "path": "corpus/html/Photosynthesis.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Photosynthesis/1371284103",
+   "sha256": "41e9521de0882bad2b69c39b9cd28b823e12307c89e586546cf83073894127df",
+   "bytes": 784523,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Photosynthesis (revision 1371284103)"
+  },
+  {
+   "path": "corpus/html/Plate_tectonics.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Plate_tectonics/1376119468",
+   "sha256": "92a68f9462debae7844b5da162264f40a96faa8dee8ab4f6e6b2cf62c34d1da6",
+   "bytes": 806033,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Plate_tectonics (revision 1376119468)"
+  },
+  {
+   "path": "corpus/html/Black_hole.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Black_hole/1378693646",
+   "sha256": "d663d9323e9281312277cd70b6842b84e4b74afb68b842d12ac36586f0a1f1bb",
+   "bytes": 1365537,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Black_hole (revision 1378693646)"
+  },
+  {
+   "path": "corpus/html/Roman_Empire.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Roman_Empire/1378955474",
+   "sha256": "9474f0ad0731b2d7d8e193083a84a2573c96917fe763bdfc28c95c34ee8809d9",
+   "bytes": 2421602,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Roman_Empire (revision 1378955474)"
+  },
+  {
+   "path": "corpus/html/French_Revolution.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/French_Revolution/1378823078",
+   "sha256": "f2fb68e963b3569ae122083cc450b389a732fb3b14d1b6b50d62610433c2921e",
+   "bytes": 1168084,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: French_Revolution (revision 1378823078)"
+  },
+  {
+   "path": "corpus/html/Penicillin.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Penicillin/1368621719",
+   "sha256": "c5ef6f625e05391735eca08a58cbcfae89c045d4c81541565b9ccfb718ae78c4",
+   "bytes": 672789,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Penicillin (revision 1368621719)"
+  },
+  {
+   "path": "corpus/html/Vaccine.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Vaccine/1376748103",
+   "sha256": "0863bf65bd1222216b09db046f37449eb87e0886afa67f2e388ea88a347f7f84",
+   "bytes": 882833,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Vaccine (revision 1376748103)"
+  },
+  {
+   "path": "corpus/html/Inflation.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Inflation/1377062796",
+   "sha256": "5c519b9353305b1a0cee7071bd5870beb59606d0bcb67f5a55baba522bf746ad",
+   "bytes": 808630,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Inflation (revision 1377062796)"
+  },
+  {
+   "path": "corpus/html/Supply_and_demand.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Supply_and_demand/1378800284",
+   "sha256": "870245a9cdc51c513e72898b7f5d5d950812333e45df4da9534cece968dc44ed",
+   "bytes": 267375,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Supply_and_demand (revision 1378800284)"
+  },
+  {
+   "path": "corpus/html/Machine_learning.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Machine_learning/1378799175",
+   "sha256": "e02180041b658e7f8e7a0e6cea4baa5ae6275a3f0be5173e3827a43930a71087",
+   "bytes": 978283,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Machine_learning (revision 1378799175)"
+  },
+  {
+   "path": "corpus/html/Public-key_cryptography.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Public-key_cryptography/1377469927",
+   "sha256": "8b3f5f4a0a656631d48a9397989360b857b1f30aa79ea6b4a8cb9965e7bd7592",
+   "bytes": 204133,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Public-key_cryptography (revision 1377469927)"
+  },
+  {
+   "path": "corpus/html/Bitcoin.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Bitcoin/1378965816",
+   "sha256": "5118a8404121258a0291f4c86c4be5e4dcb5388238827df4816d667b53d56583",
+   "bytes": 755999,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Bitcoin (revision 1378965816)"
+  },
+  {
+   "path": "corpus/html/Iceland.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Iceland/1376004446",
+   "sha256": "62e8a46c9563212737d5a1f41ddec87ff604f22db9bbdbbe6b5efbaa08756065",
+   "bytes": 1347657,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Iceland (revision 1376004446)"
+  },
+  {
+   "path": "corpus/html/Volcano.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Volcano/1378168594",
+   "sha256": "21b48a1529eb4158ea95be037c0e8b50fb79bc4e349841bbc4b09345d477fbdc",
+   "bytes": 596501,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Volcano (revision 1378168594)"
+  },
+  {
+   "path": "corpus/html/Coral_reef.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Coral_reef/1369792388",
+   "sha256": "03280d6e2cc032384f5906456c82bde7e88da6a98c33cbe45b6cdf3d3821f1ed",
+   "bytes": 1324523,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Coral_reef (revision 1369792388)"
+  },
+  {
+   "path": "corpus/html/Honey_bee.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Honey_bee/1377654009",
+   "sha256": "9a173ba8de4d50f836c42c603025cf7ae63474095fe9de406d7b564b0984be6f",
+   "bytes": 690763,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Honey_bee (revision 1377654009)"
+  },
+  {
+   "path": "corpus/html/Coffee.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Coffee/1371799424",
+   "sha256": "2ac04b485e1fc3ad2334c54bb7b0d03504886430db5d60ff4f6ee9ea9ce6390f",
+   "bytes": 894508,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Coffee (revision 1371799424)"
+  },
+  {
+   "path": "corpus/html/Chess.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Chess/1378667192",
+   "sha256": "e97491acf19a73407f944749212390e10871210b6fe082aa92251fdd0d4e6e5c",
+   "bytes": 1292767,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Chess (revision 1378667192)"
+  },
+  {
+   "path": "corpus/html/Mount_Everest.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Mount_Everest/1376942985",
+   "sha256": "b08555a9349d753a2ae4d79c1820ef45aae6ad112667917ce9adec8c640cf0cb",
+   "bytes": 1755122,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Mount_Everest (revision 1376942985)"
+  },
+  {
+   "path": "corpus/html/Amazon_River.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Amazon_River/1376437983",
+   "sha256": "fbaff538d9522649c5a0e524c3dc56d31786f4bc38b1c64408bf1109c3b2c2fc",
+   "bytes": 1256054,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Amazon_River (revision 1376437983)"
+  },
+  {
+   "path": "corpus/html/Electric_vehicle.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Electric_vehicle/1378888468",
+   "sha256": "b396c2af58f629373c29d067ca7e27192d04cb55976a498b80a92fdc10298a3d",
+   "bytes": 930407,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Electric_vehicle (revision 1378888468)"
+  },
+  {
+   "path": "corpus/html/Lithium-ion_battery.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Lithium-ion_battery/1378658243",
+   "sha256": "f4275e93cd9653b0d58bf216998e074ccee70b766ad72ae3fa944d62183083be",
+   "bytes": 1025709,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Lithium-ion_battery (revision 1378658243)"
+  },
+  {
+   "path": "corpus/html/Solar_panel.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Solar_panel/1376338048",
+   "sha256": "e37c3b8c818a09f873215414b669baf570cc14704da03164ac3462ee28368b83",
+   "bytes": 555167,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Solar_panel (revision 1376338048)"
+  },
+  {
+   "path": "corpus/html/Wind_power.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Wind_power/1377654224",
+   "sha256": "b8912d28ed76e81eeb2c87fe2536b9f22496d4d5439a9a29985ac29a15532970",
+   "bytes": 909553,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Wind_power (revision 1377654224)"
+  },
+  {
+   "path": "corpus/html/Copyright.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Copyright/1378907740",
+   "sha256": "74c1f279c3e0705c1119eacc4df11a433a8e9445789a386162e813f3ae8121c0",
+   "bytes": 457932,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Copyright (revision 1378907740)"
+  },
+  {
+   "path": "corpus/html/Open-source_software.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Open-source_software/1378983048",
+   "sha256": "9b3be37008164536b70caa9af6e15136ce64daa73c8e60baf6feb286b11ab359",
+   "bytes": 531344,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Open-source_software (revision 1378983048)"
+  },
+  {
+   "path": "corpus/html/Linux_kernel.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Linux_kernel/1378492402",
+   "sha256": "5a1a377db7b127efb89282be84de824fdf7ffcc1850e95fd34d6916f5a932373",
+   "bytes": 1339115,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Linux_kernel (revision 1378492402)"
+  },
+  {
+   "path": "corpus/html/Git.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Git/1373236942",
+   "sha256": "fa946f1d2da2792437b658f12acfa79ae5538ddf5c74e2a26e7a427630f27bc0",
+   "bytes": 481153,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Git (revision 1373236942)"
+  },
+  {
+   "path": "corpus/html/Docker_(software).html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Docker_%28software%29/1378632233",
+   "sha256": "1ac91dcd29627eaad07879dacad90e5644ecb13e0ab717a8ca0fada9835c5371",
+   "bytes": 293905,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Docker_(software) (revision 1378632233)"
+  },
+  {
+   "path": "corpus/html/Kubernetes.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Kubernetes/1377943065",
+   "sha256": "c6212ce5746db1736a4e0920d68145fb7c27002245c8a3e3d0ff3c55e1fa928b",
+   "bytes": 492826,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Kubernetes (revision 1377943065)"
+  },
+  {
+   "path": "corpus/html/Graphics_processing_unit.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Graphics_processing_unit/1376564485",
+   "sha256": "a96054bea91cbae380e2ecf0341d6fa2736bebe8370d12942f2e5b5cb0208d1c",
+   "bytes": 421487,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Graphics_processing_unit (revision 1376564485)"
+  },
+  {
+   "path": "corpus/pdf/wikipedia-Mightling.pdf",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/pdf/Mightling",
+   "sha256": "6356ac2f971f2fbc7216a92dc01635480d9fff3c9452d8be03445fda9fe6ddcb",
+   "bytes": 777823,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia PDF rendering: Mightling (current revision 1374797011 at collection time)"
+  },
+  {
+   "path": "corpus/pdf/wikipedia-Auk.pdf",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/pdf/Auk",
+   "sha256": "e932bd2773aa2a4a666914064f42510c4730e5cf2e7c7c0dac276fe894ac169c",
+   "bytes": 603512,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia PDF rendering: Auk (current revision 1356220599 at collection time)"
+  },
+  {
+   "path": "corpus/pdf/wikipedia-Seabird.pdf",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/pdf/Seabird",
+   "sha256": "f4d9667af70b2745bc94a25b33c07fdc38c606bc7534def0527fdedf147233ab",
+   "bytes": 1662241,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia PDF rendering: Seabird (current revision 1368715644 at collection time)"
+  },
+  {
+   "path": "corpus/pdf/wikipedia-Arctic_tern.pdf",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/pdf/Arctic_tern",
+   "sha256": "7dfd74670fe509fcc67bbf601ca811767b773e6eb793d97ff949ce7a714c2be7",
+   "bytes": 973935,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia PDF rendering: Arctic_tern (current revision 1374622634 at collection time)"
+  },
+  {
+   "path": "corpus/pdf/wikipedia-Guillemot.pdf",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/pdf/Guillemot",
+   "sha256": "b203322b00b03e2f6b8d87bfb482f6af6a05ea327b1c4e999b3007b4c27d381c",
+   "bytes": 328688,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia PDF rendering: Guillemot (current revision 1378425039 at collection time)"
+  },
+  {
+   "path": "corpus/_docx_src/Tea.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Tea/1374563032",
+   "sha256": "1afe8422a3e9e0585e951620bf8426bc281ee244ba77719001120556513e03f9",
+   "bytes": 605641,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Tea (revision 1374563032), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Chocolate.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Chocolate/1377728169",
+   "sha256": "c42925d03e29f6a7a8f8988acb9a0a8adb45d2d588965b0669cba4ba8def32cc",
+   "bytes": 683824,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Chocolate (revision 1377728169), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Bread.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Bread/1378709354",
+   "sha256": "fdb2a07e6abc05d7e566a3d655258cb4df1eec7bd789c1ab79ecde45dc4ca319",
+   "bytes": 444922,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Bread (revision 1378709354), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Cheese.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Cheese/1376859092",
+   "sha256": "6812150c77186ca08cc44928c1a8b4dc50e0bd5296be53670e8929b74b3a0163",
+   "bytes": 387665,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Cheese (revision 1376859092), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Olive_oil.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Olive_oil/1378238075",
+   "sha256": "a2a45959f4986fee54bf4c09a7159bfe164b1efdc8c4a181b1a98c3380a794da",
+   "bytes": 698507,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Olive_oil (revision 1378238075), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Wine.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Wine/1378185914",
+   "sha256": "d60084f7038bba4378845f32bf9524ee0485ee7361e5a128b931a66779a8f222",
+   "bytes": 590662,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Wine (revision 1378185914), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Rice.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Rice/1376837633",
+   "sha256": "f1fb08bf5aa0b5ca9cac5d52631b1ce835b24340220b82206af0c6d5463e88e3",
+   "bytes": 725224,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Rice (revision 1376837633), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Potato.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Potato/1378814806",
+   "sha256": "cb95f4f836d0819de82e7b6016f9cb1b3783f683caf72a698d75379ba59cc1e4",
+   "bytes": 633105,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Potato (revision 1378814806), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Tomato.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Tomato/1375083804",
+   "sha256": "2a3416d4a0721af2acbbca905e585cb5e2484cdba60bccb44b3d8e89e6ef90f9",
+   "bytes": 615815,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Tomato (revision 1375083804), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Apple.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Apple/1378395484",
+   "sha256": "bcb5dd71314df7b0e7f2fdec09048b421f7769938ba2d0735dac0189aa94cba5",
+   "bytes": 726516,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Apple (revision 1378395484), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Banana.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Banana/1376419536",
+   "sha256": "e207aaf979800059f3f0a39e46e05bb3ac1e4e5ea7721ea93c96cb242238f279",
+   "bytes": 871719,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Banana (revision 1376419536), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Salt.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Salt/1377839847",
+   "sha256": "6af5952867aaa5b1599d7400e079c90bcfcf50a6dd1949d6f4b01496951ca9f0",
+   "bytes": 543040,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Salt (revision 1377839847), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Sugar.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Sugar/1378815242",
+   "sha256": "dd63b20f7f305db4630a05d2c95b7a58026fdc0b971914b68a73d04a9a2d08e3",
+   "bytes": 575669,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Sugar (revision 1378815242), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Honey.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Honey/1378877316",
+   "sha256": "7c5e03c49e5fdd46d20c64832499e54d9c85087ebc3f713084e134cfbffce9f3",
+   "bytes": 796358,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Honey (revision 1378877316), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/_docx_src/Vanilla.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Vanilla/1378215951",
+   "sha256": "cb681516b379734b0e5c8f31a49a5e179b76c58e2f87a693c6ad88af9b3b1ff3",
+   "bytes": 526893,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Vanilla (revision 1378215951), source of a generated DOCX"
+  },
+  {
+   "path": "corpus/md/rust-book-ch00-00-introduction.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch00-00-introduction.md",
+   "sha256": "2eba711175d633b5c6bf2585bcb6382fef4eec2b39f18689a1a2b9134dd9d273",
+   "bytes": 10839,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch01-01-installation.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch01-01-installation.md",
+   "sha256": "5796f74894f69e71d937ef93be972815294c6047c65038981d4d155e89d890c4",
+   "bytes": 6660,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch01-03-hello-cargo.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch01-03-hello-cargo.md",
+   "sha256": "61369f359b84b646fc3773eb569a26bc18ba6edb4cf2be06a84472c7054c0e39",
+   "bytes": 11025,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch03-00-common-programming-concepts.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch03-00-common-programming-concepts.md",
+   "sha256": "577cfc9c38aef8a921625806872f74d15d26e6457e3f7249665ea7afef29e014",
+   "bytes": 1183,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch03-02-data-types.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch03-02-data-types.md",
+   "sha256": "edd88c0a5be94e0b804d01121bab8d70f6732d75bfc988052d855e8b44920a90",
+   "bytes": 17272,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch03-04-comments.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch03-04-comments.md",
+   "sha256": "82b0aac1db631041ec36dc64c6eb115c2a34e0deb062464ee0ed86203b044372",
+   "bytes": 1529,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch04-00-understanding-ownership.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch04-00-understanding-ownership.md",
+   "sha256": "c928725db99b50317a78423e90e790868e7efa4ffb87c62062b71ad6f3b5e59f",
+   "bytes": 406,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch04-02-references-and-borrowing.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch04-02-references-and-borrowing.md",
+   "sha256": "7d983eec6235630df6e85c7a5b4cfbdfc7c380c780f60774df65ba2fa1d05ca4",
+   "bytes": 10608,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch05-00-structs.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch05-00-structs.md",
+   "sha256": "f868f22d0149966b0d0b7191ce20318bf12981275cb0e393dbcd52caaab8b173",
+   "bytes": 859,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch05-02-example-structs.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch05-02-example-structs.md",
+   "sha256": "bebb0dfbd5dd94bfcd19f9d2f6216fcac10a9b168eef6a07a1d753ae85512557",
+   "bytes": 11585,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch06-00-enums.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch06-00-enums.md",
+   "sha256": "efa473933293ae1d6cdca81c2efd61e9d2a602d43f4b8978b7bd145ec8e6c2c1",
+   "bytes": 670,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch06-02-match.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch06-02-match.md",
+   "sha256": "db9a32dfa0c24d89d74362e0bbdb9e5793a6e61fe3aa487b67897b1cb3f90899",
+   "bytes": 12595,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch07-00-managing-growing-projects-with-packages-crates-and-modules.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch07-00-managing-growing-projects-with-packages-crates-and-modules.md",
+   "sha256": "d5dcbe4f7799c942a95051d313df3b70383a1835cff1fb71510c027c4581a242",
+   "bytes": 2970,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch07-02-defining-modules-to-control-scope-and-privacy.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch07-02-defining-modules-to-control-scope-and-privacy.md",
+   "sha256": "9a47196bd42516d57eaa32a2813db3f89d404ef3a02f78fb465329acc9c95571",
+   "bytes": 8018,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch07-04-bringing-paths-into-scope-with-the-use-keyword.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch07-04-bringing-paths-into-scope-with-the-use-keyword.md",
+   "sha256": "0eb94c4c75fd6fc0cf8f4f13170b277888f72da4d1603a3f6094859e1de95a8f",
+   "bytes": 13686,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch08-00-common-collections.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch08-00-common-collections.md",
+   "sha256": "0226216f7782e55712c8c583b06280c38483c093b9b4ef501b1c95f09eb2514a",
+   "bytes": 1355,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch08-02-strings.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch08-02-strings.md",
+   "sha256": "c69284d04088681b53c2fd05bc87219f122414aa639d9ea68f8e2d35c7b4b2c4",
+   "bytes": 17635,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch09-00-error-handling.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch09-00-error-handling.md",
+   "sha256": "8c5d97ecf63d50fcb053197176dc31544d19add7df3c60e61791b95659890733",
+   "bytes": 1378,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch09-02-recoverable-errors-with-result.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch09-02-recoverable-errors-with-result.md",
+   "sha256": "dab3e88d324cdde74cf96356c58a423747a5735ac6848d8d4592dc7c13637c62",
+   "bytes": 26432,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch10-00-generics.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch10-00-generics.md",
+   "sha256": "d020e896ebc0b986fcddcbab0511462ebb9e4ca4b6ebdb456b2993041f2614af",
+   "bytes": 5738,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch10-02-traits.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch10-02-traits.md",
+   "sha256": "705ae11758c687175e47104a302a9b5f694d04d683bffc28dcc61ffe9a0dc80e",
+   "bytes": 18682,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch11-00-testing.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch11-00-testing.md",
+   "sha256": "c65a2080c43a9f3d83a351779e059c6203b2c48285835c9fd277f7465fbd5192",
+   "bytes": 1987,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch11-02-running-tests.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch11-02-running-tests.md",
+   "sha256": "4c2cbb5c746e0c91c91d40b178025135bf126175c957110f0fa4368613388960",
+   "bytes": 8133,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch12-00-an-io-project.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch12-00-an-io-project.md",
+   "sha256": "0558d29b101abf718e8944d8ac3687282579dbdc1e3626c3eb2c18f9badf1495",
+   "bytes": 2497,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch12-02-reading-a-file.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch12-02-reading-a-file.md",
+   "sha256": "43a390d84480ff0f5ae94b422cc07a131b97784d6a0b9943f8401a235090b39c",
+   "bytes": 2372,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch12-04-testing-the-librarys-functionality.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch12-04-testing-the-librarys-functionality.md",
+   "sha256": "82cdffa0023c7c3a3a8a8f5658cf305e09f123c1e5b08713d1a19ebda80a3582",
+   "bytes": 9800,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch12-06-writing-to-stderr-instead-of-stdout.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch12-06-writing-to-stderr-instead-of-stdout.md",
+   "sha256": "f61a0dce702794c35688c89b09a7b5db6b91769a3d65ce1b53d45d84b2202ffb",
+   "bytes": 4451,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch13-01-closures.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch13-01-closures.md",
+   "sha256": "a20cbb0b6af2a985486d9ec88f5be83dac27fd45893983bfe600a08c5faf7b6e",
+   "bytes": 20936,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch13-03-improving-our-io-project.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch13-03-improving-our-io-project.md",
+   "sha256": "0ba736d1914be507b6ab06bdd64ede35dc4d5ce57836b09c87dd84c177681cc9",
+   "bytes": 9090,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch14-00-more-about-cargo.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch14-00-more-about-cargo.md",
+   "sha256": "b65b3d97000dff979a58e111dcdab150284674c21b73d16a7d0745578be243fd",
+   "bytes": 718,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch14-02-publishing-to-crates-io.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch14-02-publishing-to-crates-io.md",
+   "sha256": "dc30b41f9c5d8c5ae3ff2e13d193a7466709483e90ca8d4939b663e39c450a79",
+   "bytes": 21548,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch14-04-installing-binaries.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch14-04-installing-binaries.md",
+   "sha256": "5e9d6e61baa315b97a51080bd2dd96acd69690c280e6cb9bc13b4e6b6af82b15",
+   "bytes": 2175,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch15-00-smart-pointers.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch15-00-smart-pointers.md",
+   "sha256": "adf324198a3eb791ba5828cee69a201f3f2e6f8493280bfb5c897e8b50fca0f1",
+   "bytes": 2687,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch15-02-deref.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch15-02-deref.md",
+   "sha256": "36001d087e5aeabe658ce2689fe7c286c774fc74045841d62f6cf01108d0980e",
+   "bytes": 14476,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch15-04-rc.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch15-04-rc.md",
+   "sha256": "3ef419d9f6d39ad665238bd0ead40f7ad65485e8762a8f8f64dd13d7152e5868",
+   "bytes": 8911,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch15-06-reference-cycles.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch15-06-reference-cycles.md",
+   "sha256": "63e59efb318ea3cf88df11b3f87528bd221abfd25174f8a0388a445c41018e71",
+   "bytes": 16080,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch16-01-threads.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch16-01-threads.md",
+   "sha256": "84d2e46991bce433f8d50c29479e36fd0c7f62e735758c8a096ab4e1ebe58fe7",
+   "bytes": 12564,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch16-03-shared-state.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch16-03-shared-state.md",
+   "sha256": "9aa8adf23ccf6ceaf7586b9aac35c30769bd13ebfbb8950a185d9b136104f10b",
+   "bytes": 12519,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch17-00-async-await.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch17-00-async-await.md",
+   "sha256": "f9cd7f4b2e03b4be88231c9dd2d6d0e10a4b770dc4f3033cf3e33a6e6a69550e",
+   "bytes": 9734,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch17-02-concurrency-with-async.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch17-02-concurrency-with-async.md",
+   "sha256": "c839d2eb1a7051a3719a948f4aa972577bd6e3def82e08c6d903931dcb29cad5",
+   "bytes": 19550,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch17-04-streams.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch17-04-streams.md",
+   "sha256": "b494f9019a1e9a79992db4c056377995227764d2822bb8cd0f86d51ce4a08655",
+   "bytes": 5159,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch17-06-futures-tasks-threads.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch17-06-futures-tasks-threads.md",
+   "sha256": "1d6018f020d01dc2f9d460765e995e587025029ef66c41a64b98dd61926b74cd",
+   "bytes": 5828,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch18-01-what-is-oo.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch18-01-what-is-oo.md",
+   "sha256": "09efdf84fb2fd7197a221e8bdd8df24fb7b0a25468b2c84a01a9d71e537f6526",
+   "bytes": 8203,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch18-03-oo-design-patterns.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch18-03-oo-design-patterns.md",
+   "sha256": "2f87e2bda9a748c973642b0c7f9ded2ac0467059a708aecabe7bd11e08eb305a",
+   "bytes": 28054,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch19-01-all-the-places-for-patterns.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch19-01-all-the-places-for-patterns.md",
+   "sha256": "6d7fcf955b94ce6424d13e912688b6ba4536fb9c2cb7c5d08b8384f44d090921",
+   "bytes": 11039,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch19-03-pattern-syntax.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch19-03-pattern-syntax.md",
+   "sha256": "cc8b098538391d5e5f28e66c126209262e9aaf55d12f99056950be043d748679",
+   "bytes": 27808,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch20-01-unsafe-rust.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch20-01-unsafe-rust.md",
+   "sha256": "5d91b909eec72d9a9438ed2f9d6db65cfa1243e607109d4f152e0be8e2295d7b",
+   "bytes": 28212,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch20-03-advanced-types.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch20-03-advanced-types.md",
+   "sha256": "640f8f52f31cf573a6a1f64dbbdebfe7f36f54a3f42a8cf22c42e7658e75960e",
+   "bytes": 14390,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch20-05-macros.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch20-05-macros.md",
+   "sha256": "403fb3429c4c11ef118a31477aae7ce73cfcc0a2776289faac1a797c7f57f173",
+   "bytes": 24927,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/md/rust-book-ch21-01-single-threaded.md",
+   "url": "https://raw.githubusercontent.com/rust-lang/book/1500248d8f230566e4ec9f27fcbb8fe9e2898ab1/src/ch21-01-single-threaded.md",
+   "sha256": "899122a94a52c45f4c934e1967460a36c7803fcc1b6a933b790e610a9376f04f",
+   "bytes": 21877,
+   "licence": "MIT OR Apache-2.0 (The Rust Programming Language)",
+   "source": "rust-lang/book@1500248d8f23"
+  },
+  {
+   "path": "corpus/rst/pep-0008.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0008.rst",
+   "sha256": "6028935c6cb2c674d5f4d512c7ba6ce2923713b1c47ce1a78adc690db817fc5d",
+   "bytes": 50796,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0020.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0020.rst",
+   "sha256": "742999637cc96eef52e8148fdf65a6065a0953daee92bb48b8c739efcf6def07",
+   "bytes": 1648,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0257.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0257.rst",
+   "sha256": "7db41c5aaea3bfde0463307c72b38d735dc604491cadd059d7f9fe94b8142c0e",
+   "bytes": 10581,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0484.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0484.rst",
+   "sha256": "ddfe61c36a61b3ba926aaf23f4934ab17493a1cb7ea5d45497235b552c4a9f7c",
+   "bytes": 88614,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0572.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0572.rst",
+   "sha256": "abf5401ec523a03d59a6f3173842784f426bfd49d8b0a87a512646557bcef8b1",
+   "bytes": 47028,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0634.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0634.rst",
+   "sha256": "352927baffdbb0fdaba34cf059e95fe2a464a604fdba167a41c6257c90e10e5e",
+   "bytes": 23168,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-3333.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-3333.rst",
+   "sha256": "c8c12a1aa81b5f2f5346d74ff09e6f3f9f5214e646a6f0c28a5f2b3e683a6c2b",
+   "bytes": 81401,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0405.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0405.rst",
+   "sha256": "97a8048cbf102953fb1660d299855f1ee977b0ce34c153bd548dbc8db2228e33",
+   "bytes": 22230,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0517.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0517.rst",
+   "sha256": "fcc588817c7d8223a86cab484b0f6231ad3c78da6fbcbf7266e896ed69f6f81b",
+   "bytes": 46752,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/rst/pep-0668.rst",
+   "url": "https://raw.githubusercontent.com/python/peps/730372f74cd1c200170478fb91a9b3f07a737acd/peps/pep-0668.rst",
+   "sha256": "5cfa0584de93ffd9d9d57570aedc4fc0391c41da31715b5395ed88a64089be86",
+   "bytes": 55281,
+   "licence": "Public domain or CC0-1.0 (stated in each PEP)",
+   "source": "python/peps@730372f74cd1"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.06018.pdf",
+   "url": "https://arxiv.org/pdf/2610.06018v1",
+   "sha256": "1273615fb1f275c7a4bfee4079f03aae6f2493214a1e1845c033c4729b8c2f6c",
+   "bytes": 16582602,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.06018v1: Investigating Query-Insensitive Behavior in Spatio-Temporal Video Grounding"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.07070.pdf",
+   "url": "https://arxiv.org/pdf/2610.07070v1",
+   "sha256": "665744c4784508e648c21be3bcccaf12150de31c4081fe1a59819596f100a7cb",
+   "bytes": 1316222,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.07070v1: Turnslide: Scalable Multi-Turn Data Synthesis by Walking a Finite-State Machine"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05978.pdf",
+   "url": "https://arxiv.org/pdf/2610.05978v1",
+   "sha256": "9ae323558b52ef4beca2f07630b00691fabf333873c249e0ca5aa586e94ed4b6",
+   "bytes": 846807,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05978v1: Byte Language Models: Scaling, Emergent Abstractions, and Information Allocation"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05976.pdf",
+   "url": "https://arxiv.org/pdf/2610.05976v1",
+   "sha256": "4942536d927ac47457ca939758444a51b2ad95be9ee71fb711c499ddd95f7f4c",
+   "bytes": 533589,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05976v1: Can Language Models Learn to Reject Their Own Bad Reasoning Steps?"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05966.pdf",
+   "url": "https://arxiv.org/pdf/2610.05966v1",
+   "sha256": "21b09500be6cb249dd8b1bd51e1ce3e362939ded2e700844972dff4f6145c9ff",
+   "bytes": 5829603,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05966v1: HuatuoGPT-3: RL-Only Domain Adaptation from Base Models"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05894.pdf",
+   "url": "https://arxiv.org/pdf/2610.05894v1",
+   "sha256": "ef65ced6a05a97e001cf2282cc603b93855318230a9e729be695e1c60a5a5c83",
+   "bytes": 787600,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05894v1: Noise Out, Bias In: Targeted Bias Injection in Diffusion Language Models via Closed-Loop Activation Steering"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.07062.pdf",
+   "url": "https://arxiv.org/pdf/2610.07062v1",
+   "sha256": "9595917ea22fc281ca52fd8f6eaf222f86dd0f4791635d385b58b4b00bbbb35a",
+   "bytes": 640354,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.07062v1: Learning to Simulate Individuals from Macro Social Signals"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05879.pdf",
+   "url": "https://arxiv.org/pdf/2610.05879v1",
+   "sha256": "6d08fac8c115abfeb93a281f5701c79ea87afb29c168c642b25e6d75470a1c28",
+   "bytes": 592238,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05879v1: Learning to Learn a Language"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05872.pdf",
+   "url": "https://arxiv.org/pdf/2610.05872v1",
+   "sha256": "a791088939a9a721b634bfd5526ba12e60fb84e7850c0e4f3f455dc28ccfc8b3",
+   "bytes": 1028138,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05872v1: Off-Policy Merging Beats On-Policy Self-Distillation for Continual Learning"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05842.pdf",
+   "url": "https://arxiv.org/pdf/2610.05842v1",
+   "sha256": "4f75bd02320f327d81e6464bc6e4f96dad4b2b7508e6263e22947fd4cf57dd46",
+   "bytes": 1549357,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05842v1: HLA: Expressive Hybrid Linear Attention via Chunk-Wise Dynamic Mixing"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05831.pdf",
+   "url": "https://arxiv.org/pdf/2610.05831v1",
+   "sha256": "ccbe8ca174aae4233e36e00dbaffe43efa29419846a378d82c13420a2ea06fad",
+   "bytes": 2747439,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05831v1: Selecting Long-Horizon Trajectories for Reliable and Efficient Terminal-Agent Training"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05817.pdf",
+   "url": "https://arxiv.org/pdf/2610.05817v1",
+   "sha256": "86ac958d8b88a5b868a351eb42c05d3778bd21ae0d53b374713092ec4b1f2cbd",
+   "bytes": 908454,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05817v1: Nash Equilibrium Text: A Game-Theoretic Decoding Framework for Text Generation"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05815.pdf",
+   "url": "https://arxiv.org/pdf/2610.05815v1",
+   "sha256": "af8da5d4cb5d61c334cb4d2bdbed975b458dcfd6e32b052797e66666b1c9e9b3",
+   "bytes": 401385,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05815v1: Plan Canvas: Fixed Reasoning Regions for Continuous Language Flows"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05783.pdf",
+   "url": "https://arxiv.org/pdf/2610.05783v1",
+   "sha256": "b0ebe22c5305f3888809f7e3b9d19081494b19361a8c9c3446d071c68dde274c",
+   "bytes": 3544506,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05783v1: CLARA: Can AI Assess Developmental Appropriateness in Children&#39;s Stories?"
+  },
+  {
+   "path": "corpus/pdf/arxiv-2610.05774.pdf",
+   "url": "https://arxiv.org/pdf/2610.05774v1",
+   "sha256": "f0cd80e0b0b9597b7ab3b45202480c79cb9bc438f93c20a66900c6daa44972b3",
+   "bytes": 553345,
+   "licence": "http://creativecommons.org/licenses/by/4.0/",
+   "source": "arXiv 2610.05774v1: AdaSpark: Adaptive DSpark with Online Learning for Tree Verification and N-gram Fill"
+  },
+  {
+   "path": "corpus/pdf/eia-monthly-energy-review-2025-09.pdf",
+   "url": "https://www.eia.gov/totalenergy/data/monthly/archive/00352509.pdf",
+   "sha256": "cadfaed75766decbbb9d7312936aeda5013d9deb14b9d08bdabd502775ac09bb",
+   "bytes": 49836165,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "EIA Monthly Energy Review, September 2025 (tables)"
+  },
+  {
+   "path": "corpus/pdf/census-p60-282.pdf",
+   "url": "https://www2.census.gov/library/publications/2024/demo/p60-282.pdf",
+   "sha256": "e6cf145cb10b5d037f5e77fa199d2e558bfe24f76273f385e9767c2eabba1cbf",
+   "bytes": 1890167,
+   "licence": "Public domain (work of the U.S. federal government, 17 U.S.C. 105)",
+   "source": "U.S. Census Bureau P60-282 (tables)"
+  },
+  {
+   "path": "corpus/html/General_Data_Protection_Regulation.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/General_Data_Protection_Regulation/1370738186",
+   "sha256": "1e76a9b54e66da077df2f89909641700eea49850c4313a722b09fdb70bf91b61",
+   "bytes": 683580,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: General_Data_Protection_Regulation (revision 1370738186)"
+  },
+  {
+   "path": "corpus/html/HTTP.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/HTTP/1377007807",
+   "sha256": "fd27f21e956c36345305f47141966ca519e69de9c8532f1763505d7b2f117da4",
+   "bytes": 472259,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: HTTP (revision 1377007807)"
+  },
+  {
+   "path": "corpus/html/Transformer_(deep_learning).html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Transformer_%28deep_learning%29/1378958346",
+   "sha256": "8ca5ef569d49d042fc72476ad22a771bb6aaa5d8b064358b72089b02006eba4a",
+   "bytes": 932709,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Transformer_(deep_learning) (revision 1378958346)"
+  },
+  {
+   "path": "corpus/html/Arctic.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Arctic/1372680104",
+   "sha256": "5227ba690a5d471babfd3497a75c725ab09e3c119b663b6d6ce8535aa576e693",
+   "bytes": 519382,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Arctic (revision 1372680104)"
+  },
+  {
+   "path": "corpus/html/Glacier.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Glacier/1376978672",
+   "sha256": "a18340238fbbc54b5860347f49ec6ec4911147d2adb045add8f604ea110fe5d4",
+   "bytes": 547572,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Glacier (revision 1376978672)"
+  },
+  {
+   "path": "corpus/html/Tide.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Tide/1378838879",
+   "sha256": "54519dd3cf35b6ca03f71fa140fddab457e86c4615bd703fbf9c5a713f41411e",
+   "bytes": 835790,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Tide (revision 1378838879)"
+  },
+  {
+   "path": "corpus/html/Lighthouse.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Lighthouse/1376073246",
+   "sha256": "71c6e2c92a1e473f34f6d74b42a9ec9b2de87d43dab8fff70bb82d2f02f89971",
+   "bytes": 261667,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Lighthouse (revision 1376073246)"
+  },
+  {
+   "path": "corpus/html/Fjord.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Fjord/1378675197",
+   "sha256": "109ce61ae25ed7fb31f31fe6e0b5312cdee82d14759d485159b92a07c5431078",
+   "bytes": 367530,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Fjord (revision 1378675197)"
+  },
+  {
+   "path": "corpus/html/Salmon.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Salmon/1373322210",
+   "sha256": "a81c739d368f47cb05aabdd68a5948d380d427198c3e11b78fe45ef22ee1b0fa",
+   "bytes": 674972,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Salmon (revision 1373322210)"
+  },
+  {
+   "path": "corpus/html/Whale.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Whale/1377720929",
+   "sha256": "64dbbd0a9f226c1fb278981764e61a4513c486a37cc279ef999cf46df2d23d67",
+   "bytes": 722583,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Whale (revision 1377720929)"
+  },
+  {
+   "path": "corpus/html/Penguin.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Penguin/1378987382",
+   "sha256": "1d0a5c19f7803e1c3fe9e76673974d21b05f0b1f11ff8701f0c22895ae98af6b",
+   "bytes": 537746,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Penguin (revision 1378987382)"
+  },
+  {
+   "path": "corpus/html/Albatross.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Albatross/1367213464",
+   "sha256": "56eaf0cc21b6cc4a95ebd1fe05ebfec16b9588b5040648fe7c613f3bdea21cdd",
+   "bytes": 414859,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Albatross (revision 1367213464)"
+  },
+  {
+   "path": "corpus/html/Database.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Database/1369645396",
+   "sha256": "0072914fc3a4225c84eaf596e27818c77acebd47274f56bd84ec77a736c3fd64",
+   "bytes": 391092,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Database (revision 1369645396)"
+  },
+  {
+   "path": "corpus/html/Compiler.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Compiler/1373605841",
+   "sha256": "38d653928aaf2ab018b5a581d2d5279a4a7c30c13854442cb8e98e38e3e527d7",
+   "bytes": 357149,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Compiler (revision 1373605841)"
+  },
+  {
+   "path": "corpus/html/Operating_system.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Operating_system/1378031792",
+   "sha256": "7a8fce1f3d610c4946f724e45a91e6848e74315200d5f8ebaa9a45b19da09180",
+   "bytes": 520383,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Operating_system (revision 1378031792)"
+  },
+  {
+   "path": "corpus/html/Cryptographic_hash_function.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Cryptographic_hash_function/1376147393",
+   "sha256": "e7a0d62ae098cb05d7ed432427e08849ed2cab84f567e90414d6df7476aeaa26",
+   "bytes": 300024,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Cryptographic_hash_function (revision 1376147393)"
+  },
+  {
+   "path": "corpus/html/Email.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Email/1373529169",
+   "sha256": "b53f58744997af0c005956f43e47f4c9b8467a0a813ee516061620eaa3580385",
+   "bytes": 465082,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Email (revision 1373529169)"
+  },
+  {
+   "path": "corpus/html/Spreadsheet.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Spreadsheet/1378825446",
+   "sha256": "8c2e7b0ac6c99333b0122b4396a41c60be9385fbdefbed53a01d9620b01cbe84",
+   "bytes": 327316,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Spreadsheet (revision 1378825446)"
+  },
+  {
+   "path": "corpus/html/PDF.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/PDF/1378857733",
+   "sha256": "9197c3ec7d6986f6125db8824fc2a68d2d7c063a6e87a2de57c5eece43b9a4fb",
+   "bytes": 506778,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: PDF (revision 1378857733)"
+  },
+  {
+   "path": "corpus/html/Markdown.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Markdown/1378832470",
+   "sha256": "39787df349a8f2c944690f1e50ab6c00bb0f69f0efcb57744251a274ca43c14e",
+   "bytes": 241620,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Markdown (revision 1378832470)"
+  },
+  {
+   "path": "corpus/html/Search_engine.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Search_engine/1378205047",
+   "sha256": "1cf5f9895106a4c65b8ad818d942bcff3ed0aeb6a4a96c54ee56de7732a5e6cf",
+   "bytes": 376423,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Search_engine (revision 1378205047)"
+  },
+  {
+   "path": "corpus/html/Information_retrieval.html",
+   "url": "https://en.wikipedia.org/api/rest_v1/page/html/Information_retrieval/1375036430",
+   "sha256": "90e7fa56cd2eefd2646b41cedf8c4be47d37740a4751e7262fb7d4cfce349378",
+   "bytes": 240640,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia: Information_retrieval (revision 1375036430)"
+  },
+  {
+   "path": "corpus/html-multi/de-Coffee.html",
+   "url": "https://de.wikipedia.org/api/rest_v1/page/html/Kaffee/270967792",
+   "sha256": "74cc134f55b6ff83081962c43a95059c68c071253366209d389e754c1b0a3696",
+   "bytes": 615213,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (de): Kaffee (revision 270967792)"
+  },
+  {
+   "path": "corpus/html-multi/fr-Coffee.html",
+   "url": "https://fr.wikipedia.org/api/rest_v1/page/html/Caf%C3%A9/239848976",
+   "sha256": "b74ba3dc1712a511c343c9c0605dd2fc8b2c4ffa6c7ce24edda337a922136a72",
+   "bytes": 836916,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (fr): Caf\u00e9 (revision 239848976)"
+  },
+  {
+   "path": "corpus/html-multi/es-Coffee.html",
+   "url": "https://es.wikipedia.org/api/rest_v1/page/html/Caf%C3%A9/175492772",
+   "sha256": "a97df66ccd4d4a315064ed0b434d592d7eaf372a7148e6691f7a837198f724e8",
+   "bytes": 685930,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (es): Caf\u00e9 (revision 175492772)"
+  },
+  {
+   "path": "corpus/html-multi/sv-Coffee.html",
+   "url": "https://sv.wikipedia.org/api/rest_v1/page/html/Kaffe/59617007",
+   "sha256": "a9e353eb91da68f1f0885861d04b2ee32b6a0cf67c467525746e89fd36d36bd2",
+   "bytes": 190454,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (sv): Kaffe (revision 59617007)"
+  },
+  {
+   "path": "corpus/html-multi/ru-Coffee.html",
+   "url": "https://ru.wikipedia.org/api/rest_v1/page/html/%D0%9A%D0%BE%D1%84%D0%B5/153564774",
+   "sha256": "5b3bcd6622e2eba92063d62e70cf6b1497d205fee76705356ee9e1a9f7a93f4f",
+   "bytes": 522137,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ru): \u041a\u043e\u0444\u0435 (revision 153564774)"
+  },
+  {
+   "path": "corpus/html-multi/zh-Coffee.html",
+   "url": "https://zh.wikipedia.org/api/rest_v1/page/html/%E5%92%96%E5%95%A1/94531274",
+   "sha256": "90912d69d895e9beeadd284e7dce6aa40919b0eaf8c49e1dd55fd82ceba25f0a",
+   "bytes": 559216,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (zh): \u5496\u5561 (revision 94531274)"
+  },
+  {
+   "path": "corpus/html-multi/ja-Coffee.html",
+   "url": "https://ja.wikipedia.org/api/rest_v1/page/html/%E3%82%B3%E3%83%BC%E3%83%92%E3%83%BC/111165450",
+   "sha256": "7b22279e5f0de26dafe7c671ca752757c46f6bc6ee3bbfacaedc7fe0ba614193",
+   "bytes": 571308,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ja): \u30b3\u30fc\u30d2\u30fc (revision 111165450)"
+  },
+  {
+   "path": "corpus/html-multi/ar-Coffee.html",
+   "url": "https://ar.wikipedia.org/api/rest_v1/page/html/%D9%82%D9%87%D9%88%D8%A9/76778148",
+   "sha256": "1df48bee7edb4222d341c2ac65e0a4dbd9d27bd7a38df4d638fec5ad2f3cbc0e",
+   "bytes": 238849,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ar): \u0642\u0647\u0648\u0629 (revision 76778148)"
+  },
+  {
+   "path": "corpus/html-multi/de-Volcano.html",
+   "url": "https://de.wikipedia.org/api/rest_v1/page/html/Vulkan/266300685",
+   "sha256": "3d20ce233b78817165826f1fe8a5608930eea10568acac5f05a0950f0038744b",
+   "bytes": 94642,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (de): Vulkan (revision 266300685)"
+  },
+  {
+   "path": "corpus/html-multi/fr-Volcano.html",
+   "url": "https://fr.wikipedia.org/api/rest_v1/page/html/Volcan/240006238",
+   "sha256": "a49e44f0eadda6a39ba1e8aa000c25a58dc72e2cc096bab0e7aaccfe2413b818",
+   "bytes": 335739,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (fr): Volcan (revision 240006238)"
+  },
+  {
+   "path": "corpus/html-multi/es-Volcano.html",
+   "url": "https://es.wikipedia.org/api/rest_v1/page/html/Volc%C3%A1n/175596091",
+   "sha256": "7181c4f04bb8d6eb59626e0a997cfde942aeeb97e94ec74ffa95f6e4a2b83287",
+   "bytes": 201823,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (es): Volc\u00e1n (revision 175596091)"
+  },
+  {
+   "path": "corpus/html-multi/sv-Volcano.html",
+   "url": "https://sv.wikipedia.org/api/rest_v1/page/html/Vulkan/59368407",
+   "sha256": "361a03a3894af46b3f0526483b9548d1d0275062aeea82ab1dc89d4c0223b691",
+   "bytes": 154217,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (sv): Vulkan (revision 59368407)"
+  },
+  {
+   "path": "corpus/html-multi/ru-Volcano.html",
+   "url": "https://ru.wikipedia.org/api/rest_v1/page/html/%D0%92%D1%83%D0%BB%D0%BA%D0%B0%D0%BD/152848546",
+   "sha256": "dcbbf894ebda15ffe8c2df4d38fb8c79efff6bdd3758c7043ed36c59758489fe",
+   "bytes": 209101,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ru): \u0412\u0443\u043b\u043a\u0430\u043d (revision 152848546)"
+  },
+  {
+   "path": "corpus/html-multi/zh-Volcano.html",
+   "url": "https://zh.wikipedia.org/api/rest_v1/page/html/%E7%81%AB%E5%B1%B1/94173037",
+   "sha256": "fd09567631ec89cc0d88a8eff0547df72cc28e0ca47ce21c9bb45c777eefd303",
+   "bytes": 293465,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (zh): \u706b\u5c71 (revision 94173037)"
+  },
+  {
+   "path": "corpus/html-multi/ja-Volcano.html",
+   "url": "https://ja.wikipedia.org/api/rest_v1/page/html/%E7%81%AB%E5%B1%B1/111291750",
+   "sha256": "e5edce8cbbc43ac34092012733ced8cd1453ed199423a899ed82c2db3ec0ebc4",
+   "bytes": 258428,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ja): \u706b\u5c71 (revision 111291750)"
+  },
+  {
+   "path": "corpus/html-multi/ar-Volcano.html",
+   "url": "https://ar.wikipedia.org/api/rest_v1/page/html/%D8%A8%D8%B1%D9%83%D8%A7%D9%86/75531035",
+   "sha256": "3d3cd0b0b6832913af4a776a73d7266cb2e83ec3885cb17359bf9cc0777a0617",
+   "bytes": 211936,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ar): \u0628\u0631\u0643\u0627\u0646 (revision 75531035)"
+  },
+  {
+   "path": "corpus/html-multi/de-Photosynthesis.html",
+   "url": "https://de.wikipedia.org/api/rest_v1/page/html/Photosynthese/268891481",
+   "sha256": "f695849eb21de1f7b8e7d4f8e59bd5cec7d24824678c157af400a5ca63e4575c",
+   "bytes": 445503,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (de): Photosynthese (revision 268891481)"
+  },
+  {
+   "path": "corpus/html-multi/fr-Photosynthesis.html",
+   "url": "https://fr.wikipedia.org/api/rest_v1/page/html/Photosynth%C3%A8se/238282939",
+   "sha256": "b0d0f4beb351b9818fbf678a46b243df67bec79fea1430d88e38b0bc252a739b",
+   "bytes": 519046,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (fr): Photosynth\u00e8se (revision 238282939)"
+  },
+  {
+   "path": "corpus/html-multi/es-Photosynthesis.html",
+   "url": "https://es.wikipedia.org/api/rest_v1/page/html/Fotos%C3%ADntesis/175633842",
+   "sha256": "9eb1d436387c0d8e93804ffe82a1dec9555ed07ddffc445dda57232a6dbefee0",
+   "bytes": 212949,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (es): Fotos\u00edntesis (revision 175633842)"
+  },
+  {
+   "path": "corpus/html-multi/sv-Photosynthesis.html",
+   "url": "https://sv.wikipedia.org/api/rest_v1/page/html/Fotosyntes/59710231",
+   "sha256": "fdadc6dee804f3866493c6ec9d41996494b2d2eae3b86519aaba1a81eb784007",
+   "bytes": 79662,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (sv): Fotosyntes (revision 59710231)"
+  },
+  {
+   "path": "corpus/html-multi/ru-Photosynthesis.html",
+   "url": "https://ru.wikipedia.org/api/rest_v1/page/html/%D0%A4%D0%BE%D1%82%D0%BE%D1%81%D0%B8%D0%BD%D1%82%D0%B5%D0%B7/154852829",
+   "sha256": "ed66832d691569e3480e6dfe3bc2f850111df2f7543f784d8ed667c3a57cb50b",
+   "bytes": 223705,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ru): \u0424\u043e\u0442\u043e\u0441\u0438\u043d\u0442\u0435\u0437 (revision 154852829)"
+  },
+  {
+   "path": "corpus/html-multi/zh-Photosynthesis.html",
+   "url": "https://zh.wikipedia.org/api/rest_v1/page/html/%E5%85%89%E5%90%88%E4%BD%9C%E7%94%A8/94770718",
+   "sha256": "393234bfd908500f16cc4c04323e0017c5f02e8c633900d81c96f7735041386e",
+   "bytes": 564982,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (zh): \u5149\u5408\u4f5c\u7528 (revision 94770718)"
+  },
+  {
+   "path": "corpus/html-multi/ja-Photosynthesis.html",
+   "url": "https://ja.wikipedia.org/api/rest_v1/page/html/%E5%85%89%E5%90%88%E6%88%90/111243995",
+   "sha256": "dde33391beabcbaa53b6840cefd3e601fb661d58b1c635c1f1a78a8fb27128ba",
+   "bytes": 360320,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ja): \u5149\u5408\u6210 (revision 111243995)"
+  },
+  {
+   "path": "corpus/html-multi/ar-Photosynthesis.html",
+   "url": "https://ar.wikipedia.org/api/rest_v1/page/html/%D8%AA%D8%B1%D9%83%D9%8A%D8%A8_%D8%B6%D9%88%D8%A6%D9%8A/76808234",
+   "sha256": "f4d0bb68492335af71f84ffc27e4c5925c72c3857f603395942ddc0709ca796b",
+   "bytes": 303074,
+   "licence": "CC BY-SA 4.0 (Wikipedia contributors)",
+   "source": "Wikipedia (ar): \u062a\u0631\u0643\u064a\u0628_\u0636\u0648\u0626\u064a (revision 76808234)"
+  },
+  {
+   "path": "reference/rfc9110.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc9110.txt",
+   "sha256": "21c1cdce6ab0e5509b04d84a28000836c7a087cf786efe6f04877ebfff47232a",
+   "bytes": 502941,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 9110 plain text: the reference for PDF extraction order"
+  },
+  {
+   "path": "reference/rfc9114.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc9114.txt",
+   "sha256": "6b84555c88eeebcf5d2b2e1d9d7b58630abc97ab877b2cf62dee4cd635db34e4",
+   "bytes": 155206,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 9114 plain text: the reference for PDF extraction order"
+  },
+  {
+   "path": "reference/rfc9293.txt",
+   "url": "https://www.rfc-editor.org/rfc/rfc9293.txt",
+   "sha256": "6d9ac8be4b0286f8c3d337addf442b2eb6a9b14e1366594ea7fbc273f93dc2d9",
+   "bytes": 263696,
+   "licence": "IETF Trust Legal Provisions (BCP 78): may be copied and distributed unmodified",
+   "source": "RFC 9293 plain text: the reference for PDF extraction order"
+  }
+ ],
+ "generated": [
+  {
+   "path": "corpus/email/kestrel-100.eml",
+   "bytes": 408,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "1916653c7cfb2ed06f24c879e44a0a92a41c87b847b747f7a81aedf221e1d334"
+  },
+  {
+   "path": "corpus/email/kestrel-101.eml",
+   "bytes": 471,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "3bab480cc2acf9aa561929140bfc92634f55fabc0cdc95cb7988bf1cd3a39cf6"
+  },
+  {
+   "path": "corpus/email/kestrel-102.eml",
+   "bytes": 489,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "2c1bddafe81e43a22240b248a93e9cb0b106e11ff7ce422cbf4661f728859495"
+  },
+  {
+   "path": "corpus/email/kestrel-103.eml",
+   "bytes": 461,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "a55b1ba769c0be80ab033cc5802ce987e5cb02a124dba04385ad77d30400501a"
+  },
+  {
+   "path": "corpus/email/kestrel-104.eml",
+   "bytes": 450,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "397fe60c1d5c2915ae6532e49a087901923365fbddf91d4c4ea4f16b0f2952dc"
+  },
+  {
+   "path": "corpus/email/kestrel-105.eml",
+   "bytes": 439,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "dd51564bd7444dace9540f3536d5d62c20337da110889da4b13e43be9c6e4e9d"
+  },
+  {
+   "path": "corpus/email/kestrel-106.eml",
+   "bytes": 462,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "766d81551d1094adf9f491d614dfebe3bc01d89ab4f317787ffb92943d7e0b12"
+  },
+  {
+   "path": "corpus/email/kestrel-107.eml",
+   "bytes": 440,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "5e1a978d5969be740824175bce97963c713141525b57512942899e644b1b9ccb"
+  },
+  {
+   "path": "corpus/email/kestrel-108.eml",
+   "bytes": 486,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "826a5a710bedd4f75ba71a72e73cc246028acd2d4c30a24f82c1fe10b1063169"
+  },
+  {
+   "path": "corpus/email/kestrel-109.eml",
+   "bytes": 439,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "df9c85d3703e90343d3bfb484ed18ca37f7366112591aab8cce5193e67d08e37"
+  },
+  {
+   "path": "corpus/email/kestrel-2025.mbox",
+   "bytes": 17518,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "72c6776f57bea50b1c1612b5cd74e38ac27ee29cac45a804b62a3fe509ae932b"
+  },
+  {
+   "path": "corpus/csv/expenses-2025.csv",
+   "bytes": 11178,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "22b5e0c79931bc046865340ba71d89597157c1daaa863823568a612acb5c3604"
+  },
+  {
+   "path": "corpus/csv/robot-fleet.csv",
+   "bytes": 7194,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "43d7b06f54e1ec7667c55292d5f3f913c388dd184302aea0f81fade275d8b6f0"
+  },
+  {
+   "path": "corpus/csv/sensor-calibration.csv",
+   "bytes": 6483,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "506e33a7caf3533b1abc52302366b8f65eb13bd7f11ec6870f9f0d4fb3ba8fa9"
+  },
+  {
+   "path": "corpus/csv/warehouse-inventory.csv",
+   "bytes": 9582,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "182eca1af955ba7b9f31d20289fa0423c930b0cda96a8c281c6db3ce43714852"
+  },
+  {
+   "path": "corpus/csv/world-capitals.csv",
+   "bytes": 468,
+   "generator": "generate.py",
+   "licence": "CC0 (authored for this set; people and companies are fictional)",
+   "sha256": "9376cc800c53bb5d0a337db49b3f1056827c983e7bb38d268d1c047122874a0f"
+  },
+  {
+   "path": "corpus/docx/Apple.docx",
+   "bytes": 52770,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Banana.docx",
+   "bytes": 55347,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Bread.docx",
+   "bytes": 46563,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Cheese.docx",
+   "bytes": 46610,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Chocolate.docx",
+   "bytes": 49935,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Honey.docx",
+   "bytes": 55110,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Olive_oil.docx",
+   "bytes": 49307,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Potato.docx",
+   "bytes": 50046,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Rice.docx",
+   "bytes": 48462,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Salt.docx",
+   "bytes": 47895,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Sugar.docx",
+   "bytes": 45266,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Tea.docx",
+   "bytes": 53306,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Tomato.docx",
+   "bytes": 48799,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Vanilla.docx",
+   "bytes": 49412,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "corpus/docx/Wine.docx",
+   "bytes": 48266,
+   "generator": "generate.py",
+   "licence": "CC BY-SA 4.0 (text adapted from the Wikipedia article in corpus/_docx_src)"
+  },
+  {
+   "path": "hostile/bad-xref.pdf",
+   "bytes": 589,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/deep-nesting.pdf",
+   "bytes": 200589,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/empty.pdf",
+   "bytes": 0,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/encrypted.pdf",
+   "bytes": 1350,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/flate-bomb.pdf",
+   "bytes": 1044262,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/garbage.pdf",
+   "bytes": 200009,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/many-pages.pdf",
+   "bytes": 3258265,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/page-tree-loop.pdf",
+   "bytes": 341,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/text-ops.pdf",
+   "bytes": 28000575,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  },
+  {
+   "path": "hostile/truncated.pdf",
+   "bytes": 322302,
+   "generator": "make_hostile.py",
+   "licence": "CC0 (synthetic)"
+  }
+ ]
+}

@@ -1,0 +1,5 @@
+{"engine": "pdfium", "ceiling": 1.0, "recall10": 0.724, "pdf": "29/34", "mrr10": 0.598}
+{"engine": "pdfium-ordered", "ceiling": 1.0, "recall10": 0.729, "pdf": "30/34", "mrr10": 0.597}
+{"engine": "pymupdf", "ceiling": 1.0, "recall10": 0.729, "pdf": "30/34", "mrr10": 0.596}
+{"engine": "pymupdf-sort", "ceiling": 0.972, "recall10": 0.702, "pdf": "25/34", "mrr10": 0.579}
+{"engine": "pdftotext", "ceiling": 0.994, "recall10": 0.724, "pdf": "29/34", "mrr10": 0.597}

@@ -1,0 +1,274 @@
+{
+ "pdfium": {
+  "licence": "Apache-2.0 / BSD-3 (pypdfium2; PDFium BSD-3); Rust: pdfium-render MIT OR Apache-2.0",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 14.4,
+  "pages_per_second": 99.9,
+  "eia_298_pages_seconds": 1.2,
+  "peak_rss_mb_median": 25,
+  "peak_rss_mb_max": 96,
+  "near_empty_pages": 8,
+  "pdf_question_snippets_found": "34/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.8,
+   "rfc9114": 0.742,
+   "rfc9293": 0.781
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "ok, empty text (no error)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "killed at memory cap",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "error (clean)",
+   "text-ops.pdf": "killed at memory cap",
+   "truncated.pdf": "error (clean)"
+  }
+ },
+ "pdfium-ordered": {
+  "licence": "as pdfium (worker.py ordered_page)",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 11.0,
+  "pages_per_second": 130.9,
+  "eia_298_pages_seconds": 1.6,
+  "peak_rss_mb_median": 25,
+  "peak_rss_mb_max": 96,
+  "near_empty_pages": 9,
+  "pdf_question_snippets_found": "34/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.887,
+   "rfc9114": 0.873,
+   "rfc9293": 0.841
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "ok, empty text (no error)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "killed at memory cap",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "error (clean)",
+   "text-ops.pdf": "killed at memory cap",
+   "truncated.pdf": "error (clean)"
+  }
+ },
+ "pymupdf": {
+  "licence": "AGPL-3.0 (or commercial)",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 21.0,
+  "pages_per_second": 68.6,
+  "eia_298_pages_seconds": 0.9,
+  "peak_rss_mb_median": 55,
+  "peak_rss_mb_max": 118,
+  "near_empty_pages": 5,
+  "pdf_question_snippets_found": "34/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.799,
+   "rfc9114": 0.741,
+   "rfc9293": 0.781
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "ok, empty text (no error)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "ok",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "error (clean)",
+   "text-ops.pdf": "ok",
+   "truncated.pdf": "ok, empty text (no error)"
+  }
+ },
+ "pymupdf-sort": {
+  "licence": "AGPL-3.0 (or commercial)",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 23.7,
+  "pages_per_second": 60.7,
+  "eia_298_pages_seconds": 2.1,
+  "peak_rss_mb_median": 56,
+  "peak_rss_mb_max": 119,
+  "near_empty_pages": 6,
+  "pdf_question_snippets_found": "29/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.978,
+   "rfc9114": 0.971,
+   "rfc9293": 0.932
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "ok, empty text (no error)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "ok",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "error (clean)",
+   "text-ops.pdf": "ok",
+   "truncated.pdf": "ok, empty text (no error)"
+  }
+ },
+ "pdftotext": {
+  "licence": "GPL-2.0/3.0 (Poppler), external process only",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 30.1,
+  "pages_per_second": 47.8,
+  "eia_298_pages_seconds": 0.9,
+  "peak_rss_mb_median": 17,
+  "peak_rss_mb_max": 24,
+  "near_empty_pages": 9,
+  "pdf_question_snippets_found": "33/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.965,
+   "rfc9114": 0.95,
+   "rfc9293": 0.916
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "ok, empty text (no error)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "ok",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "ok, empty text (no error)",
+   "text-ops.pdf": "ok",
+   "truncated.pdf": "error (clean)"
+  }
+ },
+ "pdf_oxide": {
+  "licence": "MIT OR Apache-2.0 (Rust)",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 14.3,
+  "pages_per_second": 100.7,
+  "eia_298_pages_seconds": 2.3,
+  "peak_rss_mb_median": 26,
+  "peak_rss_mb_max": 194,
+  "near_empty_pages": 5,
+  "pdf_question_snippets_found": "34/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.733,
+   "rfc9114": 0.805,
+   "rfc9293": 0.916
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "crash (process abort/panic)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "ok, empty text (no error)",
+   "flate-bomb.pdf": "ok, empty text (no error)",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "ok, empty text (no error)",
+   "text-ops.pdf": "ok",
+   "truncated.pdf": "ok"
+  }
+ },
+ "pdf-extract": {
+  "licence": "MIT (Rust)",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 20.6,
+  "pages_per_second": 69.8,
+  "eia_298_pages_seconds": 5.7,
+  "peak_rss_mb_median": 17,
+  "peak_rss_mb_max": 141,
+  "near_empty_pages": 5,
+  "pdf_question_snippets_found": "34/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.599,
+   "rfc9114": 0.621,
+   "rfc9293": 0.766
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok, empty text (no error)",
+   "deep-nesting.pdf": "crash (process abort/panic)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "killed at memory cap",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "timeout (30 s)",
+   "page-tree-loop.pdf": "ok, empty text (no error)",
+   "text-ops.pdf": "killed at memory cap",
+   "truncated.pdf": "error (clean)"
+  }
+ },
+ "pypdf": {
+  "licence": "BSD-3-Clause",
+  "corpus_ok": "31/31",
+  "corpus_failures": {},
+  "pages": 1439,
+  "seconds": 35.0,
+  "pages_per_second": 41.1,
+  "eia_298_pages_seconds": 2.6,
+  "peak_rss_mb_median": 42,
+  "peak_rss_mb_max": 143,
+  "near_empty_pages": 5,
+  "pdf_question_snippets_found": "34/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.599,
+   "rfc9114": 0.621,
+   "rfc9293": 0.781
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok",
+   "deep-nesting.pdf": "error (recursion)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "error (clean)",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "error (clean)",
+   "text-ops.pdf": "timeout (30 s)",
+   "truncated.pdf": "error (clean)"
+  }
+ },
+ "pdfminer": {
+  "licence": "MIT",
+  "corpus_ok": "30/31",
+  "corpus_failures": {
+   "corpus/pdf/census-p60-282.pdf": "exit -9: "
+  },
+  "pages": 1380,
+  "seconds": 52.0,
+  "pages_per_second": 26.6,
+  "eia_298_pages_seconds": 4.9,
+  "peak_rss_mb_median": 41,
+  "peak_rss_mb_max": 226,
+  "near_empty_pages": 5,
+  "pdf_question_snippets_found": "33/34",
+  "rfc_8gram_recall": {
+   "rfc9110": 0.594,
+   "rfc9114": 0.617,
+   "rfc9293": 0.772
+  },
+  "hostile": {
+   "bad-xref.pdf": "ok, empty text (no error)",
+   "deep-nesting.pdf": "error (recursion)",
+   "empty.pdf": "error (clean)",
+   "encrypted.pdf": "error (clean)",
+   "flate-bomb.pdf": "killed at memory cap",
+   "garbage.pdf": "error (clean)",
+   "many-pages.pdf": "ok",
+   "page-tree-loop.pdf": "ok, empty text (no error)",
+   "text-ops.pdf": "timeout (30 s)",
+   "truncated.pdf": "error (clean)"
+  }
+ }
+}

@@ -1,0 +1,19 @@
+# The Phase 0 measurement environment (a throwaway virtualenv; nothing here ships with ling-docs).
+# pdftotext is Poppler 24.02 from the distribution; the two Rust crates are built from rustpdf/;
+# Tesseract 5.3.4 is unpacked from the distribution's packages by tess_setup.sh.
+beautifulsoup4==4.15.0
+fastembed==0.8.1
+numpy==2.5.3
+onnxruntime==1.30.0
+pdfminer.six==20260107
+pymupdf==1.28.2
+pypdf==6.19.0
+pypdfium2==5.14.0
+python-docx==1.2.0
+tokenizers==0.23.2
+# OCR (ocr_bench.py). python-bidi (LGPL-3.0) only reorders RapidOCR's Arabic output for display;
+# a Rust build would use the unicode-bidi crate (MIT OR Apache-2.0).
+rapidocr==3.9.2
+python-bidi==0.6.11
+RapidFuzz==3.14.6
+pillow==12.3.0
