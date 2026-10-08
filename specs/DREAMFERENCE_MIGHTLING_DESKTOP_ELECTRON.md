@@ -150,3 +150,28 @@ The same app for macOS, built on GitHub's Mac runners, published as `Mightling-<
 
 ### 10.1 Results
 
+Run [37772687306](https://github.com/dreamference/mightling/actions/runs/37772687306) (both jobs green), bundling `ling 1.5.1` from the macOS client artifacts of release run 37761824506; the dmgs were then downloaded and unpacked here with 7-Zip (the reason for HFS+):
+
+| What | arm64 (`macos-15`) | x64 (`macos-15-intel`) |
+|---|---|---|
+| dmg | `Mightling-1.5.1-arm64-preview.dmg`, 281 MB (268 MiB); `hdiutil verify` VALID | `Mightling-1.5.1-x64-preview.dmg`, 300 MB (286 MiB); VALID |
+| In it | `Mightling.app` and an `Applications` link | the same |
+| App installed | 644 MB: `ling` 289 MB, `codex-code-mode-host` 82 MB, `Frameworks` (Electron) 276 MB, `app.asar` 370 KB | 682 MB: `ling` 307 MB, `codex-code-mode-host` 86 MB, `Frameworks` 281 MB |
+| `file` | main executable, `Electron Framework`, `ling`, `codex-code-mode-host`: Mach-O 64-bit **arm64** | all Mach-O 64-bit **x86_64** |
+| Minimum macOS | app 12.0 (`LSMinimumSystemVersion`, Electron's); `ling` 11.0 | app 12.0; `ling` 10.12 |
+| Signature | ad hoc on the bundle, `ling` and `codex-code-mode-host` (CodeDirectory flags `0x2`, an empty CMS blob, no Team ID); `codesign --verify --deep --strict`: valid on disk, also from the mounted dmg | the same |
+| Gatekeeper (`spctl -a -t exec`) | **rejected**, as expected without a Developer ID | rejected |
+| Fuses | as on Linux (§9.4): RunAsNode, NODE_OPTIONS, `--inspect`, file:// privileges off; cookie encryption, asar integrity, only-from-asar, Wasm trap handlers on | the same |
+| `Info.plist` | `dev.dreamference.mightling` 1.5.1, `mightling://` scheme, Local Network text and `_mightling-node._tcp`, our icon (identical pixels to `icons/icon.png`) | the same |
+| Audit session on the runner | exit 0; `Resources/ling -c features.code_mode_host=true app-server` running as the app's child; Chat's `localhost:3000` refused (no node there), as expected | the same |
+
+The ad-hoc signatures are what Apple silicon needs to run the app at all; they say nothing about who built it, and macOS's quarantine check treats the app as unsigned. That is why `docs/desktop.md` (On a Mac) and the release notes give the three ways past it: Open Anyway in Privacy & Security (the only one in the Finder on macOS 15, which dropped the Control-click → Open bypass), Control-click → Open on macOS 14 and earlier, or `xattr -dr com.apple.quarantine /Applications/Mightling.app`.
+
+### 10.2 Not verified (needs a person at a Mac)
+
+- **Opening the downloaded dmg** with its quarantine mark: the Gatekeeper dialog, Open Anyway, Control-click → Open on 14, and the `xattr` route. The runner ran the app it had just built, which carries no quarantine mark.
+- **The Local Network prompt** on macOS 15 and whether, once allowed, the browse (`multicast-dns` binds UDP 5353 beside `mDNSResponder` with `reuseAddr`) finds a real node; whether the `ling` the app starts is covered by the app's permission. Whether an update, whose ad-hoc signature differs, asks again. In CI the model server was named, so nothing browsed.
+- **Chat and Work against a real node**: the forwarder to the node's web UI, sign-in, a Work turn on the node's model.
+- **App Translocation**: run from the dmg or from Downloads without moving it, macOS starts it from a random read-only path; the docs say to drag it to Applications first.
+- **The keychain**: the cookie-encryption key is stored in the login keychain (CI used Chromium's mock keychain). macOS may ask once whether Mightling may use it.
+- **Gaps known from the code:** `ling app` (`ling-rs/src/app.rs`) looks for `ling-app` on PATH or a `.desktop` entry, neither of which exists on a Mac, so it does not open the app there (`open -b dev.dreamference.mightling` would); closing the last window quits the app (Linux behaviour, not the Mac convention); the data folder is `~/.local/share/dev.dreamference.mightling`, not `~/Library/Application Support`; no auto-update; the tray icon is the colour icon scaled down, not a template image; the `.icns` tops out at 512 px (no 1024 px entry, as `icons/` has none).
