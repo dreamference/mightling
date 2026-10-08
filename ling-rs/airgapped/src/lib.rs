@@ -655,6 +655,10 @@ mod tests {
         {
             let _ = std::os::unix::fs::symlink(&home, base.join("link"));
             assert!(within(&base.join("link").join(".mightling"), &[home.clone()]));
+            // A file not yet written, reached through the link: still inside (macOS's /tmp and
+            // /var are such links, and a user config file often does not exist yet).
+            assert!(within(&base.join("link").join(".config/dreamference/config.toml"), &[home.clone()]));
+            assert!(within(&home.join(".config/dreamference/config.toml"), &[base.join("link")]));
         }
         let plain = writable_roots(&home, None).len();
         assert_eq!(writable_roots(&home, Some(Path::new("/var/tmp/x"))).len(), plain + 1);

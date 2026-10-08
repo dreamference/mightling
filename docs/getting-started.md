@@ -112,6 +112,31 @@ ling-admin desktop run
 
 After that, `ling app` also opens it. See [Desktop app](desktop.md).
 
+## 6. Optional: your laptop as a client
+
+Your other computers can use the GB10's model. On the GB10, let them find it:
+
+```bash
+ling-admin node enable          # publishes this machine to your local network (asks for sudo once)
+```
+
+Then on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple silicon or Intel):
+
+```bash
+curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash
+cd ~/my-project && ling
+```
+
+The script installs only the client: `ling`, `ling-search`, `ling-fetch` and `ling-code`.
+A Mac is never installed as a node. `ling` finds the GB10 on the network by itself and asks before
+it uses a node it has not used before; `ling node list` shows what it found. To name one yourself:
+`MIGHTLING_NODE=<host> ling`.
+
+!!! note "`/airgapped` on a Mac"
+    macOS's own sandbox enforces `/airgapped on`, but it is set once, when `ling` starts: use
+    `ling airgapped default on` (or `DREAMFERENCE_MIGHTLING_AIRGAPPED=on ling`) and restart. Typed
+    inside a running session, `/airgapped on` and `off` say so and change nothing.
+
 ## Known issues
 
 - **`ling update` finds nothing yet.** It installs the latest published Mightling release, and none

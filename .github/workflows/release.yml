@@ -52,6 +52,10 @@ on:
         description: "Also build the Windows client (Arm64 and x86-64; preview, unsigned). Off until its CI passes"
         type: boolean
         default: false
+      build_clients:
+        description: "Also build the client for Intel/AMD Linux and macOS (build-clients.yml)"
+        type: boolean
+        default: false
 
 # Read-only by default; only the job that publishes the release may write (security review
 # 2026-10). Every action is pinned to a commit, with its tag in a comment, so a moved tag cannot
@@ -266,14 +270,23 @@ jobs:
     with:
       version: ${{ inputs.version }}
 
+  # The client for machines that are not a GB10 (x86-64 Linux, macOS), built by the same workflow
+  # CI runs on clients/** branches; its artifacts are named mightling-client-<target>.
+  ling-clients:
+    needs: [validate, test]
+    if: ${{ inputs.build_clients && !failure() && !cancelled() }}
+    uses: ./.github/workflows/build-clients.yml
+    with:
+      version: ${{ inputs.version }}
+
   release:
-    needs: [python-dist, desktop, ling, windows]
+    needs: [python-dist, desktop, ling, windows, ling-clients]
     permissions:
       contents: write
       # Build provenance: the OIDC token Sigstore certifies, and the right to store the attestation.
       id-token: write
       attestations: write
-    # `desktop`, `ling` and `windows` are skipped when their inputs are off; the release still
+    # `desktop`, `ling`, `windows` and `ling-clients` are skipped when their inputs are off; the release still
     # goes out without them.
     if: ${{ !failure() && !cancelled() && needs.python-dist.result == 'success' }}
     # The signing key lives only in this environment, which runs from `main` alone and waits for

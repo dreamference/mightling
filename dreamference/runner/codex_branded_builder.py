@@ -415,26 +415,30 @@ class CodexBrandedBuilder:
 
         Returns:
             str: For example `aarch64-unknown-linux-gnu` on GB10, `aarch64-pc-windows-msvc` on an
-            RTX Spark laptop.
+            RTX Spark laptop, `aarch64-apple-darwin` on an Apple silicon Mac (whose `uname -m` says
+            `arm64`), `x86_64-apple-darwin` on an Intel one.
         """
         import platform
 
-        return cls.target_for(platform.machine(), IS_WINDOWS)
+        return cls.target_for(platform.machine(), IS_WINDOWS, darwin=platform.system() == "Darwin")
 
     @classmethod
-    def target_for(cls, machine: str, windows: bool) -> str:
+    def target_for(cls, machine: str, windows: bool, darwin: bool = False) -> str:
         """
         The Rust target triple for a processor name as `platform.machine()` reports it.
 
         Args:
             machine (str): `aarch64` or `x86_64` on Linux; `ARM64` or `AMD64` on Windows.
             windows (bool): Whether the machine runs Windows.
+            darwin (bool): Whether it runs macOS.
 
         Returns:
             str: The triple, e.g. `x86_64-pc-windows-msvc`.
         """
         arch = {"arm64": "aarch64", "amd64": "x86_64", "x64": "x86_64"}.get(machine.lower(), machine.lower())
-        return f"{arch}-pc-windows-msvc" if windows else f"{arch}-unknown-linux-gnu"
+        if windows:
+            return f"{arch}-pc-windows-msvc"
+        return f"{arch}-apple-darwin" if darwin else f"{arch}-unknown-linux-gnu"
 
     @classmethod
     def v8_archive_name(cls, target: str) -> str:

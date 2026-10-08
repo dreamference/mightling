@@ -79,17 +79,21 @@ pub fn decide(current: Option<&str>, latest: &str) -> Decision {
     }
 }
 
-/// The Rust target triple the release assets are named after.
-pub fn target() -> String {
+/// The Rust target triple the release assets are named after: this machine's architecture on
+/// Linux (glibc), macOS or Windows. `None` where no release build exists.
+pub fn target() -> Option<String> {
     target_for(std::env::consts::ARCH, std::env::consts::OS)
 }
 
 /// [`target`] for a given architecture and operating system, as `std::env::consts` names them.
-pub fn target_for(arch: &str, os: &str) -> String {
-    match os {
-        "windows" => format!("{arch}-pc-windows-msvc"),
-        _ => format!("{arch}-unknown-linux-gnu"),
-    }
+pub fn target_for(arch: &str, os: &str) -> Option<String> {
+    let system = match os {
+        "linux" => "unknown-linux-gnu",
+        "macos" => "apple-darwin",
+        "windows" => "pc-windows-msvc",
+        _ => return None,
+    };
+    matches!(arch, "aarch64" | "x86_64").then(|| format!("{arch}-{system}"))
 }
 
 /// The Windows sandbox's helpers, which Codex looks for beside its own executable. Windows
@@ -170,9 +174,13 @@ fn github_token(repo: &str) -> Option<String> {
 
 /// Runs `ling update`.
 pub async fn run() -> anyhow::Result<()> {
-    if !cfg!(any(target_os = "linux", windows)) {
-        bail!("`ling update` only has Linux and Windows release builds to install");
-    }
+    let Some(target) = target() else {
+        bail!(
+            "`ling update` has no release builds for {} on {}; releases carry Linux, macOS and Windows builds",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        );
+    };
     let repo = std::env::var("MIGHTLING_RELEASE_REPO")
         .ok()
         .filter(|repo| !repo.is_empty())
@@ -226,7 +234,6 @@ pub async fn run() -> anyhow::Result<()> {
         },
     }
 
-    let target = target();
     let [mightling_asset, host_asset, sums_asset] = asset_names(&target);
     let assets: HashMap<&str, &str> = release["assets"]
         .as_array()
@@ -592,10 +599,10 @@ mod tests {
 
     #[test]
     fn windows_assets_are_named_for_the_msvc_targets() {
-        assert_eq!(target_for("aarch64", "windows"), "aarch64-pc-windows-msvc");
-        assert_eq!(target_for("x86_64", "windows"), "x86_64-pc-windows-msvc");
-        assert_eq!(target_for("aarch64", "linux"), "aarch64-unknown-linux-gnu");
-        assert_eq!(asset_names("aarch64-pc-windows-msvc")[0], "mightling-aarch64-pc-windows-msvc.gz");
+        assert_eq!(target_for("aarch64", "windows").as_deref(), Some("aarch64-pc-windows-msvc"));
+        assert_eq!(target_for("x86_64", "windows").as_deref(), Some("x86_64-pc-windows-msvc"));
+        assert_eq!(target_for("aarch64", "linux").as_deref(), Some("aarch64-unknown-linux-gnu"));
+        assert_eq!(asset_names("aarch64-pc-windows-msvc")[0], "ling-aarch64-pc-windows-msvc.gz");
     }
 
     #[test]
@@ -664,5 +671,17 @@ mod tests {
         );
         // The launcher finds the router by this name beside `ling` (code_index::binary).
         assert!(optional_commands().contains(&"ling-code"));
+    }
+
+    #[test]
+    fn every_released_platform_has_a_target_and_others_have_none() {
+        // The same names install.sh and the release workflow give the assets.
+        assert_eq!(target_for("aarch64", "linux").as_deref(), Some("aarch64-unknown-linux-gnu"));
+        assert_eq!(target_for("x86_64", "linux").as_deref(), Some("x86_64-unknown-linux-gnu"));
+        assert_eq!(target_for("aarch64", "macos").as_deref(), Some("aarch64-apple-darwin"));
+        assert_eq!(target_for("x86_64", "macos").as_deref(), Some("x86_64-apple-darwin"));
+        assert_eq!(target_for("riscv64", "linux"), None);
+        assert_eq!(target_for("x86_64", "freebsd"), None);
+        assert!(target().is_some());
     }
 }

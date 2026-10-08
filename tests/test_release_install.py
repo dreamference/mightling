@@ -129,15 +129,16 @@ def sign(assets, key="release", listed=None):
     return assets
 
 
-def binaries(names=("ling", "codex-code-mode-host", "ling-search", "ling-fetch"), corrupt=None, signed=True):
+def binaries(names=("ling", "codex-code-mode-host", "ling-search", "ling-fetch"), corrupt=None, signed=True,
+             target=TARGET):
     """Release assets for `names`: gzipped scripts that print their own name, the per-target sums
     file and, unless `signed` is false, SHA256SUMS signed by the test's release key."""
     assets, sums = {}, []
     for name in names:
         archive = gzip.compress(f"#!/bin/sh\necho {name} from the release\n".encode())
-        sums.append(f"{hashlib.sha256(archive).hexdigest()}  {name}-{TARGET}.gz")
-        assets[f"{name}-{TARGET}.gz"] = archive + (b"tampered" if name == corrupt else b"")
-    assets[f"ling-{TARGET}.sha256sums"] = ("\n".join(sums) + "\n").encode()
+        sums.append(f"{hashlib.sha256(archive).hexdigest()}  {name}-{target}.gz")
+        assets[f"{name}-{target}.gz"] = archive + (b"tampered" if name == corrupt else b"")
+    assets[f"ling-{target}.sha256sums"] = ("\n".join(sums) + "\n").encode()
     return sign(assets) if signed else assets
 
 
@@ -154,14 +155,14 @@ def release_server():
 
 
 def run_install(home, server, *args, token=None, uname_m="aarch64", gpu="Some Other GPU", pci=(),
-                nvidia_smi=True):
+                nvidia_smi=True, uname_s="Linux"):
     """Runs install.sh with a `uname`, an `nvidia-smi` and a PCI bus that report the machine the
     test wants, whatever runs the tests (on a GB10 the real bus has the GB10's GPU on it)."""
     fake_bin = Path(home) / "fakebin"
     fake_bin.mkdir(exist_ok=True)
     # Without a driver nvidia-smi fails; it is never left out of the fake bin, where the real one
     # in /usr/bin would answer for this machine's GPU.
-    tools = [("uname", f'case "$1" in -s) echo Linux;; -m) echo {uname_m};; *) echo Linux;; esac'),
+    tools = [("uname", f'case "$1" in -s) echo {uname_s};; -m) echo {uname_m};; *) echo {uname_s};; esac'),
              ("nvidia-smi", f'echo "{gpu}"' if nvidia_smi else 'echo "NVIDIA-SMI has failed" >&2; exit 9')]
     for name, script in tools:
         (fake_bin / name).write_text(f"#!/bin/sh\n{script}\n")
@@ -294,6 +295,36 @@ def test_a_gb10_without_a_driver_is_still_found_by_its_pci_id(tmp_path, release_
     assert "role: client" in run_install(tmp_path, server, nvidia_smi=False,
                                          pci=[("0x10de", "0x2e13"), ("0x8086", "0x2e12")]).stdout
     assert "role: client" in run_install(tmp_path, server, nvidia_smi=False).stdout
+
+
+@pytest.mark.parametrize("uname_s, uname_m, target", [
+    ("Linux", "x86_64", "x86_64-unknown-linux-gnu"),
+    # macOS's uname says arm64 where the asset says aarch64.
+    ("Darwin", "arm64", "aarch64-apple-darwin"),
+    ("Darwin", "x86_64", "x86_64-apple-darwin"),
+])
+def test_a_laptop_that_is_not_a_gb10_gets_the_client_built_for_it(tmp_path, release_server, uname_s, uname_m, target):
+    # Intel/AMD Linux and both kinds of Mac are clients of a GB10 node: the same assets, named after
+    # their own target, as `ling update` names them (update.rs `target_for`).
+    names = ("ling", "codex-code-mode-host", "ling-search", "ling-fetch", "ling-code")
+    server = release_server(binaries(names, target=target))
+    result = run_install(tmp_path, server, uname_s=uname_s, uname_m=uname_m, gpu="NVIDIA GB10")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"for {target}, role: client" in result.stdout
+    for name in ("ling", "ling-search", "ling-fetch", "ling-code"):
+        link = tmp_path / ".local/bin" / name
+        assert subprocess.run([str(link)], capture_output=True, text=True).stdout == f"{name} from the release\n"
+    assert not (tmp_path / ".local/share/dreamference/venv").exists()
+
+
+def test_a_mac_is_never_installed_as_a_node(tmp_path, release_server):
+    # The node is a GB10's model server, its Docker containers and host settings: nothing a Mac can
+    # run. Refused before anything is downloaded, rather than installed and left broken.
+    server = release_server(binaries(target="aarch64-apple-darwin"))
+    result = run_install(tmp_path, server, "--role", "node", uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 1
+    assert "macOS" in result.stderr and "client" in result.stderr
+    assert server.requests == []
 
 
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):

@@ -3,7 +3,7 @@
     python .github/scripts/package_mightling.py <dist-dir>
 
 Reads the binaries CodexBrandedBuilder installed, names each `<command>-<target>.gz` (on Windows
-the archive holds `<command>.exe`), and writes `mightling-<target>.sha256sums` covering all of them,
+the archive holds `<command>.exe`), and writes `ling-<target>.sha256sums` covering all of them,
 which `ling update`, install.sh and install.ps1 check every archive against. Optional commands
 are packaged when they were built. Used by .github/workflows/windows.yml.
 """
@@ -39,7 +39,7 @@ def main() -> None:
         with open(binary, "rb") as source, gzip.open(os.path.join(dist, asset), "wb", compresslevel=9) as out:
             shutil.copyfileobj(source, out)
         packaged.append(asset)
-    with open(os.path.join(dist, f"mightling-{target}.sha256sums"), "w", newline="\n") as sums:
+    with open(os.path.join(dist, f"ling-{target}.sha256sums"), "w", newline="\n") as sums:
         for asset in packaged:
             with open(os.path.join(dist, asset), "rb") as handle:
                 sums.write(f"{hashlib.sha256(handle.read()).hexdigest()}  {asset}\n")

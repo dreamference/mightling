@@ -43,6 +43,9 @@ Works on the **NVIDIA DGX Spark** and every GB10 machine from Acer, ASUS, Dell, 
 and MSI. The script is short: it verifies every download against the release's checksums and prints
 each `sudo` command before running it. [Read it first](install.sh) if you like.
 
+**On your laptop:** run the same one-liner on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple
+silicon or Intel). It installs the client, which uses the model on your GB10 over your network.
+
 Already using a coding agent? Paste this into it:
 
 ```text
@@ -129,7 +132,7 @@ nothing to pay per token, ever.
   oversized model load can lock up the whole box. Mightling checks the host first and watches memory
   pressure during the load, stopping it before the machine stalls.
 - **Your other machines find it.** Run `ling-admin node enable` on the GB10, install the same
-  script on another arm64 Linux machine on your network, and `ling` there finds the GB10 by itself.
+  script on a Linux laptop or a Mac on your network, and `ling` there finds the GB10 by itself.
 - **Updates are one command:** `ling update`.
 
 ## What you get
@@ -155,9 +158,13 @@ Mightling is developed and tested daily on the ASUS Ascent GX10; the others are 
 
 ## FAQ
 
-**Do I need a GB10?** Yes, to run the model. Another arm64 Linux machine on your network can use it
-as a client: the same install command sets that up automatically. Clients for x86 Linux, macOS and
-Windows on Arm (the RTX Spark laptops) are planned.
+**Do I need a GB10?** Yes, to run the model. Your other computers use it as clients: Linux
+(Intel/AMD or Arm) and macOS (Apple silicon or Intel), set up by the same install command. A
+Windows client, for the RTX Spark laptops among others, is being built.
+
+**Does `/airgapped on` work on a Mac?** Yes, enforced by macOS's own sandbox, with one difference:
+there the level is set when `ling` starts (`ling airgapped default on`, then restart), not
+switched inside a running session.
 
 **I installed Puffin. Is this it?** Yes: Puffin was renamed Mightling in 1.5. Run `puffin update`
 once, then `puffin` one last time. It moves your sessions, settings and links over and from then on

@@ -9,7 +9,8 @@
 #   client   the `ling` terminal agent and its commands (`ling-search`, `ling-fetch`,
 #            `ling-code` when the release carries it): prebuilt binaries, downloaded from the
 #            release, checked against its checksum file, placed in
-#            ~/.local/share/dreamference/mightling/bin and linked into ~/.local/bin.
+#            ~/.local/share/dreamference/mightling/bin and linked into ~/.local/bin. Releases carry it
+#            for arm64 and x86-64 Linux and for macOS (Apple silicon and Intel).
 #   node     the client, plus `ling-admin` (the Python package, from the release's wheel, in a
 #            virtualenv of its own) and the host settings a model load needs. This is what a GB10
 #            (DGX Spark and its siblings) gets by default; every other machine gets the client.
@@ -61,7 +62,7 @@ HOST_SETUP=1
 say()  { printf '%s\n' "$*"; }
 fail() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -133,6 +134,10 @@ case "$ROLE" in
     node|both)   ROLE="node" ;;
     *)           fail "--role is client or node, not '$ROLE'." ;;
 esac
+# The node is a GB10's model server, its containers and its host settings; a Mac can only use one.
+if [ "$ROLE" = "node" ] && [ "$os" = "apple-darwin" ]; then
+    fail "macOS cannot be a Mightling node (the node runs the model on a GB10, under Linux). Install the client here (--role client, the default) and point it at your GB10."
+fi
 if [ "$ROLE" = "node" ] && ! is_gb10; then
     say "⚠️  This machine is not a GB10. The node's model recipes and host-safety checks are written"
     say "   for one; installing the node anyway because --role node was given."
