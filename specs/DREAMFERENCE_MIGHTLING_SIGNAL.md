@@ -481,7 +481,7 @@ It checks:
 - **Release packaging:** release assets for `ling-signal`, and CI building libsignal's JNI library for arm64 (§3).
 - **Owner commands on the node:** `trust`, `remove` and `setup --refresh`.
 - **Linked mode:** the code paths for it are in place and tested at the gate (§4.2), but it is not offered.
-- **Egress audit:** `audit egress --signal` and the egress audit's note.
+- **Egress audit:** `audit egress --signal`, the trace of the unit's own connections. The note is built: when `mightling-signal.service` is enabled, every `ling-admin audit egress` report ends with "ℹ️ Declared exception: Signal bridge enabled …" (`EgressAudit.declared_exceptions`, tested).
 - **Phase 2:** everything in §14.
 
 **Not verified:** anything against Signal itself. That needs a dedicated number, and the owner's phone for the code.

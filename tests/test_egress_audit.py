@@ -620,3 +620,22 @@ def test_a_labelled_resolver_socket_still_yields_its_query_names():
     )
     trace = StraceParser.parse(text)
     assert trace.dns_names == {"example.com": 1} and trace.destinations == {}
+
+
+# -- declared exceptions ---------------------------------------------------------------------------
+
+def test_an_enabled_signal_bridge_is_named_not_passed_over(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0 if enabled else 1)
+
+    monkeypatch.setattr("dreamference.audit.egress_audit.shutil.which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr("dreamference.audit.egress_audit.subprocess.run", fake_run)
+    enabled = True
+    lines = EgressAudit.declared_exceptions()
+    assert len(lines) == 1 and "Signal bridge enabled" in lines[0] and "ling-signal remove" in lines[0]
+    assert calls[-1] == ["systemctl", "is-enabled", "--quiet", "mightling-signal.service"]
+    enabled = False
+    assert EgressAudit.declared_exceptions() == []

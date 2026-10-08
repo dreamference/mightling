@@ -70,6 +70,11 @@ SESSION_NAMES: Final[Dict[str, str]] = {
 APP_SESSION_S: Final[int] = 40
 WEB_UI_PORT: Final[int] = 3000
 
+# Mightling over Signal (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §10): the one component that talks to
+# an outside service by itself, and only once the user set it up. It runs as its own system unit,
+# outside any traced session, so the report names it instead of passing silently.
+SIGNAL_UNIT: Final[str] = "mightling-signal.service"
+
 # How long `ling web serve` may take to listen.
 WEB_START_TIMEOUT_S: Final[int] = 30
 
@@ -325,6 +330,23 @@ class EgressAudit:
         return StraceParser.parse(text)
 
     @classmethod
+    def declared_exceptions(cls) -> List[str]:
+        """
+        Names what the user turned on that reaches outside this machine by design, which no traced
+        session shows: today, the Signal bridge (SIGNAL §10).
+
+        Returns:
+            List[str]: One line per enabled exception; empty when there is none.
+        """
+        if shutil.which("systemctl") is None:
+            return []
+        enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", SIGNAL_UNIT], capture_output=True).returncode == 0
+        if not enabled:
+            return []
+        return [f"Signal bridge enabled ({SIGNAL_UNIT}): signal-cli connects to Signal's servers, outside this trace. "
+                "`ling-signal remove` turns it off."]
+
+    @classmethod
     def render(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: Dict[int, str]) -> List[str]:
         """
         Renders the report: the verdict and anything unexpected first, then everything seen.
@@ -473,6 +495,8 @@ class EgressAudit:
             verdict = cls.judge(trace, allowed, replied)
             for line in cls.render(trace, verdict, allowed):
                 print(line)
+            for exception in cls.declared_exceptions():
+                print(f"ℹ️  Declared exception: {exception}")
             if verdict.status == TRACE_FAILED:
                 if tui and cls.tui_stage == "composer":
                     print("💡 The interface opened and took the prompt, but no reply was recorded.")
