@@ -314,6 +314,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
 | `--strip-names` | Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it. |
 | `--refine` | Two steps per instance: a session that studies the issue and writes a refined description without changing the repository, then a fresh session that fixes it. |
+| `--task-rules` | Rules added to the task prompt, comma-separated, of: tests (default none). tests: never change an existing test, keep your own scripts in /tmp, and compare failing tests by name with and without the change. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing) |
@@ -325,6 +326,8 @@ The grading phase: the upstream harness applies each patch and runs the tests.
 | Option | Description |
 |---|---|
 | `run` | The run (default: the latest) |
+| `--drop-test-hunks` | Grade the same predictions again with every test file left out of each patch, as a separate grading (eval-drop-test-hunks/); no agent runs. |
+| `--remove-images` | Grade one repository at a time and remove the images this grading pulled once their repository is graded. |
 
 #### `ling-admin swe-bench report`
 
@@ -334,6 +337,7 @@ Print the resolved rate and what it was measured with.
 |---|---|
 | `run` | The run (default: the latest) |
 | `--against` | Compare with this run, instance by instance. |
+| `--drop-test-hunks` | Report the grading with test files dropped (eval --drop-test-hunks); with --against the other run's plain grading is the comparison, which may be the same run's. |
 
 #### `ling-admin swe-bench status`
 

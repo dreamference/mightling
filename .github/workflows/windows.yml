@@ -103,6 +103,11 @@ jobs:
         uses: ./codex/.github/actions/setup-msvc-env
         with:
           target: ${{ matrix.target }}
+      # `ling web` serves the Mightling UI from inside the binary: the build runs desktop/ui's
+      # Vite build first and embeds it (LING_WEB_UI_DIST, ling-rs/web/build.rs).
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
       - name: Build ling
         shell: bash
         run: python -c "import sys; from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; sys.exit(0 if B.build(force=True) else 1)"

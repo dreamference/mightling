@@ -22,29 +22,20 @@ export function applySwitches(): void {
 }
 
 /**
- * Session rules, once the app is ready: no permission a page asks for is granted except the
- * microphone for Chat's own origin (the web chat's voice input), and spellcheck downloads nothing
+ * Session rules, once the app is ready: no permission a page asks for is granted but writing to
+ * the clipboard (the Ask window is text only; the microphone went with the Onyx window), and
+ * spellcheck downloads nothing
  * (Electron on Linux would fetch Hunspell dictionaries from a Google CDN: the download URL is
  * pointed at the app's own scheme, where no dictionary exists).
  */
-export function applySessionRules(chatOrigin: string): void {
+export function applySessionRules(): void {
   const ses = session.defaultSession;
-  ses.setPermissionRequestHandler((contents, permission, callback) => {
-    const origin = safeOrigin(contents.getURL());
-    callback(permission === "media" && origin === chatOrigin);
-  });
-  ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) => permission === "media" && safeOrigin(requestingOrigin) === chatOrigin);
+  // Writing to the clipboard (a copy button) is the one thing a page may do.
+  ses.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === "clipboard-sanitized-write"));
+  ses.setPermissionCheckHandler((_contents, permission) => permission === "clipboard-sanitized-write");
   try {
     ses.setSpellCheckerDictionaryDownloadURL("app://-/dictionaries/");
   } catch {
     ses.setSpellCheckerEnabled(false);
-  }
-}
-
-function safeOrigin(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return "";
   }
 }

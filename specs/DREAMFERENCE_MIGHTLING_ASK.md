@@ -1,6 +1,6 @@
 # Mightling Ask, the Mightling web server, and retiring Onyx
 
-**Status:** proposed (2026-10-07), nothing built. The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
+**Status:** proposed (2026-10-07); Phase A partly built, see §16 and §17 (2026-10-08). The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
 **Names:** written with the post-rename names ([RENAME_MIGHTLING](./DREAMFERENCE_RENAME_MIGHTLING.md), branch `rename/mightling`): `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app`, `~/.mightling`, `mightling_*` settings, `_mightling-node._tcp`. Where `main` still says Puffin, read `puffin` for `ling`.
 **Builds on:**
 - [MIGHTLING_DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
@@ -266,7 +266,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 **What Phase C deletes:**
 - `dreamference/chat/onyx_runner.py`, `onyx_installer.py`, `onyx_brand_assets.py`, `onyx_ui_fonts.py`, `onyx_ui_labels.py`, `onyx_ui_overrides.py`, `onyx_ui_scripts.py`, and their tests;
 - the `chat` command group's Onyx subcommands and `server start --no-onyx`;
-- the Onyx sections of AGENTS.md (about a third of it) and the docs' web-chat page. [ONYX](./DREAMFERENCE_ONYX.md) is kept as history, marked retired.
+- the Onyx notes (`docs/dev/onyx.md`, `docs/dev/onyx-ui-patches.md`) and the docs' web-chat page. [ONYX](./DREAMFERENCE_ONYX.md) is kept as history, marked retired.
 
 **Rollback:** until Phase C ships, `ling-admin chat start` brings Onyx back with the user's data.
 
@@ -359,9 +359,9 @@ Built: the bridge policy as data, Ask threads, and `ling web` with its credentia
 **Not built in this part:**
 
 - **Unimplemented routes.** `/api/transcribe`, `/images/*` and `/api/apps` answer 501.
-- **The embedded UI.** `build.rs` embeds the UI from `LING_WEB_UI_DIST`, but no build sets it yet, so `/` serves a placeholder until the desktop branch's `desktop/ui` is merged and the builder points at its `dist`.
+- **The embedded UI.** `build.rs` embeds the UI from `LING_WEB_UI_DIST`, but no build sets it yet, so `/` serves a placeholder until the desktop branch's `desktop/ui` is merged and the builder points at its `dist`. (Built in §17.)
 - **Pairing extras.** No QR code, and no `ling-admin web enable`; `ling web start` writes and starts the user unit itself.
-- **The node advert.** It still says `web=3000` (Onyx); it moves to 3100 when Onyx stops being the default (§10, Phase B).
+- **The node advert.** It still says `web=3000` (Onyx); it moves to 3100 when Onyx stops being the default (§10, Phase B). (Built in §17.)
 
 **Verified on this machine (2026-10-07).**
 
@@ -369,3 +369,48 @@ Built: the bridge policy as data, Ask threads, and `ling web` with its credentia
 - **Launcher:** `cargo test -p ling-launcher -p ling-web-server` in an export of the pinned Codex with the patches applied: 163 launcher tests, including the `ask` prompt.
 - **Egress:** `ling-admin audit egress --web`, with a debug build from that export and the served Qwen3.8 model, **passes**. It connected only to the model server (3×) and the Gmail service (2×, the `ask` prompt's email block), sent no DNS query, and started `ling` three times: the server, `prompt show --composed`, and the app-server.
 - **A warning for anyone testing a build of this branch:** run it with a scratch `HOME`. On a machine still laid out for Puffin, its first run of any kind, `--help` included, performs the rename migration (RENAME_MIGHTLING §4.2).
+
+---
+
+## 17. What was built (Phase A, second part: branch `web/ask-ui`, 2026-10-08)
+
+Built: the UI embedded in every `ling` build, the Ask view, attachments, the phone layout, the desktop app's Ask window on `ling web`, and the node advert on 3100. These were the five gaps between `ling web` and the Onyx web UI. Onyx itself is untouched and still runs on 3000.
+
+**The UI is in the binary.** `CodexBrandedBuilder` builds `desktop/ui` before cargo (`npm ci` once, then `npm run build`) and sets `LING_WEB_UI_DIST` for `ling-rs/web/build.rs`. A build without npm stops: a `ling` whose `ling web` serves the placeholder is the bug being fixed. The UI's sources are part of the build key, so a UI change rebuilds `ling`. `build.rs` embeds from an absolute, non-canonical path, which avoids Windows' `\\?\` prefix. The release, client and Windows `ling` jobs set up Node 22. The page's own CSP no longer allows frames from Onyx's ports. The page has a favicon (the app's mark, bundled under `assets/`).
+
+**One page, two hosts, two views.** In `ling web`, the UI shows **Ask** by default and **Work** one click away (`#work`). In the desktop app's Work window (`app://`), it shows Work alone. That window's bridge (`desktop/electron/src/bridge.ts`) does not have the policy layer that turns `prompt: "ask"` into text and a folder, so it cannot run Ask. The page tells its host apart by `window.mightlingWindowType` (`html[data-host]`), and the frameless title bar's padding and drag region apply to the app alone. A browser keeps its own context menu, which a phone needs for copy and paste.
+
+**Ask threads.** "New question" clears the view. The first message starts the thread with `{ model, prompt: "ask" }` and no `cwd`; the policy sets the folder, the sandbox and the composed prompt (§16). `work/start` now answers with `ask_root` (canonical). The UI lists the threads whose `cwd` is a `q-<hex>` folder under that root, and keeps them out of Work's projects. Search uses `thread/search` (with a snippet), rename uses `thread/name/set`, and archive uses `thread/archive`, which also handles the server's `thread/archived` notification.
+
+**Attachments.** The clip button and pasted screenshots (the `paste` event's files) attach files to the next message. They are uploaded only after the thread exists, because `/api/upload` needs the `ask/<thread-id>` link. Images (PNG, JPEG, GIF, WebP) go as `localImage`. Other files are named in the text with their path in the thread's folder. A message may be an image alone. The model's vision is not checked; the served model has it.
+
+**Copy.** Each answer has a copy button. Without `navigator.clipboard` (plain HTTP from another device, §4.4), it falls back to `document.execCommand("copy")` on a hidden textarea. A test runs it with `navigator.clipboard` undefined.
+
+**Phone layout.** Below 720 px, the thread list becomes a drawer behind a ☰ button, with a backdrop that closes it. Inputs are 16 px, so mobile browsers do not zoom in. The chips that do not fit are hidden, and the composer clears the safe area. The page is text only from other devices; nothing asks for the microphone.
+
+**The desktop app's Chat is Ask** (Phase B's "the app's Chat entry opens Ask"). The window (`chat.ts`, menu label "Ask") loads the Mightling UI from `ling web` on this machine, with no preload and no IPC. `web.ts` checks `ling web status`. When nothing answers, it starts `ling web serve` as the app's child and stops it on quit; a server the user runs as a unit is left alone. It then signs the window in with a link from `ling web open --print-url`, a new flag that prints the one-time link alone. A 401 after a server restart gets one fresh sign-in. The window never navigates off that server, and links open in the system browser. On Windows, which has no `ling web` yet, Ask opens Work. The Onyx window's password sign-in (`sign-in.ts`), the loopback forwarder to a node's port 3000 (`forwarder.ts`) and the discovery that fed it (`discover.ts`, `node_locator.ts`, `multicast-dns`) are removed. On a client, Ask runs on the client against the node's model server, as §8 says; the bundled `ling` finds the node. The app grants no permission except clipboard writes (no microphone). `ling app` opens Ask without checking for Onyx (`--ask`, with `--chat` kept as an alias), and so do `ling-admin desktop run` and `status`. `audit egress --app` allows `ling web`'s 3100 instead of 3000.
+
+**The node advert names `ling web`.** `node enable` advertises `web=3100` when `ling` is installed, and runs `ling web start --lan`. `--no-web` and `disable` run `ling web start` again, back on loopback, when the unit was on the LAN. Onyx's own bind (3000 on every interface on a sharing node) is unchanged until Onyx is retired, and the enable notice says both.
+
+**Verified on this machine (2026-10-08)**, with no live service touched:
+- `desktop/ui`: 22 vitest cases (11 new: Ask threads, attachments, the copy fallback, archive and rename in the store), typecheck, and the production build.
+- `ling-rs/web`: `cargo test` in a copy, with and without the UI embedded: 22 unit and 12 server tests. The new server test serves the embedded page with the bridge first and every asset it names.
+- `desktop/electron`: 20 vitest cases, including `web.test.ts` (a running server used as it is; a missing one started, owned and stopped; only a one-time loopback link loaded), and the typecheck.
+- Launcher: `cargo test --release -p ling-launcher -p ling-web-server` in a scratch export of the pinned Codex with the patches applied, the UI embedded and a scratch `HOME`: 229 launcher tests on the tree merged with main (with `ling app`'s Ask window), 22 + 12 web tests.
+- `CodexBrandedBuilder.build_web_ui()` run for real (npm in `desktop/ui` only; nothing installed, no `ling` run). `ling-admin codex build` was not run here, because it installs into the live folder.
+- The Python suite.
+- A headless Chrome (playwright-core, a throwaway profile) against a scratch `ling web` built from this branch: the real server crate with the UI embedded, in front of a scripted app-server on a Unix socket, port 3199, a scratch home. All 23 checks passed:
+  - sign-in by a one-time link, then Ask as the default view, with no console error and no CSP violation;
+  - a question with an image: `thread/start` carried `baseInstructions` from the stand-in composer, the sandbox and an Ask folder, with no `prompt`; the image was written into that folder and sent as `localImage`;
+  - the copy button with `navigator.clipboard` removed called `execCommand("copy")`;
+  - rename, search with and without a match, and archive;
+  - the Work view;
+  - at 390 px: no horizontal scroll, the drawer closed, opened and closed again, and 16 px inputs;
+  - a browser without a session got 401.
+
+**Not built in this part:**
+- **The desktop app's Work window still has no Ask.** Ask needs the policy in the Electron main process (§2.3: `bridge.ts` reading `policy.json` and running the vectors), or Work reaching `ling web`'s socket (§2.1).
+- **Two app-servers on one `~/.mightling`.** With `ling web` (socket) and the app's Work (stdio) both running, Phase 0's question 1 is still unmeasured.
+- **Images, apps and voice in the UI.** `/images/*`, `/api/apps` and `/api/transcribe` still answer 501. The gallery, Settings → Apps and the microphone are out of scope by the user's decision.
+- **Pairing in the UI.** There is no Settings → Devices, and no QR code; `ling web pair` prints the code.
+- **Retiring Onyx** (§10, Phase C): the `chat` command group, the Onyx sidecars' network, `google_service.py`'s secret, and Onyx's LAN bind on an advertised node.

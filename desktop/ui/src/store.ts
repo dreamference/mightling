@@ -13,6 +13,8 @@ import type { Turn } from "./protocol/v2/Turn";
 import type { TurnError } from "./protocol/v2/TurnError";
 import type { TurnStatus } from "./protocol/v2/TurnStatus";
 
+import { isAskThread } from "./ask";
+
 export interface TurnView {
   id: string;
   status: TurnStatus;
@@ -71,6 +73,7 @@ export type Action =
   | { type: "notification"; notification: ServerNotification }
   | { type: "serverRequest"; request: ServerRequest }
   | { type: "answered"; id: RequestId }
+  | { type: "archived"; threadId: string }
   | { type: "notice"; message: string }
   | { type: "dismissNotice"; index: number };
 
@@ -231,6 +234,8 @@ function onNotification(state: WorkState, notification: ServerNotification): Wor
       if (willRetry) return state;
       return withThread(state, threadId, (view) => withTurn(view, turnId, (turn) => ({ ...turn, error })));
     }
+    case "thread/archived":
+      return removeThread(state, notification.params.threadId);
     case "thread/closed": {
       const { threadId } = notification.params;
       return withThread(state, threadId, (view) => ({ ...view, activeTurnId: null }));
@@ -246,6 +251,14 @@ function requestThread(request: ServerRequest): string | null {
   if (typeof params.threadId === "string") return params.threadId;
   if (typeof params.conversationId === "string") return params.conversationId;
   return null;
+}
+
+/** Forgets an archived thread: it leaves the lists, and the view if it was open. */
+function removeThread(state: WorkState, threadId: string): WorkState {
+  if (!state.threads[threadId]) return state;
+  const threads = { ...state.threads };
+  delete threads[threadId];
+  return { ...state, threads, selected: state.selected === threadId ? null : state.selected };
 }
 
 export function reduce(state: WorkState, action: Action): WorkState {
@@ -286,6 +299,8 @@ export function reduce(state: WorkState, action: Action): WorkState {
       };
     case "answered":
       return { ...state, requests: state.requests.filter((request) => !sameId(request.id, action.id)) };
+    case "archived":
+      return removeThread(state, action.threadId);
     case "notice":
       return { ...state, notices: [...state.notices, action.message].slice(-5) };
     case "dismissNotice":
@@ -293,11 +308,14 @@ export function reduce(state: WorkState, action: Action): WorkState {
   }
 }
 
-/** The sidebar: threads grouped by project folder, most recently updated first (§6.1). */
-export function projects(state: WorkState): { cwd: string; threads: Thread[] }[] {
+/**
+ * The sidebar: threads grouped by project folder, most recently updated first (§6.1). Ask threads
+ * have a list of their own (ask.ts), not one "project" per scratch folder.
+ */
+export function projects(state: WorkState, askRoot: string | null = null): { cwd: string; threads: Thread[] }[] {
   const byCwd = new Map<string, Thread[]>();
   for (const view of Object.values(state.threads)) {
-    if (view.thread.ephemeral || view.thread.parentThreadId) continue;
+    if (view.thread.ephemeral || view.thread.parentThreadId || isAskThread(view.thread, askRoot)) continue;
     const list = byCwd.get(view.thread.cwd) ?? [];
     list.push(view.thread);
     byCwd.set(view.thread.cwd, list);

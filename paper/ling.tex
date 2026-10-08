@@ -323,7 +323,7 @@ Patch & Files & $+/-$ & Purpose \\
 \midrule
 0001 brand-mightling-name & 12 & 20/19 & Product name in TUI header, status card, slash-command list, \code{exec} banner and reply label, fixed usage strings \\
 0002 ling-launcher-hook & 2 & 2/1 & One dependency line; route argv through the launcher \\
-0005 hide-openai-login & 2 & 4/0 & Hide \code{login}/\code{logout} and \code{/logout} \\
+0005 hide-vendor-login & 2 & 4/0 & Hide \code{login}/\code{logout} and \code{/logout} \\
 0006 hide-cloud & 1 & 2/1 & Hide \code{cloud} (kept for a private cloud) \\
 0007 hide-remote-control & 1 & 2/0 & Hide \code{remote-control} \\
 0008 mightling-update & 1 & 2/2 & Send \code{update} to the launcher's release updater \\
@@ -333,7 +333,7 @@ Patch & Files & $+/-$ & Purpose \\
 0012 hide-auto-review & 1 & 2/0 & Hide \code{/approve} (defaults to a hosted review model) \\
 0013 disable-usage-analytics & 1 & 2/1 & Construct the analytics client disabled \\
 0014 mightling-home & 1 & 2/0 & Use \code{\textasciitilde/.mightling}, never upstream's login \\
-0015 no-openai-network & 4 & 20/4 & Close the channels found by tracing (\S\ref{sec:egress}); drop Codex's own tips \\
+0015 no-vendor-network & 4 & 20/4 & Close the channels found by tracing (\S\ref{sec:egress}); drop Codex's own tips \\
 0016 doctor-offline & 2 & 20/0 & Switch off \code{doctor}'s sign-in, update and reachability checks \\
 0017 cave-mode & 5 & 10/0 & \code{/cavemode}; register the terse-answer section the launcher supplies \\
 0018 night-slash-command & 2 & 7/0 & \code{/night}: queue a task for the overnight run \\

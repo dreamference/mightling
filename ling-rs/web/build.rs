@@ -1,6 +1,7 @@
 // Embeds the Mightling UI build in the binary (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1: no files
 // to go stale, nothing loaded from elsewhere). `LING_WEB_UI_DIST` names the UI's `dist` folder
-// (desktop/ui after `npm run build`); without it the table is empty and `/` serves a placeholder.
+// (desktop/ui after `npm run build`; `CodexBrandedBuilder` builds it and sets this for every `ling`
+// build); without it the table is empty and `/` serves a placeholder.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -14,7 +15,7 @@ fn walk(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) {
             walk(root, &path, files);
         } else if let Ok(relative) = path.strip_prefix(root) {
             let name = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
-            files.push((name, path.canonicalize().unwrap_or(path.clone())));
+            files.push((name, path.clone()));
         }
     }
 }
@@ -24,7 +25,9 @@ fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join("ui_assets.rs");
     let mut files = Vec::new();
     if let Some(dist) = std::env::var_os("LING_WEB_UI_DIST").filter(|dist| !dist.is_empty()) {
-        let dist = PathBuf::from(dist);
+        // Absolute, so `include_bytes!` finds the files from OUT_DIR; not canonical, because on
+        // Windows that is a verbatim (`\\?\`) path.
+        let dist = std::path::absolute(PathBuf::from(dist)).expect("LING_WEB_UI_DIST is a usable path");
         assert!(dist.join("index.html").is_file(), "LING_WEB_UI_DIST={} has no index.html", dist.display());
         println!("cargo:rerun-if-changed={}", dist.display());
         walk(&dist, &dist, &mut files);

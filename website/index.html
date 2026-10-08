@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mightling — private AI on your DGX Spark</title>
-<meta name="description" content="A coding agent, a chat assistant and a desktop app running entirely on your own NVIDIA DGX Spark or GB10. No cloud, no account, no API bill, no telemetry — and an egress audit that proves it.">
+<title>Mightling — fast AI coding on your desk</title>
+<meta name="description" content="A coding agent that resolved 68 of 100 SWE-bench Verified tasks offline on one NVIDIA DGX Spark (about 69% estimated on the full set), at about 47 tokens a second. No cloud, no account, no API bill, no telemetry.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="https://mightling.dreamference.ai/">
@@ -14,8 +14,8 @@
 <meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Mightling">
-<meta property="og:title" content="Mightling — private AI on your DGX Spark. One command.">
-<meta property="og:description" content="A fully local alternative to cloud coding agents. No cloud, no account, no API bill, no telemetry.">
+<meta property="og:title" content="Mightling — fast AI coding on your desk. About 69% on SWE-bench Verified.">
+<meta property="og:description" content="68 of 100 SWE-bench Verified tasks, offline, on one DGX Spark, at about 47 tokens a second. No cloud, no account, no API bill, no telemetry.">
 <meta property="og:url" content="https://mightling.dreamference.ai/">
 <meta property="og:image" content="https://mightling.dreamference.ai/assets/og.png">
 <meta property="og:image:width" content="1200">
@@ -30,6 +30,7 @@
     <a class="brand" href="#"><img src="assets/favicon.svg" alt="" width="34" height="34">Mightling</a>
     <nav class="links">
       <a href="#install">Install</a>
+      <a class="opt" href="#benchmark">Benchmark</a>
       <a class="opt" href="#proof">Proof</a>
       <a class="opt" href="#faq">FAQ</a>
       <a href="https://github.com/dreamference/mightling">GitHub</a>
@@ -43,9 +44,10 @@
   <div class="hero" id="install">
     <img class="logo logo-light" src="assets/mightling-logo-light.svg" alt="Mightling" width="300" height="181">
     <img class="logo logo-dark" src="assets/mightling-logo-dark.svg" alt="Mightling" width="300" height="181">
-    <h1>Private AI on your DGX Spark.<br>One command.</h1>
-    <p class="lede"><strong>A fully local alternative to cloud coding agents.</strong> A coding agent, a chat assistant
-      and a desktop app, running entirely on your own GB10. No cloud. No account. No API bill. No telemetry.</p>
+    <h1>Fast AI coding on your desk.<br>About 69% on SWE&#8209;bench Verified.</h1>
+    <p class="lede"><strong>68 of 100 SWE-bench Verified tasks, resolved offline on one DGX Spark</strong>, at about
+      47 tokens a second. A coding agent, a chat assistant and a desktop app, running entirely on your own GB10.
+      No cloud. No account. No API bill. No telemetry. <a href="#benchmark">How it was measured</a></p>
 
     <div class="install">
       <div class="cmd has-copy"><button class="copy" data-copy="curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash">Copy</button>
@@ -55,17 +57,126 @@
       <p class="note">Works on the NVIDIA DGX Spark and every GB10 machine. The script verifies every download
         against the release's checksums and prints each <code>sudo</code> command before running it.
         <a href="https://github.com/dreamference/mightling/blob/main/install.sh">Read it first</a> if you like.</p>
+
+      <div class="clients">
+        <div class="client">
+          <h3>Mac and Linux clients</h3>
+          <p>Your other computers use the GB10's model over the local network. On a Mac or another Linux machine,
+            the same command above installs the <code>ling</code> client; it finds the GB10 by itself.</p>
+          <!-- Shown again once a release carries the Mac app (1.6.0):
+          <p>The Mac desktop app is an <b>unsigned preview</b>:
+            <a href="https://github.com/dreamference/mightling/blob/main/docs/desktop.md#on-a-mac-preview">how to install and open it</a>.</p>
+          -->
+        </div>
+        <div class="client">
+          <h3>Windows client <span class="tag">preview</span></h3>
+          <div class="cmd has-copy"><button class="copy" data-copy="irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex">Copy</button>
+<pre><span class="p">&gt; </span>irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1 | iex</pre></div>
+          <p>In PowerShell. It installs without administrator rights, then Windows asks once to set up the
+            agent's sandbox. Not signed yet, so Smart App Control must be off.
+            <a href="https://github.com/dreamference/mightling/blob/main/install.ps1">Read the script</a>.</p>
+        </div>
+      </div>
     </div>
 
     <div class="numbers">
+      <div><b>68/100</b><span>SWE-bench Verified tasks, offline on one DGX Spark</span></div>
+      <div><b>~47 tok/s</b><span>generation on agent work, single stream</span></div>
       <div><b>0</b><span>phone-home connections, verified by the egress audit</span></div>
-      <div><b>87 tok/s</b><span>JSON on one GB10</span></div>
       <div><b>$0</b><span>per token, forever</span></div>
-      <div><b>262K</b><span>tokens of context</span></div>
     </div>
   </div>
 
 </div>
+
+<section id="benchmark">
+  <div class="wrap">
+    <h2>SWE-bench Verified, measured on one DGX Spark</h2>
+    <p class="sub">On 2026-10-08, Mightling 1.5.1's agent with Qwen3.8-27B resolved <b>68 of 100</b> SWE-bench Verified
+      tasks on one DGX Spark, offline: a sample of 100 tasks, one attempt per task, default mode. Scaled to all 500 tasks, that is an estimated <b>≈69%</b> (95% band 63.9–73.4%).</p>
+
+    <div class="tablewrap">
+      <table class="bench">
+        <tr><th>System</th><th>Same 100<br>tasks</th><th>All 500<br>tasks</th></tr>
+        <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">estimated</span></td></tr>
+        <tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
+        <tr><td>GLM-4.6 (Z.ai's agent)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
+        <tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
+        <tr><td>DeepSeek V3.2, high (mini-SWE-agent)<a class="fn" href="#fn5">5</a></td><td class="num">70/100</td><td class="num">70.0%</td></tr>
+        <tr><td>Claude Opus 4.5, four agents<a class="fn" href="#fn6">6</a></td><td class="num">77–80/100</td><td class="num">76.8–79.2%</td></tr>
+        <tr><td>Gemini 3 Pro (live-SWE-agent)<a class="fn" href="#fn7">7</a></td><td class="num">79/100</td><td class="num">77.4%</td></tr>
+        <tr class="group"><td colspan="3">Smaller open models (20–40B parameters)</td></tr>
+        <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), test-time scaling<a class="fn" href="#fn8">8</a></td><td class="num">60/100</td><td class="num">60.4%</td></tr>
+        <tr><td>Qwen3-Coder-30B-A3B (EntroPO + R2E), single attempt<a class="fn" href="#fn8">8</a></td><td class="num">56/100</td><td class="num">52.2%</td></tr>
+        <tr><td>Devstral Small 2512 (mini-SWE-agent)<a class="fn" href="#fn9">9</a></td><td class="num">57/100</td><td class="num">56.4%</td></tr>
+        <tr class="group"><td colspan="3">Coding-agent products, as their vendors publish them</td></tr>
+        <tr><td>GitHub Copilot agent mode (VS Code), with Claude 3.7 Sonnet<a class="fn" href="#fn10">10</a></td><td class="ns">not published</td><td class="num"><a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">56.0%</a></td></tr>
+        <tr><td>Claude Code<a class="fn" href="#fn11">11</a></td><td class="ns">not published</td><td class="ns"><a href="https://www.anthropic.com/engineering/swe-bench-sonnet">not published</a></td></tr>
+        <tr><td>Cursor<a class="fn" href="#fn12">12</a></td><td class="ns">not published</td><td class="ns"><a href="https://cursor.com/blog/composer">not published</a></td></tr>
+      </table>
+    </div>
+
+    <p class="sub after">Read it as company, not a ranking. On the same 100 tasks Mightling resolved as many as
+      Qwen3-Coder-480B and GLM-4.6, models many times its size, but every row uses a different agent, different
+      hardware and, for the leaderboard rows, the official x86 test images, where ours ran on community arm64 images.
+      A refine mode is being measured and is not in these numbers.</p>
+
+    <details class="method"><summary>How the ≈69% is estimated</summary>
+      <p>100 tasks are a fifth of Verified, so the full-set figure is an estimate. A one-parameter item-response
+        (Rasch) model is fitted on the per-task results of all 175 public Verified submissions: every task gets a
+        difficulty and every system an ability. Mightling's ability is the one that explains 68 resolved on these
+        100 tasks; ≈69% is that ability's expected score on all 500 (a plain regression on the published scores
+        agrees to within a point). To check it, every public submission was scored on these 100 tasks alone and its overall score
+        predicted the same way: the error was 2.4 points (RMSE), and the band above is ±1.96 times that.</p>
+      <p>The 100 tasks are spread across Verified's repositories in proportion to the full set, among the tasks
+        whose test environment runs and validates on arm64 (the gold patch passes, an empty change fails). Published
+        systems score 1.0 to 1.5 points lower on these 100 than on all 500, so the sample is not an easy one.
+        It is not a leaderboard entry: those are graded by the SWE-bench team on their own infrastructure.</p>
+    </details>
+
+    <ol class="footnotes">
+      <li id="fn1">Mightling: 100 tasks, one attempt each; one DGX Spark (GB10, 128 GB), model served locally,
+        no cloud; measured 2026-10-08. Estimate from the
+        <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> per-task data.</li>
+      <li id="fn2">500 tasks, one attempt; hardware not stated. Source:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>.
+        The same model with mini-SWE-agent: 57/100, 55.4%.</li>
+      <li id="fn3">500 tasks, one attempt, agent undisclosed; hardware not stated. Source:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6">experiments, 20250930_zai_glm4-6</a>.</li>
+      <li id="fn4">500 tasks, one attempt; hardware not stated. Source:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high">experiments, 20260217_mini-v2.0.0_kimi-k2-5-high</a>.</li>
+      <li id="fn5">500 tasks, one attempt; hardware not stated. Source:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high">experiments, 20260217_mini-v2.0.0_deepseek-3-2-high</a>.</li>
+      <li id="fn6">500 tasks each; hardware not stated. Four submissions:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251127_openhands_claude-opus-4-5">OpenHands</a> (80/100, 77.6%),
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251215_livesweagent_claude-opus-4-5">live-SWE-agent</a> (80/100, 79.2%),
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251205_sonar-foundation-agent_claude-opus-4-5">Sonar Foundation Agent</a> (77/100, 79.2%),
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_claude-4-5-opus-high">mini-SWE-agent, high</a> (79/100, 76.8%).
+        An earlier <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251124_mini-v1.16.0_claude-opus-4-5-20251101">mini-SWE-agent run</a> scored 74/100, 74.4%.</li>
+      <li id="fn7">500 tasks, one attempt; hardware not stated. Source:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview">experiments, 20251120_livesweagent_gemini-3-pro-preview</a>.
+        The same model with mini-SWE-agent: 72/100, 74.2%.</li>
+      <li id="fn8">The best published 20–40B model on the leaderboard. 500 tasks; test-time scaling uses two or more
+        attempts per task; hardware not stated. Sources:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B_tts">test-time scaling</a>,
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250901_entroPO_R2E_QwenCoder30BA3B">single attempt</a>.</li>
+      <li id="fn9">500 tasks, one attempt; hardware not stated. Source:
+        <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512">experiments, 20251209_mini-v1.17.2_devstral-small-2512</a>.</li>
+      <li id="fn10">GitHub's own figure, April 2025: "agent mode achieves a pass rate of 56.0% on SWE-bench Verified
+        with Claude 3.7 Sonnet". Number of tasks, attempts and hardware not stated; not on the leaderboard. Source:
+        <a href="https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/">GitHub blog</a>.</li>
+      <li id="fn11">Anthropic publishes SWE-bench Verified for its Claude models, run in a simple scaffold of its own
+        (a bash tool and an edit tool), not for the Claude Code product. Sources:
+        <a href="https://claude.com/product/claude-code">Claude Code</a>,
+        <a href="https://www.anthropic.com/engineering/swe-bench-sonnet">Anthropic's SWE-bench method</a>.</li>
+      <li id="fn12">Cursor publishes results on its own benchmark, Cursor Bench, not SWE-bench Verified. Source:
+        <a href="https://cursor.com/blog/composer">Cursor blog, Composer</a>.</li>
+    </ol>
+    <p class="note-small">All leaderboard numbers: <a href="https://www.swebench.com/">swebench.com</a> and the
+      <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a> repository; "same 100 tasks" is
+      each submission's published per-task results restricted to the tasks Mightling ran.</p>
+  </div>
+</section>
 
 <section id="try">
   <div class="wrap">
@@ -128,13 +239,16 @@ Networked git commands: none</pre></div>
       <div class="pillar">
         <h3>⚡ Fast, with no bill</h3>
         <table>
+          <tr><td>Agent work</td><td class="num">~47 tok/s</td></tr>
           <tr><td>Code</td><td class="num">50 tok/s</td></tr>
           <tr><td>JSON</td><td class="num">87 tok/s</td></tr>
           <tr><td>Prose</td><td class="num">25 tok/s</td></tr>
           <tr><td>Reading code</td><td class="num">~1,700 tok/s</td></tr>
           <tr><td>Context</td><td class="num">262K</td></tr>
         </table>
-        <p class="note-small">Single stream on a GB10. Run four agents at once: no quota, no "please wait".</p>
+        <p class="note-small">Single stream on a GB10 with speculative decoding. Agent work is measured over real
+          agent sessions; code, JSON and prose by kind of output, with greedy decoding. Run four agents at once:
+          no quota, no "please wait".</p>
       </div>
       <div class="pillar">
         <h3>✨ Nothing to configure</h3>
@@ -198,9 +312,8 @@ Networked git commands: none</pre></div>
   <div class="wrap">
     <h2>FAQ</h2>
     <details><summary>Do I need a GB10?</summary>
-      <p>Yes, to run the model. Another arm64 Linux machine on your network can use it as a client: the same install
-        command sets that up automatically. Clients for x86 Linux, macOS and Windows on Arm (the RTX Spark laptops)
-        are on the way.</p></details>
+      <p>Yes, to run the model. Your other computers use it as clients: Linux (Arm or x86) and macOS with the same
+        install command, Windows (Arm or x86, preview) with <a href="#install">the PowerShell line</a>.</p></details>
     <details><summary>I installed Puffin. Is this it?</summary>
       <p>Yes: Puffin was renamed Mightling in 1.5. Run <code>puffin update</code> once, then <code>puffin</code> one
         last time. It moves your sessions, settings and links over, and from then on the command is <code>ling</code>.</p></details>

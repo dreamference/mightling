@@ -13,11 +13,12 @@ from typing import Any, List, Optional
 
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
-from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
+from dreamference.swe_bench.swe_bench_evaluator import DROP_TEST_HUNKS, SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
+from dreamference.swe_bench.swe_bench_instance_run import TASK_RULES
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 
@@ -68,16 +69,29 @@ class SweBenchCommand:
         run.add_argument("--refine", action="store_true",
                          help="Two steps per instance: a session that studies the issue and writes a refined description "
                               "without changing the repository, then a fresh session that fixes it")
+        run.add_argument("--task-rules", default=None,
+                         help="Rules added to the task prompt, comma-separated, of: " + ", ".join(sorted(TASK_RULES))
+                              + " (default none). tests: never change an existing test, keep your own scripts in "
+                                "/tmp, and compare failing tests by name with and without the change")
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
 
         evaluate = commands.add_parser("eval", help="The grading phase: the upstream harness applies each patch and runs the tests")
         evaluate.add_argument("run", nargs="?", default=None, help="The run (default: the latest)")
+        evaluate.add_argument("--drop-test-hunks", action="store_true",
+                              help="Grade the same predictions again with every test file left out of each patch, "
+                                   "as a separate grading (eval-drop-test-hunks/); no agent runs")
+        evaluate.add_argument("--remove-images", action="store_true",
+                              help="Grade one repository at a time and remove the images this grading pulled once "
+                                   "their repository is graded")
 
         report = commands.add_parser("report", help="Print the resolved rate and what it was measured with")
         report.add_argument("run", nargs="?", default=None, help="The run (default: the latest)")
         report.add_argument("--against", default=None, help="Compare with this run, instance by instance")
+        report.add_argument("--drop-test-hunks", action="store_true",
+                            help="Report the grading with test files dropped (eval --drop-test-hunks); with --against "
+                                 "the other run's plain grading is the comparison, which may be the same run's")
 
         commands.add_parser("status", help="Runs, their progress, images and disk")
 
@@ -107,11 +121,12 @@ class SweBenchCommand:
                 subset=args.subset, name=args.name, evaluate=args.eval, until=args.until,
                 idle_minutes=args.idle_minutes, ignore_sessions=args.ignore_open_sessions,
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
-                mask=args.mask, strip_names=args.strip_names, refine=args.refine)
+                mask=args.mask, strip_names=args.strip_names, refine=args.refine,
+                task_rules=cls._ids(args.task_rules))
         if command == "eval":
-            return cls.evaluate(args.run)
+            return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":
-            return cls.report(args.run, args.against)
+            return cls.report(args.run, args.against, DROP_TEST_HUNKS if args.drop_test_hunks else None)
         if command == "status":
             return cls.status()
         if command == "clean":
@@ -259,12 +274,15 @@ class SweBenchCommand:
         return SweBenchRunStore(name)
 
     @classmethod
-    def evaluate(cls, name: Optional[str]) -> int:
+    def evaluate(cls, name: Optional[str], variant: Optional[str] = None, remove_images: bool = False) -> int:
         """
         Grades a run's predictions that are not graded yet.
 
         Args:
             name: The run; None for the latest.
+            variant: A grading series other than the plain one (`drop-test-hunks`), or None.
+            remove_images: Grade one repository at a time and remove the images the grading
+                pulled once their repository is graded.
 
         Returns:
             int: 0 when the harness ran.
@@ -280,20 +298,41 @@ class SweBenchCommand:
             print(f"⚠️  Not graded: {available / GIB:.0f} GiB of memory is available and {settings.eval_workers} "
                   f"workers of {settings.eval_memory} plus the 8 GiB reserve need {needed / GIB:.0f}.")
             return 1
-        results = SweBenchEvaluator.grade(store, settings)
+        if remove_images:
+            # One repository at a time, as `run --eval --remove-images` does: an image this grading
+            # pulled goes once its repository is graded, so the disk holds one repository's.
+            manifest = store.manifest() or {}
+            rows = {row["instance_id"]: row for row in SweBenchHarness.rows(manifest.get("dataset", "verified"))}
+            ids = [prediction["instance_id"] for prediction in store.predictions() if prediction["instance_id"] in rows]
+            results = {}
+            for group in SweBenchRunner.by_repository(ids, rows).values():
+                images = [manifest["images"][i]["image"] for i in group if i in manifest.get("images", {})]
+                absent = [image for image in images if SweBenchDocker.image_digest(image) is None]
+                results = SweBenchEvaluator.grade(store, settings, only=group, variant=variant)
+                SweBenchImages.remove([image for image in absent if SweBenchDocker.image_digest(image)])
+        else:
+            results = SweBenchEvaluator.grade(store, settings, variant=variant)
         resolved = sum(1 for result in results.values() if result.get("resolved"))
+        if variant == DROP_TEST_HUNKS:
+            changed = sum(1 for result in results.values() if result.get("dropped"))
+            print(f"✅ {store.name}, test files dropped: {len(results)} graded, {resolved} resolved; "
+                  f"{changed} patch(es) lost test files. `ling-admin swe-bench report {store.name} --drop-test-hunks "
+                  f"--against {store.name}` compares it with the plain grading.")
+            return 0
         print(f"✅ {store.name}: {len(results)} graded, {resolved} resolved. "
               f"`ling-admin swe-bench report {store.name}` prints the report.")
         return 0
 
     @classmethod
-    def report(cls, name: Optional[str], against: Optional[str]) -> int:
+    def report(cls, name: Optional[str], against: Optional[str], variant: Optional[str] = None) -> int:
         """
         Prints a run's report, or its comparison with another run.
 
         Args:
             name: The run; None for the latest.
             against: The run to compare with, if any.
+            variant: The grading series of the run's verdicts (`drop-test-hunks`); None for the
+                plain one.
 
         Returns:
             int: 0 when a report was printed.
@@ -302,9 +341,9 @@ class SweBenchCommand:
         if store is None:
             return 1
         if against:
-            print(SweBenchReport.against(store, SweBenchRunStore(against)), end="")
+            print(SweBenchReport.against(store, SweBenchRunStore(against), variant), end="")
             return 0
-        print(SweBenchReport.write(store), end="")
+        print(SweBenchReport.write(store, variant), end="")
         return 0
 
     @classmethod

@@ -107,6 +107,60 @@ def test_the_build_key_changes_with_the_launcher_source(tmp_path):
         assert CodexBrandedBuilder.build_key() != first
 
 
+def test_the_build_key_changes_with_the_ui_that_ling_web_embeds(tmp_path):
+    ui = tmp_path / "ui"
+    (ui / "src").mkdir(parents=True)
+    (ui / "src" / "App.tsx").write_text("// one")
+    (ui / "node_modules").mkdir()
+    (ui / "dist").mkdir()
+    with patch.object(builder_module, "WEB_UI_DIR", str(ui)), \
+            patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
+        first = CodexBrandedBuilder.build_key()
+        # Installed packages and a previous build's output are not sources.
+        (ui / "node_modules" / "x.js").write_text("x")
+        (ui / "dist" / "index.html").write_text("x")
+        assert CodexBrandedBuilder.build_key() == first
+        assert CodexBrandedBuilder.web_ui_files() == [str(ui / "src" / "App.tsx")]
+        (ui / "src" / "App.tsx").write_text("// two")
+        assert CodexBrandedBuilder.build_key() != first
+
+
+def test_ling_is_not_built_without_the_ui_it_serves(tmp_path, capsys):
+    # A `ling` whose `ling web` serves the placeholder page is the bug this build step fixes.
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "package.json").write_text("{}")
+    with patch.object(builder_module, "WEB_UI_DIR", str(ui)), \
+            patch.object(builder_module.shutil, "which", return_value=None):
+        assert CodexBrandedBuilder.build_web_ui() is None
+    assert "npm is needed" in capsys.readouterr().out
+
+    calls = []
+
+    def fake_call(command, cwd=None, env=None):
+        calls.append(command[1:])
+        if command[1:] == ["run", "build"]:
+            (ui / "dist").mkdir()
+            (ui / "dist" / "index.html").write_text("<html>")
+        return 0
+
+    with patch.object(builder_module, "WEB_UI_DIR", str(ui)), \
+            patch.object(builder_module, "WEB_UI_DIST", str(ui / "dist")), \
+            patch.object(builder_module.shutil, "which", return_value="/usr/bin/npm"), \
+            patch.object(builder_module.subprocess, "call", side_effect=fake_call):
+        assert CodexBrandedBuilder.build_web_ui() == str(ui / "dist")
+    assert calls == [["ci", "--no-audit", "--no-fund"], ["run", "build"]]
+
+    with patch.object(builder_module, "BUILD_CACHE_DIR", str(tmp_path / "cache")), \
+            patch.object(CodexBrandedBuilder, "build_key", return_value="k"), \
+            patch.object(CodexBrandedBuilder, "prepare_source", return_value=True), \
+            patch.object(CodexBrandedBuilder, "fetch_rusty_v8", return_value={"RUSTY_V8_ARCHIVE": "a", "RUSTY_V8_SRC_BINDING_PATH": "b"}), \
+            patch.object(builder_module.DesktopInstaller, "install_rust", return_value=True), \
+            patch.object(CodexBrandedBuilder, "build_web_ui", return_value=None), \
+            patch.object(builder_module.subprocess, "call", side_effect=AssertionError("cargo must not run")):
+        assert CodexBrandedBuilder._build_locked() is False
+
+
 def test_the_export_reports_lings_version_not_the_upstream_tag(tmp_path, monkeypatch):
     # Every banner reads CARGO_PKG_VERSION, so the workspace version is what `ling --version`, the
     # session header and the status card show; it is stamped into the export, never the submodule.
@@ -149,10 +203,13 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
             patch.object(CodexBrandedBuilder, "build_web_tools", return_value=True), \
             patch.object(CodexBrandedBuilder, "build_code_index", return_value=True), \
             patch.object(CodexBrandedBuilder, "build_docs_index", return_value=True), \
+            patch.object(CodexBrandedBuilder, "build_web_ui", return_value="/ui/dist"), \
             patch.object(builder_module.subprocess, "call", side_effect=fake_call):
         assert CodexBrandedBuilder.build() is False
 
     (command, cwd, env), = calls
+    # `ling web` embeds the UI built just before (ling-rs/web/build.rs).
+    assert env["LING_WEB_UI_DIST"] == "/ui/dist"
     assert cwd == os.path.join(str(tmp_path), "src", "codex-rs")
     assert not cwd.startswith(CODEX_SUBMODULE_DIR)
     assert env["RUSTY_V8_ARCHIVE"] == "a"

@@ -158,7 +158,7 @@ The formatting commit touches nearly every file, so it is made **when no other b
 
 **Phase 3: the five functions.** One function per change, tests first where coverage is thin:
 1. **`run_cli`** (complexity 228, 1,265 lines): a dispatch table from subcommand to one handler method per command group (`_cmd_server`, `_cmd_node`, `_cmd_night` …), each handler under the §3.4 limits. The parser (`build_parser`) stays a flat table.
-2. **`build_launch_command`** (33): one method per argument family (engine, memory, speculation, parsers), composed in order. The registry stays the source of truth for flags (AGENTS.md "Model matrix is the source of truth").
+2. **`build_launch_command`** (33): one method per argument family (engine, memory, speculation, parsers), composed in order. The registry stays the source of truth for flags (`docs/dev/models-and-engines.md`).
 3. **`start_server`** (28, 367 lines): split along its existing stages (pre-flight, sidecar, launch, watch). **Both host-safety layers are preserved** and their order is unchanged; this is the riskiest refactor here and gets a test per stage boundary before it is touched.
 4. **`GmailSearchService.serve`** (37): routing table plus one handler per endpoint.
 5. **`ContainerDiagnostics.get_diagnostics_line`** (30), then `DreamferenceConfig.__init__` (224 lines: the 4-tier resolution is one rule applied per field; make it a table of fields and one resolver).
@@ -192,7 +192,7 @@ The formatting commit touches nearly every file, so it is made **when no other b
 ## 9. Risks
 
 - **Churn against parallel work.** The format commit conflicts with every open branch (§6, Phase 1 says when to make it).
-- **Refactoring host-safety code** (`start_server`). A change in the order of the pre-flight, the sidecar start and the watchdog can freeze the host (AGENTS.md "Host-safety subsystem"). Mitigation: per-stage tests first, and no change to the order.
+- **Refactoring host-safety code** (`start_server`). A change in the order of the pre-flight, the sidecar start and the watchdog can freeze the host (`docs/dev/host-safety.md`). Mitigation: per-stage tests first, and no change to the order.
 - **Rules that do not fit.** `PLR2004` may be noisy against the registry's numeric tables, `T201` against the CLI's voice. Phase 0 decides with real counts, and a per-file ignore with a reason is an acceptable answer.
 - **Over-decomposition.** The limits of §3.4 can be met by splitting a function into shallow pieces, which §5 flags. The reviewer's checklist is part of the standard, not decoration.
 

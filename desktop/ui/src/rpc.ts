@@ -16,6 +16,7 @@ import type { ThreadCompactStartResponse } from "./protocol/v2/ThreadCompactStar
 import type { ThreadListResponse } from "./protocol/v2/ThreadListResponse";
 import type { ThreadReadResponse } from "./protocol/v2/ThreadReadResponse";
 import type { ThreadResumeResponse } from "./protocol/v2/ThreadResumeResponse";
+import type { ThreadSearchResponse } from "./protocol/v2/ThreadSearchResponse";
 import type { ThreadRevertResponse } from "./protocol/v2/ThreadRevertResponse";
 import type { ThreadStartResponse } from "./protocol/v2/ThreadStartResponse";
 import type { TurnInterruptResponse } from "./protocol/v2/TurnInterruptResponse";
@@ -35,6 +36,7 @@ interface Responses {
   "thread/resume": ThreadResumeResponse;
   "thread/read": ThreadReadResponse;
   "thread/list": ThreadListResponse;
+  "thread/search": ThreadSearchResponse;
   "thread/compact/start": ThreadCompactStartResponse;
   "thread/revert": ThreadRevertResponse;
   "turn/start": TurnStartResponse;

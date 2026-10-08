@@ -5,7 +5,9 @@ node (specs/DREAMFERENCE_MIGHTLING_NODE.md §4, §5.2).
 Enabling does three things: it installs the Avahi service file that advertises the node, it
 publishes the web UI and SearXNG beyond loopback, and it records that it did so, so that a later
 `ling-admin chat configure` or `searxng start` keeps those addresses. Disabling undoes all
-three. Root is needed once, for the file under `/etc/avahi`; the command is printed before it
+three. The web UI the advert names is `ling web` on port 3100 (specs/DREAMFERENCE_MIGHTLING_ASK.md
+§4.2, §8), which serves a device only once it is paired; the Onyx web UI on port 3000 is still
+published beside it until Onyx is retired. Root is needed once, for the file under `/etc/avahi`; the command is printed before it
 runs and sudo prompts on the terminal. With no terminal it still runs when sudo needs no password,
 and `--yes` (what `install.sh` passes) never waits for input: `sudo -n` or nothing.
 """
@@ -26,19 +28,25 @@ from dreamference.node.node_identity import NodeIdentity
 from dreamference.node.node_service_file import NodeServiceFile
 from dreamference.node.node_settings import LOOPBACK, NodeSettings
 
-WEB_PORT = 3000
+# `ling web`'s port (ling-rs/web/src/server.rs DEFAULT_PORT): what the advert's `web` record names.
+WEB_PORT = 3100
+# `ling web`'s user unit (ling-rs/web/src/cli.rs UNIT_NAME), which `ling web start` writes.
+WEB_UNIT = os.path.expanduser("~/.config/systemd/user/mightling-web.service")
 # Ubuntu puts the daemon in /usr/sbin, which is not on every user's PATH.
 AVAHI_DAEMON = "/usr/sbin/avahi-daemon"
 DEFAULT_MODEL_PORT = 8000
 
 SHARING_NOTICE = (
-    "⚠️  Anyone on the local network can now use this node: send prompts to its model, search\n"
-    "   through its SearXNG, and open its web UI. Nothing is encrypted or authenticated."
+    "⚠️  Anyone on the local network can now use this node: send prompts to its model and search\n"
+    "   through its SearXNG. Nothing is encrypted."
 )
 WEB_NOTICE = (
-    "⚠️  The web UI has one account, shared by everyone who opens it: one chat history, the admin\n"
-    "   panel, and the Gmail tool, which searches the mail connected on this node.\n"
-    "   `ling-admin node enable --no-web` keeps the web UI on this machine."
+    f"🌐 The Mightling web UI (`ling web`, port {WEB_PORT}) is on the local network: a phone or another\n"
+    "   computer opens it once paired, with the code `ling web pair` prints on this node.\n"
+    "⚠️  Until Onyx is retired, its web UI (port 3000) is published too. It has one account, shared by\n"
+    "   everyone who opens it: one chat history, the admin panel, and the Gmail tool, which searches\n"
+    "   the mail connected on this node.\n"
+    "   `ling-admin node enable --no-web` keeps both web UIs on this machine."
 )
 
 
@@ -77,7 +85,7 @@ class NodeAdvertiser:
         text = NodeServiceFile.render(
             port=port, node_id=node_id, version=cls.version(),
             state="ready" if cls.model_answers(port) else "stopped",
-            web_port=WEB_PORT if cls.web_installed() and not no_web else None,
+            web_port=WEB_PORT if cls.ling_web_available() and not no_web else None,
             search_port=cls.search_port(),
             main=cls.serves_main_model(),
         )
@@ -145,7 +153,12 @@ class NodeAdvertiser:
         else:
             shown = ", ".join(f"{key}={value}" for key, value in records.items())
             lines.append(f"Service file: {shown}")
-        lines.append(f"Web UI (port {WEB_PORT}) published on: {cls.web_published_address() or 'not installed'}")
+        if not cls.ling_web_available():
+            lines.append(f"Web UI (ling web, port {WEB_PORT}): ling is not installed")
+        else:
+            shared = settings["advertise"] and settings["web"]
+            lines.append(f"Web UI (ling web, port {WEB_PORT}): {'the local network, paired devices only' if shared else 'this machine only'}")
+        lines.append(f"Onyx web UI (port 3000) published on: {cls.web_published_address() or 'not installed'}")
         searxng = cls.searxng_published_address()
         lines.append(f"SearXNG published on: {searxng or 'not running'}")
         found = NodeBrowser.browse()
@@ -194,17 +207,74 @@ class NodeAdvertiser:
     def on_web_ui_bound(cls) -> None:
         """Called when the web UI's publish address was applied: the advert follows it."""
         if NodeSettings.advertised():
-            shared = NodeSettings.web_bind_address() != LOOPBACK and cls.web_installed()
+            shared = NodeSettings.web_bind_address() != LOOPBACK and cls.ling_web_available()
             cls._report(NodeServiceFile.update(web_port=WEB_PORT if shared else None))
 
     @classmethod
     def web_installed(cls) -> bool:
         """
         Returns:
-            bool: True if the web UI is installed on this machine (its `.env` exists).
+            bool: True if the Onyx web UI is installed on this machine (its `.env` exists).
         """
         from dreamference.chat.onyx_runner import ONYX_ENV_FILE
         return os.path.isfile(ONYX_ENV_FILE)
+
+    @classmethod
+    def ling_executable(cls) -> Optional[str]:
+        """
+        Returns:
+            Optional[str]: The installed `ling`, which serves `ling web`, or None.
+        """
+        from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+        path = CodexBrandedBuilder.executable_path()
+        return path if os.path.isfile(path) and os.access(path, os.X_OK) else None
+
+    @classmethod
+    def ling_web_available(cls) -> bool:
+        """
+        Returns:
+            bool: True if this machine can serve the Mightling web UI (`ling web`, part of `ling`).
+        """
+        return cls.ling_executable() is not None
+
+    @classmethod
+    def serve_web(cls, shared: bool) -> bool:
+        """
+        Puts `ling web` where the settings say: on the local network for an advertised node that
+        shares its web UI (`ling web start --lan`, which refuses on any other machine), and back on
+        loopback when a unit this command started on the network is no longer wanted there. A
+        machine that never ran `ling web` is left alone when nothing is shared.
+
+        Args:
+            shared: Whether the web UI is shared with the network.
+
+        Returns:
+            bool: True when `ling web` was (re)started.
+        """
+        ling = cls.ling_executable()
+        if ling is None:
+            return False
+        if shared:
+            command = [ling, "web", "start", "--lan"]
+        else:
+            try:
+                with open(WEB_UNIT) as handle:
+                    on_lan = " --lan" in handle.read()
+            except OSError:
+                on_lan = False
+            if not on_lan:
+                return False
+            command = [ling, "web", "start"]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            print(f"⚠️  Could not run `ling {' '.join(command[1:])}`: {error}")
+            return False
+        if result.returncode != 0:
+            reason = (result.stderr or result.stdout).strip()
+            print(f"⚠️  `ling {' '.join(command[1:])}` failed{': ' + reason if reason else ''}")
+            return False
+        return True
 
     @classmethod
     def _report(cls, outcome: Optional[bool]) -> None:
@@ -217,16 +287,18 @@ class NodeAdvertiser:
     @classmethod
     def apply_binds(cls) -> bool:
         """
-        Publishes the web UI and SearXNG where the settings say, recreating a container only when
-        its address changes. Neither is installed or started by this: a node without the web UI
-        simply does not offer it.
+        Publishes the web UIs and SearXNG where the settings say, recreating a container only when
+        its address changes. `ling web` is started on the network for a node that shares its web
+        UI (`serve_web`); Onyx and SearXNG are neither installed nor started by this: a node
+        without them simply does not offer them.
 
         Returns:
-            bool: True when the web UI is installed and published beyond loopback.
+            bool: True when the Onyx web UI is installed and published beyond loopback.
         """
         from dreamference.chat.onyx_runner import OnyxRunner
         from dreamference.chat.searxng_sidecar import SEARXNG_CONTAINER_NAME, SearxngSidecar
         from dreamference.chat.sidecar_network import SidecarNetwork
+        cls.serve_web(NodeSettings.advertised() and NodeSettings.web_bind_address() != LOOPBACK)
         web_shared = False
         if cls.web_installed():
             OnyxRunner().bind_to_loopback()
@@ -382,7 +454,7 @@ class NodeAdvertiser:
     def web_published_address(cls) -> str:
         """
         Returns:
-            str: The address the web UI's `.env` publishes port 3000 on, or "" when the web UI is
+            str: The address the Onyx web UI's `.env` publishes port 3000 on, or "" when it is
             not installed.
         """
         from dreamference.chat.onyx_runner import ONYX_ENV_FILE

@@ -374,7 +374,7 @@ Each piece has its own opt-out. See `DREAMFERENCE_ONYX.md`.
 
 ### 4.20. `ling-admin desktop`
 
-`install`, `run`, `build`, `status` for the Tauri desktop window (binary `ling-app`). `ling app` opens the same window. See `AGENTS.md` ("The desktop app is a window, not a second frontend").
+`install`, `run`, `build`, `status` for the Tauri desktop window (binary `ling-app`). `ling app` opens the same window. See `docs/dev/desktop.md`.
 
 ### 4.21. `ling-admin night`
 

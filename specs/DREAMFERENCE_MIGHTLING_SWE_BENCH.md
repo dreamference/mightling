@@ -578,7 +578,7 @@ Fetched on 2026-10-01.
 - [SWE-bench pull request 521](https://github.com/SWE-bench/SWE-bench/pull/521) and [issue 520](https://github.com/SWE-bench/SWE-bench/issues/520): arm64 support, closed unmerged on 2026-08-12, and the x86 assumptions it listed.
 - [`greynewell/swe-bench-arm64` on Docker Hub](https://hub.docker.com/r/greynewell/swe-bench-arm64), with its author's [write-up](https://greynewell.com/blog/swe-bench-arm64-native-containers-6x-faster/) and [data](https://gist.github.com/greynewell/497005bb33641503f1a5874f16578088): 1,798 of 2,294 instances native on arm64, 11 instances compared against x86, about six times faster than emulation. These are the author's figures, not checked here.
 - [princeton-nlp/SWE-bench_Verified](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified): 500 rows and the field list.
-- [the upstream vendor: Why SWE-bench Verified no longer measures frontier coding capabilities](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/): the contamination findings of §8.
+- [Why SWE-bench Verified no longer measures frontier coding capabilities](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/) (the upstream vendor): the contamination findings of §8.
 - [SWE-Bench Pro Verified (arXiv 2609.08149)](https://arxiv.org/pdf/2609.08149): the July 2026 withdrawal of the SWE-bench Pro recommendation and the estimate of about 30% broken tasks, as reported by a web search summary; the paper itself was not read.
 
 ### 13.8 The exact arm: `--code-index exact` (2026-10-07)
@@ -590,3 +590,7 @@ The third arm indexes each instance with the SCIP stores alone and runs the agen
 - **Caching.** The stores are cached per repository and commit under `index-exact/`, apart from the universal cache.
 - **Failures.** An instance whose indexers did not all finish still runs. Its state records `stores`, `failed` and `peak_mb`, and the report counts such instances and those with no store at all.
 - **A `ling-code` under test** (`DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE`) is relocated into a runtime directory of its own, so preparing it never replaces the one a running arm has mounted.
+
+## 15. Fixes from the failure analysis (2026-10-08)
+
+[MIGHTLING_SWE_BENCH_FAILURES §8](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md) records them. The eval script's test-file reset is made per file in the dataset file each harness call gets, so a test patch that adds a file no longer leaves the agent's test edits in place (the grader records `eval_reset: per-file`, so a run graded before is graded again). "Test patch failed" counts every refusal of the test patch. A turn that changed the tree and stopped mid-work gets a completion nudge. `run --task-rules tests` is the test-discipline arm. `eval --drop-test-hunks` regrades a run's predictions with their test files left out, as a separate grading series, and `eval --remove-images` cycles images by repository. With `run --eval --remove-images` the code-index pass no longer keeps every image it pulled.

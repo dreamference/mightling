@@ -502,8 +502,10 @@ shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o"
     # Chromium's profile and the app's data folder land in the scratch home, never the user's.
     assert call["HOME"] != os.path.expanduser("~") and call["HOME"].endswith("home-dir")
     assert call["CODEX_HOME"] != str(tmp_path / "codex-home")
-    assert 3000 in EgressAudit.allowed_ports("http://localhost:8000", "app")
-    assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000")
+    assert 3100 in EgressAudit.allowed_ports("http://localhost:8000", "app")
+    assert 3100 not in EgressAudit.allowed_ports("http://localhost:8000")
+    # The Onyx web UI is no longer part of the app's session.
+    assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000", "app")
 
 
 def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
@@ -546,8 +548,10 @@ shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o"
     # Chromium's profile and the app's data folder land in the scratch home, never the user's.
     assert call["HOME"] != os.path.expanduser("~") and call["HOME"].endswith("home-dir")
     assert call["CODEX_HOME"] != str(tmp_path / "codex-home")
-    assert 3000 in EgressAudit.allowed_ports("http://localhost:8000", "app")
-    assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000")
+    assert 3100 in EgressAudit.allowed_ports("http://localhost:8000", "app")
+    assert 3100 not in EgressAudit.allowed_ports("http://localhost:8000")
+    # The Onyx web UI is no longer part of the app's session.
+    assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000", "app")
 
 
 def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
@@ -565,10 +569,12 @@ def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
 # -- route lookups ---------------------------------------------------------------------------------
 # Recorded from the desktop app on 2026-10-07: Chromium's IPv6 reachability check, a UDP connect
 # to Google's resolver address that fails here (no IPv6 route) and is never followed by a payload.
+# The loopback connect was the Chat window's, to the Onyx web UI on 3000 then; its port is now the
+# Ask window's, `ling web` on 3100.
 CHROMIUM_PROBE = (
     '2628928 connect(23<UDPv6:[10868489]>, {sa_family=AF_INET6, sin6_port=htons(443), sin6_flowinfo=htonl(0), '
     'inet_pton(AF_INET6, "2001:4860:4860::8888", &sin6_addr), sin6_scope_id=0}, 28) = -1 ENETUNREACH (Network is unreachable)\n'
-    '2628930 connect(24<TCP:[10873001]>, {sa_family=AF_INET, sin_port=htons(3000), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)\n'
+    '2628930 connect(24<TCP:[10873001]>, {sa_family=AF_INET, sin_port=htons(3100), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)\n'
     '2628931 execve("/opt/Mightling", ["/opt/Mightling", "--type=utility"], 0xffff /* 40 vars */) = 0\n'
 )
 
@@ -576,7 +582,7 @@ CHROMIUM_PROBE = (
 def test_a_udp_connect_with_nothing_sent_is_a_route_lookup_not_a_destination():
     trace = StraceParser.parse(CHROMIUM_PROBE)
     assert trace.route_lookups == {"[2001:4860:4860::8888]:443": 1}
-    assert trace.destinations == {"127.0.0.1:3000": 1}
+    assert trace.destinations == {"127.0.0.1:3100": 1}
     allowed = EgressAudit.allowed_ports("http://localhost:8000", "app")
     verdict = EgressAudit.judge(trace, allowed, replied=True)
     assert verdict.status == PASS, verdict.problems

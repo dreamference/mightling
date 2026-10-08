@@ -32,6 +32,10 @@ theme:
     - search.highlight
     - content.code.copy
 
+# docs/dev/ holds developer notes linked from AGENTS.md, not pages for the user site.
+exclude_docs: |
+  dev/
+
 validation:
   anchors: warn
 

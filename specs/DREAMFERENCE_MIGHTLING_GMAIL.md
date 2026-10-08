@@ -10,7 +10,7 @@
 
 Let the terminal agent answer mailbox questions — "what did Alice send about the invoice?", "find the booking confirmation from last week" — using the Gmail accounts the user has already connected in Mightling's web UI. There is no new sign-in, no new credential store and no new IMAP code: the agent reaches the same service, with the same credentials, that the web UI's `Gmail` tool already uses.
 
-**Non-goals.** Sending, drafting, labelling, archiving or deleting mail. The service is read-only by construction (`BODY.PEEK`, no write verbs), and this spec keeps it that way. Gmail through the upstream vendor's hosted `codex_apps` connector is also out of scope: it needs a ChatGPT login, never activates under `--oss`, and would route mail through the upstream vendor, which contradicts the air-gapped design.
+**Non-goals.** Sending, drafting, labelling, archiving or deleting mail. The service is read-only by construction (`BODY.PEEK`, no write verbs), and this spec keeps it that way. Gmail through the upstream vendor's hosted `codex_apps` connector is also out of scope: it needs the vendor's sign-in, never activates under `--oss`, and would route mail through the upstream vendor, which contradicts the air-gapped design.
 
 ## 2. Why a shell command, not a tool
 

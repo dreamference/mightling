@@ -64,11 +64,12 @@ SESSION_NAMES: Final[Dict[str, str]] = {
 }
 
 # The desktop app's session (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §6): `ling-app` is
-# started with `MIGHTLING_APP_AUDIT=<seconds>`, opens Chat on the web UI and Work with its
-# app-server, both hidden, and quits by itself after that many seconds. The web UI's loopback
-# port joins the allowlist for this kind of session alone.
+# started with `MIGHTLING_APP_AUDIT=<seconds>`, opens Ask on `ling web` (which it starts, so the
+# server is traced too) and Work with its app-server, both hidden, and quits by itself after that
+# many seconds. `ling web`'s loopback port joins the allowlist for this kind of session alone; the
+# Onyx web UI's 3000 is no longer reached (specs/DREAMFERENCE_MIGHTLING_ASK.md §10).
 APP_SESSION_S: Final[int] = 40
-WEB_UI_PORT: Final[int] = 3000
+WEB_UI_PORT: Final[int] = 3100
 
 # Mightling over Signal (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §10): the one component that talks to
 # an outside service by itself, and only once the user set it up. It runs as its own system unit,
@@ -98,7 +99,7 @@ class EgressAudit:
 
         Args:
             vllm_host (str): The model server's base URL.
-            session (str): `exec`, `tui` or `app`; the app's session may also reach the web UI.
+            session (str): `exec`, `tui` or `app`; the app's session may also reach `ling web`.
 
         Returns:
             Dict[int, str]: Port to the service behind it.
@@ -107,7 +108,7 @@ class EgressAudit:
         model_port = parsed.port or (443 if parsed.scheme == "https" else 80)
         allowed = {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG"}
         if session == APP:
-            allowed[WEB_UI_PORT] = "web UI (the Chat window)"
+            allowed[WEB_UI_PORT] = "ling web (the Ask window)"
         return allowed
 
     @classmethod

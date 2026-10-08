@@ -184,6 +184,34 @@ async fn a_login_link_works_once() {
     assert!(headers.get(header::SET_COOKIE).is_none());
 }
 
+/// A build with the UI embedded (`LING_WEB_UI_DIST`, as every `ling` build sets it) serves the
+/// UI's page with the bridge first, and every asset the page names. Without it there is nothing
+/// to check but the placeholder.
+#[tokio::test]
+async fn the_embedded_ui_is_served_with_the_bridge_first() {
+    let scratch = scratch("ui");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let cookie = sign_in(&server).await;
+    let (status, _, page) = call(&server, request("GET", "/").header(header::COOKIE, &cookie).body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    if ling_web_server::assets::ui_asset("index.html").is_none() {
+        assert!(page.contains("LING_WEB_UI_DIST"), "the placeholder says how to embed the UI");
+        return;
+    }
+    let bridge = page.find(ling_web_server::assets::BRIDGE_TAG).expect("the bridge tag");
+    let module = page.find("type=\"module\"").expect("the UI's module script");
+    assert!(bridge < module, "{page}");
+    let assets: Vec<&str> = page.split('"').filter(|part| part.starts_with("./assets/") || part.starts_with("/assets/")).collect();
+    assert!(!assets.is_empty(), "{page}");
+    for asset in assets {
+        let path = asset.trim_start_matches('.');
+        let (status, headers, _) = call(&server, request("GET", path).header(header::COOKIE, &cookie).body(Body::empty()).unwrap()).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        let kind = headers[header::CONTENT_TYPE].to_str().unwrap();
+        assert!(kind.starts_with("text/javascript") || kind.starts_with("text/css") || kind == "image/png", "{path}: {kind}");
+    }
+}
+
 #[tokio::test]
 async fn host_and_origin_must_be_the_servers_own_even_with_a_credential() {
     let scratch = scratch("origin");
@@ -391,6 +419,9 @@ async fn a_tab_reaches_the_app_server_through_the_policy_and_ask_threads_get_the
     assert!(early["error"].as_str().unwrap().contains("not running"));
     let started = browser.call(json!({ "type": "work/start" })).await;
     assert_eq!(started["result"]["started"], false, "{started}");
+    // The UI tells Ask threads from projects by this folder, named as their `cwd` will be.
+    let ask_root = started["result"]["ask_root"].as_str().unwrap();
+    assert_eq!(Path::new(ask_root), server.ask_root().canonicalize().unwrap().as_path(), "{started}");
 
     // An ordinary request passes; one outside the allow-list never reaches the server.
     let refused = browser.call(json!({ "type": "work/send", "message": { "id": 1, "method": "account/login/start", "params": {} } })).await;

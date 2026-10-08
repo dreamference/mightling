@@ -193,4 +193,4 @@ interactive interface writes its log to `~/.mightling/logs_2.sqlite`, which
 
 `ling` is compiled from source pinned to a release, with Mightling's own launcher and a short series
 of patches added. See
-[Architecture](architecture.md#how-mightling-is-built).
+[Architecture](architecture.md#how-ling-is-built).

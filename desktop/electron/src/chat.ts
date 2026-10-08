@@ -1,60 +1,36 @@
-// The Chat window: the local web UI at `http://localhost:<port>/app`, unchanged since before Work
-// existed, now in a Chromium window. No preload, no IPC and no injected script: Onyx's page has no
-// business with the agent, and the sign-in happens in this process (`sign-in.ts`), so the page
-// never sees the credential.
+// The Ask window (the menu's former Chat): the Mightling UI served by `ling web` on this machine,
+// where Ask threads get the policy layer they need (web.ts). Until 2026-10-08 this window showed
+// the Onyx web UI on port 3000; that is still running for anyone who opens it in a browser, but
+// the app no longer depends on it (specs/DREAMFERENCE_MIGHTLING_ASK.md §10).
+//
+// No preload and no IPC: the page talks to `ling web` over its own WebSocket, exactly as in a
+// browser, with the session cookie the one-time sign-in link sets. The window never navigates off
+// that server; links open in the system browser.
 
-import { BrowserWindow, net, shell, type Session } from "electron";
+import { BrowserWindow, shell } from "electron";
 
 import appConfig from "../app.json";
-import { WindowSignIn, credentialsFile, readCredentials, type Http, type ParsedCookie } from "./sign-in";
-
-/** The URL the window loads: the configured one, or the same path on the forwarder's fallback port. */
-export function chatUrl(port: number | null): string {
-  const url = new URL(appConfig.chat.url);
-  if (port !== null) url.port = String(port);
-  return url.toString();
-}
-
-/** The sign-in's network, over `session` (the Chat window's own), with redirects not followed. */
-export function sessionHttp(session: Session): Http {
-  const request = (method: string, url: string, body?: string) =>
-    new Promise<{ status: number; setCookie: string[] }>((resolve, reject) => {
-      const outgoing = net.request({ method, url, session, credentials: "include", redirect: "manual" });
-      if (body !== undefined) outgoing.setHeader("Content-Type", "application/x-www-form-urlencoded");
-      outgoing.on("response", (response) => {
-        const header = response.headers["set-cookie"];
-        const setCookie = header === undefined ? [] : Array.isArray(header) ? header : [header];
-        response.on("data", () => {});
-        response.on("end", () => resolve({ status: response.statusCode, setCookie }));
-        response.on("error", reject);
-      });
-      outgoing.on("redirect", () => outgoing.abort());
-      outgoing.on("abort", () => reject(new Error("redirected")));
-      outgoing.on("error", reject);
-      outgoing.end(body);
-    });
-  return {
-    status: async (url) => (await request("GET", url)).status,
-    postForm: (url, body) => request("POST", url, body),
-    // `credentials: "include"` stores the response's cookies in the session; this covers a
-    // Chromium that did not, so the window is signed in either way.
-    ensureCookie: async (origin: string, cookie: ParsedCookie) => {
-      const existing = await session.cookies.get({ url: origin, name: cookie.name });
-      if (existing.length > 0) return;
-      await session.cookies.set({ url: origin, ...cookie });
-    },
-  };
-}
+import { showContextMenu } from "./shell";
+import { sameServer, type WebServer } from "./web";
 
 export interface ChatOptions {
-  port: number | null;
+  server: WebServer;
   show: boolean;
+}
+
+/** A page shown while `ling web` starts, or when it cannot: text only, nothing loaded. */
+export function messagePage(title: string, body: string): string {
+  const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Mightling</title>` +
+    `<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:15vh auto;padding:0 20px;color:#111}p{color:#555;white-space:pre-wrap}</style></head>` +
+    `<body><h1>${escape(title)}</h1><p>${escape(body)}</p></body></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 export function openChat(options: ChatOptions): BrowserWindow {
   const { chat } = appConfig;
   const window = new BrowserWindow({
-    title: options.port !== null && options.port !== 3000 ? `${chat.title} (port ${options.port}: 3000 is in use on this machine)` : chat.title,
+    title: chat.title,
     width: chat.width,
     height: chat.height,
     minWidth: chat.minWidth,
@@ -65,26 +41,46 @@ export function openChat(options: ChatOptions): BrowserWindow {
     autoHideMenuBar: true,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: true, devTools: !isPackaged() },
   });
-  const url = chatUrl(options.port);
-  const origin = new URL(url).origin;
-  // Read when needed, never kept: the password lives in this process only for the one request.
-  const signIn = new WindowSignIn(origin, () => readCredentials(credentialsFile()), sessionHttp(window.webContents.session));
 
-  // Signed in before the first load where possible, so the login page does not flash; after a
-  // load (a server that came up late, a session that expired) the same one attempt is offered.
-  const load = () => void window.loadURL(url);
-  window.webContents.on("did-finish-load", () => {
-    void signIn.run().then((outcome) => {
-      if (outcome === "signed-in" && !window.isDestroyed()) load();
-    });
+  let login: string | null = null;
+  // One fresh sign-in per refusal: a server restarted since (its sessions live in memory) answers
+  // 401 once, and a second refusal in a row is shown rather than retried forever.
+  let retried = false;
+  const signIn = async () => {
+    try {
+      login = await options.server.loginUrl();
+      if (!window.isDestroyed()) await window.loadURL(login);
+    } catch (error) {
+      if (window.isDestroyed()) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      void window.loadURL(messagePage("Mightling could not start Ask", reason));
+    }
+  };
+  window.webContents.on("did-navigate", (_event, url, status) => {
+    if (!login || !sameServer(url, login)) return;
+    if (status === 401 && !retried) {
+      retried = true;
+      void signIn();
+    } else if (status === 200) {
+      retried = false;
+    }
   });
-  // A link that would open a new tab opens in the system browser, as the Codex app does; the
-  // window itself stays on the web UI.
-  window.webContents.setWindowOpenHandler(({ url: target }) => {
-    if (/^https?:/.test(target)) void shell.openExternal(target);
+  // The page never leaves the server; anything else opens in the system browser.
+  window.webContents.on("will-navigate", (event, url) => {
+    if (login && sameServer(url, login)) return;
+    event.preventDefault();
+    if (/^https?:/.test(url)) void shell.openExternal(url);
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
-  void signIn.run().finally(load);
+  window.webContents.on("context-menu", (_event, params) => {
+    showContextMenu(window, { x: params.x, y: params.y, editable: params.isEditable, selection: params.selectionText });
+  });
+
+  void window.loadURL(messagePage("Starting Mightling…", "Starting ling web, the server Ask runs on."));
+  void signIn();
   return window;
 }
 

@@ -40,11 +40,11 @@ module.exports = {
     extendInfo: {
       NSLocalNetworkUsageDescription:
         "Mightling finds your Mightling node (a GB10) on the local network and talks to its model server and web UI.",
-      // src/node_locator.ts SERVICE_TYPE, without the domain.
+      // ling-rs/node-locator's SERVICE_TYPE, without the domain: the bundled `ling` browses for it.
       NSBonjourServices: ["_mightling-node._tcp"],
     },
-    // The asar holds what the app loads: the Vite build (main, preload, Work's page, with
-    // multicast-dns bundled in), the icons and package.json. Sources, configs, tests, the staged
+    // The asar holds what the app loads: the Vite build (main, preload, Work's page), the icons
+    // and package.json. Sources, configs, tests, the staged
     // binaries (extra resources above) and node_modules stay out.
     ignore: (file) =>
       !(file === "" || file === "/package.json" || file === "/.vite" || file.startsWith("/.vite/") || file === "/icons" || file.startsWith("/icons/")),

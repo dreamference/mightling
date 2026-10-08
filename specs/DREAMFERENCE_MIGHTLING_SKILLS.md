@@ -317,7 +317,7 @@ A skill is text the model treats as instructions, plus scripts it may run. Insta
 - [Gemini CLI: skills](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md)
 - [OpenClaw: skills](https://docs.openclaw.ai/tools/skills); [ClawHub skill format](https://github.com/openclaw/clawhub/blob/main/docs/skill-format.md)
 - [Hermes Agent: skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills); [creating skills](https://hermes-agent.nousresearch.com/docs/developer-guide/creating-skills)
-- [openai/skills](https://github.com/openai/skills)
+- [`openai/skills`](https://github.com/openai/skills)
 
 ---
 

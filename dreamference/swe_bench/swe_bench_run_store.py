@@ -7,6 +7,7 @@ runs/<run>/instances/<id>.json one instance's state, replaced whole
 runs/<run>/logs/<id>.jsonl     ling exec's events
 runs/<run>/predictions.jsonl   appended, one line per finished instance
 runs/<run>/eval/<n>/           grading n: the harness's logs, and what it was graded with
+runs/<run>/eval-<variant>/<n>/ the same for another series (`drop-test-hunks`: test files left out)
 runs/<run>/report.md           written by `report`
 ```
 """
@@ -253,48 +254,65 @@ class SweBenchRunStore:
 
     # -- gradings ------------------------------------------------------------------------------
 
-    def gradings(self) -> List[int]:
+    @classmethod
+    def eval_directory_name(cls, variant: Optional[str] = None) -> str:
         """
+        Args:
+            variant: A grading series other than the plain one (`drop-test-hunks`), or None.
+
+        Returns:
+            str: The directory under the run that holds the series: `eval`, or `eval-<variant>`.
+        """
+        return f"eval-{variant}" if variant else "eval"
+
+    def gradings(self, variant: Optional[str] = None) -> List[int]:
+        """
+        Args:
+            variant: The grading series; None for the plain one.
+
         Returns:
             List[int]: The grading numbers on disk, ascending.
         """
-        directory = self.directory / "eval"
+        directory = self.directory / self.eval_directory_name(variant)
         if not directory.is_dir():
             return []
         return sorted(int(entry.name) for entry in directory.iterdir()
                       if entry.is_dir() and entry.name.isdigit())
 
-    def grading_dir(self, number: int) -> Path:
+    def grading_dir(self, number: int, variant: Optional[str] = None) -> Path:
         """
         Args:
             number: The grading number.
+            variant: The grading series; None for the plain one.
 
         Returns:
             Path: Its directory, where the harness is run.
         """
-        return self.directory / "eval" / str(number)
+        return self.directory / self.eval_directory_name(variant) / str(number)
 
-    def grading(self, number: int) -> Dict[str, Any]:
+    def grading(self, number: int, variant: Optional[str] = None) -> Dict[str, Any]:
         """
         Args:
             number: The grading number.
+            variant: The grading series; None for the plain one.
 
         Returns:
             Dict[str, Any]: `{"grader": {...}, "results": {instance id: {...}}}`; empty parts
             when nothing is recorded yet.
         """
-        record = self._read(self.grading_dir(number) / "grading.json") or {}
+        record = self._read(self.grading_dir(number, variant) / "grading.json") or {}
         record.setdefault("grader", {})
         record.setdefault("results", {})
         return record
 
-    def write_grading(self, number: int, record: Dict[str, Any]) -> None:
+    def write_grading(self, number: int, record: Dict[str, Any], variant: Optional[str] = None) -> None:
         """
         Args:
             number: The grading number.
             record: The grading record, as `grading()` returns it.
+            variant: The grading series; None for the plain one.
         """
-        self._write(self.grading_dir(number) / "grading.json", record)
+        self._write(self.grading_dir(number, variant) / "grading.json", record)
 
     # -- files ---------------------------------------------------------------------------------
 
