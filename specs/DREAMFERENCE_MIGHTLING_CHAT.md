@@ -201,9 +201,13 @@ From the phone, in Element X (Matrix) or Telegram, a private chat with **Mightli
 | File | Contents |
 |---|---|
 | `telegram.json` | the bot token, the consent date, and the paired user ids |
-| `matrix.json` | the homeserver URL, the bot's user id and access token, and the allow-list |
+| `matrix.json` | the homeserver URL, the server name, the bot's user id and access token, and the allow-list (written by `ling-admin matrix`) |
+| `matrix-admin.json` | the server name chosen once, the registration token, and whether push is on (`ling-admin matrix` only) |
+| `matrix-state.json` | the bridge's `next_batch` and the room it opened for each user |
 | `threads.json` | the chat → thread map |
 | `pairing/` | pending code hashes |
+
+The registration token in `matrix-admin.json` lets anyone who can reach the homeserver create an account. Only the node and the tailnet can reach it, and an account is useless to them: the bridge answers allow-listed users only.
 
 **Stated plainly, as for the Google tokens (GOA §0): these files are readable by any command the agent runs.** Codex's sandbox limits writes, not reads. What that means:
 
@@ -317,6 +321,45 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
   - Work threads on a repository chosen from the phone, with approvals;
   - other messengers, if users ask (Signal through `signal-cli` is the obvious next, with the caveats its own project states).
 
-## 14. What was built
+## 14. What was built (Phase 1, branch `chat/messengers`, 2026-10-08; not merged)
 
-*(Filled in when Phase 1 lands.)*
+**Built:**
+
+| Piece | Where |
+|---|---|
+| The bridge: hub, link to `ling web`, renderer and splitter, state files, CLI | `ling-rs/chat/` (crate `ling-chat`), `src/{hub,agent,render,store,cli}.rs` |
+| Telegram adapter | `ling-rs/chat/src/telegram.rs` |
+| Matrix adapter | `ling-rs/chat/src/matrix.rs` |
+| `ling chat …` in the launcher | `ling-rs/src/chat.rs`, one branch in `ling-rs/src/lib.rs`, one dependency line in `ling-rs/Cargo.toml` |
+| `ling-admin matrix …` | `dreamference/chat/matrix_homeserver.py`, wired in `dreamference/cli/dreamference_cli_controller.py` |
+
+**Where it departs from the design above:**
+
+- **The command is `ling-admin matrix`,** not `ling-admin chat matrix`: `ling-admin chat` already names the web UI (Onyx's alias).
+- **The loopback proxy is decided:** two user units with `systemd-socket-proxyd` (§5.2), not a forwarder inside the bridge, so the homeserver stays reachable from the phone whether or not the bridge runs.
+- **The image is pinned by digest:** tuwunel `v1.9.3@sha256:678b7f53…`, a multi-architecture index with arm64 and amd64.
+- **A message that cannot steer a running turn** is queued and starts the next turn, with a one-line notice ("Noted: this goes in as soon as the current answer is done").
+- **`requestUserInput` with several questions or a secret** is answered empty, and the chat says to answer it at a computer.
+- **`ling chat status` does not list running turns,** which needs the bridge's own state. It names the messengers, the paired users and whether the unit runs.
+- **The `[chat]` settings of §10 are read** from the user-level config file's `[chat]` table.
+
+**Verified (2026-10-08, on stand-ins only):**
+
+- **`cargo test`** in a copy of `ling-rs/chat` beside `web/` and `airgapped/`: **45 tests**, and `cargo clippy --all-targets` is clean.
+  - 19 unit tests: renderer, splitter, state files, CLI helpers, the air-gap reading.
+  - 11 hub tests against a scripted agent: threads, `/new`, `/use`, steering and its fallback, approvals with every payload of §3, timeouts, the air gap pausing Telegram only, reconnect recovery, stop, failures.
+  - 9 Telegram tests against a stand-in Bot API (axum): pairing, strangers, groups, drafts with the stop button and the typing fallback, HTML with the plain-text fallback, splitting, buttons, rate limits, no token in errors.
+  - 5 Matrix tests against a stand-in homeserver: invites, encrypted and crowded rooms, the first sync, formatting, typing, reactions, one room per user, `next_batch`.
+  - **1 end-to-end test** through the real `ling-web-server` (its sign-in, `/ws` relay and bridge policy) to a stand-in app-server on a Unix socket:
+    - the chat's `prompt: ask` arrives as the composed prompt in an Ask folder;
+    - an approval's answer passes the policy's pending check;
+    - after `ling web` restarts (new in-memory sessions), the bridge signs in again and resumes the thread.
+- **Python:** 8 tests for `ling-admin matrix` with Docker, systemd, Tailscale and the homeserver replaced. The whole suite: 913 passed, with the same 13 failures `main` has on this machine, all tests that run the installed `ling` binary.
+
+**Not verified:**
+
+- **Nothing of Phase 0 (§11) has run.** No real Telegram, no real tuwunel, no Element X, no Tailscale (not installed on this machine), no phone.
+- **The launcher was not compiled.** The Codex workspace was not built, so `ling chat` routing in `ling-rs/src/lib.rs` and `src/chat.rs` is untested. It mirrors `ling web`'s routing line for line.
+- **The user units** (`mightling-chat.service` and the proxy units) were written only in tests and never started.
+- **`ling chat telegram setup`'s terminal path** (consent, the token with echo off) was not run.
+- **Privacy, still to decide:** a Telegram thread is an Ask thread with `/apps` and `docs_*`, so mail and file contents can reach Telegram's servers in an answer. The warning says so. A Telegram-specific prompt without those tools is a possible Phase 2 step if the user wants it.
