@@ -396,7 +396,7 @@ Built: the UI embedded in every `ling` build, the Ask view, attachments, the pho
 - `desktop/ui`: 22 vitest cases (11 new: Ask threads, attachments, the copy fallback, archive and rename in the store), typecheck, and the production build.
 - `ling-rs/web`: `cargo test` in a copy, with and without the UI embedded: 22 unit and 12 server tests. The new server test serves the embedded page with the bridge first and every asset it names.
 - `desktop/electron`: 20 vitest cases, including `web.test.ts` (a running server used as it is; a missing one started, owned and stopped; only a one-time loopback link loaded), and the typecheck.
-- Launcher: `cargo test --release -p ling-launcher -p ling-web-server` in a scratch export of the pinned Codex with the patches applied, the UI embedded and a scratch `HOME`: 227 launcher tests (with `ling app`'s Ask window), 22 + 12 web tests.
+- Launcher: `cargo test --release -p ling-launcher -p ling-web-server` in a scratch export of the pinned Codex with the patches applied, the UI embedded and a scratch `HOME`: 229 launcher tests on the tree merged with main (with `ling app`'s Ask window), 22 + 12 web tests.
 - `CodexBrandedBuilder.build_web_ui()` run for real (npm in `desktop/ui` only; nothing installed, no `ling` run). `ling-admin codex build` was not run here, because it installs into the live folder.
 - The Python suite.
 - A headless Chrome (playwright-core, a throwaway profile) against a scratch `ling web` built from this branch: the real server crate with the UI embedded, in front of a scripted app-server on a Unix socket, port 3199, a scratch home. All 23 checks passed:
