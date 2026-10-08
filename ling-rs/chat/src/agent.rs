@@ -74,8 +74,8 @@ type Socket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
 
 async fn open(target: &WebTarget) -> Result<Socket, String> {
     let port = ling_web_server::cli::running_port(&target.state);
-    if ling_web_server::cli::probe(&target.state, port).is_none() {
-        if let Some(ling) = &target.ling {
+    if ling_web_server::cli::probe(&target.state, port).is_none()
+        && let Some(ling) = &target.ling {
             let _ = tokio::process::Command::new(ling).args(["web", "start"]).status().await;
             for _ in 0..60 {
                 if ling_web_server::cli::probe(&target.state, ling_web_server::cli::running_port(&target.state)).is_some() {
@@ -84,7 +84,6 @@ async fn open(target: &WebTarget) -> Result<Socket, String> {
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
-    }
     let port = ling_web_server::cli::running_port(&target.state);
     let cookie = ling_web_server::ask_client::sign_in(&target.state, port).await?;
     let stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.map_err(|err| format!("ling web is not answering on port {port}: {err}"))?;

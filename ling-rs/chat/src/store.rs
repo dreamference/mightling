@@ -299,8 +299,7 @@ mod tests {
         assert_eq!(config.allowed, vec!["@owner:x".to_string()]);
         write_private(&MatrixConfig::path(&dir), r#"{"homeserver":"http://127.0.0.1:6167"}"#).unwrap();
         assert_eq!(MatrixConfig::load(&dir), None);
-        let mut state = MatrixState::default();
-        state.next_batch = Some("s1".to_string());
+        let mut state = MatrixState { next_batch: Some("s1".to_string()), ..Default::default() };
         state.rooms.insert("@owner:x".to_string(), "!r:x".to_string());
         state.save(&dir).unwrap();
         assert_eq!(MatrixState::load(&dir), state);

@@ -75,40 +75,35 @@ fn inline(line: &str) -> String {
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
-        if c == '`' {
-            if let Some(end) = find(&chars, i + 1, "`") {
+        if c == '`'
+            && let Some(end) = find(&chars, i + 1, "`") {
                 out.push_str("<code>");
                 out.push_str(&escape(&chars[i + 1..end].iter().collect::<String>()));
                 out.push_str("</code>");
                 i = end + 1;
                 continue;
             }
-        }
-        if c == '*' && chars.get(i + 1) == Some(&'*') {
-            if let Some(end) = find(&chars, i + 2, "**") {
-                if end > i + 2 {
+        if c == '*' && chars.get(i + 1) == Some(&'*')
+            && let Some(end) = find(&chars, i + 2, "**")
+                && end > i + 2 {
                     out.push_str("<b>");
                     out.push_str(&inline(&chars[i + 2..end].iter().collect::<String>()));
                     out.push_str("</b>");
                     i = end + 2;
                     continue;
                 }
-            }
-        }
-        if c == '*' && chars.get(i + 1).is_some_and(|next| !next.is_whitespace() && *next != '*') {
-            if let Some(end) = find(&chars, i + 1, "*") {
-                if !chars[end - 1].is_whitespace() {
+        if c == '*' && chars.get(i + 1).is_some_and(|next| !next.is_whitespace() && *next != '*')
+            && let Some(end) = find(&chars, i + 1, "*")
+                && !chars[end - 1].is_whitespace() {
                     out.push_str("<i>");
                     out.push_str(&inline(&chars[i + 1..end].iter().collect::<String>()));
                     out.push_str("</i>");
                     i = end + 1;
                     continue;
                 }
-            }
-        }
-        if c == '[' {
-            if let Some(close) = find(&chars, i + 1, "](") {
-                if let Some(end) = find(&chars, close + 2, ")") {
+        if c == '['
+            && let Some(close) = find(&chars, i + 1, "](")
+                && let Some(end) = find(&chars, close + 2, ")") {
                     let text: String = chars[i + 1..close].iter().collect();
                     let url: String = chars[close + 2..end].iter().collect();
                     if (url.starts_with("https://") || url.starts_with("http://")) && !url.contains(char::is_whitespace) {
@@ -117,8 +112,6 @@ fn inline(line: &str) -> String {
                         continue;
                     }
                 }
-            }
-        }
         out.push_str(&escape(&c.to_string()));
         i += 1;
     }
@@ -144,7 +137,7 @@ pub fn split(markdown: &str, limit: usize) -> Vec<String> {
         // Room for a closing fence if this part ends inside a block.
         let room = limit.saturating_sub(part.len() + 4);
         if rest.len() <= room {
-            part.extend(rest.drain(..));
+            part.append(&mut rest);
         } else {
             let window: String = rest[..room].iter().collect();
             let cut = window
@@ -216,7 +209,7 @@ mod tests {
     #[test]
     fn long_text_splits_at_paragraphs_and_fits() {
         let paragraph = "word ".repeat(30);
-        let text = vec![paragraph.trim(); 10].join("\n\n");
+        let text = [paragraph.trim(); 10].join("\n\n");
         let parts = split(&text, 400);
         assert!(parts.len() > 1);
         for part in &parts {
