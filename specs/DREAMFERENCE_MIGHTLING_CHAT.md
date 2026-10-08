@@ -377,7 +377,9 @@ The user decided that the messenger bridges ship with Mightling, are off by defa
 
 **Compiled at last.**
 - The launcher workspace, with `ling-chat` linked in, built in a scratch export of the pinned Codex.
-- `cargo test --release -p ling-chat` and the launcher's tests ran there. The counts are in the merge's commit message.
+- `cargo test --release -p ling-chat` ran there: 47 passed. The launcher's 230 tests also passed.
+- The end-to-end test through `ling-web-server` once missed its ten-second wait with the other suites running beside it on a busy machine. Its wait is now thirty seconds; alone, it takes about 6.5 s.
+- The built `ling` routes `ling chat` (run with a scratch `HOME`): `status` answered, and `start` refused because nothing was set up.
 - §14's "the launcher was not compiled" no longer holds.
 
 **Off means off across a reboot.**

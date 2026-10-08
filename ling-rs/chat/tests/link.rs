@@ -94,7 +94,9 @@ async fn next_frame(frames: &mut Frames) -> (Value, mpsc::UnboundedSender<Value>
 
 async fn next_out(rx: &mut mpsc::UnboundedReceiver<Outbound>) -> Outbound {
     loop {
-        let out = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.expect("no output").unwrap();
+        // Generous: with the signal, launcher and web suites running beside it on a busy machine,
+        // one answer once took longer than ten seconds to arrive.
+        let out = tokio::time::timeout(Duration::from_secs(30), rx.recv()).await.expect("no output").unwrap();
         if !matches!(out, Outbound::Draft { .. }) {
             return out;
         }

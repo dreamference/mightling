@@ -154,7 +154,7 @@ WantedBy=multi-user.target
 ```
 
 **On these settings:**
-- **Memory:** `MemoryMax=768M` with a 256 MB heap keeps the JVM inside a fixed budget. Unified memory makes a runaway JVM a host problem (CLAUDE.md, host safety). The real footprint is measured in Phase 0 and the cap set from it.
+- **Memory:** `MemoryMax=768M` with a 256 MB heap keeps the JVM inside a fixed budget. Unified memory makes a runaway JVM a host problem (`docs/dev/host-safety.md`). The real footprint is measured in Phase 0 and the cap set from it.
 - **No access to home folders:** `ProtectHome=yes` means the bridge can never open a file of the user's. Attachments reach the Ask folder through `ling web`'s `/api/upload`, which owns that check.
 
 **Updates:**
@@ -616,7 +616,17 @@ The account, the keys and the pairing are left alone. `status` already pointed a
 
 **Verified (2026-10-08, this machine, no Signal network):**
 - **The launcher workspace compiled in a scratch export of the pinned Codex** (`prepare_source` + the pinned V8, `nice -n 10`, `-j 8`), with `codex` and `ling-signal` built together.
-- **Tests:** the launcher's tests, `cargo test --release -p ling-signal -p ling-chat`, and the Python suite; results are in the merge's commit message.
+- **Tests, on the tree merged with `main`:**
+  - `ling-launcher`: 230 passed (1 ignored), including the routing and `update` tests for `ling-signal`;
+  - `ling-signal`: 73 unit tests and 3 end-to-end tests;
+  - `ling-chat`: 47;
+  - `ling-web-server`: 22 unit and 12 server tests;
+  - the Python suite: 954 passed, with the one failure `main` already has in `test_codex_branded_builder.py`.
+- **The built `ling`, run with a scratch `HOME`:**
+  - `ling signal help`, `setup --dry-run` and `setup --refresh --dry-run` printed the plans above;
+  - without `ling-signal` beside it, setup said how to get one and changed nothing;
+  - `ling signal serve` was refused;
+  - `ling chat status` answered, and `ling chat start` refused because nothing was set up.
 - **signal-cli 0.14.9 on the pinned JRE:** it starts with the arm64 JNI library on its library path, inside an empty network namespace (`unshare -rn`). `--version` and `listAccounts` both answered.
 - **The pins:** all three archives (signal-cli, libsignal for arm64, the JRE) matched their pins when downloaded.
 
