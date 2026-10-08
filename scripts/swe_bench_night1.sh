@@ -24,9 +24,11 @@ D=${D:-$HOME/.local/share/dreamference/swe-bench/night1}
 PREFIX=${PREFIX:-n1}
 UNIT=${UNIT:-ling-swe-night1}
 LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
-# The disk a repository's images need at once (about 2.3 GB each unpacked), and the run's reserve.
+# The disk a repository's images need at once (about 2.3 GB each unpacked), and the disk the run
+# keeps free. RESERVE_GB is written into the run's config as `disk_reserve`, so the pre-flight below
+# and the runner's own check (which stops starting instances below it) use the same number.
 IMAGE_GB=3
-RESERVE_GB=100
+RESERVE_GB=${RESERVE_GB:-100}
 
 log() { echo "$(date -Is) $*"; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
@@ -55,10 +57,12 @@ start() {
     free=$(df --output=avail -BG "$HOME/.cache" | tail -1 | tr -dc '0-9')
     echo "Tasks: $count; largest repository: $largest; disk needed about ${need}G, free ${free}G."
     if [ "$free" -lt "$need" ]; then
-        echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`."; exit 1
+        echo "❌ Not enough disk. Leftover instance images can go with \`ling-admin swe-bench clean --images\`;"
+        echo "   or set a smaller reserve, e.g. RESERVE_GB=60 $0 start."; exit 1
     fi
     mkdir -p "$D"
-    { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\n'; } > "$D/dreamference.toml"
+    { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\n' "$RESERVE_GB"; } \
+        > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night 1: default against test discipline on 50 fresh tasks" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" \

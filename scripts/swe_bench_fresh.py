@@ -9,9 +9,11 @@ tasks of ``sample-100.txt``, so they are measured on tasks outside it. This scri
     difficulty, as ``sample-25.txt`` was).
 
 ``validate``
-    Validates the first ``--count`` candidates (default 60) the way ``ling-admin swe-bench setup
-    --validate`` does, in batches of ``--batch``, and removes after each batch the images that batch
-    pulled, so the disk never holds more than one batch (an image is about 2.3 GB unpacked).
+    Validates candidates in order the way ``ling-admin swe-bench setup --validate`` does, until
+    ``--count`` of them (default 60) have a result, in batches of at most ``--batch`` and never more
+    than the disk above the reserve holds, and removes after each batch the images that batch
+    pulled (an image is about 2.3 GB unpacked). A candidate skipped for disk or a failed pull is
+    tried once more.
 
 ``draw``
     Draws ``--count`` tasks (default 50) from the validated tasks outside ``sample-100.txt`` with a
@@ -36,6 +38,7 @@ import hashlib
 import importlib.util
 import json
 import random
+import shutil
 import subprocess
 import sys
 import time
@@ -50,6 +53,8 @@ SAMPLE_100: Final[Path] = swe_bench_settings.CACHE_DIR / "sample-100.txt"
 DEFAULT_LIST: Final[Path] = swe_bench_settings.CACHE_DIR / "fresh-50.txt"
 CANDIDATES: Final[Path] = swe_bench_settings.CACHE_DIR / "fresh-candidates.txt"
 LIVE_UNIT: Final[str] = "puffin-swe-im100-refine"
+# An instance image unpacked (2.1 to 2.4 GB measured), with a margin.
+IMAGE_BYTES: Final[int] = int(2.5 * 1024 ** 3)
 
 # Tiers of the failure analysis (§2): the share of the strong submissions (60% or more overall)
 # that solve a task.
@@ -92,7 +97,13 @@ def busy(unit: str) -> Optional[str]:
     return None
 
 
-def validate(count: int, batch: int, unit: str) -> int:
+def validate(count: int, batch: int, unit: str, disk_reserve: Optional[str]) -> int:
+    """
+    Validates candidates, in order, until ``count`` of them have a recorded result (validated or
+    rejected). Each batch is no larger than the disk above the reserve holds, its images are
+    removed afterwards, and a candidate that could not be validated yet (no disk, no pull) is tried
+    once more later.
+    """
     if not SweBenchHarness.rows(DATASET) or SweBenchHarness.installed_version() != swe_bench_settings.HARNESS_VERSION:
         print("❌ The harness or the dataset snapshot is missing: run `ling-admin swe-bench setup` first.")
         return 1
@@ -100,30 +111,48 @@ def validate(count: int, batch: int, unit: str) -> int:
     if reason:
         print(f"❌ Not now: {reason}.")
         return 1
-    wanted = candidates()[:count]
-    CANDIDATES.write_text(f"# {len(wanted)} candidates, sha256 order, {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"
-                          + "".join(f"{i}\n" for i in wanted))
-    print(f"🔎 Validating {len(wanted)} candidate(s) in batches of {batch} (list: {CANDIDATES})", flush=True)
+    from dreamference.night_shift.night_shift_host import GIB, NightShiftHost
     settings = SweBenchSettings()
+    if disk_reserve:
+        settings.disk_reserve = disk_reserve
+    reserve = NightShiftHost.parse_size(settings.disk_reserve)
+    order = candidates()
+    CANDIDATES.write_text(f"# {len(order)} candidates, sha256 order, {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"
+                          + "".join(f"{i}\n" for i in order))
+    print(f"🔎 Validating until {count} candidate(s) have a result, at most {batch} at a time, "
+          f"keeping {settings.disk_reserve} of disk free (candidates: {CANDIDATES})", flush=True)
     tags = SweBenchImages.tags()
-    good, bad = [], {}
-    for start in range(0, len(wanted), batch):
-        chunk = wanted[start:start + batch]
+    good, bad, tries = [], {}, {}
+    while len(good) + len(bad) < count:
+        queue = [i for i in order if i not in good and i not in bad and tries.get(i, 0) < 2]
+        if not queue:
+            break
+        free = shutil.disk_usage(swe_bench_settings.CACHE_DIR).free
+        room = int((free - reserve) // IMAGE_BYTES)
+        if room < 1:
+            print(f"⚠️  Stopped: {free / GIB:.0f} GiB free and the reserve is {reserve / GIB:.0f} GiB, no room for an "
+                  "image. Free some (`ling-admin swe-bench clean --images`) or pass --disk-reserve.")
+            break
+        chunk = queue[:min(batch, room, count - len(good) - len(bad))]
         images = {i: SweBenchImages.image_for(i, tags) for i in chunk}
         absent = [image for image in images.values() if image and SweBenchDocker.image_digest(image) is None]
         outcome = SweBenchEvaluator.validate(DATASET, chunk, settings)
-        removed = SweBenchImages.remove(absent)
-        for instance_id, problem in sorted(outcome.items()):
+        removed = SweBenchImages.remove([image for image in absent if SweBenchDocker.image_digest(image)])
+        for instance_id in chunk:
+            problem = outcome.get(instance_id, "not validated yet: no result")
             if problem is None:
                 good.append(instance_id)
+            elif problem.startswith("not validated yet"):
+                tries[instance_id] = tries.get(instance_id, 0) + 1
+                print(f"   {instance_id}: {problem} (attempt {tries[instance_id]})", flush=True)
             else:
                 bad[instance_id] = problem
                 print(f"   {instance_id}: {problem}", flush=True)
-        print(f"   batch {start // batch + 1}: {sum(1 for p in outcome.values() if p is None)} of {len(chunk)} "
-              f"validated; {removed} image(s) removed again", flush=True)
+        print(f"   {len(good)} validated, {len(bad)} rejected so far; {removed} image(s) removed again", flush=True)
     fresh = [i for i in SweBenchImages.validated() if i not in set(read_ids(SAMPLE_100))]
-    print(f"✅ {len(good)} of {len(wanted)} validated now; {len(fresh)} validated tasks lie outside sample-100.txt.")
-    return 0
+    print(f"✅ {len(good)} validated and {len(bad)} rejected now; {len(fresh)} validated tasks lie outside "
+          "sample-100.txt.")
+    return 0 if len(good) + len(bad) >= count else 1
 
 
 def strong_rates(experiments: Path) -> Optional[Dict[str, float]]:
@@ -208,9 +237,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser("candidates", help="print the candidates, in validation order")
     listing.add_argument("--count", type=int, default=60)
-    checking = commands.add_parser("validate", help="validate the first --count candidates")
+    checking = commands.add_parser("validate", help="validate candidates until --count have a result")
     checking.add_argument("--count", type=int, default=60)
     checking.add_argument("--batch", type=int, default=10)
+    checking.add_argument("--disk-reserve", default=None,
+                          help="disk to keep free, e.g. 60G (default: [swe_bench] disk_reserve, 100G)")
     checking.add_argument("--wait-for-unit", default=LIVE_UNIT,
                           help=f"refuse while this systemd user unit is active (default {LIVE_UNIT})")
     drawing = commands.add_parser("draw", help="draw the fresh task list")
@@ -226,7 +257,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("\n".join(found[:args.count]))
         return 0
     if args.command == "validate":
-        return validate(args.count, args.batch, args.wait_for_unit)
+        return validate(args.count, args.batch, args.wait_for_unit, args.disk_reserve)
     return draw(args.count, args.seed, args.out, args.experiments)
 
 
