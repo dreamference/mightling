@@ -1,6 +1,6 @@
 # Mightling over Signal: `ling signal`
 
-**Status:** proposed (2026-10-08). The bridge's core is built and unit-tested on branch `features/signal` (§16); nothing has run against a real Signal account. The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
+**Status:** proposed (2026-10-08). The bridge (`ling-signal`) is built and tested on branch `features/signal` (§16), end to end against a scripted signal-cli and a stand-in `ling web`; nothing has run against a real Signal account yet, and `ling signal …` is not routed by the launcher yet (the binary is `ling-signal`). The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 **Builds on:**
 - [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md). The bridge is one more client of `ling web`, signed in like a paired phone (§4.3 there). It uses **Ask threads** (§3 there), the bridge policy (`ling-rs/web/policy.json`) and `/api/upload`.
@@ -271,6 +271,8 @@ When the owner's identity key changes (a new phone, a reinstall, or someone else
 | `conversation.json` | The current thread id, the last eight Signal threads, the queue, the last 1,000 handled timestamps, the ignored-message counter |
 | `pin` (0600) | The registration-lock PIN |
 
+`/run/mightling-signal/status.json` (0644, the unit's `RuntimeDirectory`) is the one file meant for the user: running, mode, whether the owner is paired, whether `ling web` is connected, the air gap, the last owner message's time, the strangers counted, the identity refusals, the last error and the versions. It holds no message text and no account id. `ling-signal status` reads it.
+
 Every file is replaced whole: written to a temporary name, then renamed, as Night Shift writes its tasks.
 
 ---
@@ -355,7 +357,7 @@ Signal shows plain text with style ranges: bold, italic, strikethrough, monospac
 
 ## 11. The air gap
 
-- **When it is checked:** the bridge reads the user-level air-gap level through the resolver crate (`ling-rs/airgapped`), with the user's config paths given at setup, before every send and every turn.
+- **When it is checked:** every five seconds the bridge asks `ling web` for the user-level level (`GET /api/airgapped`, behind the device cookie like every route). The bridge cannot read the user's configuration itself, because `ProtectHome=yes` and its own uid keep it out of the home folder. `ling web` resolves the level with the same crate the sandbox helper uses (`ling-rs/airgapped`): `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of the file `DREAMFERENCE_CONFIG_PATH` names and the user-level file. No session's level is consulted.
 - **At `on`:** it starts no turn and sends nothing. It answers nothing, because answering would itself be a send.
 - **When the level drops back to `off`:** it says once "Mightling was air-gapped from <time> to <time>; messages from then were not read. Send again what you need."
 - **Session-level air gap:** a thread whose own level is `on` (set with `/airgapped on` in the app) is not used by the bridge. `/use` refuses it, saying why.
@@ -377,6 +379,22 @@ Each item is answered on this machine (gx10-1a2b), not on node-b (that machine i
 7. **Signal's hosts:** what the daemon connects to in a minute of idle and a minute of traffic (strace), for the audit's allow-list.
 
 ---
+
+### 12.1 Phase 0 results (2026-10-08, gx10-1a2b)
+
+- **Item 1, arm64: works.**
+  - **What was run:** signal-cli 0.14.9 with Java 25.0.4 (Temurin, in a scratch folder; Ubuntu's `openjdk-25-jre-headless` 25.0.4 is the package setup installs) and exquo's `libsignal_jni.so` 0.103.0 for aarch64, the version the release bundles as `libsignal-client-0.103.0.jar`.
+  - **How the library is found:** `-Djava.library.path=<dir>` through `JAVA_OPTS`, with no change to the jar.
+  - **Result:** `signal-cli --version` answered, and `signal-cli link` reached Signal's provisioning service and printed a `sgnl://linkdevice?…` link. Nothing was linked; the process was stopped there.
+- **Item 2, memory: about 190 MB** resident for the JVM at the link step, with `-Xmx256m -XX:+UseSerialGC`. Idle and receiving are still to be measured with an account. `MemoryMax=768M` stays until then.
+- **Item 4, option names: confirmed** from signal-cli 0.14.9's man page:
+  - `register [--voice] [--captcha …]` and `verify CODE [--pin PIN]`;
+  - `setPin PIN`, a registration lock that, per the man page, "resets after 7 days of inactivity". An always-on bridge stays active.
+  - `updateProfile --given-name`, `updateAccount --discoverable-by-number false` and `updateContact -e/--expiration SECONDS`;
+  - `trust -v SAFETY_NUMBER`, and `listIdentities [-n RECIPIENT]`;
+  - `jsonRpc --receive-mode on-start --ignore-attachments --ignore-stories`;
+  - JSON-RPC parameter names "generally match the long CLI parameter names" in camelCase (`textStyle`, `targetTimestamp`).
+- **Items 3, 5, 6, 7 are open:** the Note to Self sync shape, long messages, how a changed key appears, and the hosts signal-cli connects to. They need a registered number or the owner's phone.
 
 ## 13. Tests
 
@@ -429,4 +447,41 @@ All without Signal, without a network, without `ling web` running, and without s
 
 ## 16. What was built (branch `features/signal`, 2026-10-08)
 
-Filled in as the work lands; see the branch's last commit.
+The crate `ling-rs/signal` (`ling-signal`, library and binary). Like `ling-web-server`, its tests run in a copy of the folder (`cargo test`), with no Codex workspace, no network beyond loopback, no Signal and no sudo: 61 unit tests and one end-to-end test.
+
+| Module | What it does |
+|---|---|
+| `envelope.rs` | Reads a `receive` notification: a direct message, Note to Self (linked mode), a group, or anything else |
+| `gate.rs` | §5.1 and §5.3. The owner by ACI and fingerprint, never by number. Strangers counted, never answered. A changed key refused. Stale and duplicate messages. The pairing code binds the first sender with a key within ten minutes |
+| `command.rs` | §5.2. YES and NO mean something only while an approval is pending |
+| `format.rs` | §9. Markdown to text plus style ranges in UTF-16 units, emoji and CJK included. Splitting at paragraph, line or space without cutting a surrogate pair, with a range across a cut closed and reopened. More than eight parts becomes `answer.md` |
+| `bridge.rs` | The conversation as a pure state machine. Questions open or resume an Ask thread; one runs at a time, five are queued. `/stop` interrupts (also before the turn id is known), and `/new`, `/threads`, `/use N`, `/status` and `/help` work as specified. Approvals are relayed one at a time and declined after ten minutes; permission requests are always declined. Typing is renewed every 10 s; a progress note comes at one minute, then every five. The model-server hint. Air gap `on` sends nothing (not even a receipt), and `off` says what was missed. A lost connection is reported once after 10 s, and a question that was opening its thread is asked again |
+| `rpc.rs` | signal-cli's JSON-RPC on stdio: request ids, `receive` notifications, `send` with `textStyle` and attachments, typing, read receipts, and the trusted fingerprint from `listIdentities` |
+| `agent.rs` | `ling web` as a paired device. `POST /pair` for the cookie, `/ws` with the same envelope as `ling web ask`, `/api/upload` and `/api/airgapped`. The translator from app-server messages to the conversation's events. Server requests other than approvals get a JSON-RPC error, so a turn never hangs on one |
+| `state.rs` | `bridge.json`, `conversation.json`, `device-cookie` (each 0600, replaced whole) and the public `status.json` |
+| `unit.rs` | The unit of §3, plus `RuntimeDirectory=` for the status file. A test checks that nothing in it runs as root |
+| `serve.rs` | The daemon. It carries out the state machine's actions, reconnects to `ling web` with backoff, polls the air gap and sets the disappearing timer once the owner pairs |
+| `setup.rs`, `main.rs` | `ling-signal setup --number +… [--voice] [--dry-run]` prints every step before any sudo: the system account, Java 25, signal-cli 0.14.9 and the arm64 libsignal 0.103.0, both checked against pinned SHA-256s before they are unpacked as root, the bridge in `/usr/local/lib/mightling`, the 0700 state folder and the unit. It then registers (CAPTCHA, SMS or voice code), sets the registration lock, the profile name and number discovery off, pairs with `ling web pair`, writes `bridge.json`, prints the owner code and waits for it. `status`, `start`, `stop` and `unit`. `init`, `pair` and `bind` are for the bridge's own account |
+
+**`ling web`:** new route `GET /api/airgapped` (§11), behind the same credential as every route; its test is in `tests/server.rs`. The web crate's suite passes, 22 unit and 11 server tests.
+
+**The end-to-end test** (`tests/daemon.rs`) runs the real daemon against two stand-ins:
+- **signal-cli:** a shell script that logs every request and delivers a stranger's message, then the owner's.
+- **`ling web`:** a WebSocket server in the test that plays one Ask thread.
+
+It checks:
+- the owner's question becomes `thread/start {prompt: "ask"}` and one `turn/start` with the owner's words;
+- the answer reaches signal-cli as one `send` to the owner, with `textStyle ["14:1:BOLD"]`;
+- the owner sees a read receipt and typing;
+- nothing goes to the stranger, who is counted once;
+- `conversation.json` keeps the thread, and `status.json` names neither the stranger nor the text.
+
+**Not built:**
+- **Launcher routing:** `ling signal …` does not exist yet. The launcher would route it to `ling-signal`, installed beside `ling`.
+- **Release packaging:** release assets for `ling-signal`, and CI building libsignal's JNI library for arm64 (§3).
+- **Owner commands on the node:** `trust`, `remove` and `setup --refresh`.
+- **Linked mode:** the code paths for it are in place and tested at the gate (§4.2), but it is not offered.
+- **Egress audit:** `audit egress --signal` and the egress audit's note.
+- **Phase 2:** everything in §14.
+
+**Not verified:** anything against Signal itself. That needs a dedicated number, and the owner's phone for the code.
