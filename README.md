@@ -47,6 +47,8 @@ command before running it. [Read it first](install.sh) if you like.
 
 **On your laptop:** run the same one-liner on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple
 silicon or Intel). It installs the client, which uses the model on your GB10 over your network.
+On a Mac there is also the desktop app, as a preview: the `-preview.dmg` on the release page. It
+is not notarized, so macOS asks you to allow it once ([how](docs/desktop.md#on-a-mac-preview)).
 
 Already using a coding agent? Paste this into it:
 
