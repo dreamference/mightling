@@ -113,11 +113,15 @@ pub const WEB_ACCESS_INSTRUCTIONS: &str = r#"
 You have web access through two shell commands, run like any other command:
 
     ling-search "your query here"              # search; -n N for more results (default 5)
+    ling-search --read "your question here"    # search and read the top 3 pages; --pages N (1-5)
     ling-fetch "https://example.com"           # fetch a page as readable text
 
 Use them whenever the answer depends on something you cannot know from training or from the files
 in front of you: today's weather or tides, current events, release versions, live documentation,
-anything dated. Search first, then `ling-fetch` a promising URL when the snippets are not enough.
+anything dated. For a quick lookup (a version number, an error message, a URL) use plain
+`ling-search`. For a research question or to read documentation, use `ling-search --read`: one call
+returns numbered sources and an extract of each page, so cite them as [1], [2]. Use `ling-fetch`
+when you already know the URL, or to read one source in full.
 
 Do not say you cannot browse the web. You can, through these commands, unless a later message says web access is off for this session.
 
@@ -562,26 +566,115 @@ pub(crate) fn config_file() -> Option<PathBuf> {
     global.is_file().then_some(global)
 }
 
+/// The context window assumed when neither the server nor the user says what it is.
+pub const FALLBACK_CONTEXT_WINDOW: u64 = 32_768;
+
+/// Overrides whatever the server reports about its context window, in tokens.
+pub const CONTEXT_WINDOW_ENV: &str = "DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW";
+
+/// The same, in the Dreamference TOML file.
+pub const CONTEXT_WINDOW_KEY: &str = "mightling_context_window";
+
 /// Asks the server which model it serves. `None` means it is not answering yet.
+///
+/// The context window is, first match wins: `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW`, then
+/// `mightling_context_window` in the config file, then what the server reports (see
+/// [`context_window_from_card`]; for llama.cpp's server, the window it was started with, from
+/// `/props`), then [`FALLBACK_CONTEXT_WINDOW`]. Ollama's OpenAI endpoint reports no window at all,
+/// so on Ollama the setting is the way to give one.
 pub async fn served_model(client: &reqwest::Client, host: &str) -> Option<ServedModel> {
-    let url = format!("{}/v1/models", host.trim_end_matches('/'));
-    let response = client.get(url).send().await.ok()?;
+    served_model_with(client, host, configured_context_window()).await
+}
+
+/// [`served_model`], given the user's context-window setting.
+async fn served_model_with(client: &reqwest::Client, host: &str, configured: Option<u64>) -> Option<ServedModel> {
+    let base = host.trim_end_matches('/');
+    let response = client.get(format!("{base}/v1/models")).send().await.ok()?;
     if !response.status().is_success() {
         return None;
     }
     let body: serde_json::Value = response.json().await.ok()?;
-    parse_served_model(&body)
+    let card = served_card(&body)?;
+    let id = card.get("id")?.as_str()?.to_string();
+    let reported = match context_window_from_card(card) {
+        Some(window) => Some(window),
+        // llama.cpp's `/v1/models` gives the model's training length (`meta.n_ctx_train`), which
+        // can be far beyond the window the server was started with (`-c`); `/props` has the latter.
+        None if card.get("meta").is_some() => llama_cpp_window(client, base).await.or_else(|| training_window(card)),
+        None => None,
+    };
+    let max_model_len = configured
+        .or(reported)
+        .unwrap_or(FALLBACK_CONTEXT_WINDOW);
+    Some(ServedModel { id, max_model_len })
 }
 
+fn served_card(body: &serde_json::Value) -> Option<&serde_json::Value> {
+    body.get("data")?.as_array()?.first()
+}
+
+/// The context window a `/v1/models` entry reports: `max_model_len` (vLLM, SGLang, MTPLX), then
+/// `context_length` (MTPLX, and the field name several gateways use), then `max_context_length`
+/// (LM Studio's model listing, MTPLX). A zero is no answer.
+pub fn context_window_from_card(card: &serde_json::Value) -> Option<u64> {
+    ["max_model_len", "context_length", "max_context_length"]
+        .iter()
+        .find_map(|key| card.get(*key).and_then(serde_json::Value::as_u64).filter(|window| *window > 0))
+}
+
+/// The model's training length as llama.cpp's server reports it in `/v1/models`: an upper bound,
+/// used only when `/props` does not answer.
+fn training_window(card: &serde_json::Value) -> Option<u64> {
+    card.get("meta")?.get("n_ctx_train")?.as_u64().filter(|window| *window > 0)
+}
+
+/// The window llama.cpp's server was started with: `default_generation_settings.n_ctx` in `/props`.
+async fn llama_cpp_window(client: &reqwest::Client, base: &str) -> Option<u64> {
+    let response = client.get(format!("{base}/props")).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = response.json().await.ok()?;
+    llama_cpp_window_from_props(&body)
+}
+
+fn llama_cpp_window_from_props(body: &serde_json::Value) -> Option<u64> {
+    body.get("default_generation_settings")?
+        .get("n_ctx")?
+        .as_u64()
+        .filter(|window| *window > 0)
+}
+
+/// `DREAMFERENCE_MIGHTLING_CONTEXT_WINDOW`, then `mightling_context_window` in the config file.
+pub fn configured_context_window() -> Option<u64> {
+    configured_context_window_from(
+        std::env::var(CONTEXT_WINDOW_ENV).ok().as_deref(),
+        config_file()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .as_deref(),
+    )
+}
+
+fn configured_context_window_from(env: Option<&str>, toml_text: Option<&str>) -> Option<u64> {
+    if let Some(window) = env.and_then(|value| value.trim().parse::<u64>().ok()).filter(|window| *window > 0) {
+        return Some(window);
+    }
+    let parsed: toml::Table = toml::from_str(toml_text?).ok()?;
+    parsed
+        .get(CONTEXT_WINDOW_KEY)?
+        .as_integer()
+        .and_then(|window| u64::try_from(window).ok())
+        .filter(|window| *window > 0)
+}
+
+#[cfg(test)]
 fn parse_served_model(body: &serde_json::Value) -> Option<ServedModel> {
-    let card = body.get("data")?.as_array()?.first()?;
+    let card = served_card(body)?;
     Some(ServedModel {
         id: card.get("id")?.as_str()?.to_string(),
-        // vLLM always reports it; the fallback only covers another OpenAI-compatible server.
-        max_model_len: card
-            .get("max_model_len")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(32_768),
+        max_model_len: context_window_from_card(card)
+            .or_else(|| training_window(card))
+            .unwrap_or(FALLBACK_CONTEXT_WINDOW),
     })
 }
 
@@ -1090,6 +1183,83 @@ mod tests {
             Some(ServedModel { id: "Intel/Qwen".into(), max_model_len: 32768 })
         );
         assert_eq!(parse_served_model(&json!({"data": []})), None);
+    }
+
+    #[test]
+    fn each_server_reports_its_window_under_its_own_name() {
+        // vLLM and SGLang.
+        assert_eq!(context_window_from_card(&json!({"id": "m", "max_model_len": 262144})), Some(262_144));
+        // MTPLX reports all three; a gateway may send only `context_length`.
+        assert_eq!(context_window_from_card(&json!({"id": "m", "context_length": 65536})), Some(65_536));
+        // LM Studio's model listing.
+        assert_eq!(context_window_from_card(&json!({"id": "m", "max_context_length": 32768})), Some(32_768));
+        // The first one present wins; zero and strings are no answer.
+        assert_eq!(context_window_from_card(&json!({"max_model_len": 0, "context_length": 4096})), Some(4096));
+        assert_eq!(context_window_from_card(&json!({"max_model_len": "8192"})), None);
+        // Ollama's OpenAI endpoint reports nothing.
+        assert_eq!(context_window_from_card(&json!({"id": "qwen", "object": "model", "owned_by": "library"})), None);
+        assert_eq!(
+            parse_served_model(&json!({"data": [{"id": "qwen", "object": "model", "owned_by": "library"}]})),
+            Some(ServedModel { id: "qwen".into(), max_model_len: FALLBACK_CONTEXT_WINDOW })
+        );
+    }
+
+    #[test]
+    fn llama_cpp_gives_its_serving_window_in_props_and_its_training_length_in_models() {
+        let card = json!({"id": "q.gguf", "meta": {"n_vocab": 151936, "n_ctx_train": 262144}});
+        assert_eq!(context_window_from_card(&card), None);
+        assert_eq!(training_window(&card), Some(262_144));
+        assert_eq!(llama_cpp_window_from_props(&json!({"default_generation_settings": {"n_ctx": 32768}})), Some(32_768));
+        assert_eq!(llama_cpp_window_from_props(&json!({"default_generation_settings": {}})), None);
+        assert_eq!(llama_cpp_window_from_props(&json!({"default_generation_settings": {"n_ctx": 0}})), None);
+    }
+
+    #[test]
+    fn the_context_window_setting_comes_from_the_environment_then_the_config_file() {
+        assert_eq!(configured_context_window_from(Some("131072"), Some("mightling_context_window = 8192\n")), Some(131_072));
+        assert_eq!(configured_context_window_from(None, Some("mightling_context_window = 8192\n")), Some(8192));
+        assert_eq!(configured_context_window_from(Some(""), Some("mightling_context_window = 8192\n")), Some(8192));
+        assert_eq!(configured_context_window_from(Some("lots"), None), None);
+        assert_eq!(configured_context_window_from(Some("0"), None), None);
+        assert_eq!(configured_context_window_from(None, Some("mightling_context_window = -5\n")), None);
+        assert_eq!(configured_context_window_from(None, Some("other = 1\n")), None);
+        assert_eq!(configured_context_window_from(None, None), None);
+    }
+
+    #[tokio::test]
+    async fn the_setting_wins_over_the_server_and_llama_cpp_is_asked_for_props() {
+        use std::io::{BufRead, BufReader, Write};
+        // A stand-in llama.cpp server: `/v1/models` with only the training length, `/props` with
+        // the window it was started with.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let mut header = String::new();
+                while reader.read_line(&mut header).is_ok_and(|n| n > 2) {
+                    header.clear();
+                }
+                let body = if line.starts_with("GET /props ") {
+                    r#"{"default_generation_settings": {"n_ctx": 16384}}"#
+                } else {
+                    r#"{"object": "list", "data": [{"id": "q.gguf", "meta": {"n_ctx_train": 262144}}]}"#
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        let client = reqwest::Client::new();
+        let served = served_model_with(&client, &base, None).await.unwrap();
+        assert_eq!(served, ServedModel { id: "q.gguf".into(), max_model_len: 16_384 });
+        let served = served_model_with(&client, &base, Some(65_536)).await.unwrap();
+        assert_eq!(served.max_model_len, 65_536);
     }
 
     #[test]
