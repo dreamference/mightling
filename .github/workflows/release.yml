@@ -59,7 +59,7 @@ on:
       build_mac_preview:
         description: "Also build the Mac desktop app (.dmg, Apple silicon and Intel; preview, unsigned). Needs build_clients, whose macOS ling it bundles"
         type: boolean
-        default: false
+        default: true
 
 # Read-only by default; only the job that publishes the release may write (security review
 # 2026-10). Every action is pinned to a commit, with its tag in a comment, so a moved tag cannot
