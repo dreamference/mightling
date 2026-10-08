@@ -225,7 +225,7 @@ fn link(target: &Path, link_path: &Path) -> io::Result<()> {
     if let Some(parent) = link_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::os::unix::fs::symlink(target, link_path)
+    make_symlink(target, link_path)
 }
 
 /// Rewrites `puffin_<key> =` lines to `mightling_<key> =`, whole-line key matches only.
@@ -327,7 +327,7 @@ fn rename_origin_files(dir: &Path) {
 fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     let metadata = std::fs::symlink_metadata(from)?;
     if metadata.file_type().is_symlink() {
-        std::os::unix::fs::symlink(std::fs::read_link(from)?, to)
+        make_symlink(std::fs::read_link(from)?, to)
     } else if metadata.is_dir() {
         std::fs::create_dir_all(to)?;
         for entry in std::fs::read_dir(from)? {
@@ -372,11 +372,11 @@ mod tests {
         let links = home.join(".local/bin");
         std::fs::create_dir_all(&links).unwrap();
         for name in ["puffin", "puffin-search", "puffin-fetch", "puffin-code"] {
-            std::os::unix::fs::symlink(bin.join(name), links.join(name)).unwrap();
+            make_symlink(bin.join(name), links.join(name)).unwrap();
         }
         let venv_bin = home.join(".local/share/dreamference/venv/bin");
         write(&venv_bin.join("puffin-admin"), "admin");
-        std::os::unix::fs::symlink(venv_bin.join("puffin-admin"), links.join("puffin-admin")).unwrap();
+        make_symlink(venv_bin.join("puffin-admin"), links.join("puffin-admin")).unwrap();
         write(&links.join("puffin-app"), "a real file someone else put here");
         write(
             &home.join(".config/dreamference/config.toml"),
@@ -488,5 +488,29 @@ mod tests {
         let home = scratch("clean");
         assert!(migrate(&home, &home, None).is_empty());
         let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+/// A symbolic link at `link` to `target`. On Windows (which never had a Puffin install to migrate,
+/// but builds this module) a file or directory link by what `target` is.
+fn make_symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
+    #[cfg(windows)]
+    {
+        let (target, link) = (target.as_ref(), link.as_ref());
+        let resolved = link.parent().map_or_else(|| target.to_path_buf(), |parent| parent.join(target));
+        if resolved.is_dir() {
+            std::os::windows::fs::symlink_dir(target, link)
+        } else {
+            std::os::windows::fs::symlink_file(target, link)
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, link);
+        Err(io::Error::new(io::ErrorKind::Unsupported, "symbolic links are not supported here"))
     }
 }

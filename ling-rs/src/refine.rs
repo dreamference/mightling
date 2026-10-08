@@ -33,7 +33,6 @@ use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::io::Read;
 use std::io::Write;
-use std::os::fd::AsFd;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -443,7 +442,7 @@ pub fn around_exec(command: &Command, original: &[OsString], prepared: Vec<OsStr
     let kind = if has_full_access(&user_args) { "separate session with Full Access" } else { "separate read-only session" };
     eprintln!("refine: studying the task first, in a {kind} ({}); then a fresh session does it.", source_now());
     // The study step's stdout goes to this process's stderr: stdout is the doing step's alone.
-    let stdout = std::io::stderr().as_fd().try_clone_to_owned().map_or_else(|_| Stdio::inherit(), Stdio::from);
+    let stdout = stderr_as_stdio();
     let result = run_study(&study, &task, &out, stdout, Stdio::inherit());
     let _ = std::fs::remove_file(&out);
     let study = match result {
@@ -656,6 +655,25 @@ pub fn run_cli(args: &[String]) -> i32 {
             eprintln!("ling refine: unknown action `{other}` (use `ling refine` to see the setting)");
             2
         }
+    }
+}
+
+
+/// This process's stderr as a child's stdout, or the inherited stdout when it cannot be duplicated.
+fn stderr_as_stdio() -> Stdio {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsFd;
+        std::io::stderr().as_fd().try_clone_to_owned().map_or_else(|_| Stdio::inherit(), Stdio::from)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsHandle;
+        std::io::stderr().as_handle().try_clone_to_owned().map_or_else(|_| Stdio::inherit(), Stdio::from)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Stdio::inherit()
     }
 }
 
