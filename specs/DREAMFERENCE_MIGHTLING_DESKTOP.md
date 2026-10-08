@@ -18,7 +18,7 @@
 
 | What | Found |
 |---|---|
-| Package | `chatgpt` 26.930.31730, arm64, maintainer the upstream vendor, homepage `developers.openai.com/codex/app`; 1.5 GB installed. Adds the upstream vendor's apt repository and an AppArmor profile |
+| Package | `chatgpt` 26.930.31730, arm64, maintained by the upstream vendor, homepage `developers.openai.com/codex/app`; 1.5 GB installed. Adds the upstream vendor's apt repository and an AppArmor profile |
 | Shell | An Electron app on the upstream vendor's "owl" Chromium runtime (`owl-electron-app.json`, packaged from `codex/codex-apps/electron` in the upstream vendor's private monorepo). User data directory `Codex`. Main process in `app.asar` (`.vite/build/*.js`), UI a React bundle under `webview/` |
 | The agent | **A bundled `codex` binary** (`resources/codex`, `codex-cli 0.160.0`, statically linked), plus `codex-code-mode-host`, `rg` and `tectonic` beside it |
 | How it runs the agent | Spawns **`codex -c features.code_mode_host=true app-server --analytics-default-enabled`** and speaks JSON-RPC over **stdio**. Alternatives in the same code: a WebSocket URL, a shared local daemon (`codex app-server daemon`), and host kinds `local`, `wsl`, `ssh` and `remote-control` |
@@ -48,7 +48,7 @@ The app-server it drives is the one in our submodule. Its client requests (`app-
 - **Security:** the CLI's sandbox, cached web search by default, approval for elevated commands, project or team **rules** that let named commands run elevated.
 - **Video captions** (the videos themselves were not analysable): "Updating a website using the Vercel and image generation skills"; "Creating a spreadsheet to generate shopping lists using the spreadsheet skill"; "Setting up an automation to periodically create new skills"; a 3D racing game built from one prompt over 7 million tokens, with Codex "playing the game" to test it.
 
-**Added since, from the upstream vendor's documentation and changelog and third-party write-ups:** local / worktree / cloud execution modes and **hand-off** of a thread between Local and Worktree; a **review pane** with staged and unstaged diffs, stage / unstage / revert per file and per hunk, split or unified view, inline comments sent to the composer; **commit, push and "Create pull request"**; **"Open in"** an editor, terminal or file manager; **IDE extension sync** (the app follows the files open in the editor); an **integrated terminal** per thread (Cmd+J); a **command palette** (Cmd+K); **voice dictation**; **pop-out windows**; **queued follow-ups and steering** while a turn runs; editing the previous message (Esc twice); a **context-usage indicator** with a Compress action; **plan mode**; **thread fork**; **local environments** with setup scripts and **project actions**; **notifications**, prevent-sleep; an **artifact viewer** (documents, spreadsheets, images), **sites**; an **in-app browser** and **computer use**; image inputs and generation; web search; **MCP servers**, **plugins**, **apps** (connectors); settings pages and keyboard shortcuts; **Chat/Work** modes in the ChatGPT desktop app; `/app` in the CLI to continue a session in the app.
+**Added since, from the upstream vendor's documentation and changelog and third-party write-ups:** local / worktree / cloud execution modes and **hand-off** of a thread between Local and Worktree; a **review pane** with staged and unstaged diffs, stage / unstage / revert per file and per hunk, split or unified view, inline comments sent to the composer; **commit, push and "Create pull request"**; **"Open in"** an editor, terminal or file manager; **IDE extension sync** (the app follows the files open in the editor); an **integrated terminal** per thread (Cmd+J); a **command palette** (Cmd+K); **voice dictation**; **pop-out windows**; **queued follow-ups and steering** while a turn runs; editing the previous message (Esc twice); a **context-usage indicator** with a Compress action; **plan mode**; **thread fork**; **local environments** with setup scripts and **project actions**; **notifications**, prevent-sleep; an **artifact viewer** (documents, spreadsheets, images), **sites**; an **in-app browser** and **computer use**; image inputs and generation; web search; **MCP servers**, **plugins**, **apps** (connectors); settings pages and keyboard shortcuts; **Chat/Work** modes in the upstream desktop app; `/app` in the CLI to continue a session in the app.
 
 §6 maps every one of these.
 
@@ -58,7 +58,7 @@ The app-server it drives is the one in our submodule. Its client requests (`app-
 
 | Constraint | Consequence |
 |---|---|
-| Mightling talks to no the upstream vendor service (patches `0013`, `0015`, `0016`; the egress audit) | No ChatGPT sign-in, no `codex_apps`, no cloud tasks, no rate-limit or credits UI, no Statsig, no Sentry |
+| Mightling talks to no upstream vendor service (patches `0013`, `0015`, `0016`; the egress audit) | No vendor sign-in, no `codex_apps`, no cloud tasks, no rate-limit or credits UI, no Statsig, no Sentry |
 | The upstream vendor's app is proprietary and not ours to redistribute | Mightling cannot ship it, its webview bundle, its icons, sounds or strings |
 | Mightling is AGPL-3.0 | Anything we take must be licence-compatible (MIT and Apache-2.0 are) |
 | The model is local and smaller | Features that need the upstream vendor's hosted models (image generation, deep research, the upstream vendor's computer-use model) have nothing to call |
@@ -122,7 +122,7 @@ Generated from the `ling` binary the release ships: `ling app-server generate-ts
 
 ### 4.5 Work's frontend
 
-React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinned Node toolchain; `node_modules` not committed. Diff rendering, the terminal (xterm.js) and Markdown/Mermaid rendering use MIT or Apache-2.0 libraries bundled into the app, never loaded from a CDN. Every Onyx-side lesson in AGENTS.md still applies to Chat; for Work, §9 lists the WebKitGTK ones.
+React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinned Node toolchain; `node_modules` not committed. Diff rendering, the terminal (xterm.js) and Markdown/Mermaid rendering use MIT or Apache-2.0 libraries bundled into the app, never loaded from a CDN. Every Onyx-side lesson in `docs/dev/onyx-ui-patches.md` still applies to Chat; for Work, §9 lists the WebKitGTK ones.
 
 ### 4.6 Running the upstream vendor's app on `ling` — rejected as the product
 
@@ -140,7 +140,7 @@ The installed `ling` (0.158.0, built 2 October) was driven over stdio by a scrip
 | Is stdout clean JSON-RPC through the launcher? | **Yes:** 0 non-JSON lines. The launcher's messages go to stderr |
 | Sign-in | `account/read` → `{"account": null, "requiresOpenaiAuth": false}`: nothing to sign in to |
 | **Does the launcher's model choice reach the app-server?** | **No — a bug in today's `ling`, independent of the desktop work.** The CLI applies only root `-c` overrides to `app-server` (`cli/src/main.rs`, the `AppServer` arm); `--oss --local-provider --model <id>` are the TUI's flags and are ignored there. The thread started with `model: ""` and the server warned "Model metadata for `` not found. Defaulting to fallback metadata" — **so Mightling's model catalog, and with it Mightling's prompt blocks, did not apply.** With `-c model="RadixArk/Qwen3.8-27B-NVFP4"` the warning is gone and the session's request carries Mightling's prompt ("You are Mightling, a coding agent…", the `ling-search` block): measured. Fix in §4.2 (the launcher) and, belt and braces, the bridge passes the served model in every `thread/start` |
-| `model/list` | **Empty** even with the model set, although `model_catalog.json` holds the served model. **Cause found (2026-10-03):** the launcher's catalog entry said `"supported_in_api": false`, and Codex drops such a model from every picker unless the session has a ChatGPT sign-in (`ModelPreset::filter_by_auth`, `protocol/src/openai_models.rs`); Mightling never has one, so the TUI's `/model` list was empty too. Nothing else reads the field. Fixed on branch `fix/startup-lines-app-server` (`true`, with a test); not yet in an installed build, so not re-measured |
+| `model/list` | **Empty** even with the model set, although `model_catalog.json` holds the served model. **Cause found (2026-10-03):** the launcher's catalog entry said `"supported_in_api": false`, and Codex drops such a model from every picker unless the session has the vendor's sign-in (`ModelPreset::filter_by_auth`, `protocol/src/openai_models.rs`); Mightling never has one, so the TUI's `/model` list was empty too. Nothing else reads the field. Fixed on branch `fix/startup-lines-app-server` (`true`, with a test); not yet in an installed build, so not re-measured |
 | `permissionProfile/list` | `:read-only`, `:workspace`, `:danger-full-access`, all `allowed: true` at level `off` — the picker's three rows |
 | Remote control | `remoteControl/status/changed` → `disabled` |
 | Rate limits | `account/rateLimits/updated` with every field null: ignore it |
@@ -167,7 +167,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Mightling's** (th
 |---|---|---|---|
 | Project sidebar, threads per project, pin, rename, archive, sections | `project/*` (experimental), `thread/list`, `threadSection/*`, `thread/name/set`, `thread/archive|unarchive`, `thread/metadata/update` | **Same.** Threads from `ling` in a terminal appear here and back (both read `~/.mightling/sessions`) | 1 |
 | Switch threads without losing context; several threads running at once | `thread/loaded/list`, one server, per-thread subscriptions | **Same.** Parallel turns share one model server: Work shows the KV pool's headroom (§7) | 1 |
-| Chat / Work toggle | ChatGPT desktop app | **Mightling's:** Work is the agent, Chat is the Onyx window (§4.2) | 1 |
+| Chat / Work toggle | Upstream desktop app | **Mightling's:** Work is the agent, Chat is the Onyx window (§4.2) | 1 |
 | Command palette, thread search | client, `thread/search` (experimental) | **Same** (Ctrl+K): threads, projects, slash commands, settings | 2 |
 | Pop-out windows | client | **Same:** a thread in its own Tauri window | 2 |
 | Notifications when a turn ends or needs approval | client | **Same:** desktop notification, no bundled sounds | 2 |
@@ -247,7 +247,7 @@ Status: **Same** (the Codex app's behaviour, on our server), **Mightling's** (th
 |---|---|---|---|
 | Scheduled tasks with instructions and optional skills | the app's own scheduler | **Mightling's: Night Shift.** `/night add` from the composer, the queue as a panel, a schedule on the timer `night enable` installs. No new scheduler | 2 |
 | Results land in a review queue | client | **Mightling's:** the morning report, each task's branch as a thread with its diff in the review pane | 2 |
-| Memory across automation runs | `memory/*`, `thread/memoryMode/set` (experimental) | **Mightling's:** COMPACTION §4.4's nightly notes, if built; Codex's own memory if Phase 0 finds it needs no the upstream vendor service | Later |
+| Memory across automation runs | `memory/*`, `thread/memoryMode/set` (experimental) | **Mightling's:** COMPACTION §4.4's nightly notes, if built; Codex's own memory if Phase 0 finds it needs no upstream vendor service | Later |
 | Cloud triggers | The upstream vendor | **No:** no cloud | — |
 
 ### 6.9 Handoff and shared history
@@ -276,7 +276,7 @@ Rebindable in Settings, stored with the window's preferences, not in `config.tom
 
 | Codex app | Why |
 |---|---|
-| ChatGPT sign-in, plan, credits, rate limits, workspace messages | No a cloud account; `requiresOpenaiAuth: false` (§5) |
+| Vendor sign-in, plan, credits, rate limits, workspace messages | No hosted account; `requiresOpenaiAuth: false` (§5) |
 | Cloud tasks, cloud environments, remote control | The upstream vendor's services; `cloud` is refused by the launcher, remote control is `disabled` |
 | Computer use, the upstream vendor's browser plugin, image generation, deep research | No local model or runtime for them |
 | Feedback upload | Uploads to the upstream vendor |
@@ -325,7 +325,7 @@ Threads the app starts are ordinary Codex sessions in `~/.mightling/sessions`. T
 
 ## 9. The webview: what `desktop/` already learned
 
-Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (AGENTS.md, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
+Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (`docs/dev/onyx-ui-patches.md`, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
 
 ---
 
@@ -358,7 +358,7 @@ Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKI
 
 **Phase 3 — optional.** `/app` from the TUI on Linux (one hook), the `ssh` host kind to a node, the preview pane, the artifact viewer, external agent import, dark mode, macOS and Windows builds.
 
-**Not proposed:** ChatGPT sign-in, cloud tasks and triggers, the upstream vendor's bundled plugins, computer use, the upstream vendor's browser, image generation, sites, feedback upload, IDE extension sync, any telemetry.
+**Not proposed:** the vendor's sign-in, cloud tasks and triggers, the upstream vendor's bundled plugins, computer use, the upstream vendor's browser, image generation, sites, feedback upload, IDE extension sync, any telemetry.
 
 ---
 

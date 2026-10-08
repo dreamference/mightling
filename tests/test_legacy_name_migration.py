@@ -1,13 +1,18 @@
 """Puffin became Mightling: `ling-admin`'s one-time migration of a 1.4.x node
 (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.2). Every test runs in conftest's scratch HOME, with
-systemctl and sudo stubbed."""
+systemctl and sudo stubbed. The suite imports the package from the checkout, where the migration
+refuses by itself, so the tests of what it does opt in with MIGHTLING_LEGACY_MIGRATION=1, and the
+tests of the guard leave it unset."""
 
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
-from dreamference.cli.legacy_name_migration import LegacyNameMigration
+import pytest
+
+from dreamference.cli import legacy_name_migration
+from dreamference.cli.legacy_name_migration import OPT_IN_ENV, LegacyNameMigration
 from dreamference.night_shift.night_shift_scheduler import NightShiftScheduler, WINDOW_MARKER
 from dreamference.node.node_advertiser import NodeAdvertiser
 from dreamference.node.node_pairing import KEY_COMMENT
@@ -60,7 +65,12 @@ def _legacy_node(tmp_home: Path):
     return venv, legacy_file
 
 
-def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(monkeypatch, capsys):
+@pytest.fixture
+def opted_in(monkeypatch):
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+
+
+def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(opted_in, monkeypatch, capsys):
     tmp_home = Path(os.path.expanduser("~"))
     venv, legacy_file = _legacy_node(tmp_home)
     calls, enabled_windows, privileged = [], [], []
@@ -101,12 +111,12 @@ def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(m
     assert LegacyNameMigration.run() == [], "a second run finds nothing to do"
 
 
-def test_a_machine_with_nothing_old_says_nothing(capsys):
+def test_a_machine_with_nothing_old_says_nothing(opted_in, capsys):
     assert LegacyNameMigration.run() == []
     assert capsys.readouterr().err == ""
 
 
-def test_a_project_file_with_old_keys_is_named_not_rewritten(monkeypatch, tmp_path, capsys):
+def test_a_project_file_with_old_keys_is_named_not_rewritten(opted_in, monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "dreamference.toml").write_text('puffin_prompt = "high-swe"\n')
     LegacyNameMigration.run()
@@ -114,7 +124,7 @@ def test_a_project_file_with_old_keys_is_named_not_rewritten(monkeypatch, tmp_pa
     assert "no longer read" in capsys.readouterr().err
 
 
-def test_without_a_terminal_the_advertisement_keeps_working_and_the_sudo_line_is_printed(monkeypatch):
+def test_without_a_terminal_the_advertisement_keeps_working_and_the_sudo_line_is_printed(opted_in, monkeypatch):
     tmp_home = Path(os.path.expanduser("~"))
     _venv, legacy_file = _legacy_node(tmp_home)
     monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl([], enabled=False))
@@ -122,3 +132,89 @@ def test_without_a_terminal_the_advertisement_keeps_working_and_the_sudo_line_is
     LegacyNameMigration.run()
     assert f"<type>{SERVICE_TYPE}</type>" in legacy_file.read_text(), "clients see the node under the new type"
     assert not NodeServiceFile.service_path.exists()
+
+
+def _untouched(tmp_home: Path, legacy_file: Path):
+    old_bin = tmp_home / ".local/share/dreamference/puffin/bin"
+    assert (old_bin / "puffin").is_file(), "the live install folder stays where it is"
+    assert (tmp_home / ".local/bin/puffin").is_symlink() and (tmp_home / ".local/bin/puffin-admin").is_symlink()
+    assert (NightShiftScheduler.unit_dir() / "puffin-night.timer").is_file()
+    assert legacy_file.is_file() and "_puffin-node._tcp" in legacy_file.read_text()
+    assert "puffin-node" in NodeServe.authorized_keys().read_text()
+    assert "puffin_airgapped" in (tmp_home / ".config/dreamference/config.toml").read_text()
+    assert (tmp_home / ".local/share/dev.dreamference.puffin/cookies").is_file()
+
+
+def _no_sudo(cls, command, purpose, yes=False):
+    pytest.fail("no sudo when the migration refuses")
+
+
+def test_from_a_source_tree_a_puffin_node_is_left_alone_and_nothing_is_said(monkeypatch, tmp_path, capsys):
+    """The 2026-10-08 incident: the package imported from a worktree, beside a live Puffin install."""
+    tmp_home = Path(os.path.expanduser("~"))
+    _venv, legacy_file = _legacy_node(tmp_home)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dreamference.toml").write_text('puffin_prompt = "high-swe"\n')
+    calls = []
+    monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl(calls))
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(_no_sudo))
+
+    assert not LegacyNameMigration.release_install(), "the suite imports the package from the checkout"
+    assert LegacyNameMigration.run() == []
+
+    assert calls == [], "not even systemctl is asked"
+    assert capsys.readouterr().err == ""
+    _untouched(tmp_home, legacy_file)
+
+
+def test_the_switch_set_to_0_keeps_even_a_release_from_migrating(monkeypatch):
+    tmp_home = Path(os.path.expanduser("~"))
+    _venv, legacy_file = _legacy_node(tmp_home)
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(_no_sudo))
+    monkeypatch.setattr(LegacyNameMigration, "release_install", classmethod(lambda cls, package_dir=None: True))
+    monkeypatch.setenv(OPT_IN_ENV, "0")
+    assert LegacyNameMigration.run() == []
+    _untouched(tmp_home, legacy_file)
+
+
+def test_an_installed_release_migrates_without_the_switch(monkeypatch):
+    tmp_home = Path(os.path.expanduser("~"))
+    _legacy_node(tmp_home)
+    monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl([], enabled=False))
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose, yes=False: False))
+    monkeypatch.setattr(LegacyNameMigration, "release_install", classmethod(lambda cls, package_dir=None: True))
+    assert LegacyNameMigration.run(), "a release with an old layout migrates"
+    assert not (tmp_home / ".local/share/dreamference/puffin").exists()
+
+
+def test_only_a_package_in_site_packages_with_no_source_beside_it_is_a_release(tmp_path):
+    venv = tmp_path / "venv/lib/python3.12/site-packages"
+    (venv / "dreamference").mkdir(parents=True)
+    assert LegacyNameMigration.release_install(venv / "dreamference")
+    debian = tmp_path / "usr/lib/python3/dist-packages"
+    (debian / "dreamference").mkdir(parents=True)
+    assert LegacyNameMigration.release_install(debian / "dreamference")
+
+    checkout = tmp_path / "checkout"
+    (checkout / "dreamference").mkdir(parents=True)
+    for marker in ("setup.py", "pyproject.toml"):
+        (checkout / marker).write_text("")
+    (checkout / "ling-rs").mkdir()
+    assert not LegacyNameMigration.release_install(checkout / "dreamference"), "a checkout or a PYTHONPATH folder"
+    bare = tmp_path / "copied"
+    (bare / "dreamference").mkdir(parents=True)
+    assert not LegacyNameMigration.release_install(bare / "dreamference"), "a copy outside site-packages"
+
+    for marker in legacy_name_migration.SOURCE_MARKERS:
+        tree = tmp_path / f"odd-{marker}" / "site-packages"
+        (tree / "dreamference").mkdir(parents=True)
+        (tree / marker).mkdir()
+        assert not LegacyNameMigration.release_install(tree / "dreamference"), f"{marker} beside the package"
+
+
+def test_the_package_this_suite_imports_is_a_source_tree():
+    """The rule, read against where this very suite imports the package from."""
+    from dreamference.runner.codex_branded_builder import CodexBrandedBuilder
+    assert CodexBrandedBuilder.has_source()
+    assert not LegacyNameMigration.release_install()
+    assert not LegacyNameMigration.allowed()

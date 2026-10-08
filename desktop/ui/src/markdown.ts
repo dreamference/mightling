@@ -1,6 +1,6 @@
 // Markdown for the agent's messages, with nothing in it that can act: raw HTML is shown as text,
 // links are not followable (navigating would replace the Work window, and `target="_blank"` does
-// nothing in this webview: AGENTS.md, the desktop app), and images show their alt text.
+// nothing in this webview: specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §9), and images show their alt text.
 
 import { Marked } from "marked";
 

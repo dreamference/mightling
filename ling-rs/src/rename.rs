@@ -9,7 +9,17 @@
 //!
 //! Std only, and called first thing in `main()` (from `home::use_mightling_home`), before any thread
 //! exists.
+//!
+//! Only an installed binary migrates ([`allowed`]): one that runs from the install folder, the old
+//! one (what `puffin update` replaced) or the new one (a release, or `ling-admin codex build`, which
+//! copies the binary it built there). A binary run from a Cargo target directory, a scratch export
+//! or a copy elsewhere leaves the machine alone, because the migration moves the install folder and
+//! the links of whatever installation the machine runs now. On 2026-10-08 the Python half ran from a
+//! source worktree with the real HOME and broke a live Puffin install that a running benchmark used;
+//! this side follows the same rule, and `MIGHTLING_LEGACY_MIGRATION` (`1` always, `0` never) is the
+//! same switch.
 
+use std::ffi::OsStr;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
@@ -21,6 +31,33 @@ pub const LEGACY_INSTALL_DIR: &str = ".local/share/dreamference/puffin";
 pub const INSTALL_DIR: &str = ".local/share/dreamference/mightling";
 /// Written into the new home after the carry-over, listing what came across.
 pub const MARKER: &str = ".migrated-from-puffin";
+/// `1` migrates whichever binary runs (to test the migration on purpose, in a scratch HOME), `0`
+/// never migrates; unset, only an installed binary does. `ling-admin` reads the same variable.
+pub const OPT_IN_ENV: &str = "MIGHTLING_LEGACY_MIGRATION";
+
+/// Whether this process may migrate: [`OPT_IN_ENV`] when it is `1` or `0`, otherwise whether `exe`
+/// is an installed binary ([`is_installed_binary`]). No executable path means no migration.
+pub fn allowed(home: &Path, exe: Option<&Path>, choice: Option<&OsStr>) -> bool {
+    match choice.and_then(OsStr::to_str).map(str::trim) {
+        Some("1") => true,
+        Some("0") => false,
+        _ => exe.is_some_and(|exe| is_installed_binary(home, exe)),
+    }
+}
+
+/// Whether `exe` sits directly in the `bin` folder of the old or the new install folder under
+/// `home`. Both sides are resolved first, so a link to the binary (`~/.local/bin/ling`) counts as
+/// the binary and a home reached through a symbolic link still matches.
+pub fn is_installed_binary(home: &Path, exe: &Path) -> bool {
+    let resolve = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let exe = resolve(exe);
+    let Some(dir) = exe.parent() else {
+        return false;
+    };
+    [LEGACY_INSTALL_DIR, INSTALL_DIR]
+        .iter()
+        .any(|install| resolve(&home.join(install).join("bin")) == dir)
+}
 
 /// Binaries in the install folder, by their old and new names.
 const BINARIES: &[(&str, &str)] = &[
@@ -481,6 +518,53 @@ mod tests {
         assert!(new_home.join(MARKER).is_file());
         assert!(home.join(LEGACY_HOME_DIR).join("auth.json").is_file(), "the old home is left as it was");
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn only_a_binary_in_an_install_folder_may_migrate() {
+        let home = scratch("guard");
+        legacy_layout(&home);
+        let old = home.join(LEGACY_INSTALL_DIR).join("bin/puffin");
+        assert!(is_installed_binary(&home, &old), "what `puffin update` installed");
+        assert!(
+            is_installed_binary(&home, &home.join(".local/bin/puffin")),
+            "the command link resolves to it"
+        );
+        let new = home.join(INSTALL_DIR).join("bin/ling");
+        write(&new, "ling");
+        assert!(is_installed_binary(&home, &new), "a release, or what `codex build` copied there");
+
+        // The 2026-10-08 case: a build of the launcher run from its source tree, beside a live install.
+        let built = home.join("src/codex-rs/target/release/codex");
+        write(&built, "codex");
+        assert!(!is_installed_binary(&home, &built));
+        let elsewhere = home.join("opt/ling/ling");
+        write(&elsewhere, "copy");
+        assert!(!is_installed_binary(&home, &elsewhere));
+        assert!(!is_installed_binary(&home, &home.join(INSTALL_DIR).join("bin/sub/ling")), "only bin itself");
+        assert!(!is_installed_binary(&home.join("other"), &old), "another home's install folder");
+
+        assert!(!allowed(&home, Some(&built), None));
+        assert!(!allowed(&home, Some(&built), Some(OsStr::new("yes"))), "only 1 and 0 are choices");
+        assert!(allowed(&home, Some(&built), Some(OsStr::new("1"))));
+        assert!(allowed(&home, Some(&old), None));
+        assert!(!allowed(&home, Some(&old), Some(OsStr::new("0"))));
+        assert!(!allowed(&home, None, None), "no executable path, no migration");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_home_reached_through_a_link_still_matches() {
+        let real = scratch("linked-home");
+        let link = real.with_file_name(format!("ling-rename-linked-home-link-{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        make_symlink(&real, &link).unwrap();
+        let exe = real.join(INSTALL_DIR).join("bin/ling");
+        write(&exe, "ling");
+        assert!(is_installed_binary(&link, &exe));
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&real);
     }
 
     #[test]

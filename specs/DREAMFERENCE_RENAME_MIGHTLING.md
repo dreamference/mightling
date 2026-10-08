@@ -102,12 +102,20 @@ Mightling runs it whenever an old layout is present (the old install dir, `~/.pu
 5. **Renames the pairing key** `~/.ssh/puffin-node_ed25519` (and `.pub`) when the new name is free.
 6. **Prints once:** "Puffin is now Mightling: run `ling`", plus "update `ling-admin` with install.sh" when step 4 found no `ling-admin`.
 
-**`ling-admin`** (`dreamference/rename_migration.py`), on a machine with the Python side:
+**`ling-admin`** (`dreamference/cli/legacy_name_migration.py`), on a machine with the Python side:
+0. **The same install-folder move and link removal** as the launcher's steps 1 and 4, so a node whose first new command is `ling-admin` does not start an empty install folder beside the old one.
 1. **The same key rewrite** of the configuration files.
 2. **Replaces the old Night Shift units** (stops and removes the old ones, then reinstalls under the new names when the old timer was enabled). Also any other `puffin-*` user units it installed.
 3. **Replaces the Avahi service file** when it can write it, and otherwise prints the one `sudo` line that does.
 4. **Rewrites the `authorized_keys` lines** carrying the old marker: the forced command's `puffin-admin` becomes the `ling-admin` beside it, and the marker becomes `mightling-node`.
 5. **Moves the desktop app's data dir** when the new one does not exist.
+
+**Only an installed Mightling migrates** (added 2026-10-08). The migration acts on the machine's live installation, so it must never run from code that is merely being developed or tested:
+- **`ling-admin`** migrates only when the package was imported from a `site-packages` (or `dist-packages`) folder with no source tree beside it (`LegacyNameMigration.release_install`): what `install.sh` leaves, the wheel in a virtualenv of its own. A checkout, whether an editable install or `PYTHONPATH=<worktree>`, has `setup.py`, `codex-patches/` and `ling-rs/` beside the package (the same test as `CodexBrandedBuilder.has_source()`) and never migrates by itself. Refusing is silent: no step, no notice, not even the hint about a project's `dreamference.toml`.
+- **`ling`** migrates only when its own executable, resolved, is directly in `~/.local/share/dreamference/puffin/bin` (what `puffin update` replaced) or `~/.local/share/dreamference/mightling/bin` (a release, or the copy `ling-admin codex build` installs from a checkout, so a developer who builds from source still migrates the first time the installed `ling` runs). A binary run from a Cargo target directory, a scratch export or SWE-bench's relocated copy does not (`rename::allowed`). The home's carry-over (step 2) is not gated: it only copies, and leaves `~/.puffin` as it was.
+- **`MIGHTLING_LEGACY_MIGRATION`**, read by both: `1` migrates from anywhere (to test the migration on purpose, in a scratch `HOME`), `0` never migrates, even from an installed release. The tests opt in with `1` and test the guard with it unset; conftest clears it for every test.
+
+Why: on 2026-10-08 the package was run from a source worktree (`PYTHONPATH=<worktree> python -m …`) with the machine's real `HOME`, on a machine still running Puffin 1.4.x. The migration moved `~/.local/share/dreamference/puffin` to `…/mightling` and renamed its binaries, removed the `puffin*` links from `~/.local/bin`, and replaced the Night Shift units with ones naming a `ling-admin` that did not exist yet; a benchmark running on that installation broke.
 
 ### 4.3 What the user sees
 

@@ -227,6 +227,9 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # ~/.mightling whatever HOME said: outside a sandbox it wrote the real `night/runner.lock`, and
     # inside one that write failed a test (2026-10-02). A test that needs the variable sets it.
     monkeypatch.delenv("CODEX_HOME", raising=False)
+    # The rename migration's switch (legacy_name_migration.py): a developer's shell setting must not
+    # decide whether a test migrates. A test that means to migrate sets it.
+    monkeypatch.delenv("MIGHTLING_LEGACY_MIGRATION", raising=False)
 
     # HOME alone does not reach paths a module resolved at import, like VLLM_CACHE_HOME: a test
     # that ran start_server stamped the real ~/.cache/dreamference/vllm/.compile_signature with a

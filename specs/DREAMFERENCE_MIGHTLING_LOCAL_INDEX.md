@@ -15,7 +15,7 @@ the release says in §17.
 
 ## 1. Why, and what Onyx does today
 
-- **The Onyx installed by Mightling indexes nothing.** `onyx-cli deploy install --lite` (AGENTS.md,
+- **The Onyx installed by Mightling indexes nothing.** `onyx-cli deploy install --lite` (`docs/dev/onyx.md`,
   `chat/onyx_runner.py`) deploys the API server, the web server and PostgreSQL only: no Vespa, no
   background workers, no embedding model servers. Full Onyx's main feature, connectors that index
   Drive, folders, Slack and so on into Vespa, is not in this install. Dropping Onyx therefore loses

@@ -8,6 +8,15 @@ on a machine that still has it: the Night Shift timer, the Avahi service file, t
 `authorized_keys`, the user-level configuration keys and the desktop app's data. Each step checks
 before it acts, so on a machine with nothing old it does nothing and says nothing. The old names
 are migrated, never kept working beside the new ones.
+
+It runs only from an installed release (`release_install`): the package imported from a
+`site-packages` folder with no source tree beside it. On 2026-10-08 the package was imported from a
+source worktree (`PYTHONPATH=<worktree> python -m ...`) with the machine's real HOME; the migration
+moved the live install folder of a machine still running Puffin, removed its links and replaced its
+Night Shift units with ones naming a `ling-admin` that did not exist yet, and a running benchmark
+broke. A developer's checkout, editable or on PYTHONPATH, never migrates by itself; a developer who
+means to migrate sets `MIGHTLING_LEGACY_MIGRATION=1` (and `=0` switches it off on an installed
+release too).
 """
 
 import os
@@ -32,19 +41,68 @@ LEGACY_BINARIES: Final[tuple] = (("puffin", "ling"), ("puffin-search", "ling-sea
                                  ("puffin-fetch", "ling-fetch"), ("puffin-code", "ling-code"))
 LEGACY_LINKS: Final[tuple] = ("puffin", "puffin-search", "puffin-fetch", "puffin-code", "puffin-app",
                               "puffin-admin")
+# `1` migrates even from a source tree (to test the migration on purpose, in a scratch HOME); `0`
+# never migrates. Unset, the migration runs only from an installed release. `ling` reads the same.
+OPT_IN_ENV: Final[str] = "MIGHTLING_LEGACY_MIGRATION"
+# A folder pip installs packages into; a checkout or a PYTHONPATH folder is never named so.
+INSTALL_FOLDERS: Final[tuple] = ("site-packages", "dist-packages")
+# What sits beside the package in a source tree and never in an installed one.
+SOURCE_MARKERS: Final[tuple] = (".git", "setup.py", "pyproject.toml", "codex-patches", "ling-rs")
 
 
 class LegacyNameMigration:
     """Moves what a Puffin 1.4.x node left under the old names to the new ones, once."""
 
     @classmethod
+    def release_install(cls, package_dir: Optional[Path] = None) -> bool:
+        """
+        Tells an installed release from a source tree, by where the package was imported from.
+
+        A release install (`install.sh`) puts the wheel in a virtualenv of its own, so the package
+        is in that virtualenv's `site-packages`, with no source beside it. A checkout imports it
+        from the repository, through an editable install or PYTHONPATH, with `setup.py`,
+        `codex-patches/` and `ling-rs/` beside it (`CodexBrandedBuilder.has_source()` is the same
+        test). Both conditions are required, so a copy of the package placed anywhere else is not a
+        release either.
+
+        Args:
+            package_dir (Optional[Path]): The `dreamference` package folder; None means the one
+                this module was imported from.
+
+        Returns:
+            bool: True only for a package installed by pip into a `site-packages` folder.
+        """
+        package_dir = package_dir or Path(__file__).resolve().parent.parent
+        parent = package_dir.parent
+        if parent.name not in INSTALL_FOLDERS:
+            return False
+        return not any((parent / marker).exists() for marker in SOURCE_MARKERS)
+
+    @classmethod
+    def allowed(cls) -> bool:
+        """
+        Whether this process may migrate: from an installed release, unless `MIGHTLING_LEGACY_MIGRATION`
+        says otherwise.
+
+        Returns:
+            bool: True when the migration may run.
+        """
+        choice = os.environ.get(OPT_IN_ENV, "").strip()
+        if choice in ("0", "1"):
+            return choice == "1"
+        return cls.release_install()
+
+    @classmethod
     def run(cls) -> List[str]:
         """
-        Runs every step and prints a notice when one did something.
+        Runs every step and prints a notice when one did something. From a source tree it does
+        nothing and says nothing (`allowed`).
 
         Returns:
             List[str]: What was done, one line per step; empty when there was nothing old.
         """
+        if not cls.allowed():
+            return []
         done: List[str] = []
         for step in (cls.move_install_dir, cls.remove_old_links, cls.rewrite_user_config,
                      cls.replace_night_units, cls.replace_service_file, cls.rewrite_authorized_keys,

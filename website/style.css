@@ -138,11 +138,40 @@ footer .row { display: flex; justify-content: space-between; flex-wrap: wrap; ga
 footer p { margin: 6px 0; max-width: 640px; }
 footer a { color: var(--ink-soft); }
 
+/* Clients under the install line */
+.clients { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; text-align: left; }
+.client { border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; min-width: 0; }
+.client h3 { font-size: 17px; margin-bottom: 6px; }
+.client p { margin: 8px 0 0; color: var(--ink-soft); font-size: 15.5px; }
+.client .cmd { margin-top: 10px; }
+.client .cmd pre { font-size: 0.82em; }
+@media (max-width: 760px) { .clients { grid-template-columns: 1fr; } }
+
+/* Benchmark table */
+.bench td:not(:first-child), .bench th:not(:first-child) { text-align: right; white-space: nowrap; }
+.bench tr.mine td { background: var(--bg-soft); font-weight: 700; }
+.bench tr.group td { color: var(--ink-soft); font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 18px; }
+.bench .ns { color: var(--ink-soft); font-style: italic; }
+.bench .est { display: block; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
+.bench td.ns { white-space: normal; }
+@media (max-width: 640px) {
+  .bench { font-size: 14px; }
+  .bench th, .bench td { padding: 8px 8px; }
+  .tablewrap .bench th:first-child, .tablewrap .bench td:first-child { padding-left: 10px; }
+  .bench th { font-size: 11px; }
+  .bench tr.group td { font-size: 11.5px; }
+}
+a.fn { font-size: 11px; font-weight: 600; vertical-align: super; line-height: 0; margin-left: 3px; text-decoration: none; }
+details.method { margin-top: 18px; }
+.footnotes { margin: 18px 0 0; padding-left: 22px; color: var(--ink-soft); font-size: 14px; }
+.footnotes li { margin: 4px 0; overflow-wrap: anywhere; }
+.footnotes li:target { color: var(--ink); }
+
 .sub.after { margin: 16px 0 0; }
 .sub.flush { margin: 0; }
 .sub.centered { margin: 0 auto; }
 .note-small { margin-top: 10px; font-size: 15px; color: var(--ink-soft); }
 .cmd.has-copy pre { margin-right: 72px; padding-right: 8px; }
 /* A long command must scroll inside its box, not widen the column. */
-.install > *, .proof > *, .pillars > *, .features > * { min-width: 0; }
+.install > *, .proof > *, .pillars > *, .features > *, .clients > * { min-width: 0; }
 .cmd { max-width: 100%; overflow: hidden; }
