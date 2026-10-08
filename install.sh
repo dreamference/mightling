@@ -2,6 +2,7 @@
 # Installs Mightling from a release, with no checkout of the repository and nothing compiled.
 #
 #   ./install.sh [--role client|node] [--version X.Y.Z] [--no-advertise]
+#                [--from <dir>] [--no-host-setup]
 #
 # What it installs depends on the machine:
 #
@@ -31,6 +32,14 @@
 # the key below. Nothing is installed from a signed release whose signature does not verify, or
 # from a release from 1.5.0 on that is unsigned. specs/DREAMFERENCE_RELEASE_SIGNING.md.
 #
+# --from <dir> installs from a directory holding the same asset names and the same checksum and
+# signature files instead of a GitHub release, with no network for Mightling's own files
+# (`ling-admin node provision` copies such a bundle from another node; specs/
+# DREAMFERENCE_MIGHTLING_FLEET.md §7.2). The checks are the same. A `VERSION` file in it names the
+# version, and a `wheelhouse/` folder in it, if present, holds the Python dependencies so pip needs
+# no index either. --no-host-setup skips the host settings (provisioning applies them with
+# `sudo ling-admin node prepare` instead).
+#
 # For a development install from a checkout, use scripts/install_gb10.sh instead.
 set -euo pipefail
 
@@ -46,11 +55,13 @@ LINK_DIR="$HOME/.local/bin"
 ROLE=""
 VERSION=""
 ADVERTISE=1
+FROM=""
+HOST_SETUP=1
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -59,12 +70,22 @@ while [ $# -gt 0 ]; do
         --version)   VERSION="${2:-}"; shift 2 ;;
         --version=*) VERSION="${1#*=}"; shift ;;
         --no-advertise) ADVERTISE=0; shift ;;
+        --from)      FROM="${2:-}"; shift 2 ;;
+        --from=*)    FROM="${1#*=}"; shift ;;
+        --no-host-setup) HOST_SETUP=0; shift ;;
         -h|--help)   usage; exit 0 ;;
         *)           fail "unknown argument: $1 (see --help)" ;;
     esac
 done
 
-for tool in curl gzip awk; do
+if [ -n "$FROM" ]; then
+    [ -d "$FROM" ] || fail "--from: $FROM is not a directory."
+    FROM="$(cd "$FROM" && pwd)"
+    NEEDED="gzip awk"
+else
+    NEEDED="curl gzip awk"
+fi
+for tool in $NEEDED; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is needed and was not found."
 done
 if command -v sha256sum >/dev/null 2>&1; then
@@ -119,56 +140,71 @@ fi
 
 # -- the release -----------------------------------------------------------------------------
 
-# A token is used when GH_TOKEN or GITHUB_TOKEN is set; a logged-in gh's token only for a fork
-# named by MIGHTLING_RELEASE_REPO (the public repository needs none, and a gh login carries far more
-# access than reading a release). It is only ever sent to the API root, never to a download URL
-# the release names.
-TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-if [ -z "$TOKEN" ] && [ -n "${MIGHTLING_RELEASE_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
-    TOKEN="$(gh auth token 2>/dev/null || true)"
-fi
-auth=()
-[ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
-
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-if [ -n "$VERSION" ]; then
-    release_url="$API/repos/$REPO/releases/tags/v${VERSION#v}"
+if [ -n "$FROM" ]; then
+    # A bundle: the asset names are the files in the folder, and "fetching" one copies it.
+    TAG="bundle"
+    [ -f "$FROM/VERSION" ] && TAG="$(head -n 1 "$FROM/VERSION")"
+    for file in "$FROM"/*; do
+        if [ -f "$file" ]; then printf '%s\t%s\n' "$(basename "$file")" "$file"; fi
+    done > "$WORK/assets.tsv"
+    asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
+    fetch() {  # fetch <asset name>: copies it into $WORK, or fails
+        local path; path="$(asset_url "$1")"
+        [ -n "$path" ] || return 1
+        cp "$path" "$WORK/$1"
+    }
 else
-    release_url="$API/repos/$REPO/releases/latest"
-fi
-if ! curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json"; then
-    say "❌ Could not read $release_url" >&2
-    if [ -z "$TOKEN" ]; then
-        say "   Check the network and that $REPO has a published release. If the repository is" >&2
-        say "   private, set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it, or log in with" >&2
-        say "   \`gh auth login\`, and run this again." >&2
-    else
-        say "   Check that the token can read $REPO and that the release exists (drafts are not listed)." >&2
+    # A token is used when GH_TOKEN or GITHUB_TOKEN is set; a logged-in gh's token only for a fork
+    # named by MIGHTLING_RELEASE_REPO (the public repository needs none, and a gh login carries far more
+    # access than reading a release). It is only ever sent to the API root, never to a download URL
+    # the release names.
+    TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -z "$TOKEN" ] && [ -n "${MIGHTLING_RELEASE_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
+        TOKEN="$(gh auth token 2>/dev/null || true)"
     fi
-    exit 1
+    auth=()
+    [ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
+
+    if [ -n "$VERSION" ]; then
+        release_url="$API/repos/$REPO/releases/tags/v${VERSION#v}"
+    else
+        release_url="$API/repos/$REPO/releases/latest"
+    fi
+    if ! curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/vnd.github+json" "$release_url" -o "$WORK/release.json"; then
+        say "❌ Could not read $release_url" >&2
+        if [ -z "$TOKEN" ]; then
+            say "   Check the network and that $REPO has a published release. If the repository is" >&2
+            say "   private, set GH_TOKEN (or GITHUB_TOKEN) to a token that can read it, or log in with" >&2
+            say "   \`gh auth login\`, and run this again." >&2
+        else
+            say "   Check that the token can read $REPO and that the release exists (drafts are not listed)." >&2
+        fi
+        exit 1
+    fi
+
+    TAG="$(awk -F'"' '/^  "tag_name":/ {print $4; exit}' "$WORK/release.json")"
+    [ -n "$TAG" ] || fail "the release at $release_url has no tag."
+
+    # "name<TAB>API url" for every asset. GitHub prints an asset's own "url" before its "name"; the
+    # uploader's "url" in between is a user URL and is not taken.
+    awk -F'"' '
+        /"url": "[^"]*\/releases\/assets\/[0-9]+"/ { url = $4 }
+        /^      "name":/ && url != "" { print $4 "\t" url; url = "" }
+    ' "$WORK/release.json" > "$WORK/assets.tsv"
+
+    asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
+
+    fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
+        local url; url="$(asset_url "$1")"
+        [ -n "$url" ] || return 1
+        local header=()
+        case "$url" in "$API"/*) header=(${auth[@]+"${auth[@]}"}) ;; esac
+        curl -fsSL ${header[@]+"${header[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
+    }
 fi
-
-TAG="$(awk -F'"' '/^  "tag_name":/ {print $4; exit}' "$WORK/release.json")"
-[ -n "$TAG" ] || fail "the release at $release_url has no tag."
-
-# "name<TAB>API url" for every asset. GitHub prints an asset's own "url" before its "name"; the
-# uploader's "url" in between is a user URL and is not taken.
-awk -F'"' '
-    /"url": "[^"]*\/releases\/assets\/[0-9]+"/ { url = $4 }
-    /^      "name":/ && url != "" { print $4 "\t" url; url = "" }
-' "$WORK/release.json" > "$WORK/assets.tsv"
-
-asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/assets.tsv"; }
-
-fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
-    local url; url="$(asset_url "$1")"
-    [ -n "$url" ] || return 1
-    local header=()
-    case "$url" in "$API"/*) header=(${auth[@]+"${auth[@]}"}) ;; esac
-    curl -fsSL ${header[@]+"${header[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
-}
 
 say "🐧 Mightling $TAG for $TARGET, role: $ROLE"
 
@@ -221,6 +257,11 @@ release key ($(tail -n 1 "$WORK/verify.out")). Nothing was installed."
     [ "$(sha256 "$WORK/$SUMS")" = "$wanted" ] \
         || fail "$SUMS does not match its checksum in SHA256SUMS; nothing was installed."
     say "🔏 Release $TAG is signed by Mightling's release key."
+elif [ -n "$FROM" ] && [ "${TAG#this-}" != "$TAG" ]; then
+    # `ling-admin node provision` bundles the build this node runs (VERSION `this-<digest>`): no
+    # release job made it, so there is no release signature to check, only its checksums. A
+    # bundle of a release (VERSION `vX.Y.Z`) carries that release's signature and is checked above.
+    say "⚠️  Bundle $TAG is a build copied from another node, not a release; it is checked against its checksums only."
 elif signing_required "$TAG"; then
     fail "release $TAG is not signed (it has no SHA256SUMS.sig); nothing was installed. Every release \
 from $SIGNED_SINCE on is signed by Mightling's release key, so an unsigned one did not come from its release job."
@@ -280,6 +321,8 @@ for name in $INSTALLED; do
     # Codex looks for its Code Mode host beside its own executable, so that one needs no link.
     [ "$name" = "codex-code-mode-host" ] || link "$INSTALL_DIR/bin/$name" "$name"
 done
+# What was installed, for `node provision`'s state probe and drift report.
+printf '%s\n' "$TAG" > "$INSTALL_DIR/VERSION"
 say "✅ Installed$INSTALLED in $INSTALL_DIR/bin"
 
 # -- the node --------------------------------------------------------------------------------
@@ -310,8 +353,14 @@ if [ "$ROLE" = "node" ]; then
             || fail "python3 could not create a virtualenv (on Ubuntu: sudo apt install python3-venv)."
     fi
     say "📦 Installing ling-admin and what it depends on (about 6 GB with PyTorch; a few minutes) ..."
-    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
-    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade "$WORK/$wheel"
+    pip_index=()
+    if [ -n "$FROM" ] && [ -d "$FROM/wheelhouse" ]; then
+        # Every dependency is in the bundle: no package index is asked.
+        pip_index=(--no-index --find-links "$FROM/wheelhouse")
+    else
+        "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
+    fi
+    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade ${pip_index[@]+"${pip_index[@]}"} "$WORK/$wheel"
     link "$VENV_DIR/bin/ling-admin" ling-admin
     say "✅ Installed ling-admin $TAG in $VENV_DIR"
 
@@ -319,7 +368,9 @@ if [ "$ROLE" = "node" ]; then
     # folder, so the command prints each line before it runs and sudo asks on the terminal; when
     # this script has no terminal (piped into bash), it reads the keyboard through /dev/tty.
     say ""
-    if [ -t 0 ]; then
+    if [ "$HOST_SETUP" = 0 ]; then
+        say "⏭️  Host settings skipped (--no-host-setup)."
+    elif [ -t 0 ]; then
         "$VENV_DIR/bin/ling-admin" host setup || true
     elif (exec < /dev/tty) 2>/dev/null; then
         "$VENV_DIR/bin/ling-admin" host setup < /dev/tty || true

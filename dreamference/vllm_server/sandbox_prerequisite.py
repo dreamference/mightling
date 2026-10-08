@@ -35,10 +35,11 @@ PROFILE_NAME: Final[str] = "puffin-bwrap"
 PROFILE_PATH: Final[str] = f"/etc/apparmor.d/{PROFILE_NAME}"
 USERNS_SYSCTL: Final[str] = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
 
-# Commands that are never asked about: `mcp` and `node serve-job` speak a protocol on stdio, and
-# `host` reports and fixes the sandbox itself.
+# Commands that are never asked about: `mcp` and `node serve-job` speak a protocol on stdio,
+# `node askpass` prints a password for ssh and nothing else, `host` reports and fixes the sandbox
+# itself, and `node prepare` (run as root) applies the same fix.
 QUIET_COMMANDS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
-    ("mcp", None), ("host", None), ("node", "serve-job"),
+    ("mcp", None), ("host", None), ("node", "serve-job"), ("node", "askpass"), ("node", "prepare"),
 )
 
 # What cannot work without the sandbox, refused while it is missing and the user has turned it

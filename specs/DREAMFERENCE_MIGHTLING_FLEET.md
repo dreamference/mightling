@@ -1,6 +1,6 @@
 # Mightling Fleet: setting up more GB10s from the one you have
 
-**Status:** proposed on 2026-10-02; §15's open questions answered by the user on 2026-10-03. Nothing here is built. The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-1a2b`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
+**Status:** proposed on 2026-10-02; §15's open questions answered by the user on 2026-10-03. Phases 1–3 and part of 4 built on 2026-10-03 and tested offline only (§16); nothing has run against a second machine. The research is from NVIDIA's documentation and playbooks, read on 2026-10-02 (§2, sources at the end). The local facts were read on this GB10 (`gx10-1a2b`), without changing anything (§3). No second machine was available, so nothing between two machines was run; Phase 0 (§13) lists what has to be measured on the first new unit.
 **Target:** new DGX Spark-class machines (DGX Spark and the partner GB10 units; this one is an ASUS Ascent GX10) on the same local network as an existing Mightling node.
 **Builds on:**
 - the client/node split, discovery and SSH pairing in [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md), in particular §9 (installing), §12.4 (no roles), §13.2 (pairing), §15.1 (control over SSH) and §18.6 (pairing as built);
@@ -240,7 +240,7 @@ Each step reads first and does nothing if the machine already satisfies it.
 
 ### 7.2 What is installed: a bundle from this machine
 
-`install.sh` gains **`--from <dir>`**: install from a directory holding the same asset names and the same `mightling-<target>.sha256sums`, with no network. The checksum checks stay as they are. It also gains `--no-host-setup`, because step 5 does that part. The bundle is built here, once per run, under `~/.cache/dreamference/fleet/bundle-<version>/`:
+`install.sh` gains **`--from <dir>`**: install from a directory holding the same asset names and the same `ling-<target>.sha256sums`, with no network. The checksum checks stay as they are. It also gains `--no-host-setup`, because step 5 does that part. The bundle is built here, once per run, under `~/.cache/dreamference/fleet/bundle-<version>/`:
 
 - **`--from this`** (the default).
   - **On a machine running from a checkout**, as this one does, the bundle holds:
@@ -492,6 +492,41 @@ Live, from Phase 0 on: everything in §13's list, then one unit end to end, then
 9. **Passwords:** one password by default for several hosts; `--per-host-password` to opt out (§8.2).
 10. **An example Ansible playbook:** no (§6.3).
 11. **The bubblewrap fix:** the AppArmor profile route, `ling-admin host setup` (`/etc/apparmor.d/puffin-bwrap`), loaded and verified on this machine on 2026-10-03: from a systemd user unit `bwrap --unshare-user --unshare-net` and `ling sandbox` succeed and `host check` reports nothing to do. `node prepare` applies the same step (§7.3).
+
+---
+
+## 16. As built (2026-10-03), offline only
+
+Built on branch `fleet/provision`, unit-tested with stand-ins for every machine; **no second GB10 exists here, so nothing below has run against one**. Phase 0 (§13) is still owed in full.
+
+**Code**
+
+| Where | What |
+|---|---|
+| `install.sh` | `--from <dir>`: the asset names are the folder's files and "fetching" copies them; same checksum checks; `curl` is not needed or called. A `VERSION` file names the version and a `wheelhouse/` folder, if present, makes pip use `--no-index`. `--no-host-setup` skips the host settings. Every install now records its version in `~/.local/share/dreamference/mightling/VERSION`, which the probe reads |
+| `dreamference/node/fleet_bundle.py` (`FleetBundle`) | `--from this` on a checkout: the installed binaries gzipped under the release names, a `pip wheel --no-deps` of the checkout, `install.sh`, a sums file and `VERSION` (`this-<digest>`), cached under `~/.cache/dreamference/fleet/`. On a release install, `this` is the installed version's release. `--from release[=X.Y.Z]` downloads with `gh release download` |
+| `dreamference/node/fleet_session.py` (`FleetSession`) | the provisioning session: `ControlMaster=yes` only on the command that opens it (`-f -N`, its output to a file, never a pipe), `ControlMaster=no` on every later command so a lost master fails instead of re-authenticating; the run's own known-hosts file, `accept-new` only at first contact; no agent or port forwarding; `sudo -S -p ''` with the password on stdin, or `sudo` on a remote terminal (`-t`) when no password is held; `sg docker -c` for Docker; `rsync -aH --partial --mkpath` over the master; `docker save | zstd` piped into `zstd -d | docker load`. A per-host log under `~/.local/state/dreamference/fleet/` records each command and output and writes `(input: <password>)` where a password was sent |
+| `dreamference/node/fleet_askpass.py` (`FleetAskpass`) | **departure from §8.2:** ssh closes every descriptor above stderr before it runs its askpass program, so the "inherited pipe" cannot work. The run listens on a Unix socket (0600) in its 0700 folder; `SSH_ASKPASS` is a two-line script running `ling-admin node askpass` (hidden), which asks the socket for the host in `MIGHTLING_ASKPASS_HOST`. Only the socket's path and the host name are in the environment; the server checks the peer's uid (`SO_PEERCRED`) |
+| `dreamference/node/fleet_probe.py` (`FleetProbe`) | the read-only POSIX shell probe of step 2 and its parser: GB10 check, bundle version, `docker` group, linger, Avahi file owner and content, AppArmor profile and the userns restriction, NVIDIA telemetry, free disk, hub path, assigned model, SearXNG running, and each needed model folder and image. Run on this machine (dash) as a check: it printed the expected readings and changed nothing |
+| `dreamference/node/fleet_model_plan.py` (`FleetModelPlan`) | per matrix key: the checkpoint and drafter folders (`NodeModelSync.repos`), the embedding model when this machine has it, the recipe's image and SearXNG's; a reference with a `/` (digest-pinned or not) is pulled by the node, a bare local tag is copied; the 20 GB disk margin |
+| `dreamference/node/node_prepare.py` (`NodePrepare`), `ling-admin node prepare` | §7.3 as specified, reading each setting first. Two details: `HostSafetySetup`'s own sandbox check runs bubblewrap from the invoking user's systemd, which root does not have, so `prepare` checks the AppArmor profile itself (file present and listed in `/sys/kernel/security/apparmor/profiles`); and the Avahi file is created **empty** and owned by the user (`install -m 644 -o <user> /dev/null …`), for `node enable` to fill as the user. Every command is checked against a list of words it may never contain (sshd, netplan, NetworkManager, firewall tools, account tools, APT sources, sudoers) and refused if it does |
+| `dreamference/node/node_provisioner.py` (`NodeProvisioner`), `ling-admin node provision` | §7.1's steps 1–12 with every option of §5. Questions first: with several hosts one `getpass` for all (or one per host with `--per-host-password`), every session opened and every host-key fingerprint printed before the first install; a host refusing the shared password is asked for its own once. Each step reads the probe and does nothing when satisfied (assignment is skipped when the config already names the model, an unset config meaning the default; SearXNG when it runs). A failing step stops that machine there, the others go on, and the summary table names the step and the command left; exit 1 if any machine is incomplete. After the sessions close, start (`serve-job start`) and verify (a chat completion on the model port, a JSON query to SearXNG on 8888) go through the pairing key and the open ports only. The node record gains `provisioned` (bundle, model, image, date) |
+| `dreamference/node/node_pairing.py` | `node add <address>` with no browse (`add_by_login`), and `pair_over_session`: the id and name read over the session (`node id && hostname`), `node authorize` run through it with no second password, the session's accepted host key pinned to the node id; a different key already pinned to that id is refused |
+| `dreamference/node/node_browser.py` | `browse_service()` for any DNS-SD type and `unprovisioned()`: `_ssh._tcp` hosts not advertised as `_mightling-node._tcp`, named `spark-…`, `gx10-…` or `zgx-…` (or `--match`) |
+| CLI, `sandbox_prerequisite.py`, `scripts/gen_admin_reference.py` | `node provision`, `node prepare`, hidden `node askpass`; the sandbox gate never asks during `node askpass` (it must print the password and nothing else) or `node prepare`; the reference generator skips hidden subcommands |
+| `tests/conftest.py` | any real `ssh`, `scp`, `rsync`, `sudo` or `sg` from a test fails it. It caught one at once: the existing pairing test's "not on the network" case now falls through to pairing by address, which tried a real login |
+
+**Tests:** `tests/test_fleet_provision.py`, 34 tests: session options, the password never in argv, environment or log, `sudo -S` against a terminal prompt, `sg docker`, the `-f` master never on a pipe, askpass over a real socket (its own host only, nothing printed otherwise), `prepare`'s refusals and its exact missing steps, no forbidden word in any real step, the probe never writing and its parsing, the plan for every offered model, the disk check, discovery's filtering, host-key pinning and mismatch, `node add` falling back to a login, and whole runs against stand-in machines: one machine end to end, questions before any install with two, one password by default and one per host on request, a second run issuing no changing command, a failure stopping only its machine, a non-GB10 left untouched, a dry run changing nothing, `--web`, another model assigned, an unknown model refused before connecting; and `install.sh --from` against a real bundle (no `curl`, the version recorded, a checksum failure installing nothing). Full suite: 767 passed, 76 skipped.
+
+**Not built**
+- `--mesh`: the flag is accepted and says so. Pairing node A with node B needs B's password typed on A, and the session to A has no terminal for it; the askpass route would have to run on A.
+- The drift fields of `info` and the drift column in `node list` (§10.1).
+- Installs running side by side on several machines (§9.2): machines are provisioned one after another.
+- The wheelhouse as the default (Phase 0 item 9); `install.sh` uses one when the bundle carries it, but `FleetBundle` does not build one.
+- The image-id fix of §7.4 (after Phase 0).
+- `--os-update` is written (stop the server, `apt-get dist-upgrade`, `fwupdmgr`, reboot, wait for SSH, probe again) but is the least tested step: stand-ins only, no reboot ever observed.
+
+**Unverified, and how Phase 0 settles each:** that `sg docker -c` reaches the socket from a multiplexed session (item 4); that `SSH_ASKPASS_REQUIRE=force` with the socket script answers a real password prompt; that `sudo -S -p ''` over `ssh -T` reads the password (item 4); copy throughput (item 5); whether an empty file under `/etc/avahi/services` only makes Avahi log a parse warning until `node enable` fills it; and that the readiness check by `/v1/models` on the node's host name resolves from here (a `.local` name needs mDNS on this machine).
 
 ---
 

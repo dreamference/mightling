@@ -428,7 +428,7 @@ One helper, `home_dir()`, reading `HOME` then `USERPROFILE`, is shared by the st
 
 ### 16.2 Release assets
 
-Per binary, as today: `mightling-aarch64-pc-windows-msvc.gz` (holding `ling.exe`), `codex-code-mode-host-…`, `ling-search-…`, `ling-fetch-…`, `ling-code-…`, and the three sandbox helpers `codex-windows-sandbox-setup-…`, `codex-windows-sandbox-service-…` and `codex-command-runner-…`, under the names Codex looks for. One `mightling-aarch64-pc-windows-msvc.sha256sums` covers them, so `install.ps1` and `ling update` share one mechanism, as `install.sh` and `update.rs` do. `ling-app` ships as an NSIS `.exe`. Codex's LICENSE and NOTICE travel with them.
+Per binary, as today: `ling-aarch64-pc-windows-msvc.gz` (holding `ling.exe`), `codex-code-mode-host-…`, `ling-search-…`, `ling-fetch-…`, `ling-code-…`, and the three sandbox helpers `codex-windows-sandbox-setup-…`, `codex-windows-sandbox-service-…` and `codex-command-runner-…`, under the names Codex looks for. One `ling-aarch64-pc-windows-msvc.sha256sums` covers them, so `install.ps1` and `ling update` share one mechanism, as `install.sh` and `update.rs` do. `ling-app` ships as an NSIS `.exe`. Codex's LICENSE and NOTICE travel with them.
 
 ### 16.3 Signing
 

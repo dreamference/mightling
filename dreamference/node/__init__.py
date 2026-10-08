@@ -4,6 +4,11 @@ The node half of Mightling: the GB10 that serves the model, advertised on the lo
 (specs/DREAMFERENCE_MIGHTLING_NODE.md).
 """
 
+from dreamference.node.fleet_askpass import FleetAskpass
+from dreamference.node.fleet_bundle import FleetBundle
+from dreamference.node.fleet_model_plan import FleetModelPlan
+from dreamference.node.fleet_probe import FleetProbe
+from dreamference.node.fleet_session import FleetSession
 from dreamference.node.node_advertiser import NodeAdvertiser
 from dreamference.node.node_browser import NodeBrowser
 from dreamference.node.node_identity import NodeIdentity
@@ -12,12 +17,19 @@ from dreamference.node.node_job_sender import NodeJobSender
 from dreamference.node.node_lanes import NodeLanes
 from dreamference.node.node_model_sync import NodeModelSync
 from dreamference.node.node_pairing import NodePairing
+from dreamference.node.node_prepare import NodePrepare
+from dreamference.node.node_provisioner import NodeProvisioner
 from dreamference.node.node_remote import NodeRemote
 from dreamference.node.node_serve import NodeServe
 from dreamference.node.node_service_file import PROTO, SERVICE_TYPE, NodeServiceFile
 from dreamference.node.node_settings import NodeSettings
 
 __all__ = [
+    "FleetAskpass",
+    "FleetBundle",
+    "FleetModelPlan",
+    "FleetProbe",
+    "FleetSession",
     "NodeAdvertiser",
     "NodeBrowser",
     "NodeIdentity",
@@ -26,6 +38,8 @@ __all__ = [
     "NodeLanes",
     "NodeModelSync",
     "NodePairing",
+    "NodePrepare",
+    "NodeProvisioner",
     "NodeRemote",
     "NodeServe",
     "NodeServiceFile",
