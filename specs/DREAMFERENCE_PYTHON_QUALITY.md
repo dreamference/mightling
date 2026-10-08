@@ -15,7 +15,7 @@ There is no single Stanford coding standard. Two Stanford sources between them c
 
 **Where they disagree, CS 190 wins.** CS106A's "less than 10 lines" is a rule for first programs. Applied to a code base, it produces what CS 190 calls *classitis* and *shallow modules*: many tiny functions whose interfaces are as complicated as their bodies, and a reader who has to jump between them to follow one idea. This standard therefore limits **complexity and nesting** hard (§3.4) and uses **length** only as a trigger for a look (§5), not as a limit.
 
-PEP 8 and PEP 257 are the base layer, and the **Google Python Style Guide's docstring format** stays, because it is already the project's norm (CLAUDE.md "Conventions").
+PEP 8 and PEP 257 are the base layer, and the **Google Python Style Guide's docstring format** stays, because it is already the project's norm (AGENTS.md "Conventions").
 
 ---
 
@@ -36,7 +36,7 @@ PEP 8 and PEP 257 are the base layer, and the **Google Python Style Guide's docs
 | Lines over 100 / 120 characters | 983 / 216 | |
 | Other flake8 findings | 23 unused imports, 10 f-strings without placeholders, 22 `if x: y` on one line, 2 unused variables, ~140 whitespace and blank-line findings | mechanical |
 | One class per file | 2 files break it: `chat/image_search_service.py` (7 classes), `cli/code_index_setup.py` (2) | |
-| Dead shim modules | 7 (`dreamference/{cli,config,hardware,runner,context_engine,mcp_server,vllm_server}.py`), each a `from … import *` shadowed by its package (CLAUDE.md "Gotchas") | they are the source of the 7 `F403` star-import findings |
+| Dead shim modules | 7 (`dreamference/{cli,config,hardware,runner,context_engine,mcp_server,vllm_server}.py`), each a `from … import *` shadowed by its package (AGENTS.md "Gotchas") | they are the source of the 7 `F403` star-import findings |
 | Tooling | flake8 7.3 in `.venv`; no ruff, mypy, pyright or formatter; no `pyproject.toml`; no test job in `.github/workflows/` (only `docs.yml`, `release.yml`) | |
 
 Two readings follow. The **habits are already good** (docstrings, annotations, `Final` constants, one class per file): what is missing is a check that keeps them, and the cleanup of a handful of very large functions. And **the problem is concentrated**: five functions hold most of the complexity, so the refactoring phase (§6, Phase 3) is a short list, not a rewrite.
@@ -91,7 +91,7 @@ Function **length** has no hard limit, for §1's reason; a function over 40 line
 - `Any` (`ANN401`) is not allowed in a **public** signature. Inside a function it is allowed where JSON from an outside service arrives, and should be narrowed to a `TypedDict` at the boundary where its shape is known (Onyx's admin API, `/v1/models`, the registry's `launch_overrides`).
 
 ### 3.9 Project conventions, checked by the ratchet test (§4) because no linter knows them
-- **One class per file**, the file named after the class in snake_case (CLAUDE.md). Exempt: a file that is copied into a container and run there as one script; the exemption is a list in the test, each entry with its reason.
+- **One class per file**, the file named after the class in snake_case (AGENTS.md). Exempt: a file that is copied into a container and run there as one script; the exemption is a list in the test, each entry with its reason.
 - **`__init__.py` is a facade** with an explicit `__all__` and no logic.
 - **No module-level logic** beyond constants, imports and `__all__`.
 - **`print` only in `cli/`** and in the console-facing methods it calls; long-running services (`gmail_search_service`, `image_search_service`, the MCP server, `diffusion_openai_service`) log through `logging` (`T201` with per-file ignores).
@@ -149,7 +149,7 @@ Every phase is **behaviour-preserving**: the full suite passes before and after,
 **Phase 1: mechanical.** One commit each, listed in `.git-blame-ignore-revs` so `git blame` skips them:
 1. `ruff format` over everything.
 2. `ruff check --fix` with **safe** fixes only (imports, whitespace, pyupgrade, f-strings without placeholders).
-3. Delete the seven dead shim modules. Before deleting, a test asserts that `import dreamference.hardware` (etc.) resolves to the package's `__init__.py`, which is what CLAUDE.md says already happens.
+3. Delete the seven dead shim modules. Before deleting, a test asserts that `import dreamference.hardware` (etc.) resolves to the package's `__init__.py`, which is what AGENTS.md says already happens.
 4. Land `tests/test_code_quality.py` with the baseline.
 
 The formatting commit touches nearly every file, so it is made **when no other branch is open** (on 2026-10-03 there were six worktrees with work in flight); a branch opened before it is rebased with `ruff format` run on its side first.
@@ -158,7 +158,7 @@ The formatting commit touches nearly every file, so it is made **when no other b
 
 **Phase 3: the five functions.** One function per change, tests first where coverage is thin:
 1. **`run_cli`** (complexity 228, 1,265 lines): a dispatch table from subcommand to one handler method per command group (`_cmd_server`, `_cmd_node`, `_cmd_night` …), each handler under the §3.4 limits. The parser (`build_parser`) stays a flat table.
-2. **`build_launch_command`** (33): one method per argument family (engine, memory, speculation, parsers), composed in order. The registry stays the source of truth for flags (CLAUDE.md "Model matrix is the source of truth").
+2. **`build_launch_command`** (33): one method per argument family (engine, memory, speculation, parsers), composed in order. The registry stays the source of truth for flags (AGENTS.md "Model matrix is the source of truth").
 3. **`start_server`** (28, 367 lines): split along its existing stages (pre-flight, sidecar, launch, watch). **Both host-safety layers are preserved** and their order is unchanged; this is the riskiest refactor here and gets a test per stage boundary before it is touched.
 4. **`GmailSearchService.serve`** (37): routing table plus one handler per endpoint.
 5. **`ContainerDiagnostics.get_diagnostics_line`** (30), then `DreamferenceConfig.__init__` (224 lines: the 4-tier resolution is one rule applied per field; make it a table of fields and one resolver).
@@ -172,7 +172,7 @@ The formatting commit touches nearly every file, so it is made **when no other b
 - `ruff format --check` and `ruff check` pass with an **empty** baseline for `C901`, `PLR0912`, `PLR1702`, `E722` and `D`, and a baseline for every other rule that is lower than at Phase 0.
 - mypy `strict` passes for `config/`, `hardware/` and `context_engine/` at least.
 - No function in `dreamference/` has complexity above 10 except the ones listed by name, with a reason, in `pyproject.toml`.
-- CLAUDE.md "Conventions" points at this spec and names the command that runs the checks.
+- AGENTS.md "Conventions" points at this spec and names the command that runs the checks.
 - The suite still runs offline and in about the same time.
 
 ---
@@ -192,7 +192,7 @@ The formatting commit touches nearly every file, so it is made **when no other b
 ## 9. Risks
 
 - **Churn against parallel work.** The format commit conflicts with every open branch (§6, Phase 1 says when to make it).
-- **Refactoring host-safety code** (`start_server`). A change in the order of the pre-flight, the sidecar start and the watchdog can freeze the host (CLAUDE.md "Host-safety subsystem"). Mitigation: per-stage tests first, and no change to the order.
+- **Refactoring host-safety code** (`start_server`). A change in the order of the pre-flight, the sidecar start and the watchdog can freeze the host (AGENTS.md "Host-safety subsystem"). Mitigation: per-stage tests first, and no change to the order.
 - **Rules that do not fit.** `PLR2004` may be noisy against the registry's numeric tables, `T201` against the CLI's voice. Phase 0 decides with real counts, and a per-file ignore with a reason is an acceptable answer.
 - **Over-decomposition.** The limits of §3.4 can be met by splitting a function into shallow pieces, which §5 flags. The reviewer's checklist is part of the standard, not decoration.
 
@@ -235,7 +235,7 @@ mypy 2.4.0, default strictness, `ignore_missing_imports`: **89 errors in 29 of 1
 
 `tests/test_code_quality.py` and `tests/quality_baseline.json` implement §4 as written: ruff's findings and the PQ checks of §3.9 (PQ001 one class per file, PQ002 `__init__.py` without `__all__`, PQ003 work at import time), counted per file and rule; a rise fails and names it; a new file counts from zero; a fall prints the update command; a ruff other than the pinned one fails with the install command; `--update-baseline` refuses to raise a count unless given `--allow-raise`. It runs in 0.7 s and passes against the tree it recorded.
 
-It is **on the branch `quality/phase0`, not on `main`**, because of what it would do to work in flight: new code written in today's house style (`Optional[...]`, the summary on a docstring's second line, `os.path`) fails it from its first commit, while CLAUDE.md tells every author to match the surrounding style. Checked against the branches open on 2026-10-03: `fleet/provision`'s new `node/fleet_session.py` would fail with 7 rule counts above zero (`D212` 15, `D205` 11, `UP045` 11, `UP006` 8, `PLR2004` 4, `UP035`, `PTH123`), and `swe/runtime-lzma` with one (`UP006` 2→3 in `swe_bench_runtime.py`); `ctx/budget` and `tests/watchdog-leak` would pass. Phase 1's safe-fix commit converts the tree to the style the rules ask for; the test lands right after it with a re-recorded baseline, which is §6's order anyway (step 4).
+It is **on the branch `quality/phase0`, not on `main`**, because of what it would do to work in flight: new code written in today's house style (`Optional[...]`, the summary on a docstring's second line, `os.path`) fails it from its first commit, while AGENTS.md tells every author to match the surrounding style. Checked against the branches open on 2026-10-03: `fleet/provision`'s new `node/fleet_session.py` would fail with 7 rule counts above zero (`D212` 15, `D205` 11, `UP045` 11, `UP006` 8, `PLR2004` 4, `UP035`, `PTH123`), and `swe/runtime-lzma` with one (`UP006` 2→3 in `swe_bench_runtime.py`); `ctx/budget` and `tests/watchdog-leak` would pass. Phase 1's safe-fix commit converts the tree to the style the rules ask for; the test lands right after it with a re-recorded baseline, which is §6's order anyway (step 4).
 
 ---
 

@@ -151,7 +151,7 @@ A CSS `content` swap would leave the original in the accessibility tree and in f
 
 The block is appended to **every** stylesheet under `/app/.next`, because Next.js splits CSS per route. It opens with `/*dreamference-ui-overrides*/`, and a re-run cuts at the marker and rewrites, so later edits apply.
 
-**Rules of the craft** (details in `CLAUDE.md`):
+**Rules of the craft** (details in `AGENTS.md`):
 - **Match Onyx's specificity exactly.** The selected sidebar row is `.interactive[data-interactive-variant^="sidebar"][data-interactive-state="selected"]` → `#0ABAB5`, and on hover `#09A19C`.
 - **Redefine tokens instead of repainting.** Message text is black because `--text-04`/`--text-05` are redefined.
 - **Anchor to things a build cannot renumber:** `data-testid`, `data-*`, `aria-label`, `opal-…` BEM classes and SVG viewBoxes. Never Tailwind utilities.

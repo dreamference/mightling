@@ -39,7 +39,6 @@ ENV/
 .dreamference/
 .antigravity/
 .gemini/
-.claude/
 /config/
 
 # The Electron app: npm's install, Vite's and Forge's output, the binaries copied in for bundling

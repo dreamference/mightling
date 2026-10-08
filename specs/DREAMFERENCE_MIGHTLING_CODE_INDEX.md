@@ -455,7 +455,7 @@ The layers name things differently. The graph has qualified names (`dreamference
 - **Prompt:** the launcher appends a `# Code navigation` block to the model's prompt, next to web access and Gmail. The text is what `ling-code prompt-block` prints (§4.2). It covers the commands of §7.1, the meaning of `exact`/`heuristic`/`unresolved`/`not indexed`/`not checked`, and one rule: *before changing a signature, renaming or deleting, run `ling-code refs`. If any row is `heuristic`, `unresolved` or `not indexed`, or the answer has a `not checked` line, confirm with `rg` and run the build or tests after the edit.*
 - **Ready, building or absent:** the block is full, reduced or absent according to the index state at launch (§4.1).
 - **MCP:**
-  - `ling-code mcp` serves the same operations over stdio for Claude Code and IDEs, and replaces jCodeMunch in `~/.claude.json` once implemented.
+  - `ling-code mcp` serves the same operations over stdio for Claude Code and IDEs, and can be registered in `~/.claude.json` once implemented.
   - `ling-admin mcp`'s `workspace_search_code` is re-pointed at the router; the `dreamference` context engine (per-file TF-IDF, FTS5 and embeddings) is retired once the router passes §10, since it answers a subset of `ling-code search` with no call graph.
   - The local model keeps using shell commands, because it does not reliably call MCP tools under Codex's Code Mode (see `codex_runner.py`'s history).
 

@@ -266,7 +266,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 **What Phase C deletes:**
 - `dreamference/chat/onyx_runner.py`, `onyx_installer.py`, `onyx_brand_assets.py`, `onyx_ui_fonts.py`, `onyx_ui_labels.py`, `onyx_ui_overrides.py`, `onyx_ui_scripts.py`, and their tests;
 - the `chat` command group's Onyx subcommands and `server start --no-onyx`;
-- the Onyx sections of CLAUDE.md (about a third of it) and the docs' web-chat page. [ONYX](./DREAMFERENCE_ONYX.md) is kept as history, marked retired.
+- the Onyx sections of AGENTS.md (about a third of it) and the docs' web-chat page. [ONYX](./DREAMFERENCE_ONYX.md) is kept as history, marked retired.
 
 **Rollback:** until Phase C ships, `ling-admin chat start` brings Onyx back with the user's data.
 
@@ -324,7 +324,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 - **MIGHTLING_APPS:** Connect is linked from the UI's Settings → Apps rather than Onyx's injected button.
 - **IMAGE_SEARCH:** an MCP tool instead of an Onyx custom tool; served by `ling web`.
 - **MIGHTLING_EGRESS:** the `--web` mode.
-- **ARCHITECTURE, CLI, SETUP, CLAUDE.md:** the web UI is `ling web`; the `chat` command group shrinks, then goes.
+- **ARCHITECTURE, CLI, SETUP, AGENTS.md:** the web UI is `ling web`; the `chat` command group shrinks, then goes.
 
 ---
 
