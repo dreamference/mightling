@@ -12,6 +12,11 @@ SWE-bench runs `ling` inside each instance's own container (`dreamference/swe_be
 4. Codex's sandbox cannot start in a container, so the agent runs with the bypass flag and **the container is the sandbox** (an internal Docker network that reaches the model server at its gateway and nothing else), which is also why `/airgapped on` cannot be set there (`ling` refuses `on` with the bypass flag).
 5. The image's `PATH` puts conda's base environment first, so the container's `PATH` leads with the `testbed` environment.
 6. `HEAD` is not `base_commit` in those images, so the patch is collected against the tree the agent started from.
+7. The upstream eval script resets the test patch's files with one `git checkout <base> <files>`, which resets nothing when the test patch adds a file. The dataset file each harness call gets rewrites that line to reset file by file (`SweBenchHarness.per_file_reset`), so the agent's own test edits never survive into grading (`specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md` §5.2, §8).
+
+## Arms and regrades from the failure analysis
+
+`run --task-rules tests` adds three lines of test discipline to the task prompt; `eval --drop-test-hunks` grades a run's predictions again with their test files left out, in a grading series of its own (`eval-drop-test-hunks/`). Fresh tasks outside `sample-100.txt` are validated and drawn with `scripts/swe_bench_fresh.py`, and `scripts/swe_bench_night1.sh` runs the first pair. See the failure analysis's §8.
 
 ## The code index in a run
 
