@@ -37,6 +37,8 @@ use crate::state::Conversation;
 
 /// Waits between attempts to reach `ling web`.
 const BACKOFF_S: [u64; 5] = [1, 2, 5, 10, 30];
+/// The conversation's disappearing-message timer, set once the owner pairs: one week.
+const DISAPPEARING_S: u64 = 7 * 24 * 3600;
 /// How often the air-gap level is asked for.
 const AIRGAP_EVERY: Duration = Duration::from_secs(5);
 
@@ -253,6 +255,13 @@ impl Daemon {
                 self.config.binding = None;
                 if let Err(err) = self.config.save(&self.state_dir) {
                     self.note_error(format!("could not save bridge.json: {err}"));
+                }
+                // Messages here disappear after a week, so code and mail shown on the phone do not
+                // stay there for good (§4.1 step 5).
+                if let Some(aci) = self.owner()
+                    && let Err(err) = self.signal.call("updateContact", json!({ "recipient": aci, "expiration": DISAPPEARING_S })).await
+                {
+                    self.note_error(format!("could not set disappearing messages: {err}"));
                 }
                 self.send_text(&Styled::plain("Paired. Ask me anything; /help lists what else I understand.")).await;
                 self.save_conversation();

@@ -14,5 +14,6 @@ pub mod format;
 pub mod gate;
 pub mod rpc;
 pub mod serve;
+pub mod setup;
 pub mod state;
 pub mod unit;
