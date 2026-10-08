@@ -276,7 +276,9 @@ class FleetSession:
             "-e",
             transport,
             f"{source}/",
-            f"{self.target()}:{destination}/",
+            # rsync splits `host:path` at the first colon, so an IPv6 host goes in brackets.
+            f"{self.user}@[{self.host}]:{destination}/" if ":" in self.host
+            else f"{self.target()}:{destination}/",
         ]
         result = self._spawn(command, capture=True)
         self._log(command, result)

@@ -13,7 +13,17 @@ runs them. It decides nothing itself: every reading comes from the same helpers 
 the two cannot disagree about what "safe" means, and the check stays the gate.
 
 Everything here changes the machine outside the user's home, so each command is printed before it
-runs and sudo prompts on the terminal. Where sudo cannot prompt, the commands are only printed.
+runs and sudo prompts on the terminal. Where sudo cannot prompt, the commands are only printed,
+unless sudo needs no password (root, a NOPASSWD rule, or the timestamp `install.sh` keeps fresh),
+in which case they run with `sudo -n`. `--yes` (`setup(yes=True)`, what `install.sh` calls) never
+waits for input: it runs them with `sudo -n` or not at all.
+
+A setup must survive the terminal it was started from going away halfway: on 2026-10-08 a
+`host setup | head` died of a closed pipe between `fallocate` and `mkswap`, leaving the machine
+with its swap off. Output that can no longer be written is now dropped instead of ending the run;
+each command's own output is collected and printed by this process, so a closed pipe never reaches
+the command; a command that needs no password runs in a session of its own, out of reach of the
+terminal's hang-up; and a `/swap.img` an interruption left out of use is finished on the next run.
 """
 
 import getpass
@@ -23,6 +33,7 @@ except ImportError:  # Windows, where only the release builder imports this pack
     grp = None
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from typing import Any, Dict, Final, List, Optional
@@ -39,6 +50,8 @@ SWAP_FILE: Final[str] = "/swap.img"
 SYSCTL_FILE: Final[str] = "/etc/sysctl.d/99-dreamference.conf"
 EARLYOOM_DEFAULTS: Final[str] = "/etc/default/earlyoom"
 FSTAB: Final[str] = "/etc/fstab"
+# How long `sudo -n true` may take to say whether sudo would ask for a password.
+SUDO_PROBE_SECONDS: Final[int] = 10
 DOCKER_SOCKET: Final[str] = "/var/run/docker.sock"
 # Where NVIDIA documents installing the two things DGX OS ships and a plain Ubuntu does not. Every
 # GB10 machine ships DGX OS (HP and Lenovo also document Ubuntu 24.04), so these matter only to a
@@ -96,42 +109,101 @@ class HostSafetySetup:
         return False
 
     @classmethod
-    def setup(cls) -> bool:
+    def setup(cls, yes: bool = False) -> bool:
         """
         Applies every fix that is safe to automate, then reads the host again.
+
+        Args:
+            yes: Never wait for input (`ling-admin host setup --yes`, as `install.sh` runs it):
+                run the commands with `sudo -n`, and change nothing if sudo would ask for a password.
 
         Returns:
             bool: True if the host passes every check afterwards.
         """
         steps = cls.steps()
         if not steps:
-            print("✅ Host setup: nothing to do. This machine has what a model load and ling's sandbox need.")
+            cls._say("✅ Host setup: nothing to do. This machine has what a model load and ling's sandbox need.")
             return True
-        can_prompt = sys.stdin.isatty() and shutil.which("sudo") is not None
-        if not can_prompt:
-            print("⚠️  sudo cannot ask for a password here (no terminal), so nothing was changed.\n"
-                  "   Run `ling-admin host setup` in a terminal, or run these yourself:\n")
-        for number, step in enumerate(steps, 1):
-            cls._describe(number, step)
-            if not can_prompt or step.get("manual"):
-                continue
-            for command in step["commands"]:
-                if not cls._run_as_root(command):
-                    print(f"❌ That command failed; the rest of \"{step['name']}\" was skipped.")
-                    break
+        mode = cls.root_mode(yes)
+        if mode is None:
+            reason = ("sudo needs a password and --yes never waits for one" if yes
+                      else "sudo cannot ask for a password here (no terminal)")
+            cls._say(f"⚠️  {reason}, so nothing was changed.\n"
+                     "   Run `ling-admin host setup` in a terminal, or run these yourself:\n")
+        hangup = cls._ignore_hangup()
+        try:
+            for number, step in enumerate(steps, 1):
+                cls._describe(number, step)
+                if mode is None or step.get("manual"):
+                    continue
+                for command in step["commands"]:
+                    if not cls._run_as_root(command, mode):
+                        cls._say(f"❌ That command failed; the rest of \"{step['name']}\" was skipped.")
+                        break
+        finally:
+            cls._restore_hangup(hangup)
         remaining = cls.steps()
         if not any(step["name"] == "let bubblewrap create its sandbox" for step in remaining):
             # A "turn it off" answer given to `SandboxPrerequisite` no longer applies.
             from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
             if SandboxPrerequisite.turned_off():
                 SandboxPrerequisite._forget()
-                print("💡 Night Shift was turned off for the sandbox; `ling-admin night enable` puts the timer back.")
+                cls._say("💡 Night Shift was turned off for the sandbox; `ling-admin night enable` puts the timer back.")
         if not remaining:
-            print("✅ Host setup: this machine now has what a model load and ling's sandbox need.")
+            cls._say("✅ Host setup: this machine now has what a model load and ling's sandbox need.")
             return True
-        print(f"⚠️  {len(remaining)} thing(s) still to fix: "
-              + "; ".join(step["name"] for step in remaining) + ".")
+        cls._say(f"⚠️  {len(remaining)} thing(s) still to fix: "
+                 + "; ".join(step["name"] for step in remaining) + ".")
         return False
+
+    @classmethod
+    def root_mode(cls, yes: bool = False) -> Optional[str]:
+        """
+        Decides how a command is run as root, running nothing that changes the machine.
+
+        Args:
+            yes: Never wait for input, so a password prompt is not an option.
+
+        Returns:
+            Optional[str]: `root` (this process is root, so no sudo), `sudo` (sudo may ask on this
+            terminal), `sudo -n` (sudo needs no password: a NOPASSWD rule or a fresh timestamp), or
+            None when root cannot be had without asking someone who is not there.
+        """
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            return "root"
+        if shutil.which("sudo") is None:
+            return None
+        if not yes and sys.stdin.isatty():
+            return "sudo"
+        return "sudo -n" if cls.passwordless_sudo() else None
+
+    @classmethod
+    def passwordless_sudo(cls) -> bool:
+        """
+        Returns:
+            bool: True if `sudo -n true` succeeds, i.e. sudo would run a command without asking.
+        """
+        try:
+            return subprocess.run(["sudo", "-n", "true"], stdin=subprocess.DEVNULL, capture_output=True,
+                                  timeout=SUDO_PROBE_SECONDS, check=False).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    @classmethod
+    def root_argv(cls, command: List[str], mode: str) -> List[str]:
+        """
+        Args:
+            command: The argv, without `sudo`.
+            mode: What `root_mode` decided.
+
+        Returns:
+            List[str]: The argv to run.
+        """
+        if mode == "root":
+            return list(command)
+        if mode == "sudo -n":
+            return ["sudo", "-n", *command]
+        return ["sudo", *command]
 
     # -- the checks, each with its fix -----------------------------------------------------------
 
@@ -202,11 +274,20 @@ class HostSafetySetup:
                               f"it is not resized automatically. Bring the total to {MIN_SWAP_GB:.0f} GB "
                               f"yourself, for example by adding a swap file beside what is there.")
             return step
-        if not areas and os.path.exists(SWAP_FILE):
-            step["manual"] = (f"{SWAP_FILE} exists but is not in use as swap. Check what it is, then "
-                              f"`sudo swapon {SWAP_FILE}` or remove it and run this again.")
-            return step
         existing_gb = areas[0]["size_gb"] if areas else 0.0
+        if not areas and os.path.exists(SWAP_FILE):
+            if not cls.is_swap_file(SWAP_FILE):
+                step["manual"] = (f"{SWAP_FILE} exists but is not in use as swap. Check what it is, then "
+                                  f"`sudo swapon {SWAP_FILE}` or remove it and run this again.")
+                return step
+            # This machine's swap file, switched off: what a resize interrupted after its swapoff
+            # leaves (measured 2026-10-08: swapoff and fallocate done, mkswap not, so the file was
+            # 64 GB under its old 16 GB header and the machine had no swap at all). The same
+            # commands finish it: fallocate leaves a file of that size as it is, and mkswap
+            # rewrites the header. What the file held is not data: it was swap that is off.
+            step["why"] = (f"{SWAP_FILE} is this machine's swap file but is not in use (an interrupted "
+                           f"resize leaves it so), and swap is {swap_gb:.1f} GB")
+            existing_gb = cls._file_gb(SWAP_FILE)
         free_gb = cls._disk_free_gb("/")
         if free_gb + existing_gb < MIN_SWAP_GB + SWAP_DISK_MARGIN_GB:
             step["manual"] = (f"The root filesystem has {free_gb:.0f} GB free; a {MIN_SWAP_GB:.0f} GB swap "
@@ -404,6 +485,42 @@ class HostSafetySetup:
         return areas
 
     @classmethod
+    def is_swap_file(cls, path: str) -> bool:
+        """
+        Whether a file that is not in use is nonetheless this machine's swap file: `/etc/fstab`
+        mounts it as swap, or its header says so (readable by root only).
+
+        Args:
+            path: The file.
+
+        Returns:
+            bool: True if it is safe to `mkswap` it.
+        """
+        try:
+            with open(FSTAB) as handle:
+                for line in handle:
+                    fields = line.split("#", 1)[0].split()
+                    if len(fields) >= 3 and fields[0] == path and fields[2] == "swap":
+                        return True
+        except OSError:
+            pass
+        if shutil.which("blkid") is None:
+            return False
+        try:
+            result = subprocess.run(["blkid", "-p", "-o", "value", "-s", "TYPE", path], capture_output=True,
+                                    text=True, timeout=10, stdin=subprocess.DEVNULL, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.stdout.strip() == "swap"
+
+    @classmethod
+    def _file_gb(cls, path: str) -> float:
+        try:
+            return os.path.getsize(path) / (1024 ** 3)
+        except OSError:
+            return 0.0
+
+    @classmethod
     def _disk_free_gb(cls, path: str) -> float:
         try:
             return shutil.disk_usage(path).free / (1024 ** 3)
@@ -424,14 +541,47 @@ class HostSafetySetup:
     # -- output and the one place sudo runs -------------------------------------------------------
 
     @classmethod
+    def _say(cls, text: str = "") -> None:
+        """
+        Prints a line, and carries on when it cannot: a reader that went away (`| head`, a dropped
+        SSH session) must not stop a setup between two of its commands.
+
+        Args:
+            text: The line.
+        """
+        try:
+            print(text, flush=True)
+        except OSError:                       # BrokenPipeError among them
+            try:
+                sys.stdout = open(os.devnull, "w")
+            except OSError:
+                pass
+
+    @classmethod
+    def _ignore_hangup(cls) -> Any:
+        try:
+            return signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        except (AttributeError, ValueError, OSError):  # no SIGHUP (Windows), or not the main thread
+            return None
+
+    @classmethod
+    def _restore_hangup(cls, previous: Any) -> None:
+        if previous is None:
+            return
+        try:
+            signal.signal(signal.SIGHUP, previous)
+        except (AttributeError, ValueError, OSError):
+            pass
+
+    @classmethod
     def _describe(cls, number: int, step: Dict[str, Any]) -> None:
-        print(f"{number}. {step['name']}: {step['why']}.")
+        cls._say(f"{number}. {step['name']}: {step['why']}.")
         if step.get("manual"):
-            print(f"   {step['manual']}\n")
+            cls._say(f"   {step['manual']}\n")
             return
         for command in step["commands"]:
-            print(f"     {cls.command_line(command)}")
-        print()
+            cls._say(f"     {cls.command_line(command)}")
+        cls._say()
 
     @classmethod
     def command_line(cls, command: List[str]) -> str:
@@ -448,10 +598,30 @@ class HostSafetySetup:
         return "sudo " + " ".join(shlex.quote(part) for part in command)
 
     @classmethod
-    def _run_as_root(cls, command: List[str]) -> bool:
-        print(f"🔑 {cls.command_line(command)}")
+    def _run_as_root(cls, command: List[str], mode: str = "sudo") -> bool:
+        """
+        Runs one command as root. Its output is collected and printed here, so a reader that went
+        away cannot kill it with SIGPIPE halfway; when no password can be asked it also runs in a
+        session of its own, out of reach of the terminal's hang-up.
+
+        Args:
+            command: The argv, without `sudo`.
+            mode: What `root_mode` decided; `sudo`, which may ask on the terminal, by default.
+
+        Returns:
+            bool: True if it ran and succeeded.
+        """
+        cls._say(f"🔑 {cls.command_line(command)}")
+        detached = mode in ("root", "sudo -n")
         try:
-            return subprocess.run(["sudo", *command], check=False).returncode == 0
+            result = subprocess.run(cls.root_argv(command, mode), check=False, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True,
+                                    stdin=subprocess.DEVNULL if detached else None,
+                                    start_new_session=detached)
         except OSError as error:
-            print(f"❌ {error}")
+            cls._say(f"❌ {error}")
             return False
+        output = (result.stdout or "").rstrip() if isinstance(result.stdout, str) else ""
+        if output:
+            cls._say(output)
+        return result.returncode == 0

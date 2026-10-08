@@ -2,8 +2,16 @@
 What a browse of the local network returns, from the node's side
 (specs/DREAMFERENCE_MIGHTLING_NODE.md §5): `ling-admin node status` shows it so the owner sees what
 clients see. Clients themselves browse with the launcher's own code, not with this.
+
+Each machine is kept once, at the address that is easiest to reach: IPv4 first, then an IPv6
+address with no scope, then a link-local IPv6 address, which is given its interface (`fe80::1%eth0`)
+because without one neither ssh nor a socket can use it (on 2026-10-08 `node add` passed a bare
+`fe80::…` to ssh, which answered "Invalid argument"). The launcher ranks the same way
+(`ling-rs/src/node.rs`, `usable_addresses`), and drops link-local addresses altogether, because a
+URL there cannot carry the scope.
 """
 
+import ipaddress
 import re
 import shutil
 import subprocess
@@ -31,13 +39,13 @@ class NodeBrowser:
             service_type: The service to keep (`_mightling-node._tcp` unless told otherwise).
 
         Returns:
-            List[Dict[str, str]]: One entry per node and address family seen on a real network
-            interface: `name`, `host`, `address`, `port`, `interface` and the TXT records by key.
-            Docker's bridges and container interfaces are left out: Avahi answers on them too,
-            and no client is there.
+            List[Dict[str, str]]: One entry per node seen on a real network interface, at its best
+            address (see the module's docstring): `name`, `host`, `address`, `port`, `interface`
+            and the TXT records by key. Docker's bridges and container interfaces are left out:
+            Avahi answers on them too, and no client is there.
         """
-        nodes: List[Dict[str, str]] = []
-        seen = set()
+        best: Dict[str, Dict[str, str]] = {}
+        order: List[str] = []
         for line in output.splitlines():
             fields = line.split(";")
             if len(fields) < 10 or fields[0] != "=" or fields[4] != service_type:
@@ -46,16 +54,53 @@ class NodeBrowser:
             if interface == "lo" or interface.startswith(("docker", "br-", "veth")):
                 continue
             entry = {"interface": interface, "name": fields[3], "host": fields[6],
-                     "address": fields[7], "port": fields[8]}
+                     "address": cls.scoped(fields[7], interface), "port": fields[8]}
             for record in fields[9].split('" "'):
                 key, _, value = record.strip('"').partition("=")
                 if key:
                     entry[key] = value
-            identity = (entry.get("node", entry["name"]), entry["address"])
-            if identity not in seen:
-                seen.add(identity)
-                nodes.append(entry)
-        return nodes
+            identity = entry.get("node", entry["name"])
+            if identity not in best:
+                order.append(identity)
+                best[identity] = entry
+            elif cls.rank(entry["address"]) < cls.rank(best[identity]["address"]):
+                best[identity] = entry
+        return [best[identity] for identity in order]
+
+    @classmethod
+    def scoped(cls, address: str, interface: str) -> str:
+        """
+        Args:
+            address: An address as Avahi printed it.
+            interface: The interface it was seen on.
+
+        Returns:
+            str: The address, with `%<interface>` added to a link-local IPv6 one that has no scope.
+        """
+        try:
+            parsed = ipaddress.ip_address(address)
+        except ValueError:
+            return address
+        if parsed.version == 6 and parsed.is_link_local and interface:
+            return f"{address}%{interface}"
+        return address
+
+    @classmethod
+    def rank(cls, address: str) -> int:
+        """
+        Args:
+            address: An address, possibly with an IPv6 scope.
+
+        Returns:
+            int: 0 for IPv4, 1 for IPv6 that needs no scope, 2 for link-local IPv6, 3 otherwise.
+        """
+        try:
+            parsed = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError:
+            return 3
+        if parsed.version == 4:
+            return 0
+        return 2 if parsed.is_link_local else 1
 
     @classmethod
     def unprovisioned(cls, match: Optional[str] = None, timeout: int = 6) -> List[Dict[str, str]]:

@@ -42,6 +42,10 @@ from dreamference.chat.google_service import GoogleService  # noqa: E402
 
 # `server start` starts the Google service on a node, and `google start` creates its container.
 REAL_GOOGLE_SERVICE_START = GoogleService.start
+from dreamference.node.node_advertiser import NodeAdvertiser as _NodeAdvertiser  # noqa: E402
+
+# Runs a command through sudo; the fixture below replaces it, and a test of it restores it.
+REAL_RUN_PRIVILEGED = _NodeAdvertiser.run_privileged
 from dreamference.vllm_server.vllm_server_manager import VLLMServerManager  # noqa: E402
 
 # `server start` stops the code index's systemd scopes; the fixture below replaces it.
@@ -109,9 +113,18 @@ def _isolate_node_advert(tmp_path_factory, monkeypatch):
 
     scratch = tmp_path_factory.mktemp("avahi") / "mightling-node.service"
     monkeypatch.setattr(NodeServiceFile, "service_path", scratch)
-    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose: False))
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose, yes=False: False))
     # Whether this machine has Avahi must not decide a test (it does not on a CI runner).
     monkeypatch.setattr(NodeAdvertiser, "avahi_installed", classmethod(lambda cls: True))
+
+
+@pytest.fixture(autouse=True)
+def _no_passwordless_sudo(monkeypatch):
+    # Whether sudo needs a password on this machine must not decide a test, and asking it is a
+    # real sudo; a test of the no-password path says so itself.
+    from dreamference.vllm_server import HostSafetySetup
+
+    monkeypatch.setattr(HostSafetySetup, "passwordless_sudo", classmethod(lambda cls: False))
 
 
 @pytest.fixture(autouse=True)

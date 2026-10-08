@@ -404,7 +404,9 @@ def host(monkeypatch):
              "swap_gb": 64.0, "areas": [{"name": "/swap.img", "type": "file", "size_gb": 64.0, "used_gb": 1.0}],
              "sysctl": {"vm.min_free_kbytes": 1_048_576, "vm.watermark_scale_factor": 200},
              "disk_free_gb": 300.0, "mem_available_gb": 60.0, "swap_file_exists": True, "sandbox": True,
-             "missing": set(), "docker_access": True}
+             "missing": set(), "docker_access": True, "swap_file_is_swap": False, "swap_file_gb": 16.0}
+    monkeypatch.setattr(HostSafetySetup, "is_swap_file", classmethod(lambda cls, path: state["swap_file_is_swap"]))
+    monkeypatch.setattr(HostSafetySetup, "_file_gb", classmethod(lambda cls, path: state["swap_file_gb"]))
     monkeypatch.setattr(HostSafetySetup, "sandbox_works", classmethod(lambda cls: state["sandbox"]))
     monkeypatch.setattr(host_safety_setup.shutil, "which",
                         lambda name: None if name in state["missing"] or (name == "sar" and not state["sar"])
@@ -642,6 +644,125 @@ def test_without_a_terminal_setup_prints_the_commands_and_changes_nothing(host, 
     assert HostSafetySetup.setup() is False
     output = capsys.readouterr().out
     assert "nothing was changed" in output and "sudo apt-get install -y sysstat" in output
+
+
+def recording_sudo(host, monkeypatch, ran):
+    """A subprocess.run that records each command and makes the sysctl one take effect."""
+    def fake_run(command, **kwargs):
+        ran.append((command, kwargs))
+        if "sysctl" in command and "-w" in command:
+            host["sysctl"]["vm.watermark_scale_factor"] = 200
+        return subprocess.CompletedProcess(command, 0, "done\n")
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", fake_run)
+
+
+def test_setup_with_yes_runs_through_sudo_n_with_no_terminal(host, monkeypatch, capsys):
+    # 2026-10-08: on a GB10 installed over SSH with no terminal, `host setup` only printed its
+    # commands, although sudo needed no password there. --yes is what install.sh runs.
+    host["sysctl"]["vm.watermark_scale_factor"] = 10
+    monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(HostSafetySetup, "passwordless_sudo", classmethod(lambda cls: True))
+    ran = []
+    recording_sudo(host, monkeypatch, ran)
+    assert HostSafetySetup.setup(yes=True) is True
+    assert [command[:3] for command, _ in ran] == [["sudo", "-n", "sysctl"], ["sudo", "-n", "sh"]]
+    # Out of reach of a closed pipe and of the terminal's hang-up: output collected, own session.
+    assert all(kw["stdout"] == subprocess.PIPE and kw["start_new_session"] and kw["stdin"] == subprocess.DEVNULL
+               for _, kw in ran)
+    assert "done" in capsys.readouterr().out
+
+
+def test_setup_with_yes_never_asks_for_a_password_even_at_a_terminal(host, monkeypatch, capsys):
+    host["sar"] = False
+    monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(host_safety_setup.subprocess, "run", lambda *a, **k: pytest.fail("sudo must not run"))
+    assert HostSafetySetup.setup(yes=True) is False
+    output = capsys.readouterr().out
+    assert "--yes never waits" in output and "sudo apt-get install -y sysstat" in output
+
+
+def test_without_a_terminal_setup_still_runs_when_sudo_needs_no_password(host, monkeypatch):
+    host["sysctl"]["vm.watermark_scale_factor"] = 10
+    monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(HostSafetySetup, "passwordless_sudo", classmethod(lambda cls: True))
+    ran = []
+    recording_sudo(host, monkeypatch, ran)
+    assert HostSafetySetup.setup() is True
+    assert ran and all(command[:2] == ["sudo", "-n"] for command, _ in ran)
+
+
+def test_a_reader_that_goes_away_does_not_stop_setup_between_two_commands(host, monkeypatch):
+    # 2026-10-08: `host setup | head` died of the closed pipe after `swapoff` and `fallocate`,
+    # before `mkswap`, and left the machine with no swap.
+    host.update(swap_gb=16.0, areas=[{"name": "/swap.img", "type": "file", "size_gb": 16.0, "used_gb": 0.0}])
+    monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: True, raising=False)
+
+    class ClosedPipe:
+        def write(self, text):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self):
+            raise BrokenPipeError(32, "Broken pipe")
+    monkeypatch.setattr(host_safety_setup.sys, "stdout", ClosedPipe())
+    ran = []
+    recording_sudo(host, monkeypatch, ran)
+    HostSafetySetup.setup()
+    assert [command[1] for command, _ in ran][:5] == ["swapoff", "fallocate", "chmod", "mkswap", "swapon"]
+
+
+def test_a_swap_file_left_off_by_an_interrupted_resize_is_finished(host):
+    # What the second GB10 was left with: /swap.img grown to 64 GB, its old header, not in use.
+    host.update(swap_gb=0.0, areas=[], swap_file_exists=True, swap_file_is_swap=True, swap_file_gb=64.0,
+                disk_free_gb=30.0)
+    (step,) = HostSafetySetup.steps()
+    assert "not in use" in step["why"]
+    assert commands_of(step)[:4] == ["fallocate -l 64G /swap.img", "chmod 600 /swap.img",
+                                     "mkswap /swap.img", "swapon /swap.img"]
+    assert not any(command.startswith("swapoff") for command in commands_of(step))
+
+
+def test_a_swap_file_is_known_by_fstab(tmp_path, monkeypatch):
+    fstab = tmp_path / "fstab"
+    fstab.write_text("# comment /swap.img none swap\nUUID=1 / ext4 defaults 0 1\n/swap.img\tnone\tswap\tsw\t0\t0\n")
+    monkeypatch.setattr(host_safety_setup, "FSTAB", str(fstab))
+    assert HostSafetySetup.is_swap_file("/swap.img") is True
+    fstab.write_text("UUID=1 / ext4 defaults 0 1\n")
+    monkeypatch.setattr(host_safety_setup.shutil, "which", lambda name: None)    # and no blkid
+    assert HostSafetySetup.is_swap_file("/swap.img") is False
+
+
+def test_node_enable_with_yes_needs_no_terminal_when_sudo_needs_no_password(monkeypatch, capsys):
+    from conftest import REAL_RUN_PRIVILEGED
+    from dreamference.node import NodeAdvertiser
+    from dreamference.node import node_advertiser
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", REAL_RUN_PRIVILEGED)
+    monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: True, raising=False)
+    ran = []
+    monkeypatch.setattr(node_advertiser.subprocess, "run",
+                        lambda command, **kw: ran.append(command) or subprocess.CompletedProcess(command, 0))
+    # sudo would ask: --yes runs nothing, even at a terminal.
+    assert NodeAdvertiser.run_privileged(["true"], "test", yes=True) is False and ran == []
+    assert "--yes never waits" in capsys.readouterr().out
+    monkeypatch.setattr(HostSafetySetup, "passwordless_sudo", classmethod(lambda cls: True))
+    assert NodeAdvertiser.run_privileged(["install", "x", "y"], "test", yes=True) is True
+    assert ran == [["sudo", "-n", "install", "x", "y"]]
+    # Without --yes and with no terminal, a sudo that needs no password is used too.
+    monkeypatch.setattr(host_safety_setup.sys.stdin, "isatty", lambda: False, raising=False)
+    assert NodeAdvertiser.run_privileged(["true"], "test") is True and ran[-1] == ["sudo", "-n", "true"]
+
+
+def test_the_cli_passes_yes_to_host_setup_and_node_enable(monkeypatch):
+    from dreamference.cli import main
+    from dreamference.node import NodeAdvertiser
+    calls = []
+    monkeypatch.setattr(HostSafetySetup, "setup", classmethod(lambda cls, yes=False: calls.append(("setup", yes)) or True))
+    monkeypatch.setattr(NodeAdvertiser, "enable",
+                        classmethod(lambda cls, no_web=False, yes=False: calls.append(("enable", yes)) or True))
+    for argv in (["host", "setup", "--yes"], ["node", "enable", "--yes"], ["host", "setup"]):
+        monkeypatch.setattr("sys.argv", ["ling-admin", *argv])
+        with pytest.raises(SystemExit):
+            main()
+    assert calls == [("setup", True), ("enable", True), ("setup", False)]
 
 
 def test_swap_areas_are_read_from_proc_swaps(tmp_path, monkeypatch):

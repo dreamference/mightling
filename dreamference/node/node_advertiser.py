@@ -6,7 +6,8 @@ Enabling does three things: it installs the Avahi service file that advertises t
 publishes the web UI and SearXNG beyond loopback, and it records that it did so, so that a later
 `ling-admin chat configure` or `searxng start` keeps those addresses. Disabling undoes all
 three. Root is needed once, for the file under `/etc/avahi`; the command is printed before it
-runs and sudo prompts on the terminal.
+runs and sudo prompts on the terminal. With no terminal it still runs when sudo needs no password,
+and `--yes` (what `install.sh` passes) never waits for input: `sudo -n` or nothing.
 """
 
 import getpass
@@ -45,12 +46,14 @@ class NodeAdvertiser:
     """Enables, disables and reports the node's advertisement."""
 
     @classmethod
-    def enable(cls, no_web: bool = False) -> bool:
+    def enable(cls, no_web: bool = False, yes: bool = False) -> bool:
         """
         Advertises this machine as a node and publishes what clients need.
 
         Args:
             no_web: Keep the web UI on loopback; clients then get `ling` and web search only.
+            yes: Never wait for input (`node enable --yes`, as `install.sh` runs it): root through
+                `sudo -n` only.
 
         Returns:
             bool: True when the service file is installed and the binds applied; False, with
@@ -62,7 +65,8 @@ class NodeAdvertiser:
         # DGX OS has Avahi (GNOME depends on it); a GB10 reinstalled as Ubuntu Server does not, and
         # without the daemon there is neither a folder to put the file in nor anyone to publish it.
         if not cls.avahi_installed() and not cls.run_privileged(
-                ["apt-get", "install", "-y", "avahi-daemon"], "install Avahi, which publishes the advertisement"):
+                ["apt-get", "install", "-y", "avahi-daemon"], "install Avahi, which publishes the advertisement",
+                yes=yes):
             print("❌ Avahi is not installed, so this node cannot be advertised: `sudo apt install avahi-daemon`, "
                   "then run this again. Until then a client reaches it with MIGHTLING_NODE=<this machine's address>.")
             return False
@@ -79,7 +83,7 @@ class NodeAdvertiser:
         )
         # The advertisement first, the binds only once it is in place: a node whose web UI is on
         # the LAN but which nobody can find is the worst of both states.
-        if not cls.install_service_file(text):
+        if not cls.install_service_file(text, yes=yes):
             NodeSettings.save(advertise=before["advertise"], web=before["web"])
             print("⚠️  Nothing was published. Run `ling-admin node enable` from a terminal, where sudo "
                   "can ask for the password once.")
@@ -240,13 +244,14 @@ class NodeAdvertiser:
         return shutil.which("avahi-daemon") is not None or os.path.exists(AVAHI_DAEMON)
 
     @classmethod
-    def install_service_file(cls, text: str) -> bool:
+    def install_service_file(cls, text: str, yes: bool = False) -> bool:
         """
         Puts the service file in place: written directly when it is already this user's, created
         through sudo (owned by this user, so later updates need no root) otherwise.
 
         Args:
             text: The file's content.
+            yes: Never wait for a password (`sudo -n` only).
 
         Returns:
             bool: True when the file is installed with this content.
@@ -259,7 +264,7 @@ class NodeAdvertiser:
         try:
             user = getpass.getuser()
             command = ["install", "-m", "644", "-o", user, staged.name, str(path)]
-            if cls.run_privileged(command, "advertise the node (Avahi publishes files in this folder)"):
+            if cls.run_privileged(command, "advertise the node (Avahi publishes files in this folder)", yes=yes):
                 return True
         finally:
             os.unlink(staged.name)
@@ -268,25 +273,31 @@ class NodeAdvertiser:
         return False
 
     @classmethod
-    def run_privileged(cls, command: List[str], purpose: str) -> bool:
+    def run_privileged(cls, command: List[str], purpose: str, yes: bool = False) -> bool:
         """
         Runs one command as root, visibly: it is printed first and sudo prompts on the terminal.
-        Where sudo cannot prompt (no terminal) the command is only printed.
+        With no terminal it runs only if sudo needs no password; otherwise it is only printed.
 
         Args:
             command: The argv, without `sudo`.
             purpose: What it is for, for the message.
+            yes: Never wait for input: `sudo -n` or nothing, terminal or not.
 
         Returns:
             bool: True if the command ran and succeeded.
         """
+        from dreamference.vllm_server.host_safety_setup import HostSafetySetup
         line = "sudo " + " ".join(command)
-        if not sys.stdin.isatty():
+        mode = HostSafetySetup.root_mode(yes)
+        if mode is None:
             print(f"💡 Run this to {purpose}:\n   {line}")
+            if yes:
+                print("   (sudo needs a password, and --yes never waits for one)")
             return False
         print(f"🔑 Needs root once, to {purpose}:\n   {line}")
         try:
-            return subprocess.run(["sudo", *command], check=False).returncode == 0
+            return subprocess.run(HostSafetySetup.root_argv(command, mode), check=False,
+                                  stdin=None if mode == "sudo" else subprocess.DEVNULL).returncode == 0
         except OSError:
             return False
 

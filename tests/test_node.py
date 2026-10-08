@@ -238,7 +238,7 @@ def test_enable_without_root_publishes_nothing_and_prints_the_file(machine, caps
 def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(machine, monkeypatch, capsys):
     asked = []
 
-    def privileged(cls, command, purpose):
+    def privileged(cls, command, purpose, yes=False):
         asked.append(command)
         if command[0] == "install":
             NodeServiceFile.service_path.write_text(open(command[-2]).read())
@@ -306,6 +306,38 @@ def test_the_browse_output_is_read_and_docker_interfaces_are_left_out():
         "port": "8000", "main": "1", "state": "ready", "version": "1.3.0", "node": "abc", "proto": "1"}]
 
 
+def test_a_node_is_kept_once_at_ipv4_and_a_link_local_address_carries_its_interface():
+    # 2026-10-08: `node add` took the node's link-local IPv6 address from the browse, with no
+    # scope, and ssh answered "Invalid argument"; `node list` showed http://[fe80::…]:8000/v1.
+    v6 = '=;enP7s7;IPv6;spark-2;_mightling-node._tcp;local;spark-2.local;fe80::4ab0:2dff:fe01:203;8000;"node=n2" "proto=1"'
+    v4 = '=;enP7s7;IPv4;spark-2;_mightling-node._tcp;local;spark-2.local;192.168.1.20;8000;"node=n2" "proto=1"'
+    for output in ("\n".join([v6, v4]), "\n".join([v4, v6])):
+        (node,) = NodeBrowser.parse(output)
+        assert node["address"] == "192.168.1.20"
+    # IPv6 only: the address is usable as it stands, by ssh and by Python's sockets and URLs.
+    (node,) = NodeBrowser.parse(v6)
+    assert node["address"] == "fe80::4ab0:2dff:fe01:203%enP7s7"
+    from dreamference.node.node_lanes import NodeLanes
+    import urllib.parse
+    url = urllib.parse.urlsplit(f"http://{NodeLanes.url_host(node['address'])}:8000/v1")
+    assert url.hostname == "fe80::4ab0:2dff:fe01:203%enP7s7" and url.port == 8000
+    # A global IPv6 address beats a link-local one, and needs no scope.
+    global_v6 = v6.replace("fe80::4ab0:2dff:fe01:203", "2001:db8::20")
+    (node,) = NodeBrowser.parse("\n".join([v6, global_v6]))
+    assert node["address"] == "2001:db8::20"
+
+
+def test_rsync_brackets_an_ipv6_host(tmp_path, monkeypatch):
+    from dreamference.node.fleet_session import FleetSession
+    session = FleetSession("fe80::1%enP7s7", "owner", tmp_path)
+    ran = []
+    monkeypatch.setattr(session, "_spawn", lambda command, capture=False: ran.append(command)
+                        or subprocess.CompletedProcess(command, 0, "", ""))
+    monkeypatch.setattr(session, "_log", lambda command, result: None)
+    session.rsync(tmp_path, "~/bundle")
+    assert ran[0][-1] == "owner@[fe80::1%enP7s7]:~/bundle/"
+
+
 # -- the locator crate ------------------------------------------------------------------------------
 
 def test_the_web_crates_locator_is_a_byte_identical_copy():
@@ -331,7 +363,7 @@ def test_the_web_crates_locator_is_a_byte_identical_copy():
 def test_the_node_commands_reach_the_advertiser(machine, monkeypatch, capsys):
     from dreamference.cli import main
     calls = []
-    monkeypatch.setattr(NodeAdvertiser, "enable", classmethod(lambda cls, no_web=False: calls.append(("enable", no_web)) or True))
+    monkeypatch.setattr(NodeAdvertiser, "enable", classmethod(lambda cls, no_web=False, yes=False: calls.append(("enable", no_web)) or True))
     monkeypatch.setattr(NodeAdvertiser, "disable", classmethod(lambda cls: calls.append(("disable",)) or True))
     for argv, code in ((["node", "enable", "--no-web"], 0), (["node", "disable"], 0), (["node", "status"], 0), (["node"], 2)):
         monkeypatch.setattr("sys.argv", ["ling-admin", *argv])
@@ -1289,7 +1321,7 @@ def test_enable_without_avahi_installs_it_or_publishes_nothing(machine, monkeypa
     monkeypatch.setattr(NodeAdvertiser, "avahi_installed", classmethod(lambda cls: False))
     asked = []
     monkeypatch.setattr(NodeAdvertiser, "run_privileged",
-                        classmethod(lambda cls, command, purpose: asked.append(command) or False))
+                        classmethod(lambda cls, command, purpose, yes=False: asked.append(command) or False))
     assert NodeAdvertiser.enable() is False
     assert asked == [["apt-get", "install", "-y", "avahi-daemon"]]
     assert "MIGHTLING_NODE" in capsys.readouterr().out

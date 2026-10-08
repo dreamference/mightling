@@ -67,7 +67,7 @@ def test_a_puffin_node_is_moved_to_the_new_names_and_a_second_run_does_nothing(m
     monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl(calls))
     monkeypatch.setattr(NightShiftScheduler, "enable", classmethod(lambda cls, w: enabled_windows.append(w) or True))
 
-    def fake_privileged(cls, command, purpose):
+    def fake_privileged(cls, command, purpose, yes=False):
         privileged.append(command)
         shutil.move(command[1], command[2])
         return True
@@ -118,7 +118,7 @@ def test_without_a_terminal_the_advertisement_keeps_working_and_the_sudo_line_is
     tmp_home = Path(os.path.expanduser("~"))
     _venv, legacy_file = _legacy_node(tmp_home)
     monkeypatch.setattr(NightShiftScheduler, "systemctl", _fake_systemctl([], enabled=False))
-    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose: False))
+    monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose, yes=False: False))
     LegacyNameMigration.run()
     assert f"<type>{SERVICE_TYPE}</type>" in legacy_file.read_text(), "clients see the node under the new type"
     assert not NodeServiceFile.service_path.exists()

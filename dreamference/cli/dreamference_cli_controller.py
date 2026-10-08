@@ -1027,7 +1027,8 @@ class DreamferenceCLIController:
         host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and ling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap)")
         host_subparsers = host_parser.add_subparsers(dest="host_command")
         host_subparsers.add_parser("check", help="Show what `server start` would refuse over, changing nothing")
-        host_subparsers.add_parser("setup", help="Apply the settings; each command is printed first and sudo asks for your password")
+        host_setup_parser = host_subparsers.add_parser("setup", help="Apply the settings; each command is printed first and sudo asks for your password")
+        host_setup_parser.add_argument("--yes", action="store_true", help="Never wait for input: run through `sudo -n` (root, NOPASSWD or a fresh sudo timestamp), with no terminal needed; change nothing if sudo would ask")
 
         # Command: ling-admin night (Night Shift: run queued tasks overnight)
         night_parser = subparsers.add_parser("night", help="Run the Night Shift queue overnight (tasks are queued with /night add)")
@@ -1063,6 +1064,7 @@ class DreamferenceCLIController:
         node_subparsers = node_parser.add_subparsers(dest="node_command")
         node_enable_parser = node_subparsers.add_parser("enable", help="Advertise the node and publish the web UI and web search to the local network")
         node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get ling and web search only")
+        node_enable_parser.add_argument("--yes", action="store_true", help="Never wait for input: root through `sudo -n` only, with no terminal needed (what install.sh runs)")
         node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
         node_status_parser = node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status")
         node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `ling-admin status` instead")
@@ -2393,7 +2395,7 @@ class DreamferenceCLIController:
         elif args.command == "node":
             from dreamference.node import NodeAdvertiser
             if args.node_command == "enable":
-                sys.exit(0 if NodeAdvertiser.enable(no_web=args.no_web) else 1)
+                sys.exit(0 if NodeAdvertiser.enable(no_web=args.no_web, yes=args.yes) else 1)
             if args.node_command == "disable":
                 sys.exit(0 if NodeAdvertiser.disable() else 1)
             if args.node_command == "status" and not args.name:
@@ -2467,7 +2469,7 @@ class DreamferenceCLIController:
             if args.host_command == "check":
                 sys.exit(0 if HostSafetySetup.check() else 1)
             if args.host_command == "setup":
-                sys.exit(0 if HostSafetySetup.setup() else 1)
+                sys.exit(0 if HostSafetySetup.setup(yes=args.yes) else 1)
             print("usage: ling-admin host {check,setup}")
             sys.exit(2)
 
