@@ -54,7 +54,7 @@ pub fn path(docs_dir: &Path) -> PathBuf {
 
 /// Appends a request. Fails where the directory is read-only (the agent's read-only sandbox).
 pub fn append(docs_dir: &Path, request: &Request) -> Result<()> {
-    std::fs::create_dir_all(docs_dir)?;
+    crate::store::create_private_dir(docs_dir)?;
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path(docs_dir))?;
     writeln!(file, "{}", request.line())?;
     Ok(())

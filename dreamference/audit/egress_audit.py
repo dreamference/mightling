@@ -128,9 +128,10 @@ class EgressAudit:
         repository, so it opens on the composer, and its reply is read from the session file it
         writes.
 
-        The code index is switched off for the session (`code_index_enabled = false` in the
-        throwaway config): its indexers run detached in their own network-less sandbox and
-        outlive the session, so they are not part of what this trace can show.
+        The code index and the local file index are switched off for the session
+        (`code_index_enabled = false`, `mightling_docs = false` in the throwaway config): their
+        indexers run detached in their own network-less sandbox and outlive the session, so they
+        are not part of what this trace can show (`audit egress --docs` traces the file index).
 
         Args:
             puffin_bin (str): The `puffin` executable.
@@ -154,7 +155,7 @@ class EgressAudit:
             subprocess.run(git + args, cwd=repo, capture_output=True, check=False)
         config = os.path.join(work_dir, "config.toml")
         with open(config, "w") as handle:
-            handle.write(f"vllm_host = {json.dumps(vllm_host)}\ncode_index_enabled = false\n")
+            handle.write(f"vllm_host = {json.dumps(vllm_host)}\ncode_index_enabled = false\nmightling_docs = false\n")
         trace_path = os.path.join(work_dir, "trace.txt")
         reply_path = os.path.join(work_dir, "reply.txt")
         env = dict(os.environ)

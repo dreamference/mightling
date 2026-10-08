@@ -408,6 +408,9 @@ Speeds are for the whole set at batch 16, and at batch 1 where measured (160-chu
 | potion-multilingual-128M (static) | MIT | 489 MB | 256 | 1,512 | 1.2 GB | 0.1 ms | 0.608 | 0.773 / 0.528 | 52, 38 | 23, 22 | 3 / 5 |
 | BM25 alone (with trigrams) | — | — | — | — | — | 1.5 ms | — | 0.790 / 0.645 | 54, 41 | 24, 18 | — / 6 |
 
+- *Note (Phase 1, §16.2): the recall columns were measured with document vectors embedded at
+  batch 16, and the int8 export's vectors depend on the batch; ling-docs embeds at batch 1, and
+  its own recall is §16.5.*
 - **Chosen: snowflake-arctic-embed-m-v2.0, int8, one chunk at a time** (§7.3). It has the best
   dense recall (0.901), the best hybrid MRR and the best cross-lingual recall of everything that
   fits. **Batch 1 is both its fastest and its smallest setting**: a batch pads every chunk to the
