@@ -59,6 +59,12 @@ ling-web-server = { path = "web" }
 # `ling chat`: the messenger bridge, a client of `ling web` (src/chat.rs). Unix only, for the same reason.
 ling-chat = { path = "chat" }
 
+# `ling signal`: Mightling over Signal (src/signal.rs). The same crate also builds the small
+# `ling-signal` binary the bridge's system account runs from /usr/local/lib/mightling; the launcher
+# routes the user's commands to it. Linux only: the bridge is a system unit.
+[target.'cfg(target_os = "linux")'.dependencies]
+ling-signal = { path = "signal" }
+
 # Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), the
 # same windows-sys release the Codex workspace already builds.
 [target.'cfg(windows)'.dependencies]

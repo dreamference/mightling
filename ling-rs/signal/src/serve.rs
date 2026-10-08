@@ -91,13 +91,13 @@ impl From<String> for Stop {
 }
 
 pub const UNLINKED_TEXT: &str = "Signal refused this device's credentials: it was probably unlinked from the phone (or the account was registered again). \
-Its keys are still in the bridge's state: `ling-signal remove` deletes them; `ling-signal setup` links again.";
+Its keys are still in the bridge's state: `ling signal remove` deletes them; `ling signal setup` links again.";
 
 /// Runs until signal-cli exits or the process is stopped. An error makes systemd restart it,
 /// except [`Stop::Unlinked`].
 pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), Stop> {
     let config = Config::load(state_dir)?;
-    let cookie = state::load_cookie(state_dir).ok_or_else(|| "the bridge is not paired with `ling web` (run `ling-signal setup`)".to_string())?;
+    let cookie = state::load_cookie(state_dir).ok_or_else(|| "the bridge is not paired with `ling web` (run `ling signal setup`)".to_string())?;
     let conversation = Conversation::load(state_dir);
     let launch = Launch::json_rpc(
         config.signal_cli.clone(),

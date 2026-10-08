@@ -235,6 +235,15 @@ jobs:
       - name: Test the local file index
         working-directory: ling-docs-rs
         run: ~/.cargo/bin/cargo test --release --locked
+      # The messenger bridges' crates (Signal, and Matrix and Telegram through `ling chat`), in the
+      # export the build above left, with its profile, so nothing is compiled twice. Their
+      # stand-ins for signal-cli, `ling web`, the Bot API and the homeserver run on loopback.
+      - name: Test the messenger bridges
+        run: |
+          cd "$HOME/.cache/dreamference/puffin-codex/src/codex-rs"
+          CARGO_TARGET_DIR="$HOME/.cache/dreamference/puffin-codex/target" \
+          CARGO_PROFILE_RELEASE_DEBUG=none CARGO_PROFILE_RELEASE_STRIP=debuginfo \
+            ~/.cargo/bin/cargo test --release -p ling-signal -p ling-chat
       - name: Package
         run: |
           bin="$(dirname "$(python -c 'from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; print(B.executable_path())')")"
@@ -249,6 +258,9 @@ jobs:
           # The local file index, binary only: `ling-admin docs setup` fetches PDFium, ONNX Runtime
           # and the embedding model it loads, each pinned (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §17).
           gzip -9 -c "$bin/ling-docs" > "dist/ling-docs-$target.gz"
+          # Mightling over Signal's bridge, binary only and off until `ling signal setup`, which
+          # fetches signal-cli and its Java runtime, pinned (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §3).
+          gzip -9 -c "$bin/ling-signal" > "dist/ling-signal-$target.gz"
           # Mightling began as a fork of the Codex CLI (Apache 2.0), whose licence and notice must
           # travel with the binaries (Apache 2.0 section 4); the names say what they belong to.
           cp codex/LICENSE dist/THIRD-PARTY-LICENSE-codex-cli.txt
@@ -256,7 +268,7 @@ jobs:
           # `ling update` checks every archive against this file before installing any.
           (cd dist && sha256sum "ling-$target.gz" "codex-code-mode-host-$target.gz" \
             "ling-search-$target.gz" "ling-fetch-$target.gz" "ling-code-$target.gz" \
-            "ling-docs-$target.gz" > "ling-$target.sha256sums")
+            "ling-docs-$target.gz" "ling-signal-$target.gz" > "ling-$target.sha256sums")
           # The transition from Puffin (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.1): a 1.4.x
           # `puffin update` asks for these exact names, so the same binaries are published under
           # them too, with a checksum file that lists them. The new binary migrates the old

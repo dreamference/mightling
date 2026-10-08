@@ -53,6 +53,8 @@ pub mod prompt;
 pub mod refine;
 pub mod release_signature;
 pub mod rename;
+#[cfg(target_os = "linux")]
+pub mod signal;
 pub mod skills;
 
 pub mod update;
@@ -92,7 +94,7 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat", "signal",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -311,6 +313,19 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         #[cfg(not(unix))]
         {
             eprintln!("`ling chat` is not available on Windows yet: it reaches the agent through `ling web`.");
+            std::process::exit(2);
+        }
+    }
+    // `signal` is Mightling over Signal: the setup, status and removal of the bridge the system
+    // account runs (signal.rs; specs/DREAMFERENCE_MIGHTLING_SIGNAL.md).
+    if let Some(index) = subcommand
+        && user_args[index] == "signal"
+    {
+        #[cfg(target_os = "linux")]
+        std::process::exit(signal::run_cli(&user_args[index + 1..]).await);
+        #[cfg(not(target_os = "linux"))]
+        {
+            eprintln!("`ling signal` runs on the Linux node only: the bridge is a system unit there.");
             std::process::exit(2);
         }
     }

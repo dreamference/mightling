@@ -403,10 +403,12 @@ fi
 
 # Required, then optional: releases before the web commands and the code index were Rust binaries
 # do not carry them, which is how `ling update` treats them too. The local file index, ling-docs,
-# is built for Linux only (and from 1.6.0 on).
+# is built for Linux only (and from 1.6.0 on), as is ling-signal, Mightling over Signal's bridge
+# (from 1.6.0 on). The bridge is installed and nothing more: it is off until `ling signal setup`,
+# which fetches signal-cli and its Java runtime, pinned (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §3).
 REQUIRED="ling codex-code-mode-host"
 OPTIONAL="ling-search ling-fetch ling-code"
-[ "$(uname -s)" = Linux ] && OPTIONAL="$OPTIONAL ling-docs"
+[ "$(uname -s)" = Linux ] && OPTIONAL="$OPTIONAL ling-docs ling-signal"
 INSTALLED=""
 for name in $REQUIRED $OPTIONAL; do
     asset="$name-$TARGET.gz"
@@ -452,8 +454,9 @@ link() {  # link <target> <name>: ~/.local/bin/<name> -> target, never over a re
 for name in $INSTALLED; do
     install -m 0755 "$WORK/$name" "$INSTALL_DIR/bin/.$name.new"
     mv -f "$INSTALL_DIR/bin/.$name.new" "$INSTALL_DIR/bin/$name"
-    # Codex looks for its Code Mode host beside its own executable, so that one needs no link.
-    [ "$name" = "codex-code-mode-host" ] || link "$INSTALL_DIR/bin/$name" "$name"
+    # Codex looks for its Code Mode host beside its own executable, so that one needs no link,
+    # and `ling signal` finds its bridge there too: its commands are `ling signal …`.
+    case "$name" in codex-code-mode-host|ling-signal) ;; *) link "$INSTALL_DIR/bin/$name" "$name" ;; esac
 done
 # What was installed, for `node provision`'s state probe and drift report.
 printf '%s\n' "$TAG" > "$INSTALL_DIR/VERSION"

@@ -55,10 +55,22 @@ pub const CODE_COMMAND: &str = "ling-code";
 /// embedding model it loads are fetched, pinned, by `ling-admin docs setup`.
 pub const DOCS_COMMAND: &str = "ling-docs";
 
+/// Mightling over Signal's bridge (`ling-rs/signal/`, Linux only). `ling signal setup` copies it
+/// for the bridge's system account (`signal::bridge_beside`), and `ling signal setup --refresh`
+/// copies it again after an update. The release carries the binary only: signal-cli and its Java
+/// runtime are fetched, pinned, by setup. It is never linked onto PATH: the commands are
+/// `ling signal …`.
+pub const SIGNAL_COMMAND: &str = "ling-signal";
+
 /// The commands a release may carry beside `ling`, each installed if its asset is present and
 /// kept as installed if not.
-pub fn optional_commands() -> [&'static str; 4] {
-    [WEB_COMMANDS[0], WEB_COMMANDS[1], CODE_COMMAND, DOCS_COMMAND]
+pub fn optional_commands() -> [&'static str; 5] {
+    [WEB_COMMANDS[0], WEB_COMMANDS[1], CODE_COMMAND, DOCS_COMMAND, SIGNAL_COMMAND]
+}
+
+/// Whether an optional command is linked into `~/.local/bin` beside `ling`.
+pub fn linked_onto_path(name: &str) -> bool {
+    name != SIGNAL_COMMAND
 }
 
 /// What `ling update` should do, given this build's version and the latest release's.
@@ -122,7 +134,7 @@ pub fn asset_names(target: &str) -> [String; 3] {
 }
 
 /// Asset names of the optional commands for a target, in `optional_commands` order.
-pub fn optional_asset_names(target: &str) -> [String; 4] {
+pub fn optional_asset_names(target: &str) -> [String; 5] {
     optional_commands().map(|name| format!("{name}-{target}.gz"))
 }
 
@@ -303,8 +315,9 @@ pub async fn run() -> anyhow::Result<()> {
         optional.extend(WINDOWS_SANDBOX_HELPERS);
     }
     for name in optional {
-        // Only Linux releases build the file index; elsewhere its absence is not news.
-        if name == DOCS_COMMAND && !cfg!(target_os = "linux") {
+        // Only Linux releases build the file index and the Signal bridge; elsewhere their absence
+        // is not news.
+        if (name == DOCS_COMMAND || name == SIGNAL_COMMAND) && !cfg!(target_os = "linux") {
             continue;
         }
         let asset = format!("{name}-{target}.gz");
@@ -329,7 +342,7 @@ pub async fn run() -> anyhow::Result<()> {
     }
     for (installed, binary) in binaries {
         replace(install_dir, &installed, &binary)?;
-        if optional_commands().contains(&installed.as_str()) {
+        if optional_commands().contains(&installed.as_str()) && linked_onto_path(&installed) {
             link_onto_path(install_dir, &installed);
         }
     }
@@ -677,9 +690,14 @@ mod tests {
                 "ling-search-aarch64-unknown-linux-gnu.gz".to_string(),
                 "ling-fetch-aarch64-unknown-linux-gnu.gz".to_string(),
                 "ling-code-aarch64-unknown-linux-gnu.gz".to_string(),
-                "ling-docs-aarch64-unknown-linux-gnu.gz".to_string()
+                "ling-docs-aarch64-unknown-linux-gnu.gz".to_string(),
+                "ling-signal-aarch64-unknown-linux-gnu.gz".to_string()
             ]
         );
+        // `ling signal setup` finds the bridge by this name beside `ling` (signal::bridge_beside),
+        // and nothing puts it on PATH.
+        assert!(optional_commands().contains(&"ling-signal"));
+        assert!(!linked_onto_path("ling-signal") && linked_onto_path("ling-code"));
         // The launcher finds the router and the file index by these names beside `ling`
         // (code_index::binary, docs_index::binary).
         assert!(optional_commands().contains(&"ling-code"));

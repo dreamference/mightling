@@ -4,10 +4,12 @@
 //! signal-cli over JSON-RPC on stdio and is one more paired client of `ling web`, so a message from
 //! the owner's phone becomes a turn in an Ask thread. The conversation's rules (`bridge`), the gate
 //! (`gate`) and the formatting (`format`) are pure and tested without Signal or a network; `serve`
-//! only carries out what they decide.
+//! only carries out what they decide. `cli` is the command line, reached as `ling signal …` from the
+//! launcher and as `ling-signal …` from the binary the unit runs.
 
 pub mod agent;
 pub mod bridge;
+pub mod cli;
 pub mod command;
 pub mod envelope;
 pub mod format;

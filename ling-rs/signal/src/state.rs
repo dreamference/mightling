@@ -228,7 +228,7 @@ mod tests {
             port: 3100,
             node: "gx10".to_string(),
             signal_cli: PathBuf::from("/opt/mightling/signal-cli-0.14.9/bin/signal-cli"),
-            signal_cli_env: vec![("JAVA_HOME".to_string(), "/usr/lib/jvm/java-25-openjdk-arm64".to_string())],
+            signal_cli_env: vec![("JAVA_HOME".to_string(), "/opt/mightling/jdk-25.0.4.1+1-jre".to_string())],
             signal_cli_version: "0.14.9".to_string(),
             vision: true,
         }

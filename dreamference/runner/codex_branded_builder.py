@@ -118,6 +118,15 @@ WINDOWS_SANDBOX_HELPERS: Final[tuple] = ("codex-windows-sandbox-setup", "codex-c
 # executable, so the two binaries are built and installed together.
 CODE_MODE_HOST_NAME: Final[str] = "codex-code-mode-host"
 
+# Mightling over Signal's bridge (`ling-rs/signal/`, specs/DREAMFERENCE_MIGHTLING_SIGNAL.md): the
+# launcher links the crate for `ling signal …`, and the crate's own small binary is what the
+# bridge's system account runs, copied there by `ling signal setup`. Built in the same Cargo run as
+# `ling` (the crate is a workspace member through the launcher's dependency), installed beside it
+# and never linked onto PATH. Linux only: the bridge is a system unit.
+SIGNAL_PACKAGE: Final[str] = "ling-signal"
+SIGNAL_BIN_NAME: Final[str] = "ling-signal"
+BUILDS_SIGNAL: Final[bool] = sys.platform.startswith("linux")
+
 # Upstream's release profile keeps line tables (`debug = "line-tables-only"`, `strip = false`) so
 # its CI can archive symbols, and strips only when it packages. Built as-is, mightling-codex is 1.4 GB
 # rather than ~315 MB -- and the runner reads the whole file on every launch to recover its system
@@ -291,10 +300,10 @@ class CodexBrandedBuilder:
             if handle.read().strip() != key:
                 return False
         host = os.path.join(INSTALL_DIR, "bin", CODE_MODE_HOST_NAME + EXE_SUFFIX)
-        return all(
-            os.path.isfile(path) and os.access(path, os.X_OK)
-            for path in (cls.executable_path(), host)
-        )
+        required = [cls.executable_path(), host]
+        if BUILDS_SIGNAL:
+            required.append(os.path.join(INSTALL_DIR, "bin", SIGNAL_BIN_NAME))
+        return all(os.path.isfile(path) and os.access(path, os.X_OK) for path in required)
 
     @classmethod
     def prepare_source(cls, source_dir: str) -> bool:
@@ -683,6 +692,9 @@ class CodexBrandedBuilder:
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
         installed_names = [(CARGO_BIN_NAME, BRANDED_EXECUTABLE_NAME), (CODE_MODE_HOST_NAME, CODE_MODE_HOST_NAME)]
+        if BUILDS_SIGNAL:
+            command += ["-p", SIGNAL_PACKAGE, "--bin", SIGNAL_BIN_NAME]
+            installed_names.append((SIGNAL_BIN_NAME, SIGNAL_BIN_NAME))
         if IS_WINDOWS:
             command += ["-p", WINDOWS_SANDBOX_PACKAGE]
             for helper in WINDOWS_SANDBOX_HELPERS:

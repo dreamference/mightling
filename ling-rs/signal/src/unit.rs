@@ -44,7 +44,7 @@ LockPersonality=yes\n\
 Restart=on-failure\n\
 RestartSec=10\n\
 # 78: Signal refused this device (unlinked from the phone, or the account registered again).\n\
-# Restarting cannot help; `ling-signal status` says what to do.\n\
+# Restarting cannot help; `ling signal status` says what to do.\n\
 RestartPreventExitStatus=78\n\
 \n\
 [Install]\n\

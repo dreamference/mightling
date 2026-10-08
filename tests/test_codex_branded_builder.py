@@ -163,6 +163,28 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     assert command[:3] == ["cargo", "build", "--release"]
     # Cargo builds `codex`; the builder installs it as `ling`.
     assert command[command.index("--bin") + 1] == "codex"
+    # On Linux the Signal bridge is built in the same run, so its dependencies are the workspace's.
+    bins = [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"]
+    assert ("ling-signal" in bins) == builder_module.BUILDS_SIGNAL
+    if builder_module.BUILDS_SIGNAL:
+        assert command[command.index("ling-signal") - 1] == "-p"
+
+
+def test_on_linux_a_build_without_the_signal_bridge_is_not_current(tmp_path, monkeypatch):
+    monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(builder_module, "BUILDS_SIGNAL", True)
+    monkeypatch.setattr(CodexBrandedBuilder, "build_key", classmethod(lambda cls: "k"))
+    (tmp_path / "build-key").write_text("k\n")
+    for name in ("ling", "codex-code-mode-host"):
+        path = tmp_path / "bin" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+    assert CodexBrandedBuilder.is_current() is False
+    bridge = tmp_path / "bin" / "ling-signal"
+    bridge.write_text("#!/bin/sh\n")
+    bridge.chmod(0o755)
+    assert CodexBrandedBuilder.is_current() is True
 
 
 def test_the_runner_never_falls_back_to_an_upstream_codex(tmp_path):
