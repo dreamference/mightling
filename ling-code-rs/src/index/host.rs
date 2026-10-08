@@ -64,7 +64,7 @@ fn slice_cgroup() -> PathBuf {
     #[cfg(not(unix))]
     let uid = 0;
     PathBuf::from(format!(
-        "/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/ling.slice/{SLICE}"
+        "/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/mightling.slice/{SLICE}"
     ))
 }
 
