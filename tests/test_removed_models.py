@@ -17,7 +17,7 @@ REMOVED = "qwen3.5-122b-a10b-hybrid-dflash"
 def test_every_name_of_a_removed_model_is_known_and_none_of_the_served_ones():
     for name in (REMOVED, "Qwen3.5-122B-A10B-Int4-DFlash", "nvidia/Qwen3.6-35B-A3B-NVFP4",
                  "Intel/Qwen3.5-122B-A10B-int4-AutoRound", "qwen3.5-122b-a10b-dflash-draft"):
-        assert ModelMatrixRegistry.removed_in(name) == "1.4.2", name
+        assert ModelMatrixRegistry.removed_in(name) == "1.5.0", name
         assert not ModelMatrixRegistry.is_offered(name), name
     for name in (DEFAULT_MODEL_ALIAS, "qwen3.8-27b-dflash2-draft", "someone/raw-repo", "", None):
         assert ModelMatrixRegistry.removed_in(name) is None, name
@@ -26,8 +26,8 @@ def test_every_name_of_a_removed_model_is_known_and_none_of_the_served_ones():
 
 def test_the_message_says_what_happened_and_the_command_that_fixes_it():
     message = ModelMatrixRegistry.removed_message(REMOVED, configured=True)
-    assert "removed in Puffin 1.4.2" in message and "your Puffin configuration" in message
-    assert f"puffin-admin main-model set {DEFAULT_MODEL_ALIAS}" in message
+    assert "removed in Mightling 1.5.0" in message and "your Mightling configuration" in message
+    assert f"ling-admin main-model set {DEFAULT_MODEL_ALIAS}" in message
 
 
 def test_main_model_set_refuses_a_removed_model_and_saves_nothing(capsys, monkeypatch):
@@ -45,7 +45,7 @@ def test_model_download_refuses_a_removed_model_without_downloading(capsys, monk
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["model", "download", "--model", REMOVED])
     assert exit_info.value.code == 1 and not downloads
-    assert "removed in Puffin 1.4.2" in capsys.readouterr().out
+    assert "removed in Mightling 1.5.0" in capsys.readouterr().out
 
 
 def test_server_start_with_a_removed_model_in_dreamference_toml_stops_before_anything_starts(
@@ -64,4 +64,4 @@ def test_server_start_with_a_removed_model_in_dreamference_toml_stops_before_any
         DreamferenceCLIController.run_cli(["server", "start"])
     assert exit_info.value.code == 1
     out = capsys.readouterr().out
-    assert "your Puffin configuration" in out and f"main-model set {DEFAULT_MODEL_ALIAS}" in out
+    assert "your Mightling configuration" in out and f"main-model set {DEFAULT_MODEL_ALIAS}" in out

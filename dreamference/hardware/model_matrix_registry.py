@@ -30,13 +30,13 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
 # 2026-10-07: Mightling serves this one model.
 DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.8-27b-nvfp4-dflash2"
 
-# Models Puffin served once and removed, keyed by every name an older configuration could hold for
+# Models Mightling served once and removed, keyed by every name an older configuration could hold for
 # them (alias, HuggingFace repository, display name, all lowercase), each naming the release that
 # removed it. Unknown keys are otherwise taken as raw HuggingFace repositories, so without this a
 # 1.4.1 dreamference.toml naming a removed alias was accepted by `main-model set`, and `model
 # download` and `server start` tried to fetch a repository of that name.
 REMOVED_MODELS: Final[Dict[str, str]] = {
-    name: "1.4.2"
+    name: "1.5.0"
     for name in (
         "qwen3.5-122b-a10b-hybrid-dflash",
         "qwen 3.5 122b-a10b (int4+fp8 hybrid + dflash + dense-bandwidth stack)",
@@ -409,7 +409,7 @@ class ModelMatrixRegistry:
     @classmethod
     def removed_in(cls, model_key: Optional[str]) -> Optional[str]:
         """
-        Names the release that removed a model, if `model_key` names one Puffin no longer serves.
+        Names the release that removed a model, if `model_key` names one Mightling no longer serves.
 
         Args:
             model_key (Optional[str]): Short model alias, HF repo ID, or display name.
@@ -434,10 +434,10 @@ class ModelMatrixRegistry:
         Returns:
             str: Two lines: what happened, and the command that fixes it.
         """
-        where = " (it is the model in your Puffin configuration)" if configured else ""
-        return (f"'{model_key}' was removed in Puffin {cls.removed_in(model_key)}{where}: Puffin "
+        where = " (it is the model in your Mightling configuration)" if configured else ""
+        return (f"'{model_key}' was removed in Mightling {cls.removed_in(model_key)}{where}: Mightling "
                 f"serves one model, {DEFAULT_MODEL_ALIAS}.\n"
-                f"   Switch to it: puffin-admin main-model set {DEFAULT_MODEL_ALIAS}")
+                f"   Switch to it: ling-admin main-model set {DEFAULT_MODEL_ALIAS}")
 
     @classmethod
     def declares_own_quantization(cls, model_key: str) -> bool:

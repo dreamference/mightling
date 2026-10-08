@@ -1,5 +1,7 @@
 # Puffin 1.4.2 — release notes
 
+*Never released: 1.4.2 was prepared on 2026-10-07 and superseded the same day by 1.5.0, the first Mightling release, which carries everything below. Kept as the record of that preparation.*
+
 **Status:** draft, 2026-10-07, on branch `release/1.4.2`, from `git log v1.4.1..main` (main at `4de1174`). Not built, tagged or published. The text between the two rules is the GitHub release's description; the sections marked *(if merged)* are added or dropped by the checklist at the end.
 
 **Version.** setup.py, `dreamference.__version__`, the MCP server's `serverInfo`, `tauri.conf.json` and `puffin-app`'s Cargo manifest and lock say `1.4.2`; the release workflow stamps the version it is given into setup.py, `tauri.conf.json` and the `puffin` binary in its own checkout.
