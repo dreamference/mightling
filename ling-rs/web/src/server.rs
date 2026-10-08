@@ -201,6 +201,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/apps", get(not_built))
         .route("/images/{*path}", get(not_built))
         .route("/healthz", get(healthz))
+        .route("/api/airgapped", get(airgapped))
         .route("/login", get(login))
         .route("/pair", get(pair_page).post(pair))
         .route("/pair.css", get(pair_css))
@@ -298,6 +299,32 @@ async fn healthz(State(server): State<Arc<Server>>) -> Response {
 
 async fn websocket(State(server): State<Arc<Server>>, upgrade: WebSocketUpgrade) -> Response {
     upgrade.max_message_size(64 << 20).on_upgrade(move |socket| crate::relay::run_tab(socket, server))
+}
+
+/// The user-level air-gap level, for clients that cannot read the user's configuration: the Signal
+/// bridge runs as its own system account with no access to the home folder, and must send nothing
+/// at `on` (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §11). No session's level is consulted: a client
+/// asks about the machine, not about a thread.
+async fn airgapped(State(_server): State<Arc<Server>>) -> Response {
+    let resolved = user_airgap_level();
+    json_response(StatusCode::OK, json!({ "level": resolved.level.name(), "source": resolved.source.label() }))
+}
+
+/// The air-gap level without a session: `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the strictest of
+/// the file `DREAMFERENCE_CONFIG_PATH` names and the user-level file.
+pub fn user_airgap_level() -> ling_airgapped::Resolved {
+    let environment = std::env::var(ling_airgapped::ENV_VAR).ok();
+    let mut files = Vec::new();
+    if let Some(path) = std::env::var_os("DREAMFERENCE_CONFIG_PATH").filter(|path| !path.is_empty()) {
+        files.push(PathBuf::from(path));
+    }
+    if let Some(user) = ling_airgapped::user_config_file()
+        && !files.contains(&user)
+    {
+        files.push(user);
+    }
+    let configs: Vec<(PathBuf, String)> = files.into_iter().filter_map(|path| std::fs::read_to_string(&path).ok().map(|text| (path, text))).collect();
+    ling_airgapped::resolve_from(None, environment.as_deref(), &configs)
 }
 
 /// `ling web open`'s link: trades the one-time code for a session cookie.

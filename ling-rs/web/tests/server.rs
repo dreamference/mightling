@@ -109,6 +109,7 @@ const PROTECTED: &[(&str, &str)] = &[
     ("POST", "/api/upload?thread=t&kind=file"),
     ("POST", "/api/transcribe"),
     ("GET", "/api/apps"),
+    ("GET", "/api/airgapped"),
     ("GET", "/images/a.png"),
     ("GET", "/anything-else"),
 ];
@@ -138,6 +139,11 @@ async fn every_route_but_the_sign_in_pages_needs_a_credential_on_loopback_too() 
     assert_eq!(status, StatusCode::OK);
     assert!(headers[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/javascript"));
     assert!(body.contains("window.electronBridge") && body.contains("mightlingWindowType = \"web\""));
+    // The machine's air-gap level, for the Signal bridge, which cannot read the user's files.
+    let (status, _, body) = call(&server, request("GET", "/api/airgapped").header(header::COOKIE, &cookie).body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    let level = serde_json::from_str::<Value>(&body).unwrap()["level"].as_str().unwrap().to_string();
+    assert!(level == "on" || level == "off", "{body}");
     // A made-up session cookie is nothing.
     let (status, _, _) =
         call(&server, request("GET", "/healthz").header(header::COOKIE, "mightling_session=forged").body(Body::empty()).unwrap()).await;
