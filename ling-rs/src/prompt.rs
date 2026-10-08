@@ -503,7 +503,7 @@ async fn show(codex_home: &Path, prompt: &Prompt, composed: bool) -> i32 {
 /// Writes `mightling_prompt = "<name>"` to the configuration file. Returns the lines and the code.
 fn use_prompt(name: &str) -> (Vec<String>, i32) {
     let path = crate::config_file().or_else(|| {
-        Some(PathBuf::from(std::env::var_os("HOME")?).join(".config/dreamference/config.toml"))
+        Some(ling_node_locator::home_dir()?.join(".config").join("dreamference").join("config.toml"))
     });
     let Some(path) = path else {
         return (vec!["Could not find a configuration file to write: HOME is not set.".to_string()], 1);
@@ -672,7 +672,8 @@ mod tests {
         assert_eq!(catalog, home.join("model_catalog.high-swe.json"));
         let args: Vec<OsString> = vec!["ling".into(), "exec".into(), "hi".into()];
         let out: Vec<String> = with_catalog(args, &catalog).iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(out, ["ling", "-c", "model_catalog_json=\"/h/.mightling/model_catalog.high-swe.json\"", "exec", "hi"]);
+        let setting = format!("model_catalog_json={}", toml::Value::String(catalog.display().to_string()));
+        assert_eq!(out, ["ling", "-c", setting.as_str(), "exec", "hi"]);
         let (_, value) = out[2].split_once('=').unwrap();
         assert!(format!("v = {value}").parse::<toml::Table>().is_ok());
         // The user's own catalog wins.

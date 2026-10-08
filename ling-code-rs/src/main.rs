@@ -160,8 +160,12 @@ fn run(command: Command) -> anyhow::Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Session { parent_pid } => ling_code::session::run(repo, settings, parent_pid).map(|_| ExitCode::SUCCESS),
+        Command::Session { parent_pid } => {
+            ling_code::paths::indexing_supported()?;
+            ling_code::session::run(repo, settings, parent_pid).map(|_| ExitCode::SUCCESS)
+        }
         Command::Index { exact, include_submodules, wait } => {
+            ling_code::paths::indexing_supported()?;
             if include_submodules {
                 anyhow::bail!("--include-submodules is gone (it lasted one run): choose per submodule with `ling-code submodules include <path>`");
             }

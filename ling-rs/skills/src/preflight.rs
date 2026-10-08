@@ -54,9 +54,21 @@ fn is_executable(path: &Path) -> bool {
     path.metadata().is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
+/// On Windows a program is a file with one of `PATHEXT`'s extensions (`gh` is `gh.exe`); a file
+/// without one cannot be run by name.
 #[cfg(not(unix))]
 fn is_executable(path: &Path) -> bool {
-    path.is_file() || path.with_extension("exe").is_file()
+    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    extensions
+        .split(';')
+        .filter_map(|extension| extension.strip_prefix('.'))
+        .filter(|extension| !extension.is_empty())
+        .any(|extension| {
+            let mut candidate = path.as_os_str().to_owned();
+            candidate.push(".");
+            candidate.push(extension.to_ascii_lowercase());
+            Path::new(&candidate).is_file()
+        })
 }
 
 /// The outcome for one skill.
@@ -108,7 +120,7 @@ mod tests {
     fn host_with(test: &str, programs: &[&str], env: &[&str]) -> (Host, PathBuf) {
         let dir = crate::testing::scratch(&format!("preflight-{test}"));
         for program in programs {
-            crate::testing::write_executable(&dir.join(program), "#!/bin/sh\n");
+            crate::testing::write_executable(&dir.join(crate::testing::program_file(program)), "#!/bin/sh\n");
         }
         std::fs::write(dir.join("not-executable"), "").unwrap_or_default();
         let host = Host {

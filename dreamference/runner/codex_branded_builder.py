@@ -95,6 +95,15 @@ CODE_BUILD_STAMP_NAME: Final[str] = "code-build-key"
 CODE_BIN_NAMES: Final[tuple] = ("ling-code",)
 CODE_PATH_LINK: Final[str] = os.path.expanduser("~/.local/bin/ling-code")
 
+# Windows (specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md §16.1). Every executable carries `.exe`, and
+# there are no `~/.local/bin` links: install.ps1 puts the install directory itself on the user's
+# PATH. The sandbox's helpers are built with `ling`, under the names Codex looks for beside its
+# own executable (`windows-sandbox-rs/src/helper_materialization.rs`).
+IS_WINDOWS: Final[bool] = os.name == "nt"
+EXE_SUFFIX: Final[str] = ".exe" if IS_WINDOWS else ""
+WINDOWS_SANDBOX_PACKAGE: Final[str] = "codex-windows-sandbox"
+WINDOWS_SANDBOX_HELPERS: Final[tuple] = ("codex-windows-sandbox-setup", "codex-command-runner")
+
 # Code Mode runs its JavaScript in a separate host process that Codex looks for next to its own
 # executable, so the two binaries are built and installed together.
 CODE_MODE_HOST_NAME: Final[str] = "codex-code-mode-host"
@@ -134,7 +143,7 @@ class CodexBrandedBuilder:
         Returns:
             str: Absolute path to `mightling-codex`, whether or not it has been built yet.
         """
-        return os.path.join(INSTALL_DIR, "bin", BRANDED_EXECUTABLE_NAME)
+        return os.path.join(INSTALL_DIR, "bin", BRANDED_EXECUTABLE_NAME + EXE_SUFFIX)
 
     @classmethod
     def has_source(cls) -> bool:
@@ -164,7 +173,7 @@ class CodexBrandedBuilder:
         """
         return all(
             os.path.isfile(path) and os.access(path, os.X_OK)
-            for path in (os.path.join(INSTALL_DIR, "bin", name) for name in names)
+            for path in (os.path.join(INSTALL_DIR, "bin", name + EXE_SUFFIX) for name in names)
         )
 
     @classmethod
@@ -271,7 +280,7 @@ class CodexBrandedBuilder:
         with open(stamp) as handle:
             if handle.read().strip() != key:
                 return False
-        host = os.path.join(INSTALL_DIR, "bin", CODE_MODE_HOST_NAME)
+        host = os.path.join(INSTALL_DIR, "bin", CODE_MODE_HOST_NAME + EXE_SUFFIX)
         return all(
             os.path.isfile(path) and os.access(path, os.X_OK)
             for path in (cls.executable_path(), host)
@@ -297,13 +306,15 @@ class CodexBrandedBuilder:
 
         shutil.rmtree(source_dir, ignore_errors=True)
         os.makedirs(source_dir)
+        # `core.autocrlf=false`: a Windows runner converts text to CRLF on the way out of git
+        # otherwise, and the LF patches then fail to apply.
         archive = subprocess.Popen(
-            ["git", "-C", CODEX_SUBMODULE_DIR, "archive", commit, "codex-rs"],
+            ["git", "-c", "core.autocrlf=false", "-C", CODEX_SUBMODULE_DIR, "archive", commit, "codex-rs"],
             stdout=subprocess.PIPE,
         )
-        extracted = subprocess.run(["tar", "-x", "-C", source_dir], stdin=archive.stdout, check=False)
+        extracted = cls.extract_archive(archive.stdout, source_dir)
         archive.stdout.close()
-        if archive.wait() != 0 or extracted.returncode != 0:
+        if archive.wait() != 0 or not extracted:
             print(f"❌ Could not export codex {commit[:12]} from the submodule.")
             return False
         # Before the patches, because 0002 makes the CLI depend on it.
@@ -369,16 +380,76 @@ class CodexBrandedBuilder:
         return True
 
     @classmethod
+    def extract_archive(cls, stream, destination: str) -> bool:
+        """
+        Unpacks a `git archive` tar stream into `destination`.
+
+        In Python rather than `tar`, because Windows' `tar` stops at the tree's one symbolic link
+        (`codex-rs/vendor/bubblewrap/LICENSE`), which an unprivileged Windows account cannot
+        create. Links are kept elsewhere and skipped on Windows, where nothing builds from them.
+
+        Args:
+            stream: The archive's bytes, as a readable binary stream.
+            destination (str): The directory to unpack into.
+
+        Returns:
+            bool: True if the archive unpacked.
+        """
+        import tarfile
+
+        try:
+            with tarfile.open(fileobj=stream, mode="r|") as archive:
+                for member in archive:
+                    if IS_WINDOWS and (member.issym() or member.islnk()):
+                        continue
+                    archive.extract(member, destination, filter="fully_trusted")
+        except (tarfile.TarError, OSError) as error:
+            print(f"❌ Could not unpack the exported source: {error}")
+            return False
+        return True
+
+    @classmethod
     def host_target(cls) -> str:
         """
         Returns the Rust target triple of this machine, which is the one Codex is built for.
 
         Returns:
-            str: For example `aarch64-unknown-linux-gnu` on GB10.
+            str: For example `aarch64-unknown-linux-gnu` on GB10, `aarch64-pc-windows-msvc` on an
+            RTX Spark laptop.
         """
         import platform
 
-        return f"{platform.machine()}-unknown-linux-gnu"
+        return cls.target_for(platform.machine(), IS_WINDOWS)
+
+    @classmethod
+    def target_for(cls, machine: str, windows: bool) -> str:
+        """
+        The Rust target triple for a processor name as `platform.machine()` reports it.
+
+        Args:
+            machine (str): `aarch64` or `x86_64` on Linux; `ARM64` or `AMD64` on Windows.
+            windows (bool): Whether the machine runs Windows.
+
+        Returns:
+            str: The triple, e.g. `x86_64-pc-windows-msvc`.
+        """
+        arch = {"arm64": "aarch64", "amd64": "x86_64", "x64": "x86_64"}.get(machine.lower(), machine.lower())
+        return f"{arch}-pc-windows-msvc" if windows else f"{arch}-unknown-linux-gnu"
+
+    @classmethod
+    def v8_archive_name(cls, target: str) -> str:
+        """
+        The prebuilt V8's file name, as upstream's `setup-rusty-v8` action names it.
+
+        Args:
+            target (str): The Rust target triple.
+
+        Returns:
+            str: `rusty_v8_<profile>_<target>.lib.gz` on Windows, `librusty_v8_…a.gz` elsewhere.
+        """
+        if target.endswith("-pc-windows-msvc"):
+            return f"rusty_v8_{RUSTY_V8_PROFILE}_{target}.lib.gz"
+        return f"librusty_v8_{RUSTY_V8_PROFILE}_{target}.a.gz"
 
     @classmethod
     def fetch_rusty_v8(cls, source_dir: str) -> Optional[dict]:
@@ -458,7 +529,7 @@ class CodexBrandedBuilder:
                 name.lstrip("*"): digest
                 for digest, name in (line.split() for line in handle.read().replace("\r", "").splitlines() if line.strip())
             }
-        archive_name = f"librusty_v8_{RUSTY_V8_PROFILE}_{target}.a.gz"
+        archive_name = cls.v8_archive_name(target)
         binding_name = f"src_binding_{RUSTY_V8_PROFILE}_{target}.rs"
         if archive_name not in listed or binding_name not in listed:
             print(f"❌ {checksums_name} does not list the V8 archive and bindings for {target}.")
@@ -525,18 +596,42 @@ class CodexBrandedBuilder:
         # mid-compile ("Could not locate working directory"). An exclusive lock makes a second
         # build wait, and the re-check after it lets that one finish at once if the first build
         # already produced what it needed.
-        import fcntl
-
         os.makedirs(BUILD_CACHE_DIR, exist_ok=True)
         with open(os.path.join(BUILD_CACHE_DIR, ".build.lock"), "w") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                print("⏳ Another ling build is running; waiting for it to finish...")
-                fcntl.flock(lock, fcntl.LOCK_EX)
+            cls._lock_exclusive(lock)
             if not force and cls.is_current():
                 return True
             return cls._build_locked()
+
+    @classmethod
+    def _lock_exclusive(cls, handle) -> None:
+        """
+        Takes an exclusive lock on an open file, waiting (and saying so) if another build holds it.
+
+        Args:
+            handle: The open lock file. The lock is released when it is closed.
+        """
+        if IS_WINDOWS:
+            import msvcrt
+            import time
+
+            waited = False
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    return
+                except OSError:
+                    if not waited:
+                        print("⏳ Another ling build is running; waiting for it to finish...")
+                        waited = True
+                    time.sleep(2)
+        import fcntl
+
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("⏳ Another ling build is running; waiting for it to finish...")
+            fcntl.flock(handle, fcntl.LOCK_EX)
 
     @classmethod
     def _build_locked(cls) -> bool:
@@ -572,6 +667,15 @@ class CodexBrandedBuilder:
             "-p", "codex-cli", "--bin", CARGO_BIN_NAME,
             "-p", "codex-code-mode-host", "--bin", CODE_MODE_HOST_NAME,
         ]
+        installed_names = [(CARGO_BIN_NAME, BRANDED_EXECUTABLE_NAME), (CODE_MODE_HOST_NAME, CODE_MODE_HOST_NAME)]
+        if IS_WINDOWS:
+            command += ["-p", WINDOWS_SANDBOX_PACKAGE]
+            for helper in WINDOWS_SANDBOX_HELPERS:
+                command += ["--bin", helper]
+                installed_names.append((helper, helper))
+            if cls.host_target().startswith("x86_64"):
+                # As upstream's Windows release job does for this target.
+                environment["LIBSQLITE3_FLAGS"] = "SQLITE_DISABLE_INTRINSIC"
         print(f"🔨 Building ling (upstream {CODEX_RELEASE_TAG}, {len(cls.patches())} patches)...")
         if subprocess.call(command, cwd=os.path.join(source_dir, "codex-rs"), env=environment) != 0:
             print("❌ The ling build failed; see the cargo output above.")
@@ -580,12 +684,12 @@ class CodexBrandedBuilder:
         release_dir = os.path.join(BUILD_CACHE_DIR, "target", "release")
         bin_dir = os.path.join(INSTALL_DIR, "bin")
         os.makedirs(bin_dir, exist_ok=True)
-        for built, installed in ((CARGO_BIN_NAME, BRANDED_EXECUTABLE_NAME), (CODE_MODE_HOST_NAME, CODE_MODE_HOST_NAME)):
+        for built, installed in installed_names:
             # Copied to a temporary name and renamed over the old one, so a running session keeps
             # its binary and a new one never sees a half-written file.
             staging = os.path.join(bin_dir, f".{installed}.new")
-            shutil.copy2(os.path.join(release_dir, built), staging)
-            os.replace(staging, os.path.join(bin_dir, installed))
+            shutil.copy2(os.path.join(release_dir, built + EXE_SUFFIX), staging)
+            os.replace(staging, os.path.join(bin_dir, installed + EXE_SUFFIX))
         with open(os.path.join(INSTALL_DIR, BUILD_STAMP_NAME), "w") as handle:
             handle.write(f"{key}\n")
 
@@ -634,7 +738,7 @@ class CodexBrandedBuilder:
             if handle.read().strip() != cls.crate_key(crate_dir):
                 return False
         return all(
-            os.access(os.path.join(INSTALL_DIR, "bin", name), os.X_OK) for name in bin_names
+            os.access(os.path.join(INSTALL_DIR, "bin", name + EXE_SUFFIX), os.X_OK) for name in bin_names
         )
 
     @classmethod
@@ -677,8 +781,8 @@ class CodexBrandedBuilder:
         for name in bin_names:
             # Renamed over the old file, so a command running now keeps its binary.
             staging = os.path.join(bin_dir, f".{name}.new")
-            shutil.copy2(os.path.join(cache_dir, "target", "release", name), staging)
-            os.replace(staging, os.path.join(bin_dir, name))
+            shutil.copy2(os.path.join(cache_dir, "target", "release", name + EXE_SUFFIX), staging)
+            os.replace(staging, os.path.join(bin_dir, name + EXE_SUFFIX))
         with open(os.path.join(INSTALL_DIR, stamp_name), "w") as handle:
             handle.write(f"{cls.crate_key(crate_dir)}\n")
         cls.link_onto_path()
@@ -747,8 +851,11 @@ class CodexBrandedBuilder:
 
         `ling` so it works from any shell; the others so the model can run the web and mail
         commands its prompt names from the shell `ling` gives it. A web command is linked only
-        once its binary is installed, so a link never dangles.
+        once its binary is installed, so a link never dangles. Nothing on Windows, where the
+        install directory itself is on PATH.
         """
+        if IS_WINDOWS:
+            return
         cls._link(cls.executable_path(), PATH_LINK)
         script = cls.console_script_path("ling-admin")
         if script:

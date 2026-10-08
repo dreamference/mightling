@@ -1,0 +1,211 @@
+# The Windows client (specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md, Phase 1): ling.exe and its
+# commands for Windows on Arm (the RTX Spark laptops) and x86-64 Windows, built and tested on
+# GitHub's hosted runners, then installed with install.ps1 under Windows PowerShell 5.1.
+#
+# Runs on pushes to `windows/**` branches while the port is worked on, by hand, and from the
+# Release workflow (`build_windows`), which then publishes what this uploads. Windows builds are a
+# preview and are not signed (decided 2026-10-07).
+name: Windows
+
+on:
+  push:
+    branches: ["windows/**"]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version compiled into ling (empty: a source build)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  # The small crates and the two standalone ones: minutes, so their failures show long before the
+  # Codex build finishes.
+  tools:
+    name: Tools - ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          targets: ${{ matrix.target }}
+      # The std-only crates, each in a copy outside the launcher workspace (they inherit nothing
+      # from it), tested natively: the air-gap resolver, the node locator, the skills crate with
+      # its directory junctions.
+      - name: Test the launcher's standalone crates
+        shell: bash
+        run: |
+          set -euo pipefail
+          for crate in airgapped node-locator skills; do
+            rm -rf "$RUNNER_TEMP/$crate"
+            cp -r "ling-rs/$crate" "$RUNNER_TEMP/$crate"
+            (cd "$RUNNER_TEMP/$crate" && cargo test --release)
+          done
+      - name: Test the web commands
+        working-directory: ling-web-rs
+        run: cargo test --release --locked
+      - name: Test the code index's queries
+        working-directory: ling-code-rs
+        run: cargo test --release --locked --lib
+
+  ling:
+    name: ling - ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    # Upstream's own Windows release builds "can exceed an hour" on larger machines.
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    env:
+      # Compiled into the launcher, so `ling update` can tell whether a newer release exists.
+      MIGHTLING_VERSION: ${{ inputs.version }}
+      # The builder prints emoji, which the runner's cp1252 console cannot encode.
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Long paths
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Codex submodule
+        run: git submodule update --init --depth 1 codex
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      # The builder imports only these; the package's own dependencies (PyTorch among them) are
+      # for the node and have no Windows on Arm wheels.
+      - name: Install the builder
+        run: |
+          pip install --no-deps -e .
+          pip install requests rich
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          targets: ${{ matrix.target }}
+      # Upstream's own action, from the pinned submodule: the MSVC environment and LLVM's linker
+      # for this target.
+      - name: MSVC environment
+        uses: ./codex/.github/actions/setup-msvc-env
+        with:
+          target: ${{ matrix.target }}
+      - name: Build ling
+        shell: bash
+        run: python -c "import sys; from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; sys.exit(0 if B.build(force=True) else 1)"
+      - name: Smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$(dirname "$(python -c 'from dreamference.runner.codex_branded_builder import CodexBrandedBuilder as B; print(B.executable_path())')")"
+          ls -l "$bin"
+          "$bin/ling.exe" --version
+          "$bin/ling.exe" --help > /dev/null
+          "$bin/ling-search.exe" --help > /dev/null
+          "$bin/ling-code.exe" --help > /dev/null
+      - name: Package
+        run: python .github/scripts/package_mightling.py dist
+      # install.ps1 end to end, under Windows PowerShell 5.1 (what a standard Windows 11 laptop
+      # has), against a stand-in for GitHub's release API serving the assets just packaged.
+      - name: install.ps1 under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList ".github\scripts\fake_release.py", "dist", "8787", "dreamference/mightling", "v0.0.0-ci"
+          Start-Sleep -Seconds 3
+          $env:MIGHTLING_RELEASE_API = "http://127.0.0.1:8787"
+          $env:MIGHTLING_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "mightling-install\bin"
+          try {
+            Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+            if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed" }
+            & (Join-Path $env:MIGHTLING_INSTALL_DIR "ling.exe") --version
+            if ($LASTEXITCODE -ne 0) { throw "the installed ling.exe did not run" }
+            # Again, over the installed files: the replace-aside path.
+            & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+            if ($LASTEXITCODE -ne 0) { throw "a second install.ps1 failed" }
+            Get-ChildItem $env:MIGHTLING_INSTALL_DIR | Format-Table Name, Length
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            if (-not (($userPath -split ";") -contains $env:MIGHTLING_INSTALL_DIR)) { throw "the install folder is not on the user's PATH" }
+            # The runner is already an administrator, so install.ps1's one elevated step ran without
+            # a prompt: the sandbox's accounts and the mDNS rule must exist now.
+            Get-NetFirewallRule -Name "Mightling-mDNS-ling" | Format-List Name, DisplayName, Profile, Enabled
+            Get-LocalUser | Where-Object { $_.Name -like "CodexSandbox*" } | Format-Table Name, Enabled
+            if (-not (Get-LocalUser | Where-Object { $_.Name -like "CodexSandboxOffline*" })) { throw "the sandbox's offline account was not created" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+      # Phase 2 (WINDOWS_ARM §7, §14, §18): the refusal at `on`, the offline account taking a
+      # sandboxed command's network away, and the egress audit over ETW, against a stand-in model
+      # server. The runner is an administrator, which both the sandbox and ETW need.
+      - name: Air gap and egress audit
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ling = Join-Path $env:RUNNER_TEMP "mightling-install\bin\ling.exe"
+          $server = Start-Process -PassThru -NoNewWindow python -ArgumentList ".github\scripts\stub_model_server.py", "8799"
+          Start-Sleep -Seconds 3
+          # Native commands write to stderr; that is output here, not a terminating error.
+          $ErrorActionPreference = "Continue"
+          try {
+            # At `on`, a sandbox that cannot take the network away is refused before anything starts.
+            $env:DREAMFERENCE_MIGHTLING_AIRGAPPED = "on"
+            $env:DREAMFERENCE_VLLM_HOST = "http://127.0.0.1:8799"
+            $refused = & $ling -c windows.sandbox=unelevated exec --skip-git-repo-check "hello" 2>&1 | Out-String
+            $refusedExit = $LASTEXITCODE
+            Write-Host "refusal: exit $refusedExit, $refused"
+            if ($refusedExit -eq 0 -or $refused -notmatch "non-admin sandbox") { throw "the non-admin sandbox was not refused at on" }
+            # The elevated sandbox: a command reaches the network at `off` and not at `on`. Plain
+            # HTTP: Windows' curl.exe uses Schannel, which cannot acquire credentials as the
+            # sandbox's account (SEC_E_NO_CREDENTIALS), so an https probe fails at off after connecting.
+            $probe = @("sandbox", "-c", "sandbox_mode=workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--", "curl.exe", "-sS", "-m", "20", "-o", "NUL", "-w", "%{http_code}", "http://example.com")
+            $env:DREAMFERENCE_MIGHTLING_AIRGAPPED = "off"
+            $off = & $ling @probe 2>&1 | Out-String
+            $offExit = $LASTEXITCODE
+            Write-Host "off: exit $offExit, $off"
+            $env:DREAMFERENCE_MIGHTLING_AIRGAPPED = "on"
+            $on = & $ling @probe 2>&1 | Out-String
+            $onExit = $LASTEXITCODE
+            Write-Host "on: exit $onExit, $on"
+            Remove-Item Env:DREAMFERENCE_MIGHTLING_AIRGAPPED
+            # The egress audit: one real session against the stand-in, traced over ETW.
+            & $ling audit egress --host http://127.0.0.1:8799
+            $auditExit = $LASTEXITCODE
+            if ($offExit -ne 0) { throw "a sandboxed curl failed at off, so the result at on proves nothing" }
+            if ($onExit -eq 0) { throw "a sandboxed curl reached the network at on" }
+            if ($auditExit -ne 0) { throw "the egress audit did not pass (exit $auditExit)" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() }}
+        with:
+          name: mightling-windows-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+      # Last, so the smoke test, the packaging and install.ps1 run whatever the tests say. The same
+      # export, V8 and target directory the build used, so the tests reuse its crates.
+      - name: Launcher test environment
+        if: ${{ !cancelled() }}
+        run: |
+          python -c "import os; from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR as C, CodexBrandedBuilder as B; src = os.path.join(C, 'src'); env = dict(B.fetch_rusty_v8(src), MIGHTLING_EXPORT=os.path.join(src, 'codex-rs'), CARGO_TARGET_DIR=os.path.join(C, 'target'), CARGO_PROFILE_RELEASE_DEBUG='none', CARGO_PROFILE_RELEASE_STRIP='debuginfo'); open(os.environ['GITHUB_ENV'], 'a').write(''.join(f'{k}={v}\n' for k, v in env.items()))"
+      - name: Launcher tests
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          Set-Location $env:MIGHTLING_EXPORT
+          cargo test --release -p ling-launcher
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

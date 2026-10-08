@@ -27,9 +27,19 @@ impl FileStamp {
 }
 
 /// Nanoseconds since the epoch of a file's modification time.
+#[cfg(unix)]
 pub fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
     use std::os::unix::fs::MetadataExt;
     meta.mtime() * 1_000_000_000 + meta.mtime_nsec()
+}
+
+/// Nanoseconds since the epoch of a file's modification time (0 when the system has none).
+#[cfg(not(unix))]
+pub fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos() as i64)
 }
 
 /// The hex SHA-256 of a file's content.

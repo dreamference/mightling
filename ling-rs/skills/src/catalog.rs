@@ -640,7 +640,7 @@ mod tests {
         assert!(plan.link_sets(&fixture.home).iter().all(|set| set.links.is_empty()));
         assert_eq!(
             plan.config_entries(),
-            vec![(fixture.home.join(".agents/skills/mac-only/SKILL.md"), "unavailable: for macos only".to_string())]
+            vec![(crate::testing::canonical(fixture.home.join(".agents/skills/mac-only/SKILL.md")), "unavailable: for macos only".to_string())]
         );
         assert!(!plan.offers_foreign_skill());
 
@@ -682,16 +682,18 @@ mod tests {
         assert_eq!(
             switched_off,
             vec![
-                fixture.home.join(".mightling/skills/lint/SKILL.md"),
-                fixture.home.join(".agents/skills/lint/SKILL.md"),
-                fixture.home.join(".mightling/skills/.system/pdf/SKILL.md"),
+                crate::testing::canonical(fixture.home.join(".mightling/skills/lint/SKILL.md")),
+                crate::testing::canonical(fixture.home.join(".agents/skills/lint/SKILL.md")),
+                crate::testing::canonical(fixture.home.join(".mightling/skills/.system/pdf/SKILL.md")),
             ]
         );
         let links: Vec<String> = plan.link_sets(&fixture.home).into_iter().flat_map(|set| set.links.into_keys()).collect();
         assert_eq!(links, vec!["only-here".to_string()]);
 
         // `disable` withholds the winner; the next in line is then offered.
-        let settings = Settings { disabled: [fixture.home.join(".mightling/skills/pdf").to_string_lossy().into_owned()].into(), ..Settings::default() };
+        // The folder as the catalog found it, the key `ling skill disable` writes.
+        let pdf = fixture.machine().skills_root().join("pdf");
+        let settings = Settings { disabled: [pdf.to_string_lossy().into_owned()].into(), ..Settings::default() };
         let plan = super::plan(&fixture.machine(), &settings);
         assert_eq!(plan.find("pdf").map(|entry| entry.skill.origin.label()), Some("Claude Code".to_string()));
     }
@@ -778,7 +780,8 @@ mod tests {
     }
 
     fn trust(fixture: &Fixture, root: &Path) {
-        let config = format!("[projects.\"{}\"]\ntrust_level = \"trusted\"\n", root.display());
+        // A literal string: a Windows path's backslashes are not TOML escapes there.
+        let config = format!("[projects.'{}']\ntrust_level = \"trusted\"\n", root.display());
         std::fs::write(fixture.codex_home.join("config.toml"), config).unwrap_or_default();
     }
 

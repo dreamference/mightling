@@ -371,7 +371,13 @@ fn fetch_stops_downloading_at_the_size_cap() {
     assert_eq!(printed["text"].as_str().unwrap().len(), 100_000);
     assert_eq!(printed["truncated"], true);
     let output = fetch(&[&server.base, "--max-chars", "10"], &[]);
-    assert!(stdout(&output).ends_with("aaaaaaaaaa\n\n[truncated at 10 chars]\n"));
+    // Failed once on x86-64 Windows (run 37628134383) and passed on every other run: say what was printed.
+    assert!(
+        stdout(&output).ends_with("aaaaaaaaaa\n\n[truncated at 10 chars]\n"),
+        "stdout: {:?}\nstderr: {}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

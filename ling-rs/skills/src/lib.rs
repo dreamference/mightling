@@ -446,7 +446,9 @@ mod tests {
         let text = config(&fixture);
         assert!(text.starts_with("model = \"m\"\n"), "{text}");
         assert!(text.contains("unavailable: for macos only\n[[skills.config]]\npath = "), "{text}");
-        assert!(text.contains(".agents/skills/mac-only/SKILL.md\"\nenabled = false\n"), "{text}");
+        // A Windows path is written as a TOML literal string: single quotes, backslashes as they are.
+        let flat = text.replace('\\', "/").replace('\'', "\"");
+        assert!(flat.contains(".agents/skills/mac-only/SKILL.md\"\nenabled = false\n"), "{text}");
 
         // A second start changes nothing on disk.
         let modified = |path: &Path| path.metadata().and_then(|metadata| metadata.modified()).ok();
@@ -538,7 +540,7 @@ mod tests {
         let lines = start(&machine, false, "t2").lines;
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with("Skills: 1 item was found under a from-* name that ling did not put there; moved to "), "{lines:?}");
-        assert!(lines[0].ends_with("skills/.quarantine/t2"), "{lines:?}");
+        assert!(lines[0].replace('\\', "/").ends_with("skills/.quarantine/t2"), "{lines:?}");
         assert!(fixture.codex_home.join("skills/.quarantine/t2/from-claude/planted/SKILL.md").is_file());
         // A planted skill is never offered, even before the rebuild removes it.
         let plan = catalog::plan(&machine, &Settings::default());

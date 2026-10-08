@@ -15,10 +15,17 @@ use crate::install;
 use crate::install::Provenance;
 use crate::settings::Settings;
 
-/// `/home/me/.claude/skills/x` as `~/.claude/skills/x`.
+/// `/home/me/.claude/skills/x` as `~/.claude/skills/x`, with `/` after the `~` on Windows too,
+/// as the fixed folder names beside it are written. Both are compared without Windows' verbatim
+/// `\\?\` prefix, which only a resolved path carries.
 pub fn short_path(path: &Path, home: &Path) -> String {
-    match path.strip_prefix(home) {
-        Ok(rest) if !home.as_os_str().is_empty() => format!("~/{}", rest.display()),
+    let path = crate::links::plain_path(path);
+    let home = crate::links::plain_path(home);
+    match path.strip_prefix(&home) {
+        Ok(rest) if !home.as_os_str().is_empty() => {
+            let parts: Vec<String> = rest.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
+            format!("~/{}", parts.join("/"))
+        }
         _ => path.display().to_string(),
     }
 }
@@ -199,7 +206,7 @@ pub fn show(entry: &Entry, machine: &Machine) -> Vec<String> {
         origin => format!("{} ({})", origin.label(), short_path(&skill.dir, &machine.home)),
     };
     lines.push(format!("From:        {place}"));
-    lines.push(format!("File:        {}", skill.skill_md.display()));
+    lines.push(format!("File:        {}", crate::links::plain_path(&skill.skill_md).display()));
     match &skill.frontmatter {
         Err(error) => lines.push(format!("Frontmatter: {error}")),
         Ok(frontmatter) => {

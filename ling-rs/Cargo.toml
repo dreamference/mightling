@@ -56,6 +56,15 @@ openssl-sys = { workspace = true, features = ["vendored"] }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
+# Windows: whether the process that wrote an air-gap seal is still running (src/airgapped.rs), the
+# same windows-sys release the Codex workspace already builds.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
+# Whether the elevated sandbox is set up, asked exactly as Codex asks it (src/airgapped.rs).
+codex-windows-sandbox = { workspace = true }
+# `ling audit egress`: the ETW real-time trace (src/audit.rs; WINDOWS_ARM §14).
+ferrisetw = "1.2"
+
 [dev-dependencies]
 clap = { workspace = true, features = ["derive"] }
 # Codex's own hook types, to check the trust hashes the launcher computes (refine.rs's tests).

@@ -48,7 +48,11 @@ const CARRY_OVER_DB_PREFIXES: &[&str] =
 pub fn use_mightling_home() {
     // Refine mode's `--refine`/`--no-refine` become its variable here, for the same reason.
     crate::refine::export_flag();
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+    // A Windows update moved the binaries it replaced aside; this start is the first moment they
+    // can be deleted.
+    #[cfg(windows)]
+    crate::update::sweep_replaced_binaries();
+    let Some(home) = ling_node_locator::home_dir() else {
         return;
     };
     // Puffin became Mightling: an installation of the old name is moved over once (rename.rs).
@@ -104,12 +108,19 @@ pub fn resolve(codex_home_env: Option<&std::ffi::OsStr>, home: &Path) -> Option<
     }
 }
 
+#[cfg(unix)]
 fn create_private_dir(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(path)
+}
+
+/// On Windows the profile folder's ACLs already keep other users out.
+#[cfg(not(unix))]
+fn create_private_dir(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)
 }
 
 /// Copies the allow-listed entries of `from` into `to` and records them in the marker file.
@@ -153,7 +164,7 @@ pub fn should_carry_over(name: &str) -> bool {
 fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     let metadata = std::fs::symlink_metadata(from)?;
     if metadata.file_type().is_symlink() {
-        std::os::unix::fs::symlink(std::fs::read_link(from)?, to)
+        copy_link(from, to)
     } else if metadata.is_dir() {
         std::fs::create_dir_all(to)?;
         for entry in std::fs::read_dir(from)? {
@@ -164,6 +175,18 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     } else {
         std::fs::copy(from, to).map(|_| ())
     }
+}
+
+#[cfg(unix)]
+fn copy_link(from: &Path, to: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(std::fs::read_link(from)?, to)
+}
+
+/// A link cannot be made without a privilege on Windows; it is left behind, as the allow-list's
+/// other misses are.
+#[cfg(not(unix))]
+fn copy_link(_from: &Path, _to: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]

@@ -114,9 +114,52 @@ pub fn git_z(dir: &Path, args: &[&str]) -> Result<Vec<String>> {
     Ok(git(dir, args)?.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
 }
 
-/// The user's home directory.
+/// Whether process `pid` is running. Only a Unix can be asked here; indexing, the one thing that
+/// asks, runs only there for now (specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md §12).
+#[cfg(unix)]
+pub fn process_alive(pid: i32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists and may be signalled.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+pub fn process_alive(_pid: i32) -> bool {
+    false
+}
+
+/// Indexing needs bubblewrap, systemd scopes and cgroups: a Linux host (§9). Elsewhere `index`
+/// and `session` say so, and queries read an index built on Linux.
+pub fn indexing_supported() -> anyhow::Result<()> {
+    if cfg!(target_os = "linux") {
+        Ok(())
+    } else {
+        anyhow::bail!("indexing runs on Linux only for now; on this system ling-code answers queries from an existing index")
+    }
+}
+
+/// The user's home directory: `HOME`, or `USERPROFILE` on Windows, where `HOME` is usually unset.
 pub fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    home_from(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
+}
+
+/// [`home`] on given values: the first that is set and not empty, else `/`.
+pub fn home_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ffi::OsString>) -> PathBuf {
+    home.filter(|home| !home.is_empty())
+        .or_else(|| userprofile.filter(|home| !home.is_empty()))
+        .map_or_else(|| PathBuf::from("/"), PathBuf::from)
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+
+    #[test]
+    fn the_home_folder_falls_back_to_userprofile() {
+        use std::ffi::OsString;
+        assert_eq!(home_from(None, Some(OsString::from(r"C:\Users\Jane Doe"))), PathBuf::from(r"C:\Users\Jane Doe"));
+        assert_eq!(home_from(Some(OsString::from("/home/u")), Some(OsString::from(r"C:\x"))), PathBuf::from("/home/u"));
+        assert_eq!(home_from(Some(OsString::new()), None), PathBuf::from("/"));
+    }
 }
 
 /// Where Mightling installs its binaries and the pinned tools (spec §5).

@@ -152,11 +152,24 @@ pub fn resolve_from(session: Option<&str>, environment: Option<&str>, configs: &
     Resolved { level, source, invalid }
 }
 
+/// The user's home folder: `HOME`, or `USERPROFILE` (Windows, where `HOME` is usually unset).
+/// The same rule as the node locator's, so the copies cannot disagree.
+pub fn home_dir() -> Option<PathBuf> {
+    home_from(std::env::var_os("HOME"), std::env::var_os("USERPROFILE"))
+}
+
+/// [`home_dir`] on given values: the first that is set and not empty.
+pub fn home_from(home: Option<std::ffi::OsString>, userprofile: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    home.filter(|home| !home.is_empty())
+        .or_else(|| userprofile.filter(|home| !home.is_empty()))
+        .map(PathBuf::from)
+}
+
 /// `$CODEX_HOME`, or `~/.mightling` when a shell-environment policy stripped the variable.
 pub fn codex_home() -> Option<PathBuf> {
     match std::env::var_os("CODEX_HOME") {
         Some(home) if !home.is_empty() => Some(PathBuf::from(home)),
-        _ => Some(PathBuf::from(std::env::var_os("HOME")?).join(".mightling")),
+        _ => Some(home_dir()?.join(".mightling")),
     }
 }
 
@@ -170,7 +183,7 @@ pub fn session_file(id: &str) -> Option<PathBuf> {
 
 /// The user-level configuration file, the one `/airgapped default` writes.
 pub fn user_config_file() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("HOME")?).join(".config/dreamference/config.toml"))
+    Some(home_dir()?.join(".config").join("dreamference").join("config.toml"))
 }
 
 /// The configuration files to read, in the order they are named when two agree: the one
@@ -190,9 +203,13 @@ pub fn config_files(cwd: &Path) -> Vec<PathBuf> {
 }
 
 /// The folders a sandboxed command can write under the workspace-write sandbox: the working
-/// directory, `/tmp` and `$TMPDIR`. (Folders the user adds as `writable_roots` are not known here.)
+/// directory, `/tmp` (not on Windows) and the temporary folder `tmpdir`. (Folders the user adds as
+/// `writable_roots` are not known here.)
 pub fn writable_roots(cwd: &Path, tmpdir: Option<&Path>) -> Vec<PathBuf> {
-    let mut roots = vec![cwd.to_path_buf(), PathBuf::from("/tmp")];
+    let mut roots = vec![cwd.to_path_buf()];
+    if !cfg!(windows) {
+        roots.push(PathBuf::from("/tmp"));
+    }
     if let Some(tmpdir) = tmpdir
         && !tmpdir.as_os_str().is_empty()
     {
@@ -201,17 +218,61 @@ pub fn writable_roots(cwd: &Path, tmpdir: Option<&Path>) -> Vec<PathBuf> {
     roots
 }
 
+/// The variables naming the temporary folders a command can write: `TMPDIR`, or on Windows `TEMP`
+/// and `TMP`.
+pub const TEMP_VARS: &[&str] = if cfg!(windows) { &["TEMP", "TMP"] } else { &["TMPDIR"] };
+
 /// Whether `path` lies in (or is) one of `roots`, comparing real paths where they exist.
 pub fn within(path: &Path, roots: &[PathBuf]) -> bool {
-    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = real(path);
-    roots.iter().any(|root| path.starts_with(real(root)))
+    let path = real_path(path);
+    roots.iter().any(|root| path.starts_with(real_path(root)))
 }
 
-/// [`writable_roots`] for this process: its working directory and its `$TMPDIR`.
+/// `path` with its deepest existing ancestor resolved, links followed, and the rest appended as
+/// written: a file not created yet still compares with the folder it would be created in. On
+/// Windows, `canonicalize` gives the resolved part the verbatim prefix (`\\?\C:\…`) and nothing else
+/// has it, so it is removed.
+pub fn real_path(path: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut existing = path;
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(existing) {
+            let mut real = without_verbatim_prefix(resolved);
+            for part in rest.iter().rev() {
+                real.push(part);
+            }
+            return real;
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// `C:\…` for `\\?\C:\…`; any other path, a verbatim UNC one included, as it is.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
+/// [`writable_roots`] for this process: its working directory and its temporary folders.
 fn writable_roots_here() -> Vec<PathBuf> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    writable_roots(&cwd, std::env::var_os("TMPDIR").map(PathBuf::from).as_deref())
+    let mut roots = writable_roots(&cwd, None);
+    for var in TEMP_VARS {
+        if let Some(dir) = std::env::var_os(var).filter(|dir| !dir.is_empty()).map(PathBuf::from)
+            && !roots.contains(&dir)
+        {
+            roots.push(dir);
+        }
+    }
+    roots
 }
 
 /// Whether a sandboxed command started here could rewrite the files the level is read from:
@@ -225,7 +286,18 @@ pub fn level_files_exposed() -> bool {
 /// The user's runtime directory: `$XDG_RUNTIME_DIR`, or `/run/user/<uid>` when a shell-environment
 /// policy stripped the variable. systemd creates it per login, owned by the user, and the command
 /// sandbox mounts it read-only (measured 2026-10-02: a sandboxed `touch` there fails with
-/// "Read-only file system", from the home directory too).
+/// "Read-only file system", from the home directory too). On Windows, `%LOCALAPPDATA%\Mightling`:
+/// the sandbox runs commands as its own local accounts, which cannot write the user's profile
+/// (specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md §7.3).
+#[cfg(windows)]
+fn runtime_dir() -> Option<PathBuf> {
+    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA").filter(|dir| !dir.is_empty())?);
+    let dir = base.join("Mightling");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+#[cfg(not(windows))]
 fn runtime_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
         && dir.is_absolute()
@@ -303,11 +375,16 @@ pub fn resolve_guarded(
 /// Resolves the level for the first of `ids` that has a session file, reading every tier and the
 /// seals.
 pub fn resolve(ids: &[&str]) -> Resolved {
+    resolve_with(ids, std::env::var(ENV_VAR).ok())
+}
+
+/// [`resolve`] with the environment tier's value given, for a command whose environment is not
+/// this process's.
+pub fn resolve_with(ids: &[&str], environment: Option<String>) -> Resolved {
     let session = ids
         .iter()
         .filter_map(|id| session_file(id))
         .find_map(|path| std::fs::read_to_string(path).ok());
-    let environment = std::env::var(ENV_VAR).ok();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let configs: Vec<(PathBuf, String)> = config_files(&cwd)
         .into_iter()
@@ -330,6 +407,18 @@ pub fn resolve_for_command() -> Resolved {
 /// the command's own environment, once per command.
 pub fn sealed_for_command() -> bool {
     resolve_for_command().level == Level::On
+}
+
+/// [`sealed_for_command`] for a command whose environment is in hand rather than inherited. Codex's
+/// Windows sandbox resolves a command's permissions in its own process before the command starts,
+/// with the command's environment as a map (patch 0024; specs/DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md
+/// §7.3). `get` looks a variable up in that map; the level variable falls back to this process's,
+/// which the command inherits.
+pub fn sealed_for_env(get: impl Fn(&str) -> Option<String>) -> bool {
+    let thread = get("CODEX_THREAD_ID").unwrap_or_default();
+    let session = get("CODEX_SESSION_ID").unwrap_or_default();
+    let environment = get(ENV_VAR).or_else(|| std::env::var(ENV_VAR).ok());
+    resolve_with(&[thread.as_str(), session.as_str()], environment).level == Level::On
 }
 
 /// What Codex is told when it may not take a permission profile: the allowed set of its error.
@@ -506,6 +595,39 @@ mod tests {
     }
 
     #[test]
+    fn a_commands_environment_map_decides_its_level() {
+        // The level variable in the command's map wins over this process's and the files'.
+        let map = |var: &'static str, value: &'static str| move |key: &str| (key == var).then(|| value.to_string());
+        assert!(sealed_for_env(map(ENV_VAR, "on")));
+        assert!(!sealed_for_env(map(ENV_VAR, "off")));
+        // Ids that are not ids name no session file and no seal.
+        assert!(!sealed_for_env(|key: &str| match key {
+            "CODEX_THREAD_ID" => Some("../x".to_string()),
+            ENV_VAR => Some("off".to_string()),
+            _ => None,
+        }));
+    }
+
+    #[test]
+    fn the_verbatim_prefix_is_removed_from_drive_paths_only() {
+        assert_eq!(without_verbatim_prefix(PathBuf::from(r"\\?\C:\Users\j")), PathBuf::from(r"C:\Users\j"));
+        assert_eq!(without_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share")), PathBuf::from(r"\\?\UNC\server\share"));
+        assert_eq!(without_verbatim_prefix(PathBuf::from("/home/u")), PathBuf::from("/home/u"));
+    }
+
+    #[test]
+    fn the_home_folder_falls_back_to_userprofile() {
+        use std::ffi::OsString;
+        let windows = Some(OsString::from(r"C:\Users\Jane Doe"));
+        // Windows: `HOME` is usually unset, and a user-level `mightling_airgapped` must still be read.
+        assert_eq!(home_from(None, windows.clone()), Some(PathBuf::from(r"C:\Users\Jane Doe")));
+        assert_eq!(home_from(Some(OsString::new()), windows.clone()), Some(PathBuf::from(r"C:\Users\Jane Doe")));
+        assert_eq!(home_from(Some(OsString::from("/home/u")), windows), Some(PathBuf::from("/home/u")));
+        assert_eq!(home_from(None, Some(OsString::new())), None);
+        assert_eq!(home_from(None, None), None);
+    }
+
+    #[test]
     fn a_path_is_within_a_writable_root_by_its_real_location() {
         let base = std::env::temp_dir().join(format!("ling-airgapped-roots-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -514,12 +636,19 @@ mod tests {
         std::fs::create_dir_all(base.join("elsewhere")).unwrap_or_default();
         // `ling` started in the home directory: `~/.mightling` is inside the working directory.
         let roots = writable_roots(&home, None);
-        assert_eq!(roots, vec![home.clone(), PathBuf::from("/tmp")]);
+        if cfg!(windows) {
+            assert_eq!(roots, vec![home.clone()]);
+        } else {
+            assert_eq!(roots, vec![home.clone(), PathBuf::from("/tmp")]);
+        }
         assert!(within(&home.join(".mightling"), &[home.clone()]));
         assert!(within(&home.join(".config/dreamference/config.toml"), &[home.clone()]));
         // Started in a project folder: it is not.
         assert!(!within(&home.join(".mightling"), &[home.join("project")]));
         assert!(!within(&base.join("elsewhere"), &[home.clone()]));
+        // A file not created yet, under a folder not created yet, is inside the folder it would be in.
+        assert!(within(&home.join(".config").join("dreamference").join("config.toml"), &[home.clone()]));
+        assert!(!within(&base.join("elsewhere").join("not-yet"), &[home.clone()]));
         // A name that only shares a prefix is not inside, and a link is followed to where it leads.
         assert!(!within(&base.join("home2"), &[home.clone()]));
         #[cfg(unix)]
@@ -527,8 +656,9 @@ mod tests {
             let _ = std::os::unix::fs::symlink(&home, base.join("link"));
             assert!(within(&base.join("link").join(".mightling"), &[home.clone()]));
         }
-        assert_eq!(writable_roots(&home, Some(Path::new("/var/tmp/x"))).len(), 3);
-        assert_eq!(writable_roots(&home, Some(Path::new(""))).len(), 2);
+        let plain = writable_roots(&home, None).len();
+        assert_eq!(writable_roots(&home, Some(Path::new("/var/tmp/x"))).len(), plain + 1);
+        assert_eq!(writable_roots(&home, Some(Path::new(""))).len(), plain);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

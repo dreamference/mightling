@@ -36,7 +36,9 @@ def test_the_user_guide_names_every_command_the_launcher_parses():
 def test_the_crate_builds_inside_the_codex_workspace_without_a_second_copy_of_a_crate():
     # The crate pins versions itself so its tests run alone; they have to be the workspace's, or
     # building ling compiles each of these twice. The launcher's manifest is how it gets in.
-    manifest = (CRATE / "Cargo.toml").read_text()
+    # The Windows-only `junction` (directory junctions for the `from-*` links) is left out: the
+    # workspace has no copy of it at all, so it adds one, not a second, and only on Windows.
+    manifest = (CRATE / "Cargo.toml").read_text().split("[target.'cfg(windows)'.dependencies]")[0]
     workspace = (REPO / "codex" / "codex-rs" / "Cargo.toml")
     if not workspace.exists():  # the submodule is not checked out
         return

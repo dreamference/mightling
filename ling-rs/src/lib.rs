@@ -34,6 +34,7 @@ use toml_edit::value;
 pub mod airgapped;
 pub mod app;
 pub mod apps;
+pub mod audit;
 pub mod cave;
 pub mod code_index;
 pub mod compaction;
@@ -57,6 +58,11 @@ pub mod web;
 
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
+
+/// `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`: a child the launcher starts on Windows outlives a
+/// Ctrl-C in this console, as `process_group(0)` does on Unix.
+#[cfg(windows)]
+pub const DETACHED_PROCESS_FLAGS: u32 = 0x0000_0200 | 0x0000_0008;
 
 /// The provider name the catalog and `config.toml` agree on.
 pub const PROVIDER: &str = "openai-custom";
@@ -259,6 +265,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     {
         std::process::exit(skills::run_cli(&user_args[index + 1..]).await);
     }
+    // `audit egress` traces one session's network use (audit.rs; on Windows only: the node's audit
+    // is `ling-admin audit egress`).
+    if let Some(index) = subcommand
+        && user_args[index] == "audit"
+    {
+        std::process::exit(audit::run_cli(&user_args[index + 1..]));
+    }
     // `prompt` lists, shows and chooses the system prompt new sessions get (prompt.rs).
     if let Some(index) = subcommand
         && user_args[index] == "prompt"
@@ -285,6 +298,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     let configured = airgapped::resolve(None);
     if let Some(reason) = airgapped::full_access_conflict(&user_args, configured.level) {
         bail!("{reason}");
+    }
+    // On Windows, `on` also needs the elevated sandbox, set up; without a sandbox, every start says so.
+    if let Some(reason) = airgapped::windows_sandbox_conflict(&user_args, configured.level) {
+        bail!("{reason}");
+    }
+    for line in airgapped::windows_sandbox_lines(&user_args) {
+        notice::say(&line);
     }
     // A session that starts at `on` says first whether that holds (airgapped.rs).
     for line in airgapped::startup_lines_now(&configured) {
@@ -585,9 +605,10 @@ pub(crate) fn config_file() -> Option<PathBuf> {
     if local.is_file() {
         return Some(local);
     }
-    let global = std::env::var_os("HOME")
-        .map(PathBuf::from)?
-        .join(".config/dreamference/config.toml");
+    let global = ling_node_locator::home_dir()?
+        .join(".config")
+        .join("dreamference")
+        .join("config.toml");
     global.is_file().then_some(global)
 }
 
@@ -925,6 +946,11 @@ pub fn updated_config(existing: &str, catalog_path: &Path, host: &str) -> anyhow
         let mut roots = toml_edit::Array::new();
         roots.push(home.join("skills").to_string_lossy().into_owned());
         sandbox.insert("writable_roots", value(roots));
+    }
+    // Windows: the elevated sandbox, once install.ps1 has set it up (WINDOWS_ARM §7.1). Not before:
+    // selected and not set up, the first command would ask for Administrator rights itself.
+    if cfg!(windows) && catalog_path.parent().is_some_and(airgapped::windows_sandbox_set_up) {
+        airgapped::select_elevated_sandbox(&mut doc);
     }
 
     Ok(doc.to_string())
@@ -1340,7 +1366,7 @@ mod tests {
                 .and_then(toml::Value::as_array)
                 .map(|roots| roots.iter().filter_map(toml::Value::as_str).map(str::to_string).collect::<Vec<_>>())
         };
-        assert_eq!(roots(""), Some(vec!["/h/skills".to_string()]));
+        assert_eq!(roots(""), Some(vec![Path::new("/h").join("skills").display().to_string()]));
         // The user's own list, an empty one included, is left alone.
         assert_eq!(roots("[sandbox_workspace_write]\nwritable_roots = []\n"), Some(vec![]));
         assert_eq!(

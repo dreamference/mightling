@@ -13,6 +13,7 @@ pub mod sandbox;
 pub mod store;
 pub mod supervisor;
 
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -67,21 +68,24 @@ pub fn spawn_supervisor_child(repo: &Repo, plan: &plan::Plan) -> Result<std::pro
     std::fs::write(&path, serde_json::to_vec_pretty(plan)?)?;
     let log = std::fs::File::create(dir.join(format!("supervisor-{}.log", std::process::id())))?;
     let exe = std::env::current_exe()?;
-    let child = unsafe {
-        Command::new(exe)
-            .arg("supervise")
-            .arg(&path)
-            .current_dir(&repo.root)
-            .stdin(Stdio::null())
-            .stdout(log.try_clone()?)
-            .stderr(log)
-            .pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            })
-            .spawn()?
-    };
-    Ok(child)
+    let mut command = Command::new(exe);
+    command
+        .arg("supervise")
+        .arg(&path)
+        .current_dir(&repo.root)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log);
+    // Its own session, so it outlives the process that started it.
+    #[cfg(unix)]
+    // SAFETY: setsid is async-signal-safe and touches nothing the parent shares.
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    Ok(command.spawn()?)
 }
 
 /// `ling-code supervise <plan>`: execute a written plan (the detached supervisor).
@@ -103,7 +107,7 @@ pub fn running(repo: &Repo) -> bool {
     std::fs::read_to_string(repo.state_dir().join("code_index.running"))
         .ok()
         .and_then(|pid| pid.trim().parse::<i32>().ok())
-        .map(|pid| unsafe { libc::kill(pid, 0) } == 0)
+        .map(crate::paths::process_alive)
         .unwrap_or(false)
 }
 

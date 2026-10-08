@@ -273,9 +273,15 @@ pub fn is_offline_failure(log: &str) -> bool {
 
 /// Whether a run ended because its scope was stopped from outside, not by the kernel or by
 /// itself: SIGTERM, seen directly or as the 143 a shell or bwrap reports for a child it took.
+#[cfg(unix)]
 fn stopped_from_outside(status: &std::process::ExitStatus) -> bool {
     use std::os::unix::process::ExitStatusExt;
     status.code() == Some(143) || status.signal() == Some(15)
+}
+
+#[cfg(not(unix))]
+fn stopped_from_outside(status: &std::process::ExitStatus) -> bool {
+    status.code() == Some(143)
 }
 
 /// `choom -n 1000 -- nice -n 10 ionice -c3 bwrap … -- sh -c '<run>; write the cgroup's peak'`.
@@ -460,6 +466,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "a scope is stopped by a Unix signal; Windows indexing is Phase 5")]
     fn a_scope_stopped_from_outside_is_deferred_and_records_no_peak() {
         let dir = tempfile::tempdir().unwrap();
         for stand_in in ["exit 143", "kill -TERM $$"] {

@@ -30,7 +30,10 @@ use std::process::Stdio;
 pub fn binary() -> Option<PathBuf> {
     let path = match std::env::var_os("MIGHTLING_CODE_BIN") {
         Some(path) => PathBuf::from(path),
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".local/share/dreamference/mightling/bin/ling-code"),
+        // On Windows `ling.exe` is not a link but the installed file itself (install.ps1 puts
+        // its folder on PATH), so `ling-code.exe` is its sibling.
+        None if cfg!(windows) => std::env::current_exe().ok()?.with_file_name("ling-code.exe"),
+        None => ling_node_locator::home_dir()?.join(".local/share/dreamference/mightling/bin/ling-code"),
     };
     path.is_file().then_some(path)
 }
@@ -185,17 +188,24 @@ pub fn session_dir(user_args: &[String]) -> PathBuf {
 pub fn start_and_prompt_block(tools: bool, dir: &std::path::Path) -> String {
     let Some(binary) = binary() else { return String::new() };
     // Its own process group, so Ctrl-C in the TUI does not reach it; it exits with this process.
-    let _ = {
+    let mut command = Command::new(&binary);
+    command
+        .args(["session", "--parent-pid", &std::process::id().to_string()])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
         use std::os::unix::process::CommandExt;
-        Command::new(&binary)
-            .args(["session", "--parent-pid", &std::process::id().to_string()])
-            .current_dir(dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()
-    };
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(crate::DETACHED_PROCESS_FLAGS);
+    }
+    let _ = command.spawn();
     block_from(&binary, tools, dir)
 }
 
@@ -246,7 +256,8 @@ mod tests {
         let here = std::env::current_dir().unwrap_or_default();
         let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
         assert_eq!(session_dir(&args(&["exec", "hi"])), here);
-        assert_eq!(session_dir(&args(&["exec", "-C", "/srv/tree", "hi"])), std::path::PathBuf::from("/srv/tree"));
+        let absolute = if cfg!(windows) { r"C:\srv\tree" } else { "/srv/tree" };
+        assert_eq!(session_dir(&args(&["exec", "-C", absolute, "hi"])), std::path::PathBuf::from(absolute));
         assert_eq!(session_dir(&args(&["--cd=sub", "exec"])), here.join("sub"));
         assert_eq!(session_dir(&args(&["-Csub", "exec"])), here.join("sub"));
     }
@@ -266,7 +277,7 @@ mod tests {
             .collect();
         assert_eq!(out[0], "ling");
         assert_eq!(out[1], "-c");
-        assert_eq!(out[2], format!("mcp_servers.ling_code.command=\"{}\"", binary.display()));
+        assert_eq!(out[2], format!("mcp_servers.ling_code.command={}", toml::Value::String(binary.display().to_string())));
         assert_eq!(out[4], "mcp_servers.ling_code.args=[\"mcp\"]");
         assert!(out[6].starts_with("mcp_servers.ling_code.env_vars=[\"MIGHTLING_CODE_ROOT\", "), "{}", out[6]);
         assert_eq!(out[8], format!("mcp_optional_startup_grace_ms={STARTUP_GRACE_MS}"));

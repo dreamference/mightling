@@ -131,6 +131,11 @@ pub async fn open(args: &[String]) -> i32 {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(crate::DETACHED_PROCESS_FLAGS);
+    }
     match command.spawn() {
         Ok(_) => 0,
         Err(error) => {
@@ -197,7 +202,7 @@ fn is_executable(path: &Path) -> bool {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    ling_node_locator::home_dir()
 }
 
 #[cfg(test)]

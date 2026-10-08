@@ -1,0 +1,36 @@
+diff --git a/codex-rs/windows-sandbox-rs/Cargo.toml b/codex-rs/windows-sandbox-rs/Cargo.toml
+--- a/codex-rs/windows-sandbox-rs/Cargo.toml
++++ b/codex-rs/windows-sandbox-rs/Cargo.toml
+@@ -29,2 +29,3 @@
+ codex-http-client = { workspace = true }
++ling-airgapped = { path = "../ling/airgapped" }
+ anyhow = "1.0"
+diff --git a/codex-rs/windows-sandbox-rs/src/resolved_permissions.rs b/codex-rs/windows-sandbox-rs/src/resolved_permissions.rs
+--- a/codex-rs/windows-sandbox-rs/src/resolved_permissions.rs
++++ b/codex-rs/windows-sandbox-rs/src/resolved_permissions.rs
+@@ -14,2 +14,11 @@
+ 
++/// Mightling: no network when the command's session is air-gapped, so it runs as the offline account.
++pub(crate) fn mightling_airgapped(profile: &PermissionProfile, env_map: &HashMap<String, String>) -> PermissionProfile {
++    let mut profile = profile.clone();
++    if let PermissionProfile::Managed { network, .. } | PermissionProfile::External { network } = &mut profile && ling_airgapped::sealed_for_env(|key| env_map.get(key).cloned()) {
++        *network = NetworkSandboxPolicy::Restricted;
++    }
++    profile
++}
++
+ /// Windows-local view of the runtime permission profile.
+diff --git a/codex-rs/windows-sandbox-rs/src/elevated_impl.rs b/codex-rs/windows-sandbox-rs/src/elevated_impl.rs
+--- a/codex-rs/windows-sandbox-rs/src/elevated_impl.rs
++++ b/codex-rs/windows-sandbox-rs/src/elevated_impl.rs
+@@ -119,2 +119,3 @@
+         } = request;
++        let permission_profile = &crate::resolved_permissions::mightling_airgapped(permission_profile, &env_map);
+         let permissions =
+diff --git a/codex-rs/windows-sandbox-rs/src/unified_exec/backends/elevated.rs b/codex-rs/windows-sandbox-rs/src/unified_exec/backends/elevated.rs
+--- a/codex-rs/windows-sandbox-rs/src/unified_exec/backends/elevated.rs
++++ b/codex-rs/windows-sandbox-rs/src/unified_exec/backends/elevated.rs
+@@ -177,2 +177,3 @@
+         .collect::<Vec<_>>();
++    let permission_profile = &crate::resolved_permissions::mightling_airgapped(permission_profile, &env_map);
+     let permissions =

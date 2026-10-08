@@ -571,13 +571,27 @@ fn latest_report(dir: &Path) -> Option<PathBuf> {
 /// The repository a directory belongs to. A linked worktree belongs to its main checkout, so a
 /// task queued from one is listed with the others.
 pub fn repo_root(cwd: &Path) -> Option<PathBuf> {
-    let top = PathBuf::from(git(cwd, &["rev-parse", "--show-toplevel"])?);
+    let top = native_path(PathBuf::from(git(cwd, &["rev-parse", "--show-toplevel"])?));
     let common = git(cwd, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).map(PathBuf::from);
     match common {
         Some(common) if common.file_name().is_some_and(|name| name == ".git") => {
-            Some(common.parent().map(Path::to_path_buf).unwrap_or(top))
+            Some(common.parent().map(|parent| native_path(parent.to_path_buf())).unwrap_or(top))
         }
         _ => Some(top),
+    }
+}
+
+/// A path git printed, in the form the rest of the system writes it. On Windows git prints
+/// `C:/Users/...`, so the path is resolved and written with `\` and no verbatim prefix, as a
+/// task's `repo` must match the same repository named from anywhere. Elsewhere it is unchanged.
+pub fn native_path(path: PathBuf) -> PathBuf {
+    if !cfg!(windows) {
+        return path;
+    }
+    let resolved = path.canonicalize().unwrap_or(path);
+    match resolved.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => resolved,
     }
 }
 
@@ -609,8 +623,8 @@ fn served_model_id() -> Option<String> {
 /// writes it on a marker line); without a timer, `[night] window` from the config file says what
 /// enabling would install.
 fn next_window_line() -> String {
-    let timer = std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".config/systemd/user/mightling-night.timer"))
+    let timer = ling_node_locator::home_dir()
+        .map(|home| home.join(".config/systemd/user/mightling-night.timer"))
         .and_then(|path| std::fs::read_to_string(path).ok());
     if let Some(window) = timer.as_deref().and_then(window_from_timer) {
         return format!("Next window: {window}.");
@@ -695,7 +709,7 @@ mod tests {
         ] {
             let _ = Command::new("git").arg("-C").arg(&repo).args(&args).output();
         }
-        let repo = repo.canonicalize().unwrap_or(repo);
+        let repo = native_path(repo.canonicalize().unwrap_or(repo));
         (repo, root.join("night"))
     }
 
