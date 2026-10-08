@@ -118,7 +118,7 @@ The default model, `qwen3.8-27b-nvfp4-dflash2`, is served by SGLang with `--mem-
 
 **Goals**
 - A person with an RTX Spark laptop runs `irm …/install.ps1 | iex`, and then `ling` works: against a DGX Spark on their LAN, or against the laptop's own GPU.
-- The privacy story holds on Windows: no the upstream vendor channel, `/airgapped on` enforced by the kernel, and an egress audit that proves it (§14).
+- The privacy story holds on Windows: no upstream vendor channel, `/airgapped on` enforced by the kernel, and an egress audit that proves it (§14).
 - The same agent, prompts, skills, code index answers and `/apps` as on Linux.
 - Nothing new for Linux users: every change is gated by `cfg(windows)` or is a portable fix that Linux tests cover.
 
