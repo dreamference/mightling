@@ -541,8 +541,8 @@ Point Onyx at the local vLLM model as its default provider.
 
 | Option | Description |
 |---|---|
-| `--email` | Onyx admin e-mail (registered if no account exists) |
-| `--password` | Onyx admin password. |
+| `--email` | Your own admin e-mail (registered if no account exists); default: a generated account. |
+| `--password` | Your own admin password, with --email; stored in ~/.config/dreamference/chat-admin.json. |
 | `--no-web` | Skip registering SearXNG as Onyx's web search provider. |
 | `--no-brand` | Skip rebranding the deployment as Mightling. |
 | `--no-voice` | Skip the local Whisper server and the microphone button. |
@@ -565,6 +565,10 @@ Connect Gmail and give the assistant a mailbox search tool.
 #### `ling-admin chat status`
 
 Show Onyx version, containers and health.
+
+#### `ling-admin chat password`
+
+Show the web chat's admin e-mail and generated password.
 
 #### `ling-admin chat logs`
 

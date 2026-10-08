@@ -91,7 +91,7 @@ def test_configure_creates_then_updates_the_same_provider():
         calls.append((url, payload, method))
         return {"id": 1}, None
 
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None):
@@ -105,7 +105,7 @@ def test_configure_creates_then_updates_the_same_provider():
     assert "id" not in provider_call[1]
 
     calls.clear()
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=42):
@@ -125,7 +125,7 @@ def test_configure_names_the_served_model_and_its_context_length():
         captured.setdefault("first", payload)
         return {"id": 1}, None
 
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None):
@@ -238,7 +238,7 @@ def test_web_search_is_skipped_when_searxng_is_absent():
 
 def test_configure_can_opt_out_of_web_search():
     runner = OnyxRunner()
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
@@ -258,7 +258,7 @@ def test_configure_advertises_vision_for_a_vision_checkpoint():
         calls.append((url, payload))
         return {"id": 1}, None
 
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
@@ -281,7 +281,7 @@ def test_configure_skips_vision_for_a_text_only_model():
         calls.append((url, payload))
         return {"id": 1}, None
 
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
@@ -391,7 +391,7 @@ def test_branding_keeps_the_stock_assistant_when_dream_could_not_be_created():
 
 def test_configure_can_opt_out_of_branding():
     runner = OnyxRunner()
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
@@ -517,7 +517,7 @@ def test_voice_is_skipped_when_onyx_will_not_accept_a_local_endpoint():
 
 def test_configure_can_opt_out_of_voice():
     runner = OnyxRunner()
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
@@ -1023,7 +1023,7 @@ def test_telemetry_is_disabled_before_the_session_is_opened():
                       side_effect=lambda: order.append("telemetry")), \
          patch.object(OnyxRunner, "bind_to_loopback",
                       side_effect=lambda: order.append("loopback")), \
-         patch.object(OnyxRunner, "_authenticate",
+         patch.object(OnyxRunner, "_admin_session",
                       side_effect=lambda *a, **k: order.append("auth") or None):
         assert runner.configure() == 1
 
@@ -1161,7 +1161,7 @@ def test_configure_registers_gmail_so_a_fresh_install_has_the_tool():
     # Registering only from `ling-admin chat gmail --email …` meant a fresh install had no Gmail tool
     # until someone had finished a flow they can only start from the page that lists it.
     runner = OnyxRunner()
-    with patch.object(OnyxRunner, "_authenticate", return_value="cookie"), \
+    with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
          patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \

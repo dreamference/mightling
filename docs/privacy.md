@@ -82,5 +82,7 @@ other untrusted input.
 
 ## Accounts
 
-The web chat's accounts live in its local database. Always create the administrator account with
-your own e-mail and password (see [Get started](getting-started.md#5-optional-the-web-chat-and-desktop-app)).
+The web chat's accounts live in its local database. The administrator account's password is
+generated for each install and kept in `~/.config/dreamference/chat-admin.json`, readable by you only;
+pass your own with `--email` and `--password` if you prefer (see
+[Get started](getting-started.md#5-optional-the-web-chat-and-desktop-app)).

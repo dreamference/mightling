@@ -1140,9 +1140,13 @@ class DreamferenceCLIController:
             "configure", help="Point Onyx at the local vLLM model as its default provider"
         )
         onyx_configure_parser.add_argument(
-            "--email", default=None, help="Onyx admin e-mail (registered if no account exists)"
+            "--email", default=None,
+            help="Your own admin e-mail (registered if no account exists); default: a generated account",
         )
-        onyx_configure_parser.add_argument("--password", default=None, help="Onyx admin password")
+        onyx_configure_parser.add_argument(
+            "--password", default=None,
+            help="Your own admin password, with --email; stored in ~/.config/dreamference/chat-admin.json",
+        )
         onyx_configure_parser.add_argument(
             "--no-web", action="store_true",
             help="Skip registering SearXNG as Onyx's web search provider",
@@ -1182,6 +1186,9 @@ class DreamferenceCLIController:
             "--refresh", action="store_true", help=argparse.SUPPRESS,
         )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
+        onyx_subparsers.add_parser(
+            "password", help="Show the web chat's admin e-mail and generated password"
+        )
 
         # Command: ling-admin desktop {run,build,status}
         #
@@ -2041,6 +2048,8 @@ class DreamferenceCLIController:
                 sys.exit(0 if onyx_runner.connect_gmail() else 1)
             elif args.onyx_command == "status":
                 sys.exit(onyx_runner.status())
+            elif args.onyx_command == "password":
+                sys.exit(onyx_runner.show_admin_credentials())
             elif args.onyx_command == "logs":
                 sys.exit(onyx_runner.logs(follow=args.follow))
             elif args.onyx_command == "stop":
