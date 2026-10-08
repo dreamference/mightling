@@ -31,5 +31,11 @@ contextBridge.exposeInMainWorld("electronBridge", {
 contextBridge.exposeInMainWorld("mightlingWindowType", "electron");
 
 // The system theme, read at preload time so the page can style its first paint.
+// The document element may not exist yet when the preload runs (seen on macOS: "Cannot read
+// properties of null (reading 'dataset')"), so then it is set as soon as the document is parsed.
 const theme = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-document.documentElement.dataset.theme = theme;
+const applyTheme = () => {
+  if (document.documentElement) document.documentElement.dataset.theme = theme;
+};
+if (document.documentElement) applyTheme();
+else document.addEventListener("DOMContentLoaded", applyTheme, { once: true });
