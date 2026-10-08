@@ -45,6 +45,7 @@ nav:
       - Terminal agent: ling.md
       - Web chat: web-chat.md
       - Desktop app: desktop.md
+      - Phone messengers: messengers.md
   - Reference:
       - ling-admin: admin.md
       - Models: models.md

@@ -321,7 +321,7 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
   - Work threads on a repository chosen from the phone, with approvals;
   - other messengers, if users ask (Signal through `signal-cli` is the obvious next, with the caveats its own project states).
 
-## 14. What was built (Phase 1, branch `chat/messengers`, 2026-10-08; not merged)
+## 14. What was built (Phase 1, branch `chat/messengers`, 2026-10-08; merged with §15)
 
 **Built:**
 
@@ -365,3 +365,38 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
 - **The user units** (`mightling-chat.service` and the proxy units) were written only in tests and never started.
 - **`ling chat telegram setup`'s terminal path** (consent, the token with echo off) was not run.
 - **Privacy, still to decide:** a Telegram thread is an Ask thread with `/apps` and `docs_*`, so mail and file contents can reach Telegram's servers in an answer. The warning says so. A Telegram-specific prompt without those tools is a possible Phase 2 step if the user wants it.
+
+## 15. Merged, off by default (branch `messengers/optional`, 2026-10-08)
+
+The user decided that the messenger bridges ship with Mightling, are off by default and are turned on per machine by a command. This section records what merging into `main` changed, together with Signal (SIGNAL §17).
+
+**The command surface stays as built.**
+- `ling chat …` is a launcher subcommand, like `ling web`. The bridge is a library linked into `ling`, so there is no separate binary to ship.
+- The homeserver is `ling-admin matrix …`, because containers are `ling-admin`'s, and `ling-admin chat` is the web UI.
+- There is no `ling chat matrix` alias: one command for one thing.
+
+**Compiled at last.**
+- The launcher workspace, with `ling-chat` linked in, built in a scratch export of the pinned Codex.
+- `cargo test --release -p ling-chat` and the launcher's tests ran there. The counts are in the merge's commit message.
+- §14's "the launcher was not compiled" no longer holds.
+
+**Off means off across a reboot.**
+- `ling chat stop` now disables `mightling-chat.service` as well as stopping it.
+- `ling-admin matrix stop` now:
+  - turns `tailscale serve` off;
+  - disables the proxy socket, not only stops it;
+  - stops the container (whose `unless-stopped` policy keeps it stopped).
+- `start` turns each of these on again.
+- Nothing in the installer, Night Shift or `node enable` starts either one.
+
+**The egress audit names each bridge that is on** (`EgressAudit.declared_exceptions`):
+- the chat bridge's user unit, when it is enabled with a Telegram token (Telegram's Bot API, outside the trace);
+- the Matrix proxy socket, when it is enabled (offered to the tailnet by `tailscale serve`; with push on, push notifications can leave).
+
+With Matrix alone, the chat bridge talks only to loopback and is not an exception. With every bridge off, the audit names nothing, and the report is what it was before the bridges existed. Each case is tested.
+
+**Release packaging.**
+- Nothing new ships for Matrix and Telegram. `ling-chat` is inside `ling`, `ling-admin matrix` is in the wheel, and the tuwunel image is pinned by digest and pulled only by `ling-admin matrix start`.
+- The release job runs the crate's tests in the build's export.
+
+**Not verified:** everything §14 lists, apart from compiling the launcher. Also not run: the live egress audit with any bridge on, which needs the model server.

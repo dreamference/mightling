@@ -1,6 +1,6 @@
 # Mightling over Signal: `ling signal`
 
-**Status:** proposed (2026-10-08). The bridge (`ling-signal`) is built and tested on branch `features/signal` (§16), end to end against a scripted signal-cli and a stand-in `ling web`; nothing has run against a real Signal account yet, and `ling signal …` is not routed by the launcher yet (the binary is `ling-signal`). The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
+**Status:** implemented, off by default (2026-10-08). The bridge is built and tested (§16) end to end against a scripted signal-cli and a stand-in `ling web`, and merged into `main` with the other messengers (§17): `ling signal …` is a launcher subcommand, the `ling-signal` daemon binary ships in the release, and signal-cli and its Java runtime are fetched pinned by setup. Nothing has run against a real Signal account yet. The user asked for this on 2026-10-08 ("can I chat with ling using signal? … write a spec for this").
 **Names:** post-rename (`ling`, `ling-admin`, `~/.mightling`, `ling web` on port 3100).
 **Builds on:**
 - [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md). The bridge is one more client of `ling web`, signed in like a paired phone (§4.3 there). It uses **Ask threads** (§3 there), the bridge policy (`ling-rs/web/policy.json`) and `/api/upload`.
@@ -111,7 +111,7 @@ With a dedicated number, the same exchange happens in a conversation with that c
 | What | Where | Why |
 |---|---|---|
 | System account `mightling-signal` (no login shell, no home) | `/etc/passwd` | Keys out of the agent's reach (§0.3) |
-| Java runtime | `openjdk-25-jre-headless` (apt) | signal-cli 0.14 needs Java 25 or later. Ubuntu 24.04 has it (25.0.4 on arm64, checked 2026-10-08) |
+| Java runtime | `/opt/mightling/jdk-25.0.4.1+1-jre/` | signal-cli 0.14 needs Java 25 or later. Eclipse Temurin's JRE, fetched by setup and pinned by URL and SHA-256 for arm64 and x86_64 (§17); no apt package, whose pool URL would vanish with the next security update |
 | signal-cli | `/opt/mightling/signal-cli-<version>/` | The release tarball, checked against the `.asc` signature from signal-cli's release and a SHA-256 pinned in Mightling's source |
 | libsignal JNI for arm64 | `/opt/mightling/signal-cli-<version>/lib/libsignal_jni.so`, put inside the `libsignal-client-<v>.jar` | signal-cli bundles it only for x86_64 Linux, Windows and macOS (its wiki, "Provide native lib for libsignal") |
 | The bridge | `/usr/local/lib/mightling/ling-signal` (root, 0755) | Users' homes are 0750 on Ubuntu 24.04, so the system account cannot run a binary from the user's install |
@@ -297,13 +297,13 @@ When the owner's identity key changes (a new phone, a reinstall, or someone else
 
 | Command | What it does |
 |---|---|
-| `ling-signal setup [--number +… [--voice]] [--dry-run]` | §3 and §4: install, then link to the owner's account by QR (the default) or register a dedicated number and bind its owner; pair with `ling web`, start the unit |
-| `ling signal setup --refresh` | Copies the current bridge binary and the pinned signal-cli again |
+| `ling signal setup [--number +… [--voice]] [--dry-run]` | §3 and §4: install, then link to the owner's account by QR (the default) or register a dedicated number and bind its owner; pair with `ling web`, start the unit |
+| `ling signal setup --refresh [--dry-run]` | Copies the current bridge binary, fetches the pinned signal-cli and Java if they changed, points the bridge at them and restarts it |
 | `ling signal status` | Running or not, mode, the owner's last message time, versions, messages ignored, the last error |
 | `ling signal trust` | §5.3 |
-| `ling signal stop` / `start` | The unit |
+| `ling signal stop` / `start` | The unit: `stop` disables it as well, so it stays off across a reboot |
 | `ling signal remove` | Stops and disables the unit, unregisters (dedicated) or unlinks (linked), revokes the `ling web` device, and deletes `/var/lib/mightling-signal` and the account. Asks for confirmation; the Ask threads stay |
-| `ling-signal serve --state DIR` | The daemon itself: what the unit runs; nobody types it |
+| `ling-signal serve --state DIR` | The daemon itself: what the unit runs; nobody types it. `ling signal` refuses it and the bridge account's other commands |
 
 **Pairing with `ling web`:** setup runs `ling web pair` as the user and hands the eight-digit code to the daemon. The daemon `POST`s it to `http://127.0.0.1:3100/pair` with the server's own `Origin`, and keeps the device cookie in its state. `ling web` must be running; setup starts it (`ling web start`) if it isn't.
 
@@ -558,10 +558,8 @@ It checks that:
 
 Tests: 69 unit tests and three end-to-end tests (dedicated, air gap on, linked).
 
-**Not built:**
-- **Launcher routing:** `ling signal …` does not exist yet. The launcher would route it to `ling-signal`, installed beside `ling`.
-- **Release packaging:** release assets for `ling-signal`, and CI building libsignal's JNI library for arm64 (§3).
-- **Owner commands on the node:** `trust`, `remove` and `setup --refresh`.
+**Not built** (as of this section; §17 adds the routing, the packaging and `setup --refresh`):
+- **CI building libsignal's JNI library for arm64** (§3); exquo's build stays pinned.
 - **Egress audit:** `audit egress --signal`, the trace of the unit's own connections. The note is built: when `mightling-signal.service` is enabled, every `ling-admin audit egress` report ends with "ℹ️ Declared exception: Signal bridge enabled …" (`EgressAudit.declared_exceptions`, tested).
 - **Phase 2:** everything in §14.
 
@@ -577,3 +575,52 @@ A second end-to-end test runs the daemon with `ling web` answering `on`. The own
   The stand-in accepts any shape. A mismatch would show up only as a logged error, or, for `listIdentities`, as the owner's messages being refused.
 
 **Verified without installing anything:** the Java home `setup` uses, `/usr/lib/jvm/java-25-openjdk-arm64`, is the directory Ubuntu 24.04's `openjdk-25-jre-headless` 25.0.4.1 (arm64) installs to. This was read from the package's contents with `apt-get download` and `dpkg -c`.
+
+## 17. Merged, off by default (branch `messengers/optional`, 2026-10-08)
+
+The user decided that the messenger bridges ship with Mightling, are off by default and are turned on per machine by a command. This section records what merging into `main` changed.
+
+**One command surface: `ling signal …`.**
+- The launcher links the crate under `cfg(target_os = "linux")` and routes `ling signal …` to `ling_signal::cli::run` (`ling-rs/src/signal.rs`), on a blocking thread so the commands' own runtimes never nest in the launcher's. Elsewhere it says the bridge runs on the Linux node only.
+- The command line moved from `main.rs` to `cli.rs`, so both ways in run the same code. `main.rs` is now the small `ling-signal` binary, kept on purpose. The system account runs it from `/usr/local/lib/mightling` (users' homes are 0750). Running the 300 MB `ling` as a system account would also bring its home folder and its rename migration along. The binary also accepts the bridge account's own commands (`serve`, `init`, `retool`, `pair`, `bind`, `trust-owner`, `account`), which `ling signal` refuses.
+- Setup takes the bridge to install from beside the resolved `ling`. Before this change it took its own executable, which from `ling` would have installed `ling` itself. When the bridge is not installed, setup says how to get it and changes nothing.
+- User-facing text says `ling signal …` everywhere.
+
+**Release packaging:**
+- `ling-signal` is built in the same Cargo run as `ling` on Linux (`BUILDS_SIGNAL` and `SIGNAL_PACKAGE` in `codex_branded_builder.py`). It is a workspace member through the launcher's dependency, so it adds no second copy of any crate. `is_current` requires it on Linux.
+- The release workflow gzips it as `ling-signal-<target>.gz` and lists it in `ling-<target>.sha256sums`. It also runs `cargo test --release -p ling-signal -p ling-chat` in the build's export.
+- `scripts/package_mightling.sh`, `install.sh` (Linux) and `ling update` (`update::SIGNAL_COMMAND`, an optional command) install it beside `ling`. None of them links it onto PATH, and nothing runs it until `ling signal setup`.
+
+**`setup --refresh`** (`setup::refresh_plan`):
+- copies the bridge again;
+- fetches whatever pinned runtime is not installed yet;
+- rewrites the settings' signal-cli path, version and environment as the bridge's account (`retool`);
+- rewrites the unit and runs `systemctl try-restart`.
+
+The account, the keys and the pairing are left alone. `status` already pointed at this command whenever the two versions differ.
+
+**Java is pinned, not installed with apt.**
+- The JRE is Eclipse Temurin 25.0.4.1+1 (`OpenJDK25U-jre_<arch>_linux_hotspot_25.0.4.1_1.tar.gz`):
+  - aarch64 SHA-256 `34828cbb93ed31c281c84ecb31ddab655d11a802f263c1fc019d42e9e0230fed`;
+  - x86_64 SHA-256 `1731a34baadec5479258ea0202e4d5d865d2efeee60cb0c7d7eb056fe96ca219`.
+- Both hashes were computed from the downloaded archives. They match the `.sha256.txt` files Adoptium publishes beside them.
+- Setup downloads the JRE and checks it as the user, then unpacks it as root to `/opt/mightling/jdk-25.0.4.1+1-jre`, as it does for signal-cli. `JAVA_HOME` points there.
+- `remove` deletes it with signal-cli.
+- Nothing is bundled. The download follows the same pattern `ling-admin docs setup` uses for ling-docs's runtime.
+- qrencode, which only draws the QR code in the terminal, is still an apt package. It is installed only when it is missing.
+
+**Off by default:**
+- No installer step, timer or other command creates the account, the unit or the state.
+- `stop` now disables the unit as well, so a reboot does not bring the bridge back.
+- The egress audit names the bridge only while its unit is enabled.
+
+**Verified (2026-10-08, this machine, no Signal network):**
+- **The launcher workspace compiled in a scratch export of the pinned Codex** (`prepare_source` + the pinned V8, `nice -n 10`, `-j 8`), with `codex` and `ling-signal` built together.
+- **Tests:** the launcher's tests, `cargo test --release -p ling-signal -p ling-chat`, and the Python suite; results are in the merge's commit message.
+- **signal-cli 0.14.9 on the pinned JRE:** it starts with the arm64 JNI library on its library path, inside an empty network namespace (`unshare -rn`). `--version` and `listAccounts` both answered.
+- **The pins:** all three archives (signal-cli, libsignal for arm64, the JRE) matched their pins when downloaded.
+
+**Not verified:**
+- Anything against a real Signal account.
+- `ling signal setup` and `--refresh` past `--dry-run`, which would need sudo and a phone.
+- A release build of the new asset in CI.

@@ -17,6 +17,9 @@ off.
 | Signing in to the web chat with Google, if you enable it | The sign-in exchange | Google |
 | Image search, if you use it | The image query, then downloads of the matching images | Public search engines through SearXNG, then the sites hosting the images |
 | `ling update` | A check for, and download of, the latest Mightling release | GitHub |
+| Signal, only after `ling signal setup` | Your Note to Self messages and Mightling's replies, end-to-end encrypted; setup itself downloads signal-cli and a Java runtime, pinned | Signal's servers; GitHub for the downloads |
+| Telegram, only after `ling chat telegram setup` | What you send the bot and its answers, unencrypted | Telegram's servers |
+| Matrix, only after `ling-admin matrix start` | Your chat with the homeserver on the node, over your tailnet; with push on, push notifications (no text) | Your phone through Tailscale; with push on, the push gateway |
 
 Apart from these, Mightling does not send your repositories, prompts or chats anywhere. The only content that leaves the machine is what these features need: a search query,
 a URL, a mailbox read.
