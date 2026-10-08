@@ -255,7 +255,7 @@ The sandbox prompt and setup errors say "Codex" (`windows_sandbox_prompts.rs`). 
   request: it connects, then fails. It comes from the upstream Windows sandbox (the offline/online sandbox
   accounts have no credentials Schannel can acquire), not from Phase 2; the CI probe at `off` uses plain
   HTTP for that reason. `ling-search` and `ling-fetch` use rustls and are probably unaffected, which is not
-  checked yet. Decided 2026-10-07: investigate on the real laptop (§17).
+  checked yet. Decided 2026-10-07: investigate on the real laptop (§18).
 
 ---
 
