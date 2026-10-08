@@ -1288,6 +1288,29 @@ class DreamferenceCLIController:
             "status", help="Show whether it runs and which accounts hold which apps"
         )
 
+        # Command: ling-admin matrix (the private homeserver behind `ling chat`'s Matrix adapter)
+        matrix_parser = subparsers.add_parser(
+            "matrix", help="Manage the private Matrix homeserver for chatting with Mightling from a phone"
+        )
+        matrix_subparsers = matrix_parser.add_subparsers(dest="matrix_command")
+        matrix_subparsers.add_parser(
+            "start", help="Start the homeserver (no route out), its loopback proxy and `tailscale serve`"
+        )
+        matrix_subparsers.add_parser("stop", help="Stop the homeserver; accounts and messages are kept")
+        matrix_subparsers.add_parser("status", help="Show the server name, the container, Tailscale and the accounts")
+        matrix_add_user_parser = matrix_subparsers.add_parser(
+            "add-user", help="Create an account for the phone and allow it to talk to Mightling"
+        )
+        matrix_add_user_parser.add_argument("name", help="The user name (lowercase letters, digits, . _ = -)")
+        matrix_push_parser = matrix_subparsers.add_parser(
+            "push", help="Let push notifications leave the machine (event ids only), or not"
+        )
+        matrix_push_parser.add_argument("state", choices=["on", "off"])
+        matrix_remove_parser = matrix_subparsers.add_parser(
+            "remove", help="Delete the homeserver, every account and every message"
+        )
+        matrix_remove_parser.add_argument("--yes", action="store_true", help="Confirm the deletion")
+
         # Command: ling-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
@@ -1306,6 +1329,7 @@ class DreamferenceCLIController:
             "searxng": (searxng_parser, "searxng_command"),
             "docs": (docs_parser, "docs_command"),
             "google": (google_parser, "google_command"),
+            "matrix": (matrix_parser, "matrix_command"),
         }
         if diffusion_model_parser is not None:
             parser.command_groups["diffusion-model"] = (diffusion_model_parser, "diffusion_model_command")
@@ -2639,6 +2663,22 @@ class DreamferenceCLIController:
 
         elif args.command == "google":
             cls._run_google(args.google_command)
+
+        elif args.command == "matrix":
+            from dreamference.chat.matrix_homeserver import MatrixHomeserver
+            actions = {
+                "start": MatrixHomeserver.start,
+                "stop": MatrixHomeserver.stop,
+                "status": MatrixHomeserver.status,
+                "add-user": lambda: MatrixHomeserver.add_user(args.name),
+                "push": lambda: MatrixHomeserver.set_push(args.state == "on"),
+                "remove": lambda: MatrixHomeserver.remove(args.yes),
+            }
+            action = actions.get(args.matrix_command or "")
+            if action is None:
+                print("usage: ling-admin matrix {start,stop,status,add-user,push,remove}")
+                sys.exit(2)
+            sys.exit(action())
 
         elif args.command == "web":
             cls.display_header()

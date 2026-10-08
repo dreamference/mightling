@@ -13,7 +13,8 @@ in the compiled bundle (`onyx_ui_labels`) -- and the desktop shell that offers t
 in a window of its own (`desktop_installer`, `desktop_runner`). `searxng_sidecar` and
 `sidecar_network` start the search container the web UI, `ling-search` and the MCP server share;
 `google_service` starts the Google service without the web UI, and `google_workspace_reader` is its
-read-only Drive and Calendar half (Mightling's apps).
+read-only Drive and Calendar half (Mightling's apps). `matrix_homeserver` runs the private Matrix
+homeserver `ling chat` answers on (MIGHTLING_CHAT §5).
 """
 
 from dreamference.chat.desktop_installer import DesktopInstaller
@@ -24,6 +25,7 @@ from dreamference.chat.gmail_search_service import GmailSearchService
 from dreamference.chat.google_service import GoogleService
 from dreamference.chat.google_workspace_reader import GoogleWorkspaceReader
 from dreamference.chat.chat_admin_credentials import ChatAdminCredentials
+from dreamference.chat.matrix_homeserver import MatrixHomeserver
 from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
 from dreamference.chat.onyx_installer import OnyxInstaller
 from dreamference.chat.onyx_runner import OnyxRunner
@@ -43,6 +45,7 @@ __all__ = [
     "GmailSearchService",
     "GoogleService",
     "GoogleWorkspaceReader",
+    "MatrixHomeserver",
     "OnyxBrandAssets",
     "OnyxInstaller",
     "OnyxRunner",

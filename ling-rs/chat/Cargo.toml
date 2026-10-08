@@ -1,0 +1,31 @@
+# `ling chat`, Mightling from a phone messenger (specs/DREAMFERENCE_MIGHTLING_CHAT.md): one bridge with a
+# Matrix adapter and a Telegram adapter, a client of `ling web`, so every chat is an Ask thread under
+# the same bridge policy. A crate of its own so its tests run without compiling the Codex workspace
+# (`cargo test` in a copy of this folder beside `../web` and `../airgapped`); the launcher
+# (`../src/chat.rs`) only routes `ling chat …` here. Versions are the Codex workspace's, so building
+# inside it adds no second copy of any crate; reqwest uses rustls, as the workspace's other clients do.
+[package]
+name = "ling-chat"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_chat"
+path = "src/lib.rs"
+
+[dependencies]
+futures = { version = "0.3", default-features = false, features = ["std"] }
+ling-airgapped = { path = "../airgapped" }
+ling-web-server = { path = "../web" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
+serde_json = "1"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.182"
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }

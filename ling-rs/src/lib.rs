@@ -36,6 +36,8 @@ pub mod app;
 pub mod apps;
 pub mod audit;
 pub mod cave;
+#[cfg(unix)]
+pub mod chat;
 pub mod code_index;
 pub mod compaction;
 pub mod docs_index;
@@ -90,7 +92,7 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill", "web",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web", "chat",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -296,6 +298,19 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         #[cfg(not(unix))]
         {
             eprintln!("`ling web` is not available on Windows yet: the web server reaches the app-server over a Unix socket.");
+            std::process::exit(2);
+        }
+    }
+    // `chat` is the messenger bridge: Matrix and Telegram, through `ling web` (chat.rs;
+    // specs/DREAMFERENCE_MIGHTLING_CHAT.md).
+    if let Some(index) = subcommand
+        && user_args[index] == "chat"
+    {
+        #[cfg(unix)]
+        std::process::exit(chat::run_cli(&user_args[index + 1..]).await);
+        #[cfg(not(unix))]
+        {
+            eprintln!("`ling chat` is not available on Windows yet: it reaches the agent through `ling web`.");
             std::process::exit(2);
         }
     }
