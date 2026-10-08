@@ -1,7 +1,8 @@
 //! `ling-signal` (specs/DREAMFERENCE_MIGHTLING_SIGNAL.md §6).
 //!
 //! As the user:
-//! - `setup --number +… [--voice] [--port N] [--dry-run]`: install, register, pair, start (§3, §4.1)
+//! - `setup [--number +… [--voice]] [--port N] [--dry-run]`: install, link to the owner's account
+//!   (the default, §4.2) or register a dedicated number (§4.1), pair with `ling web`, start
 //! - `status`: what the running bridge reports (`/run/mightling-signal/status.json`)
 //! - `start`, `stop`: the system unit
 //! - `trust`: accept the owner's new safety number after comparing it (§5.3)
@@ -32,7 +33,7 @@ use ling_signal::state;
 use ling_signal::state::Config;
 use ling_signal::unit;
 
-const USAGE: &str = "Usage: ling-signal setup --number +NUMBER [--voice] [--port N] [--dry-run] | status | start | stop | trust | remove [--dry-run] | unit\n       ling-signal serve --state DIR [--runtime DIR]   (what the system unit runs)";
+const USAGE: &str = "Usage: ling-signal setup [--number +NUMBER [--voice]] [--port N] [--dry-run] | status | start | stop | trust | remove [--dry-run] | unit\n       ling-signal serve --state DIR [--runtime DIR]   (what the system unit runs)";
 
 fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
@@ -52,7 +53,7 @@ fn main() {
         Some("trust-owner") => run_trust_owner(&args[1..]),
         Some("account") => match Config::load(Path::new(&flag(&args[1..], "--state").unwrap_or_else(|| unit::STATE_DIR.to_string()))) {
             Ok(config) => {
-                println!("{}", config.account);
+                println!("{} {}", config.account, if matches!(config.mode, Mode::Linked { .. }) { "linked" } else { "dedicated" });
                 0
             }
             Err(err) => {
@@ -91,7 +92,8 @@ fn run_serve(args: &[String]) -> i32 {
     let runtime_dir = flag(args, "--runtime").map(PathBuf::from);
     match runtime().block_on(serve::serve(&state, runtime_dir.as_deref())) {
         Ok(()) => 0,
-        Err(err) => {
+        Err(serve::Stop::Unlinked) => unit::UNLINKED_EXIT,
+        Err(serve::Stop::Failed(err)) => {
             eprintln!("ling-signal: {err}");
             1
         }
@@ -113,11 +115,22 @@ fn run_init(args: &[String]) -> i32 {
         }
     }
     let previous = Config::load(&state_dir).ok();
+    let own_uuid = flag(args, "--own-uuid").or_else(|| previous.as_ref().and_then(|p| p.own_uuid.clone()));
+    let (mode, owner) = if has(args, "--linked") {
+        let (Some(device), Some(uuid)) = (flag(args, "--own-device").and_then(|d| d.parse().ok()), own_uuid.clone()) else {
+            eprintln!("--linked needs --own-uuid and --own-device");
+            return 2;
+        };
+        // Linked: the owner is the account itself, and no identity key is compared (gate.rs).
+        (Mode::Linked { own_device: device }, Some(gate::Owner { aci: uuid, fingerprint: String::new() }))
+    } else {
+        (Mode::Dedicated, previous.as_ref().and_then(|p| p.owner.clone()))
+    };
     let config = Config {
-        mode: Mode::Dedicated,
+        mode,
         account,
-        own_uuid: previous.as_ref().and_then(|p| p.own_uuid.clone()),
-        owner: previous.as_ref().and_then(|p| p.owner.clone()),
+        own_uuid,
+        owner,
         binding: None,
         port: flag(args, "--port").and_then(|p| p.parse().ok()).unwrap_or(3100),
         node: flag(args, "--node").unwrap_or_default(),
@@ -206,7 +219,9 @@ fn run_status(args: &[String]) -> i32 {
         let ago = serve::now_ms().saturating_sub(ms) / 60_000;
         println!("  last message:      {ago} min ago");
     }
-    println!("  strangers ignored: {}", status.get("strangersIgnored").and_then(serde_json::Value::as_u64).unwrap_or(0));
+    if let Some(ignored) = status.get("strangersIgnored").and_then(serde_json::Value::as_u64) {
+        println!("  strangers ignored: {ignored}");
+    }
     let refusals = status.get("identityRefusals").and_then(serde_json::Value::as_u64).unwrap_or(0);
     if refusals > 0 {
         println!("  ⚠️  {refusals} message(s) refused: the owner's safety number changed.");
@@ -251,11 +266,13 @@ fn prompt(question: &str) -> String {
 }
 
 fn run_setup(args: &[String]) -> i32 {
-    let Some(number) = flag(args, "--number") else {
-        eprintln!("setup needs --number +NUMBER: the dedicated number Mightling will answer on (specs §4.1).");
-        return 2;
-    };
-    if !setup::valid_number(&number) {
+    // Linked to the owner's own account by default (the user's choice, 2026-10-08); `--number`
+    // registers a dedicated number instead.
+    let number = flag(args, "--number");
+    let linked = number.is_none();
+    if let Some(number) = &number
+        && !setup::valid_number(number)
+    {
         eprintln!("{number} is not a number in international form, e.g. +15551234567.");
         return 2;
     }
@@ -265,9 +282,13 @@ fn run_setup(args: &[String]) -> i32 {
     let work = std::env::temp_dir().join(format!("ling-signal-setup-{}", std::process::id()));
     let account_exists = Command::new("id").arg(unit::ACCOUNT).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
     let java_present = Path::new(&setup::signal_cli_env(arch)[0].1).exists();
-    let plan = setup::install_plan(&bridge, &work, arch, account_exists, java_present);
+    let qrencode_present = Command::new("sh").args(["-c", "command -v qrencode"]).stdout(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+    let plan = setup::install_plan(&bridge, &work, arch, account_exists, java_present, linked && !qrencode_present);
 
-    println!("Mightling over Signal: setup for {number}\n");
+    match &number {
+        Some(number) => println!("Mightling over Signal: setup with its own number, {number}\n"),
+        None => println!("Mightling over Signal: setup linked to your own Signal account\n"),
+    }
     println!("This installs signal-cli and a small bridge that runs as its own system account,");
     println!("`{}`, so the agent can never read the Signal keys. It changes these things:\n", unit::ACCOUNT);
     for step in &plan {
@@ -276,9 +297,21 @@ fn run_setup(args: &[String]) -> i32 {
         }
         println!("      {}", step.display());
     }
-    println!("\nThen it registers {number} with Signal (an SMS or voice code), pairs the bridge with `ling web`,");
-    println!("and starts `{}`. The bridge connects to Signal's servers only; it runs only while", unit::UNIT_NAME);
-    println!("the air gap is off.");
+    if linked {
+        println!("\nThen it links the bridge to your Signal account as a new device (you scan a QR code");
+        println!("with your phone), and you talk to Mightling in Note to Self. Read this first:");
+        println!("  • A linked device can read every message your account receives from now on, and send as you.");
+        println!("    The bridge acts on Note to Self only and drops everything else unread, but its keys are");
+        println!("    keys to your whole account. They live in {} (0700, its own account),", unit::STATE_DIR);
+        println!("    out of the agent's reach. `ling-signal remove` deletes them.");
+        println!("  • If your phone offers to transfer your message history, choose \"Don't transfer\".");
+        println!("  • Mightling's replies in Note to Self start with {}so you can tell them from your notes.", ling_signal::format::LINKED_MARKER);
+    } else {
+        println!("\nThen it registers the number with Signal (an SMS or voice code) and asks you to send a");
+        println!("pairing code from your phone.");
+    }
+    println!("\nIt pairs the bridge with `ling web` and starts `{}`. The bridge connects to Signal's", unit::UNIT_NAME);
+    println!("servers only, and acts only while the air gap is off.");
     if has(args, "--dry-run") {
         return 0;
     }
@@ -300,49 +333,23 @@ fn run_setup(args: &[String]) -> i32 {
     }
     let _ = std::fs::remove_dir_all(&work);
 
-    // Register the number: a CAPTCHA first if Signal wants one, then the SMS or voice code.
-    let mut register: Vec<&str> = vec!["register"];
-    if has(args, "--voice") {
-        register.push("--voice");
-    }
-    let mut result = run(&setup::signal_cli_command(arch, &number, &register), None);
-    if let Err(output) = &result
-        && output.to_ascii_lowercase().contains("captcha")
-    {
-        println!("\nSignal asks for a CAPTCHA. Open https://signalcaptchas.org/registration/generate.html,");
-        println!("solve it, then right-click \"Open Signal\" and copy the link (it starts with signalcaptcha://).");
-        let Some(token) = setup::captcha_token(&prompt("Paste the link:")) else {
-            eprintln!("That is not a signalcaptcha:// link.");
+    let node = run(&["hostname".to_string()], None).unwrap_or_default().trim().to_string();
+    let (account, own_uuid, own_device) = if let Some(number) = number {
+        if !register(arch, &number, has(args, "--voice")) {
             return 1;
-        };
-        let mut again = register.clone();
-        again.extend(["--captcha", token.as_str()]);
-        result = run(&setup::signal_cli_command(arch, &number, &again), None);
-    }
-    if let Err(output) = result {
-        eprintln!("❌ Signal refused the registration:\n{output}");
-        return 1;
-    }
-    let code = prompt(&format!("Signal sent a code to {number}. Type it:"));
-    if let Err(output) = run(&setup::signal_cli_command(arch, &number, &["verify", code.trim()]), None) {
-        eprintln!("❌ The code was not accepted:\n{output}");
-        return 1;
-    }
-    // Lock the account against re-registration, name it, hide it from number discovery.
-    let pin = format!("{:08}", rand::random_range(0..100_000_000u32));
-    for (what, args) in [
-        ("registration lock", vec!["setPin", pin.as_str()]),
-        ("profile name", vec!["updateProfile", "--given-name", "Mightling"]),
-        ("number discovery off", vec!["updateAccount", "--discoverable-by-number", "false"]),
-    ] {
-        if let Err(output) = run(&setup::signal_cli_command(arch, &number, &args), None) {
-            eprintln!("⚠️  Could not set the {what}: {output}");
         }
+        (number, None, None)
+    } else {
+        match link(arch, &node) {
+            Some(linked) => linked,
+            None => return 1,
+        }
+    };
+    if linked {
+        set_note_to_self_timer(arch, &account);
     }
-    let pin_path = format!("{}/pin", unit::STATE_DIR);
-    let _ = run(&setup::as_bridge(&["sh".to_string(), "-c".to_string(), format!("umask 077; cat > {pin_path}")]), Some(&pin));
 
-    // Pair the bridge with `ling web` as a device, then write its settings and an owner code.
+    // Pair the bridge with `ling web` as a device, then write its settings.
     let pairing = match run(&["ling".to_string(), "web".to_string(), "pair".to_string()], None) {
         Ok(output) => setup::pairing_code_in(&output),
         Err(output) => {
@@ -360,14 +367,13 @@ fn run_setup(args: &[String]) -> i32 {
         eprintln!("❌ {output}");
         return 1;
     }
-    let node = run(&["hostname".to_string()], None).unwrap_or_default().trim().to_string();
     let mut init = vec![
         bridge_bin.clone(),
         "init".into(),
         "--state".into(),
         state_dir.clone(),
         "--account".into(),
-        number.clone(),
+        account.clone(),
         "--node".into(),
         node,
         "--port".into(),
@@ -377,6 +383,9 @@ fn run_setup(args: &[String]) -> i32 {
         "--version".into(),
         setup::SIGNAL_CLI_VERSION.into(),
     ];
+    if let (Some(uuid), Some(device)) = (&own_uuid, own_device) {
+        init.extend(["--linked".into(), "--own-uuid".into(), uuid.clone(), "--own-device".into(), device.to_string()]);
+    }
     for (key, value) in setup::signal_cli_env(arch) {
         init.push("--env".into());
         init.push(format!("{key}={value}"));
@@ -384,6 +393,14 @@ fn run_setup(args: &[String]) -> i32 {
     if let Err(output) = run(&setup::as_bridge(&init), None) {
         eprintln!("❌ {output}");
         return 1;
+    }
+    if linked {
+        if systemctl(&["enable", "--now", unit::UNIT_NAME]) != 0 {
+            eprintln!("❌ The unit did not start: `journalctl -u {}`.", unit::UNIT_NAME);
+            return 1;
+        }
+        println!("\n✅ Linked. In Signal, open Note to Self and write /help. Mightling's replies start with {}", ling_signal::format::LINKED_MARKER);
+        return 0;
     }
     let owner_code = match run(&setup::as_bridge(&[bridge_bin, "bind".into(), "--state".into(), state_dir]), None) {
         Ok(output) => output.trim().to_string(),
@@ -396,7 +413,7 @@ fn run_setup(args: &[String]) -> i32 {
         eprintln!("❌ The unit did not start: `journalctl -u {}`.", unit::UNIT_NAME);
         return 1;
     }
-    println!("\n📱 From your phone, send this code to {number} in Signal within ten minutes:\n\n      {owner_code}\n");
+    println!("\n📱 From your phone, send this code to {account} in Signal within ten minutes:\n\n      {owner_code}\n");
     println!("The first account to send it becomes Mightling's owner; anyone else is ignored.");
     let deadline = std::time::Instant::now() + Duration::from_millis(gate::BINDING_MS);
     while std::time::Instant::now() < deadline {
@@ -415,19 +432,129 @@ fn run_setup(args: &[String]) -> i32 {
     1
 }
 
+/// Dedicated mode: registers the number (a CAPTCHA if Signal wants one, then the SMS or voice
+/// code), sets the registration lock, the profile name, and number discovery off.
+fn register(arch: &str, number: &str, voice: bool) -> bool {
+    let mut register: Vec<&str> = vec!["register"];
+    if voice {
+        register.push("--voice");
+    }
+    let mut result = run(&setup::signal_cli_command(arch, number, &register), None);
+    if let Err(output) = &result
+        && output.to_ascii_lowercase().contains("captcha")
+    {
+        println!("\nSignal asks for a CAPTCHA. Open https://signalcaptchas.org/registration/generate.html,");
+        println!("solve it, then right-click \"Open Signal\" and copy the link (it starts with signalcaptcha://).");
+        let Some(token) = setup::captcha_token(&prompt("Paste the link:")) else {
+            eprintln!("That is not a signalcaptcha:// link.");
+            return false;
+        };
+        let mut again = register.clone();
+        again.extend(["--captcha", token.as_str()]);
+        result = run(&setup::signal_cli_command(arch, number, &again), None);
+    }
+    if let Err(output) = result {
+        eprintln!("❌ Signal refused the registration:\n{output}");
+        return false;
+    }
+    let code = prompt(&format!("Signal sent a code to {number}. Type it:"));
+    if let Err(output) = run(&setup::signal_cli_command(arch, number, &["verify", code.trim()]), None) {
+        eprintln!("❌ The code was not accepted:\n{output}");
+        return false;
+    }
+    let pin = format!("{:08}", rand::random_range(0..100_000_000u32));
+    for (what, args) in [
+        ("registration lock", vec!["setPin", pin.as_str()]),
+        ("profile name", vec!["updateProfile", "--given-name", "Mightling"]),
+        ("number discovery off", vec!["updateAccount", "--discoverable-by-number", "false"]),
+    ] {
+        if let Err(output) = run(&setup::signal_cli_command(arch, number, &args), None) {
+            eprintln!("⚠️  Could not set the {what}: {output}");
+        }
+    }
+    let pin_path = format!("{}/pin", unit::STATE_DIR);
+    let _ = run(&setup::as_bridge(&["sh".to_string(), "-c".to_string(), format!("umask 077; cat > {pin_path}")]), Some(&pin));
+    true
+}
+
+/// Linked mode: `signal-cli link`, its QR code shown here, until the phone has scanned it. Returns
+/// the account's number, its id and this device's id.
+fn link(arch: &str, node: &str) -> Option<(String, Option<String>, Option<u64>)> {
+    let name = if node.is_empty() { "Mightling".to_string() } else { format!("Mightling ({node})") };
+    let command = setup::signal_cli_bare(arch, &["link", "-n", &name]);
+    let mut child = match Command::new(&command[0]).args(&command[1..]).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            eprintln!("❌ Could not start signal-cli: {err}");
+            return None;
+        }
+    };
+    let stdout = child.stdout.take()?;
+    let mut number = None;
+    for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+        if line.starts_with("sgnl://") {
+            println!("\nOn your phone: Signal → Settings → Linked devices → Link new device, and scan:\n");
+            let shown = Command::new("qrencode").args(["-t", "ANSIUTF8", "-m", "2", &line]).status().map(|s| s.success()).unwrap_or(false);
+            if !shown {
+                println!("(qrencode is not installed; make a QR code of this link with any tool:)");
+            }
+            println!("{line}\n");
+            println!("If the phone offers to transfer your message history, choose \"Don't transfer\".");
+            println!("Waiting for the phone…");
+        } else if let Some(associated) = setup::associated_number(&line) {
+            number = Some(associated);
+        }
+    }
+    let _ = child.wait();
+    let Some(number) = number else {
+        eprintln!("❌ The link was not completed (it times out after a few minutes; run setup again).");
+        return None;
+    };
+    println!("✅ Linked to {number}.");
+    let aci = run(&setup::signal_cli_bare(arch, &["-o", "json", "listAccounts"]), None).ok().and_then(|out| setup::account_aci(&out, &number));
+    let device = run(&setup::signal_cli_command(arch, &number, &["listDevices"]), None).ok().and_then(|out| setup::this_device(&out));
+    if aci.is_none() || device.is_none() {
+        eprintln!("❌ signal-cli did not say this account's id or this device's number; `ling-signal remove`, then setup again.");
+        return None;
+    }
+    Some((number, aci, device))
+}
+
+/// Note to Self has one disappearing-message timer, shared by the owner's own notes and
+/// Mightling's replies, and it reaches every device of the account (§4.2). Set only with consent.
+fn set_note_to_self_timer(arch: &str, number: &str) {
+    println!("\nDisappearing messages: Mightling's replies can disappear after a week, so code and mail");
+    println!("shown in them don't stay on your phone. Note to Self has one timer for the whole");
+    println!("conversation: your own notes written there from now on would disappear after a week too");
+    println!("(notes already there stay), on every device. You can change it on the phone at any time.");
+    if prompt("Set Note to Self to disappear after one week? [Y/n]").to_ascii_lowercase() == "n" {
+        println!("Left as it is.");
+        return;
+    }
+    let seconds = 7 * 24 * 3600;
+    match run(&setup::signal_cli_command(arch, number, &["updateContact", number, "--expiration", &seconds.to_string()]), None) {
+        Ok(_) => println!("✅ Note to Self now disappears after one week."),
+        Err(output) => eprintln!("⚠️  Could not set it ({output}); set it on the phone: Note to Self → the name at the top → Disappearing messages."),
+    }
+}
+
 /// The bridge's settings, read through its own account (the state folder is 0700).
-fn bridge_account_of_setup() -> Option<String> {
+fn bridge_account_of_setup() -> Option<(String, bool)> {
     let output = run(&setup::as_bridge(&[unit::BRIDGE_PATH.to_string(), "account".to_string(), "--state".to_string(), unit::STATE_DIR.to_string()]), None).ok()?;
-    let account = output.trim().to_string();
-    setup::valid_number(&account).then_some(account)
+    let mut words = output.split_whitespace();
+    let account = words.next()?.to_string();
+    let linked = words.next() == Some("linked");
+    setup::valid_number(&account).then_some((account, linked))
 }
 
 fn run_remove(args: &[String]) -> i32 {
     let arch = std::env::consts::ARCH;
     // A dry run starts nothing as root: the number is looked up only for a real removal.
     let dry_run = has(args, "--dry-run");
-    let account = if dry_run { None } else { bridge_account_of_setup() };
-    let plan = setup::remove_plan(arch, account.as_deref());
+    let found = if dry_run { None } else { bridge_account_of_setup() };
+    // Unknown (a dry run, or no state): treated as linked, so `unregister` is never run on a guess.
+    let linked = found.as_ref().is_none_or(|(_, linked)| *linked);
+    let plan = setup::remove_plan(arch, found.as_ref().map(|(account, _)| account.as_str()), linked);
     println!("This removes Mightling over Signal from this machine. Your Ask threads stay. It runs:\n");
     for step in &plan {
         if !step.what.is_empty() {
@@ -435,8 +562,12 @@ fn run_remove(args: &[String]) -> i32 {
         }
         println!("      {}", step.display());
     }
+    if linked {
+        println!("\nLinked to your own account: on your phone, also open Signal → Settings → Linked devices and");
+        println!("unlink \"Mightling\". Your account itself is never unregistered by this.");
+    }
     if dry_run {
-        println!("\n(A real removal also takes the bridge's number off Signal with `unregister` before deleting its data.)");
+        println!("\n(With its own number, a real removal also takes that number off Signal with `unregister`.)");
         return 0;
     }
     if prompt("\nRemove it? [y/N]").to_ascii_lowercase() != "y" {
@@ -482,6 +613,11 @@ fn run_trust_owner(args: &[String]) -> i32 {
             return 1;
         }
     };
+    if let Mode::Linked { .. } = config.mode {
+        println!("Linked to your own account, there is no safety number to trust: if the account is registered");
+        println!("again, Signal unlinks this device, and `ling-signal setup` links it anew.");
+        return 0;
+    }
     let Some(owner) = config.owner.clone() else {
         eprintln!("No owner is paired yet; `ling-signal setup` pairs one.");
         return 1;

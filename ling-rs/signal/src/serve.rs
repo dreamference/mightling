@@ -74,10 +74,30 @@ struct Daemon {
     held: Vec<Value>,
 }
 
-/// Runs until signal-cli exits or the process is stopped. Returns an error to make systemd restart it.
-pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), String> {
+/// Why the daemon stopped.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Stop {
+    /// Something went wrong that a restart may fix.
+    Failed(String),
+    /// Signal no longer accepts this device: unlinked from the phone, or the account registered
+    /// again. A restart cannot fix it (exit 78, `RestartPreventExitStatus`).
+    Unlinked,
+}
+
+impl From<String> for Stop {
+    fn from(error: String) -> Stop {
+        Stop::Failed(error)
+    }
+}
+
+pub const UNLINKED_TEXT: &str = "Signal refused this device's credentials: it was probably unlinked from the phone (or the account was registered again). \
+Its keys are still in the bridge's state: `ling-signal remove` deletes them; `ling-signal setup` links again.";
+
+/// Runs until signal-cli exits or the process is stopped. An error makes systemd restart it,
+/// except [`Stop::Unlinked`].
+pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), Stop> {
     let config = Config::load(state_dir)?;
-    let cookie = state::load_cookie(state_dir).ok_or("the bridge is not paired with `ling web` (run `ling signal setup`)")?;
+    let cookie = state::load_cookie(state_dir).ok_or_else(|| "the bridge is not paired with `ling web` (run `ling-signal setup`)".to_string())?;
     let conversation = Conversation::load(state_dir);
     let launch = Launch::json_rpc(
         config.signal_cli.clone(),
@@ -86,7 +106,7 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
         matches!(config.mode, Mode::Linked { .. }),
         config.signal_cli_env.clone(),
     );
-    let (signal, mut messages) = SignalCli::spawn(&launch).map_err(|err| format!("could not start signal-cli ({}): {err}", config.signal_cli.display()))?;
+    let (signal, mut messages) = SignalCli::spawn(&launch).map_err(|err| Stop::Failed(format!("could not start signal-cli ({}): {err}", config.signal_cli.display())))?;
     let mut gate = Gate::new(config.owner.clone());
     gate.binding = config.binding.clone();
     gate.restore_seen(&conversation.seen);
@@ -115,13 +135,16 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
     eprintln!("ling-signal {}: started ({} mode)", env!("CARGO_PKG_VERSION"), match daemon.config.mode { Mode::Dedicated => "dedicated", Mode::Linked { .. } => "linked" });
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut airgap = tokio::time::interval(AIRGAP_EVERY);
-    let mut stop = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).map_err(|err| err.to_string())?;
+    let mut stop = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).map_err(|err| Stop::Failed(err.to_string()))?;
     loop {
         tokio::select! {
             message = messages.recv() => {
                 let Some(params) = message else {
+                    if daemon.unlinked() {
+                        return Err(Stop::Unlinked);
+                    }
                     daemon.write_status(false);
-                    return Err("signal-cli exited".to_string());
+                    return Err(Stop::Failed("signal-cli exited".to_string()));
                 };
                 if daemon.airgap_known {
                     daemon.on_signal(params).await;
@@ -138,6 +161,10 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
                 daemon.on_incoming(incoming.unwrap_or(Incoming::Closed)).await;
             }
             _ = tick.tick() => {
+                if daemon.unlinked() {
+                    daemon.signal.kill().await;
+                    return Err(Stop::Unlinked);
+                }
                 let now = now_ms();
                 if daemon.agent.is_none() && now >= daemon.next_attempt_ms {
                     daemon.connect().await;
@@ -160,6 +187,22 @@ pub async fn serve(state_dir: &Path, runtime_dir: Option<&Path>) -> Result<(), S
 }
 
 impl Daemon {
+    fn linked(&self) -> bool {
+        matches!(self.config.mode, Mode::Linked { .. })
+    }
+
+    /// Whether signal-cli has logged that Signal refuses this device; if so, says so in the status.
+    fn unlinked(&mut self) -> bool {
+        if !self.signal.deauthorized.load(std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
+        eprintln!("ling-signal: {UNLINKED_TEXT}");
+        self.last_error = Some(UNLINKED_TEXT.to_string());
+        self.save_conversation();
+        self.write_status(false);
+        true
+    }
+
     /// Asks `ling web` for the air-gap level; the first answer also releases held messages.
     async fn poll_airgap(&mut self) {
         let Ok(on) = agent::airgap_level(self.config.port, &self.cookie).await else { return };
@@ -258,9 +301,12 @@ impl Daemon {
     }
 
     async fn on_signal(&mut self, params: Value) {
-        let Some(envelope) = envelope::parse(&params, self.config.own_uuid.as_deref()) else { return };
+        let own = envelope::OwnAccount { uuid: self.config.own_uuid.as_deref(), number: Some(self.config.account.as_str()) };
+        let Some(envelope) = envelope::parse(&params, own) else { return };
         let sender = envelope.source_uuid.clone().unwrap_or_default();
-        let fingerprint = if sender.is_empty() { None } else { self.fingerprint(&sender).await };
+        // Linked mode needs no identity key (gate.rs, `check_linked`), and asking for one for every
+        // message of every conversation on the owner's account would be work done on their mail.
+        let fingerprint = if sender.is_empty() || self.linked() { None } else { self.fingerprint(&sender).await };
         let now = now_ms();
         match self.gate.check(&envelope, &self.config.mode, fingerprint.as_deref(), now) {
             Verdict::Accept(message) => {
@@ -312,7 +358,13 @@ impl Daemon {
 
     async fn send_with(&mut self, message: &Styled, attachments: &[String]) {
         let Some(owner) = self.owner() else { return };
-        if let Err(err) = self.signal.call("send", rpc::send_params(&owner, message, attachments)).await {
+        // Linked: into the owner's Note to Self, marked as the bridge's (§4.2). Dedicated: to the owner.
+        let params = if self.linked() {
+            rpc::note_to_self_params(&crate::format::prefixed(message, crate::format::LINKED_MARKER), attachments)
+        } else {
+            rpc::send_params(&owner, message, attachments)
+        };
+        if let Err(err) = self.signal.call("send", params).await {
             self.note_error(format!("could not send to Signal: {err}"));
         }
     }
@@ -339,6 +391,9 @@ impl Daemon {
                 }
             }
             Action::Notice(text) => self.send_text(&Styled::plain(&text)).await,
+            // Note to Self shows neither typing nor receipts, and a receipt there would mark the
+            // owner's note read on every device; linked mode sends neither.
+            Action::Typing(_) | Action::Receipt(_) if self.linked() => {}
             Action::Typing(on) => {
                 if let Some(owner) = owner {
                     let _ = self.signal.call("sendTyping", rpc::typing_params(&owner, on)).await;
@@ -391,10 +446,19 @@ impl Daemon {
         let (mut images, mut files) = (Vec::new(), Vec::new());
         for attachment in attachments {
             let local = self.state_dir.join("signal-cli").join("attachments").join(&attachment.id);
-            let bytes = match std::fs::read(&local) {
+            let fetched = if self.linked() {
+                // Not downloaded with everything else (--ignore-attachments): fetched for this one.
+                match self.signal.call("getAttachment", rpc::get_attachment_params(&attachment.id, &self.config.account)).await {
+                    Ok(value) => value.get("data").and_then(Value::as_str).and_then(rpc::base64_decode).ok_or_else(|| "signal-cli sent no data".to_string()),
+                    Err(err) => Err(err),
+                }
+            } else {
+                std::fs::read(&local).map_err(|err| err.to_string())
+            };
+            let bytes = match fetched {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    self.note_error(format!("an attachment was not found ({}): {err}", attachment.id));
+                    self.note_error(format!("an attachment could not be read ({}): {err}", attachment.id));
                     continue;
                 }
             };
@@ -435,7 +499,8 @@ impl Daemon {
             "airgapped": self.bridge.airgapped(),
             "busy": self.bridge.is_busy(),
             "lastOwnerMessageMs": self.last_owner_message_ms,
-            "strangersIgnored": self.gate.ignored,
+            // Linked: not counted at all (other conversations are the owner's, not the bridge's).
+            "strangersIgnored": if self.linked() { Value::Null } else { json!(self.gate.ignored) },
             "identityRefusals": self.gate.identity_refusals,
             "lastError": self.last_error,
             "bridgeVersion": env!("CARGO_PKG_VERSION"),

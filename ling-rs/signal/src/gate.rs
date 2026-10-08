@@ -105,12 +105,17 @@ impl Gate {
         let (text, attachments) = match (&envelope.body, mode) {
             (Body::Direct { text, attachments }, Mode::Dedicated) => (text, attachments),
             (Body::NoteToSelf { text, attachments }, Mode::Linked { own_device }) => {
-                // The bridge's own replies come back to it as sync messages: never act on them.
-                if envelope.source_device == Some(*own_device) {
+                // The bridge's own replies never come back to the device that sent them, but a
+                // second bridge linked to the same account would see them: a reply is marked, and
+                // a marked message, or one from this device, is never a question (§4.2).
+                if envelope.source_device == Some(*own_device) || text.starts_with(crate::format::LINKED_MARKER) {
                     return Verdict::Ignored;
                 }
                 (text, attachments)
             }
+            // Linked to the owner's account, the bridge sees every conversation on it. None of them
+            // is counted or looked at: only Note to Self is the bridge's business.
+            (_, Mode::Linked { .. }) => return Verdict::Ignored,
             _ => {
                 if matches!(envelope.body, Body::Direct { .. } | Body::Group) {
                     self.ignored += 1;
@@ -118,6 +123,9 @@ impl Gate {
                 return Verdict::Ignored;
             }
         };
+        if let Mode::Linked { .. } = mode {
+            return self.check_linked(envelope, text, attachments, now_ms);
+        }
         let Some(sender) = envelope.source_uuid.as_deref() else {
             self.ignored += 1;
             return Verdict::Ignored;
@@ -153,6 +161,26 @@ impl Gate {
             return Verdict::Late { hours: (now_ms - envelope.timestamp) / 3_600_000 };
         }
         Verdict::Accept(OwnerMessage { text: text.clone(), attachments: attachments.clone(), timestamp: envelope.timestamp })
+    }
+}
+
+impl Gate {
+    /// Linked mode: the owner is the account itself. A Note to Self message reaches this device
+    /// only as a sync message from another device of the same account, which Signal's server
+    /// authenticates, so there is no identity key to compare: a new key for the account means it
+    /// was registered again, which unlinks every linked device, this one included (§5.3).
+    fn check_linked(&mut self, envelope: &Envelope, text: &str, attachments: &[Attachment], now_ms: u64) -> Verdict {
+        let Some(owner) = &self.owner else { return Verdict::Ignored };
+        if envelope.source_uuid.as_deref() != Some(owner.aci.as_str()) {
+            return Verdict::Ignored;
+        }
+        if !self.remember(envelope.timestamp) {
+            return Verdict::Ignored;
+        }
+        if now_ms > envelope.timestamp + STALE_MS {
+            return Verdict::Late { hours: (now_ms - envelope.timestamp) / 3_600_000 };
+        }
+        Verdict::Accept(OwnerMessage { text: text.to_string(), attachments: attachments.to_vec(), timestamp: envelope.timestamp })
     }
 }
 
@@ -260,16 +288,51 @@ mod tests {
         assert_eq!(gate.check(&direct("owner", "hi", NOW + 1), &Mode::Linked { own_device: 3 }, Some("fp1"), NOW), Verdict::Ignored);
     }
 
+    fn linked() -> (Gate, Mode) {
+        (Gate::new(Some(Owner { aci: "me".to_string(), fingerprint: String::new() })), Mode::Linked { own_device: 3 })
+    }
+
+    fn note(text: &str, timestamp: u64, device: u64) -> Envelope {
+        Envelope {
+            source_uuid: Some("me".to_string()),
+            source_number: Some("+15550000".to_string()),
+            source_device: Some(device),
+            timestamp,
+            body: Body::NoteToSelf { text: text.to_string(), attachments: vec![] },
+        }
+    }
+
     #[test]
-    fn in_linked_mode_only_note_to_self_from_another_device_counts() {
-        let mut gate = owned();
-        let mut note = direct("owner", "q", NOW);
-        note.body = Body::NoteToSelf { text: "q".to_string(), attachments: vec![] };
-        assert!(matches!(gate.check(&note, &Mode::Linked { own_device: 3 }, Some("fp1"), NOW), Verdict::Accept(_)));
-        let mut echo = note.clone();
-        echo.timestamp = NOW + 1;
-        echo.source_device = Some(3);
-        assert_eq!(gate.check(&echo, &Mode::Linked { own_device: 3 }, Some("fp1"), NOW), Verdict::Ignored);
+    fn in_linked_mode_only_note_to_self_from_another_device_is_a_question() {
+        let (mut gate, mode) = linked();
+        // No identity key is consulted for the account itself.
+        assert!(matches!(gate.check(&note("q", NOW, 1), &mode, None, NOW), Verdict::Accept(m) if m.text == "q"));
+        assert_eq!(gate.check(&note("echo", NOW + 1, 3), &mode, None, NOW), Verdict::Ignored, "this device's own message");
+        assert_eq!(gate.check(&note("🐦 an answer", NOW + 2, 1), &mode, None, NOW), Verdict::Ignored, "a marked reply");
+        assert_eq!(gate.check(&note("q", NOW, 1), &mode, None, NOW), Verdict::Ignored, "a duplicate");
+    }
+
+    #[test]
+    fn in_linked_mode_every_other_conversation_is_left_alone_and_not_counted() {
+        let (mut gate, mode) = linked();
+        // A friend writing to the owner, a group, the owner writing to a friend: all ignored.
+        assert_eq!(gate.check(&direct("friend", "hi", NOW), &mode, Some("fp"), NOW), Verdict::Ignored);
+        let mut group = direct("friend", "hi all", NOW + 1);
+        group.body = Body::Group;
+        assert_eq!(gate.check(&group, &mode, Some("fp"), NOW), Verdict::Ignored);
+        let mut to_friend = note("private", NOW + 2, 1);
+        to_friend.body = Body::Other;
+        assert_eq!(gate.check(&to_friend, &mode, None, NOW), Verdict::Ignored);
+        assert_eq!((gate.ignored, gate.identity_refusals), (0, 0), "nothing about other conversations is recorded");
+        assert!(gate.seen().is_empty(), "not even their timestamps");
+    }
+
+    #[test]
+    fn a_note_to_self_from_another_account_is_not_the_owners() {
+        let (mut gate, mode) = linked();
+        let mut forged = note("rm -rf", NOW, 1);
+        forged.source_uuid = Some("someone".to_string());
+        assert_eq!(gate.check(&forged, &mode, None, NOW), Verdict::Ignored);
     }
 
     #[test]

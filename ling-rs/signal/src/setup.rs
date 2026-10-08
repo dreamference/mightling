@@ -89,7 +89,7 @@ pub fn shell_quote(part: &str) -> String {
 
 /// Everything up to registering the number. `bridge` is the `ling-signal` binary being installed,
 /// `work` a scratch folder of the user's for downloads, `arch` `std::env::consts::ARCH`.
-pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool, java_present: bool) -> Vec<Step> {
+pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool, java_present: bool, need_qrencode: bool) -> Vec<Step> {
     let tarball = work.join(format!("signal-cli-{SIGNAL_CLI_VERSION}.tar.gz"));
     let tarball = tarball.to_string_lossy().into_owned();
     let mut steps = Vec::new();
@@ -101,6 +101,9 @@ pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool
     }
     if !java_present {
         steps.push(Step::root("Install the Java runtime signal-cli needs (Java 25)", &["apt-get", "install", "-y", JAVA_PACKAGE]));
+    }
+    if need_qrencode {
+        steps.push(Step::root("Install qrencode, to show the linking QR code in this terminal", &["apt-get", "install", "-y", "qrencode"]));
     }
     steps.push(Step::user("Download signal-cli", &["curl", "-fsSL", "-o", &tarball, &signal_cli_url()]));
     steps.push(Step::user("Check it against the pinned SHA-256", &["sh", "-c", &format!("echo '{SIGNAL_CLI_SHA256}  {tarball}' | sha256sum -c -")]));
@@ -126,9 +129,14 @@ pub fn install_plan(bridge: &Path, work: &Path, arch: &str, account_exists: bool
 /// `remove` (§6): stop and disable the unit, take the number off Signal, delete the bridge's data,
 /// the unit, the installed files and the account. The Ask threads stay. `unregister` needs the
 /// network and a working account, so a failure there is reported and the rest still runs.
-pub fn remove_plan(arch: &str, account: Option<&str>) -> Vec<Step> {
+///
+/// Linked to the owner's account (`linked`), `unregister` is never run: on that account it would
+/// act on the owner's own registration. The device is unlinked from the phone instead (Settings →
+/// Linked devices), which `ling-signal remove` asks the owner to do; deleting the state deletes the
+/// keys either way.
+pub fn remove_plan(arch: &str, account: Option<&str>, linked: bool) -> Vec<Step> {
     let mut steps = vec![Step::root("Stop and disable the bridge", &["systemctl", "disable", "--now", unit::UNIT_NAME])];
-    if let Some(account) = account {
+    if let Some(account) = account.filter(|_| !linked) {
         let command = signal_cli_command(arch, account, &["unregister"]);
         // `signal_cli_command` already starts with sudo -u; run it as given.
         steps.push(Step { what: format!("Take {account} off Signal (unregister)"), command, root: false, stdin: None });
@@ -140,6 +148,41 @@ pub fn remove_plan(arch: &str, account: Option<&str>) -> Vec<Step> {
     steps.push(Step::root("Delete signal-cli and the bridge binary", &["rm", "-rf", "--one-file-system", &signal_cli_home().to_string_lossy(), unit::BRIDGE_PATH]));
     steps.push(Step::root("Delete the system account", &["userdel", unit::ACCOUNT]));
     steps
+}
+
+/// signal-cli on the bridge's data with no account named: `link`, `listAccounts`.
+pub fn signal_cli_bare(arch: &str, args: &[&str]) -> Vec<String> {
+    let mut command = vec!["env".to_string()];
+    for (key, value) in signal_cli_env(arch) {
+        command.push(format!("{key}={value}"));
+    }
+    command.push(signal_cli_program().to_string_lossy().into_owned());
+    command.push("--config".to_string());
+    command.push(format!("{}/signal-cli", unit::STATE_DIR));
+    command.extend(args.iter().map(|s| s.to_string()));
+    as_bridge(&command)
+}
+
+/// The account `link` was associated with: its `Associated with: +…` line.
+pub fn associated_number(line: &str) -> Option<String> {
+    let number = line.trim().strip_prefix("Associated with:")?.trim();
+    (!number.is_empty()).then(|| number.to_string())
+}
+
+/// The account's id in `listAccounts -o json` (`[{"number": …, "aci": …}]`).
+pub fn account_aci(json: &str, number: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
+    value.as_array()?.iter().find(|a| a.get("number").and_then(|n| n.as_str()) == Some(number)).and_then(|a| a.get("aci")?.as_str().map(str::to_string))
+}
+
+/// This device's id in `listDevices`' text (`- Device 3 (this device):`); its JSON form leaves
+/// that mark out.
+pub fn this_device(text: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("- Device ")?;
+        let (id, tail) = rest.split_once(' ')?;
+        tail.starts_with("(this device)").then(|| id.parse().ok()).flatten()
+    })
 }
 
 /// A command run as the bridge's account, e.g. signal-cli on its data.
@@ -191,10 +234,11 @@ mod tests {
 
     #[test]
     fn the_plan_on_arm64_brings_the_jni_library_and_prints_every_root_step() {
-        let plan = install_plan(Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/tmp/w"), "aarch64", false, false);
+        let plan = install_plan(Path::new("/home/u/.local/share/dreamference/mightling/bin/ling-signal"), Path::new("/tmp/w"), "aarch64", false, false, true);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(shown[0].starts_with("sudo useradd --system --no-create-home"), "{shown:?}");
         assert!(shown.iter().any(|s| s == "sudo apt-get install -y openjdk-25-jre-headless"));
+        assert!(shown.iter().any(|s| s == "sudo apt-get install -y qrencode"));
         assert!(shown.iter().any(|s| s.contains(SIGNAL_CLI_SHA256) && s.contains("sha256sum -c")));
         assert!(shown.iter().any(|s| s.contains(LIBSIGNAL_AARCH64_SHA256)));
         assert!(shown.iter().any(|s| s.ends_with("/opt/mightling/signal-cli-0.14.9/lib/native/libsignal_jni.so")));
@@ -212,7 +256,7 @@ mod tests {
 
     #[test]
     fn an_existing_account_and_java_are_not_redone_and_x86_needs_no_library() {
-        let plan = install_plan(Path::new("/b"), Path::new("/w"), "x86_64", true, true);
+        let plan = install_plan(Path::new("/b"), Path::new("/w"), "x86_64", true, true, false);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert!(!shown.iter().any(|s| s.contains("useradd") || s.contains("apt-get") || s.contains("libsignal")));
     }
@@ -227,7 +271,7 @@ mod tests {
 
     #[test]
     fn remove_deletes_only_what_setup_made() {
-        let plan = remove_plan("aarch64", Some("+15550000"));
+        let plan = remove_plan("aarch64", Some("+15550000"), false);
         let shown: Vec<String> = plan.iter().map(Step::display).collect();
         assert_eq!(shown[0], "sudo systemctl disable --now mightling-signal.service");
         assert!(shown[1].starts_with("sudo -u mightling-signal env ") && shown[1].ends_with("-a +15550000 unregister"), "{}", shown[1]);
@@ -242,7 +286,28 @@ mod tests {
         }
         assert!(shown.contains(&"ling web revoke signal-bridge".to_string()));
         assert_eq!(shown.last().unwrap(), "sudo userdel mightling-signal");
-        assert!(!remove_plan("aarch64", None).iter().any(|s| s.display().contains("unregister")));
+        assert!(!remove_plan("aarch64", None, false).iter().any(|s| s.display().contains("unregister")));
+    }
+
+    #[test]
+    fn removing_a_linked_bridge_never_unregisters_the_owners_account() {
+        let plan = remove_plan("aarch64", Some("+15550000"), true);
+        assert!(!plan.iter().any(|s| s.display().contains("unregister")), "unregister would act on the owner's own account");
+        assert!(plan.iter().any(|s| s.display().contains("rm -rf --one-file-system /var/lib/mightling-signal")), "the keys are deleted");
+    }
+
+    #[test]
+    fn what_linking_prints_is_read() {
+        assert_eq!(associated_number("Associated with: +15550000\n").as_deref(), Some("+15550000"));
+        assert_eq!(associated_number("sgnl://linkdevice?uuid=x"), None);
+        assert_eq!(account_aci(r#"[{"number":"+15550000","aci":"aci-1"},{"number":"+1999","aci":"x"}]"#, "+15550000").as_deref(), Some("aci-1"));
+        assert_eq!(account_aci("not json", "+1"), None);
+        let devices = "- Device 1:\n  Name: Pixel\n- Device 4 (this device):\n  Name: Mightling (gx10)\n";
+        assert_eq!(this_device(devices), Some(4));
+        assert_eq!(this_device("- Device 1:\n"), None);
+        let link = signal_cli_bare("aarch64", &["link", "-n", "Mightling (gx10)"]).join(" ");
+        assert!(link.starts_with("sudo -u mightling-signal env ") && link.ends_with("--config /var/lib/mightling-signal/signal-cli link -n Mightling (gx10)"));
+        assert!(!link.contains(" -a "));
     }
 
     #[test]

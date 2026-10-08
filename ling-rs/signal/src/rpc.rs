@@ -48,7 +48,11 @@ impl Launch {
             "--receive-mode".to_string(),
             "on-start".to_string(),
             "--ignore-stories".to_string(),
+            "--ignore-avatars".to_string(),
+            "--ignore-stickers".to_string(),
         ];
+        // Linked to the owner's account, every conversation's attachments would otherwise be
+        // downloaded into the bridge's state. None is: the owner's own are fetched one by one.
         if linked {
             args.push("--ignore-attachments".to_string());
         }
@@ -56,8 +60,22 @@ impl Launch {
     }
 }
 
+/// Lines in signal-cli's log that mean this device is no longer on the account: unlinked from the
+/// phone, or the account registered again (§4.2, "Unlinking"). Matched in lower case. Taken from
+/// the exception names signal-cli logs; not yet seen on a real account (§12).
+/// Only the server refusing this device's own credentials counts: "not registered" is also what
+/// signal-cli logs for a recipient without Signal, which says nothing about this device.
+pub const DEAUTHORIZED_MARKERS: &[&str] = &["authorizationfailedexception", "authorization failed"];
+
+pub fn deauthorized(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    DEAUTHORIZED_MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
 /// A running signal-cli.
 pub struct SignalCli {
+    /// Set once signal-cli logs that this device is no longer on the account.
+    pub deauthorized: Arc<std::sync::atomic::AtomicBool>,
     stdin: tokio::sync::Mutex<ChildStdin>,
     waiters: Waiters,
     next_id: AtomicU64,
@@ -132,15 +150,26 @@ impl SignalCli {
                 let _ = waiter.send(Err("signal-cli exited".to_string()));
             }
         });
+        let deauthorized_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = deauthorized_flag.clone();
         tokio::spawn(async move {
             // signal-cli's own log goes to the journal, line by line; it never carries message text
             // at the default log level.
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if deauthorized(&line) {
+                    flag.store(true, Ordering::Relaxed);
+                }
                 eprintln!("signal-cli: {line}");
             }
         });
-        let cli = SignalCli { stdin: tokio::sync::Mutex::new(stdin), waiters, next_id: AtomicU64::new(1), child: tokio::sync::Mutex::new(child) };
+        let cli = SignalCli {
+            deauthorized: deauthorized_flag,
+            stdin: tokio::sync::Mutex::new(stdin),
+            waiters,
+            next_id: AtomicU64::new(1),
+            child: tokio::sync::Mutex::new(child),
+        };
         Ok((cli, rx))
     }
 
@@ -184,6 +213,51 @@ pub fn send_params(recipient: &str, message: &Styled, attachments: &[String]) ->
         params["attachments"] = json!(attachments);
     }
     params
+}
+
+/// `send` params for a message to the account's own Note to Self (linked mode).
+pub fn note_to_self_params(message: &Styled, attachments: &[String]) -> Value {
+    let mut params = json!({ "noteToSelf": true, "message": message.text });
+    if !message.styles.is_empty() {
+        params["textStyle"] = json!(message.style_arguments());
+    }
+    if !attachments.is_empty() {
+        params["attachments"] = json!(attachments);
+    }
+    params
+}
+
+/// `getAttachment` params: one attachment of a Note to Self message, which linked mode does not
+/// download with the rest (`--ignore-attachments`). The answer carries the file as base64 `data`.
+pub fn get_attachment_params(id: &str, own_number: &str) -> Value {
+    json!({ "id": id, "recipient": own_number })
+}
+
+/// Standard base64, as `getAttachment` returns a file; None if it is not base64.
+pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let mut buffer: u32 = 0;
+    let mut bits = 0;
+    for byte in text.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            b'\r' | b'\n' | b' ' => continue,
+            _ => return None,
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+            buffer &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 pub fn typing_params(recipient: &str, typing: bool) -> Value {
@@ -232,6 +306,24 @@ mod tests {
     }
 
     #[test]
+    fn note_to_self_has_no_recipient_and_attachments_decode() {
+        let params = note_to_self_params(&render("**ok**"), &[]);
+        assert_eq!(params, json!({"noteToSelf": true, "message": "ok", "textStyle": ["0:2:BOLD"]}));
+        assert!(params.get("recipient").is_none());
+        assert_eq!(get_attachment_params("abc", "+1555"), json!({"id": "abc", "recipient": "+1555"}));
+        assert_eq!(base64_decode("aGVsbG8gd29ybGQ=").unwrap(), b"hello world");
+        assert_eq!(base64_decode("AAEC/w==").unwrap(), vec![0, 1, 2, 255]);
+        assert!(base64_decode("not*base64").is_none());
+    }
+
+    #[test]
+    fn an_unlinked_device_is_recognised_in_the_log() {
+        assert!(deauthorized("WARN  ... org.whispersystems.signalservice.api.push.exceptions.AuthorizationFailedException: Authorization failed!"));
+        assert!(!deauthorized("ERROR User +1555 is not registered."), "a recipient without Signal is not this device");
+        assert!(!deauthorized("INFO  Received message from +1555"));
+    }
+
+    #[test]
     fn only_a_trusted_key_has_a_fingerprint() {
         let list = json!([
             {"number": "+1", "uuid": "a", "fingerprint": "f-a", "trustLevel": "TRUSTED_VERIFIED"},
@@ -274,5 +366,7 @@ done
         assert!(!args.contains("--ignore-attachments"));
         let linked = Launch::json_rpc("/x".into(), std::path::Path::new("/y"), "+1", true, vec![]);
         assert!(linked.args.contains(&"--ignore-attachments".to_string()));
+        assert!(args.contains("--ignore-avatars") && args.contains("--ignore-stickers"));
+        assert!(!args.contains("--send-read-receipts"), "read receipts are never sent for every message");
     }
 }

@@ -23,17 +23,28 @@ impl Drop for Scratch {
     }
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64
+}
+
+/// The two messages of the dedicated-mode tests: a stranger's, then the owner's.
+fn dedicated_messages() -> Vec<Value> {
+    vec![
+        json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"stranger","sourceDevice":1,"timestamp":1000,"dataMessage":{"message":"who are you?"}}}}),
+        json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"owner","sourceDevice":1,"timestamp":now_ms(),"dataMessage":{"message":"what is 2+2?"}}}}),
+    ]
+}
+
 /// A stand-in for signal-cli: every request line goes to `log`; `listIdentities` trusts the owner;
-/// everything else answers with a timestamp. Two messages arrive after a second.
-fn fake_signal_cli(dir: &Path, log: &Path) -> PathBuf {
+/// everything else answers with a timestamp. `messages` arrive after two seconds.
+fn fake_signal_cli(dir: &Path, log: &Path, messages: &[Value]) -> PathBuf {
     let path = dir.join("signal-cli");
+    let incoming = dir.join("incoming.jsonl");
+    std::fs::write(&incoming, messages.iter().map(|m| m.to_string() + "\n").collect::<String>()).unwrap();
     let script = format!(
         r#"#!/bin/sh
 LOG='{log}'
-(sleep 2
- echo '{{"jsonrpc":"2.0","method":"receive","params":{{"envelope":{{"sourceUuid":"stranger","sourceDevice":1,"timestamp":1000,"dataMessage":{{"message":"who are you?"}}}}}}}}'
- echo '{{"jsonrpc":"2.0","method":"receive","params":{{"envelope":{{"sourceUuid":"owner","sourceDevice":1,"timestamp":'$(($(date +%s) * 1000))',"dataMessage":{{"message":"what is 2+2?"}}}}}}}}'
-) &
+(sleep 2; cat '{incoming}') &
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$LOG"
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -43,7 +54,8 @@ while IFS= read -r line; do
   esac
 done
 "#,
-        log = log.display()
+        log = log.display(),
+        incoming = incoming.display()
     );
     std::fs::write(&path, script).unwrap();
     #[cfg(unix)]
@@ -129,7 +141,7 @@ async fn the_owners_question_is_answered_through_ling_web_and_a_strangers_is_not
         binding: None,
         port,
         node: "test-node".to_string(),
-        signal_cli: fake_signal_cli(&dir.0, &log),
+        signal_cli: fake_signal_cli(&dir.0, &log, &dedicated_messages()),
         signal_cli_env: vec![],
         signal_cli_version: "0.14.9".to_string(),
         vision: false,
@@ -207,7 +219,7 @@ async fn at_air_gap_on_the_owner_gets_nothing_not_even_a_receipt() {
         binding: None,
         port,
         node: "test-node".to_string(),
-        signal_cli: fake_signal_cli(&dir.0, &log),
+        signal_cli: fake_signal_cli(&dir.0, &log, &dedicated_messages()),
         signal_cli_env: vec![],
         signal_cli_version: "0.14.9".to_string(),
         vision: false,
@@ -230,5 +242,94 @@ async fn at_air_gap_on_the_owner_gets_nothing_not_even_a_receipt() {
         asked.push(message);
     }
     assert!(!asked.iter().any(|m| m["message"]["method"] == "turn/start" || m["message"]["method"] == "thread/start"), "{asked:?}");
+    daemon.abort();
+}
+
+/// Every request signal-cli was sent, in order.
+fn requests(log: &Path) -> Vec<Value> {
+    std::fs::read_to_string(log).unwrap_or_default().lines().filter_map(|line| serde_json::from_str(line).ok()).collect()
+}
+
+#[tokio::test]
+async fn linked_to_the_owners_account_only_note_to_self_is_read_and_answered_there() {
+    let dir = Scratch(std::env::temp_dir().join(format!("ling-signal-linked-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    let state = dir.0.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let log = dir.0.join("signal-cli.log");
+    let now = now_ms();
+    let messages = vec![
+        // A friend writes to the owner.
+        json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"friend","sourceDevice":1,"timestamp":now,"dataMessage":{"message":"dinner tonight?"}}}}),
+        // The owner answers the friend from the phone: a sync message, not to themselves.
+        json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"me","sourceDevice":1,"timestamp":now + 1,"syncMessage":{"sentMessage":{"destinationNumber":"+15550000","destinationUuid":"friend","message":"sure","timestamp":now + 1}}}}}),
+        // A group message from the phone.
+        json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"me","sourceDevice":1,"timestamp":now + 2,"syncMessage":{"sentMessage":{"message":"hi all","groupInfo":{"groupId":"g"},"timestamp":now + 2}}}}}),
+        // A marked reply, as a second bridge on the account would see one: never a question.
+        json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"me","sourceDevice":5,"timestamp":now + 3,"syncMessage":{"sentMessage":{"destinationNumber":"+15559999","destinationUuid":"me","message":"🐦 an earlier answer","timestamp":now + 3}}}}}),
+        // The owner writes to Note to Self from the phone: the one question.
+        json!({"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"me","sourceDevice":1,"timestamp":now + 4,"syncMessage":{"sentMessage":{"destinationNumber":"+15559999","destinationUuid":"me","message":"what is 2+2?","timestamp":now + 4}}}}}),
+    ];
+    let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel();
+    let port = fake_ling_web(seen_tx, "off").await;
+    Config {
+        mode: Mode::Linked { own_device: 4 },
+        account: "+15559999".to_string(),
+        own_uuid: Some("me".to_string()),
+        owner: Some(Owner { aci: "me".to_string(), fingerprint: String::new() }),
+        binding: None,
+        port,
+        node: "test-node".to_string(),
+        signal_cli: fake_signal_cli(&dir.0, &log, &messages),
+        signal_cli_env: vec![],
+        signal_cli_version: "0.14.9".to_string(),
+        vision: false,
+    }
+    .save(&state)
+    .unwrap();
+    ling_signal::state::save_cookie(&state, "mightling_device=test").unwrap();
+    let runtime = dir.0.join("run");
+    let daemon = {
+        let (state, runtime) = (state.clone(), runtime.clone());
+        tokio::spawn(async move { ling_signal::serve::serve(&state, Some(&runtime)).await })
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        if requests(&log).iter().any(|r| r["method"] == "send" && r["params"]["message"] == "🐦 The answer is 4.") {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no answer in Note to Self; signal-cli saw: {:?}", requests(&log));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    // Let anything else that might happen, happen.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let sent = requests(&log);
+    let sends: Vec<&Value> = sent.iter().filter(|r| r["method"] == "send").collect();
+    assert_eq!(sends.len(), 1, "one answer and nothing else: {sends:?}");
+    assert_eq!(sends[0]["params"]["noteToSelf"], true);
+    assert!(sends[0]["params"].get("recipient").is_none(), "never to anyone else");
+    // The bold "4" moved by the marker's three UTF-16 units.
+    assert_eq!(sends[0]["params"]["textStyle"], json!(["17:1:BOLD"]));
+    for method in ["sendReceipt", "sendTyping", "listIdentities", "getAttachment"] {
+        assert!(!sent.iter().any(|r| r["method"] == method), "{method} was called: {sent:?}");
+    }
+    // Only the note became a turn.
+    let mut asked = Vec::new();
+    while let Ok(message) = seen.try_recv() {
+        asked.push(message);
+    }
+    let turns: Vec<&Value> = asked.iter().filter(|m| m["message"]["method"] == "turn/start").collect();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0]["message"]["params"]["input"][0]["text"], "what is 2+2?");
+    // Nothing about the other conversations is kept or counted.
+    let conversation = std::fs::read_to_string(state.join("conversation.json")).unwrap();
+    let conversation: Value = serde_json::from_str(&conversation).unwrap();
+    assert_eq!(conversation["ignored"], 0);
+    assert_eq!(conversation["seen"], json!([now + 4]), "only the note's timestamp is remembered");
+    let status = std::fs::read_to_string(runtime.join("status.json")).unwrap();
+    assert!(status.contains(r#""strangersIgnored":null"#) && status.contains(r#""mode":"linked""#), "{status}");
+    for private in ["dinner", "sure", "hi all", "friend"] {
+        assert!(!status.contains(private) && !conversation.to_string().contains(private), "{private} leaked");
+    }
     daemon.abort();
 }

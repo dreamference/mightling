@@ -64,9 +64,27 @@ fn is_group(message: &Value) -> bool {
     message.get("groupInfo").is_some_and(|g| !g.is_null()) || message.get("groupV2").is_some_and(|g| !g.is_null())
 }
 
-/// Reads one `receive` notification's `params`. `own_uuid` is the bridge's account, needed to tell
-/// a Note to Self message (sent to oneself) from the owner's other sync messages.
-pub fn parse(params: &Value, own_uuid: Option<&str>) -> Option<Envelope> {
+/// The account signal-cli runs, as far as it is known: in linked mode, the owner's own account.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OwnAccount<'a> {
+    pub uuid: Option<&'a str>,
+    pub number: Option<&'a str>,
+}
+
+impl OwnAccount<'_> {
+    /// Whether a sync message's destination is this account itself: Note to Self.
+    fn is_destination(&self, sent: &Value) -> bool {
+        let uuid = sent.get("destinationUuid").and_then(Value::as_str);
+        let number = sent.get("destinationNumber").and_then(Value::as_str);
+        (self.uuid.is_some() && uuid == self.uuid) || (self.number.is_some() && number == self.number)
+    }
+}
+
+/// Reads one `receive` notification's `params`. `own` is the account signal-cli runs, needed to tell
+/// a Note to Self message (sent to oneself) from the owner's messages to anyone else. signal-cli
+/// writes a sync message's destination as `destinationNumber`/`destinationUuid` and the message's
+/// own fields (`message`, `attachments`, `groupInfo`) beside them (its `JsonSyncDataMessage`).
+pub fn parse(params: &Value, own: OwnAccount) -> Option<Envelope> {
     let envelope = params.get("envelope")?;
     let timestamp = envelope.get("timestamp").and_then(Value::as_u64)?;
     let source_uuid = envelope.get("sourceUuid").and_then(Value::as_str).map(str::to_string);
@@ -83,7 +101,7 @@ pub fn parse(params: &Value, own_uuid: Option<&str>) -> Option<Envelope> {
             if text.is_empty() && attachments.is_empty() { Body::Other } else { Body::Direct { text, attachments } }
         }
     } else if let Some(sent) = envelope.pointer("/syncMessage/sentMessage").filter(|s| !s.is_null()) {
-        let to_self = own_uuid.is_some() && sent.get("destinationUuid").and_then(Value::as_str) == own_uuid;
+        let to_self = own.is_destination(sent);
         if is_group(sent) {
             Body::Group
         } else if to_self {
@@ -112,7 +130,7 @@ mod tests {
             "dataMessage": {"timestamp": 1_760_000_000_000u64, "message": "hello", "expiresInSeconds": 0,
                 "attachments": [{"contentType": "image/jpeg", "filename": "a.jpg", "id": "abc.jpg", "size": 12}]}
         }, "account": "+15559999"});
-        let e = parse(&params, Some("aci-bridge")).unwrap();
+        let e = parse(&params, OwnAccount { uuid: Some("aci-bridge"), number: None }).unwrap();
         assert_eq!(e.source_uuid.as_deref(), Some("aci-owner"));
         assert_eq!(e.timestamp, 1_760_000_000_000);
         let Body::Direct { text, attachments } = e.body else { panic!("{:?}", e.body) };
@@ -124,23 +142,36 @@ mod tests {
     #[test]
     fn groups_receipts_and_reactions_are_not_messages() {
         let group = json!({"envelope": {"sourceUuid": "x", "timestamp": 1, "dataMessage": {"message": "hi", "groupInfo": {"groupId": "g"}}}});
-        assert_eq!(parse(&group, None).unwrap().body, Body::Group);
+        assert_eq!(parse(&group, OwnAccount::default()).unwrap().body, Body::Group);
         let receipt = json!({"envelope": {"sourceUuid": "x", "timestamp": 1, "receiptMessage": {"isRead": true}}});
-        assert_eq!(parse(&receipt, None).unwrap().body, Body::Other);
+        assert_eq!(parse(&receipt, OwnAccount::default()).unwrap().body, Body::Other);
         let reaction = json!({"envelope": {"sourceUuid": "x", "timestamp": 1, "dataMessage": {"reaction": {"emoji": "👍"}}}});
-        assert_eq!(parse(&reaction, None).unwrap().body, Body::Other);
+        assert_eq!(parse(&reaction, OwnAccount::default()).unwrap().body, Body::Other);
         let typing = json!({"envelope": {"sourceUuid": "x", "timestamp": 1, "typingMessage": {"action": "STARTED"}}});
-        assert_eq!(parse(&typing, None).unwrap().body, Body::Other);
-        assert!(parse(&json!({"nothing": 1}), None).is_none());
+        assert_eq!(parse(&typing, OwnAccount::default()).unwrap().body, Body::Other);
+        assert!(parse(&json!({"nothing": 1}), OwnAccount::default()).is_none());
     }
 
     #[test]
     fn a_note_to_self_is_told_from_the_owners_other_sync_messages() {
         let to_self = json!({"envelope": {"sourceUuid": "me", "sourceDevice": 1, "timestamp": 5,
             "syncMessage": {"sentMessage": {"destinationUuid": "me", "message": "q?", "timestamp": 5}}}});
-        assert_eq!(parse(&to_self, Some("me")).unwrap().body, Body::NoteToSelf { text: "q?".to_string(), attachments: vec![] });
+        let me = OwnAccount { uuid: Some("me"), number: Some("+15550000") };
+        assert_eq!(parse(&to_self, me).unwrap().body, Body::NoteToSelf { text: "q?".to_string(), attachments: vec![] });
+        // The number alone is enough when the account id is not known yet.
+        let by_number = json!({"envelope": {"sourceUuid": "me", "sourceDevice": 1, "timestamp": 7,
+            "syncMessage": {"sentMessage": {"destinationNumber": "+15550000", "message": "q2", "timestamp": 7}}}});
+        assert!(matches!(parse(&by_number, OwnAccount { uuid: None, number: Some("+15550000") }).unwrap().body, Body::NoteToSelf { .. }));
         let to_friend = json!({"envelope": {"sourceUuid": "me", "timestamp": 6,
-            "syncMessage": {"sentMessage": {"destinationUuid": "friend", "message": "private", "timestamp": 6}}}});
-        assert_eq!(parse(&to_friend, Some("me")).unwrap().body, Body::Other);
+            "syncMessage": {"sentMessage": {"destinationUuid": "friend", "destinationNumber": "+15551111", "message": "private", "timestamp": 6}}}});
+        assert_eq!(parse(&to_friend, me).unwrap().body, Body::Other);
+        // A message to a group the owner is in, sent from the phone: not Note to Self.
+        let to_group = json!({"envelope": {"sourceUuid": "me", "timestamp": 8,
+            "syncMessage": {"sentMessage": {"message": "hi all", "groupInfo": {"groupId": "g"}, "timestamp": 8}}}});
+        assert_eq!(parse(&to_group, me).unwrap().body, Body::Group);
+        // Someone else's message to the owner reaches a linked device as a data message: Direct,
+        // which the gate never acts on in linked mode.
+        let incoming = json!({"envelope": {"sourceUuid": "friend", "timestamp": 9, "dataMessage": {"message": "hey"}}});
+        assert!(matches!(parse(&incoming, me).unwrap().body, Body::Direct { .. }));
     }
 }

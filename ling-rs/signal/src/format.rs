@@ -405,6 +405,20 @@ pub fn split(styled: &Styled, limit: usize) -> Vec<Styled> {
     parts
 }
 
+/// The start of every message the bridge writes into Note to Self (linked mode, §4.2). There the
+/// owner's notes and the bridge's replies are both "sent by me"; the mark tells them apart for
+/// the owner, and for the gate, which never takes a marked message for a question.
+pub const LINKED_MARKER: &str = "🐦 ";
+
+/// The same message with `prefix` in front, its ranges moved along.
+pub fn prefixed(message: &Styled, prefix: &str) -> Styled {
+    let shift = utf16_len(prefix);
+    Styled {
+        text: format!("{prefix}{}", message.text),
+        styles: message.styles.iter().map(|s| Style { start: s.start + shift, ..*s }).collect(),
+    }
+}
+
 /// What the bridge sends for one answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reply {
@@ -554,6 +568,14 @@ mod tests {
         for part in split(&s, 3) {
             assert_eq!(part.text, "😀");
         }
+    }
+
+    #[test]
+    fn a_prefix_moves_the_ranges_by_its_utf16_length() {
+        let marked = prefixed(&render("**x**"), LINKED_MARKER);
+        assert_eq!(marked.text, "🐦 x");
+        // 🐦 is two UTF-16 units, then a space.
+        assert_eq!(marked.style_arguments(), vec!["3:1:BOLD"]);
     }
 
     #[test]

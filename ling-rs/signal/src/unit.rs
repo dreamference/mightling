@@ -6,6 +6,8 @@ pub const ACCOUNT: &str = "mightling-signal";
 pub const BRIDGE_PATH: &str = "/usr/local/lib/mightling/ling-signal";
 pub const STATE_DIR: &str = "/var/lib/mightling-signal";
 pub const RUNTIME_DIR: &str = "/run/mightling-signal";
+/// The daemon's exit status when Signal no longer accepts this device; the unit does not restart it.
+pub const UNLINKED_EXIT: i32 = 78;
 
 /// The unit file's text. `memory_max` is a systemd size (`768M`); `heap` the JVM's `-Xmx`.
 pub fn unit_text(memory_max: &str, heap: &str) -> String {
@@ -41,6 +43,9 @@ RestrictSUIDSGID=yes\n\
 LockPersonality=yes\n\
 Restart=on-failure\n\
 RestartSec=10\n\
+# 78: Signal refused this device (unlinked from the phone, or the account registered again).\n\
+# Restarting cannot help; `ling-signal status` says what to do.\n\
+RestartPreventExitStatus=78\n\
 \n\
 [Install]\n\
 WantedBy=multi-user.target\n"
@@ -60,6 +65,7 @@ mod tests {
             "MemoryMax=768M",
             "StateDirectoryMode=0700",
             "NoNewPrivileges=yes",
+            "RestartPreventExitStatus=78",
             "Environment=JAVA_TOOL_OPTIONS=-Xmx256m -XX:+UseSerialGC",
             "ExecStart=/usr/local/lib/mightling/ling-signal serve --state /var/lib/mightling-signal --runtime /run/mightling-signal",
         ] {
