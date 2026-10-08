@@ -301,8 +301,9 @@ fn run_setup(args: &[String]) -> i32 {
         println!("\nThen it links the bridge to your Signal account as a new device (you scan a QR code");
         println!("with your phone), and you talk to Mightling in Note to Self. Read this first:");
         println!("  • A linked device can read every message your account receives from now on, and send as you.");
-        println!("    The bridge acts on Note to Self only and drops everything else unread, but its keys are");
-        println!("    keys to your whole account. They live in {} (0700, its own account),", unit::STATE_DIR);
+        println!("    signal-cli decrypts everything that arrives; the bridge acts on Note to Self only and drops");
+        println!("    the rest without storing or answering it. Its keys are keys to your whole account. They");
+        println!("    live in {} (0700, its own account),", unit::STATE_DIR);
         println!("    out of the agent's reach. `ling-signal remove` deletes them.");
         println!("  • If your phone offers to transfer your message history, choose \"Don't transfer\".");
         println!("  • Mightling's replies in Note to Self start with {}so you can tell them from your notes.", ling_signal::format::LINKED_MARKER);
