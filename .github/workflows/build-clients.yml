@@ -38,7 +38,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      # Only the pinned upstream fork; nothing else is a submodule.
+      # Only the pinned upstream fork; the ling-engine submodule (a spec) plays no part in the build.
       - name: Codex submodule
         run: git submodule update --init --depth 1 codex
       # Compiled into the launcher, so `ling update` can tell whether a newer release exists. Left

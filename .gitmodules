@@ -2,3 +2,6 @@
 	path = codex
 	url = https://github.com/dgxcoder/codex.git
 	shallow = true
+[submodule "ling-engine"]
+	path = ling-engine
+	url = https://github.com/dreamference/ling-engine.git
