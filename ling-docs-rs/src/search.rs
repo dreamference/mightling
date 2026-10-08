@@ -27,6 +27,8 @@ use crate::store::{self, is_cjk};
 pub const RRF_K: f64 = 60.0;
 /// How deep each ranking is read.
 pub const DEPTH: usize = 100;
+/// Chunks one result may join (about 1,500 tokens).
+pub const MERGE_MAX: usize = 3;
 /// Results by default (§7.4).
 pub const DEFAULT_K: usize = 8;
 
@@ -285,6 +287,10 @@ impl Searcher {
     fn hits(&self, fused: &[(Key, f64)], k: usize, words: &[String]) -> Result<Vec<Hit>> {
         let mut out: Vec<(Hit, i64, i64, usize)> = Vec::new(); // hit, doc, ord range end, collection
         for ((i, id), score) in fused {
+            // Merging looks only at what ranks before the k-th result.
+            if out.len() >= k {
+                break;
+            }
             let opened = &self.opened[*i];
             let row = opened.conn.query_row(
                 "SELECT c.doc_id, c.ord, c.loc, c.page_first, c.line_first, c.line_last, c.text, d.path FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE c.id = ?",
@@ -294,7 +300,7 @@ impl Searcher {
             let Ok((doc, ord, loc, page, line_first, line_last, text, rel)) = row else { continue };
             // Adjacent to a result already taken: joined to it.
             let merge = self.merge_adjacent;
-            if let Some(entry) = out.iter_mut().find(|(h, d, last, c)| merge && *c == *i && *d == doc && (ord == *last + 1 || ord + 1 == first_ord(h, *last))) {
+            if let Some(entry) = out.iter_mut().find(|(h, d, last, c)| merge && h.chunk_ids.len() < MERGE_MAX && *c == *i && *d == doc && (ord == *last + 1 || ord + 1 == first_ord(h, *last))) {
                 let (hit, _, last, _) = entry;
                 if ord == *last + 1 {
                     hit.text = join_overlapping(&hit.text, &text);

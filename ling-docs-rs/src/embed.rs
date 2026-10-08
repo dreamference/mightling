@@ -39,7 +39,12 @@ pub struct ModelTokenizer {
 impl ModelTokenizer {
     pub fn load(model_dir: &Path) -> Result<ModelTokenizer> {
         let path = model_dir.join("tokenizer.json");
-        let tokenizer = Tokenizer::from_file(&path).map_err(|e| anyhow!("cannot load {}: {e}", path.display()))?;
+        let mut tokenizer = Tokenizer::from_file(&path).map_err(|e| anyhow!("cannot load {}: {e}", path.display()))?;
+        // The file carries the model's 512-token truncation: with it every long unit would count
+        // as 512 tokens and never be windowed (found 2026-10-08: half Phase 0's chunk count, and
+        // chunks whose tail the model never saw). Counting needs the true length; `ids` cuts.
+        tokenizer.with_truncation(None).map_err(|e| anyhow!("{e}"))?;
+        tokenizer.with_padding(None);
         Ok(ModelTokenizer { tokenizer })
     }
 
@@ -180,6 +185,16 @@ pub fn from_blob(b: &[u8]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tokenizer_counts_past_the_models_window() {
+        // Only where the model is installed (`MIGHTLING_DOCS_MODEL_DIR`).
+        let Some(dir) = std::env::var_os("MIGHTLING_DOCS_MODEL_DIR").map(std::path::PathBuf::from).filter(|d| d.join("tokenizer.json").is_file()) else { return };
+        let tokenizer = ModelTokenizer::load(&dir).unwrap();
+        let long = "The quick brown fox jumps over the lazy dog. ".repeat(200);
+        assert!(tokenizer.count(&long) > 1500, "counting must not stop at 512");
+        assert_eq!(tokenizer.ids(&long).unwrap().len(), MAX_TOKENS);
+    }
 
     #[test]
     fn blobs_round_trip_and_vectors_are_unit_length() {

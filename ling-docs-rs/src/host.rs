@@ -148,7 +148,12 @@ impl Host for SystemdHost {
             .args(["--user", "--scope", "--quiet", "--collect"])
             .arg(format!("--unit={unit}"))
             .arg(format!("--slice={SLICE}"))
-            .args(["-p", &format!("MemoryMax={cap}"), "-p", "MemorySwapMax=0", "--"])
+            // OOMPolicy=continue: the kernel kills only the largest process (the worker), and the
+            // run's shell reports it as 137 with the cgroup's peak. With systemd's default, `stop`,
+            // the whole scope gets SIGTERM, which reads as a stop from outside (a model load) and
+            // would retry the file that ran it out of memory forever (measured 2026-10-08 on
+            // eval/hostile/text-ops.pdf).
+            .args(["-p", &format!("MemoryMax={cap}"), "-p", "MemorySwapMax=0", "-p", "OOMPolicy=continue", "--"])
             .args(argv)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)

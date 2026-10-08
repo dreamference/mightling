@@ -281,6 +281,16 @@ pub fn index_collection(env: &Env, collection: &Collection) -> Result<Outcome> {
     let _ = std::fs::remove_dir_all(&scratch);
     store::create_private_dir(&scratch)?;
     let result = extract_and_embed(env, collection, &db, &scratch, &scan.jobs);
+    // The workers' logs are kept (the last run's), for `status` to point at when a run fails.
+    let logs = config::docs_dir().join("logs");
+    if std::fs::create_dir_all(&logs).is_ok() {
+        for entry in std::fs::read_dir(&scratch).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".log") {
+                let _ = std::fs::copy(entry.path(), logs.join(format!("{}-{name}", collection.name)));
+            }
+        }
+    }
     let _ = std::fs::remove_dir_all(&scratch);
     result
 }
@@ -334,11 +344,17 @@ fn runtime_paths(env: &Env, with_model: bool) -> Vec<PathBuf> {
     }
     for root in roots {
         add(&root);
+        // Every directory a link passes through (a Hugging Face cache links twice: the snapshot,
+        // then the blob), so the chain resolves inside the sandbox too.
         for entry in std::fs::read_dir(&root).into_iter().flatten().flatten() {
-            if let Ok(target) = entry.path().canonicalize() {
+            let mut hop = entry.path();
+            for _ in 0..8 {
+                let Ok(target) = std::fs::read_link(&hop) else { break };
+                let target = if target.is_absolute() { target } else { hop.parent().unwrap_or(Path::new("/")).join(target) };
                 if let Some(parent) = target.parent() {
                     add(parent);
                 }
+                hop = target;
             }
         }
     }
@@ -423,6 +439,9 @@ fn extract_all(env: &Env, collection: &Collection, scratch: &Path, jobs: &[Job],
         let unit = unit_name(&collection.name, "x", attempt);
         let argv = scope_argv(env, spec, &peak_file);
         let log = scratch.join(format!("extract-{attempt}.log"));
+        if std::env::var_os("LING_DOCS_TRACE_SCOPES").is_some() {
+            eprintln!("scope {unit}: {argv:?}");
+        }
         let mut child = env.host.start_scope(&unit, admitted.cap, &argv, &log)?;
         admitted.release();
         let (finished, current, status) = watch(env, &mut child, &unit, events, &mut offset, timeout)?;
@@ -497,6 +516,9 @@ fn watch(env: &Env, child: &mut Child, unit: &str, events: &Path, offset: &mut u
                 }
             }
             use std::os::unix::process::ExitStatusExt;
+            if std::env::var_os("LING_DOCS_TRACE_SCOPES").is_some() {
+                eprintln!("scope {unit} ended: {status:?}, reading {current:?}, finished {}", finished.len());
+            }
             let stop = match (status.code(), status.signal()) {
                 (Some(0), _) => Stop::Done,
                 (Some(143), _) | (_, Some(15)) => Stop::Outside,
