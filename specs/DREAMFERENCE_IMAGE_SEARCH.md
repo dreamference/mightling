@@ -1,14 +1,14 @@
-# Puffin Image Search Tool — Technical Specification
+# Mightling Image Search Tool — Technical Specification
 
 **Status:** v14 — Implemented (updated from the source as built; v13 was the pre-implementation draft). Constants re-checked against `image_search_service.py` on 2026-09-28.
-**Target:** Puffin (sidecar ecosystem)
+**Target:** Mightling (sidecar ecosystem)
 **Source:** `dreamference/chat/image_search_service.py` (the sidecar), `OnyxRunner.enable_image_search` and siblings in `dreamference/chat/onyx_runner.py` (provisioning, registration, nginx), `GALLERY_SCRIPT`/`GALLERY_CSS` and `IMAGE_TOOL_STEP_SCRIPT` in the UI patch modules (presentation). Tests: `tests/test_image_search_service.py`, plus registration and nginx tests in `tests/test_onyx_runner.py`.
 
 ---
 
 ## 1. Overview
 
-A built-in `Image Search` tool lets the LLM search the internet for images and display them inline in chat. It is implemented as an independent **Puffin sidecar container (`dreamference-image-search`, port 8768)** — the `dream-*` names of the v13 draft predate the deployment-wide rename to `dreamference-*` — and registered via Onyx's Custom Tool REST API, mirroring the Gmail integration.
+A built-in `Image Search` tool lets the LLM search the internet for images and display them inline in chat. It is implemented as an independent **Mightling sidecar container (`dreamference-image-search`, port 8768)** — the `dream-*` names of the v13 draft predate the deployment-wide rename to `dreamference-*` — and registered via Onyx's Custom Tool REST API, mirroring the Gmail integration.
 
 One `POST /search` call runs the whole funnel: SearXNG's image category with a **wide candidate pool (30)**, **in-memory thumbnail fetches** behind a hardened SSRF guard, a **SigLIP pre-filter**, **perceptual-hash collapse** of visual near-duplicates, a **vision rank-and-filter pass** by the served multimodal model (with the shortlist's full downloads already **prefetching speculatively**), then persistence of the winners into a local store that nginx serves back at `/puffin-images/{file_id}.jpg`. Caching locally is the point: hotlinked images die of CORP blocks and link rot; cached ones render permanently.
 
@@ -22,7 +22,7 @@ One `POST /search` call runs the whole funnel: SearXNG's image category with a *
 LLM custom tool call {"queries": ["puffin bird flying"], "count": 6}   (count optional, 1–10, default 4)
         │
         ▼
-POST http://dreamference-image-search:8768/search   (X-Puffin-Image-Token shared-secret header)
+POST http://dreamference-image-search:8768/search   (X-Mightling-Image-Token shared-secret header)
         │
         ▼
 SearXNG image search (http://dreamference-searxng:8080, format=json)
@@ -72,7 +72,7 @@ store; phash + source URL + title recorded in SQLite
 
 The `instructions` field restates the Markdown embeds and forbids answering with a bare
 acknowledgement, because a model given only a pointer ("embed the above") has answered `Done`
-and shown nothing. The Puffin persona prompt and the tool's OpenAPI summary reinforce the same
+and shown nothing. The Mightling persona prompt and the tool's OpenAPI summary reinforce the same
 contract from their side.
 
 ---
@@ -101,9 +101,9 @@ edit survives container recreates), inserting after the `client_max_body_size` l
 ```nginx
 location /puffin-images/ {
     resolver 127.0.0.11 valid=10s;
-    set $puffin_img http://dreamference-image-search:8768;
+    set $mightling_img http://dreamference-image-search:8768;
     rewrite ^/puffin-images/(.*)$ /images/$1 break;
-    proxy_pass $puffin_img;
+    proxy_pass $mightling_img;
 }
 ```
 
@@ -112,7 +112,7 @@ Two hard-won constraints:
   load; with the sidecar absent, nginx refuses to start *at all* and the whole UI dies.
   Verified live: with this form and the sidecar stopped, nginx stays healthy and only
   `/puffin-images/` answers 502. (The `rewrite` exists because a variable `proxy_pass` does not
-  append the location remainder.) `$puffin_img` and `$1` survive the entrypoint's `envsubst`
+  append the location remainder.) `$mightling_img` and `$1` survive the entrypoint's `envsubst`
   because its variable whitelist names neither.
 - **Never restart nginx when the template is unchanged.** `configure` talks to Onyx *through*
   this proxy; the first implementation restarted it unconditionally and every later step died
@@ -125,8 +125,8 @@ The v13 draft's `{"custom_tool_url": …}` sketch does not match Onyx's API. Reg
 Gmail: an **OpenAPI document** (`openapi_definition()` in the service module, one
 `image_search` POST operation with `queries` and optional `count`) sent to
 `POST /admin/tool/custom`, with lookup-then-`PUT` so re-runs update rather than duplicate, and
-a `custom_headers` shared secret (`X-Puffin-Image-Token`, generated once into the data
-directory). `puffin-admin puffin configure` (alias `onyx`) runs it; `--no-image-search` skips it. Image `GET`s carry no
+a `custom_headers` shared secret (`X-Mightling-Image-Token`, generated once into the data
+directory). `ling-admin chat configure` (alias `onyx`) runs it; `--no-image-search` skips it. Image `GET`s carry no
 secret — the browser is the caller and the ids are unguessable.
 
 ---
@@ -201,6 +201,6 @@ OpenAPI document. The funnel's collaborators are constructor-injected for exactl
 header, create-then-update), nginx route idempotence and deferred form, configure opt-out. An
 autouse fixture stubs the provisioning internals so the suite never starts containers.
 
-**Live E2E (performed):** `puffin-admin puffin configure` (alias `onyx`) registers the tool; a real `/search` returns
+**Live E2E (performed):** `ling-admin chat configure` (alias `onyx`) registers the tool; a real `/search` returns
 ranked cached embeds; the image serves through `localhost:3000/puffin-images/…` (200,
 `image/jpeg`); nginx survives the sidecar being stopped; a `count: 6` request returns six.

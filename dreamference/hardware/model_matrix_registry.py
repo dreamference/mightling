@@ -24,18 +24,18 @@ SELF_DECLARING_PRECISIONS: Final[frozenset] = frozenset(
 #
 # qwen3.8-27b-nvfp4-dflash2 since 2026-09-29, on SGLang: decode ties the 122B on prose and code
 # (24.1 / 47.5 against 23.8 / 49.9 tok/s) and beats it on JSON (82.5 against 53.1), the live
-# slash-command suite passes as it did, a real puffin task finished in 10 s against 34, context is
+# slash-command suite passes as it did, a real ling task finished in 10 s against 34, context is
 # 262K against 32K, and ~29 GB more host memory stays free while serving. The 122B recipes on vLLM
 # (hybrid-dflash, the default from 2026-08-23, and int4-dflash) and the 35B were removed on
-# 2026-10-07: Puffin serves this one model.
+# 2026-10-07: Mightling serves this one model.
 DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.8-27b-nvfp4-dflash2"
 
 # The diffusion model served beside the main one. A separate default rather than a mode of the
-# main model, because the two run in parallel: every configuration names both, and `puffin-admin server
+# main model, because the two run in parallel: every configuration names both, and `ling-admin server
 # start` launches both.
 DEFAULT_DIFFUSION_MODEL_ALIAS: Final[str] = "tiny-a2d-coder-0.5b-diffusion"
 
-# Whether Puffin uses a diffusion model at all. Off since 2026-10-03: the only one that fits beside
+# Whether Mightling uses a diffusion model at all. Off since 2026-10-03: the only one that fits beside
 # the main model (Tiny-A2D 0.5B) was measured unusable in every role tried (FAST_TOOLS §1,
 # COMPACTION §9.3), so it cost memory and a download for nothing. Off means it is never started
 # or downloaded, a leftover container is removed, and nothing names it to the user: no
@@ -66,10 +66,10 @@ class ModelMatrixRegistry:
                 "three after a warm-up, decode net of time to first token): prose 25.5, code 50.3, "
                 "JSON 87.0 tok/s with the PyTorch sampler (24.1 / 47.5 / 82.5 before it); TTFT 0.22 s; "
                 "prefill ~1,700 tok/s on a 13,333-token prompt the prefix cache could not help, "
-                "~1,000 tok/s on 115,628 tokens (needle found). Image input works; four puffin "
+                "~1,000 tok/s on 115,628 tokens (needle found). Image input works; four ling "
                 "tasks at once finished in 23 s with >= 39.8 GB still available. First boot 7.5 min (torch.compile), with ~38.7 GB of "
                 "host memory still available while serving, against ~10 GB beside the 122B. The "
-                "same `puffin exec` coding task took 10 s here and 34 s on the 122B.\n\n"
+                "same `ling exec` coding task took 10 s here and 34 s on the 122B.\n\n"
                 "Published single-Spark numbers: vLLM with the checkpoint's own MTP managed 24.0 "
                 "tok/s on a code prompt (26.0 with no speculation), SGLang with DFlash2 50.9 on "
                 "code, 25.4 on long prose and 66.6 on short chat (MiaAI-Lab), 71.4 greedy median "
@@ -81,7 +81,7 @@ class ModelMatrixRegistry:
                 "RTN-calibrated NVFP4 DFlash2 drafter at the revisions pinned below, 16 draft "
                 "tokens, memory fraction 0.50, flashinfer attention, mamba radix cache in "
                 "extra_buffer mode, torch.compile up to batch 4. Not copied: its API key and "
-                "keepalive proxy (Puffin reaches the server the way it reaches vLLM) and its "
+                "keepalive proxy (Mightling reaches the server the way it reaches vLLM) and its "
                 "reasoning-effort default."
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
@@ -115,7 +115,7 @@ class ModelMatrixRegistry:
                     # only xhigh/medium/low and answered HTTP 400. The default drops from xhigh to
                     # medium: hasso5703 measured xhigh at 3.19x medium's thinking tokens and a
                     # lower HumanEval (93.9% against 98.2%), five failures being budget
-                    # truncations. puffin itself sends `none` and is unaffected.
+                    # truncations. ling itself sends `none` and is unaffected.
                     [
                         "    {%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}\n"
                         "    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}",
@@ -353,7 +353,7 @@ class ModelMatrixRegistry:
     @classmethod
     def diffusion_enabled(cls) -> bool:
         """
-        Reports whether Puffin serves, downloads and shows diffusion models at all.
+        Reports whether Mightling serves, downloads and shows diffusion models at all.
 
         Read through this method rather than the constant, at call time, so every caller sees
         the same switch and a test can turn it on in one place.

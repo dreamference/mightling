@@ -1,8 +1,8 @@
 """
-One interactive `puffin` session driven on a pseudo-terminal, for `puffin-admin audit egress --tui`
-(specs/DREAMFERENCE_PUFFIN_EGRESS.md §3.1 step 3).
+One interactive `ling` session driven on a pseudo-terminal, for `ling-admin audit egress --tui`
+(specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.1 step 3).
 
-This module provides the TuiSession class. `puffin exec` and the full-screen interface start
+This module provides the TuiSession class. `ling exec` and the full-screen interface start
 different parts of Codex: the announcement tip that patch `0015` closed was fetched by the
 interface alone, and no trace of `exec` could have shown it. So the audit also opens the real
 interface, types a prompt, waits for the reply and quits, with strace around all of it.
@@ -100,7 +100,7 @@ class TuiSession:
     def run(cls, command: List[str], cwd: str, env: Dict[str, str], home: str, prompt: str,
             timeout: float) -> Dict[str, object]:
         """
-        Runs `command` (strace around `puffin`) on a pseudo-terminal: waits for the composer,
+        Runs `command` (strace around `ling`) on a pseudo-terminal: waits for the composer,
         types `prompt`, waits for the reply, and quits with `/quit`. A session that does not end
         by itself is stopped with everything it started.
 
@@ -153,7 +153,7 @@ class TuiSession:
         stage = "start"
         replied = False
         try:
-            if wait(lambda: ">_ Puffin" in text() and "›" in text(), READY_TIMEOUT_S):
+            if wait(lambda: ">_ Mightling" in text() and "›" in text(), READY_TIMEOUT_S):
                 stage = "composer"
                 pump(SETTLE_AFTER_READY_S)
                 child.send(" ".join(prompt.split()))
@@ -178,7 +178,7 @@ class TuiSession:
 
     @classmethod
     def _stop(cls, child) -> None:
-        """Ends the session's whole process group: strace alone, killed, would leave `puffin`."""
+        """Ends the session's whole process group: strace alone, killed, would leave `ling`."""
         if child.isalive():
             for sig in (signal.SIGTERM, signal.SIGKILL):
                 try:

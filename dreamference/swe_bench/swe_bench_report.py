@@ -1,5 +1,5 @@
 """
-The report of a run, and the comparison of two (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §6.3, §8).
+The report of a run, and the comparison of two (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §6.3, §8).
 
 Every figure is printed with what it is not: a number from this command compares configurations
 on this machine and is not a leaderboard score.
@@ -130,7 +130,7 @@ class SweBenchReport:
             lines.append(f"Grading {summary['grading']}: harness {grader.get('harness')}, dataset revision "
                          f"{str(grader.get('dataset_revision'))[:12]}")
         else:
-            lines.append("Not graded yet: run `puffin-admin swe-bench eval " + store.name + "`")
+            lines.append("Not graded yet: run `ling-admin swe-bench eval " + store.name + "`")
         lines += ["", "Per repository (resolved / validated):"]
         for repo, (resolved, total) in sorted(summary["per_repo"].items()):
             lines.append(f"  {repo:<28} {resolved} / {total}")
@@ -143,7 +143,7 @@ class SweBenchReport:
     @classmethod
     def code_index_line(cls, summary: Dict[str, Any]) -> str:
         """
-        Says whether the agent had `puffin-code`, what the indexes cost and whether it used them.
+        Says whether the agent had `ling-code`, what the indexes cost and whether it used them.
 
         Args:
             summary: A run's summary.
@@ -152,11 +152,11 @@ class SweBenchReport:
             str: One line of the report.
         """
         if summary["code_index"] == "off":
-            return "Code index          off: the agent had no puffin-code and navigated with grep and find"
+            return "Code index          off: the agent had no ling-code and navigated with grep and find"
         seconds = summary["index_seconds"]
         built = (f"indexes took {cls.duration(sum(seconds))} in all, median {cls.duration(statistics.median(seconds))}, "
                  "outside the agent's time") if seconds else "no index time recorded"
-        return (f"Code index          {summary['code_index']}: {built}; the agent called puffin-code "
+        return (f"Code index          {summary['code_index']}: {built}; the agent called ling-code "
                 f"{summary['puffin_code_calls']} time(s), in {summary['puffin_code_users']} of "
                 f"{summary['finished']} instance(s)")
 
@@ -263,7 +263,7 @@ class SweBenchReport:
                 "input tokens": f"{sum(s.get('input_tokens', 0) for s in stats):,}",
                 "output tokens": f"{sum(s.get('output_tokens', 0) for s in stats):,}",
                 "commands": f"{sum(s.get('commands', 0) for s in stats):,}",
-                "puffin-code calls": sum(s.get("puffin_code_calls", 0) for s in stats),
+                "ling-code calls": sum(s.get("puffin_code_calls", 0) for s in stats),
                 "instances using it": sum(1 for s in stats if s.get("puffin_code_calls")),
                 "index time": cls.duration(sum(index)) if summary["code_index"] != "off" else "none",
             }
@@ -283,7 +283,7 @@ class SweBenchReport:
                 state = summary["states"].get(instance_id, {})
                 calls = summary["stats"].get(instance_id, {}).get("puffin_code_calls", 0)
                 cells.append(f"{state.get('status', '?')} {state.get('wall_s', '?')} s"
-                             + (f", {calls} puffin-code" if summary["code_index"] != "off" else ""))
+                             + (f", {calls} ling-code" if summary["code_index"] != "off" else ""))
             table.append(f"  {instance_id:<34} {verdict:<16} {cells[0]:<28} {cells[1]}")
         lines.append("Resolved in " + ", ".join(f"{label}: {counts.get(label, 0)}"
                                                  for label in ("both", f"only {name}", f"only {other}", "neither")))
@@ -291,9 +291,9 @@ class SweBenchReport:
             if summary["code_index"] != "off":
                 users = sum(1 for i in both if summary["stats"].get(i, {}).get("puffin_code_calls"))
                 if users == 0:
-                    lines.append(f"In {run} the agent never called puffin-code: this comparison says nothing about the index.")
+                    lines.append(f"In {run} the agent never called ling-code: this comparison says nothing about the index.")
                 else:
-                    lines.append(f"In {run} the agent called puffin-code in {users} of {len(both)} instances; "
+                    lines.append(f"In {run} the agent called ling-code in {users} of {len(both)} instances; "
                                  "the others ran as if there were no index.")
         lines += ["", f"  {'instance':<34} {'resolved in':<16} {name:<28} {other}"] + table
         return lines

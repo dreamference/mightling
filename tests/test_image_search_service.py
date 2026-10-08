@@ -1,5 +1,5 @@
 """
-Tests for the Puffin image search sidecar.
+Tests for the Mightling image search sidecar.
 
 Everything here runs offline: DNS is stubbed, downloads are fakes, and the SigLIP and vision
 stages are plain objects -- the funnel's collaborators are constructor-injected for exactly

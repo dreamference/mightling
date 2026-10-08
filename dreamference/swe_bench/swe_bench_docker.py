@@ -1,5 +1,5 @@
 """
-The one place `puffin-admin swe-bench` runs `docker` (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md).
+The one place `ling-admin swe-bench` runs `docker` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 
 Every container, image and network command of the benchmark goes through `SweBenchDocker.run`
 or `SweBenchDocker.popen`, so the test suite replaces two methods and nothing in it can start a

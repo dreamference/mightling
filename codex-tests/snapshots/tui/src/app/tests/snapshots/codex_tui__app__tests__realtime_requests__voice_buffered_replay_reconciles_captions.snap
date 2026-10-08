@@ -3,7 +3,7 @@ source: tui/src/app/tests/realtime_requests.rs
 expression: "normalize_voice_snapshot_directory(&rendered, &app.config.cwd)"
 ---
 ╭────────────────────────────────────────╮
-│ >_ Puffin (v0.0.0)                     │
+│ >_ Mightling (v0.0.0)                     │
 │                                        │
 │ model:     gpt-test   /model to change │
 │ directory: /tmp/project                │

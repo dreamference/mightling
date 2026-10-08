@@ -5,8 +5,8 @@ index 25a7842..93c12fc 100644
 @@ -307,3 +307,6 @@ impl SlashCommand {
              SlashCommand::App => cfg!(any(target_os = "macos", target_os = "windows")),
 -            SlashCommand::Voice => true,
-+            // Puffin: hidden, not removed -- voice uses OpenAI's realtime API; kept for a local voice later.
++            // Mightling: hidden, not removed -- voice uses OpenAI's realtime API; kept for a local voice later.
 +            SlashCommand::Voice => false,
-+            // Puffin: hidden, not removed -- pets fetch their art from OpenAI's CDN (oaistatic.com).
++            // Mightling: hidden, not removed -- pets fetch their art from OpenAI's CDN (oaistatic.com).
 +            SlashCommand::Pets => false,
-             // Puffin: no OpenAI account to sign out of.
+             // Mightling: no OpenAI account to sign out of.

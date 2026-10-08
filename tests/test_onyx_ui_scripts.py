@@ -20,7 +20,7 @@ def test_script_is_guarded_against_taking_the_app_down():
     # worth that, so the block is wrapped and runs at most once.
     assert CONNECT_GOOGLE_SCRIPT.startswith(";(function(){try{")
     assert CONNECT_GOOGLE_SCRIPT.endswith("}catch(e){}})();")
-    assert "window.__puffinConnect" in CONNECT_GOOGLE_SCRIPT
+    assert "window.__lingConnect" in CONNECT_GOOGLE_SCRIPT
 
 
 def test_scripts_go_only_into_chunks_that_render_the_anchor():
@@ -107,7 +107,7 @@ def test_button_is_offered_to_anyone_who_has_not_connected_gmail(tmp_path):
 
     # A WebKitGTK user agent has no "Chrome/", so the desktop app is marked as webkit -- which is
     # what the scrollbar rule keys on.
-    assert outcome["engine"] == "data-puffin-engine=webkit"
+    assert outcome["engine"] == "data-mightling-engine=webkit"
     assert outcome["shown"] is True
     assert outcome["text"] == "Connect to Google"
     assert outcome["id"] == BUTTON_ID
@@ -163,7 +163,7 @@ def test_drawn_scrollbar_replaces_the_suppressed_native_one():
     # Same containment contract as the connect script: guarded, wrapped, run-once.
     assert SCROLLBAR_SCRIPT.startswith(";(function(){try{")
     assert SCROLLBAR_SCRIPT.endswith("}catch(e){}})();")
-    assert "window.__puffinScrollbar" in SCROLLBAR_SCRIPT
+    assert "window.__lingScrollbar" in SCROLLBAR_SCRIPT
 
 
 def test_drawn_scrollbar_survives_react_recreating_the_chat_list():
@@ -230,7 +230,7 @@ def test_the_service_pages_offer_a_way_back():
     from dreamference.chat.gmail_search_service import GmailSearchService, ONYX_ORIGIN
 
     source = inspect.getsource(GmailSearchService.serve)
-    assert '<a href="{ONYX_ORIGIN}/app">Back to Puffin</a>' in source
+    assert '<a href="{ONYX_ORIGIN}/app">Back to Mightling</a>' in source
     assert ONYX_ORIGIN == "http://localhost:3000"
 
 

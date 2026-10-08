@@ -30,9 +30,9 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "puffin-admin=dreamference.cli:main",
-            # `puffin-search` and `puffin-fetch` are not console scripts: they are Rust binaries
-            # (puffin-web-rs/) that `puffin-admin codex build` installs beside `puffin`.
+            "ling-admin=dreamference.cli:main",
+            # `ling-search` and `ling-fetch` are not console scripts: they are Rust binaries
+            # (ling-web-rs/) that `ling-admin codex build` installs beside `ling`.
         ],
     },
 )

@@ -5,7 +5,7 @@ expression: "snapshots.join(\"\\n---\\n\")"
 resume lookup fallback:
 before:
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
@@ -16,7 +16,7 @@ before:
 
 after:
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
@@ -29,7 +29,7 @@ after:
 fork lookup fallback:
 before:
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
@@ -40,7 +40,7 @@ before:
 
 after:
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
@@ -55,13 +55,13 @@ before:
 hidden while picker owns input
 after:
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   ? for shortcuts
 ---
@@ -70,12 +70,12 @@ before:
 hidden while picker owns input
 after:
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   ? for shortcuts

@@ -1,5 +1,5 @@
 """
-The model servers one run can spread its tasks over (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3).
+The model servers one run can spread its tasks over (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3).
 
 A *lane* is one model server and the share of its KV pool a run may use. This machine's server is
 always the first lane; a paired node serving the **same model** is a replica and adds a lane of its
@@ -117,7 +117,7 @@ class NodeLanes:
             names = {record.get("name", "").lower() for record in paired}
             for name in wanted:
                 if name.lower() not in names:
-                    notes.append(f"{name}: not a paired node (`puffin-admin node add {name}`), so not used.")
+                    notes.append(f"{name}: not a paired node (`ling-admin node add {name}`), so not used.")
             paired = [record for record in paired if record.get("name", "").lower() in {n.lower() for n in wanted}]
         mine = NodeIdentity.read()
         for record in paired:

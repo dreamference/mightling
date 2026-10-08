@@ -4,31 +4,31 @@ expression: "snapshots.join(\"\\n---\\n\")"
 ---
 empty (48 columns):
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
 
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   ? for shortcuts
 ---
 resuming (48 columns):
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
   Resuming session…
 
-› Ask Puffin to do anything
+› Ask Mightling to do anything
 
   ? for shortcuts
 ---
 forking (48 columns):
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
@@ -40,7 +40,7 @@ forking (48 columns):
 ---
 multiline (48 columns):
 
-  >_ Puffin (v<VERSION>)
+  >_ Mightling (v<VERSION>)
      loading
 
   Pull up a prompt.
@@ -53,7 +53,7 @@ multiline (48 columns):
 ---
 narrow (18 columns):
 
-  >_ Puffin (v0.0…
+  >_ Mightling (v0.0…
      loading
 
   Pull up a promp…

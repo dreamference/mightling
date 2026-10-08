@@ -2,7 +2,7 @@
 
 Work that is planned or designed but **not built yet**. Nothing here is a commitment to a date.
 
-Already shipped and so no longer listed here: the code index (`puffin-code`, offered to the agent
+Already shipped and so no longer listed here: the code index (`ling-code`, offered to the agent
 as tools), Gmail, Google Drive and Calendar in `/apps`, the desktop app's Work window, and
 observation masking with a per-output cap (built, off by default).
 
@@ -10,7 +10,7 @@ observation masking with a per-output cap (built, off by default).
 
 *Status: Phase 1 built.*
 
-The desktop app's **Work** window drives `puffin` sessions: threads, approvals, diffs, Stop, steer
+The desktop app's **Work** window drives `ling` sessions: threads, approvals, diffs, Stop, steer
 and undo. Still to come: review, git worktrees, settings pages and choosing a model from the window.
 
 ## Keeping long tasks inside the context window
@@ -26,7 +26,7 @@ cost results.
 
 *Status: designed.*
 
-After NVIDIA's first-boot wizard, one command on an existing node installs Puffin on new units,
+After NVIDIA's first-boot wizard, one command on an existing node installs Mightling on new units,
 applies the host settings, copies the model over the network and pairs them.
 
 ## Documents
@@ -40,7 +40,7 @@ Search across PDFs, Word, PowerPoint and spreadsheet files as well as code:
 
 ## Returning features, locally
 
-Features that Puffin hides because they depend on a vendor's cloud, kept in the build so they can
+Features that Mightling hides because they depend on a vendor's cloud, kept in the build so they can
 come back on local infrastructure:
 
 - **`cloud`:** running tasks on a private cloud.

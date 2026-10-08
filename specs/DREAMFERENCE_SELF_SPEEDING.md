@@ -5,15 +5,15 @@
 **Builds on:**
 - `resolve_speculative_config()` and the `--draft-model` layering ([INFERENCE](./DREAMFERENCE_INFERENCE.md));
 - the compile-cache signature (`_compile_cache_signature`), which already includes the draft model;
-- `ModelDeepInspector.profile_acceptance_by_workload()` behind `puffin-admin main-model inspect --deep`;
-- the session logs in `~/.puffin/sessions/`;
-- the overnight window of [PUFFIN_NIGHT_SHIFT](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md).
+- `ModelDeepInspector.profile_acceptance_by_workload()` behind `ling-admin main-model inspect --deep`;
+- the session logs in `~/.mightling/sessions/`;
+- the overnight window of [MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md).
 
 ---
 
 ## 1. Goal
 
-Make `puffin` faster on *this user's* work by retraining the drafter on the user's own sessions, overnight and on this machine. Nothing leaves the host, and the answers do not change.
+Make `ling` faster on *this user's* work by retraining the drafter on the user's own sessions, overnight and on this machine. Nothing leaves the host, and the answers do not change.
 
 **Why it is safe to try.** Speculative decoding is lossless: the target model verifies every drafted token, so a better or worse drafter changes speed only, never output. The only risk is a slower machine, and §6 refuses to promote a drafter that is slower.
 
@@ -36,24 +36,24 @@ Make `puffin` faster on *this user's* work by retraining the drafter on the user
 
 ## 2. Surface
 
-No slash command. Tuning stops the model server, which the `puffin` session asking for it depends on, so it cannot be triggered from inside an agent session. Everything is in `puffin-admin`:
+No slash command. Tuning stops the model server, which the `ling` session asking for it depends on, so it cannot be triggered from inside an agent session. Everything is in `ling-admin`:
 
 | Command | Effect |
 |---|---|
-| `puffin-admin drafter stats [--since 7d]` | Acceptance per workload class from the measurement log (§3), plus the live counters. |
-| `puffin-admin drafter collect` | Builds the training set from sessions (§4). Reports size, class mix and what was excluded. The server may keep running. |
-| `puffin-admin drafter tune [--budget 3h]` | Trains a candidate (§5). Refuses unless vLLM is stopped. Checkpoints, so it can stop at the budget or window end and resume. |
-| `puffin-admin drafter evaluate <id>` | A/B against the current drafter (§6). Starts vLLM with the candidate, measures, and restores the server as it was. |
-| `puffin-admin drafter promote <id>` | Makes the candidate the drafter (§6.3). |
-| `puffin-admin drafter rollback` | Returns to the previous drafter, or the registry's. |
-| `puffin-admin drafter list` | Candidates, with training data size, dates, evaluation results and which one is active. |
+| `ling-admin drafter stats [--since 7d]` | Acceptance per workload class from the measurement log (§3), plus the live counters. |
+| `ling-admin drafter collect` | Builds the training set from sessions (§4). Reports size, class mix and what was excluded. The server may keep running. |
+| `ling-admin drafter tune [--budget 3h]` | Trains a candidate (§5). Refuses unless vLLM is stopped. Checkpoints, so it can stop at the budget or window end and resume. |
+| `ling-admin drafter evaluate <id>` | A/B against the current drafter (§6). Starts vLLM with the candidate, measures, and restores the server as it was. |
+| `ling-admin drafter promote <id>` | Makes the candidate the drafter (§6.3). |
+| `ling-admin drafter rollback` | Returns to the previous drafter, or the registry's. |
+| `ling-admin drafter list` | Candidates, with training data size, dates, evaluation results and which one is active. |
 
 **Scheduling.** With Night Shift enabled, `drafter.auto = true` lets the night run take the tail of its window:
 1. once the task queue is empty, stop vLLM;
 2. `collect`, `tune` and `evaluate` within the remaining budget;
 3. restart vLLM with the drafter that serves best.
 
-Promotion is never automatic unless `drafter.auto_promote = true`. The morning report ([NIGHT_SHIFT §5.6](./DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md)) says what happened.
+Promotion is never automatic unless `drafter.auto_promote = true`. The morning report ([NIGHT_SHIFT §5.6](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md)) says what happened.
 
 ---
 
@@ -81,7 +81,7 @@ This log is the baseline, and it is what shows whether the user's work differs f
 
 ### 4.1. Source
 
-The source is Codex rollout files under `~/.puffin/sessions/YYYY/MM/DD/*.jsonl`: each turn's full request context and the target model's response. Only sessions served by the **current target model** are used. A drafter learns one target's distribution, and sessions from other models teach it the wrong one.
+The source is Codex rollout files under `~/.mightling/sessions/YYYY/MM/DD/*.jsonl`: each turn's full request context and the target model's response. Only sessions served by the **current target model** are used. A drafter learns one target's distribution, and sessions from other models teach it the wrong one.
 
 ### 4.2. Selection
 
@@ -95,7 +95,7 @@ The source is Codex rollout files under `~/.puffin/sessions/YYYY/MM/DD/*.jsonl`:
 
 These are dropped, and `collect` reports each count:
 - turns whose context contains Gmail results;
-- turns whose context contains `puffin-admin gmail read` output;
+- turns whose context contains `ling-admin gmail read` output;
 - `.env`-like content, and matches of a credential pattern list;
 - sessions under paths listed in `drafter.exclude_paths`;
 - ephemeral sessions (`--ephemeral` writes none anyway).
@@ -125,7 +125,7 @@ Route B separates the two memory peaks and lets training resume without reloadin
 
 **Starting point.** Training fine-tunes the current drafter's weights, not a fresh one, so a short budget still helps.
 
-**Memory and time.** Admission as in [PUFFIN_CODE_INDEX §5.5](./DREAMFERENCE_PUFFIN_CODE_INDEX.md): available memory minus a reserve, checked against the last recorded peak for that step. A run that cannot fit is deferred, not attempted. Each step checkpoints, so `--budget` or the window's end stops it cleanly.
+**Memory and time.** Admission as in [MIGHTLING_CODE_INDEX §5.5](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md): available memory minus a reserve, checked against the last recorded peak for that step. A run that cannot fit is deferred, not attempted. Each step checkpoints, so `--budget` or the window's end stops it cleanly.
 
 **Output.** `~/.cache/dreamference/drafters/<id>/` holds:
 - the weights in the drafter's original format, loadable by vLLM as a `--draft-model` path;

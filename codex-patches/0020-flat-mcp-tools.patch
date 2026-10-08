@@ -4,7 +4,7 @@ index 693fbd7..1444e51 100644
 +++ b/codex-rs/core/Cargo.toml
 @@ -73,2 +73,3 @@ codex-thread-store = { workspace = true }
  codex-tools = { workspace = true }
-+puffin-tools = { path = "../puffin/tools" }
++ling-tools = { path = "../ling/tools" }
  codex-utils-absolute-path = { workspace = true }
 diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
 index f8faf45..9a0c600 100644
@@ -13,7 +13,7 @@ index f8faf45..9a0c600 100644
 @@ -946,3 +946,3 @@ impl ModelClient {
                  prompt.base_instructions.text.clone(),
 -                Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into()),
-+                Some(puffin_tools::flatten_raw(create_tools_raw_json_for_responses_api(&prompt.tools)?).into()),
++                Some(ling_tools::flatten_raw(create_tools_raw_json_for_responses_api(&prompt.tools)?).into()),
              )
 diff --git a/codex-rs/core/src/tools/router.rs b/codex-rs/core/src/tools/router.rs
 index d9f1f63..4203a11 100644
@@ -21,5 +21,5 @@ index d9f1f63..4203a11 100644
 +++ b/codex-rs/core/src/tools/router.rs
 @@ -257,2 +257,3 @@ impl ToolRouter {
              } => {
-+                let (namespace, name) = puffin_tools::resolve(namespace, name);
++                let (namespace, name) = ling_tools::resolve(namespace, name);
                  let tool_name = ToolName::new(namespace, name).with_default_namespace();

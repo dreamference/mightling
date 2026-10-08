@@ -1,9 +1,9 @@
 """
-Whether this node is advertised, and what it shares (specs/DREAMFERENCE_PUFFIN_NODE.md §4).
+Whether this node is advertised, and what it shares (specs/DREAMFERENCE_MIGHTLING_NODE.md §4).
 
 Kept in `~/.config/dreamference/node-advertise.json`, not in `dreamference.toml`: that file is
 resolved from the working directory first, and the address a container publishes on must not
-depend on the folder `puffin-admin puffin configure` happened to be run from.
+depend on the folder `ling-admin chat configure` happened to be run from.
 """
 
 import json
@@ -16,7 +16,7 @@ EVERY_INTERFACE: Final[str] = "0.0.0.0"
 
 
 class NodeSettings:
-    """The two switches `puffin-admin node enable|disable` set."""
+    """The two switches `ling-admin node enable|disable` set."""
 
     @classmethod
     def path(cls) -> Path:

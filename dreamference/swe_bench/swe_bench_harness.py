@@ -1,6 +1,6 @@
 """
 The upstream SWE-bench harness, in a virtualenv of its own
-(specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §6.1, §12).
+(specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §6.1, §12).
 
 Grading is always the harness's: this module installs it, hands it a dataset file and a
 predictions file, and reads the per-instance reports it writes. Two things are done to make it
@@ -27,8 +27,8 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 
 # A patch that applies to any repository and fixes nothing.
 NOOP_PATCH: Final[str] = (
-    "diff --git a/.puffin-swe-bench-noop b/.puffin-swe-bench-noop\n"
-    "new file mode 100644\n--- /dev/null\n+++ b/.puffin-swe-bench-noop\n@@ -0,0 +1 @@\n+noop\n"
+    "diff --git a/.mightling-swe-bench-noop b/.mightling-swe-bench-noop\n"
+    "new file mode 100644\n--- /dev/null\n+++ b/.mightling-swe-bench-noop\n@@ -0,0 +1 @@\n+noop\n"
 )
 
 # Dataset columns that give the answer away; never shown to the agent (§5.4).

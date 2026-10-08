@@ -1,5 +1,5 @@
 """
-The outcome of an egress audit (specs/DREAMFERENCE_PUFFIN_EGRESS.md §3.2).
+The outcome of an egress audit (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3.2).
 
 This module provides the EgressVerdict dataclass: pass, fail or "trace failed", with the reasons.
 """

@@ -1,5 +1,5 @@
 """
-Validation and grading (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §5.3, §6, §12).
+Validation and grading (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §5.3, §6, §12).
 
 Both are calls to the upstream harness. **Validation** grades an instance twice here, with the
 reference patch and with a no-op patch, and records it as usable when the first resolves and the
@@ -20,7 +20,7 @@ from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 
 VALIDATE_GOLD_RUN: Final[str] = "validate-gold"
 VALIDATE_NOOP_RUN: Final[str] = "validate-noop"
-NOOP_MODEL: Final[str] = "puffin-noop"
+NOOP_MODEL: Final[str] = "mightling-noop"
 
 
 class SweBenchEvaluator:
@@ -52,7 +52,7 @@ class SweBenchEvaluator:
         free = shutil.disk_usage(swe_bench_settings.CACHE_DIR).free
         if free < reserve:
             return (f"{free / GIB:.0f} GiB of disk is free and the reserve is {reserve / GIB:.0f} "
-                    "(free some with `puffin-admin swe-bench clean --images`)")
+                    "(free some with `ling-admin swe-bench clean --images`)")
         return None
 
     # -- validation ----------------------------------------------------------------------------

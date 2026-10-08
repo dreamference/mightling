@@ -1,7 +1,7 @@
-# Puffin Onyx Integration & Branding (the web UI)
+# Mightling Onyx Integration & Branding (the web UI)
 
 > **Version:** 1.2.0
-> **Subject:** Onyx Lite deployment; provider registration; Puffin branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
+> **Subject:** Onyx Lite deployment; provider registration; Mightling branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
 > **Checked against the code:** 2026-09-29 (`dreamference/chat/`)
 
 ---
@@ -22,14 +22,14 @@
 
 ## 1. Overview & Lifecycle
 
-**Onyx Lite** is the stock Onyx stack with Vespa, Redis, Celery, the model servers and object storage switched off. It is a browser chat UI in front of the same vLLM model the terminal agents use. Its containers are pinned to `puffin-*` names in the lite overlay:
-- `puffin-web_server-1` (Next.js);
-- `puffin-api_server-1` (FastAPI);
-- `puffin-relational_db-1` (PostgreSQL);
-- `puffin-nginx-1`;
-- `puffin-code-interpreter-1`.
+**Onyx Lite** is the stock Onyx stack with Vespa, Redis, Celery, the model servers and object storage switched off. It is a browser chat UI in front of the same vLLM model the terminal agents use. Its containers are pinned to `mightling-*` names in the lite overlay:
+- `ling-web_server-1` (Next.js);
+- `mightling-api_server-1` (FastAPI);
+- `mightling-relational_db-1` (PostgreSQL);
+- `mightling-nginx-1`;
+- `ling-code-interpreter-1`.
 
-The UI is served at `http://localhost:3000`, and the desktop window `puffin-app` shows the same server. Both of nginx's ports (80 and 3000) are published on **127.0.0.1 only** once `configure` has run (§2 step 1): Docker's default is every interface, which put the UI — and the admin account `configure` creates with a published default password, which can search the user's mail — on the local network. Until 2026-09-29 they were.
+The UI is served at `http://localhost:3000`, and the desktop window `ling-app` shows the same server. Both of nginx's ports (80 and 3000) are published on **127.0.0.1 only** once `configure` has run (§2 step 1): Docker's default is every interface, which put the UI — and the admin account `configure` creates with a published default password, which can search the user's mail — on the local network. Until 2026-09-29 they were.
 
 Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 
@@ -41,14 +41,14 @@ Onyx is a service, not an agent, so it lives in `chat/`, not `runner/`:
 | `chat/onyx_ui_fonts.py`, `onyx_ui_overrides.py`, `onyx_ui_labels.py`, `onyx_ui_scripts.py` | The UI patches (§4) |
 | `chat/gmail_*`, `chat/image_search_service.py` | Sidecar services (§7, §8) |
 
-Puffin never writes Onyx's compose files. Everything goes through `onyx-cli`:
+Mightling never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
-| Command (`puffin-admin puffin …`, alias `onyx`) | Does |
+| Command (`ling-admin chat …`, alias `onyx`) | Does |
 |---|---|
 | `start [--no-wait]` | `onyx-cli deploy install --lite --no-prompt`, and waits until healthy unless `--no-wait` |
 | `configure [--email] [--password] [--no-web] [--no-brand] [--no-voice] [--no-gmail] [--no-image-search]` | §2 |
 | `google-auth [--client-id] [--client-secret]` | §9 |
-| `gmail` | (Re-)registers the Gmail tool and refreshes the Puffin assistant's tool list (`connect_gmail()`). It does **not** sign an account in; that happens in the UI (§8) |
+| `gmail` | (Re-)registers the Gmail tool and refreshes the Mightling assistant's tool list (`connect_gmail()`). It does **not** sign an account in; that happens in the UI (§8) |
 | `status` / `logs [-f]` / `stop` | `onyx-cli deploy status` / `logs` / `stop`. `stop` keeps the data |
 | `uninstall` | Removes the deployment **and its data** |
 
@@ -58,7 +58,7 @@ Puffin never writes Onyx's compose files. Everything goes through `onyx-cli`:
 
 Onyx has **no environment variable for the LLM provider**. Providers live in its database, so `configure` drives the admin API that the Admin panel uses. In order:
 
-1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`), except on a node advertised with `puffin-admin node enable`, where port 3000 is published on every interface for clients' `puffin-app` and port 80 stays on loopback (`web_bind_env()`; [PUFFIN_NODE §4](./DREAMFERENCE_PUFFIN_NODE.md)): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
+1. **Telemetry off** (§9), then **loopback only** (`bind_to_loopback()`), except on a node advertised with `ling-admin node enable`, where port 3000 is published on every interface for clients' `ling-app` and port 80 stays on loopback (`web_bind_env()`; [MIGHTLING_NODE §4](./DREAMFERENCE_MIGHTLING_NODE.md)): `HOST_PORT_80=127.0.0.1:80` and `HOST_PORT=127.0.0.1:3000` in the deployment `.env`, which Onyx's compose files already read, and nginx is recreated. Both come first, because applying them recreates containers, and a session cookie taken earlier would point at the replaced API server. Each is a no-op once set.
 2. **Authenticate** as `admin@dreamference.dev` / `dreamference` by default. The account is registered, and becomes admin, when login fails.
 3. **Register the model** as provider `dreamference-vllm`, type `openai_compatible`:
    - `api_base` is the vLLM URL with loopback rewritten to the Docker **bridge gateway** (`docker network inspect bridge` → e.g. `http://172.17.0.1:8000/v1`), because vLLM uses `--network host` and `localhost` inside Onyx is the container itself;
@@ -77,17 +77,17 @@ Onyx has **no environment variable for the LLM provider**. Providers live in its
 
 ## 3. Branding (settings, persona, assets)
 
-Onyx's real white-labelling (`application_name`, `hide_onyx_branding`, custom logo and greeting) lives in `ee/`, behind `ENABLE_PAID_ENTERPRISE_EDITION_FEATURES`. That is a **paid** feature, and Puffin does not set it. The rebrand uses community settings plus file patches.
+Onyx's real white-labelling (`application_name`, `hide_onyx_branding`, custom logo and greeting) lives in `ee/`, behind `ENABLE_PAID_ENTERPRISE_EDITION_FEATURES`. That is a **paid** feature, and Mightling does not set it. The rebrand uses community settings plus file patches.
 
 **Settings** (`PUT /admin/settings`):
-- `company_name = "Puffin"`;
+- `company_name = "Mightling"`;
 - `company_description = "Local, air-gapped pair programming on NVIDIA GB10."`;
-- `disable_default_assistant = true`, but only once the Puffin assistant exists. Reversing that order would leave a user with no assistant, and a test covers the ordering.
+- `disable_default_assistant = true`, but only once the Mightling assistant exists. Reversing that order would leave a user with no assistant, and a test covers the ordering.
 
-**The Puffin assistant** (a public persona):
+**The Mightling assistant** (a public persona):
 - **Description:** empty on purpose. Onyx prints it under the composer, where it would be noise.
 - **Tools:** everything `GET /tool` reports, minus `coding_agent`, which overlaps the terminal agents.
-- **`system_prompt`:** `PUFFIN_ASSISTANT_INSTRUCTIONS`. Onyx's persona *name* is only a UI label and is never sent to the model. The instructions say it is Puffin, running on this machine's GB10, and that it can reach the web through its search tool, so it must never claim to have no internet. They also say that when asked for a picture it calls `image_search` and embeds the returned Markdown images.
+- **`system_prompt`:** `MIGHTLING_ASSISTANT_INSTRUCTIONS`. Onyx's persona *name* is only a UI label and is never sent to the model. The instructions say it is Mightling, running on this machine's GB10, and that it can reach the web through its search tool, so it must never claim to have no internet. They also say that when asked for a picture it calls `image_search` and embeds the returned Markdown images.
 - **`replace_base_system_prompt = false`:** the instructions are appended, so Onyx's base prompt, which teaches the search and Python tools, is kept.
 
 **Asset files** (`OnyxBrandAssets`): rendered with Pillow from a Tiffany Blue gradient (`TIFFANY_BLUE = #0ABAB5`), then copied with `docker cp` into `/app/public`:
@@ -98,7 +98,7 @@ Onyx's real white-labelling (`application_name`, `hide_onyx_branding`, custom lo
 
 Each matches the original's size. These are container file writes, so an image upgrade or `deploy install --force` reverts them, and re-running `configure` restores them. Nothing binary is checked in.
 
-**In-bundle logo and name** (§4.2): the sidebar mark is four shapes on a **64×64** grid inside the JS bundle, not a static file. `ONYX_LOGO_PATHS` maps each Onyx path to Puffin's. `ONYX_APP_NAME_STRINGS` replaces `application_name?.trim()||"Onyx"` and `.trim()}return"Onyx"` with `"Puffin"`.
+**In-bundle logo and name** (§4.2): the sidebar mark is four shapes on a **64×64** grid inside the JS bundle, not a static file. `ONYX_LOGO_PATHS` maps each Onyx path to Mightling's. `ONYX_APP_NAME_STRINGS` replaces `application_name?.trim()||"Onyx"` and `.trim()}return"Onyx"` with `"Mightling"`.
 
 ---
 
@@ -158,7 +158,7 @@ The block is appended to **every** stylesheet under `/app/.next`, because Next.j
 
 `UI_SCRIPTS`, marked `/*dreamference-ui-scripts*/`, is appended **only to the JS chunks that mention `opal-sidebar-footer`**, the chunk that renders its anchor. It is wrapped in a guard and a `try`, because a throwing top-level statement in a chunk takes the app down. It adds:
 - the "Connect Google" button and Gmail Accounts section;
-- a custom sidebar scrollbar (`#puffin-scrollbar`), because WebKitGTK's native one can't be styled;
+- a custom sidebar scrollbar (`#mightling-scrollbar`), because WebKitGTK's native one can't be styled;
 - the settings modal and its synthetic tabs;
 - image-tool step handling;
 - a gallery with a lightbox.
@@ -191,13 +191,13 @@ Onyx shows no microphone button until a speech-to-text provider exists, and vLLM
 Onyx has first-class SearXNG support (`WebSearchProviderType.SEARXNG`, no API key). `configure` registers the provider `dreamference-searxng` with `searxng_base_url = http://dreamference-searxng:8080`. Onyx's own base prompt already teaches search-then-open.
 
 - **Container:**
-  - `configure` does **not** start SearXNG. `puffin-admin searxng start` does (`SearxngSidecar`), and the error messages of `puffin-search` and `web_tools.py` name that command. It creates the container on the network `dreamference-sidecars`, never Docker's default bridge, whose DNS is a copy taken at container start ([DOCKER §6](./DREAMFERENCE_DOCKER.md)).
+  - `configure` does **not** start SearXNG. `ling-admin searxng start` does (`SearxngSidecar`), and the error messages of `ling-search` and `web_tools.py` name that command. It creates the container on the network `dreamference-sidecars`, never Docker's default bridge, whose DNS is a copy taken at container start ([DOCKER §6](./DREAMFERENCE_DOCKER.md)).
   - It publishes only on loopback, **port 8888** on the host.
   - `_attach_searxng()` joins it to Onyx's network, because the bridge gateway that reaches vLLM doesn't reach it. A container still on the default bridge is recreated on `dreamference-sidecars` first.
 - **Why a provider, not a prompt:**
   - The only global prompt hook, `user_preferences`, is capped at 500 characters.
   - Reaching SearXNG through the LLM-driven `open_url` tool would require SSRF protection set to `disabled`. The admin-configured provider's client does no SSRF validation, so the secure `validate_all` default stays untouched.
-- **Other users:** `puffin-search` and the MCP `web_search` tool use the same container, via `127.0.0.1:8888`.
+- **Other users:** `ling-search` and the MCP `web_search` tool use the same container, via `127.0.0.1:8888`.
 
 ---
 
@@ -213,10 +213,10 @@ It registers an **Image Search** custom tool, and injects an nginx route (`# >>>
 
 ## 8. Gmail
 
-- **Service:** `dreamference-gmail` (`chat/gmail_search_service.py` on `python:3-slim`) reads the connected accounts' credentials, over **read-only IMAP**. It is published on `127.0.0.1:8767` and authenticated by the `X-Puffin-Gmail-Token` header.
+- **Service:** `dreamference-gmail` (`chat/gmail_search_service.py` on `python:3-slim`) reads the connected accounts' credentials, over **read-only IMAP**. It is published on `127.0.0.1:8767` and authenticated by the `X-Mightling-Gmail-Token` header.
 - **Tool:** `enable_gmail_search()` registers a **Gmail** custom tool, "Search and read the user's Gmail mailbox." It is registered even before an account is connected, because the Connect button lives in this UI.
-- **Connecting accounts:** in the web UI, through the injected "Connect Google" button and Settings → Gmail Accounts (§4.4). The OAuth flow runs in the Gmail service (`DREAMFERENCE_GOA.md` §0). `puffin-admin puffin gmail` only (re-)registers the tool.
-- **The terminal agent:** `puffin` reaches the same service through `puffin-admin gmail` (`DREAMFERENCE_PUFFIN_GMAIL.md`).
+- **Connecting accounts:** in the web UI, through the injected "Connect Google" button and Settings → Gmail Accounts (§4.4). The OAuth flow runs in the Gmail service (`DREAMFERENCE_GOA.md` §0). `ling-admin chat gmail` only (re-)registers the tool.
+- **The terminal agent:** `ling` reaches the same service through `ling-admin gmail` (`DREAMFERENCE_MIGHTLING_GMAIL.md`).
 
 ---
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts the model server. A thin wrapper over `puffin-admin server start`, which applies the
+# Starts the model server. A thin wrapper over `ling-admin server start`, which applies the
 # model's registry recipe and the host-safety checks and memory-pressure watchdog that keep a
 # model load on GB10's unified memory from freezing the whole machine. This script used to launch
 # vLLM directly, skipping all of that.
@@ -12,4 +12,4 @@ args=(server start)
 [ -n "${2:-}" ] && args+=(--port "$2")
 [ -n "${3:-}" ] && args+=(--draft-model "$3")
 [ -n "${4:-}" ] && args+=(--num-speculative-tokens "$4")
-exec puffin-admin "${args[@]}"
+exec ling-admin "${args[@]}"

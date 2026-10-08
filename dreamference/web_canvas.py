@@ -14,7 +14,7 @@ CANVAS_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Puffin Canvas - Pair Programming & Hardware Monitor</title>
+  <title>Mightling Canvas - Pair Programming & Hardware Monitor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -170,7 +170,7 @@ CANVAS_HTML = """<!DOCTYPE html>
 
   <header>
     <div class="brand">
-      <span>⚡ Puffin</span>
+      <span>⚡ Mightling</span>
       <span class="brand-badge">NVIDIA GB10</span>
     </div>
     <div style="font-size: 0.85rem; color: var(--text-muted);">
@@ -301,11 +301,11 @@ class CanvasHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
 
 def start_web_canvas_server(port: int = 8501, daemon: bool = True) -> threading.Thread:
-    """Launches the local Puffin Web Canvas UI on the specified port."""
+    """Launches the local Mightling Web Canvas UI on the specified port."""
     # Loopback only: the page reports the workspace path and hardware state, and it was offered to
     # every machine on the LAN on 0.0.0.0 while printing a localhost URL.
     server = socketserver.TCPServer(("127.0.0.1", port), CanvasHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=daemon)
     thread.start()
-    print(f"🌐 Puffin Web Canvas UI running at: http://localhost:{port}")
+    print(f"🌐 Mightling Web Canvas UI running at: http://localhost:{port}")
     return thread

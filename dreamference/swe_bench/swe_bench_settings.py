@@ -1,6 +1,6 @@
 """
-Where `puffin-admin swe-bench` keeps its files, what it pins, and the `[swe_bench]` table of
-`dreamference.toml` (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §4, §12).
+Where `ling-admin swe-bench` keeps its files, what it pins, and the `[swe_bench]` table of
+`dreamference.toml` (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §4, §12).
 
 The directories are module-level constants on purpose: the test suite re-points every such
 attribute into a scratch home, and a path computed inside a function would escape that and let
@@ -16,7 +16,7 @@ from typing import Any, Dict, Final, Optional
 from dreamference.config.config_path_resolver import ConfigPathResolver
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 
-# Rebuildable: the harness, the dataset snapshot, the relocated `puffin`, the validated list.
+# Rebuildable: the harness, the dataset snapshot, the relocated `ling`, the validated list.
 CACHE_DIR: Final[Path] = Path(os.path.expanduser("~/.cache/dreamference/swe-bench"))
 
 # Results: one directory per run.
@@ -41,7 +41,7 @@ COMMUNITY_IMAGE_REPO: Final[str] = "greynewell/swe-bench-arm64"
 
 # The internal Docker network of the agent's containers: it reaches the model server at the
 # network's gateway and nothing else.
-NETWORK_NAME: Final[str] = "puffin-swe-bench"
+NETWORK_NAME: Final[str] = "mightling-swe-bench"
 
 # Five instances from five repositories, each validated on this machine on 2026-10-01 (the gold
 # patch resolves it, a no-op patch does not). `smoke` grades all five both ways and runs the
@@ -92,7 +92,7 @@ class SweBenchSettings:
         self.eval_memory: str = str(table.get("eval_memory", DEFAULT_EVAL_MEMORY))
         self.eval_timeout_s: int = duration(table.get("eval_timeout", DEFAULT_EVAL_TIMEOUT))
         self.disk_reserve: str = str(table.get("disk_reserve", DEFAULT_DISK_RESERVE))
-        # Paired nodes serving the same model add lanes (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3).
+        # Paired nodes serving the same model add lanes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3).
         self.nodes: Any = table.get("nodes", "paired")
 
     @classmethod

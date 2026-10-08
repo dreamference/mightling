@@ -1,15 +1,15 @@
 """
-bubblewrap's sandbox, checked on every `puffin-admin` run.
+bubblewrap's sandbox, checked on every `ling-admin` run.
 
 Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`: only a program with an
 AppArmor profile may create a user namespace with capabilities in it, and `/usr/bin/bwrap` has
-none. Every sandbox Puffin starts goes through that `bwrap` -- `puffin`'s command sandbox (Codex
+none. Every sandbox Mightling starts goes through that `bwrap` -- `ling`'s command sandbox (Codex
 prefers the system's bubblewrap on PATH), Night Shift's tasks and their test runs, the code
 indexers and jobs from other nodes -- so from a plain terminal, an SSH login or a systemd timer
 all of them fail. On the machine this was written on they had only ever worked because every
 shell was a child of the PyCharm snap, whose AppArmor label allows it (measured 2026-10-02).
 
-The fix needs root once, so when the check fails `puffin-admin` asks: fix it now (sudo asks for
+The fix needs root once, so when the check fails `ling-admin` asks: fix it now (sudo asks for
 the password), or turn off what depends on it. The fix is the narrowest one: an AppArmor profile
 for `/usr/bin/bwrap` alone, the same shape as the profiles Ubuntu itself ships for programs that
 build sandboxes (`/etc/apparmor.d/chrome`, `linux-sandbox`): `flags=(unconfined)` plus `userns,`.
@@ -18,8 +18,8 @@ Ubuntu's stricter `bwrap-userns-restrict` (apparmor-profiles) confines what runs
 sandbox as well; it was not tried with Codex's sandbox, which sets up a loopback interface in it.
 
 The user's answer to "turn it off" is kept in `~/.config/dreamference/sandbox.json`, so the
-question is not asked again; `puffin-admin host setup` applies the fix later and the file is then
-removed. Nothing here runs from a command `puffin` itself starts: that command is inside a
+question is not asked again; `ling-admin host setup` applies the fix later and the file is then
+removed. Nothing here runs from a command `ling` itself starts: that command is inside a
 sandbox already, and nobody is at its terminal to answer.
 """
 
@@ -43,7 +43,7 @@ QUIET_COMMANDS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
 
 # What cannot work without the sandbox, refused while it is missing and the user has turned it
 # off (and, with nobody at a terminal to ask, while it is missing at all): a night task is a
-# sandboxed `puffin exec`, and its tests run under `puffin sandbox`.
+# sandboxed `ling exec`, and its tests run under `ling sandbox`.
 NEEDS_SANDBOX: Final[Tuple[Tuple[str, str], ...]] = (("night", "enable"), ("night", "run"))
 
 
@@ -53,7 +53,7 @@ class SandboxPrerequisite:
     @classmethod
     def gate(cls, command: Optional[str], subcommand: Optional[str]) -> bool:
         """
-        Runs the check for one `puffin-admin` invocation.
+        Runs the check for one `ling-admin` invocation.
 
         Args:
             command: The top-level command (`night`, `server`, …).
@@ -63,7 +63,7 @@ class SandboxPrerequisite:
             bool: False if the command must not run (it needs the sandbox, and the sandbox is
             missing); True otherwise.
         """
-        if not command or cls._quiet(command, subcommand) or cls._inside_puffin():
+        if not command or cls._quiet(command, subcommand) or cls._inside_mightling():
             return True
         from dreamference.vllm_server.host_safety_setup import HostSafetySetup
         works = HostSafetySetup.sandbox_works()
@@ -78,7 +78,7 @@ class SandboxPrerequisite:
             return not needed
         if not cls._interactive():
             print("⚠️  bubblewrap cannot create a sandbox from an ordinary login on this machine "
-                  "(AppArmor); `puffin-admin host setup` fixes it.", file=sys.stderr)
+                  "(AppArmor); `ling-admin host setup` fixes it.", file=sys.stderr)
             if needed:
                 cls._refuse(command, subcommand, "nobody is at a terminal to fix it")
             return not needed
@@ -105,7 +105,7 @@ class SandboxPrerequisite:
         commands = cls.fix_commands()
         if commands is None:
             print("❌ The sandbox is refused here for a reason other than Ubuntu's AppArmor "
-                  "restriction, so there is no profile to install. `puffin-admin host check` "
+                  "restriction, so there is no profile to install. `ling-admin host check` "
                   "says what it found.")
             return False
         if shutil.which("sudo") is None:
@@ -116,7 +116,7 @@ class SandboxPrerequisite:
         for command in commands:
             if not HostSafetySetup._run_as_root(command):
                 print("❌ That command failed, so the sandbox is still missing. "
-                      "`puffin-admin host setup` tries again.")
+                      "`ling-admin host setup` tries again.")
                 return False
         if HostSafetySetup.sandbox_works() is False:
             print(f"❌ The profile is installed, but bubblewrap is still refused. "
@@ -124,9 +124,9 @@ class SandboxPrerequisite:
             return False
         was_off = cls.turned_off()
         cls._forget()
-        print("✅ bubblewrap can now sandbox from any login: puffin's commands, Night Shift and node jobs.")
+        print("✅ bubblewrap can now sandbox from any login: ling's commands, Night Shift and node jobs.")
         if was_off:
-            print("💡 Night Shift was turned off for this; `puffin-admin night enable` puts the timer back.")
+            print("💡 Night Shift was turned off for this; `ling-admin night enable` puts the timer back.")
         return True
 
     @classmethod
@@ -141,9 +141,9 @@ class SandboxPrerequisite:
         path.write_text(json.dumps({"sandbox": "off", "since": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                                     "night_timer_was_on": timer_was_on}, indent=2) + "\n")
         print("Turned off: Night Shift (`night enable` and `night run` are refused).\n"
-              "   Still affected: commands `puffin` runs in its sandbox outside the PyCharm terminal fail,\n"
+              "   Still affected: commands `ling` runs in its sandbox outside the PyCharm terminal fail,\n"
               "   and jobs sent from other nodes are refused here.\n"
-              "💡 `puffin-admin host setup` installs the fix later; you will not be asked again until then.")
+              "💡 `ling-admin host setup` installs the fix later; you will not be asked again until then.")
 
     @classmethod
     def fix_commands(cls) -> Optional[List[List[str]]]:
@@ -173,7 +173,7 @@ class SandboxPrerequisite:
             str: The AppArmor profile that gives it user namespaces and confines nothing else.
         """
         return (
-            "# Written by `puffin-admin host setup` (Puffin by Dreamference). It lets bubblewrap\n"
+            "# Written by `ling-admin host setup` (Mightling by Dreamference). It lets bubblewrap\n"
             "# create the user namespace its sandbox needs, which Ubuntu otherwise refuses to\n"
             "# programs without a profile (kernel.apparmor_restrict_unprivileged_userns=1).\n"
             "# Same shape as Ubuntu's own profiles for sandboxing programs (chrome, linux-sandbox).\n"
@@ -229,13 +229,13 @@ class SandboxPrerequisite:
 
     @classmethod
     def _ask(cls) -> str:
-        print("\n⚠️  puffin's sandbox cannot start from an ordinary login on this machine.\n"
+        print("\n⚠️  ling's sandbox cannot start from an ordinary login on this machine.\n"
               "   Ubuntu lets only programs with an AppArmor profile create a user namespace\n"
               "   (kernel.apparmor_restrict_unprivileged_userns=1), and bubblewrap has none. Commands\n"
-              "   puffin runs in its sandbox, Night Shift and jobs from other nodes need it; it works\n"
+              "   ling runs in its sandbox, Night Shift and jobs from other nodes need it; it works\n"
               "   in the PyCharm terminal only because that terminal carries the snap's AppArmor label.\n\n"
               "   1) Fix it now: install an AppArmor profile for bubblewrap alone (needs your password for sudo)\n"
-              "   2) Turn off what needs it: Night Shift (`puffin-admin host setup` fixes it later)\n"
+              "   2) Turn off what needs it: Night Shift (`ling-admin host setup` fixes it later)\n"
               "   3) Not now (asked again next time)\n")
         while True:
             try:
@@ -251,16 +251,16 @@ class SandboxPrerequisite:
 
     @classmethod
     def _refuse(cls, command: str, subcommand: Optional[str], reason: str) -> None:
-        print(f"❌ `puffin-admin {command} {subcommand}` needs bubblewrap's sandbox, which this machine "
+        print(f"❌ `ling-admin {command} {subcommand}` needs bubblewrap's sandbox, which this machine "
               f"refuses from an ordinary login, and {reason}.\n"
-              "   `puffin-admin host setup` fixes it (sudo asks for your password).", file=sys.stderr)
+              "   `ling-admin host setup` fixes it (sudo asks for your password).", file=sys.stderr)
 
     @classmethod
     def _quiet(cls, command: str, subcommand: Optional[str]) -> bool:
         return any(command == quiet and (sub is None or subcommand == sub) for quiet, sub in QUIET_COMMANDS)
 
     @classmethod
-    def _inside_puffin(cls) -> bool:
+    def _inside_mightling(cls) -> bool:
         # Codex exports these to every command it runs; such a command is sandboxed already and
         # its output goes to the model, not to a person who could type a password.
         return any(os.environ.get(name) for name in ("CODEX_THREAD_ID", "CODEX_SANDBOX"))

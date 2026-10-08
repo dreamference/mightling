@@ -1,5 +1,5 @@
 """
-Toolchain Verification for the Puffin Desktop App.
+Toolchain Verification for the Mightling Desktop App.
 
 This module provides the DesktopInstaller class, which reports whether this machine can build the
 Tauri shell in `desktop/` and installs the parts it is allowed to install.
@@ -49,7 +49,7 @@ TAURI_CLI_PACKAGE: Final[str] = "@tauri-apps/cli@^2"
 
 class DesktopInstaller:
     """
-    Verifies and provisions the toolchain the Puffin desktop app is built with.
+    Verifies and provisions the toolchain the Mightling desktop app is built with.
     """
 
     @classmethod
@@ -249,12 +249,12 @@ class DesktopInstaller:
             print("✅ The desktop build toolchain is complete.")
             return True, missing
 
-        print("⚠️  The Puffin desktop toolchain is incomplete:")
+        print("⚠️  The Mightling desktop toolchain is incomplete:")
         if "headers" in missing:
             print("   • WebKitGTK/GTK development headers — installed with sudo apt on first build.")
         if "rust" in missing:
             print("   • No Rust toolchain — installed with rustup on first build.")
         if "tauri-cli" in missing:
             print("   • No Tauri CLI — installed from npm on first build.")
-        print("💡 `puffin-admin desktop install` fetches all of it.")
+        print("💡 `ling-admin desktop install` fetches all of it.")
         return False, missing

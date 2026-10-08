@@ -1,17 +1,17 @@
 """
 Code index setup for Dreamference.
 
-This module provides the CodeIndexSetup class, behind `puffin-admin code setup`: it installs the
-pinned tools `puffin-code` runs to build its index (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §5) --
+This module provides the CodeIndexSetup class, behind `ling-admin code setup`: it installs the
+pinned tools `ling-code` runs to build its index (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §5) --
 codebase-memory-mcp and the scip CLI from their release archives, each checked against the SHA-256
-committed in `puffin-code-rs/code-index.sha256`, and scip-python and scip-typescript from npm,
-pinned by the committed lockfile's integrity hashes. Everything goes under Puffin's own install
-directory; `puffin-code` resolves its tools from there only, never from PATH, because its schema
+committed in `ling-code-rs/code-index.sha256`, and scip-python and scip-typescript from npm,
+pinned by the committed lockfile's integrity hashes. Everything goes under Mightling's own install
+directory; `ling-code` resolves its tools from there only, never from PATH, because its schema
 fingerprints belong to exactly these versions.
 
 scip-go, scip-java and scip-dotnet also need a toolchain of their own (Go, a JDK 17 or newer, a
 .NET SDK 8 or newer). Setup looks for each once, records what it found as a link under the
-indexers directory, and installs the indexer only beside a recorded toolchain; `puffin-code
+indexers directory, and installs the indexer only beside a recorded toolchain; `ling-code
 status` names what is missing. Maven and Gradle, which scip-java drives, are recorded the same way
 when they are installed. scip-clang has no linux-arm64 build upstream and is not installed.
 
@@ -84,7 +84,7 @@ class CodeIndexSetup:
     @classmethod
     def bin_dir(cls) -> str:
         """
-        Returns where the tools are installed: beside `puffin`.
+        Returns where the tools are installed: beside `ling`.
 
         Returns:
             str: The directory.
@@ -305,7 +305,7 @@ class CodeIndexSetup:
     def record_toolchains(cls, found: Dict[str, str]) -> None:
         """
         Records each toolchain as a link under the indexers directory, the way `node` is, and
-        removes the link of one no longer found, so `puffin-code` never runs a stale path.
+        removes the link of one no longer found, so `ling-code` never runs a stale path.
 
         Args:
             found (Dict[str, str]): From `find_toolchains`.
@@ -343,7 +343,7 @@ class CodeIndexSetup:
 
         Returns:
             bool: True if both are installed afterwards; False without Node.js, which keeps Python,
-            TypeScript and JavaScript on the universal layer (`puffin-code status` says so).
+            TypeScript and JavaScript on the universal layer (`ling-code status` says so).
         """
         node = cls.node_path()
         npm = shutil.which("npm")

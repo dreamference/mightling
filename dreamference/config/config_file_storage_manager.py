@@ -46,7 +46,7 @@ class ConfigFileStorageManager:
                 else:
                     return json.load(f) or {}
         except Exception as e:
-            print(f"⚠️ Error reading Puffin config file ({path}): {e}")
+            print(f"⚠️ Error reading Mightling config file ({path}): {e}")
             return {}
 
     @classmethod

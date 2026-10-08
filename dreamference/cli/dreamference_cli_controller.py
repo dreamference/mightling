@@ -1,5 +1,5 @@
 """
-Puffin admin command line interface (`puffin-admin`) controller.
+Mightling admin command line interface (`ling-admin`) controller.
 
 This module provides the DreamferenceCLIController class which parses command line arguments
 for subcommands (`init`, `run`, `status`, `server start`, `index`, `mcp`, `model download`, `web`),
@@ -33,7 +33,7 @@ from dreamference.hardware.model_matrix_registry import ModelMatrixRegistry
 # Global Rich console instance for styled terminal outputs
 console: Final[Console] = Console()
 
-# Where `puffin-admin benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
+# Where `ling-admin benchmark_server` stages vLLM's sonnet corpus. The text itself is embedded in
 # sonnet_dataset.py rather than read out of the image or fetched, because images disagree about
 # where they keep it and this project is meant to work without a network.
 SONNET_HOST_PATH: Final[str] = "/tmp/dreamference-sonnet.txt"
@@ -41,14 +41,14 @@ SONNET_CONTAINER_PATH: Final[str] = "/tmp/sonnet.txt"
 
 class DreamferenceCLIController:
     """
-    Controller class for puffin-admin operations, Rich status panels, and subcommand routing.
+    Controller class for ling-admin operations, Rich status panels, and subcommand routing.
     """
 
     @classmethod
     def display_header(cls) -> None:
-        """Renders the Rich header panel: Puffin by Dreamference, and the GB10 target architecture."""
+        """Renders the Rich header panel: Mightling by Dreamference, and the GB10 target architecture."""
         console.print(Panel.fit(
-            "[bold green]⚡ Puffin[/bold green] [dim]by Dreamference[/dim] - Autonomous Local Agentic Coding Engine\n"
+            "[bold green]⚡ Mightling[/bold green] [dim]by Dreamference[/dim] - Autonomous Local Agentic Coding Engine\n"
             "[dim]Exclusive Target Hardware: NVIDIA GB10 (Blackwell Architecture | 128 GB Unified Memory)[/dim]",
             border_style="green"
         ))
@@ -561,7 +561,7 @@ class DreamferenceCLIController:
 
     @classmethod
     def _run_google(cls, command: str | None) -> None:
-        """Runs `puffin-admin google start|stop|status` and exits.
+        """Runs `ling-admin google start|stop|status` and exits.
 
         Args:
             command (str | None): The subcommand.
@@ -569,13 +569,13 @@ class DreamferenceCLIController:
         actions = {"start": cls._google_start, "stop": cls._google_stop, "status": cls._google_status}
         action = actions.get(command or "")
         if action is None:
-            print("usage: puffin-admin google {start,stop,status}")
+            print("usage: ling-admin google {start,stop,status}")
             sys.exit(2)
         sys.exit(action())
 
     @classmethod
     def _google_start(cls) -> int:
-        """Starts the Google service (specs/DREAMFERENCE_PUFFIN_APPS.md §5.1).
+        """Starts the Google service (specs/DREAMFERENCE_MIGHTLING_APPS.md §5.1).
 
         Returns:
             int: The exit code.
@@ -586,7 +586,7 @@ class DreamferenceCLIController:
             print(f"❌ The Google service did not start. {GoogleService.problem}")
             return 1
         print(f"✅ The Google service is running on http://127.0.0.1:{GOOGLE_HOST_PORT}")
-        print("💡 Connect accounts with /apps in puffin, or in the web UI's Settings.")
+        print("💡 Connect accounts with /apps in ling, or in the web UI's Settings.")
         return 0
 
     @classmethod
@@ -622,9 +622,9 @@ class DreamferenceCLIController:
     @classmethod
     def _refuse_during_night_run(cls, what: str) -> None:
         """
-        Stops `puffin-admin <what>` while a Night Shift run or a SWE-bench run holds the runner
+        Stops `ling-admin <what>` while a Night Shift run or a SWE-bench run holds the runner
         lock: a build, an index run or a model load beside its sessions is what put the model
-        server at risk before (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §6.2).
+        server at risk before (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §6.2).
 
         Args:
             what: The command, for the message.
@@ -633,14 +633,14 @@ class DreamferenceCLIController:
         holder = NightShiftQueue.runner_holder()
         if holder:
             where = "swe-bench status" if "SWE-bench" in holder else "night status"
-            print(f"❌ {holder[0].upper()}{holder[1:]} is in progress, so `puffin-admin {what}` waits: "
-                  f"see `puffin-admin {where}`.")
+            print(f"❌ {holder[0].upper()}{holder[1:]} is in progress, so `ling-admin {what}` waits: "
+                  f"see `ling-admin {where}`.")
             sys.exit(1)
 
     @classmethod
     def handle_status(cls) -> None:
         """
-        Executes `puffin-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
+        Executes `ling-admin status` command, displaying hardware metrics, vLLM health, Codex/Cline/Continue/OpenHands config,
         and context engine index telemetry in formatted Rich panels.
         """
         cls.display_header()
@@ -649,7 +649,7 @@ class DreamferenceCLIController:
         vllm_mgr = VLLMServerManager(host=config.vllm_host)
         vllm_status = vllm_mgr.get_server_status()
         # Imported here, not at module scope: the context engine pulls in torch, which
-        # costs ~2.1s and 0.7 GB. `puffin-admin mcp` never needs it, and Codex starts one of
+        # costs ~2.1s and 0.7 GB. `ling-admin mcp` never needs it, and Codex starts one of
         # those per session on a box that is already tight on memory.
         from dreamference.context_engine import ContextEngine
         ctx_engine = ContextEngine()
@@ -717,13 +717,13 @@ class DreamferenceCLIController:
         agent_table.add_row("Cline Extension Runtime", cline_str)
         agent_table.add_row("Continue IDE Runtime", continue_str)
         agent_table.add_row("OpenHands Docker Runtime", openhands_str)
-        agent_table.add_row("puffin agent", codex_str)
+        agent_table.add_row("ling agent", codex_str)
         # With no config file anywhere, the resolver names where one *would* be written (the
         # current directory), which read as though settings were being loaded from there.
         config_path = str(config.config_file_path)
         if not config.config_file_path.exists():
             config_path += " (not present; built-in defaults)"
-        agent_table.add_row("Puffin Config Path", config_path)
+        agent_table.add_row("Mightling Config Path", config_path)
 
         console.print(Panel(agent_table, title="[bold]🤖 vLLM & Agent Status[/bold]", border_style="magenta"))
 
@@ -742,7 +742,7 @@ class DreamferenceCLIController:
     @classmethod
     def handle_gmail(cls, args: argparse.Namespace) -> int:
         """
-        Runs `puffin-admin gmail search|read|status` and prints the result for the agent to read.
+        Runs `ling-admin gmail search|read|status` and prints the result for the agent to read.
 
         The body of `read` is framed as untrusted: an email is text written by a third party, now in
         the context of an agent that holds a shell, and the frame keeps that boundary visible.
@@ -779,7 +779,7 @@ class DreamferenceCLIController:
         if args.gmail_command == "status":
             if not payload.get("connected"):
                 print("❌ No Gmail account is connected.")
-                print("💡 Connect one in Puffin: Settings → Gmail Accounts → Connect to Google")
+                print("💡 Connect one in Mightling: Settings → Gmail Accounts → Connect to Google")
                 return 1
             print(f"connected: {payload.get('email')}")
             return 0
@@ -830,23 +830,23 @@ class DreamferenceCLIController:
     @classmethod
     def build_parser(cls) -> argparse.ArgumentParser:
         """
-        Constructs ArgumentParser with subcommands for puffin-admin operations.
+        Constructs ArgumentParser with subcommands for ling-admin operations.
 
         Returns:
             argparse.ArgumentParser: Configured argument parser object.
         """
         parser = argparse.ArgumentParser(
-            prog="puffin-admin",
-            description="Puffin by Dreamference: private AI on your NVIDIA GB10. Runs the model server, the puffin agent, the web chat and the desktop app; also drives Cline, Continue and OpenHands"
+            prog="ling-admin",
+            description="Mightling by Dreamference: private AI on your NVIDIA GB10. Runs the model server, the Mightling agent, the web chat and the desktop app; also drives Cline, Continue and OpenHands"
         )
         agent_choices = ["codex", "cline", "continue", "openhands"]
 
-        parser.add_argument("--config", default=None, help="Path to custom Puffin config file (.toml, .yaml or .json)")
+        parser.add_argument("--config", default=None, help="Path to custom Mightling config file (.toml, .yaml or .json)")
         parser.add_argument("--agent", choices=agent_choices, default=None, help="Select primary AI agent runner (default: codex)")
         parser.add_argument("--hf-token", default=None, help="HuggingFace API access token (or set via HF_TOKEN env var)")
         subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-        # Command: puffin-admin init
+        # Command: ling-admin init
         init_parser = subparsers.add_parser("init", help="Initialize .dreamference project workspace and agent configs")
         init_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
         init_parser.add_argument("--vllm-host", default=None, help="vLLM server URL")
@@ -854,7 +854,7 @@ class DreamferenceCLIController:
         init_parser.add_argument("--agent", choices=agent_choices, default=None, help="Primary AI agent runner")
         init_parser.add_argument("--hf-token", default=None, help="HuggingFace API access token")
 
-        # Command: puffin-admin run
+        # Command: ling-admin run
         run_parser = subparsers.add_parser("run", help="Run an autonomous coding task")
         run_parser.add_argument("prompt", type=str, help="Task prompt for AI agent")
         run_parser.add_argument("--model", default=None, help="Model name served on vLLM GB10 endpoint")
@@ -864,24 +864,24 @@ class DreamferenceCLIController:
         run_parser.add_argument("--debug", action="store_true", help="Enable verbose debug output")
         run_parser.add_argument("--cave", action="store_true", default=False, help="Enable Cave Mode strict prompt (no explanations, only commands/code)")
 
-        # Command: puffin-admin status
+        # Command: ling-admin status
         subparsers.add_parser("status", help="Display local GB10 hardware & agent connection status")
 
-        # Command: puffin-admin index
+        # Command: ling-admin index
         index_parser = subparsers.add_parser("index", help="Index codebase AST & TF-IDF vector context")
         index_parser.add_argument("--dir", default=None, help="Directory to index")
         index_parser.add_argument("--force", action="store_true", help="Force reindexing")
 
-        # Command: puffin-admin mcp
+        # Command: ling-admin mcp
         subparsers.add_parser("mcp", help="Run stdio MCP server for JetBrains & VS Code extensions")
 
-        # Command: puffin-admin model
+        # Command: ling-admin model
         model_parser = subparsers.add_parser("model", help="Model operations")
         model_subparsers = model_parser.add_subparsers(dest="model_command", help="Model commands")
         
 
 
-        # Command: puffin-admin main-model
+        # Command: ling-admin main-model
         main_model_parser = subparsers.add_parser("main-model", help="Main model operations")
         main_model_subparsers = main_model_parser.add_subparsers(dest="main_model_command", help="Main model commands")
         main_model_set_parser = main_model_subparsers.add_parser("set", help="Set the main model")
@@ -898,7 +898,7 @@ class DreamferenceCLIController:
                  "and per-workload speculative acceptance (sends extra requests; slower)",
         )
 
-        # Command: puffin-admin diffusion-model. Absent while diffusion is switched off
+        # Command: ling-admin diffusion-model. Absent while diffusion is switched off
         # (DIFFUSION_ENABLED), so it is neither listed nor accepted.
         diffusion_on = ModelMatrixRegistry.diffusion_enabled()
         diffusion_model_parser = None
@@ -908,41 +908,41 @@ class DreamferenceCLIController:
             diffusion_model_set_parser = diffusion_model_subparsers.add_parser("set", help="Set the diffusion model served beside the main one")
             diffusion_model_set_parser.add_argument("model_name", type=str, help="Name of the diffusion model to set")
 
-        # Command: puffin-admin model download
-        # Command: puffin-admin model list
+        # Command: ling-admin model download
+        # Command: ling-admin model list
         model_subparsers.add_parser("list", help="List available model names and HuggingFace repos")
         
-        # Command: puffin-admin model download
+        # Command: ling-admin model download
         download_parser = model_subparsers.add_parser("download", help="Pre-download LLM & draft model weights into local HuggingFace cache")
         download_parser.add_argument("--model", default=None, help="Specific model to pre-download")
         download_parser.add_argument("--all", action="store_true", help="Pre-download all qualified GB10 models")
         download_parser.add_argument("--tensorize", action=argparse.BooleanOptionalAction, default=False, help="Auto-convert model to tensorize format after download (default: False)")
-        # Command: puffin-admin clear-tensorize-cache
+        # Command: ling-admin clear-tensorize-cache
         subparsers.add_parser("clear-tensorize-cache", help="Clear local tensorizer model cache only")
 
-        # Command: puffin-admin clear
+        # Command: ling-admin clear
         clear_parser = subparsers.add_parser("clear", help="Clear operations")
         clear_subparsers = clear_parser.add_subparsers(dest="clear_command", help="Clear commands")
         
-        # Command: puffin-admin clear model-cache
+        # Command: ling-admin clear model-cache
         clear_subparsers.add_parser("model-cache", help="Clear local HuggingFace and tensorizer model caches")
         
-        # Command: puffin-admin clear tensorize-cache
+        # Command: ling-admin clear tensorize-cache
         clear_subparsers.add_parser("tensorize-cache", help="Clear local tensorizer model cache only")
 
-        # Command: puffin-admin endpoints
+        # Command: ling-admin endpoints
         subparsers.add_parser("endpoints", help="Print the model server's endpoints (the standard /v1 API) and credentials")
 
-        # Command: puffin-admin server
+        # Command: ling-admin server
         server_parser = subparsers.add_parser("server", help="Manage the vLLM server container (start, stop, remove)")
         server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operations")
 
 
 
-        # Command: puffin-admin server start
+        # Command: ling-admin server start
         start_server_parser = server_subparsers.add_parser("start", help="Launch local vLLM server optimized for GB10 unified memory")
         # default=None, resolved to the *configured* model in the handler. A concrete default
-        # here silently outranked `puffin-admin main-model set`: the config said one model and
+        # here silently outranked `ling-admin main-model set`: the config said one model and
         # `server start` launched another -- found live, when a recipe switch started the old
         # checkpoint on the old image and only the /v1/models listing told the truth.
         start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
@@ -970,39 +970,39 @@ class DreamferenceCLIController:
         start_server_parser.add_argument("--diffusion-model", default=None, help=diffusion_help(f"Diffusion model to serve beside the main one (default: the configured diffusion model, {DEFAULT_DIFFUSION_MODEL})"))
         start_server_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port for the diffusion sidecar's /v1 API"))
         start_server_parser.add_argument("--no-diffusion", action="store_true", help=diffusion_help("Skip starting the diffusion sidecar"))
-        # Command: puffin-admin server stop
+        # Command: ling-admin server stop
         stop_parser = server_subparsers.add_parser("stop", help="Stop the running vLLM and diffusion Docker containers" if diffusion_on else "Stop the running model server")
         stop_parser.add_argument("--port", type=int, default=8000, help="Port of the server to stop")
         stop_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port of the diffusion sidecar to stop"))
 
-        # Command: puffin-admin server remove
+        # Command: ling-admin server remove
         remove_parser = server_subparsers.add_parser("remove", help="Remove the vLLM and diffusion Docker containers" if diffusion_on else "Remove the model server's container")
         remove_parser.add_argument("--port", type=int, default=8000, help="Port of the server to remove")
         remove_parser.add_argument("--diffusion-port", type=int, default=DEFAULT_DIFFUSION_PORT, help=diffusion_help("Port of the diffusion sidecar to remove"))
 
-        # Command: puffin-admin server logs
+        # Command: ling-admin server logs
         server_logs_parser = server_subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         server_logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
-        # Command: puffin-admin logs
+        # Command: ling-admin logs
         logs_parser = subparsers.add_parser("logs", help="Tail the vLLM Docker container logs")
         logs_parser.add_argument("target", nargs="?", choices=["server", "mcp"],
                                  help="server: vLLM container logs. mcp: the agent's MCP server lifecycle, "
-                                      "read from ~/.puffin/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file)")
+                                      "read from ~/.mightling/logs_2.sqlite, or $CODEX_HOME (the TUI logs there, not to a file)")
         logs_parser.add_argument("--port", type=int, default=8000, help="Port of the server to tail logs for")
 
-        # Command: puffin-admin codex
-        codex_parser = subparsers.add_parser("codex", help="Build puffin and manage its app-server daemon")
-        codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Build, run and test puffin")
+        # Command: ling-admin codex
+        codex_parser = subparsers.add_parser("codex", help="Build ling and manage its app-server daemon")
+        codex_subparsers = codex_parser.add_subparsers(dest="codex_command", help="Build, run and test ling")
         codex_build_parser = codex_subparsers.add_parser(
-            "build", help="Build puffin from the pinned upstream source in codex/ and the patches in codex-patches/"
+            "build", help="Build ling from the pinned upstream source in codex/ and the patches in codex-patches/"
         )
         codex_build_parser.add_argument("--force", action="store_true", help="Rebuild even if the installed build is current")
-        codex_build_parser.add_argument("--no-audit", action="store_true", help="Do not trace the new build's network use afterwards (`puffin-admin audit egress`)")
-        codex_subparsers.add_parser("start", help="Start puffin's app-server daemon in the background")
-        codex_subparsers.add_parser("stop", help="Stop puffin's app-server daemon")
+        codex_build_parser.add_argument("--no-audit", action="store_true", help="Do not trace the new build's network use afterwards (`ling-admin audit egress`)")
+        codex_subparsers.add_parser("start", help="Start ling's app-server daemon in the background")
+        codex_subparsers.add_parser("stop", help="Stop ling's app-server daemon")
         codex_test_parser = codex_subparsers.add_parser(
-            "test", help="Run the upstream test suite on puffin's patched tree, except the tests in codex-tests/puffin-skips.toml"
+            "test", help="Run the upstream test suite on ling's patched tree, except the tests in codex-tests/mightling-skips.toml"
         )
         codex_test_parser.add_argument("-E", "--filter", default=None, help="nextest filterset to narrow the run to")
         codex_test_parser.add_argument("--test-threads", type=int, default=8, help="Tests run at once (default 8)")
@@ -1013,23 +1013,23 @@ class DreamferenceCLIController:
             help="Rewrite the selected TUI snapshots and keep those that differ from upstream's by the name alone",
         )
 
-        # Command: puffin-admin code -- the code index's tools. `puffin-code` itself is a Rust
-        # binary built beside `puffin` (`codex build`); what it runs to index (codebase-memory, the
+        # Command: ling-admin code -- the code index's tools. `ling-code` itself is a Rust
+        # binary built beside `ling` (`codex build`); what it runs to index (codebase-memory, the
         # scip CLI, scip-python) is pinned by checksum and installed here, the one step that uses
-        # the network (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §5).
-        code_parser = subparsers.add_parser("code", help="Install the pinned tools of puffin-code's code index")
+        # the network (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §5).
+        code_parser = subparsers.add_parser("code", help="Install the pinned tools of ling-code's code index")
         code_subparsers = code_parser.add_subparsers(dest="code_command", help="Code index commands")
         code_subparsers.add_parser(
             "setup", help="Install codebase-memory-mcp, the scip CLI and the language indexers, each checked against its pin"
         )
 
-        # Command: puffin-admin host (the settings a model load is refused without)
-        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and puffin's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap)")
+        # Command: ling-admin host (the settings a model load is refused without)
+        host_parser = subparsers.add_parser("host", help="Check or apply the host settings a model load and ling's sandbox need (swap, sysctls, earlyoom, sysstat, bubblewrap)")
         host_subparsers = host_parser.add_subparsers(dest="host_command")
         host_subparsers.add_parser("check", help="Show what `server start` would refuse over, changing nothing")
         host_subparsers.add_parser("setup", help="Apply the settings; each command is printed first and sudo asks for your password")
 
-        # Command: puffin-admin night (Night Shift: run queued tasks overnight)
+        # Command: ling-admin night (Night Shift: run queued tasks overnight)
         night_parser = subparsers.add_parser("night", help="Run the Night Shift queue overnight (tasks are queued with /night add)")
         night_subparsers = night_parser.add_subparsers(dest="night_command")
         night_enable_parser = night_subparsers.add_parser("enable", help="Install the systemd user timer that runs the queue every night")
@@ -1040,29 +1040,29 @@ class DreamferenceCLIController:
         night_run_parser.add_argument("--until", default=None, help="HH:MM to stop at (default: the end of the window)")
         night_run_parser.add_argument("--minutes", type=float, default=None, help="Run for this many minutes instead")
         night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
-        night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open puffin sessions to close (for testing; their requests still pause the run)")
+        night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing; their requests still pause the run)")
 
-        # Command: puffin-admin swe-bench (run puffin over SWE-bench instances and grade the patches)
+        # Command: ling-admin swe-bench (run ling over SWE-bench instances and grade the patches)
         from dreamference.swe_bench.swe_bench_command import SweBenchCommand
         SweBenchCommand.add_parser(subparsers)
 
-        # Command: puffin-admin audit (what does puffin do on the network?)
-        audit_parser = subparsers.add_parser("audit", help="Check what a puffin session does on the network")
+        # Command: ling-admin audit (what does ling do on the network?)
+        audit_parser = subparsers.add_parser("audit", help="Check what a Mightling session does on the network")
         audit_subparsers = audit_parser.add_subparsers(dest="audit_command")
         audit_egress_parser = audit_subparsers.add_parser(
-            "egress", help="Trace one real puffin session and list every network destination and process, with a verdict")
-        audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `puffin exec` (needs pexpect and pyte)")
+            "egress", help="Trace one real ling session and list every network destination and process, with a verdict")
+        audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
 
-        # Command: puffin-admin node (offer this machine to the local network as a Puffin node)
+        # Command: ling-admin node (offer this machine to the local network as a Mightling node)
         node_parser = subparsers.add_parser("node", help="Advertise this machine on the local network so clients find it with no address typed")
         node_subparsers = node_parser.add_subparsers(dest="node_command")
         node_enable_parser = node_subparsers.add_parser("enable", help="Advertise the node and publish the web UI and web search to the local network")
-        node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get puffin and web search only")
+        node_enable_parser.add_argument("--no-web", action="store_true", help="Keep the web UI on this machine; clients get ling and web search only")
         node_subparsers.add_parser("disable", help="Stop advertising and put the web UI and web search back on this machine only")
         node_status_parser = node_subparsers.add_parser("status", help="Show the node id, what is advertised and published, and what a browse of the network returns; with a name, that paired node's status")
-        node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `puffin-admin status` instead")
+        node_status_parser.add_argument("name", nargs="?", default=None, help="A paired node: show its `ling-admin status` instead")
         node_subparsers.add_parser("id", help="Print this node's id, writing it first if this machine has none yet")
         node_subparsers.add_parser("list", help="List every node on the local network: its model, its load, and whether it is paired")
         node_add_parser = node_subparsers.add_parser("add", help="Pair with another node over SSH, once, so it can be managed from here")
@@ -1085,7 +1085,7 @@ class DreamferenceCLIController:
         node_run_parser.add_argument("--test", default=None, help="A command that decides pass or fail, run after the job's own")
         node_run_parser.add_argument("--gpu", action="store_true", help="Ask for the GPU (nodes refuse this for now)")
         node_run_parser.add_argument("--setup", default=None, help="The command that builds the job's environment, run once per lock-file content and kept on the node")
-        node_run_parser.add_argument("--out", default=None, help="A folder the job writes that comes back as files (to ~/.puffin/jobs/received/<id>), never as a commit")
+        node_run_parser.add_argument("--out", default=None, help="A folder the job writes that comes back as files (to ~/.mightling/jobs/received/<id>), never as a commit")
         node_run_parser.add_argument("--bind", action="append", default=None, help="A path on the node to bind read-only; the node's [node] bindable decides which are allowed (repeatable)")
         node_run_parser.add_argument("job_command", nargs=argparse.REMAINDER, help="-- then the command and its arguments")
         node_jobs_parser = node_subparsers.add_parser("jobs", help="List the jobs on a paired node, or on every paired node")
@@ -1115,17 +1115,17 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
-        # Command: puffin-admin puffin
+        # Command: ling-admin chat
         #
         # A subcommand group rather than an `--agent onyx` runner, because Onyx is a service and
-        # not a terminal session. Every entry in the --agent switch is a CLI that puffin-admin
+        # not a terminal session. Every entry in the --agent switch is a CLI that ling-admin
         # execs and waits on; Onyx is a set of long-lived containers with a lifecycle of its own,
-        # so it mirrors `puffin-admin server` instead.
-        # "puffin" is the command's name; "onyx" remains as a compatibility alias, because the
-        # muscle memory and the docs' history both predate the rename.
+        # so it mirrors `ling-admin server` instead.
+        # "chat" is the command's name (it was `puffin` before the product became Mightling, and
+        # `ling-admin mightling start` would read as nonsense); "onyx" remains, as it was before.
         onyx_parser = subparsers.add_parser(
-            "puffin", aliases=["onyx"],
-            help="Manage the Puffin web chat UI (Onyx Lite) backed by local vLLM"
+            "chat", aliases=["onyx"],
+            help="Manage the Mightling web chat UI (Onyx Lite) backed by local vLLM"
         )
         onyx_subparsers = onyx_parser.add_subparsers(dest="onyx_command", help="Onyx operations")
 
@@ -1149,7 +1149,7 @@ class DreamferenceCLIController:
         )
         onyx_configure_parser.add_argument(
             "--no-brand", action="store_true",
-            help="Skip rebranding the deployment as Puffin",
+            help="Skip rebranding the deployment as Mightling",
         )
         onyx_configure_parser.add_argument(
             "--no-voice", action="store_true",
@@ -1183,13 +1183,13 @@ class DreamferenceCLIController:
         )
         onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
 
-        # Command: puffin-admin desktop {run,build,status}
+        # Command: ling-admin desktop {run,build,status}
         #
-        # The desktop shell is a window onto the same deployment `puffin-admin puffin` manages, so it is a
+        # The desktop shell is a window onto the same deployment `ling-admin chat` manages, so it is a
         # sibling command rather than an `--agent` entry: nothing is exec'd and waited on here
         # except the window itself.
         desktop_parser = subparsers.add_parser(
-            "desktop", help="Puffin desktop app (a native window onto the local deployment)"
+            "desktop", help="Mightling desktop app (a native window onto the local deployment)"
         )
         desktop_subparsers = desktop_parser.add_subparsers(
             dest="desktop_command", help="Desktop app operations"
@@ -1197,7 +1197,7 @@ class DreamferenceCLIController:
         desktop_subparsers.add_parser(
             "install", help="Install the desktop build toolchain (system packages, Rust, Tauri CLI)"
         )
-        desktop_subparsers.add_parser("run", help="Open the Puffin desktop window")
+        desktop_subparsers.add_parser("run", help="Open the Mightling desktop window")
         desktop_subparsers.add_parser("build", help="Build a distributable desktop bundle")
         desktop_subparsers.add_parser(
             "status", help="Report whether the desktop app can be built and launched"
@@ -1211,15 +1211,15 @@ class DreamferenceCLIController:
             "uninstall", help="Permanently delete the Onyx deployment and all its data"
         )
 
-        # Web access is not here. Searching and fetching are the agent's commands, `puffin-search`
-        # and `puffin-fetch`: Rust binaries built from puffin-web-rs/ and installed beside `puffin`,
-        # so they work from any shell without this virtualenv. `puffin-admin fetch` was retired on
-        # 2026-09-30, as `puffin-admin search` was before it.
+        # Web access is not here. Searching and fetching are the agent's commands, `ling-search`
+        # and `ling-fetch`: Rust binaries built from ling-web-rs/ and installed beside `ling`,
+        # so they work from any shell without this virtualenv. `ling-admin fetch` was retired on
+        # 2026-09-30, as `ling-admin search` was before it.
 
-        # Command: puffin-admin gmail -- read-only mail access for the puffin agent, in the same shape
+        # Command: ling-admin gmail -- read-only mail access for the Mightling agent, in the same shape
         # as search/fetch and for the same reason (a shell command the model uses reliably). It is a
         # client of the service the web UI already runs, not a second IMAP path; connecting an
-        # account is still `puffin-admin puffin gmail`.
+        # account is still `ling-admin chat gmail`.
         gmail_parser = subparsers.add_parser("gmail", help="Search and read connected Gmail accounts (read-only)")
         gmail_subparsers = gmail_parser.add_subparsers(dest="gmail_command", required=True)
         gmail_search_parser = gmail_subparsers.add_parser("search", help="Search with Gmail query syntax")
@@ -1233,12 +1233,12 @@ class DreamferenceCLIController:
         gmail_status_parser = gmail_subparsers.add_parser("status", help="Show which accounts are connected")
         gmail_status_parser.add_argument("--json", action="store_true", help="Emit raw JSON")
 
-        # Command: puffin-admin searxng (the search container behind puffin-search and the web UI)
+        # Command: ling-admin searxng (the search container behind ling-search and the web UI)
         searxng_parser = subparsers.add_parser("searxng", help="Manage the local SearXNG search container")
         searxng_subparsers = searxng_parser.add_subparsers(dest="searxng_command")
         searxng_subparsers.add_parser("start", help="Start SearXNG on 127.0.0.1:8888 (recreates one made on Docker's default bridge)")
 
-        # Command: puffin-admin google (the service behind Gmail, Drive and Calendar in /apps)
+        # Command: ling-admin google (the service behind Gmail, Drive and Calendar in /apps)
         google_parser = subparsers.add_parser("google", help="Manage the local Google service (Gmail, Drive, Calendar)")
         google_subparsers = google_parser.add_subparsers(dest="google_command")
         google_subparsers.add_parser(
@@ -1251,19 +1251,19 @@ class DreamferenceCLIController:
             "status", help="Show whether it runs and which accounts hold which apps"
         )
 
-        # Command: puffin-admin web
+        # Command: ling-admin web
         web_parser = subparsers.add_parser("web", help="Launch Web Canvas UI interactive pair-programming pane")
         web_parser.add_argument("--port", type=int, default=8501, help="Port for Web Canvas UI")
 
         # Kept on the parser so run_cli can print a group's help when no subcommand is given.
-        # Without it `puffin-admin server` (or clear, model, …) matched no branch and exited 0
-        # having printed nothing; desktop and puffin named locals of build_parser and hit NameError.
+        # Without it `ling-admin server` (or clear, model, …) matched no branch and exited 0
+        # having printed nothing; desktop and ling named locals of build_parser and hit NameError.
         parser.command_groups = {
             "model": (model_parser, "model_command"),
             "main-model": (main_model_parser, "main_model_command"),
             "clear": (clear_parser, "clear_command"),
             "server": (server_parser, "server_command"),
-            "puffin": (onyx_parser, "onyx_command"),
+            "chat": (onyx_parser, "onyx_command"),
             "onyx": (onyx_parser, "onyx_command"),
             "desktop": (desktop_parser, "desktop_command"),
             "searxng": (searxng_parser, "searxng_command"),
@@ -1292,6 +1292,15 @@ class DreamferenceCLIController:
         if group is not None and not getattr(args, group[1], None):
             group[0].print_help()
             sys.exit(1)
+
+        # Puffin became Mightling: what a 1.4.x node left under the old names is moved once
+        # (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.2). Not where stdout is a protocol: `mcp`, and
+        # the node commands a paired sender's SSH session runs.
+        machine_read = args.command == "mcp" or (
+            args.command == "node" and getattr(args, "node_command", None) in ("serve-job", "job-exec"))
+        if not machine_read:
+            from dreamference.cli.legacy_name_migration import LegacyNameMigration
+            LegacyNameMigration.run()
 
         # bubblewrap's sandbox, checked on every run: where it is missing, the user is asked to
         # fix it with sudo or to turn off what needs it (specs/DREAMFERENCE_SETUP.md §3.3).
@@ -1353,7 +1362,7 @@ class DreamferenceCLIController:
             if args.model_command == "list":
                 cls.display_header()
 
-                table = Table(title="Available Puffin Models")
+                table = Table(title="Available Mightling Models")
                 table.add_column("Model Name", style="cyan", no_wrap=True)
                 table.add_column("HuggingFace Repo ID", style="magenta")
                 
@@ -1372,14 +1381,14 @@ class DreamferenceCLIController:
                 else:
                     target_model = args.model or config.model
                     if target_model and not ModelMatrixRegistry.is_offered(target_model):
-                        print(f"❌ '{target_model}' is not a model Puffin offers.")
+                        print(f"❌ '{target_model}' is not a model Mightling offers.")
                         sys.exit(1)
                     if target_model:
                         download_model(target_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                         if config.draft_model:
                             download_model(config.draft_model, hf_token=config.hf_token, auto_tensorize=auto_t)
                     else:
-                        print("⚠️  No model specified. Use --model <model_name> or initialize config with 'puffin-admin init --model <model_name>'")
+                        print("⚠️  No model specified. Use --model <model_name> or initialize config with 'ling-admin init --model <model_name>'")
                 sys.exit(0)
 
         elif args.command == "diffusion-model":
@@ -1397,7 +1406,7 @@ class DreamferenceCLIController:
                         f"[bold red]❌ '{args.model_name}' is not a diffusion model in the registry.[/bold red]\n"
                         f"   Diffusion checkpoints generate by block denoising and are served by the "
                         f"diffusion sidecar, not vLLM. For the main model use: "
-                        f"[cyan]puffin-admin main-model set {args.model_name}[/cyan]")
+                        f"[cyan]ling-admin main-model set {args.model_name}[/cyan]")
                     sys.exit(1)
                 config.diffusion_model = args.model_name
                 saved_path = config.save_config()
@@ -1413,13 +1422,13 @@ class DreamferenceCLIController:
                 # never mentions the real problem. Refuse it here, where the fix is nameable.
                 from dreamference.hardware import model_is_diffusion
                 if not ModelMatrixRegistry.is_offered(args.model_name):
-                    out_console.print(f"[bold red]❌ '{args.model_name}' is not a model Puffin offers.[/bold red]")
+                    out_console.print(f"[bold red]❌ '{args.model_name}' is not a model Mightling offers.[/bold red]")
                     sys.exit(1)
                 if model_is_diffusion(args.model_name):
                     out_console.print(
                         f"[bold red]❌ '{args.model_name}' is a diffusion model and cannot be served "
                         f"by vLLM as the main model.[/bold red]\n"
-                        f"   Use: [cyan]puffin-admin diffusion-model set {args.model_name}[/cyan]")
+                        f"   Use: [cyan]ling-admin diffusion-model set {args.model_name}[/cyan]")
                     sys.exit(1)
                 config.model = args.model_name
                 saved_path = config.save_config()
@@ -1429,7 +1438,7 @@ class DreamferenceCLIController:
                 # A model change is not local to vLLM: Onyx's LLM provider is registered by
                 # name, its vision flag follows the checkpoint, and the image search sidecar
                 # carries the served model id in its environment. Left alone, all three keep
-                # pointing at the previous model until someone remembers `puffin-admin puffin configure`
+                # pointing at the previous model until someone remembers `ling-admin chat configure`
                 # -- so it runs here, when Onyx is up. configure() is idempotent, and skipping
                 # when Onyx is absent keeps `main-model set` usable before any deployment.
                 if not args.no_onyx:
@@ -1460,7 +1469,7 @@ class DreamferenceCLIController:
                 # level requests.get/post helpers. Each of those builds a throwaway Session with
                 # its own connection pool and never closes it, so eleven probes left eleven
                 # sockets in CLOSE-WAIT for the life of the process — visible in `ss` after any
-                # `puffin-admin main-model inspect`. A shared session also reuses the one connection
+                # `ling-admin main-model inspect`. A shared session also reuses the one connection
                 # instead of reconnecting per probe. External hosts stay on the module API.
                 session = requests.Session()
 
@@ -1632,7 +1641,7 @@ class DreamferenceCLIController:
                     # then breaks, deliberately abandoning the rest of the body. A streamed
                     # response whose body is never finished holds its connection open, and the
                     # server's FIN then leaves the socket in CLOSE-WAIT for the life of the
-                    # process — `puffin-admin main-model inspect` was leaking one per probe.
+                    # process — `ling-admin main-model inspect` was leaking one per probe.
                     with session.post(
                         api_base, json=payload_stream, headers=headers, timeout=15, stream=True
                     ) as s_response:
@@ -1954,7 +1963,7 @@ class DreamferenceCLIController:
             cls.display_header()
             db = os.path.join(CodexInstaller.home_dir(), "logs_2.sqlite")
             if not os.path.exists(db):
-                print(f"❌ No puffin log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace puffin` first.")
+                print(f"❌ No ling log database at {db}. Run a session with `RUST_LOG=codex_mcp=trace ling` first.")
                 sys.exit(1)
             try:
                 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -1981,19 +1990,19 @@ class DreamferenceCLIController:
                     seen.append(entry)
 
             if not seen:
-                print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace puffin` to record some.")
+                print("No MCP lifecycle entries found. Run `RUST_LOG=codex_mcp=trace ling` to record some.")
             else:
                 print("[bold]MCP server lifecycle (most recent first)[/bold]\n")
                 for name, marker in seen:
                     icon = "✅" if marker == "Service initialized as client" else "⚠️ "
                     print(f"   {icon} {name:16} {marker}")
-                print("\nNote: a server can initialize and then be cancelled — puffin still reports")
+                print("\nNote: a server can initialize and then be cancelled — ling still reports")
                 print("      it as 'not initialized' in its startup banner.")
             sys.exit(0)
 
         elif args.command == "desktop":
             from dreamference.chat import DesktopRunner
-            # `puffin-admin` exists only on a node: the window built here then shows this
+            # `ling-admin` exists only on a node: the window built here then shows this
             # machine's web UI and never looks for another node's.
             from dreamference.node import NodeIdentity
             NodeIdentity.ensure()
@@ -2007,7 +2016,7 @@ class DreamferenceCLIController:
             elif args.desktop_command == "status":
                 sys.exit(DesktopRunner.status())
 
-        elif args.command in ("puffin", "onyx"):
+        elif args.command in ("chat", "onyx"):
             from dreamference.chat import OnyxRunner
 
             onyx_runner = OnyxRunner(config=config)
@@ -2062,8 +2071,8 @@ class DreamferenceCLIController:
             # The module-level console. Rebinding `console` anywhere in run_cli made it a local for
             # the whole function, so every other branch that printed with it (e.g. `endpoints`)
             # failed with UnboundLocalError.
-            console.print("[bold green]✅ Puffin workspace initialized successfully![/bold green]")
-            console.print(f"   [cyan]Puffin Config:[/cyan]       {saved_config_path}")
+            console.print("[bold green]✅ Mightling workspace initialized successfully![/bold green]")
+            console.print(f"   [cyan]Mightling Config:[/cyan]       {saved_config_path}")
             console.print(f"   [cyan]Active Agent:[/cyan]    {config.agent_runner.upper()} (Default: CODEX)")
             console.print(f"   [cyan]Target Model:[/cyan]    {config.model}")
             if config.draft_model:
@@ -2141,7 +2150,7 @@ class DreamferenceCLIController:
                 from dreamference.node import NodeAdvertiser
                 NodeAdvertiser.on_server_starting(args.model, args.port)
                 # On a node the Google service runs by default, so /apps can connect accounts
-                # (specs/DREAMFERENCE_PUFFIN_APPS.md §5.1); its failure never blocks the model.
+                # (specs/DREAMFERENCE_MIGHTLING_APPS.md §5.1); its failure never blocks the model.
                 from dreamference.chat.google_service import GoogleService
                 if GoogleService.ensure_on_node() is False:
                     print(f"⚠️  {GoogleService.problem}")
@@ -2152,7 +2161,7 @@ class DreamferenceCLIController:
                 # the sidecar's memory mid-load. Its failure never blocks the main model.
                 diffusion_mgr = None
                 if not ModelMatrixRegistry.diffusion_enabled():
-                    # Switched off: a sidecar an older Puffin left running (it restarts at boot)
+                    # Switched off: a sidecar an older Mightling left running (it restarts at boot)
                     # goes before the pre-flight reads free memory, and nothing is said.
                     DiffusionServerManager.remove_leftover(args.diffusion_port)
                 elif not args.no_diffusion:
@@ -2332,7 +2341,7 @@ class DreamferenceCLIController:
             if args.audit_command == "egress":
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
                 sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui))
-            print("usage: puffin-admin audit {egress}")
+            print("usage: ling-admin audit {egress}")
             sys.exit(2)
 
         elif args.command == "swe-bench":
@@ -2396,7 +2405,7 @@ class DreamferenceCLIController:
                 sys.exit(0 if NodeServe.authorize(sys.stdin.read()) else 1)
             if args.node_command == "serve-job":
                 sys.exit(NodeServe.serve(os.environ.get("SSH_ORIGINAL_COMMAND"), key_tag=args.key))
-            print("usage: puffin-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
+            print("usage: ling-admin node {enable,disable,status,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch}")
             sys.exit(2)
 
         elif args.command == "host":
@@ -2405,7 +2414,7 @@ class DreamferenceCLIController:
                 sys.exit(0 if HostSafetySetup.check() else 1)
             if args.host_command == "setup":
                 sys.exit(0 if HostSafetySetup.setup() else 1)
-            print("usage: puffin-admin host {check,setup}")
+            print("usage: ling-admin host {check,setup}")
             sys.exit(2)
 
         elif args.command == "night":
@@ -2421,14 +2430,14 @@ class DreamferenceCLIController:
                 sys.exit(NightShiftRunner.run(until=args.until, minutes=args.minutes,
                                               idle_minutes=args.idle_minutes,
                                               ignore_sessions=args.ignore_open_sessions))
-            print("usage: puffin-admin night {enable,disable,status,run}")
+            print("usage: ling-admin night {enable,disable,status,run}")
             sys.exit(2)
 
         elif args.command == "code":
             from dreamference.cli.code_index_setup import CodeIndexSetup
             if args.code_command == "setup":
                 sys.exit(0 if CodeIndexSetup.install() else 1)
-            print("usage: puffin-admin code setup")
+            print("usage: ling-admin code setup")
             sys.exit(2)
 
         elif args.command == "codex":
@@ -2460,18 +2469,18 @@ class DreamferenceCLIController:
                 sys.exit(1)
             codex_bin = CodexInstaller.get_codex_executable()
             if args.codex_command == "start":
-                print("🚀 Starting puffin's app-server daemon...")
+                print("🚀 Starting ling's app-server daemon...")
                 subprocess.Popen(
                     [codex_bin, "app-server", "daemon", "start"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-                print("✅ puffin's app-server daemon started.")
+                print("✅ ling's app-server daemon started.")
             elif args.codex_command == "stop":
-                print("🛑 Stopping puffin's app-server daemon...")
+                print("🛑 Stopping ling's app-server daemon...")
                 subprocess.call([codex_bin, "app-server", "daemon", "stop"])
-                print("✅ puffin's app-server daemon stopped.")
+                print("✅ ling's app-server daemon stopped.")
 
         elif args.command == "logs":
             cls.display_header()
@@ -2551,7 +2560,7 @@ class DreamferenceCLIController:
                 from dreamference.node import NodeAdvertiser
                 NodeAdvertiser.on_searxng_started()
                 sys.exit(0)
-            print("usage: puffin-admin searxng {start}")
+            print("usage: ling-admin searxng {start}")
             sys.exit(2)
 
         elif args.command == "google":
@@ -2560,7 +2569,7 @@ class DreamferenceCLIController:
         elif args.command == "web":
             cls.display_header()
             # Lazy for the same reason as the context engine: web_canvas imports it, and
-            # `puffin-admin web` is the only subcommand that needs either.
+            # `ling-admin web` is the only subcommand that needs either.
             from dreamference.web_canvas import start_web_canvas_server
 
             start_web_canvas_server(port=args.port, daemon=False)
@@ -2574,8 +2583,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     """
     Standalone CLI main function.
 
-    `puffin` is not defined here: it is the Rust binary built from the codex submodule, with the
-    session setup this package used to do compiled into it (see `puffin-rs/`).
+    `ling` is not defined here: it is the Rust binary built from the codex submodule, with the
+    session setup this package used to do compiled into it (see `ling-rs/`).
 
     Args:
         argv (Optional[List[str]]): Arguments to parse; None reads `sys.argv`.

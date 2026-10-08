@@ -1,8 +1,8 @@
 # Python Code Quality — a Stanford-grade standard for `dreamference/`, enforced by a ratchet
 
 **Status:** Phase 0 built (2026-10-03, §10): `pyproject.toml` with §3's rules, ruff 0.16.10 and mypy 2.4.0 pinned in setup.py's `dev` extra, and the real baseline measured (§10.1). The ratchet test and its baseline are written and pass, and are held back to land with Phase 1 (§10.2). §2's numbers were measured earlier on `main` at `584f26e` with flake8 7.3 and an AST script; §10.1 gives ruff's counts beside them.
-**Goal:** make the Python half of Puffin read like code written to a teaching standard: small, deep modules, one idea per function, names that make comments unnecessary for the *what* and comments that carry the *why*. The standard is checked by tools wherever a tool can decide, by a fixed review checklist where it cannot, and it may only get stricter over time.
-**Scope:** `dreamference/` and `tests/` (Python). Not the Rust crates (`puffin-rs/`, `puffin-web-rs/`, `puffin-code-rs/`, which have `cargo clippy`), not `desktop/`, not the `codex/` submodule (never modified), not `scratch/`.
+**Goal:** make the Python half of Mightling read like code written to a teaching standard: small, deep modules, one idea per function, names that make comments unnecessary for the *what* and comments that carry the *why*. The standard is checked by tools wherever a tool can decide, by a fixed review checklist where it cannot, and it may only get stricter over time.
+**Scope:** `dreamference/` and `tests/` (Python). Not the Rust crates (`ling-rs/`, `ling-web-rs/`, `ling-code-rs/`, which have `cargo clippy`), not `desktop/`, not the `codex/` submodule (never modified), not `scratch/`.
 
 ---
 
@@ -185,7 +185,7 @@ The formatting commit touches nearly every file, so it is made **when no other b
 - **Black** separately: `ruff format` is Black-compatible.
 - **A coverage threshold.** Coverage measures what ran, not what was checked; this spec is about readability. Worth a spec of its own if wanted.
 - **The Rust crates.** `cargo clippy -D warnings` per crate is the analogue and belongs in their own specs.
-- **Handing this standard to `puffin` itself** (as a skill or prompt block for the agent's own output). Possible later, and measurable with SWE-bench; out of scope here.
+- **Handing this standard to `ling` itself** (as a skill or prompt block for the agent's own output). Possible later, and measurable with SWE-bench; out of scope here.
 
 ---
 

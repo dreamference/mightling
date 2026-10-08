@@ -1,5 +1,5 @@
 """
-The node's stable id (specs/DREAMFERENCE_PUFFIN_NODE.md §5.1, §6.1).
+The node's stable id (specs/DREAMFERENCE_MIGHTLING_NODE.md §5.1, §6.1).
 
 A UUID written once to `~/.config/dreamference/node-id`. Clients remember a node by it, not by
 its address or name, and the launcher treats a machine that has the file as a node: it talks to

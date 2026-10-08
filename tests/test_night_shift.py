@@ -1,6 +1,6 @@
-"""Night Shift's runner (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §5, §8).
+"""Night Shift's runner (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5, §8).
 
-A scripted stand-in for `puffin` plays the agent: it changes files, stalls, stalls and then acts
+A scripted stand-in for `ling` plays the agent: it changes files, stalls, stalls and then acts
 after a nudge, hangs, or fails. Nothing here starts a systemd scope or unit, talks to the model
 server or opens the user's queue: every test has its own queue directory and repository.
 """
@@ -23,29 +23,29 @@ from dreamference.night_shift import (
 )
 from dreamference.night_shift.night_shift_task_run import NUDGE
 
-FAKE_PUFFIN = textwrap.dedent("""\
+FAKE_MIGHTLING = textwrap.dedent("""\
     #!{python}
-    # A stand-in for `puffin exec`: behaviour from $FAKE_PUFFIN_MODE, every call logged.
-    # `puffin sandbox … -- <command>` is logged apart, with what the runner set for it, and the
+    # A stand-in for `ling exec`: behaviour from $FAKE_MIGHTLING_MODE, every call logged.
+    # `ling sandbox … -- <command>` is logged apart, with what the runner set for it, and the
     # command is run as it is: the suite never starts the real sandbox.
     import json, os, sys, time, uuid
     args = sys.argv[1:]
     if args[0] == "sandbox":
-        with open(os.environ["FAKE_PUFFIN_CALLS"] + ".sandbox", "a") as log:
-            seen = {{name: os.environ.get(name) for name in ("CODEX_THREAD_ID", "DREAMFERENCE_PUFFIN_AIRGAPPED")}}
+        with open(os.environ["FAKE_MIGHTLING_CALLS"] + ".sandbox", "a") as log:
+            seen = {{name: os.environ.get(name) for name in ("CODEX_THREAD_ID", "DREAMFERENCE_MIGHTLING_AIRGAPPED")}}
             log.write(json.dumps({{"args": args, "env": seen, "cwd": os.getcwd()}}) + "\\n")
         command = args[args.index("--") + 1:]
         os.execvp(command[0], command)
-    with open(os.environ["FAKE_PUFFIN_CALLS"], "a") as log:
+    with open(os.environ["FAKE_MIGHTLING_CALLS"], "a") as log:
         log.write(json.dumps(args) + "\\n")
-    with open(os.environ["FAKE_PUFFIN_CALLS"] + ".env", "a") as log:
-        log.write(json.dumps({{"DREAMFERENCE_PUFFIN_PROMPT": os.environ.get("DREAMFERENCE_PUFFIN_PROMPT")}}) + "\\n")
+    with open(os.environ["FAKE_MIGHTLING_CALLS"] + ".env", "a") as log:
+        log.write(json.dumps({{"DREAMFERENCE_MIGHTLING_PROMPT": os.environ.get("DREAMFERENCE_MIGHTLING_PROMPT")}}) + "\\n")
     cwd = args[args.index("-C") + 1]
     out = args[args.index("-o") + 1]
     resume = "resume" in args
     session = args[args.index("resume") + 1] if resume else str(uuid.uuid4())
     prompt = args[-1]
-    mode = os.environ.get("FAKE_PUFFIN_MODE", "change")
+    mode = os.environ.get("FAKE_MIGHTLING_MODE", "change")
     print(json.dumps({{"type": "thread.started", "thread_id": session}}), flush=True)
     def say(text):
         with open(out, "w") as handle:
@@ -56,7 +56,7 @@ FAKE_PUFFIN = textwrap.dedent("""\
         sys.exit(1)
     if mode == "loosen":
         with open(os.path.join(cwd, "dreamference.toml"), "w") as handle:
-            handle.write('puffin_airgapped = "off"\\n')
+            handle.write('mightling_airgapped = "off"\\n')
         say("Loosened the level.")
     acts = mode == "change" or (mode == "stall_then_act" and prompt == {nudge!r}) \\
         or (mode == "act_on_resume" and resume)
@@ -78,7 +78,7 @@ def git(cwd, *args):
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
-    """A repository with one commit, a queue directory and the fake `puffin`."""
+    """A repository with one commit, a queue directory and the fake `ling`."""
     monkeypatch.setattr(NightShiftTaskRun, "USE_SCOPE", False)
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -88,17 +88,17 @@ def setup(tmp_path, monkeypatch):
     (repo / "README.md").write_text("readme\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "init")
-    puffin = tmp_path / "puffin"
-    puffin.write_text(FAKE_PUFFIN.format(python=sys.executable, nudge=NUDGE))
-    puffin.chmod(puffin.stat().st_mode | stat.S_IEXEC)
+    ling = tmp_path / "ling"
+    ling.write_text(FAKE_MIGHTLING.format(python=sys.executable, nudge=NUDGE))
+    ling.chmod(ling.stat().st_mode | stat.S_IEXEC)
     calls = tmp_path / "calls.jsonl"
-    monkeypatch.setenv("FAKE_PUFFIN_CALLS", str(calls))
+    monkeypatch.setenv("FAKE_MIGHTLING_CALLS", str(calls))
     night = tmp_path / "night"
-    return {"repo": repo, "night": night, "puffin": str(puffin), "calls": calls}
+    return {"repo": repo, "night": night, "ling": str(ling), "calls": calls}
 
 
 def queue(night: Path, repo: Path, task_text: str = "Add hello.txt", test=None, task_id="20261001-0100-abc") -> dict:
-    """Writes a task as the launcher does (puffin-rs/src/night.rs)."""
+    """Writes a task as the launcher does (ling-rs/src/night.rs)."""
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
     record = {
         "id": task_id, "repo": str(repo), "base": base, "branch": f"night/{task_id}", "task": task_text,
@@ -112,9 +112,9 @@ def queue(night: Path, repo: Path, task_text: str = "Add hello.txt", test=None, 
 
 
 def run_task(setup, monkeypatch, mode, deadline_s=60, **queue_args):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", mode)
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", mode)
     record = queue(setup["night"], setup["repo"], **queue_args)
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["puffin"],
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"],
                             deadline=time.time() + deadline_s)
     status = run.run()
     return status, NightShiftQueue.read(setup["night"], record["id"]), run
@@ -125,7 +125,7 @@ def calls(setup):
 
 
 def sandbox_calls(setup):
-    """The test runs the runner sent through `puffin sandbox`, with their environment."""
+    """The test runs the runner sent through `ling sandbox`, with their environment."""
     log = Path(str(setup["calls"]) + ".sandbox")
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
@@ -156,21 +156,21 @@ def test_a_change_is_committed_on_its_branch_and_the_checkout_is_untouched(setup
 
 
 def test_night_prompt_names_the_system_prompt_of_every_session_of_the_task(setup, monkeypatch):
-    # `[night] prompt` (prompt spec §7): set, every `puffin exec` of the task starts under it;
+    # `[night] prompt` (prompt spec §7): set, every `ling exec` of the task starts under it;
     # unset, the runner adds nothing and the configured prompt applies.
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_PROMPT", raising=False)
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_PROMPT", raising=False)
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     record = queue(setup["night"], setup["repo"])
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"prompt": "high-swe"}), setup["puffin"],
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({"prompt": "high-swe"}), setup["ling"],
                             deadline=time.time() + 60)
     assert run.run() == "done"
     seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
-    assert seen and all(entry["DREAMFERENCE_PUFFIN_PROMPT"] == "high-swe" for entry in seen)
+    assert seen and all(entry["DREAMFERENCE_MIGHTLING_PROMPT"] == "high-swe" for entry in seen)
     Path(str(setup["calls"]) + ".env").unlink()
     status, _, _ = run_task(setup, monkeypatch, "change", task_id="20261001-0100-def")
     assert status == "done"
     seen = [json.loads(line) for line in Path(str(setup["calls"]) + ".env").read_text().splitlines()]
-    assert seen and all(entry["DREAMFERENCE_PUFFIN_PROMPT"] is None for entry in seen)
+    assert seen and all(entry["DREAMFERENCE_MIGHTLING_PROMPT"] is None for entry in seen)
 
 
 def test_what_the_test_run_leaves_behind_is_not_committed(setup, monkeypatch):
@@ -183,8 +183,8 @@ def test_what_the_test_run_leaves_behind_is_not_committed(setup, monkeypatch):
 
 def test_the_test_run_is_sandboxed_with_a_policy_the_runner_fixes(setup, monkeypatch):
     # The test command runs what the agent wrote. Until 2026-10-02 it ran as plain `bash -c`, with
-    # the user's full rights; it now goes through `puffin sandbox`, the agent's own sandbox.
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    # the user's full rights; it now goes through `ling sandbox`, the agent's own sandbox.
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
     status, record, run = run_task(setup, monkeypatch, "change", test="test -f hello.txt")
     assert status == "done" and record["result"]["test_result"] == "passed"
     assert record["result"]["test_sandbox"] == "workspace-write"
@@ -192,78 +192,78 @@ def test_the_test_run_is_sandboxed_with_a_policy_the_runner_fixes(setup, monkeyp
     args = call["args"]
     assert args[:2] == ["sandbox", "-c"] and args[-3:] == ["bash", "-c", "test -f hello.txt"]
     options = [args[index + 1] for index, arg in enumerate(args) if arg == "-c" and index < args.index("--")]
-    # Workspace-write, and nothing from the user's config: `~/.puffin/skills` is writable there, and
+    # Workspace-write, and nothing from the user's config: `~/.mightling/skills` is writable there, and
     # a test run that could write it could leave instructions for every later session.
     assert options == ['sandbox_mode="workspace-write"', "sandbox_workspace_write.writable_roots=[]",
                        "sandbox_workspace_write.network_access=true"]
     assert call["cwd"] == str(run.worktree)
     # The sandbox helper looks the /airgapped level up by the task's own session.
     # ...and the runner hands every command of the task the level it fixed before the first one.
-    assert call["env"] == {"CODEX_THREAD_ID": record["session"], "DREAMFERENCE_PUFFIN_AIRGAPPED": "off"}
+    assert call["env"] == {"CODEX_THREAD_ID": record["session"], "DREAMFERENCE_MIGHTLING_AIRGAPPED": "off"}
     assert record["airgapped"] == "off"
     assert "sandbox: workspace-write" in NightShiftReport.render(datetime.now().astimezone(), [record], [])
 
 
 def test_at_airgapped_on_the_test_run_has_no_network(setup, monkeypatch):
     # The worktree's own config file may tighten the level (the agent can write it), never loosen it.
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
-    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "on"\n')
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    (setup["repo"] / "dreamference.toml").write_text('mightling_airgapped = "on"\n')
     git(setup["repo"], "add", "-A")
     git(setup["repo"], "commit", "-q", "-m", "seal")
     status, record, _ = run_task(setup, monkeypatch, "change", test="true")
     assert status == "done"
     (call,) = sandbox_calls(setup)
     assert "sandbox_workspace_write.network_access=false" in call["args"]
-    assert call["env"]["DREAMFERENCE_PUFFIN_AIRGAPPED"] == "on"
+    assert call["env"]["DREAMFERENCE_MIGHTLING_AIRGAPPED"] == "on"
     assert record["result"]["test_sandbox"] == "workspace-write, no network (/airgapped on)"
 
 
 def test_the_agent_cannot_loosen_the_level_for_its_own_tests(setup, monkeypatch):
     # The level is fixed before the agent runs. Read again before the test run, it would be whatever
     # the agent had by then written into the worktree's dreamference.toml.
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
-    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "on"\n')
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    (setup["repo"] / "dreamference.toml").write_text('mightling_airgapped = "on"\n')
     git(setup["repo"], "add", "-A")
     git(setup["repo"], "commit", "-q", "-m", "seal")
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "loosen")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "loosen")
     record = queue(setup["night"], setup["repo"], test="true")
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["puffin"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
     assert run.run() == "done"
     assert (run.repo / "dreamference.toml").exists()
     changed = git(setup["repo"], "show", "--format=", record["branch"]).stdout
-    assert '+puffin_airgapped = "off"' in changed
+    assert '+mightling_airgapped = "off"' in changed
     (call,) = sandbox_calls(setup)
     assert "sandbox_workspace_write.network_access=false" in call["args"]
-    assert call["env"]["DREAMFERENCE_PUFFIN_AIRGAPPED"] == "on"
+    assert call["env"]["DREAMFERENCE_MIGHTLING_AIRGAPPED"] == "on"
     # A task cut off and resumed another night keeps at least the level its first night recorded.
     resumed = dict(NightShiftQueue.read(setup["night"], record["id"]), id="20261001-0100-abe",
                    branch="night/20261001-0100-abe")
     (setup["night"] / "tasks" / "20261001-0100-abe.json").write_text(json.dumps(resumed))
-    again = NightShiftTaskRun(setup["night"], resumed, NightShiftSettings({}), setup["puffin"], time.time() + 60)
-    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "off"\n')
+    again = NightShiftTaskRun(setup["night"], resumed, NightShiftSettings({}), setup["ling"], time.time() + 60)
+    (setup["repo"] / "dreamference.toml").write_text('mightling_airgapped = "off"\n')
     again.worktree.mkdir(parents=True)
     assert again._fix_level() == "on"
 
 
 def test_night_airgapped_tightens_the_level_and_never_loosens_it(setup, monkeypatch):
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
     record = queue(setup["night"], setup["repo"])
-    level = lambda table: NightShiftTaskRun(setup["night"], record, NightShiftSettings(table), setup["puffin"],
+    level = lambda table: NightShiftTaskRun(setup["night"], record, NightShiftSettings(table), setup["ling"],
                                             time.time() + 60)._fix_level()
     assert level({}) == "off"
     assert level({"airgapped": "on"}) == "on"
     assert level({"airgapped": "nonsense"}) == "off"
-    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "on")
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
     assert level({"airgapped": "off"}) == "on"
 
 
 def test_the_main_checkouts_untracked_level_reaches_its_night_tasks(setup, monkeypatch):
     # dreamference.toml is usually untracked, so the worktree has no copy of it.
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
     (setup["repo"] / ".gitignore").write_text("dreamference.toml\n")
     git(setup["repo"], "add", "-A")
     git(setup["repo"], "commit", "-q", "-m", "ignore the local config")
-    (setup["repo"] / "dreamference.toml").write_text('puffin_airgapped = "on"\n')
+    (setup["repo"] / "dreamference.toml").write_text('mightling_airgapped = "on"\n')
     status, record, _ = run_task(setup, monkeypatch, "change", test="true")
     assert status == "done" and record["airgapped"] == "on"
     (call,) = sandbox_calls(setup)
@@ -271,27 +271,27 @@ def test_the_main_checkouts_untracked_level_reaches_its_night_tasks(setup, monke
 
 
 def test_the_airgapped_level_resolves_as_the_launcher_does(tmp_path, monkeypatch):
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
     monkeypatch.delenv("DREAMFERENCE_CONFIG_PATH", raising=False)
-    worktree, home = tmp_path / "tree", tmp_path / "puffin-home"
+    worktree, home = tmp_path / "tree", tmp_path / "mightling-home"
     worktree.mkdir()
     level = lambda session=None: NightShiftTaskRun.airgapped_level(worktree, session, home)
     assert level() == "off"
     user = Path(os.path.expanduser("~/.config/dreamference/config.toml"))
     user.parent.mkdir(parents=True, exist_ok=True)
-    user.write_text('puffin_airgapped = "off"\n')
+    user.write_text('mightling_airgapped = "off"\n')
     assert level() == "off"
     # Strictest of the files: the worktree's can tighten the user's, and cannot loosen it.
-    (worktree / "dreamference.toml").write_text('puffin_airgapped = "on"  # sealed\n[night]\ntest = "x"\n')
+    (worktree / "dreamference.toml").write_text('mightling_airgapped = "on"  # sealed\n[night]\ntest = "x"\n')
     assert level() == "on"
-    user.write_text('puffin_airgapped = "on"\n')
-    (worktree / "dreamference.toml").write_text('puffin_airgapped = "off"\n')
+    user.write_text('mightling_airgapped = "on"\n')
+    (worktree / "dreamference.toml").write_text('mightling_airgapped = "off"\n')
     assert level() == "on"
     # A key under a table is not the top-level key.
-    user.write_text('[night]\npuffin_airgapped = "on"\n')
+    user.write_text('[night]\nmightling_airgapped = "on"\n')
     assert level() == "off"
     # The environment overrides the files, and the session's own file overrides both.
-    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "ON")
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "ON")
     assert level() == "on"
     (home / "airgapped").mkdir(parents=True)
     (home / "airgapped" / "0a1b-2c3d").write_text("off\n")
@@ -300,19 +300,19 @@ def test_the_airgapped_level_resolves_as_the_launcher_does(tmp_path, monkeypatch
 
 
 def test_unsandboxed_tests_are_an_explicit_choice_and_refused_at_airgapped_on(setup, monkeypatch):
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_AIRGAPPED", raising=False)
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", raising=False)
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     record = queue(setup["night"], setup["repo"], test="test -f hello.txt")
     settings = NightShiftSettings({"test_sandbox": False})
-    run = NightShiftTaskRun(setup["night"], record, settings, setup["puffin"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, settings, setup["ling"], time.time() + 60)
     assert run.run() == "done"
     result = NightShiftQueue.read(setup["night"], record["id"])["result"]
     assert result["test_result"] == "passed" and result["test_sandbox"] == "off ([night] test_sandbox = false)"
     assert sandbox_calls(setup) == []
     # With no sandbox nothing would keep the tests off the network, so at `on` they do not run.
-    monkeypatch.setenv("DREAMFERENCE_PUFFIN_AIRGAPPED", "on")
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_AIRGAPPED", "on")
     record = queue(setup["night"], setup["repo"], test="touch ran.txt", task_id="20261001-0100-abd")
-    run = NightShiftTaskRun(setup["night"], record, settings, setup["puffin"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, settings, setup["ling"], time.time() + 60)
     assert run.run() == "done"
     result = NightShiftQueue.read(setup["night"], record["id"])["result"]
     assert result["test_result"] == "untested" and "not run: /airgapped is on" in result["test_source"]
@@ -366,8 +366,8 @@ def test_a_task_cut_off_keeps_its_worktree_and_resumes_its_session_next_time(set
     session = record["session"]
     assert session and record["result"]["branch"] == "night/20261001-0100-abc"
     # The next night: the same worktree, the recorded session, and it finishes.
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "act_on_resume")
-    rerun = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["puffin"],
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "act_on_resume")
+    rerun = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"],
                               deadline=time.time() + 60)
     assert rerun.run() == "done"
     last = calls(setup)[-1]
@@ -379,7 +379,7 @@ def test_a_dropped_task_is_cancelled_before_it_starts(setup, monkeypatch):
     record = queue(setup["night"], setup["repo"])
     NightShiftQueue.update(setup["night"], record["id"],
                            lambda task: NightShiftQueue.set_status(task, "cancel-requested"))
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["puffin"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
     assert run.run() == "cancelled"
     assert not setup["calls"].exists()
 
@@ -395,7 +395,7 @@ def test_a_cancel_requested_while_running_wins_over_the_runners_next_status(setu
 def test_a_vanished_base_commit_fails_the_task(setup, monkeypatch):
     record = queue(setup["night"], setup["repo"])
     record["base"] = "0" * 40
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["puffin"], time.time() + 60)
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings({}), setup["ling"], time.time() + 60)
     assert run.run() == "failed"
     assert "no longer exists" in NightShiftQueue.read(setup["night"], record["id"])["result"]["last_message"]
 
@@ -469,7 +469,7 @@ def test_tui_command_lines_are_told_from_the_rest():
 def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_path):
     busy = tmp_path / "night" / "busy"
     busy.mkdir(parents=True)
-    # This test process stands in for `puffin app-server`: its marker counts while it lives.
+    # This test process stands in for `ling app-server`: its marker counts while it lives.
     (busy / str(os.getpid())).write_text('{"threads": ["t1"]}')
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
@@ -477,7 +477,7 @@ def test_a_busy_app_server_holds_the_run_back_and_a_stale_marker_is_pruned(tmp_p
     (busy / "not-a-pid").write_text("{}")
     assert NightShiftHost.busy_app_server_pids(sys.executable, str(tmp_path)) == [os.getpid()]
     assert sorted(p.name for p in busy.iterdir()) == [str(os.getpid())]
-    # A live process that is not the installed `puffin` is not a session either.
+    # A live process that is not the installed `ling` is not a session either.
     assert NightShiftHost.busy_app_server_pids("/bin/true", str(tmp_path)) == []
     # No markers, or no folder: an idle Work window holds nothing back.
     assert NightShiftHost.busy_app_server_pids(sys.executable, str(tmp_path / "elsewhere")) == []
@@ -516,7 +516,7 @@ class FakeHost(NightShiftHost):
         return list(cls.heavy)
 
     @classmethod
-    def interactive_puffin_pids(cls, puffin_bin):
+    def interactive_mightling_pids(cls, mightling_bin):
         return list(cls.sessions)
 
     @classmethod
@@ -548,12 +548,12 @@ def far_end():
     (("model", None), "not answering"),
     (("safe", False), "host-safety"),
     (("available", 4 * 1024 ** 3), "GiB of memory is available"),
-    (("heavy", ["a puffin build holds the build lock"]), "build lock"),
-    (("sessions", [4242]), "puffin session is open"),
+    (("heavy", ["a ling build holds the build lock"]), "build lock"),
+    (("sessions", [4242]), "Mightling session is open"),
 ])
 def test_each_admission_check_stops_the_night_on_its_own(fake_host, monkeypatch, change, reason):
     monkeypatch.setattr(FakeHost, change[0], change[1])
-    assert reason in NightShiftRunner.admit("http://x", "puffin", 0, far_end())
+    assert reason in NightShiftRunner.admit("http://x", "ling", 0, far_end())
 
 
 def test_admission_waits_for_the_model_to_be_idle(fake_host, monkeypatch):
@@ -566,7 +566,7 @@ def test_admission_waits_for_the_model_to_be_idle(fake_host, monkeypatch):
     moved = {"running": 0.0, "served": 20.0, "kv_pool": 1.0}
     quiet = {"running": 0.0, "served": 20.0, "kv_pool": 1.0}
     FakeHost.samples = [busy, moved, quiet]
-    assert NightShiftRunner.wait_for_idle("http://x", "puffin", 1, far_end()) is None
+    assert NightShiftRunner.wait_for_idle("http://x", "ling", 1, far_end()) is None
     # Idle for a full minute counted from the last change, not from the start.
     assert clock["now"] >= 1000.0 + 60 + 30
 
@@ -574,7 +574,7 @@ def test_admission_waits_for_the_model_to_be_idle(fake_host, monkeypatch):
 def test_a_window_that_closes_while_waiting_reports_it(fake_host):
     FakeHost.samples = [{"running": 1.0, "served": 1.0, "kv_pool": 1.0}]
     past = datetime.now().astimezone() - timedelta(minutes=1)
-    assert "until the window closed" in NightShiftRunner.wait_for_idle("http://x", "puffin", 10, past)
+    assert "until the window closed" in NightShiftRunner.wait_for_idle("http://x", "ling", 10, past)
 
 
 def test_round_robin_alternates_repositories():
@@ -608,7 +608,7 @@ def test_one_wait_is_noted_once_whatever_its_figures(fake_host, monkeypatch):
     # report carried "waiting to start the next task" eight times in one minute.
     reasons = iter(["11.6 GiB is free after the running tasks' allowance; one more needs 16",
                     "11.8 GiB is free after the running tasks' allowance; one more needs 16",
-                    "a puffin session is open",
+                    "a Mightling session is open",
                     "11.7 GiB is free after the running tasks' allowance; one more needs 16"])
     clock = {"now": 1000.0}
     monkeypatch.setattr("dreamference.night_shift.night_shift_runner.time.time", lambda: clock["now"])
@@ -618,19 +618,19 @@ def test_one_wait_is_noted_once_whatever_its_figures(fake_host, monkeypatch):
     notes = []
     end = datetime.fromtimestamp(1000.0 + 4 * 5 + 1).astimezone()
     NightShiftRunner.schedule(Path("/nonexistent"), [{"id": "t", "repo": "r"}], NightShiftSettings({}),
-                              "puffin", "http://x", end, 1, notes)
+                              "ling", "http://x", end, 1, notes)
     waits = [note for note in notes if "waiting to start" in note]
     assert len(waits) == 3, waits
     assert "11.6 GiB" in waits[0] and "session is open" in waits[1] and "11.7 GiB" in waits[2]
 
 
 def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, monkeypatch):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     for index in range(3):
         queue(setup["night"], setup["repo"], task_text=f"Task {index}", test="test -f hello.txt",
               task_id=f"20261001-0100-a{index}0")
     code = NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"],
-                                puffin_bin=setup["puffin"], vllm_host="http://x",
+                                mightling_bin=setup["ling"], vllm_host="http://x",
                                 settings=NightShiftSettings({"max_parallel": 2}))
     assert code == 0
     statuses = [task["status"] for task in NightShiftQueue.tasks(setup["night"])]
@@ -646,8 +646,8 @@ def test_a_whole_night_runs_three_tasks_and_writes_the_report(setup, fake_host, 
 
 
 class FakeIndex(NightShiftIndex):
-    """Records what would have been indexed; nothing in the suite runs `puffin-code`."""
-    binary = "/opt/puffin-code"
+    """Records what would have been indexed; nothing in the suite runs `ling-code`."""
+    binary = "/opt/ling-code"
     outcome = "3 ok"
     calls = []
 
@@ -666,41 +666,41 @@ class FakeIndex(NightShiftIndex):
 @pytest.fixture
 def fake_index(monkeypatch):
     monkeypatch.setattr(FakeIndex, "calls", [])
-    monkeypatch.setattr(FakeIndex, "binary", "/opt/puffin-code")
+    monkeypatch.setattr(FakeIndex, "binary", "/opt/ling-code")
     monkeypatch.setattr(NightShiftRunner, "index", FakeIndex)
     return FakeIndex
 
 
 def test_each_repository_is_indexed_once_before_its_tasks_start(setup, fake_host, fake_index, monkeypatch):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     for index in range(2):
         queue(setup["night"], setup["repo"], task_text=f"Task {index}", task_id=f"20261001-0100-b{index}0")
-    assert NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+    assert NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                                 vllm_host="http://x", settings=NightShiftSettings({"index_timeout": "5m"})) == 0
-    assert [(call[0], call[1], call[3]) for call in fake_index.calls] == [("/opt/puffin-code", str(setup["repo"]), 0)]
+    assert [(call[0], call[1], call[3]) for call in fake_index.calls] == [("/opt/ling-code", str(setup["repo"]), 0)]
     assert fake_index.calls[0][2] == 300
     report = next((setup["night"] / "reports").glob("*.md")).read_text()
     assert f"Code index of {setup['repo']}: 3 ok." in report
     assert [task["status"] for task in NightShiftQueue.tasks(setup["night"])] == ["done", "done"]
 
 
-def test_the_index_refresh_can_be_switched_off_and_needs_puffin_code(setup, fake_host, fake_index, monkeypatch):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+def test_the_index_refresh_can_be_switched_off_and_needs_mightling_code(setup, fake_host, fake_index, monkeypatch):
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     queue(setup["night"], setup["repo"])
-    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                          vllm_host="http://x", settings=NightShiftSettings({"index": False}))
     assert fake_index.calls == []
     # Not installed: nothing runs, and nothing is said.
     queue(setup["night"], setup["repo"], task_id="20261001-0100-c00")
     fake_index.binary = None
-    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                          vllm_host="http://x", settings=NightShiftSettings({}))
     assert fake_index.calls == []
     # A refused admission indexes nothing either: the run never started.
     queue(setup["night"], setup["repo"], task_id="20261001-0100-d00")
-    fake_index.binary = "/opt/puffin-code"
+    fake_index.binary = "/opt/ling-code"
     FakeHost.model = None
-    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+    NightShiftRunner.run(minutes=30, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                          vllm_host="http://x", settings=NightShiftSettings({}))
     assert fake_index.calls == []
 
@@ -719,21 +719,21 @@ def test_the_index_refresh_takes_at_most_half_of_what_is_left(fake_host, fake_in
 
 def test_index_output_is_condensed_for_the_report():
     output = (
-        "skipped: scip-go for svc: runs on demand (`puffin-code index`)\n"
-        "puffin-index-0a1b2c3d4e-codebase-memory: ok\n"
-        "puffin-index-0a1b2c3d4e-scip-python-dreamference: ok\n"
-        "puffin-index-0a1b2c3d4e-rust-analyzer-puffin-code-rs: deferred: memory\n"
+        "skipped: scip-go for svc: runs on demand (`ling-code index`)\n"
+        "mightling-index-0a1b2c3d4e-codebase-memory: ok\n"
+        "mightling-index-0a1b2c3d4e-scip-python-dreamference: ok\n"
+        "mightling-index-0a1b2c3d4e-rust-analyzer-ling-code-rs: deferred: memory\n"
     )
-    assert NightShiftIndex.summarise(output) == "2 ok, 1 deferred (rust-analyzer-puffin-code-rs deferred: memory)"
+    assert NightShiftIndex.summarise(output) == "2 ok, 1 deferred (rust-analyzer-ling-code-rs deferred: memory)"
     assert NightShiftIndex.summarise("skipped: codebase-memory-mcp is not installed\n") == "nothing to index"
 
 
-def test_the_installed_puffin_code_is_the_only_one_used(tmp_path, monkeypatch):
+def test_the_installed_mightling_code_is_the_only_one_used(tmp_path, monkeypatch):
     monkeypatch.setattr("dreamference.night_shift.night_shift_index.INSTALL_DIR", str(tmp_path))
     assert NightShiftIndex.executable() is None
     (tmp_path / "bin").mkdir()
-    binary = tmp_path / "bin" / "puffin-code"
-    binary.write_text("#!/bin/sh\necho \"puffin-index-x-codebase-memory: ok\"\n")
+    binary = tmp_path / "bin" / "ling-code"
+    binary.write_text("#!/bin/sh\necho \"mightling-index-x-codebase-memory: ok\"\n")
     binary.chmod(0o755)
     assert NightShiftIndex.executable() == str(binary)
     # A real run of the stand-in: foreground, in the repository, its output condensed.
@@ -746,7 +746,7 @@ def test_a_refused_admission_keeps_the_queue_and_says_why(setup, fake_host):
     queue(setup["night"], setup["repo"])
     FakeHost.model = None
     assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"],
-                                puffin_bin=setup["puffin"], vllm_host="http://x",
+                                mightling_bin=setup["ling"], vllm_host="http://x",
                                 settings=NightShiftSettings({})) == 0
     assert NightShiftQueue.tasks(setup["night"])[0]["status"] == "queued"
     report = next((setup["night"] / "reports").glob("*.md")).read_text()
@@ -758,7 +758,7 @@ def test_a_second_runner_is_refused_while_the_lock_is_held(setup, fake_host):
     with NightShiftQueue.runner_lock(setup["night"]) as held:
         assert held
         assert NightShiftQueue.runner_active(setup["night"])
-        assert NightShiftRunner.run(minutes=5, night_dir=setup["night"], puffin_bin=setup["puffin"],
+        assert NightShiftRunner.run(minutes=5, night_dir=setup["night"], mightling_bin=setup["ling"],
                                     vllm_host="http://x", settings=NightShiftSettings({})) == 1
     assert not NightShiftQueue.runner_active(setup["night"])
 
@@ -793,17 +793,17 @@ def test_enable_writes_absolute_paths_and_the_window(tmp_path, monkeypatch):
                         staticmethod(lambda args: commands.append(args) or subprocess.CompletedProcess(args, 0, "", "")))
     monkeypatch.setattr(NightShiftScheduler, "lingering", classmethod(lambda cls: True))
     assert NightShiftScheduler.enable("01:30-06:15")
-    timer = (NightShiftScheduler.unit_dir() / "puffin-night.timer").read_text()
-    service = (NightShiftScheduler.unit_dir() / "puffin-night.service").read_text()
+    timer = (NightShiftScheduler.unit_dir() / "mightling-night.timer").read_text()
+    service = (NightShiftScheduler.unit_dir() / "mightling-night.service").read_text()
     assert timer.startswith("# Night Shift window: 01:30-06:15\n")
     assert "OnCalendar=*-*-* 01:30:00" in timer
     exec_start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
     assert exec_start.split("=", 1)[1].startswith("/") and exec_start.endswith("night run --until 06:15")
     assert "/.local/bin" in service and "/.cargo/bin" in service
-    assert commands == [["daemon-reload"], ["enable", "--now", "puffin-night.timer"]]
+    assert commands == [["daemon-reload"], ["enable", "--now", "mightling-night.timer"]]
     assert "window 01:30-06:15" in NightShiftScheduler.status()
     assert NightShiftScheduler.disable()
-    assert not (NightShiftScheduler.unit_dir() / "puffin-night.timer").exists()
+    assert not (NightShiftScheduler.unit_dir() / "mightling-night.timer").exists()
 
 
 def test_settings_parse_durations_and_windows():
@@ -833,14 +833,14 @@ def test_report_rows_carry_what_the_spec_lists():
     assert "## Notes" in text
 
 
-# -- several nodes (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3, §13.3) --------------------------------
+# -- several nodes (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3, §13.3) --------------------------------
 
 REPLICA = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "kv_pool": 144870.0,
            "parallel": 1, "budget": 65536}
 
 
 def test_a_session_here_holds_up_this_machines_lane_and_not_a_replicas(setup, fake_host, monkeypatch):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     for index in range(2):
         queue(setup["night"], setup["repo"], task_text=f"Task {index}", task_id=f"20261001-0100-b{index}0")
     local = {"name": "this machine", "node": None, "host": "http://x", "kv_pool": 144870.0, "parallel": 1, "budget": 65536}
@@ -848,7 +848,7 @@ def test_a_session_here_holds_up_this_machines_lane_and_not_a_replicas(setup, fa
         lambda cls, host, settings: ([local, dict(REPLICA)], ["Also using spark-2's model server (…)."])))
     monkeypatch.setattr(NightShiftRunner, "admit", classmethod(lambda cls, *args: None))
     monkeypatch.setattr(FakeHost, "sessions", [4242])                    # someone is working here
-    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                                 vllm_host="http://x", settings=NightShiftSettings({})) == 0
     tasks = NightShiftQueue.tasks(setup["night"])
     assert [task["status"] for task in tasks] == ["done", "done"]
@@ -921,7 +921,7 @@ def two_nodes(setup, fake_host, monkeypatch):
 
 def test_a_task_for_another_node_is_worked_there_and_its_branch_comes_back(two_nodes, monkeypatch):
     from dreamference.night_shift import NightShiftRemote
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     task = queue(two_nodes["night"], two_nodes["repo"], task_text="Add hello.txt on the other node",
                  task_id="20261001-0100-c00")
     path = two_nodes["night"] / "tasks" / f"{task['id']}.json"
@@ -930,10 +930,10 @@ def test_a_task_for_another_node_is_worked_there_and_its_branch_comes_back(two_n
 
     def the_other_nodes_night(seconds):
         # While this machine waits, the node's own runner works its queue.
-        node_runs.append(NightShiftRunner.run(minutes=5, idle_minutes=0, puffin_bin=two_nodes["puffin"],
+        node_runs.append(NightShiftRunner.run(minutes=5, idle_minutes=0, mightling_bin=two_nodes["ling"],
                                               vllm_host="http://127.0.0.1:8000", settings=NightShiftSettings({})))
     monkeypatch.setattr(NightShiftRemote, "sleep", staticmethod(the_other_nodes_night))
-    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=two_nodes["night"], puffin_bin=two_nodes["puffin"],
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=two_nodes["night"], mightling_bin=two_nodes["ling"],
                                 vllm_host="http://x", settings=NightShiftSettings({})) == 0
     assert node_runs == [0]
     here = NightShiftQueue.read(two_nodes["night"], task["id"])
@@ -994,15 +994,15 @@ def test_a_task_from_another_machine_runs_in_the_job_sandbox_with_its_own_home(s
     from dreamference.night_shift import NightShiftRemote
     task = {"id": "20261001-0100-f00", "repo": str(setup["repo"]), "base": "a" * 40, "task": "x",
             "remote": {"sender": "1111", "sender_name": "spark-1"}, "author": {"name": "S", "email": "s@x"}}
-    run = NightShiftTaskRun(setup["night"], task, NightShiftSettings({}), setup["puffin"], time.time() + 60,
+    run = NightShiftTaskRun(setup["night"], task, NightShiftSettings({}), setup["ling"], time.time() + 60,
                             model_host="http://127.0.0.1:8000")
     run.airgapped = "on"
-    argv = NightShiftTaskRun.__dict__["remote_sandbox"](run, [setup["puffin"], "exec", "-C", str(run.worktree)], {})
+    argv = NightShiftTaskRun.__dict__["remote_sandbox"](run, [setup["ling"], "exec", "-C", str(run.worktree)], {})
     home = NightShiftRemote.task_home(task["id"])
     assert argv[0] == "bwrap" and "--unshare-net" not in argv                  # loopback reaches the model
     assert [argv[i + 1] for i, word in enumerate(argv) if word == "--bind"] == [str(run.worktree), str(home)]
     assert os.path.expanduser("~") in [argv[i + 1] for i, word in enumerate(argv) if word == "--tmpfs"]
     variables = {argv[i + 1]: argv[i + 2] for i, word in enumerate(argv) if word == "--setenv"}
-    assert variables["CODEX_HOME"] == str(home) and variables["DREAMFERENCE_PUFFIN_GMAIL"] == "false"
-    assert variables["DREAMFERENCE_PUFFIN_AIRGAPPED"] == "on" and variables["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:8000"
+    assert variables["CODEX_HOME"] == str(home) and variables["DREAMFERENCE_MIGHTLING_GMAIL"] == "false"
+    assert variables["DREAMFERENCE_MIGHTLING_AIRGAPPED"] == "on" and variables["DREAMFERENCE_VLLM_HOST"] == "http://127.0.0.1:8000"
     assert run.last_message_path.parent == home

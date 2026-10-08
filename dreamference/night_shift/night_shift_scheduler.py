@@ -1,9 +1,9 @@
 """
-The systemd user timer that starts the night run (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §5.1):
-`puffin-admin night enable|disable|status`.
+The systemd user timer that starts the night run (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.1):
+`ling-admin night enable|disable|status`.
 
 A user service has neither `~/.local/bin` nor the virtualenv on its PATH, so the unit names
-`puffin-admin` by its absolute path and sets a PATH that reaches `puffin-search`, `puffin-fetch`
+`ling-admin` by its absolute path and sets a PATH that reaches `ling-search`, `ling-fetch`
 and Cargo for the agent's shell. Without lingering, a user timer stops at logout; `enable` says so.
 """
 
@@ -18,14 +18,14 @@ from typing import Callable, Final, List
 from dreamference.night_shift.night_shift_queue import NightShiftQueue
 from dreamference.night_shift.night_shift_settings import NightShiftSettings
 
-UNIT: Final[str] = "puffin-night"
+UNIT: Final[str] = "mightling-night"
 
 # The comment line the launcher reads to show the enabled window in `/night list`.
 WINDOW_MARKER: Final[str] = "# Night Shift window: "
 
 
 class NightShiftScheduler:
-    """Installs, removes and reports the `puffin-night` timer."""
+    """Installs, removes and reports the `mightling-night` timer."""
 
     # Seam: tests replace it so nothing in the suite talks to the real systemd.
     systemctl: Callable[[List[str]], subprocess.CompletedProcess] = staticmethod(
@@ -43,10 +43,10 @@ class NightShiftScheduler:
     def admin_executable(cls) -> str:
         """
         Returns:
-            str: The absolute path of this environment's `puffin-admin`.
+            str: The absolute path of this environment's `ling-admin`.
         """
-        candidate = Path(sys.executable).parent / "puffin-admin"
-        return str(candidate) if candidate.exists() else (shutil.which("puffin-admin") or str(candidate))
+        candidate = Path(sys.executable).parent / "ling-admin"
+        return str(candidate) if candidate.exists() else (shutil.which("ling-admin") or str(candidate))
 
     @classmethod
     def render_units(cls, window: str, admin: str) -> tuple:
@@ -55,7 +55,7 @@ class NightShiftScheduler:
 
         Args:
             window: `HH:MM-HH:MM`.
-            admin: The absolute path of `puffin-admin`.
+            admin: The absolute path of `ling-admin`.
 
         Returns:
             tuple: (timer text, service text).
@@ -65,10 +65,10 @@ class NightShiftScheduler:
         path = ":".join([f"{home}/.local/bin", f"{home}/.cargo/bin", str(Path(admin).parent),
                          "/usr/local/bin", "/usr/bin", "/bin"])
         timer = (f"{WINDOW_MARKER}{window}\n"
-                 "[Unit]\nDescription=Puffin Night Shift window\n\n"
+                 "[Unit]\nDescription=Mightling Night Shift window\n\n"
                  f"[Timer]\nOnCalendar=*-*-* {start:%H:%M}:00\nPersistent=false\nUnit={UNIT}.service\n\n"
                  "[Install]\nWantedBy=timers.target\n")
-        service = ("[Unit]\nDescription=Puffin Night Shift run\n\n"
+        service = ("[Unit]\nDescription=Mightling Night Shift run\n\n"
                    "[Service]\nType=oneshot\n"
                    f"Environment=PATH={path}\n"
                    f"WorkingDirectory={home}\n"
@@ -141,7 +141,7 @@ class NightShiftScheduler:
             if next_run:
                 lines.append(f"Next: {next_run.split('  ')[0]}")
         else:
-            lines.append("Timer: not enabled (puffin-admin night enable --window 01:00-07:00)")
+            lines.append("Timer: not enabled (ling-admin night enable --window 01:00-07:00)")
         if NightShiftQueue.runner_active():
             lines.append("A night run is in progress.")
         tasks = NightShiftQueue.tasks(NightShiftQueue.night_dir())

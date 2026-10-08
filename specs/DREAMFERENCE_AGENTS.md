@@ -1,7 +1,7 @@
-# Puffin Agent Runtimes & Integration
+# Mightling Agent Runtimes & Integration
 
 > **Version:** 1.2.0
-> **Subject:** the agent runners: Codex (`puffin`, default), Cline, Continue, OpenHands.
+> **Subject:** the agent runners: Codex (`ling`, default), Cline, Continue, OpenHands.
 > **Checked against the code:** 2026-10-01 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
 
 ---
@@ -9,7 +9,7 @@
 ## Table of Contents
 
 - [1. Agent Runtimes Overview](#1-agent-runtimes-overview)
-- [2. Codex / `puffin` (Default)](#2-codex--puffin-default)
+- [2. Codex / `ling` (Default)](#2-codex--mightling-default)
 - [3. Cline (VS Code)](#3-cline-vs-code)
 - [4. Continue (IDE)](#4-continue-ide)
 - [5. OpenHands (Docker UI)](#5-openhands-docker-ui)
@@ -26,29 +26,29 @@ The runner is chosen by `--agent`, then `DREAMFERENCE_AGENT` / `DREAMFERENCE_RUN
 **Choices:** `codex`, `cline`, `continue`, `openhands`.
 
 **How each is reached:**
-- **Codex:** the interactive agent is the `puffin` binary itself, run directly.
-- **All four:** reachable through `puffin-admin run "PROMPT" [--agent …]`. `puffin-admin chat` was removed on 2026-09-28.
+- **Codex:** the interactive agent is the `ling` binary itself, run directly.
+- **All four:** reachable through `ling-admin run "PROMPT" [--agent …]`. `ling-admin chat` was removed on 2026-09-28.
 
 **Dispatch:** a strategy switch on `config.agent_runner` in `DreamferenceCLIController.run_cli`. Each agent has a `<agent>_installer.py` / `<agent>_runner.py` pair under `dreamference/runner/`.
 
-**Waiting for vLLM** (§6): the three non-Codex runners call `VLLMReadinessWaiter.wait_for_vllm()`. Codex doesn't: the `puffin` launcher waits for the server itself.
+**Waiting for vLLM** (§6): the three non-Codex runners call `VLLMReadinessWaiter.wait_for_vllm()`. Codex doesn't: the `ling` launcher waits for the server itself.
 
-**No container sandbox of Dreamference's own.** `puffin-admin`'s `--sandbox` option and `SandboxManager` (apptainer/podman/docker prefixes) were removed on 2026-10-01: Goose applied the prefixes and Aider read the setting, and once both were gone nothing used them. Codex has its own sandbox (`puffin -s/--sandbox` policy), which is unrelated.
+**No container sandbox of Dreamference's own.** `ling-admin`'s `--sandbox` option and `SandboxManager` (apptainer/podman/docker prefixes) were removed on 2026-10-01: Goose applied the prefixes and Aider read the setting, and once both were gone nothing used them. Codex has its own sandbox (`ling -s/--sandbox` policy), which is unrelated.
 
 ---
 
-## 2. Codex / `puffin` (Default)
+## 2. Codex / `ling` (Default)
 
 - **Package:** `dreamference/runner/codex_runner.py`, `codex_installer.py`, `codex_branded_builder.py`.
-- **Runtime:** the Puffin-branded Codex build (`~/.local/share/dreamference/puffin/bin/puffin`, linked at `~/.local/bin/puffin`), built from the `codex/` submodule plus `codex-patches/`. It never uses an upstream `codex` from PATH.
-- **Session:** `CodexRunner.run_session()` builds `puffin` if needed and runs `puffin [args…] ["PROMPT"]`, passing `DREAMFERENCE_VLLM_HOST` along. With `--debug` it sets `RUST_LOG`.
-- **Everything else happens in the launcher `puffin-rs/`:**
+- **Runtime:** the Mightling-branded Codex build (`~/.local/share/dreamference/mightling/bin/ling`, linked at `~/.local/bin/ling`), built from the `codex/` submodule plus `codex-patches/`. It never uses an upstream `codex` from PATH.
+- **Session:** `CodexRunner.run_session()` builds `ling` if needed and runs `ling [args…] ["PROMPT"]`, passing `DREAMFERENCE_VLLM_HOST` along. With `--debug` it sets `RUST_LOG`.
+- **Everything else happens in the launcher `ling-rs/`:**
   - waiting for vLLM;
-  - the model catalog and `config.toml` in `$CODEX_HOME`, which `puffin` sets to `~/.puffin` (never upstream's `~/.codex`);
+  - the model catalog and `config.toml` in `$CODEX_HOME`, which `ling` sets to `~/.mightling` (never upstream's `~/.codex`);
   - the system prompt, with web access and optionally Gmail;
   - the `--oss --local-provider openai-custom --model <id>` options.
 
-See `DREAMFERENCE_PUFFIN_CODEX.md` for the full description.
+See `DREAMFERENCE_MIGHTLING_CODEX.md` for the full description.
 
 ---
 
@@ -87,7 +87,7 @@ It writes `~/.continue/config.json`. If the file exists, it replaces only `model
 {
   "models": [
     {
-      "title": "Puffin local ({model alias})",
+      "title": "Mightling local ({model alias})",
       "provider": "openai",
       "model": "{hf_repo}",
       "apiBase": "{vllm_host}/v1/",
@@ -95,7 +95,7 @@ It writes `~/.continue/config.json`. If the file exists, it replaces only `model
     }
   ],
   "tabAutocompleteModel": {
-    "title": "Puffin Tab Autocomplete",
+    "title": "Mightling Tab Autocomplete",
     "provider": "openai",
     "model": "{hf_repo}",
     "apiBase": "{vllm_host}/v1/",
@@ -125,7 +125,7 @@ The prompt is unused.
 - **Package:** `dreamference/runner/openhands_runner.py`, `openhands_installer.py`
 - **Runtime:** Docker image `ghcr.io/all-hands-ai/openhands:main`, web UI at `http://localhost:3001` (`OPENHANDS_HOST_PORT`)
 
-Port 3001, not 3000, because the Puffin web UI (Onyx) owns 3000; published on `127.0.0.1` only, because the container mounts the Docker socket and a UI on the network would hand root on the host to anyone who can reach it.
+Port 3001, not 3000, because the Mightling web UI (Onyx) owns 3000; published on `127.0.0.1` only, because the container mounts the Docker socket and a UI on the network would hand root on the host to anyone who can reach it.
 
 ### 5.2. Container Launch
 
@@ -162,10 +162,10 @@ The prompt is unused.
 1. It prints `⏳ Waiting for local vLLM server at {vllm_host} to become available...`.
 2. Every second it checks `GET /v1/models` (1 s timeout) and prints a dot.
 3. Once healthy, it sends a silent `max_tokens=1` chat completion naming the served model id. This proves that the engine can generate, not just list models; it returns success only when that request succeeds.
-4. After 600 s it prints `❌ Timed out …` and `💡 Start vLLM in another terminal via: puffin-admin server start`, and fails.
+4. After 600 s it prints `❌ Timed out …` and `💡 Start vLLM in another terminal via: ling-admin server start`, and fails.
 5. Ctrl+C cancels without starting the agent.
 
-**It does not launch vLLM.** Nothing downloads or starts a server from here. Start the server with `puffin-admin server start`, which is documented in `DREAMFERENCE_INFERENCE.md`.
+**It does not launch vLLM.** Nothing downloads or starts a server from here. Start the server with `ling-admin server start`, which is documented in `DREAMFERENCE_INFERENCE.md`.
 
 ---
 
@@ -184,19 +184,19 @@ The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call
 
 | Failure | Signal | Recovery |
 | :------ | :----- | :------- |
-| vLLM not running | No healthy `/v1/models` within 600 s | Hint `puffin-admin server start`; exit 1 |
+| vLLM not running | No healthy `/v1/models` within 600 s | Hint `ling-admin server start`; exit 1 |
 | vLLM up but not generating | Pre-warm request fails | Keeps waiting until the timeout |
 | Ctrl+C during wait | `KeyboardInterrupt` | Cancel without starting the agent |
 | Cline / Continue without VS Code | Neither `code` nor `codium` on PATH | Exit 1 with a PATH hint |
 | OpenHands without Docker | `docker ps` fails | Exit 1 with a Docker daemon hint |
 | OpenHands image pull failure | `docker pull` error | Exit 1 with the pull command |
-| `puffin` not built (Codex) | Build fails or is missing | `puffin-admin codex build` |
+| `ling` not built (Codex) | Build fails or is missing | `ling-admin codex build` |
 
 ---
 
 ## See Also
 
-- **[DREAMFERENCE_PUFFIN_CODEX.md](./DREAMFERENCE_PUFFIN_CODEX.md):** the default agent, `puffin`
+- **[DREAMFERENCE_MIGHTLING_CODEX.md](./DREAMFERENCE_MIGHTLING_CODEX.md):** the default agent, `ling`
 - **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM launch and configuration
 - **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md):** Docker architecture and images
 - **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md):** CLI commands and configuration

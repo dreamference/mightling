@@ -49,8 +49,8 @@ desktop/bridge/target/
 # The Work window's frontend: npm's install and Vite's build (dist/ is covered above)
 desktop/ui/node_modules/
 
-# puffin-code build output
-puffin-code-rs/target/
+# ling-code build output
+ling-code-rs/target/
 
 # Tauri generated schemas (regenerated on every build)
 desktop/src-tauri/gen/schemas/
@@ -59,7 +59,7 @@ desktop/src-tauri/gen/schemas/
 site/
 
 # Local builds of the standalone Rust crates (the builder uses ~/.cache/dreamference/*/target).
-/puffin-web-rs/target/
+/ling-web-rs/target/
 
 # Tool caches (ruff, mypy)
 .ruff_cache/

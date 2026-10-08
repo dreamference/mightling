@@ -66,7 +66,7 @@ TRIP_REASON_SPIKE: Final[str] = "avg10"
 TRIP_REASON_SUSTAINED: Final[str] = "avg60"
 
 # Docker's control socket, used as a kill path when signalling the container's PIDs directly is not
-# permitted — which is the normal case, because `puffin-admin` runs as an ordinary user and the container's
+# permitted — which is the normal case, because `ling-admin` runs as an ordinary user and the container's
 # processes run as root. Talking to the socket costs a connect and one small write; it does not fork
 # or exec, which is what rules out the `docker` CLI on a stalling host.
 DEFAULT_DOCKER_SOCKET: Final[str] = "/var/run/docker.sock"
@@ -289,7 +289,7 @@ class MemoryPressureWatchdog:
 
         Signal 0 asks the kernel the permission question without delivering anything, so this is
         free and safe to run against a healthy container. The answer is almost always no: the
-        container runs as root and `puffin-admin` does not, so `os.kill` raises EPERM. Knowing that in
+        container runs as root and `ling-admin` does not, so `os.kill` raises EPERM. Knowing that in
         advance is what lets `_kill` choose a path that works instead of discovering the problem
         while the host is stalling — which is what happened before, silently, because EPERM was
         swallowed by the same handler that ignores already-dead PIDs.

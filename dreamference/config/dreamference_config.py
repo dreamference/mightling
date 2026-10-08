@@ -37,32 +37,32 @@ DEFAULT_MAX_NUM_BATCHED_TOKENS: Final[int] = 8192
 DEFAULT_GUIDED_DECODING_BACKEND: Final[str] = "xgrammar"
 DEFAULT_CAVE_MODE: Final[bool] = False
 DEFAULT_USE_TENSORIZER: Final[bool] = False
-# Whether the puffin agent's prompt advertises `puffin-admin gmail` when an account is connected.
-# Read by the Rust launcher too (DREAMFERENCE_PUFFIN_GMAIL, then `puffin_gmail` in the TOML file).
-DEFAULT_PUFFIN_GMAIL: Final[bool] = True
-# Whether the puffin agent is handed a rule-built ledger (files, failed commands, last test result)
-# after each compaction (specs/DREAMFERENCE_PUFFIN_COMPACTION.md §10.1). Read by the Rust launcher
-# (DREAMFERENCE_PUFFIN_COMPACTION_LEDGER, then `puffin_compaction_ledger` in the TOML file); a test
-# keeps this default equal to LEDGER_DEFAULT in puffin-rs/src/compaction.rs.
-DEFAULT_PUFFIN_COMPACTION_LEDGER: Final[bool] = True
-# How tersely the puffin agent answers (`/cavemode`, specs/DREAMFERENCE_PUFFIN_CAVE_MODE.md). Read by
-# the Rust launcher too (DREAMFERENCE_PUFFIN_CAVE_MODE, then `puffin_cave_mode` in the TOML file);
-# a test keeps this default equal to DEFAULT_PUFFIN_CAVE_MODE in puffin-rs/src/cave.rs.
-DEFAULT_PUFFIN_CAVE_MODE: Final[str] = "ultra"
-PUFFIN_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
-# How much of the internet a puffin session may use (`/airgapped`,
-# specs/DREAMFERENCE_PUFFIN_AIRGAPPED.md): everything or nothing. The Rust
-# side (puffin-rs/airgapped) resolves it for the agent's commands; a test keeps this default equal
-# to its DEFAULT_PUFFIN_AIRGAPPED. Listed loosest first.
-DEFAULT_PUFFIN_AIRGAPPED: Final[str] = "off"
-PUFFIN_AIRGAPPED_LEVELS: Final[tuple] = ("off", "on")
-# The system prompt new puffin sessions start with (`puffin prompt`, specs/DREAMFERENCE_PUFFIN_PROMPT.md):
+# Whether the Mightling agent's prompt advertises `ling-admin gmail` when an account is connected.
+# Read by the Rust launcher too (DREAMFERENCE_MIGHTLING_GMAIL, then `mightling_gmail` in the TOML file).
+DEFAULT_MIGHTLING_GMAIL: Final[bool] = True
+# Whether the Mightling agent is handed a rule-built ledger (files, failed commands, last test result)
+# after each compaction (specs/DREAMFERENCE_MIGHTLING_COMPACTION.md §10.1). Read by the Rust launcher
+# (DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER, then `mightling_compaction_ledger` in the TOML file); a test
+# keeps this default equal to LEDGER_DEFAULT in ling-rs/src/compaction.rs.
+DEFAULT_MIGHTLING_COMPACTION_LEDGER: Final[bool] = True
+# How tersely the Mightling agent answers (`/cavemode`, specs/DREAMFERENCE_MIGHTLING_CAVE_MODE.md). Read by
+# the Rust launcher too (DREAMFERENCE_MIGHTLING_CAVE_MODE, then `mightling_cave_mode` in the TOML file);
+# a test keeps this default equal to DEFAULT_MIGHTLING_CAVE_MODE in ling-rs/src/cave.rs.
+DEFAULT_MIGHTLING_CAVE_MODE: Final[str] = "ultra"
+MIGHTLING_CAVE_MODE_LEVELS: Final[tuple] = ("off", "lite", "full", "ultra")
+# How much of the internet a Mightling session may use (`/airgapped`,
+# specs/DREAMFERENCE_MIGHTLING_AIRGAPPED.md): everything or nothing. The Rust
+# side (ling-rs/airgapped) resolves it for the agent's commands; a test keeps this default equal
+# to its DEFAULT_MIGHTLING_AIRGAPPED. Listed loosest first.
+DEFAULT_MIGHTLING_AIRGAPPED: Final[str] = "off"
+MIGHTLING_AIRGAPPED_LEVELS: Final[tuple] = ("off", "on")
+# The system prompt new ling sessions start with (`ling prompt`, specs/DREAMFERENCE_MIGHTLING_PROMPT.md):
 # `default` (Codex's own), `high-swe`, or a custom prompt in `$CODEX_HOME/system-prompts/<name>.md`.
-# The Rust launcher reads it too (DREAMFERENCE_PUFFIN_PROMPT, then `puffin_prompt` in the TOML file)
+# The Rust launcher reads it too (DREAMFERENCE_MIGHTLING_PROMPT, then `mightling_prompt` in the TOML file)
 # and decides whether a name is installed; a test keeps this default equal to DEFAULT_PROMPT in
-# puffin-rs/src/prompt.rs.
-DEFAULT_PUFFIN_PROMPT: Final[str] = "default"
-PUFFIN_PROMPT_NAME: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+# ling-rs/src/prompt.rs.
+DEFAULT_MIGHTLING_PROMPT: Final[str] = "default"
+MIGHTLING_PROMPT_NAME: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -95,11 +95,11 @@ class DreamferenceConfig:
         cave_mode: Optional[bool] = None,
         use_tensorizer: Optional[bool] = None,
         guided_decoding_backend: Optional[str] = None,
-        puffin_gmail: Optional[bool] = None,
-        puffin_compaction_ledger: Optional[bool] = None,
-        puffin_cave_mode: Optional[str] = None,
-        puffin_airgapped: Optional[str] = None,
-        puffin_prompt: Optional[str] = None,
+        mightling_gmail: Optional[bool] = None,
+        mightling_compaction_ledger: Optional[bool] = None,
+        mightling_cave_mode: Optional[str] = None,
+        mightling_airgapped: Optional[str] = None,
+        mightling_prompt: Optional[str] = None,
     ):
         """
         Initializes DreamferenceConfig by loading file defaults and overriding with environment variables and parameters.
@@ -268,48 +268,48 @@ class DreamferenceConfig:
         else:
             self.use_tensorizer = bool(self.file_data.get("use_tensorizer", DEFAULT_USE_TENSORIZER))
 
-        env_puffin_gmail = os.getenv("DREAMFERENCE_PUFFIN_GMAIL")
-        if puffin_gmail is not None:
-            self.puffin_gmail: bool = puffin_gmail
-        elif env_puffin_gmail is not None:
-            self.puffin_gmail = env_puffin_gmail.lower() in ("1", "true", "yes")
+        env_mightling_gmail = os.getenv("DREAMFERENCE_MIGHTLING_GMAIL")
+        if mightling_gmail is not None:
+            self.mightling_gmail: bool = mightling_gmail
+        elif env_mightling_gmail is not None:
+            self.mightling_gmail = env_mightling_gmail.lower() in ("1", "true", "yes")
         else:
-            self.puffin_gmail = bool(self.file_data.get("puffin_gmail", DEFAULT_PUFFIN_GMAIL))
+            self.mightling_gmail = bool(self.file_data.get("mightling_gmail", DEFAULT_MIGHTLING_GMAIL))
 
-        env_ledger = os.getenv("DREAMFERENCE_PUFFIN_COMPACTION_LEDGER")
-        if puffin_compaction_ledger is not None:
-            self.puffin_compaction_ledger: bool = puffin_compaction_ledger
+        env_ledger = os.getenv("DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER")
+        if mightling_compaction_ledger is not None:
+            self.mightling_compaction_ledger: bool = mightling_compaction_ledger
         elif env_ledger:
-            self.puffin_compaction_ledger = env_ledger.lower() in ("1", "true", "yes", "on")
+            self.mightling_compaction_ledger = env_ledger.lower() in ("1", "true", "yes", "on")
         else:
-            self.puffin_compaction_ledger = bool(
-                self.file_data.get("puffin_compaction_ledger", DEFAULT_PUFFIN_COMPACTION_LEDGER))
+            self.mightling_compaction_ledger = bool(
+                self.file_data.get("mightling_compaction_ledger", DEFAULT_MIGHTLING_COMPACTION_LEDGER))
 
         # The same tiers the launcher reads, first valid value wins; an invalid one is skipped there
         # too, so a typo in one tier falls through rather than switching cave mode off.
-        self.puffin_cave_mode: str = DEFAULT_PUFFIN_CAVE_MODE
-        for candidate in (puffin_cave_mode, os.getenv("DREAMFERENCE_PUFFIN_CAVE_MODE"), self.file_data.get("puffin_cave_mode")):
-            if isinstance(candidate, str) and candidate.strip().lower() in PUFFIN_CAVE_MODE_LEVELS:
-                self.puffin_cave_mode = candidate.strip().lower()
+        self.mightling_cave_mode: str = DEFAULT_MIGHTLING_CAVE_MODE
+        for candidate in (mightling_cave_mode, os.getenv("DREAMFERENCE_MIGHTLING_CAVE_MODE"), self.file_data.get("mightling_cave_mode")):
+            if isinstance(candidate, str) and candidate.strip().lower() in MIGHTLING_CAVE_MODE_LEVELS:
+                self.mightling_cave_mode = candidate.strip().lower()
                 break
 
         # The air-gap level, through the same tiers; an invalid value is skipped. This reads the one
         # configuration file this object resolved: the launcher also reads the user-level file and
         # takes the stricter of the two, because the agent can write the repository's.
-        self.puffin_airgapped: str = DEFAULT_PUFFIN_AIRGAPPED
-        for candidate in (puffin_airgapped, os.getenv("DREAMFERENCE_PUFFIN_AIRGAPPED"), self.file_data.get("puffin_airgapped")):
+        self.mightling_airgapped: str = DEFAULT_MIGHTLING_AIRGAPPED
+        for candidate in (mightling_airgapped, os.getenv("DREAMFERENCE_MIGHTLING_AIRGAPPED"), self.file_data.get("mightling_airgapped")):
             level = self.parse_airgapped_level(candidate)
             if level is not None:
-                self.puffin_airgapped = level
+                self.mightling_airgapped = level
                 break
 
         # The prompt's name, through the same tiers. Only its form is checked here: which prompts
         # are installed is known to the launcher, which skips a name it does not have.
-        self.puffin_prompt: str = DEFAULT_PUFFIN_PROMPT
-        for candidate in (puffin_prompt, os.getenv("DREAMFERENCE_PUFFIN_PROMPT"), self.file_data.get("puffin_prompt")):
+        self.mightling_prompt: str = DEFAULT_MIGHTLING_PROMPT
+        for candidate in (mightling_prompt, os.getenv("DREAMFERENCE_MIGHTLING_PROMPT"), self.file_data.get("mightling_prompt")):
             name = self.parse_prompt_name(candidate)
             if name is not None:
-                self.puffin_prompt = name
+                self.mightling_prompt = name
                 break
 
     @property
@@ -327,7 +327,7 @@ class DreamferenceConfig:
         """
         Sets the model and records that it was chosen deliberately.
 
-        Assigning a model is what `puffin-admin main-model set` does, and it is a pin by definition — the
+        Assigning a model is what `ling-admin main-model set` does, and it is a pin by definition — the
         caller named this model. That has to be remembered separately from the value itself, or
         save_config() cannot tell a deliberate choice from a value that merely matches today's
         default, and would drop the former on the floor.
@@ -353,7 +353,7 @@ class DreamferenceConfig:
         """
         Sets the diffusion model and records that it was chosen deliberately.
 
-        Assigning through this property is what `puffin-admin diffusion-model set` does, and it is a pin
+        Assigning through this property is what `ling-admin diffusion-model set` does, and it is a pin
         by definition -- same contract as the main model's setter above.
 
         Args:
@@ -381,7 +381,7 @@ class DreamferenceConfig:
         if not isinstance(value, str):
             return None
         name = value.strip().lower()
-        return name if name in PUFFIN_AIRGAPPED_LEVELS else None
+        return name if name in MIGHTLING_AIRGAPPED_LEVELS else None
 
     @classmethod
     def parse_prompt_name(cls, value: Any) -> Optional[str]:
@@ -397,19 +397,19 @@ class DreamferenceConfig:
         if not isinstance(value, str):
             return None
         name = value.strip()
-        return name if PUFFIN_PROMPT_NAME.fullmatch(name) else None
+        return name if MIGHTLING_PROMPT_NAME.fullmatch(name) else None
 
     @classmethod
     def resolve_airgapped_level(cls, cwd: Optional[Path] = None) -> str:
         """
         Resolves the configured air-gap level the way the Rust side does for a command with no
-        session (`puffin-rs/airgapped`, tiers 2 to 4): `DREAMFERENCE_PUFFIN_AIRGAPPED`, then the
+        session (`ling-rs/airgapped`, tiers 2 to 4): `DREAMFERENCE_MIGHTLING_AIRGAPPED`, then the
         **stricter** of the two configuration files, then the default.
 
         The two files are the one `DREAMFERENCE_CONFIG_PATH` names (or `<cwd>/dreamference.toml`)
         and the user-level `~/.config/dreamference/config.toml`. The stricter wins because an agent
         can write the repository's file: it may tighten the user's level, never loosen it. An
-        instance's `puffin_airgapped` reads one file only, so anything that *acts* on the level
+        instance's `mightling_airgapped` reads one file only, so anything that *acts* on the level
         (the MCP server's web tools) asks here.
 
         Args:
@@ -418,7 +418,7 @@ class DreamferenceConfig:
         Returns:
             str: `off` or `on`.
         """
-        level = cls.parse_airgapped_level(os.getenv("DREAMFERENCE_PUFFIN_AIRGAPPED"))
+        level = cls.parse_airgapped_level(os.getenv("DREAMFERENCE_MIGHTLING_AIRGAPPED"))
         if level is not None:
             return level
         custom = os.getenv("DREAMFERENCE_CONFIG_PATH")
@@ -431,11 +431,11 @@ class DreamferenceConfig:
             if not path.is_file():
                 continue
             level = cls.parse_airgapped_level(
-                ConfigFileStorageManager.load_config_dict(path).get("puffin_airgapped"))
-            if level is not None and (strictest is None or PUFFIN_AIRGAPPED_LEVELS.index(level)
-                                      > PUFFIN_AIRGAPPED_LEVELS.index(strictest)):
+                ConfigFileStorageManager.load_config_dict(path).get("mightling_airgapped"))
+            if level is not None and (strictest is None or MIGHTLING_AIRGAPPED_LEVELS.index(level)
+                                      > MIGHTLING_AIRGAPPED_LEVELS.index(strictest)):
                 strictest = level
-        return strictest or DEFAULT_PUFFIN_AIRGAPPED
+        return strictest or DEFAULT_MIGHTLING_AIRGAPPED
 
     def save_config(self, target_path: Optional[Path] = None) -> Path:
         """
@@ -475,12 +475,12 @@ class DreamferenceConfig:
         if self.cave_mode != DEFAULT_CAVE_MODE: data["cave_mode"] = self.cave_mode
         if self.guided_decoding_backend != DEFAULT_GUIDED_DECODING_BACKEND: data["guided_decoding_backend"] = self.guided_decoding_backend
         if self.use_tensorizer != DEFAULT_USE_TENSORIZER: data["use_tensorizer"] = self.use_tensorizer
-        if self.puffin_gmail != DEFAULT_PUFFIN_GMAIL: data["puffin_gmail"] = self.puffin_gmail
-        if self.puffin_compaction_ledger != DEFAULT_PUFFIN_COMPACTION_LEDGER:
-            data["puffin_compaction_ledger"] = self.puffin_compaction_ledger
-        if self.puffin_cave_mode != DEFAULT_PUFFIN_CAVE_MODE: data["puffin_cave_mode"] = self.puffin_cave_mode
-        if self.puffin_airgapped != DEFAULT_PUFFIN_AIRGAPPED: data["puffin_airgapped"] = self.puffin_airgapped
-        if self.puffin_prompt != DEFAULT_PUFFIN_PROMPT: data["puffin_prompt"] = self.puffin_prompt
+        if self.mightling_gmail != DEFAULT_MIGHTLING_GMAIL: data["mightling_gmail"] = self.mightling_gmail
+        if self.mightling_compaction_ledger != DEFAULT_MIGHTLING_COMPACTION_LEDGER:
+            data["mightling_compaction_ledger"] = self.mightling_compaction_ledger
+        if self.mightling_cave_mode != DEFAULT_MIGHTLING_CAVE_MODE: data["mightling_cave_mode"] = self.mightling_cave_mode
+        if self.mightling_airgapped != DEFAULT_MIGHTLING_AIRGAPPED: data["mightling_airgapped"] = self.mightling_airgapped
+        if self.mightling_prompt != DEFAULT_MIGHTLING_PROMPT: data["mightling_prompt"] = self.mightling_prompt
 
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

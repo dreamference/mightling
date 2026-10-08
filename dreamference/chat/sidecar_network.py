@@ -20,7 +20,7 @@ import subprocess
 from typing import Final
 
 # User-defined, so its containers resolve names through the host's resolver as it is at lookup
-# time. A network of its own rather than Onyx's, because SearXNG serves `puffin-search` and the MCP
+# time. A network of its own rather than Onyx's, because SearXNG serves `ling-search` and the MCP
 # server on machines where the web UI is not installed.
 SIDECAR_NETWORK: Final[str] = "dreamference-sidecars"
 

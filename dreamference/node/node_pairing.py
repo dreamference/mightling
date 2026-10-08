@@ -1,9 +1,9 @@
 """
-Pairing with another node over SSH (specs/DREAMFERENCE_PUFFIN_NODE.md §13.2, §15.1).
+Pairing with another node over SSH (specs/DREAMFERENCE_MIGHTLING_NODE.md §13.2, §15.1).
 
 Using a node (prompts, search, the web UI) is open to the local network. Controlling one, or
 running a job on it, is not: that goes through a key made for nothing else, which the other node
-restricts to one forced command, `puffin-admin node serve-job`. `puffin-admin node add <node>`
+restricts to one forced command, `ling-admin node serve-job`. `ling-admin node add <node>`
 sets the key up once; the user never types an SSH command.
 """
 
@@ -15,13 +15,13 @@ from typing import Any, Dict, Final, List, Optional
 
 from dreamference.node.node_browser import NodeBrowser
 
-KEY_NAME: Final[str] = "puffin-node_ed25519"
+KEY_NAME: Final[str] = "mightling-node_ed25519"
 
 # What the restricted key may not do, beside running anything but the forced command.
 KEY_RESTRICTIONS: Final[str] = "no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc"
 
-# The marker that tells Puffin's lines in `authorized_keys` from the user's own.
-KEY_COMMENT: Final[str] = "puffin-node"
+# The marker that tells Mightling's lines in `authorized_keys` from the user's own.
+KEY_COMMENT: Final[str] = "mightling-node"
 
 
 class NodePairing:
@@ -31,7 +31,7 @@ class NodePairing:
     def key_path(cls) -> Path:
         """
         Returns:
-            Path: `~/.ssh/puffin-node_ed25519`, the private key used for nothing else.
+            Path: `~/.ssh/mightling-node_ed25519`, the private key used for nothing else.
         """
         return Path(os.path.expanduser("~/.ssh")) / KEY_NAME
 
@@ -106,7 +106,7 @@ class NodePairing:
             address: a different machine answering at the same address later is refused, and the
             same node at a new address is not.
         """
-        return f"puffin-node-{node_id}"
+        return f"mightling-node-{node_id}"
 
     @classmethod
     def ssh_options(cls, record: Dict[str, Any], accept_new: bool = False) -> List[str]:
@@ -212,7 +212,7 @@ class NodePairing:
         import getpass
         target = cls.discover(name)
         if target is None:
-            print(f"❌ No node named {name} answers on this network (`puffin-admin node list`).")
+            print(f"❌ No node named {name} answers on this network (`ling-admin node list`).")
             return False
         public_key = cls.ensure_key()
         if public_key is None:
@@ -238,7 +238,7 @@ class NodePairing:
             print("❌ The machine that answered is not the node that was advertised; pairing removed.")
             cls.record_path(record["node"]).unlink(missing_ok=True)
             return False
-        print(f"✅ Paired with {record['name']}. This key can ask it for `puffin-admin node` operations and nothing else.")
+        print(f"✅ Paired with {record['name']}. This key can ask it for `ling-admin node` operations and nothing else.")
         if info.get("linger") is False:
             print(f"⚠️  Lingering is off for {record['user']} on {record['name']}: a job would stop when its "
                   f"sender disconnects. On that node: loginctl enable-linger")
@@ -247,7 +247,7 @@ class NodePairing:
     @classmethod
     def authorize_on_node(cls, record: Dict[str, Any], public_key: str) -> bool:
         """
-        Sends the public key to the node's `puffin-admin node authorize`, over an ordinary SSH
+        Sends the public key to the node's `ling-admin node authorize`, over an ordinary SSH
         login (password or the user's own key), which writes the restricted line.
 
         Args:
@@ -262,7 +262,7 @@ class NodePairing:
                    "-o", f"HostKeyAlias={cls.host_alias(record['node'])}",
                    "-o", "StrictHostKeyChecking=accept-new",
                    f"{record['user']}@{record['address']}",
-                   "$HOME/.local/bin/puffin-admin node authorize"]
+                   "$HOME/.local/bin/ling-admin node authorize"]
         try:
             return subprocess.run(command, input=public_key + "\n", text=True, check=False).returncode == 0
         except OSError:

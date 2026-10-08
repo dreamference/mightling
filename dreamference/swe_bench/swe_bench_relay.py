@@ -1,6 +1,6 @@
 """
 A TCP relay from the benchmark network's gateway to another node's model server
-(specs/DREAMFERENCE_PUFFIN_NODE.md §12.3, specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md).
+(specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3, specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 
 An instance's container is on an internal Docker network whose only reachable address is the
 gateway, where this machine's model server answers. A paired node serving the same model is not

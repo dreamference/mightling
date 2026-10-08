@@ -5,7 +5,7 @@ expression: "format!(\"before reveal:\\n{hidden}\\nrunning:\\n{running}\\ncomple
 before reveal:
 "                                                                                "
 "                                                                                "
-"› Ask Puffin to do anything                                                     "
+"› Ask Mightling to do anything                                                     "
 "                                                                                "
 "  GPT-5.6-Sol default · /tmp/project                                            "
 running:
@@ -13,12 +13,12 @@ running:
 "• Saving session summary                                                        "
 "                                                                                "
 "                                                                                "
-"› Ask Puffin to do anything                                                     "
+"› Ask Mightling to do anything                                                     "
 "                                                                                "
 "  GPT-5.6-Sol default · /tmp/project                                            "
 completed:
 "                                                                                "
 "                                                                                "
-"› Ask Puffin to do anything                                                     "
+"› Ask Mightling to do anything                                                     "
 "                                                                                "
 "  GPT-5.6-Sol default · /tmp/project                                            "

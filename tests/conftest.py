@@ -47,7 +47,7 @@ from dreamference.vllm_server.vllm_server_manager import VLLMServerManager  # no
 REAL_STOP_INDEX_SCOPES = VLLMServerManager._stop_index_scopes
 from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite  # noqa: E402
 
-# Every `puffin-admin` run checks bubblewrap through a transient unit of the user's systemd and may
+# Every `ling-admin` run checks bubblewrap through a transient unit of the user's systemd and may
 # ask a question; the fixture below replaces the check, and its own tests restore this.
 REAL_SANDBOX_GATE = SandboxPrerequisite.gate
 # The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
@@ -94,12 +94,12 @@ def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_node_advert(tmp_path_factory, monkeypatch):
     # `server start` and `server stop` rewrite the node's Avahi service file when one exists
-    # (specs/DREAMFERENCE_PUFFIN_NODE.md §5.2). It lives under /etc, which the home isolation
+    # (specs/DREAMFERENCE_MIGHTLING_NODE.md §5.2). It lives under /etc, which the home isolation
     # below does not reach: without this, a server test on an advertised node would change what
     # the real node tells the network. sudo is never run from a test either.
     from dreamference.node import NodeAdvertiser, NodeServiceFile
 
-    scratch = tmp_path_factory.mktemp("avahi") / "puffin-node.service"
+    scratch = tmp_path_factory.mktemp("avahi") / "mightling-node.service"
     monkeypatch.setattr(NodeServiceFile, "service_path", scratch)
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(lambda cls, command, purpose: False))
     # Whether this machine has Avahi must not decide a test (it does not on a CI runner).
@@ -127,7 +127,7 @@ def _refuse_real_docker(monkeypatch):
             if os.path.basename(str(program)) == "docker" and _changes_something(argv):
                 raise AssertionError(f"a test tried to run a real docker command: {argv!r}; mock it")
             # `server start` stops the code index's scopes before its host-safety pre-flight
-            # (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §9.2): a test must never stop, freeze or
+            # (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §9.2): a test must never stop, freeze or
             # start a unit of the user's own systemd.
             if os.path.basename(str(program)) in ("systemctl", "systemd-run") and _changes_systemd(argv):
                 raise AssertionError(f"a test tried to run a real systemd command: {argv!r}; mock it")
@@ -197,9 +197,9 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # that builds a docker command into creating folders in the real cache.
     for name in ("HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME"):
         monkeypatch.delenv(name, raising=False)
-    # `puffin` exports CODEX_HOME to every command it runs, so a suite started by the agent, or by
+    # `ling` exports CODEX_HOME to every command it runs, so a suite started by the agent, or by
     # Night Shift's sandboxed test run, resolved `$CODEX_HOME/night` and the rest to the real
-    # ~/.puffin whatever HOME said: outside a sandbox it wrote the real `night/runner.lock`, and
+    # ~/.mightling whatever HOME said: outside a sandbox it wrote the real `night/runner.lock`, and
     # inside one that write failed a test (2026-10-02). A test that needs the variable sets it.
     monkeypatch.delenv("CODEX_HOME", raising=False)
 

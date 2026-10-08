@@ -1,11 +1,11 @@
 // Signs the window in with the web UI's default account, once, when it has no session
-// (specs/DREAMFERENCE_PUFFIN_NODE.md §7). A fresh install has one account with a published
-// default password, and "type `puffin-app` and it works" is the point of the client; an owner
+// (specs/DREAMFERENCE_MIGHTLING_NODE.md §7). A fresh install has one account with a published
+// default password, and "type `ling-app` and it works" is the point of the client; an owner
 // who changed the password gets the ordinary login page, because the attempt fails and is not
 // repeated. Evaluated by main.rs after every page load; the two placeholders are filled in there.
 (function () {
   "use strict";
-  var FLAG = "puffin-auto-sign-in";
+  var FLAG = "mightling-auto-sign-in";
   try {
     if (window.sessionStorage.getItem(FLAG)) {
       return;
@@ -22,8 +22,8 @@
           credentials: "same-origin",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body:
-            "username=" + encodeURIComponent("__PUFFIN_EMAIL__") +
-            "&password=" + encodeURIComponent("__PUFFIN_PASSWORD__"),
+            "username=" + encodeURIComponent("__MIGHTLING_EMAIL__") +
+            "&password=" + encodeURIComponent("__MIGHTLING_PASSWORD__"),
         });
       })
       .then(function (login) {

@@ -1,6 +1,6 @@
-"""The Python side of the code index: `puffin-admin code setup`, and the model server stopping
-puffin-code's index runs before a load (specs/DREAMFERENCE_PUFFIN_CODE_INDEX.md §5, §9.2).
-The router itself is Rust, tested with `cargo test` in puffin-code-rs/."""
+"""The Python side of the code index: `ling-admin code setup`, and the model server stopping
+ling-code's index runs before a load (specs/DREAMFERENCE_MIGHTLING_CODE_INDEX.md §5, §9.2).
+The router itself is Rust, tested with `cargo test` in ling-code-rs/."""
 
 import hashlib
 import inspect
@@ -34,7 +34,7 @@ def test_the_pins_name_every_tool_with_a_sha256():
     for tool in pins.values():
         assert len(tool.sha256) == 64
         assert tool.url.startswith(("https://github.com/", "https://api.nuget.org/")), tool.url
-    # linux-arm64 builds, the platform Puffin targets; scip-clang has none and is not pinned.
+    # linux-arm64 builds, the platform Mightling targets; scip-clang has none and is not pinned.
     assert "arm64" in pins["scip-go"].url and "scip-clang" not in pins
     # The scip CLI's pin is the one the spec records (§3).
     assert pins["scip"].sha256 == "6ab677dc2c4bf2955975d0530766152e45daaa988f9404068d8adecacd0bb24c"
@@ -163,7 +163,7 @@ def test_toolchains_are_found_once_and_only_when_new_enough(tmp_path, monkeypatc
     monkeypatch.setattr(code_setup, "INDEXERS_DIR", str(tmp_path / "indexers"))
     CodeIndexSetup.record_toolchains({"go": str(goroot), "java": str(jdk)})
     assert os.readlink(tmp_path / "indexers" / "go") == str(goroot)
-    # A toolchain no longer found loses its link, so puffin-code never runs a stale path.
+    # A toolchain no longer found loses its link, so ling-code never runs a stale path.
     CodeIndexSetup.record_toolchains({"go": str(goroot)})
     assert not os.path.lexists(tmp_path / "indexers" / "java")
 
@@ -206,7 +206,7 @@ def test_the_admin_command_dispatches_setup(monkeypatch):
     from dreamference.cli.dreamference_cli_controller import main
 
     monkeypatch.setattr(CodeIndexSetup, "install", classmethod(lambda cls: True))
-    monkeypatch.setattr(sys, "argv", ["puffin-admin", "code", "setup"])
+    monkeypatch.setattr(sys, "argv", ["ling-admin", "code", "setup"])
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 0
@@ -228,7 +228,7 @@ def test_stopping_index_runs_asks_the_user_systemd(monkeypatch):
         lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
     )
     VLLMServerManager._stop_index_scopes()
-    assert calls == [["systemctl", "--user", "stop", "puffin-index-*"]]
+    assert calls == [["systemctl", "--user", "stop", "mightling-index-*"]]
     # No systemd at all (a container): nothing to stop, and no error.
     monkeypatch.setattr(
         "dreamference.vllm_server.vllm_server_manager.subprocess.run",
@@ -239,6 +239,6 @@ def test_stopping_index_runs_asks_the_user_systemd(monkeypatch):
 
 def test_tests_cannot_reach_the_user_systemd():
     with pytest.raises(AssertionError, match="real systemd command"):
-        subprocess.run(["systemctl", "--user", "stop", "puffin-index-*"])
+        subprocess.run(["systemctl", "--user", "stop", "mightling-index-*"])
     with pytest.raises(AssertionError, match="real systemd command"):
         subprocess.run(["systemd-run", "--user", "--scope", "true"])

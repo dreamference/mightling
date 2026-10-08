@@ -1,4 +1,4 @@
-# Puffin Architecture Overview
+# Mightling Architecture Overview
 
 > - **Version:** 1.2.0 (`dreamference.__version__`, `setup.py`)
 > - **Target Hardware:** NVIDIA GB10 (Blackwell SM121, 128 GB unified LPDDR5X)
@@ -10,34 +10,34 @@
 
 ## 1. Executive Summary
 
-**Puffin** (by Dreamference) is a local agentic coding platform for a single NVIDIA GB10: inference runs on the machine and no code or prompt goes to a cloud model. It is not air-gapped by default, because the agent's web search, page fetch and Gmail tools use the internet; `/airgapped on` switches those off and takes the network away from the agent's sandboxed commands, with the holes `DREAMFERENCE_PUFFIN_AIRGAPPED.md` lists (see also `DREAMFERENCE_PUFFIN_EGRESS.md`). It serves open models in Docker (SGLang for the default model, vLLM for the others), and puts three front ends on the same local standard /v1 endpoint:
+**Mightling** (by Dreamference) is a local agentic coding platform for a single NVIDIA GB10: inference runs on the machine and no code or prompt goes to a cloud model. It is not air-gapped by default, because the agent's web search, page fetch and Gmail tools use the internet; `/airgapped on` switches those off and takes the network away from the agent's sandboxed commands, with the holes `DREAMFERENCE_MIGHTLING_AIRGAPPED.md` lists (see also `DREAMFERENCE_MIGHTLING_EGRESS.md`). It serves open models in Docker (SGLang for the default model, vLLM for the others), and puts three front ends on the same local standard /v1 endpoint:
 
-- **`puffin`:** the terminal coding agent, and the default. It is a Puffin-branded build of Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`puffin-rs/`).
-- **Puffin web UI:** Onyx Lite, deployed and patched by `puffin-admin puffin …`. It is a browser chat with web search, image search, voice and Gmail, and it is also shown as a desktop window by the Tauri shell `puffin-app`.
-- **Other agents:** Cline, Continue and OpenHands, through `puffin-admin run --agent …`.
+- **`ling`:** the terminal coding agent, and the default. It is a Mightling-branded build of Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`ling-rs/`).
+- **Mightling web UI:** Onyx Lite, deployed and patched by `ling-admin chat …`. It is a browser chat with web search, image search, voice and Gmail, and it is also shown as a desktop window by the Tauri shell `ling-app`.
+- **Other agents:** Cline, Continue and OpenHands, through `ling-admin run --agent …`.
 
-Everything is administered through **`puffin-admin`**, the Python CLI.
+Everything is administered through **`ling-admin`**, the Python CLI.
 
-Since 2026-10-02 the GB10 can also be offered to the local network as a **node**: `puffin-admin node enable` advertises it over mDNS, and `puffin`, `puffin-search` and `puffin-app` on another machine find it with no address typed. The split is built in part, and with one GB10 here nothing has run between two machines; `DREAMFERENCE_PUFFIN_NODE.md` §18 says what was built and measured.
+Since 2026-10-02 the GB10 can also be offered to the local network as a **node**: `ling-admin node enable` advertises it over mDNS, and `ling`, `ling-search` and `ling-app` on another machine find it with no address typed. The split is built in part, and with one GB10 here nothing has run between two machines; `DREAMFERENCE_MIGHTLING_NODE.md` §18 says what was built and measured.
 
 ```text
 +------------------------------------------------------------------------------------+
 |  Front ends                                                                        |
-|   puffin (Rust, Codex fork)   Puffin web UI (Onyx Lite) / puffin-app   IDEs (MCP)  |
-|   puffin-admin run --agent cline|continue|openhands                                |
+|   ling (Rust, Codex fork)   Mightling web UI (Onyx Lite) / ling-app   IDEs (MCP)  |
+|   ling-admin run --agent cline|continue|openhands                                |
 +-----------------------+--------------------------------+---------------------------+
-                        | Standard /v1 HTTP          | stdio MCP (puffin-admin mcp)
+                        | Standard /v1 HTTP          | stdio MCP (ling-admin mcp)
 +-----------------------v--------------------------------v---------------------------+
 |  dreamference/ (Python)                                                            |
 |   config  hardware  vllm_server  runner  chat  context_engine  mcp_server          |
 |   night_shift  swe_bench  audit  node  cli                                         |
-|   agent tools: gmail (read-only); puffin-search, puffin-fetch, puffin-code: Rust   |
+|   agent tools: gmail (read-only); ling-search, ling-fetch, ling-code: Rust   |
 +-----------------------+------------------------------------------------------------+
                         | docker run
 +-----------------------v------------------------------------------------------------+
 |  Containers on the GB10                                                            |
 |   dreamference-vllm-8000 (main model)   (diffusion sidecar: switched off)          |
-|   puffin-* (Onyx: api, web, db, nginx, code-interpreter)                           |
+|   mightling-* (Onyx: api, web, db, nginx, code-interpreter)                           |
 |   dreamference-gmail, dreamference-image-search, dreamference-stt, dreamference-searxng |
 +------------------------------------------------------------------------------------+
 |  NVIDIA GB10 — Blackwell GPU + Arm CPU sharing 128 GB unified memory               |
@@ -95,50 +95,50 @@ Every field in `DreamferenceConfig.__init__` resolves, highest priority first:
 - **Host safety:** unified memory means a bad load can freeze the whole host. Two layers guard against it:
   - `check_host_safety()` runs *before* the load (swap, sysctl, earlyoom/systemd-oomd);
   - `psi_watchdog.MemoryPressureWatchdog` runs *during* it, sampling `/proc/pressure/memory` and killing the container on sustained pressure.
-- `diffusion_server_manager.py` / `diffusion_openai_service.py`: the diffusion sidecar. It runs in the main model's image, starts *before* vLLM, and is capped at `--memory=8g`. **Switched off since 2026-10-03** (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`): `server start` starts no sidecar and removes one an older Puffin left behind; the code and its tests are kept.
+- `diffusion_server_manager.py` / `diffusion_openai_service.py`: the diffusion sidecar. It runs in the main model's image, starts *before* vLLM, and is capped at `--memory=8g`. **Switched off since 2026-10-03** (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`): `server start` starts no sidecar and removes one an older Mightling left behind; the code and its tests are kept.
 
 ### 3.4. `runner/`: agents
 
-Four runner/installer pairs (Codex, Cline, Continue, OpenHands; Goose and Aider were removed on 2026-09-30) plus `vllm_readiness_waiter.py`. For Codex, the default, `codex_branded_builder.py` builds `puffin` from the submodule, patches and launcher, and `codex_test_runner.py` runs Codex's own tests on that tree (`puffin-admin codex test`). See `DREAMFERENCE_AGENTS.md` and `DREAMFERENCE_PUFFIN_CODEX.md`.
+Four runner/installer pairs (Codex, Cline, Continue, OpenHands; Goose and Aider were removed on 2026-09-30) plus `vllm_readiness_waiter.py`. For Codex, the default, `codex_branded_builder.py` builds `ling` from the submodule, patches and launcher, and `codex_test_runner.py` runs Codex's own tests on that tree (`ling-admin codex test`). See `DREAMFERENCE_AGENTS.md` and `DREAMFERENCE_MIGHTLING_CODEX.md`.
 
-### 3.5. `chat/`: the Puffin web UI and desktop
+### 3.5. `chat/`: the Mightling web UI and desktop
 
 - `onyx_runner.py` / `onyx_installer.py`: the Onyx Lite lifecycle and `configure`: LLM provider, branding, web search, voice, Gmail, image search.
 - `onyx_ui_overrides.py`, `onyx_ui_fonts.py`, `onyx_ui_labels.py`, `onyx_ui_scripts.py`, `onyx_brand_assets.py`: patches applied to Onyx's served CSS, JS and assets.
 - `gmail_search_service.py`, `gmail_credentials.py`, `gmail_client.py`: the read-only Gmail service and its client.
 - `image_search_service.py`: the image search sidecar.
-- `searxng_sidecar.py`, `sidecar_network.py`: the SearXNG container (`puffin-admin searxng start`) and the user-defined network the sidecars are created on.
-- `desktop_runner.py` / `desktop_installer.py`: the Tauri window `puffin-app` (project in `desktop/`).
+- `searxng_sidecar.py`, `sidecar_network.py`: the SearXNG container (`ling-admin searxng start`) and the user-defined network the sidecars are created on.
+- `desktop_runner.py` / `desktop_installer.py`: the Tauri window `ling-app` (project in `desktop/`).
 
-See `DREAMFERENCE_ONYX.md`, `DREAMFERENCE_PUFFIN_GMAIL.md` and `DREAMFERENCE_IMAGE_SEARCH.md`.
+See `DREAMFERENCE_ONYX.md`, `DREAMFERENCE_MIGHTLING_GMAIL.md` and `DREAMFERENCE_IMAGE_SEARCH.md`.
 
 ### 3.6. `context_engine/`: workspace index
 
-Python `ast` symbols (`ast_symbol_extractor.py`), TF-IDF, SQLite FTS5 and `nomic-embed-text-v1.5` embeddings stored as plain float32 blobs in SQLite (`sqlite_context_storage.py`, `embedding_calculator.py`; sqlite-vec is not used), all written to `.dreamference/`. It serves the web canvas, and `workspace_search_code` over MCP where the workspace has no `puffin-code` index (§3.7); `puffin` does not use it. See `DREAMFERENCE_CONTEXT.md`.
+Python `ast` symbols (`ast_symbol_extractor.py`), TF-IDF, SQLite FTS5 and `nomic-embed-text-v1.5` embeddings stored as plain float32 blobs in SQLite (`sqlite_context_storage.py`, `embedding_calculator.py`; sqlite-vec is not used), all written to `.dreamference/`. It serves the web canvas, and `workspace_search_code` over MCP where the workspace has no `ling-code` index (§3.7); `ling` does not use it. See `DREAMFERENCE_CONTEXT.md`.
 
 ### 3.7. `mcp_server/`: IDE companion
 
-A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `IDEState`, plus `web_search` / `web_fetch` (`web_tools.py`) and `workspace_search_code`, which `code_index_search.py` answers from `puffin-code` when the workspace is indexed and the context engine answers otherwise.
+A stdio MCP server (`ling-admin mcp`) with `ide_*` tools over an in-process `IDEState`, plus `web_search` / `web_fetch` (`web_tools.py`) and `workspace_search_code`, which `code_index_search.py` answers from `ling-code` when the workspace is indexed and the context engine answers otherwise.
 
-### 3.8. `cli/`: `puffin-admin`
+### 3.8. `cli/`: `ling-admin`
 
 `dreamference_cli_controller.py` (`build_parser`, `run_cli`), `model_deep_inspector.py` (`main-model inspect --deep`), `sonnet_dataset.py` (for `benchmark_server`) and `code_index_setup.py` (`code setup`). See `DREAMFERENCE_CLI.md`.
 
 ### 3.9. `night_shift/`: the overnight queue
 
-`puffin-admin night {enable,disable,status,run}`: the queue the launcher writes (`night_shift_queue.py`), settings (`night_shift_settings.py`), host probes (`night_shift_host.py`), one task in its own git worktree (`night_shift_task_run.py`), admission and scheduling (`night_shift_runner.py`), the code-index refresh before a repository's tasks (`night_shift_index.py`), the morning report (`night_shift_report.py`) and the systemd user timer (`night_shift_scheduler.py`). See `DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md`.
+`ling-admin night {enable,disable,status,run}`: the queue the launcher writes (`night_shift_queue.py`), settings (`night_shift_settings.py`), host probes (`night_shift_host.py`), one task in its own git worktree (`night_shift_task_run.py`), admission and scheduling (`night_shift_runner.py`), the code-index refresh before a repository's tasks (`night_shift_index.py`), the morning report (`night_shift_report.py`) and the systemd user timer (`night_shift_scheduler.py`). See `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md`.
 
 ### 3.10. `swe_bench/`: SWE-bench on this machine
 
-`puffin-admin swe-bench {setup,smoke,run,eval,report,status,clean}`. The agent phase (`swe_bench_runner.py`, `swe_bench_instance_run.py`) runs one `puffin exec` per instance inside that instance's own container, on an internal Docker network that reaches only the model server, with a relocated copy of `puffin` (`swe_bench_runtime.py`); the upstream harness, in a virtualenv of its own (`swe_bench_harness.py`), validates instances and grades patches (`swe_bench_evaluator.py`). Images are third-party arm64 builds (`swe_bench_images.py`); `--code-index universal` adds `puffin-code` as an arm (`swe_bench_code_index.py`). It shares Night Shift's admission and runner lock. See `DREAMFERENCE_PUFFIN_SWE_BENCH.md`.
+`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}`. The agent phase (`swe_bench_runner.py`, `swe_bench_instance_run.py`) runs one `ling exec` per instance inside that instance's own container, on an internal Docker network that reaches only the model server, with a relocated copy of `ling` (`swe_bench_runtime.py`); the upstream harness, in a virtualenv of its own (`swe_bench_harness.py`), validates instances and grades patches (`swe_bench_evaluator.py`). Images are third-party arm64 builds (`swe_bench_images.py`); `--code-index universal` adds `ling-code` as an arm (`swe_bench_code_index.py`). It shares Night Shift's admission and runner lock. See `DREAMFERENCE_MIGHTLING_SWE_BENCH.md`.
 
 ### 3.11. `audit/`: what a session does on the network
 
-`puffin-admin audit egress` (`egress_audit.py`) runs one real `puffin exec` under `strace` in a throwaway repository and home, parses the trace (`strace_parser.py`, `egress_trace.py`) and gives a verdict (`egress_verdict.py`). See `DREAMFERENCE_PUFFIN_EGRESS.md`.
+`ling-admin audit egress` (`egress_audit.py`) runs one real `ling exec` under `strace` in a throwaway repository and home, parses the trace (`strace_parser.py`, `egress_trace.py`) and gives a verdict (`egress_verdict.py`). See `DREAMFERENCE_MIGHTLING_EGRESS.md`.
 
 ### 3.12. `node/`: the GB10 as a node
 
-`puffin-admin node {enable,disable,status,list,add,remove,set,start,stop}`. Advertising is `node_advertiser.py`: the Avahi service file that advertises `_puffin-node._tcp` (`node_service_file.py`), the node's stable id (`node_identity.py`), the two switches for what is published beyond loopback (`node_settings.py`) and a browse of the network as clients see it (`node_browser.py`). Managing another node is `node_remote.py`, over an SSH pairing (`node_pairing.py`) whose key the other node restricts to one forced command (`node_serve.py`). The client side is in the Rust crates (§3.13). See `DREAMFERENCE_PUFFIN_NODE.md`.
+`ling-admin node {enable,disable,status,list,add,remove,set,start,stop}`. Advertising is `node_advertiser.py`: the Avahi service file that advertises `_mightling-node._tcp` (`node_service_file.py`), the node's stable id (`node_identity.py`), the two switches for what is published beyond loopback (`node_settings.py`) and a browse of the network as clients see it (`node_browser.py`). Managing another node is `node_remote.py`, over an SSH pairing (`node_pairing.py`) whose key the other node restricts to one forced command (`node_serve.py`). The client side is in the Rust crates (§3.13). See `DREAMFERENCE_MIGHTLING_NODE.md`.
 
 ### 3.13. Outside the Python package
 
@@ -146,12 +146,12 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 | --- | --- |
 | `codex/` | Submodule: the `dgxcoder/codex` fork, pinned to `rust-v0.158.0`, never edited |
 | `codex-patches/` | Patch series applied to an exported copy at build time (17 patches, `0001`–`0019`) |
-| `puffin-rs/` | The launcher crate compiled into `puffin` (also `/usage`, `/cavemode`, `/night`, `/airgapped`, and `puffin node`), with two leaf crates that use only the standard library: `airgapped/` (the three levels) and `node-locator/` (where the node is) |
-| `puffin-web-rs/` | `puffin-search` and `puffin-fetch`, the agent's web commands: a standalone crate installed beside `puffin`. It carries byte-identical copies of the two leaf crates' sources |
-| `puffin-code-rs/` | `puffin-code`, the code index: a standalone crate installed beside `puffin` |
-| `desktop/` | Tauri project for `puffin-app`; on a machine that is not the node, a loopback forwarder brings the node's web UI to `localhost:3000` |
-| `dreamference/web_canvas.py` | `puffin-admin web` status page |
-| `.github/workflows/release.yml` | Manually triggered release: Python dist, desktop bundles, `puffin` binaries |
+| `ling-rs/` | The launcher crate compiled into `ling` (also `/usage`, `/cavemode`, `/night`, `/airgapped`, and `ling node`), with two leaf crates that use only the standard library: `airgapped/` (the three levels) and `node-locator/` (where the node is) |
+| `ling-web-rs/` | `ling-search` and `ling-fetch`, the agent's web commands: a standalone crate installed beside `ling`. It carries byte-identical copies of the two leaf crates' sources |
+| `ling-code-rs/` | `ling-code`, the code index: a standalone crate installed beside `ling` |
+| `desktop/` | Tauri project for `ling-app`; on a machine that is not the node, a loopback forwarder brings the node's web UI to `localhost:3000` |
+| `dreamference/web_canvas.py` | `ling-admin web` status page |
+| `.github/workflows/release.yml` | Manually triggered release: Python dist, desktop bundles, `ling` binaries |
 
 ---
 
@@ -162,14 +162,14 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 - [x] Diffusion sidecar beside the main model (switched off on 2026-10-03; the code is kept)
 - [x] Agent runners (Cline, Continue, OpenHands) and the stdio MCP server
 - [x] Context engine (AST, FTS5, TF-IDF, embeddings) and web canvas
-- [x] `puffin`: branded Codex from a pinned fork, Rust launcher, `update`, `app`, `/usage`
-- [x] Puffin web UI (Onyx Lite) with branding, web and image search, voice, Gmail; desktop window
-- [x] Code index for `puffin` (`puffin-code`: codebase-memory-mcp + SCIP), implemented 2026-10-01; its §14 lists the parts not built (`DREAMFERENCE_PUFFIN_CODE_INDEX.md`)
-- [x] Cave mode (`/cavemode`) and Night Shift (`/night`, `puffin-admin night`), 2026-10-01
-- [x] `/airgapped` (Phase 1, in part), the egress audit for `exec` sessions (`puffin-admin audit egress`) and SWE-bench (`puffin-admin swe-bench`, Phase 1), 2026-10-01
-- [ ] Client/server split (`puffin-admin node`, `puffin node`, the `puffin-app` forwarder, SSH pairing between nodes): Part 1 built in part on 2026-10-02, Parts 2 and 3 (other nodes as extra model servers, `node sync-model`, `node run --setup/--out/--bind`, `/night add --on`) on 2026-10-03; nothing run between two machines (`DREAMFERENCE_PUFFIN_NODE.md`)
-- [x] `/airgapped` at two levels (`duckduckgo` removed), `on` refused with Full Access, the start-up line; the sandbox prerequisite (`puffin-admin host setup`, the AppArmor profile for `bwrap`), 2026-10-03
-- [x] Named system prompts (`/prompt` Phase 1: `puffin prompt`, `default` and `high-swe`) and skills Phase 3 (Hermes, ClawHub, repository skills), 2026-10-03
+- [x] `ling`: branded Codex from a pinned fork, Rust launcher, `update`, `app`, `/usage`
+- [x] Mightling web UI (Onyx Lite) with branding, web and image search, voice, Gmail; desktop window
+- [x] Code index for `ling` (`ling-code`: codebase-memory-mcp + SCIP), implemented 2026-10-01; its §14 lists the parts not built (`DREAMFERENCE_MIGHTLING_CODE_INDEX.md`)
+- [x] Cave mode (`/cavemode`) and Night Shift (`/night`, `ling-admin night`), 2026-10-01
+- [x] `/airgapped` (Phase 1, in part), the egress audit for `exec` sessions (`ling-admin audit egress`) and SWE-bench (`ling-admin swe-bench`, Phase 1), 2026-10-01
+- [ ] Client/server split (`ling-admin node`, `ling node`, the `ling-app` forwarder, SSH pairing between nodes): Part 1 built in part on 2026-10-02, Parts 2 and 3 (other nodes as extra model servers, `node sync-model`, `node run --setup/--out/--bind`, `/night add --on`) on 2026-10-03; nothing run between two machines (`DREAMFERENCE_MIGHTLING_NODE.md`)
+- [x] `/airgapped` at two levels (`duckduckgo` removed), `on` refused with Full Access, the start-up line; the sandbox prerequisite (`ling-admin host setup`, the AppArmor profile for `bwrap`), 2026-10-03
+- [x] Named system prompts (`/prompt` Phase 1: `ling prompt`, `default` and `high-swe`) and skills Phase 3 (Hermes, ClawHub, repository skills), 2026-10-03
 - [ ] Proposed specs are marked *Proposed* in `specs/README.md`
 
 ---
@@ -179,8 +179,8 @@ A stdio MCP server (`puffin-admin mcp`) with `ide_*` tools over an in-process `I
 - **[DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md):** model matrix and default rationale
 - **[DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md):** vLLM launch recipes and flags
 - **[DREAMFERENCE_AGENTS.md](./DREAMFERENCE_AGENTS.md):** agent runtimes
-- **[DREAMFERENCE_PUFFIN_CODEX.md](./DREAMFERENCE_PUFFIN_CODEX.md):** the `puffin` binary
-- **[DREAMFERENCE_ONYX.md](./DREAMFERENCE_ONYX.md):** the Puffin web UI
+- **[DREAMFERENCE_MIGHTLING_CODEX.md](./DREAMFERENCE_MIGHTLING_CODEX.md):** the `ling` binary
+- **[DREAMFERENCE_ONYX.md](./DREAMFERENCE_ONYX.md):** the Mightling web UI
 - **[DREAMFERENCE_CONTEXT.md](./DREAMFERENCE_CONTEXT.md):** context engine
 - **[DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md):** Docker and caches
 - **[DREAMFERENCE_CLI.md](./DREAMFERENCE_CLI.md):** CLI reference

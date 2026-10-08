@@ -1,0 +1,53 @@
+# The Mightling launcher: what used to be Dreamference's Python `ling` entry point, compiled into the
+# branded Codex binary. It is not part of the codex submodule. CodexBrandedBuilder copies this crate
+# into the exported tree as `codex-rs/ling`; patch 0002 adds one dependency line to the CLI's
+# manifest (a path dependency inside the workspace root makes it a member automatically) and one
+# call in `cli_main`. It builds against the workspace's own dependency versions.
+[package]
+name = "ling-launcher"
+version.workspace = true
+edition.workspace = true
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "ling_launcher"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+codex-extension-api = { workspace = true }
+codex-models-manager = { workspace = true }
+codex-utils-home-dir = { workspace = true }
+flate2 = { workspace = true }
+# Pure-Rust mDNS browsing, one code path on Linux, macOS and Windows; no async runtime, no logging.
+mdns-sd = { version = "0.21.4", default-features = false }
+ling-airgapped = { path = "airgapped" }
+# Mightling's apps for `/apps` (patch 0022) and as MCP tools (src/apps.rs).
+ling-apps = { path = "apps" }
+# Observation masking: the rule Codex's core calls (patch 0021); the launcher sets its policy.
+ling-masking = { path = "masking" }
+ling-node-locator = { path = "node-locator" }
+# Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
+ling-skills = { path = "skills" }
+rand = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+semver = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+
+# Build OpenSSL from source on glibc Linux, as upstream does only for musl, so building ling needs
+# no libssl-dev. Cargo unifies features across the build, so enabling `vendored` here applies to the
+# openssl-sys every other crate links -- which is what keeps this out of a patch to codex-core.
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+openssl-sys = { workspace = true, features = ["vendored"] }
+
+[dev-dependencies]
+clap = { workspace = true, features = ["derive"] }
+tar = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+zip = { workspace = true }

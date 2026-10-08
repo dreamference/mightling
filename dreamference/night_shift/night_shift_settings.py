@@ -1,5 +1,5 @@
 """
-The `[night]` table of `dreamference.toml` (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §7).
+The `[night]` table of `dreamference.toml` (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §7).
 
 It is read directly through the same file resolution as every other setting
 (`DREAMFERENCE_CONFIG_PATH`, then `./dreamference.toml`, then the global file), because
@@ -57,13 +57,13 @@ class NightShiftSettings:
         # A stricter `/airgapped` level for night runs alone (airgapped spec §7), as written; the
         # runner takes the stricter of this and the configured level, so a looser one is ignored.
         self.airgapped: Any = table.get("airgapped")
-        # The system prompt each task's `puffin exec` starts with (prompt spec §7), passed as
-        # DREAMFERENCE_PUFFIN_PROMPT; absent, the configured one. A task resumed the next night keeps
+        # The system prompt each task's `ling exec` starts with (prompt spec §7), passed as
+        # DREAMFERENCE_MIGHTLING_PROMPT; absent, the configured one. A task resumed the next night keeps
         # the prompt it started with whatever this says, because a session keeps its prompt.
         prompt = table.get("prompt")
         self.prompt: Optional[str] = prompt.strip() if isinstance(prompt, str) and prompt.strip() else None
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
-        # Where a task's session compacts, passed to every `puffin exec` of the task (compaction
+        # Where a task's session compacts, passed to every `ling exec` of the task (compaction
         # spec §4.1). Absent (None, the default): the task's share of the KV pool, so the tasks of
         # a night fit in the pool together. A number: that limit, and only as many tasks at once as
         # fit at it. 0: no limit, the launcher's own (60% of the pool) applies and the run's
@@ -74,7 +74,7 @@ class NightShiftSettings:
         # Refresh each repository's code index before its tasks start (code-index spec §6.3).
         self.index: bool = bool(table.get("index", True))
         self.index_timeout_s: int = self.parse_duration(table.get("index_timeout", DEFAULT_INDEX_TIMEOUT))
-        # Other nodes' model servers a run may also use (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3):
+        # Other nodes' model servers a run may also use (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3):
         # "paired" (every paired node serving the same model), "none", or a list of names.
         self.nodes: Any = table.get("nodes", "paired")
 

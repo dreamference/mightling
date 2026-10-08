@@ -1,6 +1,6 @@
 """
 What the night run needs to know about the machine: the model server, memory, and who else is
-using either (specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §5.2, §5.5).
+using either (specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §5.2, §5.5).
 
 Every probe reads; none starts, stops or loads anything. The model server may be SGLang (the
 default) or vLLM, so each metric is read under both engines' names.
@@ -19,10 +19,10 @@ from dreamference.runner.codex_branded_builder import BUILD_CACHE_DIR
 from dreamference.runner.codex_installer import CodexInstaller
 
 # Environment marker on every process a night run starts, so the run never mistakes its own
-# `puffin exec` sessions for someone working interactively.
-NIGHT_RUN_ENV: Final[str] = "PUFFIN_NIGHT_RUN"
+# `ling exec` sessions for someone working interactively.
+NIGHT_RUN_ENV: Final[str] = "MIGHTLING_NIGHT_RUN"
 
-# `puffin` subcommands that are not an interactive session. Anything else (no subcommand, a
+# `ling` subcommands that are not an interactive session. Anything else (no subcommand, a
 # prompt, `resume`, `fork`) is the TUI.
 NON_INTERACTIVE: Final[frozenset] = frozenset({
     "exec", "e", "app-server", "mcp-server", "mcp", "sandbox", "apply", "a", "completion",
@@ -31,8 +31,8 @@ NON_INTERACTIVE: Final[frozenset] = frozenset({
     "--help", "-h",
 })
 
-# Where `puffin-app` marks a `puffin app-server` that is running a turn, under `$CODEX_HOME/night`
-# (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §8.3); `desktop/src-tauri/src/bridge.rs` writes it.
+# Where `ling-app` marks a `ling app-server` that is running a turn, under `$CODEX_HOME/night`
+# (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3); `desktop/src-tauri/src/bridge.rs` writes it.
 BUSY_DIR_NAME: Final[str] = "busy"
 
 GIB: Final[int] = 1024 ** 3
@@ -43,7 +43,7 @@ GIB: Final[int] = 1024 ** 3
 NIGHT_POOL_SHARE: Final[float] = 0.9
 
 # The launcher's limit for any session, as a percentage of the pool (`POOL_SHARE_PERCENT` in
-# puffin-rs/src/compaction.rs); a lone night task is not given more than an interactive one.
+# ling-rs/src/compaction.rs); a lone night task is not given more than an interactive one.
 LAUNCHER_POOL_SHARE_PERCENT: Final[int] = 60
 
 
@@ -151,7 +151,7 @@ class NightShiftHost:
         """
         How many night tasks run at once, and the context each may hold, such that together they
         fit in the KV pool: `parallel × limit ≤ 90% of the pool`. The limit is enforced by passing
-        it to every `puffin exec` of a task as its compaction limit.
+        it to every `ling exec` of a task as its compaction limit.
 
         Args:
             max_parallel: The configured upper bound.
@@ -251,19 +251,19 @@ class NightShiftHost:
             return 0
 
     @classmethod
-    def interactive_puffin_pids(cls, puffin_bin: str) -> List[int]:
+    def interactive_mightling_pids(cls, mightling_bin: str) -> List[int]:
         """
-        Finds `puffin` TUI sessions: processes of the `puffin` binary that are not one of a night
+        Finds `ling` TUI sessions: processes of the `ling` binary that are not one of a night
         run's own sessions, not a subcommand that runs without a user, and not one of Codex's
         helper re-executions (its sandbox runs as the same binary under another `argv[0]`).
 
         Args:
-            puffin_bin: The installed `puffin` executable.
+            mightling_bin: The installed `ling` executable.
 
         Returns:
             List[int]: Their process ids.
         """
-        target = os.path.realpath(puffin_bin)
+        target = os.path.realpath(mightling_bin)
         pids = []
         for entry in Path("/proc").iterdir():
             if not entry.name.isdigit():
@@ -276,27 +276,27 @@ class NightShiftHost:
             except OSError:
                 continue
             args = [arg.decode("utf-8", "replace") for arg in argv if arg]
-            if not args or os.path.basename(args[0]) not in ("puffin", "codex"):
+            if not args or os.path.basename(args[0]) not in ("ling", "codex"):
                 continue
             if any(item.startswith(f"{NIGHT_RUN_ENV}=".encode()) for item in environ):
                 continue
             if cls.is_interactive(args[1:]):
                 pids.append(int(entry.name))
-        return pids + [pid for pid in cls.busy_app_server_pids(puffin_bin) if pid not in pids]
+        return pids + [pid for pid in cls.busy_app_server_pids(mightling_bin) if pid not in pids]
 
     @classmethod
-    def busy_app_server_pids(cls, puffin_bin: str, codex_home: str | None = None) -> list[int]:
-        """Finds `puffin app-server` processes running a turn for the desktop app's Work window.
+    def busy_app_server_pids(cls, mightling_bin: str, codex_home: str | None = None) -> list[int]:
+        """Finds `ling app-server` processes running a turn for the desktop app's Work window.
 
         An app-server is not a session by its command line (`NON_INTERACTIVE`): an idle
-        window left open must not hold every night back. While a turn runs, `puffin-app` keeps a
+        window left open must not hold every night back. While a turn runs, `ling-app` keeps a
         marker named after the server's pid in `$CODEX_HOME/night/busy/`
-        (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §8.3). A marker counts when its pid is alive and is
-        the installed `puffin`; any other marker is left by a window killed hard, and is deleted.
+        (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.3). A marker counts when its pid is alive and is
+        the installed `ling`; any other marker is left by a window killed hard, and is deleted.
 
         Args:
-            puffin_bin: The installed `puffin` executable.
-            codex_home: `puffin`'s home folder; defaults to the one `puffin` resolves.
+            mightling_bin: The installed `ling` executable.
+            codex_home: `ling`'s home folder; defaults to the one `ling` resolves.
 
         Returns:
             list[int]: The busy servers' process ids.
@@ -306,7 +306,7 @@ class NightShiftHost:
             markers = list(busy_dir.iterdir())
         except OSError:
             return []
-        target = os.path.realpath(puffin_bin)
+        target = os.path.realpath(mightling_bin)
         pids = []
         for marker in markers:
             pid = int(marker.name) if marker.name.isdigit() else 0
@@ -337,7 +337,7 @@ class NightShiftHost:
     @classmethod
     def is_interactive(cls, args: List[str]) -> bool:
         """
-        Tells whether a `puffin` command line opens the TUI.
+        Tells whether a `ling` command line opens the TUI.
 
         Args:
             args: The arguments after the program name.
@@ -350,8 +350,8 @@ class NightShiftHost:
     @classmethod
     def heavy_jobs(cls) -> List[str]:
         """
-        Names the heavy work already running that a night run must not join: a `puffin` build, a
-        `puffin-admin index` run, a `puffin-code` index run, or a Codex test run.
+        Names the heavy work already running that a night run must not join: a `ling` build, a
+        `ling-admin index` run, a `ling-code` index run, or a Codex test run.
 
         Returns:
             List[str]: One description per job found; empty when the machine is free.
@@ -364,7 +364,7 @@ class NightShiftHost:
                     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     fcntl.flock(handle, fcntl.LOCK_UN)
                 except BlockingIOError:
-                    found.append("a puffin build holds the build lock")
+                    found.append("a ling build holds the build lock")
         for entry in Path("/proc").iterdir():
             if not entry.name.isdigit():
                 continue
@@ -374,17 +374,17 @@ class NightShiftHost:
             except OSError:
                 continue
             names = [os.path.basename(arg) for arg in args[:2]]
-            if "puffin-admin" in names and "index" in args[1:3]:
-                found.append(f"puffin-admin index is running (pid {entry.name})")
+            if "ling-admin" in names and "index" in args[1:3]:
+                found.append(f"ling-admin index is running (pid {entry.name})")
         try:
             units = subprocess.run(
                 ["systemctl", "--user", "list-units", "--no-legend", "--plain", "--state=active",
-                 "codex-tests-*", "puffin-index-*"], capture_output=True, text=True, timeout=10).stdout
+                 "codex-tests-*", "mightling-index-*"], capture_output=True, text=True, timeout=10).stdout
         except (OSError, subprocess.SubprocessError):
             units = ""
         for line in units.splitlines():
             if line.strip():
                 unit = line.split()[0]
-                kind = "an index run" if unit.startswith("puffin-index-") else "an upstream test run"
+                kind = "an index run" if unit.startswith("mightling-index-") else "an upstream test run"
                 found.append(f"{kind} is active ({unit})")
         return found

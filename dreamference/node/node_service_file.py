@@ -1,5 +1,5 @@
 """
-The Avahi service file that advertises the node (specs/DREAMFERENCE_PUFFIN_NODE.md §5.1, §5.2).
+The Avahi service file that advertises the node (specs/DREAMFERENCE_MIGHTLING_NODE.md §5.1, §5.2).
 
 A static file under `/etc/avahi/services/` needs no running publisher, so the node is advertised
 after a reboot with nobody logged in. Creating it needs root once (`NodeAdvertiser.enable`); it
@@ -13,7 +13,7 @@ from html import escape, unescape
 from pathlib import Path
 from typing import Any, Dict, Final, Optional
 
-SERVICE_TYPE: Final[str] = "_puffin-node._tcp"
+SERVICE_TYPE: Final[str] = "_mightling-node._tcp"
 
 # Version of the advertised contract. A client refuses a node whose `proto` is higher than its own.
 PROTO: Final[int] = 1
@@ -25,10 +25,10 @@ KEEP: Final[object] = object()
 
 
 class NodeServiceFile:
-    """Renders, reads and rewrites `puffin-node.service`."""
+    """Renders, reads and rewrites `mightling-node.service`."""
 
     # Where Avahi looks. A class attribute so tests point it at a scratch folder.
-    service_path: Path = Path("/etc/avahi/services/puffin-node.service")
+    service_path: Path = Path("/etc/avahi/services/mightling-node.service")
 
     @classmethod
     def render(cls, port: int, node_id: str, version: str, state: str = "stopped",
@@ -40,7 +40,7 @@ class NodeServiceFile:
         Args:
             port: The model server's port (the SRV port).
             node_id: The node's stable id.
-            version: Puffin's version on the node.
+            version: Mightling's version on the node.
             state: `stopped`, `loading` or `ready`.
             web_port: The web UI's port; None when it is not shared.
             search_port: SearXNG's port; None when it is not shared.
@@ -62,7 +62,7 @@ class NodeServiceFile:
         lines = [
             "<?xml version=\"1.0\" standalone='no'?>",
             "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">",
-            "<!-- Written by `puffin-admin node enable`; rewritten by `puffin-admin server start|stop`. -->",
+            "<!-- Written by `ling-admin node enable`; rewritten by `ling-admin server start|stop`. -->",
             "<service-group>",
             "  <name replace-wildcards=\"yes\">%h</name>",
             "  <service>",
@@ -83,7 +83,7 @@ class NodeServiceFile:
 
         Returns:
             Optional[Dict[str, str]]: `port` and every TXT record by key, or None if the text is
-            not a `_puffin-node._tcp` service.
+            not a `_mightling-node._tcp` service.
         """
         if f"<type>{SERVICE_TYPE}</type>" not in text:
             return None
@@ -140,7 +140,7 @@ class NodeServiceFile:
             state: The new `state`, if it changes.
             port: The model server's port, if it changes.
             main: Whether the node now serves a model a coding client can use, if known.
-            version: Puffin's version, if it changes.
+            version: Mightling's version, if it changes.
             web_port: The web UI's port, or None to stop advertising it; `KEEP` leaves it.
             search_port: SearXNG's port, or None to stop advertising it; `KEEP` leaves it.
 

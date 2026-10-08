@@ -1,9 +1,0 @@
-diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
-index 3ee3298..d081494 100644
---- a/codex-rs/cli/src/main.rs
-+++ b/codex-rs/cli/src/main.rs
-@@ -1019,2 +1019,4 @@ fn stage_str(stage: Stage) -> &'static str {
- fn main() -> anyhow::Result<()> {
-+    // Puffin: its own ~/.puffin, never upstream's ~/.codex with its ChatGPT login.
-+    puffin_launcher::home::use_puffin_home();
-     codex_build_info::initialize!();

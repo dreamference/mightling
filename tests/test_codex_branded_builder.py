@@ -1,4 +1,4 @@
-"""The Puffin-branded Codex is built from a patched *copy* of the submodule, and is the only Codex the runner uses."""
+"""The Mightling-branded Codex is built from a patched *copy* of the submodule, and is the only Codex the runner uses."""
 
 import os
 import subprocess
@@ -27,13 +27,13 @@ def test_the_patch_series_is_ordered_and_non_empty():
 def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp_path):
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     session = (tmp_path / "src" / "codex-rs" / "tui" / "src" / "history_cell" / "session.rs").read_text()
-    assert '"OpenAI Codex"' not in session and '"Puffin"' in session
-    # The launcher crate is copied in from puffin-rs/ and reached through one dependency line.
-    assert (tmp_path / "src" / "codex-rs" / "puffin" / "src" / "lib.rs").is_file()
+    assert '"OpenAI Codex"' not in session and '"Mightling"' in session
+    # The launcher crate is copied in from ling-rs/ and reached through one dependency line.
+    assert (tmp_path / "src" / "codex-rs" / "ling" / "src" / "lib.rs").is_file()
     cli_manifest = (tmp_path / "src" / "codex-rs" / "cli" / "Cargo.toml").read_text()
-    assert 'puffin-launcher = { path = "../puffin" }' in cli_manifest
+    assert 'ling-launcher = { path = "../ling" }' in cli_manifest
     cli_main = (tmp_path / "src" / "codex-rs" / "cli" / "src" / "main.rs").read_text()
-    assert "puffin_launcher::parse::<MultitoolCli>().await?" in cli_main
+    assert "ling_launcher::parse::<MultitoolCli>().await?" in cli_main
     status = subprocess.run(
         ["git", "-C", CODEX_SUBMODULE_DIR, "status", "--porcelain"], capture_output=True, text=True
     )
@@ -41,8 +41,8 @@ def test_every_patch_applies_to_the_pinned_submodule_and_leaves_it_untouched(tmp
 
 
 def test_the_patches_stay_small():
-    # Anything bigger than a hook or a one-line string belongs in puffin-rs/, which Cargo compiles
-    # into the same binary; the patches are only the places Codex has to call it or say "Puffin".
+    # Anything bigger than a hook or a one-line string belongs in ling-rs/, which Cargo compiles
+    # into the same binary; the patches are only the places Codex has to call it or say "Mightling".
     # (The prompt rename used to be a ~390 KB patch to models.json; it is now rebrand() in Rust.)
     # Each hide/disable hook costs ~550 bytes, mostly diff headers, so the cap allows a few more of
     # those; it exists to catch a return to whole-file patches, not to count one-line hooks. Raised
@@ -61,13 +61,13 @@ def test_the_patches_stay_small():
     # Full Access hooks (1,261 bytes: the Full Access row disabled at `on` in both permission
     # pickers, and `/airgapped` told whether the session runs in Full Access); 33,686 after.
     # On 2026-10-03 the user approved a ceiling of 37,500 for two planned patches, the context
-    # budget's masking hook (~0.9 KB) and PUFFIN_APPS' `/apps` hooks (~2.4 KB). The cap is still
+    # budget's masking hook (~0.9 KB) and MIGHTLING_APPS' `/apps` hooks (~2.4 KB). The cap is still
     # raised here only when each lands, by its size as written, with a line saying so. Raised to
     # 34,750 for 0021's observation masking (1,011 bytes: one dependency line, and four lines at the
     # end of `for_prompt_annotated` that read the size auto-compaction uses and hand it with the
-    # items to the leaf crate puffin-rs/masking); 34,697 after. Raised to 36,250 on 2026-10-06 for
-    # 0022's `/apps` hooks (1,371 bytes: the TUI's gate also opens when Puffin offers apps, and the
-    # app server answers `app/list` with Puffin's rows before any directory request); 36,068 after.
+    # items to the leaf crate ling-rs/masking); 34,697 after. Raised to 36,250 on 2026-10-06 for
+    # 0022's `/apps` hooks (1,371 bytes: the TUI's gate also opens when Mightling offers apps, and the
+    # app server answers `app/list` with Mightling's rows before any directory request); 36,068 after.
     # On 2026-10-05 the user approved a ceiling of 38,500 for the Desktop Work window's hook. Raised
     # to 37,500 on 2026-10-06 for 0023's air-gap check in the app server (1,220 bytes: a dependency
     # line, and a validator on the config's permission constraint that refuses Full Access at `on`
@@ -87,18 +87,18 @@ def test_the_build_key_changes_with_the_patches(tmp_path):
 
 
 def test_the_build_key_changes_with_the_launcher_source(tmp_path):
-    crate = tmp_path / "puffin-rs"
+    crate = tmp_path / "ling-rs"
     (crate / "src").mkdir(parents=True)
     (crate / "src" / "lib.rs").write_text("// one")
-    with patch.object(builder_module, "PUFFIN_CRATE_DIR", str(crate)), \
+    with patch.object(builder_module, "MIGHTLING_CRATE_DIR", str(crate)), \
             patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
         first = CodexBrandedBuilder.build_key()
         (crate / "src" / "lib.rs").write_text("// two")
         assert CodexBrandedBuilder.build_key() != first
 
 
-def test_the_export_reports_puffins_version_not_the_upstream_tag(tmp_path, monkeypatch):
-    # Every banner reads CARGO_PKG_VERSION, so the workspace version is what `puffin --version`, the
+def test_the_export_reports_lings_version_not_the_upstream_tag(tmp_path, monkeypatch):
+    # Every banner reads CARGO_PKG_VERSION, so the workspace version is what `ling --version`, the
     # session header and the status card show; it is stamped into the export, never the submodule.
     manifest = tmp_path / "Cargo.toml"
     manifest.write_text('[workspace]\nmembers = ["cli"]\n\n[workspace.package]\nversion = "0.158.0"\n'
@@ -108,18 +108,18 @@ def test_the_export_reports_puffins_version_not_the_upstream_tag(tmp_path, monke
     assert '[workspace.package]\nversion = "1.4.1"\n' in text and 'foo = { version = "1" }' in text
     assert not CodexBrandedBuilder.stamp_version(str(manifest), "not a version")
 
-    monkeypatch.setenv("PUFFIN_VERSION", "2.0.0-rc.1")
-    assert CodexBrandedBuilder.puffin_version() == "2.0.0-rc.1"
-    monkeypatch.delenv("PUFFIN_VERSION")
+    monkeypatch.setenv("MIGHTLING_VERSION", "2.0.0-rc.1")
+    assert CodexBrandedBuilder.mightling_version() == "2.0.0-rc.1"
+    monkeypatch.delenv("MIGHTLING_VERSION")
     from dreamference import __version__
-    assert CodexBrandedBuilder.puffin_version() == __version__
+    assert CodexBrandedBuilder.mightling_version() == __version__
 
 
 def test_the_build_key_changes_with_the_version(monkeypatch):
     with patch.object(CodexBrandedBuilder, "source_commit", return_value="a" * 40):
-        monkeypatch.setenv("PUFFIN_VERSION", "1.4.1")
+        monkeypatch.setenv("MIGHTLING_VERSION", "1.4.1")
         first = CodexBrandedBuilder.build_key()
-        monkeypatch.setenv("PUFFIN_VERSION", "1.4.2")
+        monkeypatch.setenv("MIGHTLING_VERSION", "1.4.2")
         assert CodexBrandedBuilder.build_key() != first
 
 
@@ -150,7 +150,7 @@ def test_the_build_compiles_the_exported_copy_not_the_submodule(tmp_path):
     assert env["CARGO_PROFILE_RELEASE_DEBUG"] == "none"
     assert env["CARGO_PROFILE_RELEASE_STRIP"] == "debuginfo"
     assert command[:3] == ["cargo", "build", "--release"]
-    # Cargo builds `codex`; the builder installs it as `puffin`.
+    # Cargo builds `codex`; the builder installs it as `ling`.
     assert command[command.index("--bin") + 1] == "codex"
 
 
@@ -164,7 +164,7 @@ def test_the_runner_never_falls_back_to_an_upstream_codex(tmp_path):
 
 
 def test_the_runner_resolves_the_branded_executable(tmp_path):
-    binary = tmp_path / "bin" / "puffin"
+    binary = tmp_path / "bin" / "ling"
     binary.parent.mkdir()
     binary.write_text("#!/bin/sh\n")
     binary.chmod(0o755)
@@ -172,19 +172,19 @@ def test_the_runner_resolves_the_branded_executable(tmp_path):
         assert CodexInstaller.get_codex_executable() == str(binary)
 
 
-def test_puffin_admin_and_the_web_commands_are_linked_onto_path_for_the_models_shell(tmp_path, monkeypatch):
-    # Puffin's prompt tells the model to run `puffin-search` and `puffin-fetch` for web access,
+def test_mightling_admin_and_the_web_commands_are_linked_onto_path_for_the_models_shell(tmp_path, monkeypatch):
+    # Mightling's prompt tells the model to run `ling-search` and `ling-fetch` for web access,
     # but the commands lived only in the repository's virtualenv: every call from inside a session
     # ended in "command not found" (exit 127). conftest points the links into the test home.
     import os
     from dreamference.runner import codex_branded_builder as builder
 
-    binary = tmp_path / "puffin"
+    binary = tmp_path / "ling"
     binary.write_text("#!/bin/sh\n")
     monkeypatch.setattr(builder.CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(binary)))
     monkeypatch.setattr(builder, "INSTALL_DIR", str(tmp_path / "install"))
-    admin = builder.CodexBrandedBuilder.console_script_path("puffin-admin")
-    assert admin and admin.endswith("puffin-admin")
+    admin = builder.CodexBrandedBuilder.console_script_path("ling-admin")
+    assert admin and admin.endswith("ling-admin")
 
     # A web command is linked only once its binary exists: never a dangling link.
     builder.CodexBrandedBuilder.link_onto_path()
@@ -193,7 +193,7 @@ def test_puffin_admin_and_the_web_commands_are_linked_onto_path_for_the_models_s
     assert not os.path.lexists(builder.SEARCH_PATH_LINK) and not os.path.lexists(builder.FETCH_PATH_LINK)
 
     installed = {}
-    for name in ("puffin-search", "puffin-fetch"):
+    for name in ("ling-search", "ling-fetch"):
         path = tmp_path / "install" / "bin" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/bin/sh\n")
@@ -201,8 +201,8 @@ def test_puffin_admin_and_the_web_commands_are_linked_onto_path_for_the_models_s
         installed[name] = str(path)
     builder.CodexBrandedBuilder.link_onto_path()
     # The Rust binaries, not a console script of this virtualenv.
-    assert os.readlink(builder.SEARCH_PATH_LINK) == installed["puffin-search"]
-    assert os.readlink(builder.FETCH_PATH_LINK) == installed["puffin-fetch"]
+    assert os.readlink(builder.SEARCH_PATH_LINK) == installed["ling-search"]
+    assert os.readlink(builder.FETCH_PATH_LINK) == installed["ling-fetch"]
 
     # A real file of that name belongs to someone else and is left alone.
     os.remove(builder.ADMIN_PATH_LINK)
@@ -234,7 +234,7 @@ def test_the_web_commands_build_from_their_own_crate_with_its_lockfile(tmp_path,
     (command, cwd, env), = calls
     assert cwd == builder_module.WEB_CRATE_DIR
     assert command[:4] == ["cargo", "build", "--release", "--locked"]
-    assert [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"] == ["puffin-search", "puffin-fetch"]
+    assert [command[i + 1] for i, arg in enumerate(command) if arg == "--bin"] == ["ling-search", "ling-fetch"]
     assert env["CARGO_TARGET_DIR"] == str(tmp_path / "cache" / "target")
     for name in builder_module.WEB_BIN_NAMES:
         assert os.access(tmp_path / "install" / "bin" / name, os.X_OK)
@@ -246,7 +246,7 @@ def test_the_web_commands_build_from_their_own_crate_with_its_lockfile(tmp_path,
 
 
 def test_the_web_crate_key_changes_with_its_source(tmp_path):
-    crate = tmp_path / "puffin-web-rs"
+    crate = tmp_path / "ling-web-rs"
     (crate / "src").mkdir(parents=True)
     (crate / "src" / "lib.rs").write_text("// one")
     (crate / "target").mkdir()
@@ -271,31 +271,31 @@ def test_the_web_commands_are_built_even_when_codex_is_current(monkeypatch):
     assert built == [("web", False), ("code", False)]
 
 
-def test_puffin_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_path, monkeypatch):
-    # The prompt's `# Code navigation` block tells the model to run `puffin-code`; like the web
-    # commands it must be on the PATH of the shell puffin gives the model, or every call is exit 127.
+def test_mightling_code_builds_from_its_own_crate_and_is_linked_onto_path(tmp_path, monkeypatch):
+    # The prompt's `# Code navigation` block tells the model to run `ling-code`; like the web
+    # commands it must be on the PATH of the shell ling gives the model, or every call is exit 127.
     calls = []
 
     def fake_call(command, cwd=None, env=None):
         calls.append((command, cwd, env))
         release = tmp_path / "cache" / "target" / "release"
         release.mkdir(parents=True, exist_ok=True)
-        (release / "puffin-code").write_text("#!/bin/sh\n")
-        (release / "puffin-code").chmod(0o755)
+        (release / "ling-code").write_text("#!/bin/sh\n")
+        (release / "ling-code").chmod(0o755)
         return 0
 
     monkeypatch.setattr(builder_module, "INSTALL_DIR", str(tmp_path / "install"))
     monkeypatch.setattr(builder_module, "CODE_BUILD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(builder_module.DesktopInstaller, "install_rust", classmethod(lambda cls: True))
     monkeypatch.setattr(builder_module.subprocess, "call", fake_call)
-    monkeypatch.setattr(CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "puffin")))
+    monkeypatch.setattr(CodexBrandedBuilder, "executable_path", classmethod(lambda cls: str(tmp_path / "ling")))
 
     assert CodexBrandedBuilder.build_code_index() is True
     (command, cwd, env), = calls
     assert cwd == builder_module.CODE_CRATE_DIR
-    assert command == ["cargo", "build", "--release", "--locked", "--bin", "puffin-code"]
+    assert command == ["cargo", "build", "--release", "--locked", "--bin", "ling-code"]
     assert env["CARGO_TARGET_DIR"] == str(tmp_path / "cache" / "target")
-    installed = tmp_path / "install" / "bin" / "puffin-code"
+    installed = tmp_path / "install" / "bin" / "ling-code"
     assert os.access(installed, os.X_OK)
     assert os.readlink(builder_module.CODE_PATH_LINK) == str(installed)
     # Current now: nothing is compiled again.
@@ -315,20 +315,20 @@ def test_the_web_crate_is_committed_with_its_lockfile():
 
 
 @pytest.mark.skipif(not SUBMODULE_PRESENT, reason="codex submodule not checked out")
-def test_the_remaining_codex_names_on_screen_say_puffin(tmp_path):
+def test_the_remaining_codex_names_on_screen_say_mightling(tmp_path):
     # Found by driving the real TUI through every popup/inline slash command, an approval prompt,
     # each subcommand's --help and `exec` (2026-09-30): the slash list said "exit Codex" and
     # "choose what Codex is allowed to do", /permissions warned "Codex can edit files outside this
-    # workspace", and `puffin exec` labelled the model's replies "codex".
+    # workspace", and `ling exec` labelled the model's replies "codex".
     assert CodexBrandedBuilder.prepare_source(str(tmp_path / "src"))
     rs = tmp_path / "src" / "codex-rs"
     popup = (rs / "tui" / "src" / "bottom_pane" / "command_popup.rs").read_text()
-    assert 'item.description().replace("Codex", "Puffin")' in popup
+    assert 'item.description().replace("Codex", "Mightling")' in popup
     permissions = (rs / "tui" / "src" / "chatwidget" / "permissions_menu.rs").read_text()
-    assert "Puffin can edit files outside this workspace" in permissions
+    assert "Mightling can edit files outside this workspace" in permissions
     exec_output = (rs / "exec" / "src" / "event_processor_with_human_output.rs").read_text()
-    assert '"codex".style' not in exec_output and exec_output.count('"puffin".style') == 2
-    # The frame drawn while puffin starts up has its own composer, built outside the one patch
+    assert '"codex".style' not in exec_output and exec_output.count('"ling".style') == 2
+    # The frame drawn while ling starts up has its own composer, built outside the one patch
     # 0001 renames; found on 2026-10-01 by Codex's own PTY test, which waits for that placeholder.
     startup = (rs / "tui" / "src" / "startup_draft.rs").read_text()
-    assert '"Ask Codex to do anything"' not in startup and '"Ask Puffin to do anything"' in startup
+    assert '"Ask Codex to do anything"' not in startup and '"Ask Mightling to do anything"' in startup

@@ -194,7 +194,7 @@ class ModelDownloader:
             return True
 
         # Serialization loads the whole checkpoint, so it carries the same freeze risk as serving
-        # it and has to clear the same gate — reachable directly via `puffin-admin model download`, which
+        # it and has to clear the same gate — reachable directly via `ling-admin model download`, which
         # never passes through start_server.
         from dreamference.vllm_server.vllm_server_manager import VLLMServerManager
         VLLMServerManager.check_host_safety()
@@ -514,7 +514,7 @@ class ModelDownloader:
         Clears the HuggingFace hub (downloaded weights) and the tensorizer cache.
 
         Only those two directories. Their parents hold other things: `~/.cache/huggingface` keeps
-        the HuggingFace login token, and `~/.cache/dreamference` keeps the puffin build cache and
+        the HuggingFace login token, and `~/.cache/dreamference` keeps the ling build cache and
         vLLM's compile cache, which take many minutes to rebuild. This used to delete both parents.
 
         Returns:
@@ -532,7 +532,7 @@ class ModelDownloader:
         """
         Clears only the tensorizer cache (`~/.cache/dreamference/tensorizer`).
 
-        Not its parent, which also holds the puffin build cache and vLLM's compile cache; this
+        Not its parent, which also holds the ling build cache and vLLM's compile cache; this
         used to delete the whole of `~/.cache/dreamference`.
 
         Returns:

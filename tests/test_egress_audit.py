@@ -1,7 +1,7 @@
-"""`puffin-admin audit egress` (specs/DREAMFERENCE_PUFFIN_EGRESS.md §3, §7).
+"""`ling-admin audit egress` (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3, §7).
 
 The parser and the verdict are tested on a recorded trace of a real session and on the same trace
-with the channels patches 0013 and 0015 closed written back in. No test here runs strace, puffin
+with the channels patches 0013 and 0015 closed written back in. No test here runs strace, ling
 or the model server: the full-screen session is played by a stand-in on a real pseudo-terminal.
 """
 
@@ -33,8 +33,8 @@ def test_the_recorded_session_reaches_only_the_model_server_and_gmail():
     # nscd's socket is glibc asking for a name-service cache that is not there.
     assert "/var/run/nscd/socket" in trace.unix_sockets
     # The launcher's own helpers and Codex's git probes, each counted once per successful exec.
-    assert trace.processes["puffin"] == 1
-    assert trace.processes["puffin-code"] == 2
+    assert trace.processes["ling"] == 1
+    assert trace.processes["ling-code"] == 2
     assert trace.processes["git"] >= 5
     verdict = EgressAudit.judge(trace, ALLOWED, replied=True)
     assert (verdict.status, verdict.problems, verdict.exit_code) == (PASS, [], 0)
@@ -164,12 +164,12 @@ open(args[len(args) - 2], "w").write("pong")
     monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    code = EgressAudit.run(write_json=True, puffin_bin="/opt/puffin", vllm_host="http://localhost:8000")
+    code = EgressAudit.run(write_json=True, mightling_bin="/opt/ling", vllm_host="http://localhost:8000")
     out = capsys.readouterr().out
     assert code == 0 and "✅ Egress audit: pass" in out
     call = json.loads(calls.read_text())
     assert call["args"][:7] == ["-f", "-qq", "-e", "trace=connect,sendto,sendmsg,sendmmsg,execve", "-s", "256", "-o"]
-    assert call["args"][8:11] == ["/opt/puffin", "exec", "--skip-git-repo-check"]
+    assert call["args"][8:11] == ["/opt/ling", "exec", "--skip-git-repo-check"]
     assert call["args"][-1] == "Reply with exactly: pong"
     # Neither the user's home nor the user's repository: both are scratch, and gone afterwards.
     assert call["CODEX_HOME"] != str(home) and not os.path.exists(call["CODEX_HOME"])
@@ -180,8 +180,8 @@ open(args[len(args) - 2], "w").write("pong")
     result = json.loads(result_file.read_text())
     assert result["verdict"] == "pass" and result["destinations"] == {"127.0.0.1:8000": 2, "127.0.0.1:8767": 1}
     assert result["codex_tag"].startswith("rust-v")
-    # /opt/puffin is not the installed build: no build key and no patch list are credited to it.
-    assert result["puffin_bin"] == "/opt/puffin" and result["build_key"] == ""
+    # /opt/ling is not the installed build: no build key and no patch list are credited to it.
+    assert result["mightling_bin"] == "/opt/ling" and result["build_key"] == ""
     assert result["build_matches_checkout"] is False and result["patches"] is None
 
 
@@ -191,22 +191,22 @@ def test_the_identity_names_the_traced_binary_and_credits_patches_only_to_a_matc
     (install / "bin").mkdir(parents=True)
     installed = install / "bin" / builder.BRANDED_EXECUTABLE_NAME
     installed.write_bytes(b"installed")
-    scratch = tmp_path / "scratch-puffin"
+    scratch = tmp_path / "scratch-ling"
     scratch.write_bytes(b"without 0015")
     monkeypatch.setattr(builder, "INSTALL_DIR", str(install))
     monkeypatch.setattr(builder.CodexBrandedBuilder, "build_key", classmethod(lambda cls: "key-1"))
     (install / builder.BUILD_STAMP_NAME).write_text("key-1\n")
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "puffin 0.158.0", ""))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "ling 0.158.0", ""))
 
     ours = EgressAudit.build_identity(str(installed))
     assert ours["build_key"] == "key-1" and ours["build_matches_checkout"] is True
-    assert "0001-brand-puffin-name.patch" in ours["patches"]
-    assert ours["puffin_sha256"] == hashlib.sha256(b"installed").hexdigest()
+    assert "0001-brand-mightling-name.patch" in ours["patches"]
+    assert ours["mightling_sha256"] == hashlib.sha256(b"installed").hexdigest()
 
     # A scratch build beside it is told apart by its hash, and is credited with nothing.
     theirs = EgressAudit.build_identity(str(scratch))
     assert theirs["build_key"] == "" and theirs["patches"] is None
-    assert theirs["puffin_sha256"] == hashlib.sha256(b"without 0015").hexdigest()
+    assert theirs["mightling_sha256"] == hashlib.sha256(b"without 0015").hexdigest()
 
     # The installed binary built from another checkout: its key is kept, the patch list is not.
     (install / builder.BUILD_STAMP_NAME).write_text("key-0\n")
@@ -220,23 +220,23 @@ def test_without_a_reply_the_audit_says_the_trace_failed(tmp_path, monkeypatch, 
     strace.write_text("#!/bin/sh\nexit 1\n")
     strace.chmod(0o755)
     monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
-    assert EgressAudit.run(puffin_bin="/opt/puffin", vllm_host="http://localhost:8000") == 2
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000") == 2
     out = capsys.readouterr().out
-    assert "Egress audit: trace failed" in out and "puffin-admin server start" in out
+    assert "Egress audit: trace failed" in out and "ling-admin server start" in out
 
 
-@pytest.mark.parametrize("missing", ["strace", "puffin"])
+@pytest.mark.parametrize("missing", ["strace", "ling"])
 def test_missing_tools_are_named(missing, tmp_path, monkeypatch, capsys):
     if missing == "strace":
         monkeypatch.setenv("PATH", str(tmp_path))
-        assert EgressAudit.run(puffin_bin="/opt/puffin", vllm_host="http://x") == 2
+        assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x") == 2
         assert "strace is not installed" in capsys.readouterr().out
     else:
         monkeypatch.setattr("dreamference.runner.codex_installer.CodexInstaller.get_codex_executable", classmethod(lambda cls: None))
         if __import__("shutil").which("strace") is None:
             pytest.skip("strace is not installed here")
         assert EgressAudit.run(vllm_host="http://x") == 2
-        assert "puffin is not built" in capsys.readouterr().out
+        assert "ling is not built" in capsys.readouterr().out
 
 
 # -- the full-screen session (--tui) ---------------------------------------------------------------
@@ -248,7 +248,7 @@ def test_the_recorded_interface_session_reaches_only_the_model_server_and_gmail(
     # What `exec` never opens: the session bus (the interface asks the desktop's accessibility
     # service). A unix socket is listed, and is not a destination.
     assert "/run/user/1000/bus" in trace.unix_sockets
-    assert trace.processes["puffin"] == 1
+    assert trace.processes["ling"] == 1
     assert EgressAudit.judge(trace, ALLOWED, True).status == PASS
 
 
@@ -280,7 +280,7 @@ record = {{"args": args, "cwd": os.getcwd(), "CODEX_HOME": home, "pid": os.getpi
 def save():
     json.dump(record, open({str(calls)!r}, "w"))
 save()
-print(">_ Puffin (v0.0.0)", flush=True)
+print(">_ Mightling (v0.0.0)", flush=True)
 print("› ", end="", flush=True)
 record["typed"].append(sys.stdin.readline().strip()); save()
 if not {answers!r}:
@@ -303,13 +303,13 @@ def test_the_interface_is_opened_prompted_and_quit_on_a_pseudo_terminal(tmp_path
     calls = interface_stand_in(tmp_path, monkeypatch, answers=True)
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    code = EgressAudit.run(write_json=True, puffin_bin="/opt/puffin", vllm_host="http://localhost:8000", tui=True)
+    code = EgressAudit.run(write_json=True, mightling_bin="/opt/ling", vllm_host="http://localhost:8000", tui=True)
     out = capsys.readouterr().out
-    assert code == 0 and "✅ Egress audit: pass" in out and "full-screen `puffin` session" in out
+    assert code == 0 and "✅ Egress audit: pass" in out and "full-screen `ling` session" in out
     call = json.loads(calls.read_text())
-    # The interface itself: `puffin` with no subcommand, on a terminal.
+    # The interface itself: `ling` with no subcommand, on a terminal.
     assert call["args"][:7] == ["-f", "-qq", "-e", "trace=connect,sendto,sendmsg,sendmmsg,execve", "-s", "256", "-o"]
-    assert call["args"][8:] == ["/opt/puffin"]
+    assert call["args"][8:] == ["/opt/ling"]
     assert call["tty"] is True and call["term"] == "xterm-256color"
     # It typed the prompt, and after the reply it quit.
     assert call["typed"] == ["Reply with exactly: pong", "/quit"]
@@ -326,7 +326,7 @@ def test_the_interface_is_opened_prompted_and_quit_on_a_pseudo_terminal(tmp_path
 def test_an_interface_that_never_answers_is_stopped_and_is_not_a_pass(tmp_path, monkeypatch, capsys):
     calls = interface_stand_in(tmp_path, monkeypatch, answers=False)
     monkeypatch.setattr("dreamference.audit.egress_audit.SESSION_TIMEOUT_S", 3)
-    assert EgressAudit.run(puffin_bin="/opt/puffin", vllm_host="http://localhost:8000", tui=True) == 2
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", tui=True) == 2
     out = capsys.readouterr().out
     assert "Egress audit: trace failed" in out and "The interface opened and took the prompt" in out
     assert EgressAudit.tui_stage == "composer"
@@ -340,12 +340,12 @@ def test_tui_without_its_terminal_modules_says_how_to_add_them(monkeypatch, caps
     if __import__("shutil").which("strace") is None:
         pytest.skip("strace is not installed here")
     monkeypatch.setattr(TuiSession, "missing_modules", classmethod(lambda cls: ["pexpect", "pyte"]))
-    assert EgressAudit.run(puffin_bin="/opt/puffin", vllm_host="http://x", tui=True) == 2
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x", tui=True) == 2
     out = capsys.readouterr().out
     assert "trace failed" in out and "pip install pexpect pyte" in out
 
 
-# -- after `puffin-admin codex build` ---------------------------------------------------------------
+# -- after `ling-admin codex build` ---------------------------------------------------------------
 
 @pytest.fixture
 def after_build(monkeypatch):
@@ -357,7 +357,7 @@ def after_build(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(TuiSession, "missing_modules", classmethod(lambda cls: []))
 
-    def run(cls, prompt=None, write_json=False, puffin_bin=None, vllm_host=None, tui=False):
+    def run(cls, prompt=None, write_json=False, mightling_bin=None, vllm_host=None, tui=False):
         runs.append({"tui": tui, "write_json": write_json, "vllm_host": vllm_host})
         return state["codes"][tui]
     monkeypatch.setattr(EgressAudit, "run", classmethod(run))
@@ -376,7 +376,7 @@ def test_after_a_build_without_a_model_server_the_audit_does_not_wait(after_buil
     state["served"] = None
     assert EgressAudit.after_build(vllm_host="http://localhost:8000") is None
     out = capsys.readouterr().out
-    assert runs == [] and "Egress audit skipped" in out and "puffin-admin audit egress --tui" in out
+    assert runs == [] and "Egress audit skipped" in out and "ling-admin audit egress --tui" in out
 
 
 def test_after_a_build_an_unexpected_destination_is_said_plainly(after_build, capsys):
@@ -414,7 +414,7 @@ def test_codex_build_audits_a_new_binary_and_keeps_its_own_exit_code(argv, was_c
     monkeypatch.setattr(CodexBrandedBuilder, "build", classmethod(lambda cls, force=False: built))
     # A failing verdict: the build's exit code must not change with it.
     monkeypatch.setattr(EgressAudit, "after_build", classmethod(lambda cls: calls.append("audit") or 1))
-    monkeypatch.setattr("sys.argv", ["puffin-admin", *argv])
+    monkeypatch.setattr("sys.argv", ["ling-admin", *argv])
     with pytest.raises(SystemExit) as exit_info:
         controller.main()
     assert exit_info.value.code == (0 if built else 1)

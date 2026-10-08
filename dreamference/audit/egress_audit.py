@@ -1,9 +1,9 @@
 """
-`puffin-admin audit egress`: where does a `puffin` session connect?
-(specs/DREAMFERENCE_PUFFIN_EGRESS.md §3)
+`ling-admin audit egress`: where does a `ling` session connect?
+(specs/DREAMFERENCE_MIGHTLING_EGRESS.md §3)
 
-This module provides the EgressAudit class. It runs one real `puffin` session under `strace`
-(`puffin exec`, or with `--tui` the full-screen interface on a pseudo-terminal), in a throwaway
+This module provides the EgressAudit class. It runs one real `ling` session under `strace`
+(`ling exec`, or with `--tui` the full-screen interface on a pseudo-terminal), in a throwaway
 repository with a throwaway `CODEX_HOME`, and prints every network destination, every name asked
 of a resolver and every process the session started, with a verdict. It makes "your code stays on your machine" something a user can check and re-check
 after each Codex bump, instead of a promise.
@@ -49,7 +49,7 @@ CHATGPT_BLACKHOLE_PORT: Final[int] = 9
 # The two kinds of session, and what the report calls them.
 EXEC: Final[str] = "exec"
 TUI: Final[str] = "tui"
-SESSION_NAMES: Final[Dict[str, str]] = {EXEC: "`puffin exec` session", TUI: "full-screen `puffin` session"}
+SESSION_NAMES: Final[Dict[str, str]] = {EXEC: "`ling exec` session", TUI: "full-screen `ling` session"}
 
 
 class EgressAudit:
@@ -116,10 +116,10 @@ class EgressAudit:
         return EgressVerdict(PASS)
 
     @classmethod
-    def trace_session(cls, puffin_bin: str, vllm_host: str, prompt: str, work_dir: str,
+    def trace_session(cls, mightling_bin: str, vllm_host: str, prompt: str, work_dir: str,
                       session: str = EXEC) -> Tuple[EgressTrace, bool, str]:
         """
-        Runs one `puffin` session under strace in a throwaway repository with a throwaway
+        Runs one `ling` session under strace in a throwaway repository with a throwaway
         `CODEX_HOME`, so no login, history or config of the user's influences the result, and
         none is touched.
 
@@ -133,7 +133,7 @@ class EgressAudit:
         outlive the session, so they are not part of what this trace can show.
 
         Args:
-            puffin_bin (str): The `puffin` executable.
+            mightling_bin (str): The `ling` executable.
             vllm_host (str): The model server's base URL.
             prompt (str): The prompt to send.
             work_dir (str): A scratch directory, owned by the caller.
@@ -148,7 +148,7 @@ class EgressAudit:
         os.makedirs(repo)
         os.makedirs(home)
         with open(os.path.join(repo, "README.md"), "w") as handle:
-            handle.write("A throwaway repository for `puffin-admin audit egress`.\n")
+            handle.write("A throwaway repository for `ling-admin audit egress`.\n")
         git = ["git", "-c", "user.name=audit", "-c", "user.email=audit@localhost", "-c", "commit.gpgsign=false"]
         for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "audit"]):
             subprocess.run(git + args, cwd=repo, capture_output=True, check=False)
@@ -159,7 +159,7 @@ class EgressAudit:
         reply_path = os.path.join(work_dir, "reply.txt")
         env = dict(os.environ)
         env.update({"CODEX_HOME": home, "DREAMFERENCE_CONFIG_PATH": config, "DREAMFERENCE_VLLM_HOST": vllm_host})
-        strace = ["strace", "-f", "-qq", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, puffin_bin]
+        strace = ["strace", "-f", "-qq", "-e", f"trace={TRACED_SYSCALLS}", "-s", "256", "-o", trace_path, mightling_bin]
         if session == TUI:
             TuiSession.trust(home, repo)
             try:
@@ -171,7 +171,7 @@ class EgressAudit:
         command = strace + ["exec", "--skip-git-repo-check", "-o", reply_path, prompt]
         try:
             # Its own process group, so a session that never answers is stopped with everything
-            # it started: strace alone, killed, would leave `puffin` waiting for the server.
+            # it started: strace alone, killed, would leave `ling` waiting for the server.
             process = subprocess.Popen(command, cwd=repo, env=env, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             try:
@@ -231,15 +231,15 @@ class EgressAudit:
         return lines
 
     @classmethod
-    def build_identity(cls, puffin_bin: str) -> Dict[str, Any]:
+    def build_identity(cls, mightling_bin: str) -> Dict[str, Any]:
         """
         Says which build was audited, so two audits can be compared across builds.
 
         Args:
-            puffin_bin (str): The `puffin` executable.
+            mightling_bin (str): The `ling` executable.
 
         Returns:
-            Dict[str, Any]: `puffin --version`, the traced binary's path and hash, the Codex tag,
+            Dict[str, Any]: `ling --version`, the traced binary's path and hash, the Codex tag,
             the build key when the traced binary is the installed one, whether that build matches
             this checkout, and each patch's hash only when it does.
         """
@@ -247,10 +247,10 @@ class EgressAudit:
             BUILD_STAMP_NAME, CODEX_RELEASE_TAG, INSTALL_DIR, CodexBrandedBuilder,
         )
         try:
-            version = subprocess.run([puffin_bin, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+            version = subprocess.run([mightling_bin, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             version = ""
-        binary = os.path.realpath(puffin_bin)
+        binary = os.path.realpath(mightling_bin)
         binary_sha256 = None
         if os.path.isfile(binary):
             digest = hashlib.sha256()
@@ -258,7 +258,7 @@ class EgressAudit:
                 for block in iter(lambda: handle.read(1 << 20), b""):
                     digest.update(block)
             binary_sha256 = digest.hexdigest()
-        # The stamp describes the installed binary only: a scratch build traced with --puffin-bin
+        # The stamp describes the installed binary only: a scratch build traced with --mightling-bin
         # (a build without one patch, say) has none, and must not be credited with the installed one's.
         build_key = ""
         stamp = os.path.join(INSTALL_DIR, BUILD_STAMP_NAME)
@@ -273,20 +273,20 @@ class EgressAudit:
                 with open(path, "rb") as handle:
                     patches[os.path.basename(path)] = hashlib.sha256(handle.read()).hexdigest()
         return {
-            "puffin_version": version,
-            "puffin_bin": binary,
-            "puffin_sha256": binary_sha256,
+            "mightling_version": version,
+            "mightling_bin": binary,
+            "mightling_sha256": binary_sha256,
             "codex_tag": CODEX_RELEASE_TAG,
             "build_key": build_key,
             "build_matches_checkout": matches,
             # The checkout's patch hashes, recorded only when they are known to be the traced
-            # binary's; otherwise None, and `puffin_sha256` is what identifies the build.
+            # binary's; otherwise None, and `mightling_sha256` is what identifies the build.
             "patches": patches,
         }
 
     @classmethod
     def run(cls, prompt: Optional[str] = None, write_json: bool = False,
-            puffin_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False) -> int:
+            mightling_bin: Optional[str] = None, vllm_host: Optional[str] = None, tui: bool = False) -> int:
         """
         Runs the audit and prints its report.
 
@@ -294,8 +294,8 @@ class EgressAudit:
             prompt (Optional[str]): The prompt for the traced session; a one-word reply by default.
             write_json (bool): Also write the full result to `$CODEX_HOME/audit/<timestamp>.json`.
             tui (bool): Trace the full-screen interface on a pseudo-terminal instead of
-                `puffin exec`. Codex starts things there that `exec` never does.
-            puffin_bin (Optional[str]): The `puffin` executable; the installed build by default.
+                `ling exec`. Codex starts things there that `exec` never does.
+            mightling_bin (Optional[str]): The `ling` executable; the installed build by default.
             vllm_host (Optional[str]): The model server; the configured one by default.
 
         Returns:
@@ -306,10 +306,10 @@ class EgressAudit:
             print("⚠️  Egress audit: trace failed")
             print("   - strace is not installed: sudo apt-get install strace")
             return 2
-        puffin_bin = puffin_bin or CodexInstaller.get_codex_executable()
-        if not puffin_bin:
+        mightling_bin = mightling_bin or CodexInstaller.get_codex_executable()
+        if not mightling_bin:
             print("⚠️  Egress audit: trace failed")
-            print("   - puffin is not built: run `puffin-admin codex build` first.")
+            print("   - ling is not built: run `ling-admin codex build` first.")
             return 2
         session = TUI if tui else EXEC
         missing = TuiSession.missing_modules() if tui else []
@@ -323,26 +323,26 @@ class EgressAudit:
             vllm_host = DreamferenceConfig().vllm_host
         allowed = cls.allowed_ports(vllm_host)
         print(f"🚀 Tracing one {SESSION_NAMES[session]} against {vllm_host} (throwaway repository and CODEX_HOME)...")
-        work_dir = tempfile.mkdtemp(prefix="puffin-audit-")
+        work_dir = tempfile.mkdtemp(prefix="mightling-audit-")
         try:
-            trace, replied, _ = cls.trace_session(puffin_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session)
+            trace, replied, _ = cls.trace_session(mightling_bin, vllm_host, prompt or DEFAULT_PROMPT, work_dir, session)
             verdict = cls.judge(trace, allowed, replied)
             for line in cls.render(trace, verdict, allowed):
                 print(line)
             if verdict.status == TRACE_FAILED:
                 if tui and cls.tui_stage == "composer":
                     print("💡 The interface opened and took the prompt, but no reply was recorded.")
-                print(f"💡 The session needs the model server at {vllm_host}: `puffin-admin server start`.")
+                print(f"💡 The session needs the model server at {vllm_host}: `ling-admin server start`.")
             if write_json:
-                print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(puffin_bin), session)}")
+                print(f"💡 Full result: {cls.write_result(trace, verdict, allowed, cls.build_identity(mightling_bin), session)}")
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
         return verdict.exit_code
 
     @classmethod
-    def after_build(cls, vllm_host: Optional[str] = None, puffin_bin: Optional[str] = None) -> Optional[int]:
+    def after_build(cls, vllm_host: Optional[str] = None, mightling_bin: Optional[str] = None) -> Optional[int]:
         """
-        The audit `puffin-admin codex build` runs once it has installed a new `puffin` (§2): a
+        The audit `ling-admin codex build` runs once it has installed a new `ling` (§2): a
         Codex bump is when a new channel would appear, and nobody remembers to re-run a trace by
         hand. Both kinds of session are traced, `exec` and then the interface, and each result
         is written under `$CODEX_HOME/audit/`.
@@ -353,13 +353,13 @@ class EgressAudit:
 
         Args:
             vllm_host (Optional[str]): The model server; the configured one by default.
-            puffin_bin (Optional[str]): The `puffin` executable; the installed build by default.
+            mightling_bin (Optional[str]): The `ling` executable; the installed build by default.
 
         Returns:
             Optional[int]: The worst exit code of the sessions traced (0 pass, 1 unexpected
             destination, 2 trace failed), or None when the audit was skipped.
         """
-        later = "run `puffin-admin audit egress` and `puffin-admin audit egress --tui` to check this build"
+        later = "run `ling-admin audit egress` and `ling-admin audit egress --tui` to check this build"
         try:
             if vllm_host is None:
                 from dreamference.config import DreamferenceConfig
@@ -370,15 +370,15 @@ class EgressAudit:
             from dreamference.night_shift import NightShiftHost
             if NightShiftHost.served_model(vllm_host, timeout=3.0) is None:
                 print(f"💡 Egress audit skipped: the model server at {vllm_host} is not answering. "
-                      f"After `puffin-admin server start`, {later}.")
+                      f"After `ling-admin server start`, {later}.")
                 return None
             print("🔎 Auditing what the new build does on the network...")
-            codes = [cls.run(write_json=True, puffin_bin=puffin_bin, vllm_host=vllm_host)]
+            codes = [cls.run(write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host)]
             if TuiSession.missing_modules():
                 print("💡 The full-screen interface was not traced (pexpect and pyte are not installed): "
-                      "`puffin-admin audit egress --tui` says how to add them.")
+                      "`ling-admin audit egress --tui` says how to add them.")
             else:
-                codes.append(cls.run(write_json=True, puffin_bin=puffin_bin, vllm_host=vllm_host, tui=True))
+                codes.append(cls.run(write_json=True, mightling_bin=mightling_bin, vllm_host=vllm_host, tui=True))
             worst = 1 if 1 in codes else max(codes)
             if worst == 1:
                 print("❌ This build reaches something it should not: see the destinations above. "

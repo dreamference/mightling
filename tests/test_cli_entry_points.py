@@ -1,6 +1,6 @@
-"""`puffin-admin` entry point. `puffin`, the terminal agent, is the Rust binary (see puffin-rs/ and
+"""`ling-admin` entry point. `ling`, the terminal agent, is the Rust binary (see ling-rs/ and
 tests/test_codex_branded_builder.py); there is no Python entry point of that name, and no
-`puffin-admin chat` either.
+`ling-admin chat` either.
 """
 
 import sys
@@ -10,26 +10,29 @@ from dreamference.cli import main
 from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
 
 
-def test_puffin_admin_still_reads_sys_argv():
+def test_mightling_admin_still_reads_sys_argv():
     with patch.object(DreamferenceCLIController, "run_cli") as run_cli:
         main()
     run_cli.assert_called_once_with(None)
 
 
-def test_there_is_no_python_puffin_entry_point():
+def test_there_is_no_python_mightling_entry_point():
     import dreamference.cli as cli
 
-    assert not hasattr(cli, "puffin_main")
-    assert "puffin=" not in open("setup.py").read()
+    assert not hasattr(cli, "mightling_main")
+    assert "ling=" not in open("setup.py").read()
 
 
-def test_there_is_no_chat_subcommand(capsys):
-    # `puffin` is the terminal agent; `puffin-admin chat` was retired with the Python launcher.
+def test_chat_is_the_web_chat_group_not_the_agent(capsys):
+    # `ling` is the terminal agent; the `chat` that started it was retired with the Python
+    # launcher. Since the rename `chat` names the web chat's group (it was `puffin-admin puffin`), so
+    # on its own it prints that group's help and starts nothing.
     import pytest
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["chat"])
-    assert "invalid choice: 'chat'" in capsys.readouterr().err
+    assert exit_info.value.code == 1
+    assert "usage: ling-admin chat" in capsys.readouterr().out
 
 
 def test_unknown_arguments_are_rejected(capsys):
@@ -42,16 +45,16 @@ def test_unknown_arguments_are_rejected(capsys):
 
 def test_a_command_group_without_a_subcommand_prints_its_help(capsys):
     # These used to match no dispatch branch and exit 0 having printed nothing (desktop and
-    # puffin hit a NameError instead).
+    # the web chat's group hit a NameError instead).
     import pytest
 
     # `diffusion-model` is absent while diffusion is switched off (tests/test_diffusion_switched_off.py).
-    for group in ("server", "clear", "model", "main-model", "desktop", "puffin", "onyx"):
+    for group in ("server", "clear", "model", "main-model", "desktop", "chat", "onyx"):
         with pytest.raises(SystemExit) as exit_info:
             DreamferenceCLIController.run_cli([group])
         assert exit_info.value.code == 1, group
-        name = "puffin" if group == "onyx" else group  # the alias prints the command's own name
-        assert f"usage: puffin-admin {name}" in capsys.readouterr().out, group
+        name = "chat" if group == "onyx" else group  # the alias prints the command's own name
+        assert f"usage: ling-admin {name}" in capsys.readouterr().out, group
 
 
 def test_model_list_runs(capsys):
@@ -62,4 +65,4 @@ def test_model_list_runs(capsys):
     with pytest.raises(SystemExit) as exit_info:
         DreamferenceCLIController.run_cli(["model", "list"])
     assert exit_info.value.code == 0
-    assert "Available Puffin Models" in capsys.readouterr().out
+    assert "Available Mightling Models" in capsys.readouterr().out

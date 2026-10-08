@@ -1,9 +1,9 @@
-"""Night Shift's per-task KV budget and compaction limit (specs/DREAMFERENCE_PUFFIN_COMPACTION.md
-§4.1, specs/DREAMFERENCE_PUFFIN_NIGHT_SHIFT.md §11).
+"""Night Shift's per-task KV budget and compaction limit (specs/DREAMFERENCE_MIGHTLING_COMPACTION.md
+§4.1, specs/DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md §11).
 
 A night run divides 90% of the KV pool between as many tasks as can each get `task_context`, and
-holds each task to its share by passing it to every `puffin exec` as the compaction limit, so the
-tasks together fit in the pool. These tests use the scripted stand-in for `puffin` of
+holds each task to its share by passing it to every `ling exec` as the compaction limit, so the
+tasks together fit in the pool. These tests use the scripted stand-in for `ling` of
 `test_night_shift.py` and read the command lines it was given.
 """
 
@@ -17,9 +17,9 @@ from test_night_shift import FakeHost, calls, fake_host, queue, setup  # noqa: F
 
 
 def exec_calls(setup, monkeypatch, table):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "stall_then_act")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "stall_then_act")
     record = queue(setup["night"], setup["repo"])
-    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings(table), setup["puffin"],
+    run = NightShiftTaskRun(setup["night"], record, NightShiftSettings(table), setup["ling"],
                             deadline=time.time() + 60)
     assert run.run() == "done"
     return calls(setup)
@@ -71,19 +71,19 @@ def test_an_unknown_pool_runs_one_task_at_a_time():
 
 
 def test_the_launchers_pool_share_is_mirrored():
-    source = (Path(__file__).resolve().parent.parent / "puffin-rs" / "src" / "compaction.rs").read_text()
+    source = (Path(__file__).resolve().parent.parent / "ling-rs" / "src" / "compaction.rs").read_text()
     match = re.search(r"pub const POOL_SHARE_PERCENT: u64 = (\d+);", source)
-    assert match, "POOL_SHARE_PERCENT not found in puffin-rs/src/compaction.rs"
+    assert match, "POOL_SHARE_PERCENT not found in ling-rs/src/compaction.rs"
     assert int(match.group(1)) == LAUNCHER_POOL_SHARE_PERCENT
 
 
 def test_a_night_run_holds_every_task_to_its_share(setup, fake_host, monkeypatch):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "stall_then_act")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "stall_then_act")
     monkeypatch.setattr(FakeHost, "samples", [{"running": 0.0, "served": 1.0, "kv_pool": 156907.0}])
     for index in range(3):
         queue(setup["night"], setup["repo"], task_text=f"Task {index}", test="test -f hello.txt",
               task_id=f"20261002-0100-b{index}0")
-    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+    assert NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                                 vllm_host="http://x", settings=NightShiftSettings({})) == 0
     execs = [call for call in calls(setup) if call[:1] == ["exec"]]
     assert len(execs) == 6  # three tasks, each a first turn and one nudge
@@ -94,10 +94,10 @@ def test_a_night_run_holds_every_task_to_its_share(setup, fake_host, monkeypatch
 
 
 def test_compact_at_zero_passes_no_limit_and_says_so(setup, fake_host, monkeypatch):
-    monkeypatch.setenv("FAKE_PUFFIN_MODE", "change")
+    monkeypatch.setenv("FAKE_MIGHTLING_MODE", "change")
     monkeypatch.setattr(FakeHost, "samples", [{"running": 0.0, "served": 1.0, "kv_pool": 156907.0}])
     queue(setup["night"], setup["repo"], test="test -f hello.txt")
-    NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], puffin_bin=setup["puffin"],
+    NightShiftRunner.run(minutes=5, idle_minutes=0, night_dir=setup["night"], mightling_bin=setup["ling"],
                          vllm_host="http://x", settings=NightShiftSettings({"compact_at": 0}))
     execs = [call for call in calls(setup) if call[:1] == ["exec"]]
     assert execs and not any(arg.startswith("model_auto_compact_token_limit") for call in execs for arg in call)
@@ -113,23 +113,23 @@ def test_the_ledger_default_is_the_launchers(tmp_path, monkeypatch):
 
     from dreamference.config import dreamference_config as cfg_mod
 
-    source = (Path(__file__).resolve().parent.parent / "puffin-rs" / "src" / "compaction.rs").read_text()
+    source = (Path(__file__).resolve().parent.parent / "ling-rs" / "src" / "compaction.rs").read_text()
     match = re.search(r"pub const LEDGER_DEFAULT: bool = (true|false);", source)
-    assert match, "LEDGER_DEFAULT not found in puffin-rs/src/compaction.rs"
-    assert (match.group(1) == "true") == cfg_mod.DEFAULT_PUFFIN_COMPACTION_LEDGER
+    assert match, "LEDGER_DEFAULT not found in ling-rs/src/compaction.rs"
+    assert (match.group(1) == "true") == cfg_mod.DEFAULT_MIGHTLING_COMPACTION_LEDGER
 
 
 def test_the_ledger_setting_survives_a_save(tmp_path, monkeypatch):
     from dreamference.config import DreamferenceConfig
     from dreamference.config import dreamference_config as cfg_mod
 
-    monkeypatch.delenv("DREAMFERENCE_PUFFIN_COMPACTION_LEDGER", raising=False)
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER", raising=False)
     path = tmp_path / "dreamference.toml"
-    chosen = not cfg_mod.DEFAULT_PUFFIN_COMPACTION_LEDGER
-    DreamferenceConfig(config_file=str(path), puffin_compaction_ledger=chosen).save_config()
-    assert DreamferenceConfig(config_file=str(path)).puffin_compaction_ledger is chosen
+    chosen = not cfg_mod.DEFAULT_MIGHTLING_COMPACTION_LEDGER
+    DreamferenceConfig(config_file=str(path), mightling_compaction_ledger=chosen).save_config()
+    assert DreamferenceConfig(config_file=str(path)).mightling_compaction_ledger is chosen
     # The default is not written, so a round trip does not fossilise it.
-    DreamferenceConfig(config_file=str(path), puffin_compaction_ledger=not chosen).save_config()
-    assert "puffin_compaction_ledger" not in path.read_text()
-    monkeypatch.setenv("DREAMFERENCE_PUFFIN_COMPACTION_LEDGER", "on" if chosen else "off")
-    assert DreamferenceConfig(config_file=str(path)).puffin_compaction_ledger is chosen
+    DreamferenceConfig(config_file=str(path), mightling_compaction_ledger=not chosen).save_config()
+    assert "mightling_compaction_ledger" not in path.read_text()
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_COMPACTION_LEDGER", "on" if chosen else "off")
+    assert DreamferenceConfig(config_file=str(path)).mightling_compaction_ledger is chosen

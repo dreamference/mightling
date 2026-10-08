@@ -3,7 +3,7 @@ source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
 ╭───────────────────────────────────────╮
-│ >_ Puffin (vtest)                     │
+│ >_ Mightling (vtest)                     │
 │                                       │
 │ model:       gpt-5   /model to change │
 │ directory:   /tmp/project             │

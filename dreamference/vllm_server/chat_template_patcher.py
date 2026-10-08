@@ -1,5 +1,5 @@
 """
-Chat Template Patcher for Puffin's model server.
+Chat Template Patcher for Mightling's model server.
 
 This module provides the ChatTemplatePatcher class, which applies a recipe's string substitutions
 to a checkpoint's own chat template and writes the result where the server container can read it.

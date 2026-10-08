@@ -1,10 +1,10 @@
-// The Work window's connection to `puffin app-server` (specs/DREAMFERENCE_PUFFIN_DESKTOP.md §4.3).
+// The Work window's connection to `ling app-server` (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §4.3).
 //
-// One server per app, started through the launcher (`puffin app-server`, never a bare `codex`) when
+// One server per app, started through the launcher (`ling app-server`, never a bare `codex`) when
 // the Work window first asks for it. Its stdout carries the protocol, one JSON object per line,
 // passed to the Work window as `work://message` events; its stderr carries the launcher's own
 // messages (the wait for a model server that is still loading), passed as `work://stderr` for the
-// start-up screen. What the window sends goes through `puffin_desktop_bridge::vet_outgoing` first.
+// start-up screen. What the window sends goes through `ling_desktop_bridge::vet_outgoing` first.
 // Only the window labelled `work` may use any of this: Chat is Onyx's page and has no business
 // with the agent, and every command here refuses it whatever the capabilities say.
 
@@ -20,8 +20,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use puffin_desktop_bridge::BusyTracker;
-use puffin_desktop_bridge::Incoming;
+use ling_desktop_bridge::BusyTracker;
+use ling_desktop_bridge::Incoming;
 use serde_json::Value;
 use tauri::AppHandle;
 use tauri::Emitter;
@@ -84,19 +84,19 @@ impl Bridge {
         if running.child.is_some() {
             return Ok(false);
         }
-        let puffin = puffin_desktop_bridge::find_puffin()
-            .ok_or("puffin is not installed: build it with `puffin-admin codex build`, or install Puffin")?;
-        let mut child = Command::new(&puffin)
+        let ling = ling_desktop_bridge::find_mightling()
+            .ok_or("ling is not installed: build it with `ling-admin codex build`, or install Mightling")?;
+        let mut child = Command::new(&ling)
             .arg("app-server")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|error| format!("could not start {} app-server: {error}", puffin.display()))?;
+            .map_err(|error| format!("could not start {} app-server: {error}", ling.display()))?;
         let stdout = child.stdout.take().ok_or("the server has no stdout")?;
         let stderr = child.stderr.take().ok_or("the server has no stderr")?;
         running.stdin = child.stdin.take();
-        running.marker = puffin_desktop_bridge::codex_home().map(|home| puffin_desktop_bridge::busy_marker(&home, child.id()));
+        running.marker = ling_desktop_bridge::codex_home().map(|home| ling_desktop_bridge::busy_marker(&home, child.id()));
         running.pending.clear();
         running.busy = BusyTracker::default();
         running.child = Some(child);
@@ -125,7 +125,7 @@ impl Bridge {
         if line.trim().is_empty() {
             return;
         }
-        let (kind, value) = puffin_desktop_bridge::classify(line);
+        let (kind, value) = ling_desktop_bridge::classify(line);
         match &kind {
             Incoming::NotProtocol => {
                 // Fails loudly: something wrote on the protocol channel.
@@ -168,7 +168,7 @@ impl Bridge {
     fn send(&self, mut message: Value) -> Result<(), String> {
         let mut running = self.lock();
         let Running { stdin, pending, .. } = &mut *running;
-        puffin_desktop_bridge::vet_outgoing(&mut message, pending)?;
+        ling_desktop_bridge::vet_outgoing(&mut message, pending)?;
         let stdin = stdin.as_mut().ok_or("the agent's server is not running")?;
         let mut line = message.to_string();
         line.push('\n');
@@ -179,12 +179,12 @@ impl Bridge {
     }
 }
 
-/// Starts `puffin app-server` if it is not running.
+/// Starts `ling app-server` if it is not running.
 #[tauri::command]
 pub fn work_start(app: AppHandle, window: WebviewWindow, bridge: tauri::State<'_, Bridge>) -> Result<Started, String> {
     only_work(&window)?;
     let started = bridge.start(&app)?;
-    let served_model = puffin_desktop_bridge::codex_home().and_then(|home| puffin_desktop_bridge::served_model(&home));
+    let served_model = ling_desktop_bridge::codex_home().and_then(|home| ling_desktop_bridge::served_model(&home));
     Ok(Started { served_model, started })
 }
 
@@ -205,7 +205,7 @@ pub fn work_stop(window: WebviewWindow, bridge: tauri::State<'_, Bridge>) -> Res
 }
 
 /// Raises the Chat window, creating it from its configuration if this process started with Work
-/// only (`puffin app --work`).
+/// only (`ling app --work`).
 #[tauri::command]
 pub fn work_open_chat(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     only_work(&window)?;
@@ -214,7 +214,7 @@ pub fn work_open_chat(app: AppHandle, window: WebviewWindow) -> Result<(), Strin
 
 /// The air-gap level in force for a thread, or the configured one: the title bar shows it, and the
 /// permission picker disables Full Access at `on` (a courtesy; the refusal that binds is the
-/// server's, specs/DREAMFERENCE_PUFFIN_DESKTOP.md §8.2).
+/// server's, specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §8.2).
 #[derive(serde::Serialize)]
 pub struct Airgapped {
     level: &'static str,
@@ -225,18 +225,18 @@ pub struct Airgapped {
 pub fn work_airgapped(window: WebviewWindow, thread: Option<String>) -> Result<Airgapped, String> {
     only_work(&window)?;
     let ids: Vec<&str> = thread.as_deref().into_iter().collect();
-    let resolved = puffin_airgapped::resolve(&ids);
+    let resolved = ling_airgapped::resolve(&ids);
     Ok(Airgapped { level: resolved.level.name(), source: resolved.source.label() })
 }
 
-/// Where the Work window was asked to open (`puffin app <folder>`, `puffin app --thread <id>`).
+/// Where the Work window was asked to open (`ling app <folder>`, `ling app --thread <id>`).
 #[derive(Default, Clone, serde::Serialize)]
 pub struct WorkTarget {
     pub cwd: Option<String>,
     pub thread: Option<String>,
 }
 
-/// The project folder or thread `puffin app` named, if any.
+/// The project folder or thread `ling app` named, if any.
 #[tauri::command]
 pub fn work_target(window: WebviewWindow, target: tauri::State<'_, WorkTarget>) -> Result<WorkTarget, String> {
     only_work(&window)?;
@@ -250,7 +250,7 @@ pub fn show_work(app: &AppHandle) -> tauri::Result<()> {
         return window.set_focus();
     }
     tauri::WebviewWindowBuilder::new(app, WORK_LABEL, tauri::WebviewUrl::App("index.html".into()))
-        .title("Puffin — Work")
+        .title("Mightling — Work")
         .inner_size(1280.0, 860.0)
         .min_inner_size(720.0, 520.0)
         .center()

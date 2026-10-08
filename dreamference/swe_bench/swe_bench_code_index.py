@@ -1,17 +1,17 @@
 """
 The code index as an arm of the benchmark: `swe-bench run --code-index universal`
-(specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §13).
+(specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §13).
 
 Without it the agent in a container navigates with `grep` and `find` only: the runtime carries
-`puffin` and nothing of `puffin-code`. With it, each instance's repository is indexed **on the
+`ling` and nothing of `ling-code`. With it, each instance's repository is indexed **on the
 host** before the agent starts, and the index is mounted read-only into the container:
 
 - the repository is copied out of the instance image (`docker create` + `docker cp /testbed`),
   so the index is of exactly the tree the agent gets;
-- `puffin-code index --wait` builds it there, under its own admission against the host's memory
-  budget and inside `puffin-index.slice`, like any other index run on this machine;
+- `ling-code index --wait` builds it there, under its own admission against the host's memory
+  budget and inside `mightling-index.slice`, like any other index run on this machine;
 - queries only read (code-index spec: queries run inside the sandbox, indexing outside), so the
-  container needs only the `puffin-code` binary and four environment variables that tell it
+  container needs only the `ling-code` binary and four environment variables that tell it
   where the index is. A file the agent edits is then answered by text search, as on the host.
 
 Only the **universal** layer (codebase-memory) is built. The exact layer was measured on one
@@ -35,20 +35,20 @@ from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 # The arms `--code-index` accepts.
 ARMS: Final[tuple] = ("off", "universal")
 
-# Names a `puffin-code` to use in place of the installed one (`host_binary`).
-PUFFIN_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_PUFFIN_CODE"
+# Names a `ling-code` to use in place of the installed one (`host_binary`).
+MIGHTLING_CODE_OVERRIDE_ENV: Final[str] = "DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE"
 
 # The MCP server's name in Codex's configuration, and the variables Codex must pass it; both as
-# the launcher has them (`puffin-rs/src/code_index.rs`, `MCP_SERVER` and `FORWARDED_ENV`).
-MCP_SERVER: Final[str] = "puffin_code"
+# the launcher has them (`ling-rs/src/code_index.rs`, `MCP_SERVER` and `FORWARDED_ENV`).
+MCP_SERVER: Final[str] = "ling_code"
 MCP_FORWARDED_ENV: Final[List[str]] = [
-    "PUFFIN_CODE_ROOT", "PUFFIN_CODE_STATE_DIR", "PUFFIN_CODE_GRAPH_DB", "PUFFIN_CODE_PROJECT",
-    "PUFFIN_CODE_TOOLS_DIR", "PUFFIN_CODE_INDEXERS_DIR", "CODEX_HOME", "DREAMFERENCE_CONFIG_PATH",
+    "MIGHTLING_CODE_ROOT", "MIGHTLING_CODE_STATE_DIR", "MIGHTLING_CODE_GRAPH_DB", "MIGHTLING_CODE_PROJECT",
+    "MIGHTLING_CODE_TOOLS_DIR", "MIGHTLING_CODE_INDEXERS_DIR", "CODEX_HOME", "DREAMFERENCE_CONFIG_PATH",
     "DREAMFERENCE_VLLM_HOST"]
 
-# Where the relocated `puffin-code` and the instance's index are mounted in the container.
-CODE_MOUNT: Final[str] = "/opt/puffin-code"
-INDEX_MOUNT: Final[str] = "/puffin-index"
+# Where the relocated `ling-code` and the instance's index are mounted in the container.
+CODE_MOUNT: Final[str] = "/opt/ling-code"
+INDEX_MOUNT: Final[str] = "/mightling-index"
 
 INDEX_TIMEOUT_S: Final[int] = 30 * 60
 RECORD_NAME: Final[str] = "index.json"
@@ -58,7 +58,7 @@ STAMP_NAME: Final[str] = "source-hash"
 class SweBenchCodeIndex:
     """Builds per-instance indexes on the host and describes how a container uses one."""
 
-    # Seam: tests replace it so nothing in the suite runs the real `puffin-code` or `patchelf`.
+    # Seam: tests replace it so nothing in the suite runs the real `ling-code` or `patchelf`.
     execute: Callable[..., subprocess.CompletedProcess] = staticmethod(
         lambda command, **kwargs: subprocess.run(command, capture_output=True, text=True,
                                                  stdin=subprocess.DEVNULL, **kwargs))
@@ -67,17 +67,17 @@ class SweBenchCodeIndex:
     def host_binary(cls) -> Optional[str]:
         """
         Returns:
-            Optional[str]: The installed `puffin-code` (beside `puffin`), or None if absent; or
-            the one `DREAMFERENCE_SWE_BENCH_PUFFIN_CODE` names, to measure a build of it that
-            is not installed (the arm then differs from the plain one in `puffin-code` alone).
+            Optional[str]: The installed `ling-code` (beside `ling`), or None if absent; or
+            the one `DREAMFERENCE_SWE_BENCH_MIGHTLING_CODE` names, to measure a build of it that
+            is not installed (the arm then differs from the plain one in `ling-code` alone).
         """
-        override = os.environ.get(PUFFIN_CODE_OVERRIDE_ENV)
+        override = os.environ.get(MIGHTLING_CODE_OVERRIDE_ENV)
         if override:
             return override if os.path.exists(override) else None
-        puffin = SweBenchRuntime.installed_puffin()
-        if not puffin:
+        ling = SweBenchRuntime.installed_mightling()
+        if not ling:
             return None
-        path = os.path.join(os.path.dirname(os.path.realpath(puffin)), "puffin-code")
+        path = os.path.join(os.path.dirname(os.path.realpath(ling)), "ling-code")
         return path if os.path.exists(path) else None
 
     # -- the binary for the container ----------------------------------------------------------
@@ -86,7 +86,7 @@ class SweBenchCodeIndex:
     def runtime_dir(cls) -> Path:
         """
         Returns:
-            Path: The relocated `puffin-code`, kept apart from `puffin`'s runtime so that
+            Path: The relocated `ling-code`, kept apart from `ling`'s runtime so that
             runtime's hash, which a run's manifest pins, does not change when this one appears.
         """
         return swe_bench_settings.CACHE_DIR / "runtime-code"
@@ -94,19 +94,19 @@ class SweBenchCodeIndex:
     @classmethod
     def ensure_runtime(cls, patchelf: str) -> Optional[str]:
         """
-        Builds the relocated `puffin-code` unless the one on disk was made from the installed
-        binary. Same treatment as `puffin`: the instance images have an older glibc.
+        Builds the relocated `ling-code` unless the one on disk was made from the installed
+        binary. Same treatment as `ling`: the instance images have an older glibc.
 
         Args:
             patchelf: The `patchelf` executable.
 
         Returns:
-            Optional[str]: The SHA-256 of the installed `puffin-code`, or None on failure.
+            Optional[str]: The SHA-256 of the installed `ling-code`, or None on failure.
         """
         import hashlib
         binary = cls.host_binary()
         if binary is None:
-            print("❌ puffin-code is not installed: run `puffin-admin codex build` first.")
+            print("❌ ling-code is not installed: run `ling-admin codex build` first.")
             return None
         wanted = hashlib.sha256(Path(binary).read_bytes()).hexdigest()
         target = cls.runtime_dir()
@@ -123,7 +123,7 @@ class SweBenchCodeIndex:
             loader, libraries = SweBenchRuntime.host_libraries(binary)
             for library in [loader, *libraries]:
                 shutil.copy(os.path.realpath(library), staging / "lib" / os.path.basename(library))
-            copy = staging / "bin" / "puffin-code"
+            copy = staging / "bin" / "ling-code"
             shutil.copy(binary, copy)
             patched = cls.execute([patchelf, "--set-interpreter", f"{CODE_MOUNT}/lib/{os.path.basename(loader)}",
                                    "--set-rpath", f"{CODE_MOUNT}/lib", str(copy)])
@@ -131,7 +131,7 @@ class SweBenchCodeIndex:
                 raise ValueError(patched.stderr.strip()[-300:])
         except (OSError, subprocess.CalledProcessError, ValueError) as error:
             shutil.rmtree(staging, ignore_errors=True)
-            print(f"❌ Could not build puffin-code for the instance images: {error}")
+            print(f"❌ Could not build ling-code for the instance images: {error}")
             return None
         (staging / STAMP_NAME).write_text(wanted + "\n")
         shutil.rmtree(target, ignore_errors=True)
@@ -189,7 +189,7 @@ class SweBenchCodeIndex:
             return dict(cached, cached=True)
         binary = cls.host_binary()
         if binary is None:
-            print("❌ puffin-code is not installed: run `puffin-admin codex build` first.")
+            print("❌ ling-code is not installed: run `ling-admin codex build` first.")
             return None
         directory = cls.index_dir(row)
         shutil.rmtree(directory, ignore_errors=True)
@@ -210,11 +210,11 @@ class SweBenchCodeIndex:
             return None
         environment = dict(
             os.environ,
-            PUFFIN_CODE_STATE_DIR=str(directory / "state"),
+            MIGHTLING_CODE_STATE_DIR=str(directory / "state"),
             CBM_CACHE_DIR=str(directory / "cbm"),
             # An empty indexers directory makes the exact (SCIP) indexers "not installed", which
             # is how this arm stays the universal layer only.
-            PUFFIN_CODE_INDEXERS_DIR=str(directory / "no-indexers"),
+            MIGHTLING_CODE_INDEXERS_DIR=str(directory / "no-indexers"),
         )
         try:
             indexed = cls.execute([binary, "index", "--wait"], cwd=str(checkout), env=environment,
@@ -226,7 +226,7 @@ class SweBenchCodeIndex:
         graphs = sorted(path.name for path in (directory / "cbm").glob("*.db") if path.name != "_config.db")
         shutil.rmtree(checkout, ignore_errors=True)  # queries read the container's own /testbed
         if code != 0 or not graphs:
-            print(f"⚠️  {row['instance_id']}: puffin-code index failed ({code}); see {directory / 'index.log'}")
+            print(f"⚠️  {row['instance_id']}: ling-code index failed ({code}); see {directory / 'index.log'}")
             return None
         import hashlib
         record = {
@@ -250,17 +250,17 @@ class SweBenchCodeIndex:
 
         Returns:
             Dict[str, Any]: `mounts` (`docker run -v` values, both read-only), `env` (what
-            `puffin-code` and the launcher read) and `path` (the directory to put on `PATH`).
+            `ling-code` and the launcher read) and `path` (the directory to put on `PATH`).
         """
         return {
             "mounts": [f"{cls.runtime_dir()}:{CODE_MOUNT}:ro", f"{cls.index_dir(row)}:{INDEX_MOUNT}:ro"],
             "env": {
-                # The launcher appends `puffin-code prompt-block` to the prompt when this names a file.
-                "PUFFIN_CODE_BIN": f"{CODE_MOUNT}/bin/puffin-code",
-                "PUFFIN_CODE_STATE_DIR": f"{INDEX_MOUNT}/state",
-                "PUFFIN_CODE_GRAPH_DB": f"{INDEX_MOUNT}/cbm/{record['graph_db']}",
+                # The launcher appends `ling-code prompt-block` to the prompt when this names a file.
+                "MIGHTLING_CODE_BIN": f"{CODE_MOUNT}/bin/ling-code",
+                "MIGHTLING_CODE_STATE_DIR": f"{INDEX_MOUNT}/state",
+                "MIGHTLING_CODE_GRAPH_DB": f"{INDEX_MOUNT}/cbm/{record['graph_db']}",
                 # The graph names its project after the host path it was indexed at.
-                "PUFFIN_CODE_PROJECT": str(record["project"]),
+                "MIGHTLING_CODE_PROJECT": str(record["project"]),
             },
             "path": f"{CODE_MOUNT}/bin",
             "config": cls.mcp_overrides(),
@@ -269,7 +269,7 @@ class SweBenchCodeIndex:
     @classmethod
     def mcp_overrides(cls) -> List[str]:
         """
-        The `-c` overrides that declare `puffin-code mcp` to Codex as a **required** server.
+        The `-c` overrides that declare `ling-code mcp` to Codex as a **required** server.
 
         The launcher declares it without `required`, and Codex then gives an optional server a
         short grace period before the first request and leaves its tools out if it is not up: in
@@ -277,14 +277,14 @@ class SweBenchCodeIndex:
         the model's first `code_search` came back "unsupported call: code_search" and it went
         back to grep for the rest of the task. A required server is waited for. The launcher
         adds its own declaration only when none is given, so this one is the whole declaration:
-        the same command, arguments and forwarded variables (`puffin-rs/src/code_index.rs`).
+        the same command, arguments and forwarded variables (`ling-rs/src/code_index.rs`).
 
         Returns:
             List[str]: The `key=value` overrides, each to follow a `-c`.
         """
         key = f"mcp_servers.{MCP_SERVER}"
         forwarded = ", ".join(json.dumps(name) for name in MCP_FORWARDED_ENV)
-        return [f"{key}.command={json.dumps(f'{CODE_MOUNT}/bin/puffin-code')}",
+        return [f"{key}.command={json.dumps(f'{CODE_MOUNT}/bin/ling-code')}",
                 f'{key}.args=["mcp"]',
                 f"{key}.env_vars=[{forwarded}]",
                 f"{key}.required=true",

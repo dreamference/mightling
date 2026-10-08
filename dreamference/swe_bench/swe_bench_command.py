@@ -1,6 +1,6 @@
 """
-`puffin-admin swe-bench {setup,smoke,run,eval,report,status,clean}`
-(specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md §3).
+`ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}`
+(specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §3).
 
 The parser and the dispatch live here so the CLI controller only registers and calls them.
 """
@@ -31,13 +31,13 @@ class SweBenchCommand:
         Registers `swe-bench` and its subcommands.
 
         Args:
-            subparsers: The top-level subparsers of `puffin-admin`.
+            subparsers: The top-level subparsers of `ling-admin`.
         """
         parser = subparsers.add_parser(
-            "swe-bench", help="Run puffin over SWE-bench instances on this machine and grade the patches")
+            "swe-bench", help="Run ling over SWE-bench instances on this machine and grade the patches")
         commands = parser.add_subparsers(dest="swe_bench_command")
 
-        setup = commands.add_parser("setup", help="Install the harness, download the dataset, build the puffin runtime for the instance images")
+        setup = commands.add_parser("setup", help="Install the harness, download the dataset, build the ling runtime for the instance images")
         setup.add_argument("--dataset", default="verified", help="verified (default), lite, full, or a HuggingFace id")
         setup.add_argument("--validate", action="store_true", help="Also check which instances grade correctly here (pulls their images)")
         setup.add_argument("--instances", default=None, help="With --validate: comma-separated instance ids")
@@ -46,9 +46,9 @@ class SweBenchCommand:
 
         smoke = commands.add_parser("smoke", help="Prove the whole pipeline on five instances; run refuses until this has passed")
         smoke.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
-        smoke.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open puffin sessions to close (for testing)")
+        smoke.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
 
-        run = commands.add_parser("run", help="The agent phase: one puffin exec per instance, producing predictions.jsonl")
+        run = commands.add_parser("run", help="The agent phase: one ling exec per instance, producing predictions.jsonl")
         run.add_argument("--dataset", default="verified", help="verified (default), lite, full, or a HuggingFace id")
         run.add_argument("--instances", default=None, help="Comma-separated instance ids")
         run.add_argument("--subset", default=None, help="A file of instance ids, one per line")
@@ -57,14 +57,14 @@ class SweBenchCommand:
         run.add_argument("--eval", action="store_true", help="Grade the predictions when the agent phase ends")
         run.add_argument("--remove-images", action="store_true", help="With --eval: work one repository at a time and remove its images once it is graded")
         run.add_argument("--code-index", default="off", choices=["off", "universal"],
-                         help="universal: index each instance's repository on the host and give the agent puffin-code (default off)")
+                         help="universal: index each instance's repository on the host and give the agent ling-code (default off)")
         run.add_argument("--prompt", default=None,
                          help="The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one)")
         run.add_argument("--mask", default="off", choices=["off", "on"],
                          help="on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off)")
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
-        run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open puffin sessions to close (for testing)")
+        run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
 
         evaluate = commands.add_parser("eval", help="The grading phase: the upstream harness applies each patch and runs the tests")
         evaluate.add_argument("run", nargs="?", default=None, help="The run (default: the latest)")
@@ -110,7 +110,7 @@ class SweBenchCommand:
             return cls.status()
         if command == "clean":
             return cls.clean(args.run, args.images)
-        print("usage: puffin-admin swe-bench {setup,smoke,run,eval,report,status,clean}")
+        print("usage: ling-admin swe-bench {setup,smoke,run,eval,report,status,clean}")
         return 2
 
     @classmethod
@@ -125,7 +125,7 @@ class SweBenchCommand:
               force: bool = False) -> int:
         """
         Prepares everything a run needs except the instance images: the harness's virtualenv,
-        the dataset snapshot, the list of arm64 images and the relocated `puffin`.
+        the dataset snapshot, the list of arm64 images and the relocated `ling`.
 
         Args:
             dataset: The dataset to download.
@@ -154,14 +154,14 @@ class SweBenchCommand:
         with_image = [i for i in ids if SweBenchImages.image_for(i, tags)]
         print(f"✅ {architecture} images: {len(with_image)} of {len(ids)} instances "
               f"({swe_bench_settings.COMMUNITY_IMAGE_REPO}, third-party); the rest are not evaluable here")
-        puffin_bin = SweBenchRuntime.installed_puffin()
-        if not puffin_bin:
-            print("❌ puffin is not built: run `puffin-admin codex build` first.")
+        mightling_bin = SweBenchRuntime.installed_mightling()
+        if not mightling_bin:
+            print("❌ ling is not built: run `ling-admin codex build` first.")
             return 1
-        runtime = SweBenchRuntime.ensure(puffin_bin, SweBenchHarness.tool("patchelf"))
+        runtime = SweBenchRuntime.ensure(mightling_bin, SweBenchHarness.tool("patchelf"))
         if runtime is None:
             return 1
-        print(f"✅ puffin runtime for the instance images: {SweBenchRuntime.directory()} ({runtime[:12]})")
+        print(f"✅ ling runtime for the instance images: {SweBenchRuntime.directory()} ({runtime[:12]})")
         disk = SweBenchEvaluator.disk_problem(settings)
         if disk:
             print(f"⚠️  {disk}")
@@ -188,7 +188,7 @@ class SweBenchCommand:
 
         Args:
             idle_minutes: Minutes the model must have been idle before the agent step.
-            ignore_sessions: Do not wait for open `puffin` sessions.
+            ignore_sessions: Do not wait for open `ling` sessions.
 
         Returns:
             int: 0 when the smoke passed and was recorded.
@@ -196,7 +196,7 @@ class SweBenchCommand:
         settings = swe_bench_settings.SweBenchSettings()
         ids = list(swe_bench_settings.SMOKE_INSTANCES)
         if not SweBenchHarness.rows("verified") or SweBenchHarness.installed_version() != swe_bench_settings.HARNESS_VERSION:
-            print("❌ Run `puffin-admin swe-bench setup` first.")
+            print("❌ Run `ling-admin swe-bench setup` first.")
             return 1
         print(f"🔎 Smoke 1/2: grading {len(ids)} instances with their reference patch and with a no-op patch...")
         outcome = SweBenchEvaluator.validate("verified", ids, settings, force=True)
@@ -239,7 +239,7 @@ class SweBenchCommand:
             "agent_resolved": bool(results[ids[0]].get("resolved")),
             "runtime_hash": SweBenchRuntime.current_hash(),
         }, indent=2) + "\n")
-        print("✅ Smoke passed; `puffin-admin swe-bench run` is unlocked.")
+        print("✅ Smoke passed; `ling-admin swe-bench run` is unlocked.")
         return 0
 
     # -- eval, report, status, clean -----------------------------------------------------------
@@ -248,7 +248,7 @@ class SweBenchCommand:
     def _store(cls, name: Optional[str]) -> Optional[SweBenchRunStore]:
         name = name or SweBenchRunStore.latest()
         if not name or SweBenchRunStore(name).manifest() is None:
-            print(f"❌ No such run: {name or '(none yet)'}. `puffin-admin swe-bench status` lists them.")
+            print(f"❌ No such run: {name or '(none yet)'}. `ling-admin swe-bench status` lists them.")
             return None
         return SweBenchRunStore(name)
 
@@ -277,7 +277,7 @@ class SweBenchCommand:
         results = SweBenchEvaluator.grade(store, settings)
         resolved = sum(1 for result in results.values() if result.get("resolved"))
         print(f"✅ {store.name}: {len(results)} graded, {resolved} resolved. "
-              f"`puffin-admin swe-bench report {store.name}` prints the report.")
+              f"`ling-admin swe-bench report {store.name}` prints the report.")
         return 0
 
     @classmethod
@@ -310,7 +310,7 @@ class SweBenchCommand:
             int: 0.
         """
         version = SweBenchHarness.installed_version()
-        print(f"Harness: {'swebench ' + version if version else 'not installed (puffin-admin swe-bench setup)'}")
+        print(f"Harness: {'swebench ' + version if version else 'not installed (ling-admin swe-bench setup)'}")
         print(f"Smoke: {'passed' if SweBenchRunner.smoke_passed() else 'not passed with this harness version'}")
         print(f"Validated here: {len(SweBenchImages.validated())} instance(s); "
               f"rejected: {len(SweBenchImages.rejected())}")
@@ -337,7 +337,7 @@ class SweBenchCommand:
         Returns:
             int: 0.
         """
-        label = f"puffin.swe-bench.run={name}" if name else "puffin.swe-bench.run"
+        label = f"ling.swe-bench.run={name}" if name else "ling.swe-bench.run"
         listed = SweBenchDocker.run(["ps", "-aq", "--filter", f"label={label}"], timeout=60)
         containers = listed.stdout.split()
         if containers:

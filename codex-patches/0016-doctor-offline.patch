@@ -4,29 +4,29 @@ index d701431..d27f0cd 100644
 +++ b/codex-rs/cli/src/doctor.rs
 @@ -1202,3 +1202,14 @@ fn config_toml_details(config: &Config, details: &mut Vec<String>) {
  
-+// Puffin: the checks that reach OpenAI or GitHub (sign-in, updates, reachability) are
++// Mightling: the checks that reach OpenAI or GitHub (sign-in, updates, reachability) are
 +// switched off, not removed; set this to false to restore them. Tests still run them.
-+const PUFFIN_DOCTOR_OFFLINE: bool = !cfg!(test);
++const MIGHTLING_DOCTOR_OFFLINE: bool = !cfg!(test);
 +
-+fn puffin_disabled(id: &str, category: &str) -> DoctorCheck {
-+    DoctorCheck::new(id, category, CheckStatus::Ok, "disabled in Puffin (no network)")
++fn mightling_disabled(id: &str, category: &str) -> DoctorCheck {
++    DoctorCheck::new(id, category, CheckStatus::Ok, "disabled in Mightling (no network)")
 +}
 +
  fn auth_check(config: &Config) -> DoctorCheck {
-+    if PUFFIN_DOCTOR_OFFLINE {
-+        return puffin_disabled("auth.credentials", "auth");
++    if MIGHTLING_DOCTOR_OFFLINE {
++        return mightling_disabled("auth.credentials", "auth");
 +    }
      let mut details = Vec::new();
 @@ -2278,2 +2289,5 @@ async fn websocket_reachability_check(
  ) -> DoctorCheck {
-+    if PUFFIN_DOCTOR_OFFLINE {
-+        return puffin_disabled("network.websocket_reachability", "websocket");
++    if MIGHTLING_DOCTOR_OFFLINE {
++        return mightling_disabled("network.websocket_reachability", "websocket");
 +    }
      let provider = &config.model_provider;
 @@ -2698,2 +2712,5 @@ fn provider_url_for_path(
  async fn provider_reachability_check(plan: ReachabilityPlan) -> DoctorCheck {
-+    if PUFFIN_DOCTOR_OFFLINE {
-+        return puffin_disabled("network.provider_reachability", "reachability");
++    if MIGHTLING_DOCTOR_OFFLINE {
++        return mightling_disabled("network.provider_reachability", "reachability");
 +    }
      let mut details = vec![format!("reachability mode: {}", plan.description)];
 diff --git a/codex-rs/cli/src/doctor/updates.rs b/codex-rs/cli/src/doctor/updates.rs
@@ -35,7 +35,7 @@ index fbad7d9..f1cc726 100644
 +++ b/codex-rs/cli/src/doctor/updates.rs
 @@ -53,2 +53,5 @@ const DESKTOP_UPDATE_URL: &str =
  pub(super) async fn updates_check(config: &Config) -> DoctorCheck {
-+    if super::PUFFIN_DOCTOR_OFFLINE {
-+        return super::puffin_disabled("updates.status", "updates");
++    if super::MIGHTLING_DOCTOR_OFFLINE {
++        return super::mightling_disabled("updates.status", "updates");
 +    }
      let current_exe = std::env::current_exe().ok();

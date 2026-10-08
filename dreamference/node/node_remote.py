@@ -1,10 +1,10 @@
 """
-Managing other nodes from this one (specs/DREAMFERENCE_PUFFIN_NODE.md §12.3, §12.4, §15.1).
+Managing other nodes from this one (specs/DREAMFERENCE_MIGHTLING_NODE.md §12.3, §12.4, §15.1).
 
-There is no primary: the machine a person types `puffin-admin node …` on is the one doing the
+There is no primary: the machine a person types `ling-admin node …` on is the one doing the
 managing. Listing needs no pairing, because a node's model, load and KV pool are on its open
 model port. Changing a node (its model, starting or stopping its server) goes over the SSH
-pairing, and is carried out by that node's own `puffin-admin`.
+pairing, and is carried out by that node's own `ling-admin`.
 """
 
 from typing import Any, Dict, List, Optional
@@ -15,7 +15,7 @@ from dreamference.node.node_pairing import NodePairing
 
 
 class NodeRemote:
-    """`puffin-admin node list|status|set|start|stop`."""
+    """`ling-admin node list|status|set|start|stop`."""
 
     @classmethod
     def list_lines(cls) -> List[str]:
@@ -29,7 +29,7 @@ class NodeRemote:
         from dreamference.night_shift.night_shift_host import NightShiftHost
         nodes = NodeBrowser.browse()
         if not nodes:
-            return ["No Puffin node answers on this network (`puffin-admin node enable` advertises this one)."]
+            return ["No Mightling node answers on this network (`ling-admin node enable` advertises this one)."]
         mine = NodeIdentity.read()
         records = {record["node"]: record for record in NodePairing.paired()}
         paired = set(records)
@@ -54,10 +54,10 @@ class NodeRemote:
             elif node.get("node") in paired:
                 tags.append("paired")
             else:
-                tags.append("not paired: `puffin-admin node add " + node["name"] + "` to manage it")
+                tags.append("not paired: `ling-admin node add " + node["name"] + "` to manage it")
             if node.get("main") != "1":
                 tags.append("not a coding model")
-            lines.append(f"{node['name']}  {host}/v1  {detail}  Puffin {node.get('version', '?')}  ({'; '.join(tags)})")
+            lines.append(f"{node['name']}  {host}/v1  {detail}  Mightling {node.get('version', '?')}  ({'; '.join(tags)})")
         return lines
 
     @classmethod
@@ -113,13 +113,13 @@ class NodeRemote:
         """
         record: Optional[Dict[str, Any]] = NodePairing.find(name)
         if record is None:
-            print(f"❌ {name} is not a paired node. Pair once with: puffin-admin node add {name}")
+            print(f"❌ {name} is not a paired node. Pair once with: ling-admin node add {name}")
             return 1
         return NodePairing.run(record, request, capture=False).returncode
 
     @classmethod
     def status(cls, name: str) -> int:
-        """Shows that node's `puffin-admin status`."""
+        """Shows that node's `ling-admin status`."""
         return cls.request(name, "status")
 
     @classmethod

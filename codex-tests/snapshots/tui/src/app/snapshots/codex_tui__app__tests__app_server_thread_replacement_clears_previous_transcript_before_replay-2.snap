@@ -3,7 +3,7 @@ source: tui/src/app/tests.rs
 expression: rendered
 ---
 ╭────────────────────────────────────────╮
-│ >_ Puffin (v0.0.0)                     │
+│ >_ Mightling (v0.0.0)                     │
 │                                        │
 │ model:     gpt-test   /model to change │
 │ directory: <thread cwd>                │

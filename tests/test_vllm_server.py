@@ -895,7 +895,7 @@ def test_watchdog_kills_cgroup_pids_without_forking(monkeypatch, tmp_path):
     assert wd._socket_calls == []
 
 def test_watchdog_probes_whether_it_may_signal_before_relying_on_it(monkeypatch, tmp_path):
-    # `puffin-admin` runs as an ordinary user and the container's processes run as root, so reading
+    # `ling-admin` runs as an ordinary user and the container's processes run as root, so reading
     # cgroup.procs succeeds while signalling those PIDs raises EPERM. The probe uses signal 0,
     # which asks the permission question without delivering anything.
     from dreamference.vllm_server import psi_watchdog

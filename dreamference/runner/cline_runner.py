@@ -43,7 +43,7 @@ class ClineRunner:
         hf_model = resolve_model_hf_repo(self.config.model)
         
         content = (
-            "# Puffin Local GB10 AI Agent Rules for Cline\n\n"
+            "# Mightling Local GB10 AI Agent Rules for Cline\n\n"
             "## Model & Endpoint Configuration\n"
             f"- API Provider: OpenAI Compatible\n"
             f"- Base URL: {self.config.vllm_host}/v1\n"

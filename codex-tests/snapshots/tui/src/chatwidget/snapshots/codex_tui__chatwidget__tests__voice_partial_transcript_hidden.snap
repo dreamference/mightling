@@ -8,6 +8,6 @@ expression: normalized_backend_snapshot(terminal.backend())
 "                                                            "
 " voice ● listening              ctrl+x mute     /voice stop "
 "                                                            "
-"› Ask Puffin to do anything                                 "
+"› Ask Mightling to do anything                                 "
 "                                                            "
 "  GPT-5.6-Sol default · /tmp/project                        "

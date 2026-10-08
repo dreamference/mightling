@@ -1,7 +1,7 @@
 """
-SWE-bench on this machine: `puffin-admin swe-bench` runs `puffin` over benchmark instances, each
+SWE-bench on this machine: `ling-admin swe-bench` runs `ling` over benchmark instances, each
 in its own container with no network but the model server, and has the upstream harness grade
-the patches (specs/DREAMFERENCE_PUFFIN_SWE_BENCH.md).
+the patches (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md).
 """
 
 from dreamference.swe_bench.swe_bench_settings import SweBenchSettings

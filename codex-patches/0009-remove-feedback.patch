@@ -13,6 +13,6 @@ index bf335d8..25a7842 100644
 +++ b/codex-rs/tui/src/slash_command.rs
 @@ -310,2 +310,4 @@ impl SlashCommand {
              SlashCommand::Logout => false,
-+            // Puffin: /feedback uploads session logs to OpenAI, which an air-gapped tool must not do.
++            // Mightling: /feedback uploads session logs to OpenAI, which an air-gapped tool must not do.
 +            SlashCommand::Feedback => false,
              SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),
