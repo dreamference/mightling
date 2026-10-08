@@ -2,7 +2,7 @@
 # Installs Mightling from a release, with no checkout of the repository and nothing compiled.
 #
 #   ./install.sh [--role client|node] [--version X.Y.Z] [--no-advertise]
-#                [--from <dir>] [--no-host-setup]
+#                [--from <dir>] [--no-host-setup] [--no-model]
 #
 # What it installs depends on the machine:
 #
@@ -12,11 +12,31 @@
 #            ~/.local/share/dreamference/mightling/bin and linked into ~/.local/bin. Releases carry it
 #            for arm64 and x86-64 Linux and for macOS (Apple silicon and Intel).
 #   node     the client, plus `ling-admin` (the Python package, from the release's wheel, in a
-#            virtualenv of its own) and the host settings a model load needs. This is what a GB10
-#            (DGX Spark and its siblings) gets by default; every other machine gets the client.
-#            A node is then offered to the local network (`ling-admin node enable`), so that
-#            `ling` on your other computers finds it with no address typed; that asks for
-#            your password once, and says what it opens. --no-advertise skips it.
+#            virtualenv of its own) and everything else a node needs, with no question asked:
+#            python3-venv where the system lacks it; the host settings a model load needs
+#            (`ling-admin host setup --yes`); you in the `docker` group; lingering, so jobs and
+#            Night Shift tasks outlive a logout; the node offered to the local network
+#            (`ling-admin node enable --yes`), so `ling` on your other computers finds it with no
+#            address typed; and the default model, downloaded and served (`ling-admin model
+#            download`, `ling-admin server start`, logged to ~/.local/state/dreamference/
+#            install-<time>.log). It ends with a summary of every step, done or failed. This is
+#            what a GB10 (DGX Spark and its siblings) gets by default; every other machine gets
+#            the client.
+#
+# You can run it on a fresh GB10 and leave. A node install changes the machine outside your home
+# folder, so it needs root, asked for once at the very start: nothing at all when sudo needs no
+# password (root, or a NOPASSWD rule), otherwise sudo's own password prompt, after which sudo is
+# kept from expiring until the script ends. With no terminal to ask on (`curl … | bash` over a
+# plain ssh) and a sudo that wants a password, it stops before anything is downloaded and says how
+# to run it so that it can ask: download it, then `bash install.sh` in a terminal (or `ssh -t`).
+#
+# System updates. A node also checks, at the start, for package upgrades (`apt-get update`;
+# NVIDIA's DGX, CUDA and driver packages are named) and firmware (`fwupdmgr`). At a terminal it
+# asks the one question it ever asks, default no: install them now? Yes installs them after
+# everything else (`apt-get full-upgrade`, firmware staged for the next boot); it never reboots,
+# and the summary says when to. With no terminal they are only listed, with the commands.
+#
+# --no-advertise keeps the node off the local network (`ling-admin node enable` offers it later).
 #
 # It downloads the same assets, by the same names and with the same checks, as `ling update`
 # (ling-rs/src/update.rs), so a machine installed this way is updated by that command.
@@ -38,8 +58,13 @@
 # (`ling-admin node provision` copies such a bundle from another node; specs/
 # DREAMFERENCE_MIGHTLING_FLEET.md §7.2). The checks are the same. A `VERSION` file in it names the
 # version, and a `wheelhouse/` folder in it, if present, holds the Python dependencies so pip needs
-# no index either. --no-host-setup skips the host settings (provisioning applies them with
-# `sudo ling-admin node prepare` instead).
+# no index either. --no-host-setup and --no-model are for provisioning, which does those parts
+# itself: the root half with `sudo ling-admin node prepare` (host settings, docker group,
+# lingering), and the model copied from the machine provisioning it. With --no-host-setup this
+# script needs no root, and checks for no system updates.
+#
+# MIGHTLING_LINGER_DIR, MIGHTLING_PCI_DEVICES and the PATH are where the tests point it at
+# stand-ins; nothing else reads them.
 #
 # For a development install from a checkout, use scripts/install_gb10.sh instead.
 set -euo pipefail
@@ -58,11 +83,23 @@ VERSION=""
 ADVERTISE=1
 FROM=""
 HOST_SETUP=1
+MODEL=1
 
-say()  { printf '%s\n' "$*"; }
-fail() { printf '❌ %s\n' "$*" >&2; exit 1; }
+# A line that cannot be written (a reader that went away) is dropped, never the end of the run.
+say()  { printf '%s\n' "$*" 2>/dev/null || true; }
+fail() { printf '❌ %s\n' "$*" >&2 2>/dev/null || true; exit 1; }
 
-usage() { sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; }
+# The comment block at the top, without its `# `.
+usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; }
+
+# What the summary lists: `step done|failed|off|available <text>`. A step is done or failed; `off`
+# is only ever an opt-out given on the command line, `available` only the system updates.
+STEPS=()
+step() { STEPS+=("$1|$2"); }
+
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dreamference"
+LOG="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
+LINGER_DIR="${MIGHTLING_LINGER_DIR:-/var/lib/systemd/linger}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -74,6 +111,7 @@ while [ $# -gt 0 ]; do
         --from)      FROM="${2:-}"; shift 2 ;;
         --from=*)    FROM="${1#*=}"; shift ;;
         --no-host-setup) HOST_SETUP=0; shift ;;
+        --no-model)  MODEL=0; shift ;;
         -h|--help)   usage; exit 0 ;;
         *)           fail "unknown argument: $1 (see --help)" ;;
     esac
@@ -143,10 +181,98 @@ if [ "$ROLE" = "node" ] && ! is_gb10; then
     say "   for one; installing the node anyway because --role node was given."
 fi
 
-# -- the release -----------------------------------------------------------------------------
-
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+KEEPALIVE=""
+cleanup() {
+    rm -rf "$WORK"
+    if [ -n "$KEEPALIVE" ]; then kill "$KEEPALIVE" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
+
+# -- root, asked for once --------------------------------------------------------------------
+
+# A terminal to ask on: standard input, or the one the script runs in when it was piped into bash.
+have_terminal() { [ -t 0 ] || { [ -r /dev/tty ] && (exec < /dev/tty) 2>/dev/null; }; }
+
+USER_NAME="$(id -un)"
+# Every root command of the node goes through "$SUDO": nothing as root, `sudo -n` otherwise, so
+# that nothing after this point can stop to ask for a password.
+SUDO=""
+NODE_ROOT=0
+if [ "$ROLE" = "node" ] && [ "$HOST_SETUP" = 1 ]; then
+    NODE_ROOT=1
+    if [ "$(id -u)" != 0 ]; then
+        command -v sudo >/dev/null 2>&1 || fail "a node install changes the machine as root (host \
+settings, the docker group, lingering) and sudo was not found. Run it as root, or install sudo."
+        if sudo -n true 2>/dev/null; then
+            :
+        elif have_terminal; then
+            say "🔑 A node install changes the machine outside your home folder (host settings, the docker"
+            say "   group, lingering, advertising, system updates), so it needs sudo. Your password is"
+            say "   asked for once, now; nothing else is asked after the update question below."
+            if [ -t 0 ]; then sudo -v; else sudo -v < /dev/tty; fi \
+                || fail "sudo did not accept the password; nothing was changed."
+        else
+            fail "a node install needs root, sudo wants a password, and there is no terminal to ask \
+on, so nothing was done (this is what \`curl … | bash\` over a plain ssh does). Download the script \
+and run it in a terminal, where sudo can ask once: \`curl -fsSL -o install.sh \
+https://github.com/$REPO/releases/latest/download/install.sh && bash install.sh\` (over ssh: \`ssh -t\`)."
+        fi
+        SUDO="sudo -n"
+        # sudo forgets the password after 15 minutes, and the model download takes longer.
+        ( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null || true; sleep 50; done ) >/dev/null 2>&1 &
+        KEEPALIVE=$!
+    fi
+fi
+
+# -- system updates, asked about once ----------------------------------------------------------
+
+# Package upgrades as `apt-get full-upgrade` would install them: its simulation leaves out what apt
+# holds back on its own (Ubuntu's phased updates), which `apt list --upgradable` would count.
+UPGRADES=""          # every package
+NVIDIA_UPGRADES=""   # NVIDIA's (DGX, CUDA, the driver, the kernels built for it)
+FIRMWARE=""          # one "device: from -> to" per line
+INSTALL_UPDATES=0
+if [ "$NODE_ROOT" = 1 ] && command -v apt-get >/dev/null 2>&1; then
+    say "🔎 Checking for system updates (apt, firmware) ..."
+    $SUDO apt-get -o DPkg::Lock::Timeout=300 -qq update > "$WORK/apt-update.log" 2>&1 \
+        || say "⚠️  apt-get update failed (see below); the list of updates may be out of date. $(tail -n 1 "$WORK/apt-update.log")"
+    apt-get -s -o Debug::NoLocking=1 full-upgrade 2>/dev/null < /dev/null | awk '/^Inst / {print}' > "$WORK/upgrades" || true
+    UPGRADES="$(awk '{print $2}' "$WORK/upgrades" | paste -sd ' ' -)"
+    NVIDIA_UPGRADES="$(awk 'tolower($0) ~ /nvidia|dgx|cuda/ {print $2}' "$WORK/upgrades" | paste -sd ' ' -)"
+    if command -v fwupdmgr >/dev/null 2>&1; then
+        $SUDO fwupdmgr refresh --force > /dev/null 2>&1 < /dev/null || true
+        # fwupdmgr prints its JSON pretty, one key a line: a device's keys at depth 3, a release's
+        # at 5. Exit 2 means nothing to update.
+        fwupdmgr get-updates --json --no-unreported-check < /dev/null 2>/dev/null > "$WORK/firmware.json" || true
+        FIRMWARE="$(awk '
+            function value(line) { sub(/^[^:]*: *"/, "", line); sub(/".*$/, "", line); return line }
+            /"Name" *:/ && depth == 3 { name = value($0); current = "" }
+            /"Version" *:/ && depth == 3 { current = value($0) }
+            /"Version" *:/ && depth == 5 && name != "" && !(name in seen) {
+                seen[name] = 1; print name ": " (current == "" ? "?" : current) " -> " value($0)
+            }
+            { line = $0; depth += gsub(/[{[]/, "", line) - gsub(/[]}]/, "", line) }
+        ' "$WORK/firmware.json")"
+    fi
+    COUNT="$(printf '%s' "$UPGRADES" | wc -w | tr -d ' ')"
+    FW_COUNT="$(printf '%s' "$FIRMWARE" | grep -c . || true)"
+    if [ "$COUNT" -gt 0 ] || [ "$FW_COUNT" -gt 0 ]; then
+        say "📦 System updates available: $COUNT package(s), $FW_COUNT firmware update(s)."
+        if [ -n "$NVIDIA_UPGRADES" ]; then say "   NVIDIA (DGX, CUDA, driver): $NVIDIA_UPGRADES"; fi
+        if [ "$FW_COUNT" -gt 0 ]; then printf '%s\n' "$FIRMWARE" | sed 's/^/   firmware: /'; fi
+        if have_terminal; then
+            printf '❓ Install them after Mightling (a reboot is needed afterwards; this script never reboots)? [y/N] '
+            answer=""
+            if [ -t 0 ]; then read -r answer || true; else read -r answer < /dev/tty || true; fi
+            case "$answer" in y|Y|yes|Yes|YES) INSTALL_UPDATES=1 ;; esac
+        fi
+    else
+        say "✅ No system updates."
+    fi
+fi
+
+# -- the release -----------------------------------------------------------------------------
 
 if [ -n "$FROM" ]; then
     # A bundle: the asset names are the files in the folder, and "fetching" one copies it.
@@ -329,6 +455,7 @@ done
 # What was installed, for `node provision`'s state probe and drift report.
 printf '%s\n' "$TAG" > "$INSTALL_DIR/VERSION"
 say "✅ Installed$INSTALLED in $INSTALL_DIR/bin"
+step done "Mightling $TAG installed:$INSTALLED"
 
 # -- the node --------------------------------------------------------------------------------
 
@@ -354,8 +481,22 @@ if [ "$ROLE" = "node" ]; then
 
     if [ ! -x "$VENV_DIR/bin/python" ]; then
         say "🐍 Creating $VENV_DIR ..."
-        python3 -m venv "$VENV_DIR" \
-            || fail "python3 could not create a virtualenv (on Ubuntu: sudo apt install python3-venv)."
+        if ! python3 -m venv "$VENV_DIR" > "$WORK/venv.log" 2>&1; then
+            # DGX OS ships python3 without venv's ensurepip (python3-venv): measured on a fresh
+            # GX10, 2026-10-08. It is installed here rather than left as a next step.
+            rm -rf "$VENV_DIR"
+            if [ "$NODE_ROOT" = 0 ] && [ "$(id -u)" != 0 ]; then
+                sudo -n true 2>/dev/null && SUDO="sudo -n" \
+                    || fail "python3 could not create a virtualenv: install python3-venv (sudo apt install python3-venv), then run this again."
+            fi
+            say "🐍 Installing python3-venv, which this system's python3 lacks ..."
+            $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y python3-venv \
+                >> "$WORK/venv.log" 2>&1 < /dev/null \
+                || fail "could not install python3-venv: $(tail -n 2 "$WORK/venv.log" | tr '\n' ' ')"
+            python3 -m venv "$VENV_DIR" >> "$WORK/venv.log" 2>&1 \
+                || fail "python3 could not create a virtualenv even with python3-venv: $(tail -n 2 "$WORK/venv.log" | tr '\n' ' ')"
+            step done "python3-venv installed (this system's python3 lacked it)"
+        fi
     fi
     say "📦 Installing ling-admin and what it depends on (about 6 GB with PyTorch; a few minutes) ..."
     pip_index=()
@@ -368,54 +509,171 @@ if [ "$ROLE" = "node" ]; then
     "$VENV_DIR/bin/python" -m pip install --quiet --upgrade ${pip_index[@]+"${pip_index[@]}"} "$WORK/$wheel"
     link "$VENV_DIR/bin/ling-admin" ling-admin
     say "✅ Installed ling-admin $TAG in $VENV_DIR"
+    step done "ling-admin $TAG installed in $VENV_DIR"
 
-    # The settings a model load is refused without. They change the machine outside this home
-    # folder, so the command prints each line before it runs and sudo asks on the terminal; when
-    # this script has no terminal (piped into bash), it reads the keyboard through /dev/tty.
-    say ""
-    if [ "$HOST_SETUP" = 0 ]; then
-        say "⏭️  Host settings skipped (--no-host-setup)."
-    elif [ -t 0 ]; then
-        "$VENV_DIR/bin/ling-admin" host setup || true
-    elif (exec < /dev/tty) 2>/dev/null; then
-        "$VENV_DIR/bin/ling-admin" host setup < /dev/tty || true
+    # From here on a closed reader or a dropped ssh session does not stop the install halfway: the
+    # rest runs to its summary (the long part is logged to a file anyway).
+    trap '' HUP PIPE
+    mkdir -p "$LOG_DIR"
+    say "📝 The long part (model download, server start, system updates) is logged to $LOG"
+
+    # Every `ling-admin` here has no terminal on its standard input, so none of them can ask a
+    # question (the sandbox check of every run asks one at a terminal).
+    admin() { "$VENV_DIR/bin/ling-admin" "$@" < /dev/null; }
+
+    if [ "$NODE_ROOT" = 1 ]; then
+        # The settings a model load is refused without, applied: each command is printed first,
+        # and runs with `sudo -n` on the password given above.
+        say ""
+        if admin host setup --yes; then
+            step done "host settings applied (swap, sysctls, earlyoom, sysstat, bubblewrap)"
+        else
+            step failed "host settings: \`ling-admin host check\` lists what is left, \`ling-admin host setup\` applies it"
+        fi
+
+        # Docker without sudo, which NVIDIA's first-boot wizard does not set up.
+        if ! getent group docker > /dev/null 2>&1; then
+            step failed "docker group: there is none, so Docker is not installed (DGX OS ships it); install Docker and the NVIDIA Container Toolkit, then run this again"
+        elif id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx docker; then
+            step done "docker group: $USER_NAME is in it"
+        elif $SUDO usermod -aG docker "$USER_NAME" < /dev/null; then
+            step done "docker group: $USER_NAME added (your next login has it; this script used \`sg docker\` meanwhile)"
+        else
+            step failed "docker group: \`sudo usermod -aG docker $USER_NAME\` failed"
+        fi
+
+        # Lingering: without it the user's systemd stops at logout, and with it every job sent
+        # from another node and every Night Shift task.
+        if [ -e "$LINGER_DIR/$USER_NAME" ]; then
+            step done "lingering is on (jobs and Night Shift outlive a logout)"
+        elif $SUDO loginctl enable-linger "$USER_NAME" < /dev/null; then
+            step done "lingering turned on (jobs and Night Shift outlive a logout)"
+        else
+            step failed "lingering: \`sudo loginctl enable-linger $USER_NAME\` failed"
+        fi
     else
-        "$VENV_DIR/bin/ling-admin" host check || true
+        step off "host settings, docker group and lingering: --no-host-setup (\`sudo ling-admin node prepare\` applies them)"
     fi
 
     # A machine with the node half is a node: its id is written now, so `ling` here uses this
     # machine's own model server and never looks for another one on the network
     # (specs/DREAMFERENCE_MIGHTLING_NODE.md §6.1, §9).
-    "$VENV_DIR/bin/ling-admin" node id >/dev/null || true
-    # Then it is offered to the local network. That publishes the model, web search and the web
-    # UI to every machine on it, so the command says so and asks for the password itself; with no
-    # terminal to ask on, it is left as a next step.
-    ADVERTISED=0
+    admin node id > /dev/null || true
+    # Then it is offered to the local network: the model, web search and the web UI, to every
+    # machine on it (the command says so). No question is asked; --no-advertise is the opt-out.
     if [ "$ADVERTISE" = 1 ]; then
         say ""
-        if [ -t 0 ]; then
-            "$VENV_DIR/bin/ling-admin" node enable && ADVERTISED=1 || true
-        elif (exec < /dev/tty) 2>/dev/null; then
-            "$VENV_DIR/bin/ling-admin" node enable < /dev/tty && ADVERTISED=1 || true
+        if admin node enable --yes; then
+            step done "advertised on the local network (\`ling-admin node disable\` stops it)"
+        else
+            step failed "advertising: \`ling-admin node enable\` says why"
         fi
+    else
+        step off "advertising: --no-advertise (\`ling-admin node enable\` offers this node later)"
+    fi
+
+    # The model: downloaded, then served. Docker is reached through `sg docker` when this login
+    # predates the group (`node provision` does the same, FleetSession.with_docker_group).
+    with_docker() {
+        if id -nG | tr ' ' '\n' | grep -qx docker \
+            || ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx docker \
+            || ! command -v sg > /dev/null 2>&1; then
+            admin "$@"
+        else
+            sg docker -c "$(printf '%q ' "$VENV_DIR/bin/ling-admin" "$@") < /dev/null"
+        fi
+    }
+    if [ "$MODEL" = 1 ]; then
+        say ""
+        say "⬇️  Downloading the default model (tens of GB; this is the long part) ... log: $LOG"
+        if with_docker model download >> "$LOG" 2>&1; then
+            step done "default model downloaded"
+            say "🚀 Starting the model server ... log: $LOG"
+            if with_docker server start >> "$LOG" 2>&1; then
+                step done "model server started (\`ling-admin status\`)"
+            else
+                step failed "model server: \`ling-admin server start\` failed, see $LOG"
+            fi
+        else
+            step failed "default model: \`ling-admin model download\` failed, see $LOG"
+            step failed "model server: not started, because the model is missing; \`ling-admin server start\` downloads and starts it"
+        fi
+    else
+        step off "model: --no-model (\`ling-admin server start\` downloads and serves it)"
     fi
 fi
 
-# -- what next -------------------------------------------------------------------------------
+# -- system updates, installed if asked --------------------------------------------------------
+
+UPDATE_COMMANDS="sudo apt-get update && sudo apt-get full-upgrade"
+FIRMWARE_COMMANDS="sudo fwupdmgr refresh && sudo fwupdmgr update"
+if [ "$INSTALL_UPDATES" = 1 ]; then
+    mkdir -p "$LOG_DIR"
+    say ""
+    say "📦 Installing the system updates ... log: $LOG"
+    if [ -n "$UPGRADES" ]; then
+        if $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 \
+                -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -y full-upgrade \
+                >> "$LOG" 2>&1 < /dev/null; then
+            step done "system packages upgraded ($(printf '%s' "$UPGRADES" | wc -w | tr -d ' '))"
+        else
+            step failed "system packages: \`$UPDATE_COMMANDS\` failed, see $LOG"
+        fi
+    fi
+    if [ -n "$FIRMWARE" ]; then
+        if $SUDO fwupdmgr update -y --no-reboot-check >> "$LOG" 2>&1 < /dev/null; then
+            step done "firmware staged; it is written during the next reboot"
+        else
+            step failed "firmware: \`$FIRMWARE_COMMANDS\` failed, see $LOG"
+        fi
+    fi
+    REBOOT=1
+elif [ -n "$UPGRADES" ] || [ -n "$FIRMWARE" ]; then
+    detail=""
+    if [ -n "$UPGRADES" ]; then
+        detail="$(printf '%s' "$UPGRADES" | wc -w | tr -d ' ') package(s)"
+        if [ -n "$NVIDIA_UPGRADES" ]; then detail="$detail, NVIDIA's: $NVIDIA_UPGRADES"; fi
+        detail="$detail; install: $UPDATE_COMMANDS"
+    fi
+    if [ -n "$FIRMWARE" ]; then
+        detail="${detail:+$detail; }$(printf '%s' "$FIRMWARE" | grep -c .) firmware update(s); install: $FIRMWARE_COMMANDS"
+    fi
+    step available "system updates, available, not installed: $detail; then reboot"
+fi
+
+# -- the summary -----------------------------------------------------------------------------
 
 case ":$PATH:" in
     *":$LINK_DIR:"*) ;;
     *) say ""; say "⚠️  $LINK_DIR is not on your PATH. Add it:  export PATH=\"$LINK_DIR:\$PATH\"" ;;
 esac
 
+FAILED=0
 say ""
 if [ "$ROLE" = "node" ]; then
-    say "🎉 Done. Next:"
-    say "   ling-admin server start     # downloads the default model on first use, then serves it"
-    say "   ling                        # the terminal agent"
-    if [ "${ADVERTISED:-0}" != 1 ]; then
-        say "   ling-admin node enable      # let ling on your other computers find and use this machine"
+    say "━━ Mightling $TAG on $(uname -n 2>/dev/null || echo this machine) ━━"
+    for entry in "${STEPS[@]}"; do
+        state="${entry%%|*}"; text="${entry#*|}"
+        case "$state" in
+            done)      say "  ✅ $text" ;;
+            failed)    say "  ❌ $text"; FAILED=1 ;;
+            off)       say "  ⚪ $text" ;;
+            available) say "  📦 $text" ;;
+        esac
+    done
+    if [ "${REBOOT:-0}" = 1 ]; then
+        say "  🔁 Reboot now to finish the updates: sudo reboot. The model server comes back by itself"
+        say "     (Docker restarts it); the firmware is written during that reboot."
+    fi
+    say ""
+    if [ "$FAILED" = 1 ]; then
+        say "⚠️  Not everything succeeded: the lines with ❌ say what to run. Log: $LOG"
+    elif [ "$ADVERTISE" = 1 ]; then
+        say "🎉 Done. \`ling\` is the terminal agent here, and \`ling\` on your other computers finds this node."
+    else
+        say "🎉 Done. \`ling\` is the terminal agent."
     fi
 else
     say "🎉 Done. \`ling\` needs a Mightling node to talk to: start one on a GB10, then run \`ling\`."
 fi
+exit "$FAILED"

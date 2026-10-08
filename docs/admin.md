@@ -236,6 +236,10 @@ Show what `server start` would refuse over, changing nothing.
 
 Apply the settings; each command is printed first and sudo asks for your password.
 
+| Option | Description |
+|---|---|
+| `--yes` | Never wait for input: run through `sudo -n` (root, NOPASSWD or a fresh sudo timestamp), with no terminal needed; change nothing if sudo would ask. |
+
 ### `ling-admin night`
 
 Run the Night Shift queue overnight (tasks are queued with /night add).
@@ -371,6 +375,7 @@ Advertise the node and publish the web UI and web search to the local network.
 | Option | Description |
 |---|---|
 | `--no-web` | Keep the web UI on this machine; clients get ling and web search only. |
+| `--yes` | Never wait for input: root through `sudo -n` only, with no terminal needed (what install.sh runs) |
 
 #### `ling-admin node disable`
 

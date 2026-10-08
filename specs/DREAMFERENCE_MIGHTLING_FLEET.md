@@ -228,7 +228,7 @@ Each step reads first and does nothing if the machine already satisfies it.
 | 1 | **Connect.** Open the provisioning session (§8.1) and check that it is a GB10: `/etc/dgx-release`, `nvidia-smi` | session | no | nothing |
 | 2 | **Read the state.** A plain shell probe, sent over the session (Mightling may not be there yet), reports: Mightling's version if installed; the facts `host check` reads (swap, the two sysctls, earlyoom, sysstat); the docker group; lingering; node id; whether the node is advertised; models and images present; free disk | session | no | nothing |
 | 3 | *(opt-in)* OS update (§10.3) | session | yes | packages, firmware, reboot |
-| 4 | **Install Mightling**, from a bundle copied from this machine (§7.2): `install.sh --from <dir> --role node --no-advertise --no-host-setup` | session | no | `~/.local/share/dreamference/{ling,venv}`, links in `~/.local/bin` |
+| 4 | **Install Mightling**, from a bundle copied from this machine (§7.2): `install.sh --from <dir> --role node --no-advertise --no-host-setup --no-model` | session | no | `~/.local/share/dreamference/{ling,venv}`, links in `~/.local/bin` |
 | 5 | **Root half**: `sudo ling-admin node prepare` (§7.3), in one command so `sudo` asks once | session | yes | §7.3's list |
 | 6 | **User half of advertising**: `ling-admin node enable --no-web` (or without `--no-web` under `--web`). The Avahi file is now the user's, so this needs no root, as in MIGHTLING_NODE §18.2. It writes `node-advertise.json` and moves SearXNG to every interface, which `ling-search` on clients needs | session | no | `~/.config/dreamference/node-advertise.json`; SearXNG's publish address |
 | 7 | **Model and images** (§7.4): weights and local-tag images copied from this machine, and digest-pinned images pulled by the node itself, here and not inside step 11, so the pull is timed and reported on its own. Docker commands run as `sg docker -c '…'`, because the session's login predates the group that step 5 added. Then `ling-admin searxng start`, which `server start` does not do, so that `ling-search` on clients has a SearXNG to ask (its image, 254 MB, is pulled by the node) | session | no | `~/.cache/huggingface/hub/models--…`, Docker images, the SearXNG container |
@@ -240,7 +240,7 @@ Each step reads first and does nothing if the machine already satisfies it.
 
 ### 7.2 What is installed: a bundle from this machine
 
-`install.sh` gains **`--from <dir>`**: install from a directory holding the same asset names and the same `ling-<target>.sha256sums`, with no network. The checksum checks stay as they are. It also gains `--no-host-setup`, because step 5 does that part. The bundle is built here, once per run, under `~/.cache/dreamference/fleet/bundle-<version>/`:
+`install.sh` gains **`--from <dir>`**: install from a directory holding the same asset names and the same `ling-<target>.sha256sums`, with no network. The checksum checks stay as they are. It also gains `--no-host-setup`, because step 5 does that part, and (2026-10-08, when a node install began downloading and starting the model by itself) `--no-model`, because the model steps do that one. The bundle is built here, once per run, under `~/.cache/dreamference/fleet/bundle-<version>/`:
 
 - **`--from this`** (the default).
   - **On a machine running from a checkout**, as this one does, the bundle holds:
@@ -423,7 +423,7 @@ The `info` operation of `serve-job` (MIGHTLING_NODE §18.6) gains read-only fiel
 
 | Where | Change |
 |---|---|
-| `install.sh` | `--from <dir>` (assets from a directory, same names and checksums, no network) and `--no-host-setup` |
+| `install.sh` | `--from <dir>` (assets from a directory, same names and checksums, no network), `--no-host-setup` and `--no-model` |
 | `dreamference/node/node_pairing.py` | `node add <address>` without a browse, the id read over the login; reuse of a given `ControlPath` |
 | `dreamference/node/node_serve.py` | `info` gains the drift fields of §10.1. No new operation that writes |
 | `dreamference/node/node_browser.py` | a browse of `_ssh._tcp` beside `_mightling-node._tcp`, for §9.1 |

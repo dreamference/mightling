@@ -32,16 +32,18 @@ app, running entirely on your own GB10. No cloud. No account. No API bill. No te
 curl -fsSL https://github.com/dreamference/mightling/releases/latest/download/install.sh | bash
 ```
 
-Then start the model and point Mightling at a project:
+On a GB10 you can start it and leave: it asks for your sudo password once, at the start (and
+whether to install pending NVIDIA system updates), then sets up the host, offers the machine to your
+local network, downloads the model (~20 GB) and starts serving it, and ends with a summary of every
+step. Then point Mightling at a project:
 
 ```bash
-ling-admin server start      # downloads the model once (~20 GB), then serves it
 cd ~/your-project && ling    # that's it
 ```
 
 Works on the **NVIDIA DGX Spark** and every GB10 machine from Acer, ASUS, Dell, Gigabyte, HP, Lenovo
-and MSI. The script is short: it verifies every download against the release's checksums and prints
-each `sudo` command before running it. [Read it first](install.sh) if you like.
+and MSI. The script verifies every download against the release's checksums and prints each `sudo`
+command before running it. [Read it first](install.sh) if you like.
 
 **On your laptop:** run the same one-liner on a Linux laptop (Intel/AMD or Arm) or a Mac (Apple
 silicon or Intel). It installs the client, which uses the model on your GB10 over your network.

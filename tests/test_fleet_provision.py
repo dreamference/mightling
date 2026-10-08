@@ -452,7 +452,8 @@ def test_one_new_machine_goes_all_the_way(fleet):
     FakeSession.machines = {"spark-1": StandIn()}
     assert provision(["spark-1"]) == 0
     commands = FakeSession.machines["spark-1"].commands
-    assert any("install.sh --from" in c and "--no-host-setup" in c and "--no-advertise" in c for c in commands)
+    assert any("install.sh --from" in c and "--no-host-setup" in c and "--no-advertise" in c and "--no-model" in c
+               for c in commands)
     assert any(c.startswith("sudo ") and "node prepare" in c for c in commands)
     assert any("node enable --no-web" in c for c in commands)
     assert any("docker pull lmsysorg/sglang@sha256:x" in c for c in commands)

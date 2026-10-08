@@ -297,7 +297,7 @@ class NodeProvisioner:
                 f"ling-admin node provision {host}",
             )
         installed = session.run(
-            f"bash {remote}/install.sh --from {remote} --role node --no-advertise --no-host-setup",
+            f"bash {remote}/install.sh --from {remote} --role node --no-advertise --no-host-setup --no-model",
             timeout=60 * 60,
         )
         if installed.returncode != 0:

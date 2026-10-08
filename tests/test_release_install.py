@@ -154,18 +154,103 @@ def release_server():
         server.close()
 
 
+# The machine's root tools, as stand-ins in the test's own HOME. Nothing real is ever run as root:
+# the fake sudo runs only programs under HOME (these stand-ins and the fake virtualenv's
+# ling-admin) and only records anything else. Each stand-in records its arguments in HOME.
+FAKE_TOOLS = {
+    # FAKE_SUDO: nopasswd (the default), password (asks once, on standard input: "secret").
+    "sudo": r'''
+log="$HOME/sudo.log"; nonint=0; validate=0
+while [ $# -gt 0 ]; do
+    case "$1" in -n) nonint=1; shift;; -v) validate=1; shift;; -u|-g) shift 2;; --) shift; break;; -*) shift;; *) break;; esac
+done
+if [ "${FAKE_SUDO:-nopasswd}" != nopasswd ] && [ ! -f "$HOME/.sudo-stamp" ]; then
+    if [ "$nonint" = 1 ]; then echo "sudo: a password is required" >&2; exit 1; fi
+    printf '[sudo] password: ' >&2
+    IFS= read -r password || exit 1
+    [ "$password" = secret ] || { echo "Sorry, try again." >&2; exit 1; }
+    touch "$HOME/.sudo-stamp"
+fi
+[ $# -eq 0 ] && exit 0
+echo "$*" >> "$log"
+if [ "$1" = env ]; then
+    shift
+    while :; do case "$1" in *=*) export "$1"; shift;; *) break;; esac; done
+fi
+case "$(command -v "$1")" in "$HOME"/*) exec "$@";; esac
+exit 0
+''',
+    # FAKE_GROUPS: this login's groups; $HOME/groups-db: the group database's (usermod adds to it).
+    "id": r'''
+case "$1" in
+    -u) echo 1000;; -un) echo tester;;
+    -nG) if [ -n "$2" ]; then cat "$HOME/groups-db" 2>/dev/null || echo tester; else echo "${FAKE_GROUPS:-tester}"; fi;;
+    *) echo "uid=1000(tester)";;
+esac
+''',
+    "getent": r'''[ "$1 $2" = "group docker" ] && [ -z "$FAKE_NO_DOCKER_GROUP" ] && echo "docker:x:999:" || exit 2''',
+    "usermod": r'''echo "usermod $*" >> "$HOME/root.log"; echo "$(cat "$HOME/groups-db" 2>/dev/null || echo tester) docker" > "$HOME/groups-db"''',
+    "loginctl": r'''echo "loginctl $*" >> "$HOME/root.log"; [ "$1" = enable-linger ] && mkdir -p "$MIGHTLING_LINGER_DIR" && touch "$MIGHTLING_LINGER_DIR/$2"''',
+    "sg": r'''echo "sg $*" >> "$HOME/sg.log"; [ "$1" = docker ] && [ "$2" = -c ] && exec sh -c "$3"''',
+    # $HOME/upgrades: the `Inst` lines of `apt-get -s full-upgrade`.
+    "apt-get": r'''
+echo "apt-get $*" >> "$HOME/apt.log"
+case " $* " in
+    *" -s "*) cat "$HOME/upgrades" 2>/dev/null;;
+    *" install "*python3-venv*) touch "$HOME/venv-installed";;
+esac
+exit 0
+''',
+    # $HOME/firmware.json: what `get-updates --json` prints; without it, nothing to update (exit 2).
+    "fwupdmgr": r'''
+echo "fwupdmgr $*" >> "$HOME/fwupd.log"
+case "$1" in get-updates) [ -f "$HOME/firmware.json" ] && cat "$HOME/firmware.json" || exit 2;; esac
+exit 0
+''',
+    # `-m venv DIR` makes a virtualenv whose pip installs a ling-admin that records its arguments
+    # ($HOME/admin.log) and fails the commands FAKE_ADMIN_FAIL names; FAKE_NO_VENV is a python3
+    # without ensurepip until python3-venv is installed.
+    "python3": r'''
+if [ "$1 $2" = "-m venv" ]; then
+    if [ -n "$FAKE_NO_VENV" ] && [ ! -f "$HOME/venv-installed" ]; then
+        mkdir -p "$3"; echo "The virtual environment was not created successfully because ensurepip is not available." >&2; exit 1
+    fi
+    mkdir -p "$3/bin"
+    cat > "$3/bin/python" <<EOF
+#!/bin/sh
+cat > "$3/bin/ling-admin" <<'ADMIN'
+#!/bin/sh
+echo "\$*" >> "\$HOME/admin.log"
+case ",\${FAKE_ADMIN_FAIL:-}," in *",\$1 \$2,"*) echo "ling-admin \$1 \$2 failed"; exit 1;; esac
+[ "\$1 \$2" = "node id" ] && echo 0123456789abcdef
+[ -t 0 ] && echo "ling-admin had a terminal on its standard input" >> "\$HOME/admin.log"
+exit 0
+ADMIN
+chmod +x "$3/bin/ling-admin"
+EOF
+    chmod +x "$3/bin/python"
+    exit 0
+fi
+exit 0
+''',
+}
+
+
 def run_install(home, server, *args, token=None, uname_m="aarch64", gpu="Some Other GPU", pci=(),
-                nvidia_smi=True, uname_s="Linux"):
+                nvidia_smi=True, uname_s="Linux", env_extra=None, terminal_input=None):
     """Runs install.sh with a `uname`, an `nvidia-smi` and a PCI bus that report the machine the
-    test wants, whatever runs the tests (on a GB10 the real bus has the GB10's GPU on it)."""
+    test wants, whatever runs the tests (on a GB10 the real bus has the GB10's GPU on it), the
+    stand-in root tools above, and no controlling terminal (its own session), unless
+    `terminal_input` is given: then standard input is a pseudo-terminal that is fed that text."""
     fake_bin = Path(home) / "fakebin"
     fake_bin.mkdir(exist_ok=True)
     # Without a driver nvidia-smi fails; it is never left out of the fake bin, where the real one
     # in /usr/bin would answer for this machine's GPU.
-    tools = [("uname", f'case "$1" in -s) echo {uname_s};; -m) echo {uname_m};; *) echo {uname_s};; esac'),
-             ("nvidia-smi", f'echo "{gpu}"' if nvidia_smi else 'echo "NVIDIA-SMI has failed" >&2; exit 9')]
+    tools = [("uname", f'case "$1" in -s) echo {uname_s};; -m) echo {uname_m};; -n) echo spark-test;; *) echo {uname_s};; esac'),
+             ("nvidia-smi", f'echo "{gpu}"' if nvidia_smi else 'echo "NVIDIA-SMI has failed" >&2; exit 9'),
+             *FAKE_TOOLS.items()]
     for name, script in tools:
-        (fake_bin / name).write_text(f"#!/bin/sh\n{script}\n")
+        (fake_bin / name).write_text(f"#!/bin/sh\n{script.strip()}\n")
         (fake_bin / name).chmod(0o755)
     pci_dir = Path(home) / "fakepci"
     shutil.rmtree(pci_dir, ignore_errors=True)
@@ -176,11 +261,36 @@ def run_install(home, server, *args, token=None, uname_m="aarch64", gpu="Some Ot
         (slot / "vendor").write_text(vendor + "\n")
         (slot / "device").write_text(device + "\n")
     env = {"HOME": str(home), "PATH": f"{fake_bin}:/usr/bin:/bin", "MIGHTLING_PCI_DEVICES": str(pci_dir),
-           "MIGHTLING_RELEASE_API": server.url, "MIGHTLING_RELEASE_REPO": "test/ling"}
+           "MIGHTLING_RELEASE_API": server.url, "MIGHTLING_RELEASE_REPO": "test/ling",
+           "MIGHTLING_LINGER_DIR": str(Path(home) / "linger"), **(env_extra or {})}
     if token:
         env["GH_TOKEN"] = token
-    return subprocess.run(["bash", str(KEYS["installer"]), *args], env=env, capture_output=True, text=True,
-                          stdin=subprocess.DEVNULL, timeout=120, check=False)
+    if terminal_input is None:
+        # A session of its own: no /dev/tty, as under `ssh host 'bash install.sh'`, whatever
+        # terminal runs the tests.
+        return subprocess.run(["bash", str(KEYS["installer"]), *args], env=env, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=120, check=False, start_new_session=True)
+    import pty
+    controller, terminal = pty.openpty()
+    try:
+        os.write(controller, terminal_input.encode())
+        return subprocess.run(["bash", str(KEYS["installer"]), *args], env=env, capture_output=True, text=True,
+                              stdin=terminal, timeout=120, check=False, start_new_session=True)
+    finally:
+        os.close(terminal)
+        os.close(controller)
+
+
+def node_release(**kwargs):
+    """A release a node installs from: the binaries and a wheel, signed."""
+    assets = binaries(signed=False, **kwargs)
+    assets["dreamference-9.9.9-py3-none-any.whl"] = b"a wheel"
+    return sign(assets)
+
+
+def logged(home, name):
+    path = Path(home) / name
+    return path.read_text() if path.exists() else ""
 
 
 def test_the_client_is_installed_from_the_release_checked_and_linked(tmp_path, release_server):
@@ -325,6 +435,145 @@ def test_a_mac_is_never_installed_as_a_node(tmp_path, release_server):
     assert result.returncode == 1
     assert "macOS" in result.stderr and "client" in result.stderr
     assert server.requests == []
+
+
+# -- the node, unattended -----------------------------------------------------------------------
+
+UPGRADES = ("Inst dgx-dashboard [1.0] (1.1 NVIDIA DGX:noble [arm64])\n"
+            "Inst nvidia-modprobe [580.65] (580.82 cuda-ubuntu2404-sbsa [arm64])\n"
+            "Inst libc6 [2.39-0ubuntu8.4] (2.39-0ubuntu8.5 Ubuntu:24.04/noble-updates [arm64])\n")
+FIRMWARE_JSON = """{
+  "Devices" : [
+    {
+      "Name" : "UEFI Device Firmware",
+      "DeviceId" : "4b9e",
+      "Version" : "0.8.4",
+      "Releases" : [
+        {
+          "Name" : "UEFI Firmware",
+          "Version" : "0.9.1"
+        }
+      ]
+    },
+    {
+      "Name" : "USB-C PD Controller",
+      "Version" : "1.20",
+      "Releases" : [
+        {
+          "Version" : "1.22"
+        }
+      ]
+    }
+  ]
+}
+"""
+
+
+def fresh_gb10(home):
+    """What a GX10 out of the box has: updates waiting, no python3-venv, not in the docker group."""
+    (home / "upgrades").write_text(UPGRADES)
+    (home / "firmware.json").write_text(FIRMWARE_JSON)
+    return {"FAKE_NO_VENV": "1", "FAKE_GROUPS": "tester adm sudo"}
+
+
+def test_a_fresh_gb10_with_no_terminal_gets_every_step_and_asks_nothing(tmp_path, release_server):
+    # 2026-10-08, installing 1.4.1 on a fresh GB10 over ssh: with no terminal, host setup and
+    # advertising were silently left out, lingering was never turned on, and a missing
+    # python3-venv stopped the script. Now a sudo that needs no password means no interaction.
+    env = fresh_gb10(tmp_path)
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env)
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    admin = logged(tmp_path, "admin.log").splitlines()
+    assert admin == ["host setup --yes", "node id", "node enable --yes", "model download", "server start"]
+    root = logged(tmp_path, "sudo.log")
+    assert "apt-get -o DPkg::Lock::Timeout=600 install -y python3-venv" in root
+    assert "usermod -aG docker tester" in root and "loginctl enable-linger tester" in root
+    assert (tmp_path / "linger" / "tester").exists()
+    # This login predates the group, so Docker is reached through sg (the model, not the rest).
+    assert "server start" in logged(tmp_path, "sg.log") and "node enable" not in logged(tmp_path, "sg.log")
+    # Updates are listed, never installed, with no terminal; phased ones never reach the list.
+    assert "-y full-upgrade" not in logged(tmp_path, "apt.log") and "update -y" not in logged(tmp_path, "fwupd.log")
+    assert "available, not installed" in out and "dgx-dashboard nvidia-modprobe" in out
+    assert "sudo apt-get update && sudo apt-get full-upgrade" in out and "sudo fwupdmgr update" in out
+    assert "USB-C PD Controller: 1.20 -> 1.22" in out and "UEFI Device Firmware: 0.8.4 -> 0.9.1" in out
+    for line in ("python3-venv installed", "host settings applied", "docker group: tester added",
+                 "lingering turned on", "advertised on the local network", "default model downloaded",
+                 "model server started"):
+        assert f"✅ {line}" in out, line
+    assert "skipped" not in out.lower() and "❌" not in out and "[y/N]" not in out
+    logs = list((tmp_path / ".local/state/dreamference").glob("install-*.log"))
+    assert len(logs) == 1 and str(logs[0]) in out
+
+
+def test_no_terminal_and_a_sudo_that_wants_a_password_stops_before_anything(tmp_path, release_server):
+    server = release_server(node_release())
+    result = run_install(tmp_path, server, gpu="NVIDIA GB10", env_extra={"FAKE_SUDO": "password"})
+    assert result.returncode == 1
+    assert "no terminal" in result.stderr and "bash install.sh" in result.stderr
+    # Not half the work: not even the release was asked for.
+    assert server.requests == [] and not (tmp_path / ".local/share/dreamference").exists()
+
+
+def test_at_a_terminal_the_password_and_the_updates_are_asked_once_at_the_start(tmp_path, release_server):
+    env = {**fresh_gb10(tmp_path), "FAKE_SUDO": "password"}
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env,
+                         terminal_input="secret\ny\n")
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert result.stderr.count("[sudo] password") == 1 and out.count("[y/N]") == 1
+    root = logged(tmp_path, "sudo.log")
+    assert ("env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef "
+            "-o Dpkg::Options::=--force-confold -y full-upgrade") in root
+    assert "fwupdmgr update -y --no-reboot-check" in root
+    # After everything else, and never a reboot: the summary says when.
+    assert root.index("loginctl") < root.index("full-upgrade")
+    assert "reboot" not in logged(tmp_path, "admin.log") and "sudo reboot" in out
+    assert "✅ system packages upgraded (3)" in out and "✅ firmware staged" in out
+    # No ling-admin ever had the terminal, so none of them could have asked anything.
+    assert "terminal" not in logged(tmp_path, "admin.log")
+
+
+def test_the_update_question_defaults_to_no(tmp_path, release_server):
+    env = {**fresh_gb10(tmp_path), "FAKE_SUDO": "password"}
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10", env_extra=env,
+                         terminal_input="secret\n\n")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "-y full-upgrade" not in logged(tmp_path, "sudo.log")
+    assert "available, not installed" in result.stdout
+
+
+def test_a_failed_step_is_named_in_the_summary_and_the_exit_code(tmp_path, release_server):
+    (tmp_path / "groups-db").write_text("tester docker\n")
+    result = run_install(tmp_path, release_server(node_release()), gpu="NVIDIA GB10",
+                         env_extra={"FAKE_ADMIN_FAIL": "server start,host setup", "FAKE_GROUPS": "tester docker"})
+    out = result.stdout
+    assert result.returncode == 1
+    assert "❌ model server: `ling-admin server start` failed, see" in out
+    assert "❌ host settings" in out and "✅ advertised on the local network" in out
+    assert "docker group: tester is in it" in out and not logged(tmp_path, "sg.log")
+
+
+def test_opt_outs_are_said_as_such_and_need_no_root(tmp_path, release_server):
+    result = run_install(tmp_path, release_server(node_release()), "--no-advertise", gpu="NVIDIA GB10")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "node enable" not in logged(tmp_path, "admin.log")
+    assert "⚪ advertising: --no-advertise" in result.stdout
+    # What `node provision` runs: no root at all, so no password and no update check, and no model.
+    home = tmp_path / "provisioned"
+    home.mkdir()
+    result = run_install(home, release_server(node_release()), "--role", "node", "--no-advertise",
+                         "--no-host-setup", "--no-model", env_extra={"FAKE_SUDO": "password"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert logged(home, "sudo.log") == "" and logged(home, "apt.log") == ""
+    assert logged(home, "admin.log").splitlines() == ["node id"]
+    assert "skipped" not in result.stdout.lower()
+
+
+def test_a_client_needs_no_root(tmp_path, release_server):
+    result = run_install(tmp_path, release_server(binaries()), "--role", "client",
+                         env_extra={"FAKE_SUDO": "password"})
+    assert result.returncode == 0 and logged(tmp_path, "sudo.log") == "" and logged(tmp_path, "apt.log") == ""
 
 
 def test_the_node_role_needs_the_wheel(tmp_path, release_server):
@@ -666,9 +915,10 @@ def test_setup_with_yes_runs_through_sudo_n_with_no_terminal(host, monkeypatch, 
     recording_sudo(host, monkeypatch, ran)
     assert HostSafetySetup.setup(yes=True) is True
     assert [command[:3] for command, _ in ran] == [["sudo", "-n", "sysctl"], ["sudo", "-n", "sh"]]
-    # Out of reach of a closed pipe and of the terminal's hang-up: output collected, own session.
-    assert all(kw["stdout"] == subprocess.PIPE and kw["start_new_session"] and kw["stdin"] == subprocess.DEVNULL
-               for _, kw in ran)
+    # Out of reach of a closed pipe (output collected here) and of any prompt (no stdin); still on
+    # the terminal, whose sudo timestamp install.sh keeps fresh.
+    assert all(kw["stdout"] == subprocess.PIPE and kw["stdin"] == subprocess.DEVNULL
+               and not kw["start_new_session"] for _, kw in ran)
     assert "done" in capsys.readouterr().out
 
 

@@ -22,8 +22,8 @@ A setup must survive the terminal it was started from going away halfway: on 202
 `host setup | head` died of a closed pipe between `fallocate` and `mkswap`, leaving the machine
 with its swap off. Output that can no longer be written is now dropped instead of ending the run;
 each command's own output is collected and printed by this process, so a closed pipe never reaches
-the command; a command that needs no password runs in a session of its own, out of reach of the
-terminal's hang-up; and a `/swap.img` an interruption left out of use is finished on the next run.
+the command; the terminal's hang-up is ignored while the commands run; and a `/swap.img` an
+interruption left out of use is finished on the next run.
 """
 
 import getpass
@@ -601,8 +601,10 @@ class HostSafetySetup:
     def _run_as_root(cls, command: List[str], mode: str = "sudo") -> bool:
         """
         Runs one command as root. Its output is collected and printed here, so a reader that went
-        away cannot kill it with SIGPIPE halfway; when no password can be asked it also runs in a
-        session of its own, out of reach of the terminal's hang-up.
+        away cannot kill it with SIGPIPE halfway. As root it also runs in a session of its own,
+        out of reach of the terminal's hang-up; through sudo it cannot, because Ubuntu's sudo
+        keeps its timestamp per terminal, and a `sudo -n` with no terminal would be refused the
+        password `install.sh` asked for once (that script ignores the hang-up itself instead).
 
         Args:
             command: The argv, without `sudo`.
@@ -612,12 +614,11 @@ class HostSafetySetup:
             bool: True if it ran and succeeded.
         """
         cls._say(f"🔑 {cls.command_line(command)}")
-        detached = mode in ("root", "sudo -n")
         try:
             result = subprocess.run(cls.root_argv(command, mode), check=False, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True,
-                                    stdin=subprocess.DEVNULL if detached else None,
-                                    start_new_session=detached)
+                                    stdin=None if mode == "sudo" else subprocess.DEVNULL,
+                                    start_new_session=mode == "root")
         except OSError as error:
             cls._say(f"❌ {error}")
             return False

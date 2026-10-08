@@ -1163,15 +1163,15 @@ def test_node_id_prints_the_id_and_writes_it_once(monkeypatch, capsys):
 
 
 def test_the_installer_makes_a_gb10_a_node_and_offers_it_to_the_network():
-    # §9: a GB10 gets both halves, its node id, and `node enable`; --no-advertise skips the last.
+    # §9: a GB10 gets both halves, its node id, and `node enable`, with no question asked (the user
+    # decided 2026-10-08: advertising starts by itself); --no-advertise is the opt-out. The runs
+    # themselves are in test_release_install.py.
     from pathlib import Path
     script = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
-    node_id = script.index('ling-admin" node id')
-    enable = script.index('ling-admin" node enable')
-    assert script.index('ling-admin" host setup') < node_id < enable
+    node_id = script.index("admin node id > /dev/null")
+    enable = script.index("if admin node enable --yes")
+    assert script.index("if admin host setup --yes") < node_id < enable
     assert "--no-advertise) ADVERTISE=0" in script
-    # Never without a terminal: the command opens the machine to the LAN and asks for a password.
-    assert '[ -t 0 ]' in script[enable - 200:enable] or "/dev/tty" in script[enable - 200:enable]
     assert subprocess.run(["bash", "-n", str(Path(__file__).resolve().parent.parent / "install.sh")]).returncode == 0
 
 

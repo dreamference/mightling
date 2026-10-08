@@ -2,15 +2,17 @@
 
 !!! tip "The quickest way: install a release"
     Every [release](https://github.com/dreamference/mightling/releases) carries `install.sh`, which
-    installs the prebuilt binaries and, on a GB10, `ling-admin` and the host settings:
+    installs the prebuilt binaries and, on a GB10, everything else, unattended: `ling-admin`, the
+    host settings, advertising on your network, and the model, downloaded and started. It asks for
+    your sudo password once, at the start, and whether to install pending system updates:
 
     ```bash
     curl -fsSLO https://github.com/dreamference/mightling/releases/latest/download/install.sh
     bash install.sh
     ```
 
-    Then continue at [step 2](#2-start-the-model-server). The steps below install from a checkout,
-    which is what you want for changing Mightling itself.
+    When its summary says every step is done, the model server is running. The steps below install
+    from a checkout, which is what you want for changing Mightling itself.
 
 ## What you need
 
