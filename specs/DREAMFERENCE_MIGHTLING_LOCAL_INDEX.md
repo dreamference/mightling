@@ -22,7 +22,7 @@ Documents+Downloads folder are chosen with numbers. Apple Silicon was not measur
   The right scope for a confidentiality product is the reverse of Onyx's connectors: **files on the
   user's own disk**, indexed on the same machine, never sent anywhere. Cloud sources stay out
   (§2); the Google apps already reach the agent read-only through `/apps`
-  ([PUFFIN_APPS](./DREAMFERENCE_PUFFIN_APPS.md)).
+  ([MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md)).
 
 ## 2. Goals and non-goals
 
@@ -36,7 +36,7 @@ Documents+Downloads folder are chosen with numbers. Apple Silicon was not measur
 4. **Nothing leaves the machine** at any step, so the index works at `/airgapped on` and passes the
    egress audit.
 5. Indexing never threatens the model server: the same host-wide memory admission as the code
-   index ([PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md) §6.4).
+   index ([MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md) §6.4).
 
 **Non-goals (v1)**
 - Cloud connectors (Slack, Confluence, Notion, Jira, Drive content). Drive and Calendar stay as
@@ -64,8 +64,8 @@ Documents+Downloads folder are chosen with numbers. Apple Silicon was not measur
 |---|---|---|
 | Hybrid search: FTS5 + float32 vectors in a plain SQLite table, scored in process; `search_document:`/`search_query:` prefixes; CPU-pinned nomic-embed | `dreamference/context_engine/` ([CONTEXT](./DREAMFERENCE_CONTEXT.md)) | The storage and ranking design (§7). Its Python/torch embedding path is *not* reused (§7.3) |
 | Session/sandbox split: queries read-only inside the agent's sandbox; indexing in a process started outside it; a request file for re-index | `ling-code` (`ling-code-rs/src/session.rs`, CODE_INDEX §3, §4.2) | The same split (§6) |
-| Host-wide memory admission, `puffin-index.slice`, `choom -n 1000`, network-less bwrap for indexers | CODE_INDEX §6.4, §9.1 | Every extraction and embedding run (§9) |
-| User-level choices stored outside any repository | `$CODEX_HOME/puffin-code.toml` (submodule choices) | Collection definitions (§5.1) |
+| Host-wide memory admission, `mightling-index.slice`, `choom -n 1000`, network-less bwrap for indexers | CODE_INDEX §6.4, §9.1 | Every extraction and embedding run (§9) |
+| User-level choices stored outside any repository | `$CODEX_HOME/ling-code.toml` (submodule choices) | Collection definitions (§5.1) |
 | `<untrusted …>` wrapping of third-party text, with the hardened tag escaping from `security/review-1` | `ling-rs/apps/src/mcp.rs` | Every chunk returned to a model (§10.1) |
 | Flat MCP tools reaching the local model | patch `0020` | `docs_search`, `docs_read` (§8.2) |
 | Air-gap resolver | `ling-rs/airgapped/` | Nothing to block (no network), but status reports it (§10.2) |
@@ -79,7 +79,7 @@ Documents+Downloads folder are chosen with numbers. Apple Silicon was not measur
   and the desktop app.
 - Stored in `~/.mightling/docs.toml` (user-level only). **Never** read from a repository or a
   folder being indexed: a cloned repository or a downloaded archive must not be able to add
-  collections, widen one, or change exclusions. (The same rule as `puffin-code.toml`.)
+  collections, widen one, or change exclusions. (The same rule as `ling-code.toml`.)
 - Each collection: `name`, `root` (absolute, resolved), `include`/`exclude` globs, `max_file_mb`
   (default 50), `follow_symlinks` (default false), `enabled`.
 
@@ -219,7 +219,7 @@ ling docs remove <name>
   which collections exist, what they contain (name + file count), and to cite sources as
   `path` + locator.
 - Output stays under the launcher's 8,000-token per-tool cap
-  ([PUFFIN_CONTEXT_BUDGET](./DREAMFERENCE_PUFFIN_CONTEXT_BUDGET.md)).
+  ([MIGHTLING_CONTEXT_BUDGET](./DREAMFERENCE_MIGHTLING_CONTEXT_BUDGET.md)).
 
 ### 8.3 Ask threads, desktop app and web UI
 
@@ -238,7 +238,7 @@ ling docs remove <name>
   accelerator where the watch budget allows (`fs.inotify.max_user_watches`), never as the only
   source of truth. Deleted files' chunks are removed in the same pass.
 - **Every run is admitted** against the host-wide ledger (CODE_INDEX §6.4): runs in
-  `puffin-index.slice` (renamed with the rest), `choom -n 1000`, a per-run cap; deferred when the
+  `mightling-index.slice` (renamed with the rest), `choom -n 1000`, a per-run cap; deferred when the
   budget can't cover it. `server start` stops these scopes before its pre-flight, as it does for
   code-index scopes.
 - **Night Shift and benchmarks:** indexing yields to a model load and does not run while the

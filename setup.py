@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="dreamference",
-    version="1.4.2",
+    version="1.5.0",
     license="AGPL-3.0-or-later",
     classifiers=[
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",

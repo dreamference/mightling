@@ -308,6 +308,8 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--code-index` | universal: index each instance's repository on the host and give the agent ling-code (default off); exact: the same with the SCIP stores alone and no graph. One of: `off`, `universal`, `exact`. |
 | `--prompt` | The system prompt the agent starts with: default, high-swe, or a custom one in $CODEX_HOME/system-prompts (default: the configured one) |
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
+| `--strip-names` | Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it. |
+| `--refine` | Two steps per instance: a session that studies the issue and writes a refined description without changing the repository, then a fresh session that fixes it. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing) |
@@ -490,6 +492,32 @@ Copy a model's files from this machine's cache to a paired node, so it need not 
 | `name` | The paired node. |
 | `model` | A key of the model matrix. |
 | `--address` | Reach the node at this address instead, such as its QSFP link's. |
+
+#### `ling-admin node provision`
+
+Set up new GB10s from this one: install Mightling, the root half, the model, pairing, start (FLEET spec); re-run on paired nodes, it is the fleet update.
+
+| Option | Description |
+|---|---|
+| `hosts` | Host names, addresses or paired nodes; none lists unprovisioned GB10s on the network. |
+| `--all` | Every paired node: the fleet update. |
+| `--user` | The account on the machines (default: this user's name) |
+| `--model` | The model each node is assigned (default: this machine's configured model) |
+| `--from` | What to install: this (default) or release[=X.Y.Z]. |
+| `--per-host-password` | With several hosts, ask each machine's password separately (default: one password for all) |
+| `--mesh` | Also pair every node with every other (not built yet) |
+| `--web` | Also install and configure the web UI there. |
+| `--no-start` | Leave the model server stopped. |
+| `--restart` | Restart a running model server. |
+| `--os-update` | NVIDIA's OS and firmware update first, with a reboot. |
+| `--dry-run` | Connect and read only, then print what each machine would change. |
+| `--via` | With one host: copy and install over this address instead (a QSFP link's) |
+| `--match` | With no hosts: a name pattern for the browse instead of spark-/gx10-/zgx-. |
+| `--start-timeout` | Seconds to wait for a started model server (default 1200) |
+
+#### `ling-admin node prepare`
+
+(Run with sudo) the root steps of a node install, for the user who ran sudo, and nothing else.
 
 #### `ling-admin node job-exec`
 

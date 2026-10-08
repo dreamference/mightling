@@ -3,20 +3,20 @@
 **Status:** proposed (2026-10-07), nothing built. The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
 **Names:** written with the post-rename names ([RENAME_MIGHTLING](./DREAMFERENCE_RENAME_MIGHTLING.md), branch `rename/mightling`): `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app`, `~/.mightling`, `mightling_*` settings, `_mightling-node._tcp`. Where `main` still says Puffin, read `puffin` for `ling`.
 **Builds on:**
-- [PUFFIN_DESKTOP](./DREAMFERENCE_PUFFIN_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
-- [PUFFIN_APPS](./DREAMFERENCE_PUFFIN_APPS.md): Gmail, Drive and Calendar through `/apps`, served by the Google service on port 8767;
+- [MIGHTLING_DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
+- [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md): Gmail, Drive and Calendar through `/apps`, served by the Google service on port 8767;
 - [ONYX](./DREAMFERENCE_ONYX.md): what is being replaced, feature by feature (§1 below);
-- [IMAGE_SEARCH](./DREAMFERENCE_IMAGE_SEARCH.md), [PUFFIN_GMAIL](./DREAMFERENCE_PUFFIN_GMAIL.md), [GOA](./DREAMFERENCE_GOA.md): the sidecars that stay;
-- [CONTEXT](./DREAMFERENCE_CONTEXT.md) and [PUFFIN_CODE_INDEX](./DREAMFERENCE_PUFFIN_CODE_INDEX.md): the indexing machinery the document index reuses;
-- [PUFFIN_NODE](./DREAMFERENCE_PUFFIN_NODE.md): what an advertised node publishes; [PUFFIN_AIRGAPPED](./DREAMFERENCE_PUFFIN_AIRGAPPED.md); [PUFFIN_EGRESS](./DREAMFERENCE_PUFFIN_EGRESS.md); the security review of 2026-10 (branch `security/review-1`).
+- [IMAGE_SEARCH](./DREAMFERENCE_IMAGE_SEARCH.md), [MIGHTLING_GMAIL](./DREAMFERENCE_MIGHTLING_GMAIL.md), [GOA](./DREAMFERENCE_GOA.md): the sidecars that stay;
+- [CONTEXT](./DREAMFERENCE_CONTEXT.md) and [MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md): the indexing machinery the document index reuses;
+- [MIGHTLING_NODE](./DREAMFERENCE_MIGHTLING_NODE.md): what an advertised node publishes; [MIGHTLING_AIRGAPPED](./DREAMFERENCE_MIGHTLING_AIRGAPPED.md); [MIGHTLING_EGRESS](./DREAMFERENCE_MIGHTLING_EGRESS.md); the security review of 2026-10 (branch `security/review-1`).
 
 ---
 
 ## 0. Decisions, stated first
 
-1. **One agent, no second chat backend.** Chat becomes an **Ask thread**: a conversation with the same `ling` agent, in a scratch folder instead of a repository. This is how the upstream vendor's desktop app does chat: it has no separate chat server either (PUFFIN_DESKTOP §1).
+1. **One agent, no second chat backend.** Chat becomes an **Ask thread**: a conversation with the same `ling` agent, in a scratch folder instead of a repository. This is how the upstream vendor's desktop app does chat: it has no separate chat server either (MIGHTLING_DESKTOP §1).
 2. **One UI, two hosts.** The Work UI in `desktop/ui/` becomes the **Mightling UI** (Work and Ask threads, settings, apps). The Electron app shows it over `app://`; a new **web server, `ling web`**, serves the same build to a browser. The UI talks through one message interface, so the same code runs in both (the upstream vendor's app re-dispatches its IPC as window `MessageEvent`s for exactly this reason).
-3. **One bridge policy.** The allow-list, the dropped thread fields and the "answer only pending requests" rule (PUFFIN_DESKTOP §4.3, `desktop/bridge/src/lib.rs`) move into one data file, `desktop/bridge/policy.json`, enforced by the Rust bridge crate (inside `ling web`) and by the Electron main process. Both run the same conformance vectors, so the two cannot drift.
+3. **One bridge policy.** The allow-list, the dropped thread fields and the "answer only pending requests" rule (MIGHTLING_DESKTOP §4.3, `desktop/bridge/src/lib.rs`) move into one data file, `desktop/bridge/policy.json`, enforced by the Rust bridge crate (inside `ling web`) and by the Electron main process. Both run the same conformance vectors, so the two cannot drift.
 4. **The web server requires a credential on every request, loopback included.** Sandboxed commands can reach loopback whenever the network is on (`/airgapped off`), and the Onyx stack showed what a published default credential costs (security review, 2026-10). Nothing is reachable from the LAN unless the node is advertised and a device has been paired.
 5. **Search over the user's files is new and local.** `ling-docs` indexes folders the user chooses, offline, inside the same memory budget and network-less sandbox as `ling-code`. Onyx Lite never did this here: the Lite stack leaves out Vespa, the workers and the embedding servers (ONYX §1).
 6. **Onyx goes in three releases, never in one.** Preview beside Onyx, then Onyx opt-in with a history export, then removal (§10). Until the last step, `ling-admin chat start` brings Onyx back.
@@ -31,7 +31,7 @@ Read from `dreamference/chat/` and [ONYX](./DREAMFERENCE_ONYX.md) on 2026-10-07.
 |---|---|---|---|
 | Browser chat UI with history, search, rename | Onyx web and API servers, PostgreSQL | **Ask threads** in the Mightling UI: `thread/list`, `thread/search`, `thread/name/set`, `thread/archive` (all already in the allow-list) | A |
 | The model as Onyx's LLM provider (`configure` §2) | `onyx_runner.py` `configure()` | Nothing to register: `ling app-server` reads the model server through the launcher's tiers | A |
-| The "Puffin" assistant persona and its instructions (ONYX §3) | `PUFFIN_ASSISTANT_INSTRUCTIONS` | The named prompt **`ask`** (`ling-rs/prompts/ask.md`), chosen per thread by the bridge (§3.2) | A |
+| The "Mightling" assistant persona and its instructions (ONYX §3) | `MIGHTLING_ASSISTANT_INSTRUCTIONS` | The named prompt **`ask`** (`ling-rs/prompts/ask.md`), chosen per thread by the bridge (§3.2) | A |
 | Branding: logos, fonts, 35 CSS rules, label rewrites, injected scripts (ONYX §3–§4) | `onyx_brand_assets.py`, `onyx_ui_*.py` | Not needed: the UI is Mightling's own code. ~180 KB of patch modules and their tests are deleted in Phase C | C |
 | Web search through SearXNG, then opening results (ONYX §6) | Onyx's SearXNG provider | **`ling-search --read`**: search, fetch the top pages, return extracts with numbered sources (branch `features/search-read-context`) | A |
 | Gmail tool and the "Connect Google" button (ONYX §8, §4.4) | custom tool + injected script | **`/apps`**: Gmail, Drive, Calendar as the agent's MCP tools; connecting through the Google service's own `/connect` pages (port 8767), linked from the UI's Settings → Apps | A |
@@ -109,7 +109,7 @@ Everything else (`rpc.ts`, `store.ts`, the views) is shared and tested once.
 
 ### 3.2 The `ask` prompt, chosen safely
 
-`ling-rs/prompts/ask.md`, a named prompt (PUFFIN_PROMPT), composed with the launcher's `web`, `email` and `code` blocks. It says:
+`ling-rs/prompts/ask.md`, a named prompt (MIGHTLING_PROMPT), composed with the launcher's `web`, `email` and `code` blocks. It says:
 - the agent answers questions and does research for the user; it isn't working in a repository;
 - for current facts it uses `ling-search --read`, and cites sources as `[n]` with the list at the end;
 - for the user's files it uses `docs_search`/`docs_read`, citing `path` and page;
@@ -200,7 +200,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 
 ### 5.3 How it runs
 
-- **Indexing** is done by `ling-admin docs index` on the node, admitted against the same host-wide memory budget as `ling-code` and run in a network-less bwrap sandbox inside `ling-index.slice` (PUFFIN_CODE_INDEX's three rules). Extraction is Python (`pypdf` for PDFs, `python-docx`, the standard library's `email` and `html.parser`), decided in Phase 0 by quality on a sample of real files rather than by language preference.
+- **Indexing** is done by `ling-admin docs index` on the node, admitted against the same host-wide memory budget as `ling-code` and run in a network-less bwrap sandbox inside `ling-index.slice` (MIGHTLING_CODE_INDEX's three rules). Extraction is Python (`pypdf` for PDFs, `python-docx`, the standard library's `email` and `html.parser`), decided in Phase 0 by quality on a sample of real files rather than by language preference.
 - **Freshness:** files are re-read when their size or modification time changes. While `ling web` or the app is running, a watch (inotify) queues changes; otherwise `ling docs index` (and Night Shift, before its tasks) catches up.
 - **Queries only read:** a small read-only MCP server, `ling-docs mcp`, offers the agent three tools:
   - `docs_search(query, k)`: chunks with path, page and a snippet;
@@ -318,12 +318,12 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 
 ## 15. Changes to other specs when this is built
 
-- **PUFFIN_DESKTOP:** Chat becomes Ask; `policy.json` replaces the hard-coded lists; the forwarder is retired.
+- **MIGHTLING_DESKTOP:** Chat becomes Ask; `policy.json` replaces the hard-coded lists; the forwarder is retired.
 - **ONYX:** marked retired in Phase C, kept as history.
-- **PUFFIN_NODE:** the advertised `web` port becomes 3100; §5's "the web UI has one account" risk is replaced by pairing.
-- **PUFFIN_APPS:** Connect is linked from the UI's Settings → Apps rather than Onyx's injected button.
+- **MIGHTLING_NODE:** the advertised `web` port becomes 3100; §5's "the web UI has one account" risk is replaced by pairing.
+- **MIGHTLING_APPS:** Connect is linked from the UI's Settings → Apps rather than Onyx's injected button.
 - **IMAGE_SEARCH:** an MCP tool instead of an Onyx custom tool; served by `ling web`.
-- **PUFFIN_EGRESS:** the `--web` mode.
+- **MIGHTLING_EGRESS:** the `--web` mode.
 - **ARCHITECTURE, CLI, SETUP, CLAUDE.md:** the web UI is `ling web`; the `chat` command group shrinks, then goes.
 
 ---
