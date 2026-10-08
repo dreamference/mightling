@@ -1,12 +1,14 @@
-# Mightling 1.5.0 — release notes
+# Mightling 1.5.1 — release notes
 
 **Status:** draft, 2026-10-08, built from `integration/1.5.0` (every open branch of 2026-10-07 merged,
 the rename applied, history rewritten). Not published: the release waits for the maintainer's
-approval. 1.5.0 is the first release under the name Mightling and the first signed one. 1.4.2 was
+approval. 1.5.1 is the first release under the name Mightling and the first signed one. 1.4.2 was
 prepared and never released; its changes are in this release (specs/DREAMFERENCE_RELEASE_1.4.2.md).
+1.5.0 was built and signed-ready but never published (the maintainer chose to ship it together with the
+unattended installer as 1.5.1, 2026-10-08); there is no v1.5.0 tag or release.
 The text between the two rules is the GitHub release's description.
 
-**Version.** 1.5.0 in `setup.py`, `dreamference/__init__.py`, the MCP server's `serverInfo` and
+**Version.** 1.5.1 in `setup.py`, `dreamference/__init__.py`, the MCP server's `serverInfo` and
 `desktop/electron/package.json`. The release workflow stamps it into the binaries.
 
 **Checklist before publishing:**
@@ -14,9 +16,9 @@ The text between the two rules is the GitHub release's description.
 - **Signed:** `SHA256SUMS` and `SHA256SUMS.sig` are attached, and `ssh-keygen -Y verify` passes against `ling-rs/release-signing.pub` (specs/DREAMFERENCE_RELEASE_SIGNING.md §6).
 - **Upgrade from a real 1.4.1 install** in a scratch HOME:
   1. `install.sh --version 1.4.1 --role client`;
-  2. `puffin update`, which must install 1.5.0;
-  3. `puffin` prints the notice, after which `ling --version` says 1.5.0, `puffin` is gone and `~/.mightling` holds the sessions.
-- **The installer:** `install.sh` from 1.5.0 over a 1.4.1 install moves the folder and removes the old links.
+  2. `puffin update`, which must install 1.5.1;
+  3. `puffin` prints the notice, after which `ling --version` says 1.5.1, `puffin` is gone and `~/.mightling` holds the sessions.
+- **The installer:** `install.sh` from 1.5.1 over a 1.4.1 install moves the folder and removes the old links.
 
 ---
 
@@ -52,7 +54,11 @@ Mightling. A client that finds no node says so, and that a node still on Puffin 
 
 **The desktop app** installs as Mightling and replaces the Puffin package.
 
-## Also new in 1.5.0
+## Also new in 1.5.1
+
+**Set up a new DGX Spark with one command and walk away.** On a GB10, `install.sh` now does everything without stopping to ask: the host's memory and swap settings, the sandbox profile, the docker group, lingering (so jobs and night tasks survive logging out), advertising on your network, the model download and the model server. The only thing it may ask is your sudo password, once, at the start. With a terminal it also lists pending NVIDIA, DGX and firmware updates and offers to install them (default no); without one it lists them in the summary. The summary ends with each step done or failed, and the long steps are logged.
+
+**Pairing finds the right address.** `ling-admin node add` prefers a node's IPv4 address and, for a link-local IPv6 one, adds the interface, so pairing no longer fails with "Invalid argument".
 
 **⚠️ One model.** Mightling serves **`qwen3.8-27b-nvfp4-dflash2`** (Qwen3.8-27B in NVFP4 with the DFlash2 drafter, on SGLang) and nothing else. The Qwen 3.5 122B-A10B and Qwen 3.6 35B-A3B models are gone. If your configuration names one of them, `ling-admin server start`, `model download` and `main-model set` stop before doing anything, say so, and give the command that switches: `ling-admin main-model set qwen3.8-27b-nvfp4-dflash2`. The old weights stay in your HuggingFace cache until you delete their folders (`models--Intel--Qwen3.5-122B-A10B-int4-AutoRound`, `models--nvidia--Qwen3.5-122B-A10B-NVFP4`, `models--nvidia--Qwen3.6-35B-A3B-NVFP4`, `models--z-lab--Qwen3.5-122B-A10B-DFlash`).
 

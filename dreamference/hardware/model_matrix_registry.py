@@ -36,7 +36,7 @@ DEFAULT_MODEL_ALIAS: Final[str] = "qwen3.8-27b-nvfp4-dflash2"
 # 1.4.1 dreamference.toml naming a removed alias was accepted by `main-model set`, and `model
 # download` and `server start` tried to fetch a repository of that name.
 REMOVED_MODELS: Final[Dict[str, str]] = {
-    name: "1.5.0"
+    name: "1.5.1"
     for name in (
         "qwen3.5-122b-a10b-hybrid-dflash",
         "qwen 3.5 122b-a10b (int4+fp8 hybrid + dflash + dense-bandwidth stack)",

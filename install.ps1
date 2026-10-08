@@ -5,7 +5,7 @@ Installs the Mightling client on Windows from a release, with nothing compiled.
 
 or, to pick a release:
 
-    & ([scriptblock]::Create((irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1))) -Version 1.5.0
+    & ([scriptblock]::Create((irm https://github.com/dreamference/mightling/releases/latest/download/install.ps1))) -Version 1.5.1
 
 It installs `ling.exe` and its commands (ling-search, ling-fetch, ling-code, and the
 sandbox's helpers when the release carries them) into %LOCALAPPDATA%\Programs\Mightling\bin and puts

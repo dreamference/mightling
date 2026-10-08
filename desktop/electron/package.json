@@ -1,7 +1,7 @@
 {
   "name": "mightling-desktop",
   "productName": "Mightling",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Mightling's desktop app: the Chat window on the local web UI and the Work window on ling app-server, with ling bundled inside (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md).",
   "author": "Dreamference",
   "license": "AGPL-3.0-or-later",

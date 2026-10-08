@@ -24,7 +24,7 @@ DRY = "--dry" in sys.argv
 EXCLUDE_FILES = {
     "specs/DREAMFERENCE_RELEASE_1.4.0.md",
     "specs/DREAMFERENCE_RELEASE_1.4.1.md",
-    "specs/DREAMFERENCE_RELEASE_1.5.0.md",
+    "specs/DREAMFERENCE_RELEASE_1.5.1.md",
     "specs/DREAMFERENCE_RENAME_MIGHTLING.md",
     "scripts/rename_mightling.py",
     "ling-rs/src/rename.rs",

@@ -70,7 +70,7 @@ class MCPServer:
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "dreamference-mcp-server", "version": "1.5.0"}
+                    "serverInfo": {"name": "dreamference-mcp-server", "version": "1.5.1"}
                 }
             }
 
