@@ -69,6 +69,11 @@ jobs:
             ~/.cargo/git
           key: cargo-registry-${{ matrix.target }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'ling-rs/**', 'ling-web-rs/Cargo.lock', 'ling-code-rs/Cargo.lock', 'ling-docs-rs/Cargo.lock') }}
           restore-keys: cargo-registry-${{ matrix.target }}-
+      # `ling web` serves the Mightling UI from inside the binary: the build runs desktop/ui's
+      # Vite build first and embeds it (LING_WEB_UI_DIST, ling-rs/web/build.rs).
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
       # The same build `ling-admin codex build` runs: export the submodule, add ling-rs/, apply
       # codex-patches/, cargo build with the prebuilt V8 for this target fetched and verified against
       # the submodule's manifest; then the web commands and the code index router, each --locked.

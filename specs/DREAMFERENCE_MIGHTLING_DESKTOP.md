@@ -122,7 +122,7 @@ Generated from the `ling` binary the release ships: `ling app-server generate-ts
 
 ### 4.5 Work's frontend
 
-React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinned Node toolchain; `node_modules` not committed. Diff rendering, the terminal (xterm.js) and Markdown/Mermaid rendering use MIT or Apache-2.0 libraries bundled into the app, never loaded from a CDN. Every Onyx-side lesson in AGENTS.md still applies to Chat; for Work, §9 lists the WebKitGTK ones.
+React + Vite + TypeScript under `desktop/ui/`, built with the repository's pinned Node toolchain; `node_modules` not committed. Diff rendering, the terminal (xterm.js) and Markdown/Mermaid rendering use MIT or Apache-2.0 libraries bundled into the app, never loaded from a CDN. Every Onyx-side lesson in `docs/dev/onyx-ui-patches.md` still applies to Chat; for Work, §9 lists the WebKitGTK ones.
 
 ### 4.6 Running the upstream vendor's app on `ling` — rejected as the product
 
@@ -325,7 +325,7 @@ Threads the app starts are ordinary Codex sessions in `~/.mightling/sessions`. T
 
 ## 9. The webview: what `desktop/` already learned
 
-Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (AGENTS.md, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
+Every setting in `desktop/src-tauri/src/main.rs` applies to both windows: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (no window at all without it under the NVIDIA driver), `GTK_THEME=Adwaita:light` (Chat's overrides are `html:not(.dark)`-scoped; Work follows it until it has a dark theme), the white `backgroundColor` (a repaint gap shows the window's own background). **`target="_blank"` does nothing**: links to the web go through `tauri-plugin-opener`. **WebKitGTK paints its own scrollbar** that CSS colours cannot reach (`docs/dev/onyx-ui-patches.md`, `onyx_ui_scripts.py`): Work's scroll areas use `scrollbar-width: thin` and are checked in an offscreen WebKitGTK view, not only in Chromium. CodexMonitor's code was built on macOS first; every part taken from it is checked on the GB10.
 
 ---
 

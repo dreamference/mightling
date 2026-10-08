@@ -86,7 +86,7 @@ What the guide says matters for an inference engine:
 - **`cudaMalloc` lands in the dedicated segment first** and "spills to the shared segment" when it is full. Shared allocations use smaller pages and can be slower.
 - **Avoid `cudaMallocManaged`**: "technically supported" but on "a compatibility path that can lead to performance degradation".
 - **`cudaMemGetInfo` reports dedicated plus shared**, while NVML (`nvidia-smi`) reports **dedicated only**. This is why NemoClaw's qualification read "31232 MiB total" on an N1X: tools that size a model from `nvidia-smi` will undersize it.
-- And, in NVIDIA's own words: **"Allocating the full GPU budget can leave too little host memory and can make the system unresponsive."** That is the GB10 freeze this repository's host-safety layer exists for (AGENTS.md, "Host-safety subsystem"), now documented by NVIDIA for Windows. §9 carries the layer across.
+- And, in NVIDIA's own words: **"Allocating the full GPU budget can leave too little host memory and can make the system unresponsive."** That is the GB10 freeze this repository's host-safety layer exists for (`docs/dev/host-safety.md`), now documented by NVIDIA for Windows. §9 carries the layer across.
 
 ### 1.3 What the default model needs
 

@@ -3,7 +3,8 @@
 //! - `serve [--lan] [--port N]`: the server in the foreground; what the user unit runs.
 //! - `start [--lan]`, `stop`: the user unit `mightling-web.service`.
 //! - `status`: whether it answers, where, and how many devices are paired.
-//! - `open`: signs this machine's browser in with a one-time link.
+//! - `open [--no-browser | --print-url]`: signs this machine's browser in with a one-time link;
+//!   `--print-url` prints the link alone, for the desktop app's Ask window.
 //! - `pair`: an eight-digit code for another device, for ten minutes.
 //! - `devices`, `revoke <device>`: paired devices, and ending one.
 //! - `ask [--port N] <question>`: one Ask thread through the running server, for scripts and the
@@ -33,7 +34,7 @@ use crate::server::Server;
 
 pub const UNIT_NAME: &str = "mightling-web.service";
 
-const USAGE: &str = "Usage: ling web start [--lan] | stop | status | open | pair | devices | revoke <device> | serve [--lan] [--port N] | ask [--port N] <question>";
+const USAGE: &str = "Usage: ling web start [--lan] | stop | status | open [--no-browser | --print-url] | pair | devices | revoke <device> | serve [--lan] [--port N] | ask [--port N] <question>";
 
 /// What the launcher tells `ling web`.
 #[derive(Clone, Debug)]
@@ -191,6 +192,7 @@ pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
             }
         },
         Some("status") => status(&state),
+        Some("open") if words.contains(&"--print-url") => print_login_url(&state),
         Some("open") => open(&state, words.contains(&"--no-browser")),
         Some("pair") => pair(&state),
         Some("devices") => devices(&state),
@@ -337,20 +339,39 @@ fn status(state: &Path) -> i32 {
     }
 }
 
-fn open(state: &Path, no_browser: bool) -> i32 {
+/// A one-time sign-in link to the running server, or the reason there is none.
+fn login_url(state: &Path) -> Result<String, String> {
     let port = running_port(state);
     if probe(state, port).is_none() {
-        eprintln!("The Mightling web server is not running: start it with `ling web start`.");
-        return 1;
+        return Err("The Mightling web server is not running: start it with `ling web start`.".to_string());
     }
-    let code = match auth::issue_login_code(state) {
-        Ok(code) => code,
+    let code = auth::issue_login_code(state).map_err(|err| format!("Could not write a sign-in code: {err}"))?;
+    Ok(format!("http://127.0.0.1:{port}/login?code={code}"))
+}
+
+/// `ling web open --print-url`: the link alone on stdout, for a program that loads it itself (the
+/// desktop app's Ask window). The code is written by the caller's own process, as for `open`.
+fn print_login_url(state: &Path) -> i32 {
+    match login_url(state) {
+        Ok(url) => {
+            println!("{url}");
+            0
+        }
         Err(err) => {
-            eprintln!("Could not write a sign-in code: {err}");
+            eprintln!("{err}");
+            1
+        }
+    }
+}
+
+fn open(state: &Path, no_browser: bool) -> i32 {
+    let url = match login_url(state) {
+        Ok(url) => url,
+        Err(err) => {
+            eprintln!("{err}");
             return 1;
         }
     };
-    let url = format!("http://127.0.0.1:{port}/login?code={code}");
     if no_browser || !open_browser(&url) {
         println!("Open this link once, within two minutes: {url}");
     } else {

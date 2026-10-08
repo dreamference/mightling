@@ -5,7 +5,7 @@ export default defineConfig({
   build: {
     sourcemap: false,
     rollupOptions: {
-      // Electron and Node's modules stay external; multicast-dns is bundled in.
+      // Electron and Node's modules stay external.
       external: ["electron"],
     },
   },

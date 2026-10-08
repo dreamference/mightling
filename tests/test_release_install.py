@@ -678,7 +678,6 @@ def test_the_desktop_app_is_not_built_without_its_project(tmp_path, monkeypatch,
     assert DesktopRunner.build() == 1 and DesktopRunner.install() == 1
     assert "Mightling .deb" in capsys.readouterr().out
     # With the release's .deb installed, `desktop run` opens that app.
-    monkeypatch.setattr(DesktopRunner, "onyx_is_up", classmethod(lambda cls, url=None: True))
     monkeypatch.setattr("dreamference.chat.desktop_runner.shutil.which", lambda name: "/usr/bin/ling-app")
     calls = []
     monkeypatch.setattr("dreamference.chat.desktop_runner.subprocess.call", lambda command, **kw: calls.append(command) or 0)

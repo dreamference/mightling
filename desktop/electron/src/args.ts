@@ -1,5 +1,5 @@
 // How `ling app` asked for the window: `--work`, `--cwd <folder>` and `--thread <id>` open Work
-// (the launcher passes them); nothing opens Chat, as before. A `mightling://` link (the scheme the
+// (the launcher passes them); nothing opens Ask (the menu's former Chat), as before. A `mightling://` link (the scheme the
 // app registers) opens Work too: `mightling://thread/<id>` or `mightling://work?cwd=<folder>`.
 
 import app from "../app.json";
@@ -9,7 +9,7 @@ export interface WorkTarget {
   thread: string | null;
 }
 
-/** The Work target in `args`, or `null` when they open Chat. Chromium's own switches are ignored. */
+/** The Work target in `args`, or `null` when they open Ask. Chromium's own switches are ignored. */
 export function workTarget(args: readonly string[]): WorkTarget | null {
   const valueOf = (flag: string): string | null => {
     const at = args.indexOf(flag);

@@ -1,8 +1,9 @@
 """The desktop app's Work window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, on Electron per
 specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md).
 
-Chat stays exactly as it was, Chat gets no IPC, the bridge only sends methods the pinned Codex
-has, and the committed protocol types are the ones the pinned Codex would generate.
+Ask (the former Chat) is the Mightling UI on `ling web` and gets no IPC, the bridge only sends
+methods the pinned Codex has, and the committed protocol types are the ones the pinned Codex would
+generate.
 """
 
 import json
@@ -19,12 +20,12 @@ from dreamference.chat.desktop_runner import ELECTRON_DIR, UI_DIR
 SRC = Path(ELECTRON_DIR) / "src"
 NPM = "/usr/bin/npm"
 
-# The Chat window as it was before Work existed (tauri.conf.json at 2026-10-03), now in app.json.
-# Any difference is a change to what every current user sees.
+# The Ask window (the menu's former Chat): its frame as Chat's was, on `ling web` instead of the
+# Onyx web UI since 2026-10-08. Any difference is a change to what every current user sees.
 CHAT_WINDOW = {
     "label": "ling",
     "title": "Mightling",
-    "url": "http://localhost:3000/app",
+    "url": "http://127.0.0.1:3100/",
     "width": 1280,
     "height": 860,
     "minWidth": 720,
@@ -43,21 +44,26 @@ def app_config() -> dict:
     return json.loads((Path(ELECTRON_DIR) / "app.json").read_text(encoding="utf-8"))
 
 
-def test_the_chat_window_is_exactly_as_it_was():
+def test_the_ask_window_is_ling_web_signed_in_with_a_one_time_link():
     assert app_config()["chat"] == CHAT_WINDOW
     chat = (SRC / "chat.ts").read_text(encoding="utf-8")
-    # Its sign-in (now from the main process, on its own session) and the forwarder's port
-    # rewrite still reach it, and only it.
-    assert "new WindowSignIn(origin" in chat and "sessionHttp(window.webContents.session)" in chat
-    assert "executeJavaScript" not in chat
-    assert "url.port = String(port)" in chat
+    web = (SRC / "web.ts").read_text(encoding="utf-8")
+    # Signed in as a browser is by `ling web open`: a one-time code this process writes, traded
+    # for a session cookie. No password, no credential file, no injected script.
+    assert '["web", "open", "--print-url"]' in web and '["web", "serve"]' in web
+    assert "options.server.loginUrl()" in chat and "executeJavaScript" not in chat
+    for retired in ("sign-in.ts", "forwarder.ts", "discover.ts"):
+        assert not (SRC / retired).exists(), retired
+    # Windows has no `ling web` yet: there the menu's Ask opens Work.
+    main = (SRC / "main.ts").read_text(encoding="utf-8")
+    assert 'process.platform !== "win32" ? WebServer.for(ling) : null' in main
     # Work opens only when asked for: no argument, no Work window.
     main = (SRC / "main.ts").read_text(encoding="utf-8")
     assert "if (options.work) showWork();\n  else showChat();" in main
 
 
 def test_chat_has_no_ipc_and_work_only_its_own():
-    # Chat has no preload, so nothing in Onyx's page can reach the main process; Work's one
+    # Ask has no preload: its page talks to `ling web`, never to the main process; Work's one
     # channel is answered only for Work's own window (§4.2, §8.1).
     chat = (SRC / "chat.ts").read_text(encoding="utf-8")
     assert "preload:" not in chat
@@ -72,7 +78,7 @@ def test_work_loads_nothing_from_the_network():
     csp = app_config()["csp"]
     assert csp.startswith("default-src 'none'")
     assert "https:" not in csp
-    assert "http:" not in csp.replace("http://localhost:3000", "").replace("http://localhost:33000", "")
+    assert "http:" not in csp and "frame-src" not in csp
     # The page carries the same policy as a meta tag, and the scheme sends it as a header.
     index = (UI_DIR / "index.html").read_text(encoding="utf-8")
     assert f'content="{csp}"' in index

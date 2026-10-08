@@ -192,13 +192,14 @@ def test_the_advert_follows_searxng_and_the_web_ui_started_after_enable(monkeypa
     path = NodeServiceFile.service_path
     path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0", "ready"))
     monkeypatch.setattr(NodeAdvertiser, "search_port", classmethod(lambda cls: 8888))
+    monkeypatch.setattr(NodeAdvertiser, "ling_web_available", classmethod(lambda cls: True))
     NodeAdvertiser.on_searxng_started()               # not advertised: the file is not touched
     assert "search" not in NodeServiceFile.read()
     NodeSettings.save(advertise=True)
     NodeAdvertiser.on_searxng_started()
     assert NodeServiceFile.read()["search"] == "8888"
-    NodeAdvertiser.on_web_ui_bound()                  # conftest's scratch web UI counts as installed
-    assert NodeServiceFile.read()["web"] == "3000"
+    NodeAdvertiser.on_web_ui_bound()                  # `ling web`, part of `ling`, serves it
+    assert NodeServiceFile.read()["web"] == "3100"
     NodeSettings.save(advertise=True, web=False)
     NodeAdvertiser.on_web_ui_bound()
     assert "web" not in NodeServiceFile.read() and NodeServiceFile.read()["search"] == "8888"
@@ -207,8 +208,19 @@ def test_the_advert_follows_searxng_and_the_web_ui_started_after_enable(monkeypa
 # -- enable, disable, status -----------------------------------------------------------------------
 
 @pytest.fixture
-def machine(monkeypatch):
-    """A node with the web UI and SearXNG installed, neither touched for real."""
+def ling_web(tmp_path, monkeypatch):
+    """A stand-in for the installed `ling`: records each `ling web` command it is given."""
+    log = tmp_path / "ling-web.log"
+    ling = tmp_path / "ling"
+    ling.write_text(f"#!/bin/sh\necho \"$*\" >> {log}\n")
+    ling.chmod(0o755)
+    monkeypatch.setattr(NodeAdvertiser, "ling_executable", classmethod(lambda cls: str(ling)))
+    return lambda: log.read_text().splitlines() if log.exists() else []
+
+
+@pytest.fixture
+def machine(monkeypatch, ling_web):
+    """A node with the web UIs and SearXNG installed, none touched for real."""
     applied = []
     monkeypatch.setattr(NodeAdvertiser, "is_gb10", classmethod(lambda cls: True))
     monkeypatch.setattr(NodeAdvertiser, "model_answers", classmethod(lambda cls, port: True))
@@ -235,7 +247,7 @@ def test_enable_without_root_publishes_nothing_and_prints_the_file(machine, caps
     assert NodeIdentity.read() is not None
 
 
-def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(machine, monkeypatch, capsys):
+def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(machine, monkeypatch, capsys, ling_web, tmp_path):
     asked = []
 
     def privileged(cls, command, purpose, yes=False):
@@ -254,10 +266,18 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(ma
     assert asked[0][:3] == ["install", "-m", "644"] and asked[0][-1] == str(NodeServiceFile.service_path)
     records = NodeServiceFile.read()
     assert records["node"] == NodeIdentity.read()
-    assert (records["web"], records["search"], records["state"], records["main"]) == ("3000", "8888", "ready", "1")
+    # The advert names `ling web`, which enable put on the network (pairing still guards it).
+    assert (records["web"], records["search"], records["state"], records["main"]) == ("3100", "8888", "ready", "1")
+    assert ling_web() == ["web start --lan"]
+    assert "ling web pair" in out
 
+    # `ling web start` wrote its unit with --lan; a stand-in for it, since the fake ling writes none.
+    unit = tmp_path / "mightling-web.service"
+    unit.write_text("[Service]\nExecStart=/x/ling web serve --lan\n")
+    monkeypatch.setattr("dreamference.node.node_advertiser.WEB_UNIT", str(unit))
     assert NodeAdvertiser.enable(no_web=True) is True  # the file is this user's now: no sudo
     assert len(asked) == 1
+    assert ling_web()[-1] == "web start"               # back on loopback
     assert "web" not in NodeServiceFile.read() and NodeServiceFile.read()["search"] == "8888"
     assert "one account" not in capsys.readouterr().out.split("advertised as")[-1]
 
@@ -288,6 +308,7 @@ def test_status_says_what_clients_see(machine, monkeypatch):
          "state": "ready", "version": "1.3.0"}]))
     text = NodeAdvertiser.status()
     assert "Advertised: yes" in text and "state=ready" in text
+    assert "Web UI (ling web, port 3100): the local network, paired devices only" in text
     assert "gx10-1a2b at 192.168.50.105:8000 state=ready version=1.3.0 (this node)" in text
     assert "SearXNG published on: 0.0.0.0" in text
 
@@ -347,8 +368,7 @@ def test_the_web_crates_locator_is_a_byte_identical_copy():
     repo = Path(__file__).resolve().parent.parent
     leaf = repo / "ling-rs" / "node-locator" / "src" / "lib.rs"
     assert (repo / "ling-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
-    # ling-app is Electron (desktop/electron/src/node_locator.ts), a port of the crate rather
-    # than a copy; its own tests mirror the crate's.
+    # ling-app finds no node itself: the `ling` it bundles does, through the crate.
     # ...and it agrees with the node about the service type and the contract's version.
     from dreamference.node import PROTO, SERVICE_TYPE
     text = leaf.read_text()
@@ -1129,26 +1149,28 @@ def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_
     assert NodeJobSender.logs("20261002-1200-abc") == 1 and NodeJobSender.fetch("../x") == 1
 
 
-# -- ling-app's one-time sign-in (§7) -------------------------------------------------------------
-# The behaviour (once per window, only without a session, no second try, a client gets the login
-# page) is tested where it lives, in desktop/electron/src/sign-in.test.ts. These pin the contract
-# the Python side shares with it: the password is per install, read by the main process only.
+# -- ling-app's Ask window (ASK §10) -------------------------------------------------------------
+# Until 2026-10-08 the app's Chat window was the Onyx web UI, reached on a client through a loopback
+# forwarder to the node and signed in with the per-install Onyx password. It is now the Mightling
+# UI on `ling web` on the same machine (desktop/electron/src/web.ts, tested in web.test.ts): an Ask
+# thread runs where the app runs, against the node's model server, so nothing is forwarded and no
+# password is read.
 
 ELECTRON_SRC = Path(__file__).resolve().parent.parent / "desktop" / "electron" / "src"
 
 
-def test_the_window_signs_in_from_the_main_process_with_the_per_install_account():
-    sign_in = (ELECTRON_SRC / "sign-in.ts").read_text()
-    assert 'path.join(".config", "dreamference", "chat-admin.json")' in sign_in
-    assert "if (me !== 401 && me !== 403)" in sign_in
+def test_the_ask_window_signs_in_with_ling_webs_one_time_link_and_no_password():
     chat = (ELECTRON_SRC / "chat.ts").read_text()
-    # No script is injected into Onyx's page and no default account is baked in.
-    assert "executeJavaScript" not in chat and "preload" not in chat.replace("No preload", "")
-    assert "net.request({ method, url, session" in chat and "window.webContents.session" in chat
-    assert not (ELECTRON_SRC / "auto_sign_in.js").exists()
+    web = (ELECTRON_SRC / "web.ts").read_text()
+    assert '["web", "open", "--print-url"]' in web
+    # No script is injected, no preload, and no account or credential file anywhere in the app.
+    assert "executeJavaScript" not in chat and "preload:" not in chat
+    assert not (ELECTRON_SRC / "sign-in.ts").exists() and not (ELECTRON_SRC / "forwarder.ts").exists()
     for source in ELECTRON_SRC.glob("*.ts"):
         text = source.read_text()
-        assert "admin@dreamference.dev" not in text or source.name == "credentials.test.ts", source.name
+        if source.name == "credentials.test.ts":
+            continue
+        assert "admin@dreamference.dev" not in text and "chat-admin.json" not in text, source.name
 
 
 def test_node_id_prints_the_id_and_writes_it_once(monkeypatch, capsys):

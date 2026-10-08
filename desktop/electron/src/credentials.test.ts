@@ -1,7 +1,8 @@
-// No credential reaches a renderer: the Chat window's sign-in is the main process's alone
-// (`sign-in.ts`). Checked in the sources that go into the preload and Work's page, and in the
-// built preload and renderer bundles when they exist (`npm run package` or `make` first; the
-// release workflow runs this file again after `make`).
+// No credential reaches a renderer, and the app handles none: the Ask window signs in with a
+// one-time link `ling web open --print-url` writes (web.ts), and the Onyx window's password
+// sign-in is gone. Checked in the sources that go into the preload and Work's page, and in the
+// built bundles when they exist (`npm run package` or `make` first; the release workflow runs
+// this file again after `make`).
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -45,17 +46,17 @@ describe("credentials stay in the main process", () => {
   it("are not in the preload's sources or Work's page", () => {
     const preloadSources = ["preload.ts", "api.ts"].map((name) => path.join(ROOT, "src", name));
     expect(offenders([...preloadSources, ...filesUnder(UI_SRC)])).toEqual([]);
-    // The preload imports nothing that could reach the sign-in.
+    // The preload imports nothing but the message shapes.
     const preload = fs.readFileSync(path.join(ROOT, "src", "preload.ts"), "utf8");
     const imports = [...preload.matchAll(/from "([^"]+)"/g)].map((match) => match[1]);
     expect(imports.sort()).toEqual(["./api", "electron"]);
   });
 
-  it("are not in the built preload or renderer bundles", { skip: !fs.existsSync(PRELOAD_BUNDLE) }, () => {
-    const bundles = [PRELOAD_BUNDLE, ...filesUnder(RENDERER_BUNDLE)];
-    expect(bundles.length).toBeGreaterThan(1);
+  it("are not in the built bundles, the main process's included", { skip: !fs.existsSync(PRELOAD_BUNDLE) }, () => {
+    const bundles = [PRELOAD_BUNDLE, MAIN_BUNDLE, ...filesUnder(RENDERER_BUNDLE)];
+    expect(bundles.length).toBeGreaterThan(2);
     expect(offenders(bundles)).toEqual([]);
-    // The check can see what it looks for: the main process does carry the sign-in.
-    expect(fs.readFileSync(MAIN_BUNDLE, "utf8")).toContain("chat-admin.json");
+    // The check reads the right bundle: the main process does carry the Ask window's sign-in.
+    expect(fs.readFileSync(MAIN_BUNDLE, "utf8")).toContain("--print-url");
   });
 });

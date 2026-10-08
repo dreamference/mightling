@@ -3,7 +3,7 @@
 **Status:** proposed. Nothing in this spec is implemented yet. Since 2026-10-03 the diffusion slot it builds on is switched off (`DIFFUSION_ENABLED = False` in `hardware/model_matrix_registry.py`: no sidecar is started, downloaded or shown, the code is kept), so building this spec starts by switching it back on with a capable model in it.
 **Goal:** let `ling` hand long, low-judgement outputs (file scaffolds, tests, docstrings, docs, commit and PR text, summaries of long tool output) to a fast diffusion model, so the main model spends its time on the decisions.
 **Builds on:**
-- the diffusion slot beside the main model (`DiffusionServerManager`, `diffusion-model set`, port 8001; [INFERENCE](./DREAMFERENCE_INFERENCE.md), AGENTS.md "Every configuration names a diffusion model");
+- the diffusion slot beside the main model (`DiffusionServerManager`, `diffusion-model set`, port 8001; [INFERENCE](./DREAMFERENCE_INFERENCE.md), `docs/dev/diffusion.md`);
 - the launcher in `ling-rs/`, which already handles `ling app` and `ling update` before Codex parses argv, and would handle `ling fast` the same way ([MIGHTLING_CODE_INDEX](./DREAMFERENCE_MIGHTLING_CODE_INDEX.md) chose the other route, a separate `ling-code` binary, because its router is large and changes often; §4.2 there gives the trade-off);
 - the prompt block the launcher appends to the model catalog (`WEB_ACCESS_INSTRUCTIONS`), which is how the local model already learns `ling-search`;
 - admission control from [MIGHTLING_NIGHT_SHIFT](./DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md) and host safety (`check_host_safety`).

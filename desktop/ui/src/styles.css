@@ -1,6 +1,7 @@
-/* The Work window: light only for now (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §14 question 3), in
-   Mightling's own colours. Scroll areas use a thin scrollbar: WebKitGTK paints its own and
-   CSS colours do not reach it (AGENTS.md, the desktop app). */
+/* The Mightling UI: light only for now (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §14 question 3), in
+   Mightling's own colours. Scroll areas use a thin scrollbar. The same page runs in the desktop app
+   (html[data-host="electron"]: a frameless window whose header is the title bar) and in a browser
+   on `ling web`, phones included (the @media rules at the end). */
 :root {
   --accent: #0abab5; /* TIFFANY_BLUE, dreamference/chat/onyx_brand_assets.py */
   --accent-soft: #e6f8f7;
@@ -18,6 +19,7 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
+body { background: #fff; }
 button { font: inherit; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: 0.5; cursor: default; }
@@ -26,21 +28,38 @@ input, textarea, select { font: inherit; border: 1px solid var(--line); border-r
 code, pre { font-family: "Roboto Mono", "DM Mono", ui-monospace, monospace; font-size: 12.5px; }
 pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
 
-.work { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.work { display: grid; grid-template-columns: 280px 1fr; height: 100%; height: 100dvh; }
 .sidebar { border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: thin; padding: 10px; background: var(--panel); }
 .new-thread { display: flex; gap: 6px; margin-bottom: 12px; }
 .new-thread input { flex: 1; min-width: 0; }
 .project h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 12px 4px 4px; cursor: pointer; }
-.thread { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: none; background: none; padding: 6px 8px; border-radius: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.thread.selected { background: var(--accent-soft); }
-.running { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; margin-left: auto; }
+.views { display: flex; gap: 4px; margin-bottom: 10px; }
+.views button { flex: 1; }
+.views button.selected { background: var(--accent-soft); border-color: var(--accent); }
+.new-question { width: 100%; margin-bottom: 8px; }
+.search { width: 100%; margin-bottom: 8px; }
+.thread-row { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+.thread-row.selected { background: var(--accent-soft); }
+.thread { display: flex; flex-direction: column; align-items: flex-start; flex: 1; min-width: 0; text-align: left; border: none; background: none; padding: 6px 8px; border-radius: 6px; }
+.thread-label, .snippet { display: block; width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.snippet { color: var(--muted); font-size: 12px; }
+.row-actions { display: flex; flex: none; visibility: hidden; }
+.thread-row:hover .row-actions, .thread-row.selected .row-actions, .thread-row:focus-within .row-actions { visibility: visible; }
+button.icon { border: none; background: none; padding: 2px 6px; color: var(--muted); }
+button.icon:hover { color: var(--text); }
+.rename { width: 100%; margin: 2px 0; }
+.running { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; margin: 0 4px; }
+.empty.small { font-size: 12px; margin: 6px 4px; }
+.backdrop { display: none; }
 
 .thread-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; }
-/* The window is frameless (desktop/electron/src/work.ts): this bar is the title bar the page draws,
-   draggable, with room on the right for the native minimise/maximise/close controls the overlay
-   paints (36px high). Its own controls opt out of dragging. */
-.bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 150px 6px 14px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; user-select: none; }
-.bar button, .bar input, .bar select, .bar .link-button { -webkit-app-region: no-drag; }
+.bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 14px; border-bottom: 1px solid var(--line); user-select: none; }
+/* The Work window is frameless (desktop/electron/src/work.ts): there this bar is the title bar the
+   page draws, draggable, with room on the right for the native minimise/maximise/close controls
+   the overlay paints (36px high). Its own controls opt out of dragging. */
+html[data-host="electron"] .bar { padding-right: 150px; -webkit-app-region: drag; }
+html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, html[data-host="electron"] .bar select, html[data-host="electron"] .bar .link-button { -webkit-app-region: no-drag; }
+.menu-toggle { display: none; }
 .bar .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .bar .cwd { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spacer { flex: 1; }
@@ -53,7 +72,10 @@ pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
 .turn { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px; }
 .item { margin: 6px 0; }
 .item.user { white-space: pre-wrap; background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; }
-.item.agent :first-child { margin-top: 0; }
+.item.agent .markdown > :first-child { margin-top: 0; }
+.item.agent .copy { font-size: 12px; padding: 0; }
+.markdown img { max-width: 100%; }
+.markdown pre, .markdown table { max-width: 100%; overflow-x: auto; }
 .item.reasoning summary, .item.command summary, .item.files summary { cursor: pointer; color: var(--muted); }
 .item.command pre { background: var(--panel); padding: 8px; border-radius: 6px; max-height: 320px; overflow: auto; scrollbar-width: thin; }
 .status-failed summary, .exit, .turn-error { color: var(--danger); }
@@ -73,7 +95,34 @@ pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
 
 .composer { border-top: 1px solid var(--line); padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
 .composer textarea { width: 100%; resize: vertical; }
-.composer-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.composer-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+.attachments { display: flex; gap: 6px; flex-wrap: wrap; }
+.attachment { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; border: 1px solid var(--line); border-radius: 6px; padding: 2px 2px 2px 6px; font-size: 12px; }
+.attachment img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; }
+.attachment-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ask-empty { max-width: 560px; margin: 10vh auto 0; text-align: center; }
+.ask-empty h1 { color: var(--text); font-size: 22px; font-weight: 600; }
 
 .startup { max-width: 760px; margin: 60px auto; padding: 0 20px; }
 .startup .log { background: var(--panel); padding: 10px; border-radius: 8px; max-height: 50vh; overflow: auto; scrollbar-width: thin; }
+
+/* Narrow windows and phones: the thread list becomes a drawer behind the ☰ button, and inputs are
+   16px so mobile browsers do not zoom into them. `ling web` is text-only from other devices
+   (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.4). */
+@media (max-width: 720px) {
+  .work { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; z-index: 20; top: 0; bottom: 0; left: 0; width: min(85vw, 320px); transform: translateX(-100%); transition: transform 0.2s ease; box-shadow: 0 0 24px rgba(0, 0, 0, 0.15); }
+  .drawer-open .sidebar { transform: none; }
+  .drawer-open .backdrop { display: block; position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.25); }
+  .menu-toggle { display: inline-block; font-size: 18px; }
+  .bar { padding: 6px 8px; gap: 6px; }
+  .bar .title { max-width: none; flex: 1; min-width: 0; }
+  .bar .cwd, .bar .spacer, .chip.optional { display: none; }
+  .turns { padding: 10px; }
+  .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+  .row-actions { visibility: visible; }
+  input, textarea, select { font-size: 16px; }
+  button { padding: 6px 12px; }
+  .approval .buttons button { flex: 1 1 auto; }
+  .startup { margin: 24px auto; }
+}
