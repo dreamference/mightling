@@ -83,7 +83,7 @@ foreach ($Asset in $Release.assets) { $Assets[$Asset.name] = $Asset.url }
 
 $Required = @("ling", "codex-code-mode-host")
 $Optional = @("ling-search", "ling-fetch", "ling-code", "codex-windows-sandbox-setup", "codex-command-runner")
-$SumsName = "mightling-$Target.sha256sums"
+$SumsName = "ling-$Target.sha256sums"
 foreach ($Name in $Required) {
     if (-not $Assets.ContainsKey("$Name-$Target.gz")) { Fail "release $Tag carries no $Name for $Target." }
 }

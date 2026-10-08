@@ -6,3 +6,6 @@
 *.sh text eol=lf
 # Read by PowerShell 5.1, which accepts either; CRLF is what Windows editors write.
 *.ps1 text eol=crlf
+# Prompts compiled into ling with include_str! and shared byte for byte with the Python side: a
+# Windows checkout must not turn them into CRLF.
+ling-rs/prompts/*.md text eol=lf
