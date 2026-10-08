@@ -570,6 +570,47 @@ def test_opt_outs_are_said_as_such_and_need_no_root(tmp_path, release_server):
     assert "skipped" not in result.stdout.lower()
 
 
+WITH_DOCS = ("ling", "codex-code-mode-host", "ling-search", "ling-fetch", "ling-code", "ling-docs")
+
+
+def test_a_node_installs_the_file_index_and_what_it_loads(tmp_path, release_server):
+    # ling-docs is a binary of the release; its PDFium, ONNX Runtime and model (about 320 MB)
+    # come from `ling-admin docs setup`, before the main model.
+    (tmp_path / "groups-db").write_text("tester docker\n")
+    result = run_install(tmp_path, release_server(node_release(names=WITH_DOCS)), gpu="NVIDIA GB10",
+                         env_extra={"FAKE_GROUPS": "tester docker"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / ".local/bin/ling-docs").is_symlink()
+    admin = logged(tmp_path, "admin.log").splitlines()
+    assert admin == ["host setup --yes", "node id", "node enable --yes", "docs setup", "model download", "server start"]
+    assert "✅ local file index: PDFium, ONNX Runtime and its embedding model installed" in result.stdout
+    # A failed download is a failed step, named, and the rest goes on.
+    home = tmp_path / "failing"
+    home.mkdir()
+    (home / "groups-db").write_text("tester docker\n")
+    result = run_install(home, release_server(node_release(names=WITH_DOCS)), gpu="NVIDIA GB10",
+                         env_extra={"FAKE_GROUPS": "tester docker", "FAKE_ADMIN_FAIL": "docs setup"})
+    assert result.returncode == 1
+    assert "❌ local file index: `ling-admin docs setup` failed, see" in result.stdout
+    assert "server start" in logged(home, "admin.log")
+    # --no-model (node provision) leaves it to `ling-admin docs setup`, and says so.
+    home = tmp_path / "provisioned"
+    home.mkdir()
+    result = run_install(home, release_server(node_release(names=WITH_DOCS)), "--role", "node", "--no-advertise",
+                         "--no-host-setup", "--no-model")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert logged(home, "admin.log").splitlines() == ["node id"]
+    assert "⚪ local file index: --no-model" in result.stdout
+
+
+def test_a_mac_never_asks_for_the_file_index(tmp_path, release_server):
+    server = release_server(binaries(WITH_DOCS, target="aarch64-apple-darwin"))
+    result = run_install(tmp_path, server, "--role", "client", uname_s="Darwin", uname_m="arm64")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not any("ling-docs" in request for request in server.requests)
+    assert not (tmp_path / ".local/bin/ling-docs").exists()
+
+
 def test_a_client_needs_no_root(tmp_path, release_server):
     result = run_install(tmp_path, release_server(binaries()), "--role", "client",
                          env_extra={"FAKE_SUDO": "password"})
@@ -589,11 +630,11 @@ def test_the_node_role_needs_the_wheel(tmp_path, release_server):
 @pytest.fixture
 def release_install(tmp_path, monkeypatch):
     """The package as a wheel leaves it: no patches, no crates, binaries under the install dir."""
-    for name in ("CODEX_PATCH_DIR", "MIGHTLING_CRATE_DIR", "CODEX_SUBMODULE_DIR", "WEB_CRATE_DIR", "CODE_CRATE_DIR"):
+    for name in ("CODEX_PATCH_DIR", "MIGHTLING_CRATE_DIR", "CODEX_SUBMODULE_DIR", "WEB_CRATE_DIR", "CODE_CRATE_DIR", "DOCS_CRATE_DIR"):
         monkeypatch.setattr(codex_branded_builder, name, str(tmp_path / "site-packages" / name.lower()))
     install_dir = tmp_path / "install"
     monkeypatch.setattr(codex_branded_builder, "INSTALL_DIR", str(install_dir))
-    for name in ("PATH_LINK", "ADMIN_PATH_LINK", "SEARCH_PATH_LINK", "FETCH_PATH_LINK", "CODE_PATH_LINK"):
+    for name in ("PATH_LINK", "ADMIN_PATH_LINK", "SEARCH_PATH_LINK", "FETCH_PATH_LINK", "CODE_PATH_LINK", "DOCS_PATH_LINK"):
         monkeypatch.setattr(codex_branded_builder, name, str(tmp_path / "bin" / name.lower()))
 
     def place(*names):

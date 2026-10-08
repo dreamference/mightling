@@ -4,7 +4,8 @@
 //! installed, which would put upstream Codex in Mightling's place. Patch 0008 sends the subcommand
 //! here instead. The release workflow attaches, per target, a gzipped `ling`, a gzipped
 //! `codex-code-mode-host`, the gzipped web commands `ling-search` and `ling-fetch`, the gzipped
-//! code index router `ling-code`, and a `sha256sums` file covering all of them; this downloads
+//! code index router `ling-code`, the gzipped local file index `ling-docs` (Linux), and a
+//! `sha256sums` file covering all of them; this downloads
 //! the latest published release's assets, checks the release's signature (from 1.5.0 on, the
 //! release-wide `SHA256SUMS` signed by Mightling's release key, which lists the per-target
 //! checksum file; src/release_signature.rs), verifies every archive against the checksum file, and
@@ -49,10 +50,15 @@ pub const WEB_COMMANDS: [&str; 2] = ["ling-search", "ling-fetch"];
 /// `ling-admin code setup`.
 pub const CODE_COMMAND: &str = "ling-code";
 
+/// The local file index (`ling-docs-rs/`, Linux only). The launcher looks for it beside `ling`
+/// (`docs_index::binary`). The release carries the binary only: PDFium, ONNX Runtime and the
+/// embedding model it loads are fetched, pinned, by `ling-admin docs setup`.
+pub const DOCS_COMMAND: &str = "ling-docs";
+
 /// The commands a release may carry beside `ling`, each installed if its asset is present and
 /// kept as installed if not.
-pub fn optional_commands() -> [&'static str; 3] {
-    [WEB_COMMANDS[0], WEB_COMMANDS[1], CODE_COMMAND]
+pub fn optional_commands() -> [&'static str; 4] {
+    [WEB_COMMANDS[0], WEB_COMMANDS[1], CODE_COMMAND, DOCS_COMMAND]
 }
 
 /// What `ling update` should do, given this build's version and the latest release's.
@@ -116,7 +122,7 @@ pub fn asset_names(target: &str) -> [String; 3] {
 }
 
 /// Asset names of the optional commands for a target, in `optional_commands` order.
-pub fn optional_asset_names(target: &str) -> [String; 3] {
+pub fn optional_asset_names(target: &str) -> [String; 4] {
     optional_commands().map(|name| format!("{name}-{target}.gz"))
 }
 
@@ -297,6 +303,10 @@ pub async fn run() -> anyhow::Result<()> {
         optional.extend(WINDOWS_SANDBOX_HELPERS);
     }
     for name in optional {
+        // Only Linux releases build the file index; elsewhere its absence is not news.
+        if name == DOCS_COMMAND && !cfg!(target_os = "linux") {
+            continue;
+        }
         let asset = format!("{name}-{target}.gz");
         if assets.contains_key(asset.as_str()) {
             wanted.push((asset, installed_name(name)));
@@ -666,11 +676,14 @@ mod tests {
             [
                 "ling-search-aarch64-unknown-linux-gnu.gz".to_string(),
                 "ling-fetch-aarch64-unknown-linux-gnu.gz".to_string(),
-                "ling-code-aarch64-unknown-linux-gnu.gz".to_string()
+                "ling-code-aarch64-unknown-linux-gnu.gz".to_string(),
+                "ling-docs-aarch64-unknown-linux-gnu.gz".to_string()
             ]
         );
-        // The launcher finds the router by this name beside `ling` (code_index::binary).
+        // The launcher finds the router and the file index by these names beside `ling`
+        // (code_index::binary, docs_index::binary).
         assert!(optional_commands().contains(&"ling-code"));
+        assert!(optional_commands().contains(&"ling-docs"));
     }
 
     #[test]
