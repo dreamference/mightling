@@ -47,6 +47,9 @@ bash tess_setup.sh && venv/bin/python ocr_models.py && venv/bin/python make_ocr_
 bash run_ocr.sh v6-tiny v6-small v6-medium v5-oracle v5-all tesseract osd && venv/bin/python ocr_report.py
 venv/bin/python make_downloads.py corpus downloads && venv/bin/python filter_bench.py
 venv/bin/python first_index_probe.py synthetic corpus downloads
+# Phase 1 (spec §16): ling-docs itself. <wrapper> runs the built ling-docs with a throwaway HOME
+# whose only collection is corpus/ (`ling-docs add corpus --name corpus`, then `ling-docs index`).
+venv/bin/python phase1_acceptance.py <wrapper> results/phase1-acceptance.json [--scale <50k-chunk wrapper>]
 ```
 
 Every extraction runs in `bwrap --unshare-all` (no network, home hidden) inside a
