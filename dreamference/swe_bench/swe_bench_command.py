@@ -65,6 +65,9 @@ class SweBenchCommand:
                          help="on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off)")
         run.add_argument("--strip-names", action="store_true",
                          help="Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it")
+        run.add_argument("--refine", action="store_true",
+                         help="Two steps per instance: a session that studies the issue and writes a refined description "
+                              "without changing the repository, then a fresh session that fixes it")
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
@@ -104,7 +107,7 @@ class SweBenchCommand:
                 subset=args.subset, name=args.name, evaluate=args.eval, until=args.until,
                 idle_minutes=args.idle_minutes, ignore_sessions=args.ignore_open_sessions,
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
-                mask=args.mask, strip_names=args.strip_names)
+                mask=args.mask, strip_names=args.strip_names, refine=args.refine)
         if command == "eval":
             return cls.evaluate(args.run)
         if command == "report":

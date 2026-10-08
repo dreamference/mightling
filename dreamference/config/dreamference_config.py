@@ -63,6 +63,13 @@ MIGHTLING_AIRGAPPED_LEVELS: Final[tuple] = ("off", "on")
 # ling-rs/src/prompt.rs.
 DEFAULT_MIGHTLING_PROMPT: Final[str] = "default"
 MIGHTLING_PROMPT_NAME: Final[re.Pattern] = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+# Refine mode (specs/DREAMFERENCE_MIGHTLING_REFINE.md): each new task is first studied by a session
+# that changes nothing and writes a refined description, then done by a fresh session given the
+# task and that description, in `ling exec`, the interactive session and Night Shift alike. Off
+# until the 100-task SWE-bench pair decides (spec §3); switching it on is this line and DEFAULT in
+# ling-rs/src/refine.rs, which a test keeps equal. The launcher reads the same tiers
+# (DREAMFERENCE_MIGHTLING_REFINE, then `mightling_refine` in the TOML file), after its `--refine` flag.
+DEFAULT_MIGHTLING_REFINE: Final[bool] = False
 
 CAVE_MODE_PROMPT: Final[str] = (
     "You are in Cave Mode. You are a senior Staff Engineer. "
@@ -100,6 +107,7 @@ class DreamferenceConfig:
         mightling_cave_mode: Optional[str] = None,
         mightling_airgapped: Optional[str] = None,
         mightling_prompt: Optional[str] = None,
+        mightling_refine: Optional[bool] = None,
     ):
         """
         Initializes DreamferenceConfig by loading file defaults and overriding with environment variables and parameters.
@@ -312,6 +320,17 @@ class DreamferenceConfig:
                 self.mightling_prompt = name
                 break
 
+        # Refine mode, through the same tiers and the same reading of a value as the launcher's:
+        # an empty variable counts as unset, anything else is on only if it says so.
+        env_refine = os.getenv("DREAMFERENCE_MIGHTLING_REFINE")
+        if mightling_refine is not None:
+            self.mightling_refine: bool = mightling_refine
+        elif env_refine:
+            self.mightling_refine = env_refine.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            file_refine = self.file_data.get("mightling_refine", DEFAULT_MIGHTLING_REFINE)
+            self.mightling_refine = file_refine if isinstance(file_refine, bool) else DEFAULT_MIGHTLING_REFINE
+
     @property
     def model(self) -> str:
         """
@@ -481,6 +500,7 @@ class DreamferenceConfig:
         if self.mightling_cave_mode != DEFAULT_MIGHTLING_CAVE_MODE: data["mightling_cave_mode"] = self.mightling_cave_mode
         if self.mightling_airgapped != DEFAULT_MIGHTLING_AIRGAPPED: data["mightling_airgapped"] = self.mightling_airgapped
         if self.mightling_prompt != DEFAULT_MIGHTLING_PROMPT: data["mightling_prompt"] = self.mightling_prompt
+        if self.mightling_refine != DEFAULT_MIGHTLING_REFINE: data["mightling_refine"] = self.mightling_refine
 
         return ConfigFileStorageManager.save_config_dict(out_path, data)
 

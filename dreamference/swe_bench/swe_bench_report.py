@@ -22,11 +22,11 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit",
 )
 # What a manifest written before a field existed ran with.
-MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim"}
+MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False}
 
 
 class SweBenchReport:
@@ -80,6 +80,42 @@ class SweBenchReport:
             "commands": sum(entry["commands"] for entry in stats.values()),
             "puffin_code_calls": sum(entry["puffin_code_calls"] for entry in stats.values()),
             "puffin_code_users": sum(1 for entry in stats.values() if entry["puffin_code_calls"]),
+            "refine": cls.refine_summary(store, manifest, states, finished & set(instances)),
+        }
+
+    @classmethod
+    def refine_summary(cls, store: SweBenchRunStore, manifest: Dict[str, Any], states: Dict[str, Any],
+                       finished: Any) -> Optional[Dict[str, Any]]:
+        """
+        The refine arm's two steps, counted apart: their time, their tokens, and how often the
+        first step changed the tree it was told not to change.
+
+        Args:
+            store: The run.
+            manifest: Its manifest.
+            states: Its instances' states.
+            finished: The instances that have a prediction.
+
+        Returns:
+            Optional[Dict[str, Any]]: None for a run without the refine arm.
+        """
+        if not manifest.get("refine"):
+            return None
+        records = {i: (states.get(i) or {}).get("refine") for i in finished}
+        records = {i: record for i, record in records.items() if record}
+        first = {key: 0 for key in ("input_tokens", "cached_input_tokens", "output_tokens")}
+        for instance_id, record in records.items():
+            stats = store.log_stats(instance_id, 0, record.get("log_offset"))
+            for key in first:
+                first[key] += stats[key]
+        return {
+            "instances": len(records),
+            "refine_s": [record.get("refine_s", 0) for record in records.values()],
+            "fix_s": [record["fix_s"] for record in records.values() if "fix_s" in record],
+            "edited": sum(1 for record in records.values() if record.get("refine_edited")),
+            "empty": sum(1 for record in records.values() if not record.get("refined_bytes")),
+            "timeouts": sum(1 for record in records.values() if record.get("refine_exec") == "timeout"),
+            "refine_tokens": first,
         }
 
     @classmethod
@@ -130,6 +166,8 @@ class SweBenchReport:
             changed = sum(1 for entry in stripped.values() if entry.get("replaced"))
             lines.append(f"Issue text          names stripped: the files, modules, functions and classes the reference "
                          f"fix touches were taken out of {changed} of {len(stripped)} issues; the rest named none of them")
+        if summary["refine"] is not None:
+            lines.append(cls.refine_line(summary["refine"]))
         if summary["grading"] is not None:
             grader = summary["grader"]
             lines.append(f"Grading {summary['grading']}: harness {grader.get('harness')}, dataset revision "
@@ -172,6 +210,28 @@ class SweBenchReport:
         return (f"Code index          {arm}: {built}; the agent called ling-code "
                 f"{summary['puffin_code_calls']} time(s), in {summary['puffin_code_users']} of "
                 f"{summary['finished']} instance(s)")
+
+    @classmethod
+    def refine_line(cls, refine: Dict[str, Any]) -> str:
+        """
+        Says what the refine arm's first step cost and did.
+
+        Args:
+            refine: The summary's `refine` entry.
+
+        Returns:
+            str: One line of the report.
+        """
+        if not refine["instances"]:
+            return "Refine first        on: no instance has finished its first step yet"
+        tokens = refine["refine_tokens"]
+        fix = (f", median {cls.duration(statistics.median(refine['fix_s']))} fixing"
+               if refine["fix_s"] else "")
+        return (f"Refine first        on: median {cls.duration(statistics.median(refine['refine_s']))} studying"
+                f"{fix}; the first step took {cls.duration(sum(refine['refine_s']))} and "
+                f"{tokens['input_tokens']:,} tokens in, {tokens['output_tokens']:,} out; it wrote nothing in "
+                f"{refine['empty']}, timed out in {refine['timeouts']} and changed the tree in {refine['edited']} "
+                f"of {refine['instances']} (discarded before fixing)")
 
     @classmethod
     def write(cls, store: SweBenchRunStore) -> Optional[str]:
@@ -271,6 +331,7 @@ class SweBenchReport:
             return {
                 "code index": summary["code_index"],
                 "issue text": summary["manifest"].get("issue_text", "verbatim"),
+                "refine first": "on" if summary["refine"] is not None else "off",
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
                 "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",
                 "agent time": cls.duration(sum(walls)),

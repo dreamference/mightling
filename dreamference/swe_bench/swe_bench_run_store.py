@@ -153,7 +153,7 @@ class SweBenchRunStore:
         """
         return self.directory / "logs" / f"{instance_id}.jsonl"
 
-    def log_stats(self, instance_id: str) -> Dict[str, int]:
+    def log_stats(self, instance_id: str, start: int = 0, end: Optional[int] = None) -> Dict[str, int]:
         """
         Counts what the agent did, from `ling exec`'s events: its commands and tool calls, how
         many of them asked `ling-code` something (as a shell command or as a `code_*` tool),
@@ -161,6 +161,9 @@ class SweBenchRunStore:
 
         Args:
             instance_id: The instance.
+            start: The byte offset in the log to count from (the refine arm's second step starts
+                at the offset its state records).
+            end: The byte offset to count up to; None for the end of the log.
 
         Returns:
             Dict[str, int]: `commands`, `puffin_code_calls`, `input_tokens`,
@@ -169,7 +172,8 @@ class SweBenchRunStore:
         stats = {"commands": 0, "puffin_code_calls": 0, "input_tokens": 0, "cached_input_tokens": 0,
                  "output_tokens": 0}
         try:
-            lines = self.log_path(instance_id).read_text(errors="replace").splitlines()
+            data = self.log_path(instance_id).read_bytes()[start:end]
+            lines = data.decode(errors="replace").splitlines()
         except OSError:
             return stats
         for line in lines:

@@ -46,6 +46,7 @@ pub mod node;
 pub mod node_command;
 pub mod notice;
 pub mod prompt;
+pub mod refine;
 pub mod release_signature;
 pub mod rename;
 pub mod skills;
@@ -195,6 +196,10 @@ pub async fn parse<T: clap::Parser>() -> anyhow::Result<T> {
 /// `command` is Codex's root CLI definition, used to find the subcommand. Returns the arguments
 /// unchanged when the command never reaches a model, e.g. `--version`.
 pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
+    // `--refine`/`--no-refine` are Mightling's (refine.rs), already turned into its variable.
+    let args = refine::without_flags(args);
+    // What the user asked for, before anything is added: refine mode's study step starts from it.
+    let original = args.clone();
     let user_args: Vec<String> = args
         .iter()
         .skip(1)
@@ -266,6 +271,12 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "web"
     {
         std::process::exit(web::run_cli(&user_args[index + 1..]).await);
+    }
+    // `refine` shows refine mode's setting, and `refine hook` is its hook in the TUI (refine.rs).
+    if let Some(index) = subcommand
+        && user_args[index] == "refine"
+    {
+        std::process::exit(refine::run_cli(&user_args[index + 1..]));
     }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);
@@ -352,6 +363,8 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
     // After the ledger's registration, so the notice group follows it in `config.toml`.
     // `resume` and `fork` open the TUI too.
     let tui = interactive || subcommand.is_some_and(|index| matches!(user_args[index].as_str(), "resume" | "fork"));
+    // Refine mode's hook for the interactive session; before the notice, which shows its line.
+    refine::register_hook(&codex_home, tui);
     notice::publish(&codex_home, tui);
     // The index as tools, when the block just written names them (code_index.rs).
     let args = if code_index::named_in(&code_block) == Some(code_index::TOOLS_NAME) {
@@ -368,6 +381,9 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         None => args,
     };
     let args = with_local_model_args(args, &model.id);
+    // Refine mode in `ling exec`: the study step runs here, and Codex gets the doing step.
+    let code_tools = code_index::named_in(&code_block) == Some(code_index::TOOLS_NAME);
+    let args = refine::around_exec(command, &original, args, code_tools);
     // `app-server` takes only `-c` overrides from the root command line, not `--model`, so the
     // model has to be named as configuration there or its threads get Codex's fallback model and
     // not Mightling's prompt (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md §5).

@@ -19,6 +19,8 @@ from typing import Any, Dict, Final, List, Optional
 
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_task_run import NUDGE, NightShiftTaskRun
+from dreamference.night_shift.refine_prompt import (FIX_RULES, NO_REFINED as NO_REFINED_PIECE, REFINED_HEADING,
+                                                    STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS, RefinePrompt)
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
@@ -43,6 +45,62 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
   `code_show` or `code_def`. Before you edit a function, `code_impact` (or `code_callers`) says
   what else uses it and so which tests to run.
 """
+
+# The refine arm (`--refine`) runs two sessions. The first studies the issue and writes a refined
+# description without changing the repository; the second, a fresh session, fixes it with the
+# issue and that description in its prompt. Measured because the default agent's failures were
+# mostly a right file with a wrong or partial fix: an example fixed instead of a requirement, a
+# guard instead of a rule, a second code path never looked at.
+REFINED_FILE: Final[str] = "refined.md"
+
+# Both prompts are built from the pieces refine mode shares with the product
+# (dreamference/night_shift/refine_prompt.py, ling-rs/prompts/refine.md), with "issue" for the
+# task; a test pins them byte for byte to the prompts the `im-refine` round was measured with.
+UNATTENDED: Final[str] = """This is an unattended task in the repository at /testbed. Nobody will answer questions:
+where something is unclear, make the reasonable choice."""
+
+REFINE_PROMPT: Final[str] = (
+    UNATTENDED + "\n\n" + RefinePrompt.subject(STUDY_INTRO, "issue") + """
+
+- You may read the code, run it and run the repository's tests. Do not change any file under
+  /testbed: every change there is discarded when this step ends. Put scratch files in /tmp.
+- There is no network.
+{code_index}
+Write the description to {refined_path}, in six sections:
+""" + STUDY_SECTIONS + """ When the file is
+written, stop.
+
+Issue:
+{problem_statement}""")
+
+# The first step's code-index sentence: it is there to find every path, not one.
+REFINE_CODE_INDEX_HINT: Final[str] = RefinePrompt.subject(STUDY_CODE_INDEX, "issue") + "\n"
+
+FIX_PROMPT: Final[str] = (
+    UNATTENDED + """
+
+- Fix the issue below by changing the repository's source files.
+- You may run the repository's tests. There is no network.
+- Do not commit. Your changes are collected when you stop.
+{code_index}""" + RefinePrompt.subject(FIX_RULES, "issue") + """
+
+Issue:
+{problem_statement}
+
+""" + REFINED_HEADING + """
+{refined}""")
+
+# What the second step is told when the first wrote nothing.
+NO_REFINED: Final[str] = RefinePrompt.subject(NO_REFINED_PIECE, "issue")
+
+# The first step's own time limit; the second then gets the full task timeout, as an instance of
+# the arm without it does, so the two arms' fixing steps have the same budget.
+# The study step's own limit, or None for the task's limit (the product's study has none; the
+# user chose that on 2026-10-07, so the benchmark measures it bounded only by the task timeout).
+REFINE_TIMEOUT_S: Final[Optional[int]] = None
+
+# Kept in the instance's state; a longer description is cut there, never in the prompt.
+REFINED_STATE_LIMIT: Final[int] = 40000
 
 # The image's default PATH puts conda's *base* environment first, which has none of the
 # repository's dependencies; `conda activate testbed` only happens in the grading script. Without
@@ -101,6 +159,17 @@ git read-tree HEAD
 [ "$tree" != "$(cat "$SCRATCH/base-tree")" ]
 """
 
+# Puts the working tree back to the tree the agent started from, between the refine arm's two
+# steps: whatever the first step changed is discarded, files it added included. The index goes
+# back to HEAD afterwards, as PREPARE_SCRIPT leaves it.
+RESET_SCRIPT: Final[str] = r"""
+cd "${TESTBED:-/testbed}" || exit 3
+base=$(cat "$SCRATCH/base-tree")
+git read-tree -u --reset "$base" || exit 4
+git clean -fdq || exit 5
+git read-tree HEAD
+"""
+
 # Writes the agent's changes as a patch against the tree it started from. Binary files are left
 # out and named: a "Binary files differ" stub makes `git apply` reject the whole patch.
 COLLECT_SCRIPT: Final[str] = r"""
@@ -126,7 +195,7 @@ class SweBenchInstanceRun:
                  deadline: float, extra_env: Optional[Dict[str, str]] = None,
                  code_index: Optional[Dict[str, Any]] = None,
                  extra_mounts: Optional[List[str]] = None,
-                 issue: Optional[Dict[str, Any]] = None) -> None:
+                 issue: Optional[Dict[str, Any]] = None, refine: bool = False) -> None:
         """
         Args:
             store: The run's files.
@@ -144,6 +213,7 @@ class SweBenchInstanceRun:
             extra_mounts: More `docker run -v` values (a custom prompt's file, read-only).
             issue: In a `--strip-names` run, the issue as the agent sees it: `text`, and the
                 names `replaced` (name to phrase). None gives the agent the dataset's text.
+            refine: Run the refine arm's two steps: study and describe, then fix.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -159,6 +229,7 @@ class SweBenchInstanceRun:
         self.extra_env = dict(extra_env or {})
         self.code_index = code_index
         self.extra_mounts: List[str] = list(extra_mounts or [])
+        self.refine = refine
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -200,6 +271,39 @@ class SweBenchInstanceRun:
         """
         return PROMPT.format(problem_statement=problem_statement,
                              code_index=CODE_INDEX_HINT if code_index else "")
+
+    @classmethod
+    def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False) -> str:
+        """
+        Builds the refine arm's first prompt: study the issue and write the refined description.
+
+        Args:
+            problem_statement: The dataset row's `problem_statement`.
+            code_index: Whether the agent has the code index, which adds `REFINE_CODE_INDEX_HINT`.
+
+        Returns:
+            str: The prompt.
+        """
+        return REFINE_PROMPT.format(problem_statement=problem_statement,
+                                    refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
+                                    code_index=REFINE_CODE_INDEX_HINT if code_index else "")
+
+    @classmethod
+    def compose_fix_prompt(cls, problem_statement: str, refined: str, code_index: bool = False) -> str:
+        """
+        Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
+
+        Args:
+            problem_statement: The dataset row's `problem_statement`.
+            refined: What the first step wrote; empty when it wrote nothing.
+            code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
+
+        Returns:
+            str: The prompt.
+        """
+        return FIX_PROMPT.format(problem_statement=problem_statement,
+                                 refined=refined.strip() or NO_REFINED,
+                                 code_index=CODE_INDEX_HINT if code_index else "")
 
     def run(self) -> str:
         """
@@ -262,12 +366,25 @@ class SweBenchInstanceRun:
                               f"{(prepared.stderr or prepared.stdout).strip()[-300:]}")
             return "error", ""
 
-        outcome = self._exec(self.compose_prompt(self.problem_statement, bool(self.code_index)), resume=False)
+        if self.refine:
+            refined, problem = self._refine(state)
+            if problem:
+                self.notes.append(problem)
+                return "error", ""
+            if self.stop_event.is_set():
+                return "interrupted", ""
+            prompt = self.compose_fix_prompt(self.problem_statement, refined, bool(self.code_index))
+        else:
+            prompt = self.compose_prompt(self.problem_statement, bool(self.code_index))
+        fix_started = time.time()
+        outcome = self._exec(prompt, resume=False)
         while outcome == "ok" and self.nudges_used < self.settings.nudges and not self._changed() \
                 and NightShiftTaskRun.announces_work(self._last_message()):
             self.nudges_used += 1
             outcome = self._exec(NUDGE, resume=True)
         state["exec"] = outcome
+        if self.refine:
+            state["refine"]["fix_s"] = int(time.time() - fix_started)
 
         if self.stop_event.is_set():
             return "interrupted", ""
@@ -287,6 +404,49 @@ class SweBenchInstanceRun:
         if outcome == "error":
             return "error", ""
         return ("stalled" if NightShiftTaskRun.announces_work(self._last_message()) else "empty"), ""
+
+    def _refine(self, state: Dict[str, Any]) -> tuple:
+        """
+        The refine arm's first step: a session that studies the issue and writes the refined
+        description, under its own time limit. The tree is then put back as it was, and the
+        second step's clock starts. Records the step in `state["refine"]`.
+
+        Returns:
+            tuple: `(refined, problem)`, the description (empty when none was written) and why
+            the instance cannot go on, or None.
+        """
+        started = time.time()
+        task_deadline = self.deadline
+        if REFINE_TIMEOUT_S is not None:
+            self.deadline = min(task_deadline, started + REFINE_TIMEOUT_S)
+        try:
+            outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index)),
+                                 resume=False)
+        finally:
+            self.deadline = task_deadline
+        record: Dict[str, Any] = {"refine_exec": outcome, "refine_s": int(time.time() - started),
+                                  "refine_session": self.session}
+        state["refine"] = record
+        if self.stop_event.is_set():
+            return "", None
+        if outcome == "timeout":
+            # The container was stopped to end the step; the second step needs it running.
+            SweBenchDocker.run(["start", self.container], timeout=120)
+        refined = self._read(self.scratch / REFINED_FILE)
+        record["refined_bytes"] = len(refined.encode())
+        record["refined"] = refined[:REFINED_STATE_LIMIT]
+        # Measured, not assumed: the first step was told not to edit, and may have.
+        record["refine_edited"] = self._changed()
+        reset = self._script(RESET_SCRIPT, timeout=600)
+        if reset.returncode != 0:
+            return refined, f"resetting /testbed after the refine step failed ({reset.returncode}): " \
+                            f"{(reset.stderr or reset.stdout).strip()[-300:]}"
+        # Where the second step's events start in the log, so the report can split the tokens.
+        record["log_offset"] = self.log_path.stat().st_size if self.log_path.exists() else 0
+        # The second step is a new session with the full task budget, like the arm without refine.
+        self.session = None
+        self.deadline = time.time() + self.settings.task_timeout_s
+        return refined, None
 
     # -- steps ---------------------------------------------------------------------------------
 

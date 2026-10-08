@@ -72,6 +72,11 @@ class NightShiftReport:
                          f"{result.get('test_result', '?')}{sandbox}")
         lines.append(f"- Attempts: {result.get('attempts', task.get('attempts', 0))}, "
                      f"nudges: {result.get('nudges', 0)}, wall time: {cls._minutes(result.get('wall_s'))}")
+        refine = result.get("refine")
+        if isinstance(refine, dict):
+            edited = "; it changed the worktree, which was put back" if refine.get("study_edited") else ""
+            lines.append(f"- Refine: studied first for {cls._minutes(refine.get('study_s'))}, "
+                         f"a {refine.get('refined_chars', 0)}-character description{edited}")
         if task.get("status") in LAST_MESSAGE_STATUSES and result.get("last_message"):
             message = result["last_message"].strip().replace("\n", " ")
             lines.append(f"- Last message: {message[:400]}")

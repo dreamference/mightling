@@ -140,7 +140,7 @@ class SweBenchRunner:
                        settings: "swe_bench_settings.SweBenchSettings", served: tuple,
                        runtime_hash: str, mightling_bin: str, parallel: int,
                        code_index: str = "off", prompt: Optional[str] = None,
-                       mask: str = "off", strip_names: bool = False) -> Dict[str, Any]:
+                       mask: str = "off", strip_names: bool = False, refine: bool = False) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -197,6 +197,7 @@ class SweBenchRunner:
             "masking": mask,
             "issue_text": "names stripped" if strip_names else "verbatim",
             **({"stripped_issues": stripped} if strip_names else {}),
+            "refine": refine,
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
             "task_memory": settings.task_memory,
@@ -258,6 +259,7 @@ class SweBenchRunner:
             ignore_sessions: bool = False, keep_images: bool = True, require_smoke: bool = True,
             code_index: str = "off", prompt: Optional[str] = None, mask: str = "off",
             strip_names: bool = False,
+            refine: bool = False,
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
@@ -284,6 +286,10 @@ class SweBenchRunner:
                 §4.1), `off` does not. A new run only, like `code_index`.
             strip_names: Take the names the gold patch touches out of each issue's text
                 (`SweBenchNameStripper`). A new run only, like `code_index`.
+            refine: Run each instance in two steps: a session that studies the issue and writes
+                a refined description without changing the repository, then a fresh session
+                that fixes it with the issue and the description. A new run only, like
+                `code_index`.
             settings: Benchmark settings; defaults to the config file's.
 
         Returns:
@@ -354,7 +360,7 @@ class SweBenchRunner:
                 excluded = {i: problem for i, problem in problems.items() if problem}
                 manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
                                               served, runtime_hash, mightling_bin, parallel, code_index,
-                                              prompt, mask, strip_names)
+                                              prompt, mask, strip_names, refine)
                 store.write_manifest(manifest)
             elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                 print(f"❌ Run {store.name} was started with another ling build or model "
@@ -376,7 +382,10 @@ class SweBenchRunner:
                          "DREAMFERENCE_MIGHTLING_AIRGAPPED": "off",
                          "DREAMFERENCE_MIGHTLING_PROMPT": run_prompt,
                          # A run made before masking existed has no key: it ran unmasked.
-                         "DREAMFERENCE_MIGHTLING_MASK": str(manifest.get("masking") or "off")}
+                         "DREAMFERENCE_MIGHTLING_MASK": str(manifest.get("masking") or "off"),
+                         # The runner orchestrates `--refine` itself; the launcher's own refine mode
+                         # would turn each step into two sessions, whatever the setting says.
+                         "DREAMFERENCE_MIGHTLING_REFINE": "off"}
             # A custom prompt reaches the container's CODEX_HOME read-only: the agent cannot edit
             # the text a later session of the same instance would start from.
             custom_prompt = cls.prompt_file(run_prompt)
@@ -560,7 +569,8 @@ class SweBenchRunner:
                             manifest["model_name_or_path"], settings, SweBenchRuntime.directory(),
                             lane.get("model_url") or model_url, time.time() + settings.task_timeout_s, extra_env,
                             (indexes or {}).get(instance_id), extra_mounts,
-                            issue=(manifest.get("stripped_issues") or {}).get(instance_id))
+                            issue=(manifest.get("stripped_issues") or {}).get(instance_id),
+                            refine=bool(manifest.get("refine", False)))
                         run.lane_host = lane["host"]
                         if lane.get("node"):
                             run.notes.append(f"model server: {lane['name']} (a replica of this machine's model)")

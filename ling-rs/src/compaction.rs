@@ -41,18 +41,50 @@ pub const LIMIT_KEY: &str = "model_auto_compact_token_limit";
 /// (specs/DREAMFERENCE_MIGHTLING_COMPACTION.md §11.2) found it halved compactions and commands.
 pub const LEDGER_DEFAULT: bool = true;
 
-/// A `SessionStart` hook the launcher registers in `config.toml`: `<this binary> <subcommand>`,
-/// under `matcher`, waited for `timeout` seconds. The trust hash covers all three.
+/// A hook the launcher registers in `config.toml`: `<this binary> <subcommand>` for `event`,
+/// under `matcher`, waited for `timeout` seconds. The trust hash covers every field. The ledger
+/// and the notice are `SessionStart` hooks; refine mode's is a `UserPromptSubmit` one (refine.rs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionHook {
     /// The command's last word, which is also how the launcher recognises its own group.
     pub subcommand: &'static str,
+    /// Empty for an event Codex matches nothing against (`UserPromptSubmit`): no `matcher` key.
     pub matcher: &'static str,
     pub timeout: i64,
+    /// The event's table under `[hooks]`: `SessionStart`, `UserPromptSubmit`.
+    pub event: &'static str,
+    /// `statusMessage`, shown while the hook runs; empty for none.
+    pub status_message: &'static str,
+    /// `additionalContextLimit`, the tokens of context above which Codex moves it to a file; `0`
+    /// never does. `None` leaves Codex's default (2,500).
+    pub context_limit: Option<i64>,
 }
 
+impl SessionHook {
+    /// A `SessionStart` hook with no status message and Codex's context limit.
+    pub const fn session_start(subcommand: &'static str, matcher: &'static str, timeout: i64) -> SessionHook {
+        SessionHook { subcommand, matcher, timeout, event: "SessionStart", status_message: "", context_limit: None }
+    }
+
+    /// The event's name in Codex's trust keys and hashes: `session_start`, `user_prompt_submit`.
+    pub fn event_label(&self) -> String {
+        let mut label = String::new();
+        for (index, c) in self.event.chars().enumerate() {
+            if c.is_ascii_uppercase() && index > 0 {
+                label.push('_');
+            }
+            label.push(c.to_ascii_lowercase());
+        }
+        label
+    }
+}
+
+/// Codex's own `additionalContextLimit` when none is given; a limit equal to it is left out of
+/// the trust hash, as Codex leaves it out.
+const DEFAULT_CONTEXT_LIMIT: i64 = 2_500;
+
 /// The ledger (ledger.rs), after each compaction. It reads one file and runs `git status`.
-pub const LEDGER_HOOK: SessionHook = SessionHook { subcommand: "ledger", matcher: "compact", timeout: 10 };
+pub const LEDGER_HOOK: SessionHook = SessionHook::session_start("ledger", "compact", 10);
 
 /// Registers the ledger hook and puts the pool-derived limit on the command line. Nothing here
 /// may stop a session from starting, so every failure leaves things as they were.
@@ -197,18 +229,28 @@ pub fn hook_hash(command: &str) -> String {
     hook_hash_for(command, &LEDGER_HOOK)
 }
 
-/// [`hook_hash`] for any of the launcher's hooks: the matcher and timeout are part of the hash.
+/// [`hook_hash`] for any of the launcher's hooks: the event, matcher, timeout, status message and
+/// context limit are part of the hash. Fields Codex leaves unset (`None`) are absent from its
+/// identity, which it serialises as TOML; so are they here.
 pub fn hook_hash_for(command: &str, hook: &SessionHook) -> String {
     // Keys in sorted order, which is what the canonical form is whatever the map's own order.
     let mut handler = serde_json::Map::new();
+    if let Some(limit) = hook.context_limit.filter(|limit| *limit != DEFAULT_CONTEXT_LIMIT) {
+        handler.insert("additionalContextLimit".to_string(), json!(limit));
+    }
     handler.insert("async".to_string(), json!(false));
     handler.insert("command".to_string(), json!(command));
+    if !hook.status_message.is_empty() {
+        handler.insert("statusMessage".to_string(), json!(hook.status_message));
+    }
     handler.insert("timeout".to_string(), json!(hook.timeout));
     handler.insert("type".to_string(), json!("command"));
     let mut identity = serde_json::Map::new();
-    identity.insert("event_name".to_string(), json!("session_start"));
+    identity.insert("event_name".to_string(), json!(hook.event_label()));
     identity.insert("hooks".to_string(), json!([handler]));
-    identity.insert("matcher".to_string(), json!(hook.matcher));
+    if !hook.matcher.is_empty() {
+        identity.insert("matcher".to_string(), json!(hook.matcher));
+    }
     let serialized = serde_json::to_vec(&identity).unwrap_or_default();
     let hex: String = Sha256::digest(serialized).iter().map(|byte| format!("{byte:02x}")).collect();
     format!("sha256:{hex}")
@@ -240,10 +282,10 @@ pub fn with_session_hook(existing: &str, config_path: &Path, command: &str, hook
     let hooks = doc["hooks"].or_insert(Item::Table(Table::new()));
     let Some(hooks) = hooks.as_table_mut() else { return Ok(existing.to_string()) };
     hooks.set_implicit(true);
-    if !hooks.get("SessionStart").is_none_or(Item::is_array_of_tables) {
+    if !hooks.get(hook.event).is_none_or(Item::is_array_of_tables) {
         return Ok(existing.to_string());
     }
-    let groups = hooks["SessionStart"].or_insert(Item::ArrayOfTables(ArrayOfTables::new()));
+    let groups = hooks[hook.event].or_insert(Item::ArrayOfTables(ArrayOfTables::new()));
     let Some(groups) = groups.as_array_of_tables_mut() else { return Ok(existing.to_string()) };
 
     // Ours is the group whose only handler runs `<something> <subcommand>[ <argument>]` under the
@@ -253,7 +295,7 @@ pub fn with_session_hook(existing: &str, config_path: &Path, command: &str, hook
         words.first() == Some(&hook.subcommand) || words.get(1) == Some(&hook.subcommand)
     };
     let is_ours = |group: &Table| {
-        group.get("matcher").and_then(Item::as_str) == Some(hook.matcher)
+        group.get("matcher").and_then(Item::as_str).unwrap_or_default() == hook.matcher
             && group
                 .get("hooks")
                 .and_then(Item::as_array_of_tables)
@@ -290,6 +332,7 @@ pub fn with_session_hook(existing: &str, config_path: &Path, command: &str, hook
             {
                 handler.insert("command", value(command));
                 handler.insert("timeout", value(hook.timeout));
+                set_optional_fields(handler, hook);
             }
             Some(index)
         }
@@ -302,10 +345,13 @@ pub fn with_session_hook(existing: &str, config_path: &Path, command: &str, hook
             handler.insert("type", value("command"));
             handler.insert("command", value(command));
             handler.insert("timeout", value(hook.timeout));
+            set_optional_fields(&mut handler, hook);
             let mut handlers = ArrayOfTables::new();
             handlers.push(handler);
             let mut group = Table::new();
-            group.insert("matcher", value(hook.matcher));
+            if !hook.matcher.is_empty() {
+                group.insert("matcher", value(hook.matcher));
+            }
             group.insert("hooks", Item::ArrayOfTables(handlers));
             groups.push(group);
             Some(groups.len() - 1)
@@ -313,12 +359,12 @@ pub fn with_session_hook(existing: &str, config_path: &Path, command: &str, hook
         (None, false) => None,
     };
     if groups.is_empty() {
-        hooks.remove("SessionStart");
+        hooks.remove(hook.event);
     }
 
     // The trust entries that are ours carry the hash of our command, the one in the file until
     // now or the one written now. They go, and the one for the group's position is written.
-    let prefix = format!("{}:session_start:", config_path.display());
+    let prefix = format!("{}:{}:", config_path.display(), hook.event_label());
     let ours: Vec<String> = old_command.iter().map(|old| hook_hash_for(old, hook)).chain([hook_hash_for(command, hook)]).collect();
     if let Some(state) = hooks.get_mut("state").and_then(Item::as_table_mut) {
         let stale: Vec<String> = state
@@ -351,6 +397,23 @@ pub fn with_session_hook(existing: &str, config_path: &Path, command: &str, hook
         doc.remove("hooks");
     }
     Ok(doc.to_string())
+}
+
+/// Writes or removes a handler's `statusMessage` and `additionalContextLimit` to match `hook`.
+fn set_optional_fields(handler: &mut Table, hook: &SessionHook) {
+    if hook.status_message.is_empty() {
+        handler.remove("statusMessage");
+    } else {
+        handler.insert("statusMessage", value(hook.status_message));
+    }
+    match hook.context_limit {
+        Some(limit) => {
+            handler.insert("additionalContextLimit", value(limit));
+        }
+        None => {
+            handler.remove("additionalContextLimit");
+        }
+    }
 }
 
 #[cfg(test)]
