@@ -724,6 +724,13 @@ names the script cannot know. Every name below is final; there are no aliases fo
    back in `eval/manifest.json`, `questions.*`, `collect.py`, `make_ocr_fixtures.py` and the README,
    the docs egress fixture keeps its puffins, and `scripts/rename_mightling.py` now leaves
    `ling-docs-rs/eval/` alone.
+8. **§12 acceptance re-run on the ported build** (2026-10-08, same text and PDF part of the set,
+   a throwaway `HOME`, the model server and a 100-task SWE-bench run live): 96 documents indexed,
+   none failed, 4,129 chunks, as in §16.5; recall@10 **1.000** merged / 0.946 per chunk, recall@5
+   0.946 / 0.929, MRR 0.832 / 0.732, identical to §16.5. Query p50 / p95 38 / 45 ms merged (busier
+   machine than §16.5's 15 / 19 ms; the 300 ms gate holds). Whole index 9 min 13 s. The scopes
+   landed in `…/mightling.slice/mightling-index.slice/`. The 50k-chunk latency and the egress
+   scenario were not re-run.
 
 ## 17. Shipping in 1.6.0
 
