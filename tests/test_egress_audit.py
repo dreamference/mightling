@@ -225,6 +225,59 @@ def test_without_a_reply_the_audit_says_the_trace_failed(tmp_path, monkeypatch, 
     assert "Egress audit: trace failed" in out and "ling-admin server start" in out
 
 
+def test_the_web_audit_traces_the_server_while_an_untraced_client_asks_it(tmp_path, monkeypatch, capsys):
+    # A stand-in for strace that plays `ling web serve`: it records how it was called, writes the
+    # server file the audit waits for, plays back the recorded trace, and serves until stopped.
+    calls = tmp_path / "calls.json"
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{os.sys.executable}
+import json, os, shutil, signal, sys, time
+args = sys.argv[1:]
+json.dump({{"args": args, "HOME": os.environ["HOME"], "XDG_RUNTIME_DIR": os.environ["XDG_RUNTIME_DIR"],
+           "CODEX_HOME": os.environ["CODEX_HOME"], "host": os.environ.get("DREAMFERENCE_VLLM_HOST")}},
+          open({str(calls)!r}, "w"))
+shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
+web = os.path.join(os.environ["CODEX_HOME"], "web")
+os.makedirs(web, exist_ok=True)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+open(os.path.join(web, "server.json"), "w").write("{{}}")
+time.sleep(60)
+""")
+    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
+    # The client, `ling web ask`, is the stand-in `ling` itself.
+    asked = tmp_path / "asked.json"
+    ling = tmp_path / "ling"
+    ling.write_text(f"""#!{os.sys.executable}
+import json, sys
+json.dump(sys.argv[1:], open({str(asked)!r}, "w"))
+print("pong")
+""")
+    ling.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    code = EgressAudit.run(mightling_bin=str(ling), vllm_host="http://localhost:8000", web=True)
+    out = capsys.readouterr().out
+    assert code == 0 and "✅ Egress audit: pass" in out and "`ling web` server" in out
+    call = json.loads(calls.read_text())
+    port = call["args"][-1]
+    assert call["args"][8:] == [str(ling), "web", "serve", "--port", port]
+    assert json.loads(asked.read_text()) == ["web", "ask", "--port", port, "Reply with exactly: pong"]
+    # The server's HOME and runtime folder are scratch: no advertised node, no user's app-server.
+    for key in ("HOME", "XDG_RUNTIME_DIR", "CODEX_HOME"):
+        assert os.path.basename(os.path.dirname(call[key])).startswith("mightling-audit-") and not os.path.exists(call[key])
+    assert call["host"] == "http://localhost:8000"
+
+
+def test_a_web_server_that_never_listens_is_not_a_pass(tmp_path, monkeypatch, capsys):
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text("#!/bin/sh\nexit 1\n")
+    strace.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", web=True) == 2
+    assert "trace failed" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("missing", ["strace", "ling"])
 def test_missing_tools_are_named(missing, tmp_path, monkeypatch, capsys):
     if missing == "strace":

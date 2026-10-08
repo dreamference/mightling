@@ -35,6 +35,8 @@ ling-masking = { path = "masking" }
 ling-node-locator = { path = "node-locator" }
 # Skills from other agents: the on-disk half, testable without the Codex workspace (src/skills.rs).
 ling-skills = { path = "skills" }
+# `ling web`: the web server, a crate of its own so its tests run without the Codex workspace (src/web.rs).
+ling-web-server = { path = "web" }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 semver = { workspace = true }

@@ -26,7 +26,7 @@ NIGHT_RUN_ENV: Final[str] = "MIGHTLING_NIGHT_RUN"
 # prompt, `resume`, `fork`) is the TUI.
 NON_INTERACTIVE: Final[frozenset] = frozenset({
     "exec", "e", "app-server", "mcp-server", "mcp", "sandbox", "apply", "a", "completion",
-    "debug", "features", "doctor", "night", "node", "airgapped", "skill", "prompt", "update", "app", "help", "review",
+    "debug", "features", "doctor", "night", "node", "airgapped", "skill", "prompt", "update", "app", "web", "help", "review",
     "--version", "-V",
     "--help", "-h",
 })

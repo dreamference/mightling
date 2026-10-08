@@ -1,0 +1,416 @@
+//! Who may use `ling web` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.3): a credential on every request,
+//! loopback included, because at `/airgapped off` a command the agent runs can reach loopback too.
+//!
+//! - **This machine:** `ling web open` writes a one-time login code into the state folder and opens
+//!   the browser on `/login?code=…`; the server trades it for a session cookie and deletes it. The
+//!   owner token (`token`, 0600) works as `Authorization: Bearer …` on `/healthz` alone, for
+//!   `ling web status`.
+//! - **What a sandboxed command can read is no credential.** Codex's sandbox limits writes, not
+//!   reads, so a command the agent runs can read everything here. The token therefore opens
+//!   nothing but the health check, pending codes are kept under their SHA-256 (a listing shows no
+//!   code), and devices are kept as hashes. Signing in needs a code, and writing one needs the
+//!   user's own shell: the sandbox cannot write this folder.
+//! - **Another device:** `ling web pair` writes an 8-digit code valid for ten minutes, for one
+//!   device. The device enters it on `/pair` and gets a long-lived device cookie; only its hash is
+//!   kept, in `devices.json`. `ling web revoke <device>` ends it.
+//! - **Every request** carries one of those. The `Host` header must be an address this server
+//!   serves (DNS rebinding), and a WebSocket upgrade or a POST must also carry an `Origin` that is
+//!   one of the server's own.
+//!
+//! Everything here is plain files and functions, so it is tested without a server.
+
+use std::collections::BTreeSet;
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+
+use rand::Rng;
+use serde_json::Value;
+use serde_json::json;
+use sha2::Digest;
+use sha2::Sha256;
+
+/// How long a pairing code is good for.
+pub const PAIRING_LIFETIME: Duration = Duration::from_secs(10 * 60);
+/// How long a one-time login code from `ling web open` is good for.
+pub const LOGIN_LIFETIME: Duration = Duration::from_secs(2 * 60);
+/// Wrong pairing codes tolerated before every pending code is withdrawn.
+pub const PAIRING_ATTEMPTS: u32 = 10;
+/// The cookie a browser on this machine holds after `ling web open`.
+pub const SESSION_COOKIE: &str = "mightling_session";
+/// The cookie a paired device holds.
+pub const DEVICE_COOKIE: &str = "mightling_device";
+
+/// The state folder: `<home>/web`, private to the user.
+pub fn state_dir(codex_home: &Path) -> PathBuf {
+    codex_home.join("web")
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Random bytes as lowercase hex.
+pub fn random_hex(bytes: usize) -> String {
+    let mut buffer = vec![0u8; bytes];
+    rand::rng().fill(buffer.as_mut_slice());
+    buffer.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn sha256_hex(text: &str) -> String {
+    Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Compares two secrets in time that does not depend on where they differ.
+pub fn same_secret(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Creates a folder private to the user (0700), parents included.
+pub fn private_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+/// Writes a file readable only by the user, replacing it whole.
+pub fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        private_dir(parent)?;
+    }
+    let staging = path.with_extension(format!("tmp-{}", std::process::id()));
+    {
+        #[cfg(unix)]
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        use std::io::Write;
+        let mut file = options.open(&staging)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&staging, path)
+}
+
+/// The owner token, created on first use.
+pub fn owner_token(state: &Path) -> std::io::Result<String> {
+    let path = state.join("token");
+    match std::fs::read_to_string(&path) {
+        Ok(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        _ => {
+            let token = random_hex(32);
+            write_private(&path, &token)?;
+            Ok(token)
+        }
+    }
+}
+
+/// A code waiting in `logins/` or `pairing/`, kept under its hash, with when it stops being good.
+fn issue_code(dir: &Path, code: &str, lifetime: Duration) -> std::io::Result<()> {
+    write_private(&dir.join(sha256_hex(code)), &json!({ "expires": now_secs() + lifetime.as_secs() }).to_string())
+}
+
+/// Takes a code: true when it existed and had not expired. It is deleted either way (one use).
+fn take_code(dir: &Path, code: &str) -> bool {
+    if code.is_empty() || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return false;
+    }
+    let path = dir.join(sha256_hex(code));
+    let Ok(text) = std::fs::read_to_string(&path) else { return false };
+    let _ = std::fs::remove_file(&path);
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|value| value.get("expires").and_then(Value::as_u64))
+        .is_some_and(|expires| now_secs() <= expires)
+}
+
+/// `ling web open`: a fresh one-time login code.
+pub fn issue_login_code(state: &Path) -> std::io::Result<String> {
+    let code = random_hex(16);
+    issue_code(&state.join("logins"), &code, LOGIN_LIFETIME)?;
+    Ok(code)
+}
+
+pub fn take_login_code(state: &Path, code: &str) -> bool {
+    take_code(&state.join("logins"), code)
+}
+
+/// `ling web pair`: a fresh 8-digit pairing code.
+pub fn issue_pairing_code(state: &Path) -> std::io::Result<String> {
+    let code = format!("{:08}", rand::rng().random_range(0..100_000_000u32));
+    issue_code(&state.join("pairing"), &code, PAIRING_LIFETIME)?;
+    Ok(code)
+}
+
+pub fn take_pairing_code(state: &Path, code: &str) -> bool {
+    code.len() == 8 && code.chars().all(|c| c.is_ascii_digit()) && take_code(&state.join("pairing"), code)
+}
+
+/// Withdraws every pending pairing code: what too many wrong guesses lead to.
+pub fn withdraw_pairing_codes(state: &Path) {
+    let _ = std::fs::remove_dir_all(state.join("pairing"));
+}
+
+/// One paired device, as `devices.json` keeps it: never the token itself.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub token_sha256: String,
+    pub created: u64,
+    pub last_used: u64,
+}
+
+fn devices_path(state: &Path) -> PathBuf {
+    state.join("devices.json")
+}
+
+pub fn load_devices(state: &Path) -> Vec<Device> {
+    let Ok(text) = std::fs::read_to_string(devices_path(state)) else { return Vec::new() };
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&text) else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|item| {
+            Some(Device {
+                id: item.get("id")?.as_str()?.to_string(),
+                name: item.get("name")?.as_str()?.to_string(),
+                token_sha256: item.get("token_sha256")?.as_str()?.to_string(),
+                created: item.get("created")?.as_u64()?,
+                last_used: item.get("last_used")?.as_u64()?,
+            })
+        })
+        .collect()
+}
+
+fn save_devices(state: &Path, devices: &[Device]) -> std::io::Result<()> {
+    let items: Vec<Value> = devices
+        .iter()
+        .map(|d| json!({"id": d.id, "name": d.name, "token_sha256": d.token_sha256, "created": d.created, "last_used": d.last_used}))
+        .collect();
+    write_private(&devices_path(state), &serde_json::to_string_pretty(&items).unwrap_or_default())
+}
+
+/// A name a person typed, made safe to keep and show: printable, at most 64 characters.
+pub fn clean_device_name(name: &str) -> String {
+    let cleaned: String = name.chars().filter(|c| !c.is_control()).take(64).collect();
+    let cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() { "unnamed device".to_string() } else { cleaned }
+}
+
+/// Pairs a device: returns its id and the token its cookie carries.
+pub fn add_device(state: &Path, name: &str) -> std::io::Result<(String, String)> {
+    let token = random_hex(32);
+    let id = random_hex(4);
+    let mut devices = load_devices(state);
+    devices.push(Device {
+        id: id.clone(),
+        name: clean_device_name(name),
+        token_sha256: sha256_hex(&token),
+        created: now_secs(),
+        last_used: now_secs(),
+    });
+    save_devices(state, &devices)?;
+    Ok((id, token))
+}
+
+/// The device a cookie's token belongs to, its last use brought up to date (at most once a minute).
+pub fn device_for_token(state: &Path, token: &str) -> Option<Device> {
+    let hash = sha256_hex(token);
+    let mut devices = load_devices(state);
+    let index = devices.iter().position(|d| same_secret(&d.token_sha256, &hash))?;
+    let now = now_secs();
+    if now.saturating_sub(devices[index].last_used) >= 60 {
+        devices[index].last_used = now;
+        let _ = save_devices(state, &devices);
+    }
+    Some(devices[index].clone())
+}
+
+/// `ling web revoke <device>`: by id or by exact name. Returns the devices removed.
+pub fn revoke_device(state: &Path, which: &str) -> std::io::Result<Vec<Device>> {
+    let devices = load_devices(state);
+    let (gone, kept): (Vec<Device>, Vec<Device>) = devices.into_iter().partition(|d| d.id == which || d.name == which);
+    if !gone.is_empty() {
+        save_devices(state, &kept)?;
+    }
+    Ok(gone)
+}
+
+/// The `host:port` values a request may name in `Host`, and the origins it may come from.
+#[derive(Clone, Debug)]
+pub struct Addresses {
+    pub hosts: BTreeSet<String>,
+}
+
+impl Addresses {
+    /// Loopback names always; on the LAN, also every given address and name.
+    pub fn new(port: u16, lan_names: &[String]) -> Addresses {
+        let mut hosts: BTreeSet<String> =
+            ["127.0.0.1", "localhost", "[::1]"].iter().map(|name| format!("{name}:{port}")).collect();
+        for name in lan_names {
+            let name = if name.contains(':') && !name.starts_with('[') { format!("[{name}]") } else { name.clone() };
+            hosts.insert(format!("{}:{port}", name.to_ascii_lowercase()));
+        }
+        Addresses { hosts }
+    }
+
+    /// Whether a `Host` header names this server.
+    pub fn host_ok(&self, host: Option<&str>) -> bool {
+        host.is_some_and(|host| self.hosts.contains(&host.trim().to_ascii_lowercase()))
+    }
+
+    /// Whether an `Origin` header is one of this server's own.
+    pub fn origin_ok(&self, origin: Option<&str>) -> bool {
+        let Some(origin) = origin else { return false };
+        let origin = origin.trim().to_ascii_lowercase();
+        origin.strip_prefix("http://").or_else(|| origin.strip_prefix("https://")).is_some_and(|host| self.hosts.contains(host))
+    }
+}
+
+/// The value of one cookie in a `Cookie` header.
+pub fn cookie<'a>(header: Option<&'a str>, name: &str) -> Option<&'a str> {
+    header?.split(';').map(str::trim).find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key.trim() == name).then_some(value.trim())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ling-web-auth-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[cfg(unix)]
+    fn mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn the_owner_token_is_private_and_stable() {
+        let state = scratch("token");
+        let first = owner_token(&state).unwrap();
+        assert_eq!(first.len(), 64);
+        assert_eq!(owner_token(&state).unwrap(), first);
+        #[cfg(unix)]
+        {
+            assert_eq!(mode(&state.join("token")), 0o600);
+            assert_eq!(mode(&state), 0o700);
+        }
+    }
+
+    #[test]
+    fn a_login_code_works_once() {
+        let state = scratch("login");
+        let code = issue_login_code(&state).unwrap();
+        assert!(take_login_code(&state, &code));
+        assert!(!take_login_code(&state, &code));
+        assert!(!take_login_code(&state, "../token"));
+        assert!(!take_login_code(&state, ""));
+    }
+
+    #[test]
+    fn an_expired_code_is_refused_and_deleted() {
+        let state = scratch("expired");
+        let dir = state.join("pairing");
+        let file = dir.join(sha256_hex("12345678"));
+        write_private(&file, &json!({"expires": now_secs() - 1}).to_string()).unwrap();
+        assert!(!take_pairing_code(&state, "12345678"));
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn a_listing_of_the_pending_codes_shows_no_code() {
+        // A sandboxed command can read this folder; it must not find a code it could use.
+        let state = scratch("listing");
+        let login = issue_login_code(&state).unwrap();
+        let pairing = issue_pairing_code(&state).unwrap();
+        for dir in ["logins", "pairing"] {
+            for entry in std::fs::read_dir(state.join(dir)).unwrap() {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                assert!(name != login && name != pairing && !name.contains(&pairing), "{name}");
+            }
+        }
+        assert!(take_login_code(&state, &login) && take_pairing_code(&state, &pairing));
+    }
+
+    #[test]
+    fn pairing_codes_are_eight_digits_and_one_use() {
+        let state = scratch("pair");
+        let code = issue_pairing_code(&state).unwrap();
+        assert_eq!(code.len(), 8);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+        assert!(!take_pairing_code(&state, "abcdefgh"));
+        assert!(take_pairing_code(&state, &code));
+        assert!(!take_pairing_code(&state, &code));
+        let other = issue_pairing_code(&state).unwrap();
+        withdraw_pairing_codes(&state);
+        assert!(!take_pairing_code(&state, &other));
+    }
+
+    #[test]
+    fn devices_keep_only_a_hash_and_can_be_revoked() {
+        let state = scratch("devices");
+        let (id, token) = add_device(&state, "Owner's phone\u{7}").unwrap();
+        let text = std::fs::read_to_string(state.join("devices.json")).unwrap();
+        assert!(!text.contains(&token), "the token itself is never stored");
+        let device = device_for_token(&state, &token).unwrap();
+        assert_eq!((device.id.as_str(), device.name.as_str()), (id.as_str(), "Owner's phone"));
+        assert!(device_for_token(&state, "wrong").is_none());
+        assert_eq!(revoke_device(&state, &id).unwrap().len(), 1);
+        assert!(device_for_token(&state, &token).is_none());
+        #[cfg(unix)]
+        assert_eq!(mode(&state.join("devices.json")), 0o600);
+    }
+
+    #[test]
+    fn hosts_and_origins_must_be_the_servers_own() {
+        let local = Addresses::new(3100, &[]);
+        assert!(local.host_ok(Some("127.0.0.1:3100")));
+        assert!(local.host_ok(Some("LOCALHOST:3100")));
+        assert!(!local.host_ok(Some("evil.example:3100")), "DNS rebinding");
+        assert!(!local.host_ok(Some("127.0.0.1:3000")));
+        assert!(!local.host_ok(None));
+        assert!(local.origin_ok(Some("http://localhost:3100")));
+        assert!(!local.origin_ok(Some("http://evil.example")));
+        assert!(!local.origin_ok(Some("null")));
+        assert!(!local.origin_ok(None));
+        let lan = Addresses::new(3100, &["192.168.50.105".to_string(), "gx10-1a2b.local".to_string()]);
+        assert!(lan.host_ok(Some("192.168.50.105:3100")));
+        assert!(lan.origin_ok(Some("http://gx10-1a2b.local:3100")));
+        assert!(!local.host_ok(Some("192.168.50.105:3100")), "loopback-only refuses the LAN address");
+    }
+
+    #[test]
+    fn cookies_are_read_by_name() {
+        let header = Some("a=1; mightling_session=abc; mightling_device=def");
+        assert_eq!(cookie(header, SESSION_COOKIE), Some("abc"));
+        assert_eq!(cookie(header, DEVICE_COOKIE), Some("def"));
+        assert_eq!(cookie(header, "missing"), None);
+        assert_eq!(cookie(None, SESSION_COOKIE), None);
+    }
+
+    #[test]
+    fn secrets_compare_whole() {
+        assert!(same_secret("abc", "abc"));
+        assert!(!same_secret("abc", "abd"));
+        assert!(!same_secret("abc", "abcd"));
+    }
+}

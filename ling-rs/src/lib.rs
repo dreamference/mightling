@@ -51,6 +51,7 @@ pub mod skills;
 
 pub mod update;
 pub mod usage;
+pub mod web;
 
 /// Where Dreamference serves its model unless configured otherwise.
 pub const DEFAULT_VLLM_HOST: &str = "http://localhost:8000";
@@ -79,7 +80,7 @@ pub const UPSTREAM_TESTS_ENV: &str = "MIGHTLING_UPSTREAM_TESTS";
 /// answers at once instead of waiting for a model server that may not be running.
 const COMMANDS_WITHOUT_MODEL: &[&str] = &[
     "help", "completion", "apply", "a", "features", "doctor", "mcp", "plugin", "archive",
-    "unarchive", "delete", "sandbox", "update", "node", "skill",
+    "unarchive", "delete", "sandbox", "update", "node", "skill", "web",
 ];
 
 /// Codex subcommands Mightling does not offer, each with the reason it gives. They are refused here,
@@ -257,6 +258,13 @@ pub async fn prepare_args(command: &Command, args: Vec<OsString>) -> anyhow::Res
         && user_args[index] == "prompt"
     {
         std::process::exit(prompt::run_cli(&user_args[index + 1..]).await);
+    }
+    // `web` is the Mightling web server: the UI in a browser, relayed to the user's app-server
+    // (web.rs; specs/DREAMFERENCE_MIGHTLING_ASK.md §4).
+    if let Some(index) = subcommand
+        && user_args[index] == "web"
+    {
+        std::process::exit(web::run_cli(&user_args[index + 1..]).await);
     }
     if !needs_model(&user_args, subcommand) || std::env::var_os(UPSTREAM_TESTS_ENV).is_some() {
         return Ok(args);

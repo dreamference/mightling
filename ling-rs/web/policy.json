@@ -1,0 +1,87 @@
+{
+  "comment": "What the Mightling UI may say to `ling app-server`, enforced by `ling web` (ling-rs/web/src/policy.rs) and by the desktop app's main process. Both run every case in ling-rs/web/vectors/, so the two cannot drift (specs/DREAMFERENCE_MIGHTLING_ASK.md \u00a72.3). It lives in this crate, not in desktop/bridge/, because the launcher's build copies ling-rs/ into the Codex export and nothing outside it.",
+  "allowedRequests": [
+    "initialize",
+    "account/read",
+    "config/read",
+    "config/value/write",
+    "config/batchWrite",
+    "configRequirements/read",
+    "model/list",
+    "permissionProfile/list",
+    "collaborationMode/list",
+    "project/list",
+    "project/read",
+    "project/create",
+    "project/update",
+    "thread/start",
+    "thread/resume",
+    "thread/fork",
+    "thread/list",
+    "thread/read",
+    "thread/loaded/list",
+    "thread/turns/list",
+    "thread/items/list",
+    "thread/search",
+    "thread/name/set",
+    "thread/metadata/update",
+    "thread/archive",
+    "thread/unarchive",
+    "thread/unsubscribe",
+    "thread/compact/start",
+    "thread/revert",
+    "thread/queue/add",
+    "thread/queue/list",
+    "thread/queue/update",
+    "thread/queue/delete",
+    "thread/queue/reorder",
+    "thread/queue/start",
+    "turn/start",
+    "turn/steer",
+    "turn/interrupt",
+    "fuzzyFileSearch",
+    "gitDiffToRemote",
+    "skills/list",
+    "mcpServerStatus/list",
+    "app/list"
+  ],
+  "allowedNotifications": [
+    "initialized"
+  ],
+  "threadOpeners": [
+    "thread/start",
+    "thread/resume",
+    "thread/fork"
+  ],
+  "droppedThreadFields": [
+    "baseInstructions",
+    "developerInstructions",
+    "modelProvider",
+    "config",
+    "personality",
+    "dynamicTools",
+    "environments",
+    "selectedCapabilityRoots",
+    "history",
+    "path"
+  ],
+  "promptField": "prompt",
+  "promptOpeners": [
+    "thread/start"
+  ],
+  "namedPrompts": [
+    "default",
+    "ask",
+    "high-swe"
+  ],
+  "scratchPrompts": [
+    "ask"
+  ],
+  "scratchFields": [
+    "cwd",
+    "sandbox",
+    "permissions",
+    "runtimeWorkspaceRoots"
+  ],
+  "scratchSandbox": "workspace-write"
+}

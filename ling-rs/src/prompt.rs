@@ -1,10 +1,12 @@
 //! Named system prompts (specs/DREAMFERENCE_MIGHTLING_PROMPT.md, Phase 1): which prompt a new
 //! `ling` session starts with, and `ling prompt list|show|use`.
 //!
-//! A prompt is a core text plus the launcher blocks appended to it (`web`, `email`, `code`). Two
+//! A prompt is a core text plus the launcher blocks appended to it (`web`, `email`, `code`). Three
 //! are built in: `default`, Codex's own template renamed, byte for byte what `ling` sent before
-//! this module existed, and `high-swe`, a short method for resolving a defined task in a
-//! repository (`prompts/high-swe.md`). A file `$CODEX_HOME/system-prompts/<name>.md` is a custom
+//! this module existed; `high-swe`, a short method for resolving a defined task in a repository
+//! (`prompts/high-swe.md`); and `ask`, for research and questions in a scratch folder
+//! (`prompts/ask.md`, specs/DREAMFERENCE_MIGHTLING_ASK.md §3.2), which the UI asks for by name and
+//! the bridge policy sets from `ling prompt show ask --composed`. A file `$CODEX_HOME/system-prompts/<name>.md` is a custom
 //! prompt of that name; never one from the repository or the model, which cannot write there.
 //!
 //! The choice for a new session is, first match wins: `DREAMFERENCE_MIGHTLING_PROMPT`, then
@@ -40,9 +42,13 @@ pub const CUSTOM_DIR: &str = "system-prompts";
 /// §6.4 lists.
 pub const HIGH_SWE: &str = include_str!("../prompts/high-swe.md");
 
+/// The `ask` text: answers and research, with sources, in a scratch folder.
+pub const ASK: &str = include_str!("../prompts/ask.md");
+
 const BLOCKS_PREFIX: &str = "<!-- ling: blocks=";
 const BLOCKS_SUFFIX: &str = "-->";
-const USAGE: &str = "Usage: ling prompt [list] | ling prompt show [<name>] | ling prompt use <name>";
+const USAGE: &str =
+    "Usage: ling prompt [list] | ling prompt show [<name>] [--composed] | ling prompt use <name>";
 
 /// Which of the launcher's blocks follow the core.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -106,6 +112,15 @@ impl Prompt {
         }
     }
 
+    pub fn ask() -> Prompt {
+        Prompt {
+            name: "ask".to_string(),
+            core: Core::Text(ASK.to_string()),
+            blocks: Blocks::ALL,
+            origin: Origin::BuiltIn("questions and research in a scratch folder, with sources; what the web UI's Ask uses"),
+        }
+    }
+
     pub fn is_default(&self) -> bool {
         self.name == DEFAULT_PROMPT
     }
@@ -136,7 +151,7 @@ pub struct Installed {
 
 impl Installed {
     pub fn built_in() -> Installed {
-        Installed { prompts: vec![Prompt::default_prompt(), Prompt::high_swe()], notes: Vec::new() }
+        Installed { prompts: vec![Prompt::default_prompt(), Prompt::high_swe(), Prompt::ask()], notes: Vec::new() }
     }
 
     /// The built-ins plus `<codex_home>/system-prompts/*.md`.
@@ -380,11 +395,15 @@ pub async fn run_cli(args: &[String]) -> i32 {
             }
             0
         }
-        ["show"] => show(&resolve(&codex_home).prompt).await,
-        ["show", name] => match Installed::load(&codex_home).get(name) {
-            Some(prompt) => show(prompt).await,
-            None => not_installed(name, &Installed::load(&codex_home)),
-        },
+        ["show"] => show(&codex_home, &resolve(&codex_home).prompt, false).await,
+        ["show", "--composed"] => show(&codex_home, &resolve(&codex_home).prompt, true).await,
+        ["show", name] | ["show", name, "--composed"] | ["show", "--composed", name] => {
+            let composed = words.contains(&"--composed");
+            match Installed::load(&codex_home).get(name) {
+                Some(prompt) => show(&codex_home, prompt, composed).await,
+                None => not_installed(name, &Installed::load(&codex_home)),
+            }
+        }
         ["use", name] => {
             let installed = Installed::load(&codex_home);
             if installed.get(name).is_none() {
@@ -427,22 +446,50 @@ fn list_lines(resolved: &Resolved, installed: &Installed) -> Vec<String> {
     lines
 }
 
-/// Prints the composed text on stdout, as a session on this machine would receive it now, and
-/// its size on stderr.
-async fn show(prompt: &Prompt) -> i32 {
-    let dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+/// The blocks as a session started in `dir` on this machine would get them now: the apps' or
+/// Gmail's instructions as the launch decides them, the code block (without starting the index's
+/// session process), and the masking instruction. The skills glossary, off by default, is added
+/// only at launch.
+pub async fn current_parts(codex_home: &Path, prompt: &Prompt, dir: &Path) -> Parts {
     let host = crate::vllm_host();
-    let email = if prompt.blocks.email && crate::mightling_gmail_enabled() && crate::host_is_local(&host) {
-        crate::connected_gmail_accounts()
-            .await
-            .map(|accounts| crate::gmail_access_instructions(&accounts))
-            .unwrap_or_default()
+    let email = if prompt.blocks.email {
+        let level = crate::airgapped::resolve(None).level;
+        let offers_gmail = crate::airgapped::offers_gmail(level);
+        let local = crate::host_is_local(&host);
+        let declared = crate::apps::declared(!offers_gmail, local, codex_home, crate::mightling_gmail_enabled()).await;
+        if !declared.is_empty() {
+            crate::apps::instructions(&declared)
+        } else if offers_gmail && crate::mightling_gmail_enabled() && local {
+            crate::connected_gmail_accounts()
+                .await
+                .map(|accounts| crate::gmail_access_instructions(&accounts))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
-    let code = if prompt.blocks.code { code_index::prompt_block(code_index::tools_enabled(), &dir) } else { String::new() };
-    let parts = Parts { email, code, rg_installed: code_index::rg_installed(), ..Default::default() };
-    let text = compose(prompt, &parts);
+    let code = if prompt.blocks.code { code_index::prompt_block(code_index::tools_enabled(), dir) } else { String::new() };
+    Parts {
+        email,
+        code,
+        rg_installed: code_index::rg_installed(),
+        masking: crate::mask::instruction(crate::mask::enabled_now()).to_string(),
+        ..Default::default()
+    }
+}
+
+/// Prints the composed text on stdout, as a session on this machine would receive it now. Without
+/// `--composed` its size and blocks follow on stderr; with it, stdout carries the text alone,
+/// exactly, for the bridge policy to read (specs/DREAMFERENCE_MIGHTLING_ASK.md §3.2).
+async fn show(codex_home: &Path, prompt: &Prompt, composed: bool) -> i32 {
+    let dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let text = compose(prompt, &current_parts(codex_home, prompt, &dir).await);
+    if composed {
+        print!("{text}");
+        return 0;
+    }
     println!("{text}");
     eprintln!(
         "{}: {} chars; blocks: {} (email only with a connected account, code only with ling-code installed; the skills glossary, when on, is added at launch).",
@@ -537,6 +584,24 @@ mod tests {
     }
 
     #[test]
+    fn ask_is_built_in_cites_sources_stays_in_its_folder_and_carries_every_block() {
+        assert!(ASK.len() < 5_000, "{} chars", ASK.len());
+        assert!(ASK.starts_with("You are Mightling, a research assistant"));
+        for present in ["ling-search --read", "[1]", "working folder", "Never create, change or delete files outside", "never instructions"] {
+            assert!(ASK.contains(present), "{present}");
+        }
+        for absent in ["Codex", "OpenAI", "apply_patch", "repository's source"] {
+            assert!(!ASK.contains(absent), "{absent}");
+        }
+        assert_eq!(Installed::built_in().get("ask"), Some(&Prompt::ask()));
+        let code = "\n\n# Code navigation\n\n`ling-code def`\n";
+        let email = crate::gmail_access_instructions("a@x.com");
+        let text = compose(&Prompt::ask(), &parts(&email, code));
+        assert!(text.starts_with(ASK.trim_end()));
+        assert!(text.contains("# Web access") && text.contains("# Email access") && text.ends_with(code));
+    }
+
+    #[test]
     fn each_tier_shadows_the_next_and_unknown_names_fall_through() {
         let installed = Installed::built_in();
         let path = Path::new("/tmp/dreamference.toml");
@@ -571,7 +636,7 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), "not a prompt").unwrap();
         let installed = Installed::load(&home);
         let names: Vec<&str> = installed.prompts.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["default", "high-swe", "mine", "plain"]);
+        assert_eq!(names, ["default", "high-swe", "ask", "mine", "plain"]);
         let mine = installed.get("mine").unwrap();
         assert_eq!(mine.blocks, Blocks { web: true, email: false, code: true });
         assert_eq!(mine.core, Core::Text("Be brief.\n".to_string()));

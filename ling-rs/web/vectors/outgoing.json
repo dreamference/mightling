@@ -1,0 +1,155 @@
+{
+  "comment": "Conformance cases for policy.json (specs/DREAMFERENCE_MIGHTLING_ASK.md §2.3, §13). Every implementation of the policy runs every case with the same stubs: a named prompt's composed text is the string \"PROMPT:<name>\"; the scratch folders it creates are \"SCRATCH/1\", \"SCRATCH/2\", ... in order of creation, counted across the whole file; and a thread whose id starts with \"ask-\" is an existing Ask thread whose folder is \"ASK/<id>\" (no other thread has one). `pending` lists the ids (as JSON text) of server requests waiting for an answer before the case. `out` is the exact message forwarded to the app-server, compared as JSON values; `pendingAfter` the ids still waiting after it.",
+  "cases": [
+    {
+      "name": "an allowed request passes unchanged, its jsonrpc field removed",
+      "message": {"jsonrpc": "2.0", "id": 1, "method": "thread/list", "params": {"limit": 5}},
+      "accept": true,
+      "out": {"id": 1, "method": "thread/list", "params": {"limit": 5}}
+    },
+    {
+      "name": "a request outside the allow-list is refused",
+      "message": {"id": 2, "method": "feedback/upload", "params": {}},
+      "accept": false
+    },
+    {
+      "name": "account sign-in is refused",
+      "message": {"id": 3, "method": "account/login/start", "params": {"type": "chatgpt"}},
+      "accept": false
+    },
+    {
+      "name": "remote control is refused",
+      "message": {"id": 4, "method": "remoteControl/enable", "params": {}},
+      "accept": false
+    },
+    {
+      "name": "thread/start loses every dropped field",
+      "message": {"id": 5, "method": "thread/start", "params": {"cwd": "/work/repo", "baseInstructions": "evil", "developerInstructions": "evil", "modelProvider": "x", "config": {"a": 1}, "personality": "pirate", "model": "m"}},
+      "accept": true,
+      "out": {"id": 5, "method": "thread/start", "params": {"cwd": "/work/repo", "model": "m"}}
+    },
+    {
+      "name": "thread/resume and thread/fork lose the dropped fields too",
+      "message": {"id": 6, "method": "thread/fork", "params": {"threadId": "t1", "baseInstructions": "evil"}},
+      "accept": true,
+      "out": {"id": 6, "method": "thread/fork", "params": {"threadId": "t1"}}
+    },
+    {
+      "name": "the default prompt by name sets nothing: the launcher's catalog already carries it",
+      "message": {"id": 7, "method": "thread/start", "params": {"cwd": "/work/repo", "prompt": "default"}},
+      "accept": true,
+      "out": {"id": 7, "method": "thread/start", "params": {"cwd": "/work/repo"}}
+    },
+    {
+      "name": "a named prompt is turned into baseInstructions by the policy, never by the UI",
+      "message": {"id": 8, "method": "thread/start", "params": {"cwd": "/work/repo", "prompt": "high-swe", "baseInstructions": "the UI's own text"}},
+      "accept": true,
+      "out": {"id": 8, "method": "thread/start", "params": {"cwd": "/work/repo", "baseInstructions": "PROMPT:high-swe"}}
+    },
+    {
+      "name": "an Ask thread gets its prompt, a fresh scratch folder as cwd and a sandbox rooted there; what the UI said about folders and permissions is ignored",
+      "message": {"id": 9, "method": "thread/start", "params": {"prompt": "ask", "cwd": "/home/user/secrets", "sandbox": "danger-full-access", "model": "m", "permissions": ":danger-full-access", "runtimeWorkspaceRoots": ["/home/user"]}},
+      "accept": true,
+      "out": {"id": 9, "method": "thread/start", "params": {"model": "m", "baseInstructions": "PROMPT:ask", "cwd": "SCRATCH/1", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "each Ask thread gets a folder of its own",
+      "message": {"id": 10, "method": "thread/start", "params": {"prompt": "ask"}},
+      "accept": true,
+      "out": {"id": 10, "method": "thread/start", "params": {"baseInstructions": "PROMPT:ask", "cwd": "SCRATCH/2", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "a prompt name outside namedPrompts is refused",
+      "message": {"id": 11, "method": "thread/start", "params": {"prompt": "my-own"}},
+      "accept": false
+    },
+    {
+      "name": "a prompt that is not a string is refused",
+      "message": {"id": 12, "method": "thread/start", "params": {"prompt": {"text": "x"}}},
+      "accept": false
+    },
+    {
+      "name": "a prompt on a request that is not a thread opener is refused",
+      "message": {"id": 13, "method": "turn/start", "params": {"threadId": "t1", "prompt": "ask", "input": []}},
+      "accept": false
+    },
+    {
+      "name": "fields that load tools, environments, plugins or another history are dropped from every opener",
+      "message": {"id": 20, "method": "thread/start", "params": {"cwd": "/work/repo", "dynamicTools": [{"name": "x"}], "environments": [{"id": "remote"}], "selectedCapabilityRoots": [{"path": "/x"}], "model": "m"}},
+      "accept": true,
+      "out": {"id": 20, "method": "thread/start", "params": {"cwd": "/work/repo", "model": "m"}}
+    },
+    {
+      "name": "thread/resume cannot load a forged history or rollout file",
+      "message": {"id": 21, "method": "thread/resume", "params": {"threadId": "t1", "history": [{"type": "message"}], "path": "/etc/passwd"}},
+      "accept": true,
+      "out": {"id": 21, "method": "thread/resume", "params": {"threadId": "t1"}}
+    },
+    {
+      "name": "a prompt cannot be chosen on resume: a session keeps the prompt it started with",
+      "message": {"id": 22, "method": "thread/resume", "params": {"threadId": "t1", "prompt": "ask"}},
+      "accept": false
+    },
+    {
+      "name": "a resumed Ask thread stays in its folder, whatever the UI asks",
+      "message": {"id": 23, "method": "thread/resume", "params": {"threadId": "ask-7", "cwd": "/home/user", "sandbox": "danger-full-access", "permissions": "x", "runtimeWorkspaceRoots": ["/home/user"]}},
+      "accept": true,
+      "out": {"id": 23, "method": "thread/resume", "params": {"threadId": "ask-7", "cwd": "ASK/ask-7", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "a fork of an Ask thread stays in the Ask thread's folder",
+      "message": {"id": 24, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "/home/user"}},
+      "accept": true,
+      "out": {"id": 24, "method": "thread/fork", "params": {"threadId": "ask-7", "cwd": "ASK/ask-7", "sandbox": "workspace-write"}}
+    },
+    {
+      "name": "any other thread is resumed where the UI says",
+      "message": {"id": 25, "method": "thread/resume", "params": {"threadId": "t1", "cwd": "/work/repo", "sandbox": "read-only"}},
+      "accept": true,
+      "out": {"id": 25, "method": "thread/resume", "params": {"threadId": "t1", "cwd": "/work/repo", "sandbox": "read-only"}}
+    },
+    {
+      "name": "an allowed notification passes",
+      "message": {"method": "initialized"},
+      "accept": true,
+      "out": {"method": "initialized"}
+    },
+    {
+      "name": "any other notification is refused",
+      "message": {"method": "thread/realtime/start", "params": {}},
+      "accept": false
+    },
+    {
+      "name": "an answer to a pending server request passes and is no longer pending",
+      "pending": ["42", "\"abc\""],
+      "message": {"id": 42, "result": {"decision": "approved"}},
+      "accept": true,
+      "out": {"id": 42, "result": {"decision": "approved"}},
+      "pendingAfter": ["\"abc\""]
+    },
+    {
+      "name": "an answer to a request the server never made is refused: the UI cannot invent approvals",
+      "pending": ["42"],
+      "message": {"id": 43, "result": {"decision": "approved"}},
+      "accept": false,
+      "pendingAfter": ["42"]
+    },
+    {
+      "name": "a string id and a number id are different requests",
+      "pending": ["\"42\""],
+      "message": {"id": 42, "result": {}},
+      "accept": false,
+      "pendingAfter": ["\"42\""]
+    },
+    {
+      "name": "something that is not an object is refused",
+      "message": [1, 2, 3],
+      "accept": false
+    },
+    {
+      "name": "an object that is neither a request, a notification nor an answer is refused",
+      "message": {"hello": "world"},
+      "accept": false
+    }
+  ]
+}
