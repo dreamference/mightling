@@ -20,12 +20,12 @@
 3. **The bridge runs as its own system account, `mightling-signal`, not as the user.**
    - **Why:** Codex's sandbox limits writes, not reads, so a command the agent runs can read anything the user can (security review, 2026-10). Signal's identity keys are not something a prompt-injected `cat` may read. With them, an attacker could read every message sent to the bridge and send messages that look like Mightling's.
    - **How:** a separate uid with a 0700 state folder puts them out of the agent's reach. A systemd system unit with `ProtectHome=yes` also keeps the bridge out of the user's files.
-4. **One owner, bound by a code, not by a phone number typed in.** `ling signal setup` shows a one-time code. The first account that sends it from Signal within ten minutes becomes the owner, and its account id (ACI) and identity key are recorded.
+4. **One owner.** Linked (the default), the owner is the account itself (§4.2). With a dedicated number, the owner is bound by a code, never by a phone number typed in: `ling signal setup` shows a one-time code. The first account that sends it from Signal within ten minutes becomes the owner, and its account id (ACI) and identity key are recorded.
    - **Strangers:** messages from anyone else are dropped without a reply, so the number does not reveal that a bot answers it.
    - **A changed identity key:** messages from the owner stop being accepted until the owner re-trusts on the node (§5.3). This is what a SIM swap or a re-registered phone looks like.
-5. **A dedicated number is the recommended mode; linking to the owner's own account is the second.**
-   - **Dedicated (Phase 1):** a second Signal account (prepaid SIM or landline) that the owner talks to like a contact.
-   - **Linked (Phase 2):** the bridge becomes a linked device of the owner's account, and the owner talks to it in **Note to Self**. It costs nothing, but the bridge then receives every message of the owner's account. That is why it waits for Phase 0's measurements and comes with a warning (§4.2).
+5. **Linked to the owner's own account is the mode (the user's decision, 2026-10-08: no second number).**
+   - **Linked (default):** the bridge becomes a linked device of the owner's account, paired by QR code. The owner talks to it in **Note to Self**, and it answers there. It costs nothing, but the bridge then holds keys to the owner's whole account and receives every message of it. §4.2 is the risk analysis, and setup prints the warning before anything happens.
+   - **Dedicated (`--number`):** a second Signal account (prepaid SIM or landline) that the owner talks to like a contact. Built and kept for anyone who prefers it.
 6. **Signal needs the internet, so the bridge runs only at `/airgapped off`.**
    - **Never at `on`:** at a user-level `on` the bridge acts on nothing and sends nothing, not even a read receipt. It learns the level from `ling web` (§11), and until the first answer arrives it holds incoming messages rather than act on them. When the level drops back to `off`, it says once what was missed.
    - **One external exception:** the bridge is the one Mightling component that talks to an outside service on its own. It talks only to Signal's servers, and only when the user turned it on. `ling-admin audit egress` names it as an enabled exception instead of passing silently (§10).
@@ -38,31 +38,35 @@
    - takes images and files *in* through `/api/upload`;
    - relays approvals as yes/no questions.
 
-   Voice notes (through the speech sidecar), files *out*, Work threads on repositories and the linked mode are Phase 2.
+   Voice notes (through the speech sidecar), files *out* and Work threads on repositories are Phase 2.
+10. **Where it runs:** gx10-1a2b, the node with `ling web` and the model (the user's decision). Approvals are answered from the phone with YES or NO, as designed (§8).
 
 ---
 
 ## 1. What the owner sees
 
+Linked to the owner's account, in **Note to Self** (the default). Every line is "sent by me"; the bridge's start with 🐦.
+
 ```
-Owner (phone)                          Mightling (dedicated number)
-───────────────────────────────────    ─────────────────────────────────────────────
-What changed in the SGLang release
-notes this week?                       ✓✓ (read)   … typing …
-                                       Three things matter for us: … [1][2]
-                                       Sources: [1] github.com/… [2] …
+What changed in the SGLang release notes this week?
+🐦 Three things matter for us: … [1][2]
+   Sources: [1] github.com/… [2] …
 /new
-                                       New thread. (The last one stays in your history.)
-Here's a photo of the error  [image]   ✓✓   … typing …
-                                       That traceback is from …
-                                       ⚠️ Mightling wants to run:
-                                         pip download torch==2.9 --no-deps -d .
-                                       in this question's folder. Reply YES or NO.
-YES                                    … typing …   Done: …
-/stop                                  Stopped.
+🐦 New thread. (The last one stays in your history.)
+Here's a photo of the error  [image]
+🐦 That traceback is from …
+🐦 ⚠️ Mightling wants to run:
+   pip download torch==2.9 --no-deps -d .
+   in this question's folder. Reply YES or NO.
+YES
+🐦 Done: …
+/stop
+🐦 Stopped.
 ```
 
-- **Each message from the owner is one turn.** While a turn runs, the bridge keeps the typing indicator alive.
+With a dedicated number, the same exchange happens in a conversation with that contact, without the 🐦, and the owner also sees read receipts and the typing indicator.
+
+- **Each message from the owner is one turn.** While a turn runs, a dedicated-number bridge keeps the typing indicator alive; Note to Self has none.
 - **A long turn gets one progress note** after a minute, then at most one every five minutes. The note says what it is doing, e.g. "running `pytest -q`, 2m10s". The final answer arrives as one or more messages.
 - **A message sent while a turn runs is queued.** The bridge says so ("Queued; I'll take it next. /stop to interrupt.") and starts it when the turn ends. At most five are queued.
 - **The thread is the conversation.** Everything since the last `/new` is one Ask thread with its own scratch folder, so "and what about the second one?" works.
@@ -161,7 +165,7 @@ WantedBy=multi-user.target
 
 ## 4. The two account modes
 
-### 4.1 Dedicated number (Phase 1, recommended)
+### 4.1 Dedicated number (`--number`)
 
 1. **Register.** `ling signal setup` asks for the number (E.164) and runs `register`. Signal usually asks for a CAPTCHA:
    - the command prints `https://signalcaptchas.org/registration/generate.html`;
@@ -183,20 +187,66 @@ WantedBy=multi-user.target
 
 Numbers that work: a prepaid SIM, a landline (voice code) or an eSIM data plan with a number. VoIP numbers are often refused by Signal. Setup says so before registering.
 
-### 4.2 Linked to the owner's account (Phase 2)
+### 4.2 Linked to the owner's account (the default)
 
-`ling signal setup --linked`:
-- runs `link -n "Mightling"` and shows the `sgnl://linkdevice?…` link as a QR code in the terminal;
-- the owner scans it in Signal → Settings → Linked devices;
-- the owner then talks to Mightling in **Note to Self**, and the bridge answers there.
+`ling-signal setup`, with no `--number`, does the following:
 
-**What Phase 0 must establish before this ships:**
-- that a message the owner sends to Note to Self from the phone reaches the linked device as a `syncMessage.sentMessage` whose destination is the owner's own account;
-- that the bridge's own replies (sent from its device id) come back as sync messages and are ignored, so they never loop.
+1. **Install:** it runs the install of §3, plus `qrencode` to draw the QR code.
+2. **Link:**
+   - it runs `signal-cli link -n "Mightling (<host>)"` as `mightling-signal`;
+   - it reads the `sgnl://linkdevice?…` link from its output and draws it as a QR code in the terminal. signal-cli draws one itself only when it owns a terminal, which it does not under `sudo -u` with its output read.
+3. **Scan:** the owner opens Signal → Settings → Linked devices → Link new device and scans the code. When the phone asks, they choose "Don't transfer" for message history.
+4. **Learn the account:**
+   - the number, from signal-cli's `Associated with: +…` line;
+   - the account's id (ACI), from `listAccounts -o json`;
+   - this device's number, from the `(this device)` line of `listDevices`, whose JSON leaves that mark out.
+5. **Timer:** it asks about the disappearing-message timer (below), then pairs with `ling web`, writes `bridge.json` with `mode: linked` and starts the unit.
+6. **Talk:** the owner writes `/help` in Note to Self.
 
-**The warning setup prints:** "A linked device receives *every* message of your Signal account. Mightling reads only Note to Self and discards the rest, and its keys are kept where the agent can't read them. Use a dedicated number if you'd rather it never see the rest." In this mode signal-cli runs with `--ignore-attachments`, so other conversations' attachments are never downloaded. The owner's own attachments are fetched one by one with `getAttachment`.
+**What the bridge reads.**
+- **Only Note to Self:** a Note to Self message reaches the bridge as a sync message, `syncMessage.sentMessage`, whose destination (`destinationUuid` or `destinationNumber`, as signal-cli's `JsonSyncDataMessage` writes them) is the account itself, sent from another of the owner's devices.
+- **Never anything else, never counted:** messages from others (data messages), the owner's messages to anyone else or to a group (sync messages with another destination or a group), receipts, typing, calls and stories. Their timestamps are not even remembered, and `status.json` has no count of them (`strangersIgnored: null`).
+- **Nothing on the owner's behalf:** no read receipt (it would mark the owner's own note read on every device) and no typing indicator (Note to Self shows none).
 
----
+**Answers.**
+- **Where:** answers go to Note to Self (`send` with `noteToSelf: true`, no recipient).
+- **The marker:** every message the bridge writes starts with `🐦 ` (`LINKED_MARKER`), because in Note to Self the owner's notes and the bridge's replies are both "sent by me". The style ranges move by the marker's three UTF-16 units.
+- **No loops:** a marked message, or one from the bridge's own device, is never a question. Signal does not echo a message to the device that sent it, but a second bridge linked to the same account would see this one's replies, and without the marker the two would answer each other forever.
+
+**The risks of linking, and what is done about each.**
+
+1. **The bridge holds keys to the owner's whole account.** A linked device gets the account's identity key pair and its own credentials at provisioning. With them, signal-cli can:
+   - read every message the account receives from the moment of linking, in every conversation;
+   - send as the owner to anyone;
+   - read the contact and group lists that the phone syncs to every linked device, and change the profile.
+
+   This is not a narrower key than the phone's; it is the same account. What is done:
+   - **What signal-cli is told to do:** it runs with `--ignore-attachments --ignore-avatars --ignore-stickers --ignore-stories`, so nothing of other conversations is downloaded.
+   - **What the bridge does:** it acts on Note to Self alone. Everything else signal-cli decrypts is dropped in memory by the gate, and the bridge never writes message text to disk or to the journal.
+   - **What is stored anyway:** signal-cli's own store under `/var/lib/mightling-signal/signal-cli` still holds the account's keys and the synced contact and group lists. It is protected as the keys are (2 below).
+2. **The agent must never reach those keys.** Unchanged from §0.3, and in linked mode it matters more.
+   - **The keys live where the agent cannot go:** in `/var/lib/mightling-signal`, mode 0700, owned by the system account `mightling-signal`. The agent runs as the user, so no command it runs, sandboxed or not, can read them.
+   - **The bridge cannot touch the user's files:** `ProtectHome=yes` keeps it out of them, and attachments reach the Ask folder only through `ling web`'s `/api/upload`.
+   - **The bridge holds no route back to the keys:** the only thing it shares with the user's side is a `ling web` device cookie. That cookie gives `ling web`'s routes, which are the bridge policy, and nothing of Signal.
+   - **The one exposure left is root:** anyone with root (sudo) on the node can read the keys, as they can read anything. The agent never gets root: `/airgapped`, Full Access and the sandbox are unchanged by this feature.
+3. **Message history sync.** When a device is linked, current Signal phones can offer to transfer recent message history, and they sync contacts, groups and settings to every linked device.
+   - **What the owner is told:** setup tells the owner to choose "Don't transfer".
+   - **Whether signal-cli 0.14.9 would take an archive at all:** not established (§12).
+   - **If history did arrive:** the bridge would not act on it. Old messages are older than the gate's 24-hour limit, and history arriving as anything other than live Note to Self sync messages is not a question.
+   - **What sync still brings:** the contact and group lists still arrive, and live in signal-cli's store.
+4. **Unlinking.** The owner can unlink the device from the phone at any time (Settings → Linked devices → Mightling → Unlink). Re-registering the account, on a new phone or by someone else, unlinks every linked device.
+   - **What signal-cli sees:** the server then refuses the device's credentials, and signal-cli logs an `AuthorizationFailedException`.
+   - **What the bridge does:** it treats that line as "unlinked". It writes `status.json` with what to do, stops signal-cli and exits with status 78, which the unit's `RestartPreventExitStatus=78` keeps from restarting in a loop. Nothing is deleted automatically: a mistaken match must not destroy a working link.
+   - **What the keys can still do:** the device credentials are dead once unlinked. The account's identity key in the state folder is not: Signal does not rotate it on unlink, and it stays until the owner's account is registered again. So `ling-signal remove` deletes the state.
+   - **If the state was ever exposed:** the only way to retire that identity key is to register the account again, which changes the safety number for every contact.
+   - **The other way round:** `ling-signal remove` deletes the keys but cannot unlink the device from the phone's list, so it asks the owner to do that.
+   - **Never `unregister`:** in linked mode `remove` never runs `unregister`, which would act on the owner's own registration. A test holds this, and an unknown mode is treated as linked.
+5. **Thirty days offline.** Signal removes a linked device that has not connected for about 30 days. A node switched off that long must be linked again with `ling-signal setup`.
+6. **The account's device limit.** Signal allows a small number of linked devices per account, five at the time of writing. The bridge takes one.
+
+**Disappearing messages in Note to Self** (one week, the user's default). Signal keeps one disappearing-message timer per conversation, and a message carries its sender's timer, so the timer cannot be set for the bridge's replies alone. In Note to Self, a one-week timer therefore also applies to the owner's own notes written there from then on, on every device. Notes already there are not affected. Setup says this and asks, with yes as the default. It sets the timer with `updateContact <own number> --expiration 604800`, and if signal-cli refuses that on the account itself, it tells the owner where to set it on the phone (Note to Self → the name at the top → Disappearing messages). That this command works on one's own account is not established (§12).
+
+**Attachments:** the owner's attachments in Note to Self are fetched one at a time with `getAttachment {id, recipient: <own number>}`, which returns the file as base64. They then go to the Ask folder through `/api/upload`. Nothing else is ever downloaded.
 
 ## 5. The owner, and everyone else
 
@@ -247,7 +297,7 @@ When the owner's identity key changes (a new phone, a reinstall, or someone else
 
 | Command | What it does |
 |---|---|
-| `ling signal setup [--linked] [--number +…]` | §3 and §4: install, register or link, bind the owner, pair with `ling web`, start the unit |
+| `ling-signal setup [--number +… [--voice]] [--dry-run]` | §3 and §4: install, then link to the owner's account by QR (the default) or register a dedicated number and bind its owner; pair with `ling web`, start the unit |
 | `ling signal setup --refresh` | Copies the current bridge binary and the pinned signal-cli again |
 | `ling signal status` | Running or not, mode, the owner's last message time, versions, messages ignored, the last error |
 | `ling signal trust` | §5.3 |
@@ -394,7 +444,15 @@ Each item is answered on this machine (gx10-1a2b), not on node-b (that machine i
   - `trust -v SAFETY_NUMBER`, and `listIdentities [-n RECIPIENT]`;
   - `jsonRpc --receive-mode on-start --ignore-attachments --ignore-stories`;
   - JSON-RPC parameter names "generally match the long CLI parameter names" in camelCase (`textStyle`, `targetTimestamp`).
-- **Items 3, 5, 6, 7 are open:** the Note to Self sync shape, long messages, how a changed key appears, and the hosts signal-cli connects to. They need a registered number or the owner's phone.
+- **Item 3, the Note to Self shape: read from signal-cli 0.14.9's source.** It is not observed yet. `JsonSyncDataMessage` writes `destinationNumber`, `destinationUuid` and the message's own fields beside them. `link` prints the URI, draws a QR only when it owns a terminal, and ends with `Associated with: <number>`. `listAccounts` gives `{number, aci}`, and `listDevices` marks `(this device)` in its text output only.
+- **Items 5, 6 and 7 are open:** long messages, how a changed key appears in dedicated mode, and the hosts signal-cli connects to.
+- **Linked mode adds four open items:**
+  - whether signal-cli accepts a message-history transfer;
+  - the exact log line when the device is unlinked;
+  - whether `updateContact <own number> --expiration` sets Note to Self's timer;
+  - the shape of `getAttachment`'s answer.
+
+  All need the owner's phone.
 
 ## 13. Tests
 
@@ -436,12 +494,12 @@ All without Signal, without a network, without `ling web` running, and without s
 
 ---
 
-## 15. Questions for the user
+## 15. The user's answers (2026-10-08)
 
-1. **Dedicated number or linked:** do you have a second number for Mightling (a prepaid SIM, a landline, an eSIM)? If not, Phase 2's linked mode is the only way, and it waits for Phase 0's check with your phone.
-2. **Disappearing messages:** keep the default timer of one week?
-3. **Approvals from the phone:** may an approval be answered from Signal at all, or should every turn from Signal run with approvals declined (read and answer only)?
-4. **Which node:** run the bridge on gx10-1a2b, the production node, since node-b is for ling-engine only?
+1. **Number:** no new number. The bridge is linked to the owner's own account and talks in Note to Self (§4.2).
+2. **Approvals:** YES or NO from the phone, as designed (§8).
+3. **Machine:** gx10-1a2b.
+4. **Disappearing messages:** one week, the default. In Note to Self that timer also covers the owner's own notes, so setup asks first (§4.2).
 
 ---
 
@@ -476,11 +534,34 @@ It checks:
 - nothing goes to the stranger, who is counted once;
 - `conversation.json` keeps the thread, and `status.json` names neither the stranger nor the text.
 
+**Linked mode** is built (2026-10-08), the default:
+- `setup` links by QR code, prints the warning of §4.2 and asks about Note to Self's timer;
+- the gate reads Note to Self alone and keeps nothing of other conversations;
+- the marker and loop guard; sending with `noteToSelf`, without receipts or typing;
+- attachments with `getAttachment`;
+- unlink detection with exit 78;
+- `remove` never runs `unregister`, and `trust` has nothing to do.
+
+Its end-to-end test hands the daemon five messages:
+- a friend's message;
+- the owner's reply to the friend;
+- a group message;
+- a marked echo;
+- one Note to Self question.
+
+It checks that:
+- exactly one `send` goes out, with `noteToSelf: true`, no recipient, the marker and the style moved to `17:1:BOLD`;
+- no receipt, typing indicator, `listIdentities` or `getAttachment` call is made;
+- one turn is started, with the note's words;
+- `conversation.json` remembers only the note's timestamp;
+- no text or id of the other conversations is in any file.
+
+Tests: 69 unit tests and three end-to-end tests (dedicated, air gap on, linked).
+
 **Not built:**
 - **Launcher routing:** `ling signal …` does not exist yet. The launcher would route it to `ling-signal`, installed beside `ling`.
 - **Release packaging:** release assets for `ling-signal`, and CI building libsignal's JNI library for arm64 (§3).
 - **Owner commands on the node:** `trust`, `remove` and `setup --refresh`.
-- **Linked mode:** the code paths for it are in place and tested at the gate (§4.2), but it is not offered.
 - **Egress audit:** `audit egress --signal`, the trace of the unit's own connections. The note is built: when `mightling-signal.service` is enabled, every `ling-admin audit egress` report ends with "ℹ️ Declared exception: Signal bridge enabled …" (`EgressAudit.declared_exceptions`, tested).
 - **Phase 2:** everything in §14.
 
