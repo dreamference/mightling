@@ -8,6 +8,15 @@ import type { Transport } from "./rpc";
 export interface Started {
   served_model: string | null;
   started: boolean;
+  /** The folder Ask threads' scratch folders live in (`$CODEX_HOME/ask`), when the host knows it. */
+  ask_root?: string | null;
+}
+
+/** Which host the page runs in: `ling web` in a browser (or the app's Ask window), or the app's Work window. */
+export type Host = "web" | "electron";
+
+export function host(): Host {
+  return typeof window !== "undefined" && window.mightlingWindowType === "electron" ? "electron" : "web";
 }
 
 export interface WorkTarget {
@@ -50,6 +59,23 @@ export const airgapped = (thread: string | null) => send<Airgapped>({ type: "wor
 export const contextMenu = (x: number, y: number, editable: boolean, selection: string) =>
   send<void>({ type: "context-menu", x, y, editable, selection });
 export const windowControl = (action: "minimize" | "maximize" | "close") => send<void>({ type: `window/${action}` });
+
+export interface Uploaded {
+  path: string;
+  bytes: number;
+}
+
+/**
+ * Writes an attachment into an Ask thread's scratch folder through `ling web`'s `/api/upload`
+ * (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1), and resolves with where it landed. Only `ling web`
+ * serves the route: the app's Work window has no Ask threads.
+ */
+export async function upload(thread: string, file: Blob & { name?: string }, kind: "image" | "file", name?: string): Promise<Uploaded> {
+  const query = new URLSearchParams({ thread, name: name ?? file.name ?? "attachment", kind });
+  const response = await fetch(`/api/upload?${query.toString()}`, { method: "POST", body: file, credentials: "same-origin" });
+  if (!response.ok) throw new Error((await response.text()).trim() || `the upload failed (${response.status})`);
+  return (await response.json()) as Uploaded;
+}
 
 export interface BridgeEvents {
   message: (message: unknown) => void;

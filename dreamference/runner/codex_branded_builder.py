@@ -131,6 +131,15 @@ RELEASE_PROFILE_OVERRIDES: Final[dict] = {
 # Records which source commit and patch set the installed binaries were built from.
 BUILD_STAMP_NAME: Final[str] = "build-key"
 
+# `ling web` serves the Mightling UI from its own binary (specs/DREAMFERENCE_MIGHTLING_ASK.md
+# §4.1): `ling-rs/web/build.rs` embeds the folder `LING_WEB_UI_DIST` names, which is `desktop/ui`'s
+# Vite build. Without it `/` serves a placeholder page, so every build of `ling` builds the UI
+# first and refuses to go on without it. Its sources are part of the build key; its packages and
+# output are not.
+WEB_UI_DIR: Final[str] = os.path.join(REPO_ROOT, "desktop", "ui")
+WEB_UI_DIST: Final[str] = os.path.join(WEB_UI_DIR, "dist")
+WEB_UI_IGNORED: Final[frozenset] = frozenset({"node_modules", "dist"})
+
 # Code Mode embeds V8. The `v8` crate's own build script downloads a prebuilt library from
 # denoland/rusty_v8, but Codex builds V8 with pointer compression and the sandbox on, a flavour
 # denoland does not publish for aarch64 Linux -- the download 404s. OpenAI publishes that flavour on
@@ -244,7 +253,60 @@ class CodexBrandedBuilder:
             digest.update(os.path.relpath(path, MIGHTLING_CRATE_DIR).encode())
             with open(path, "rb") as handle:
                 digest.update(handle.read())
+        # `ling web` embeds the UI, so a change to it is a change to the binary.
+        for path in cls.web_ui_files():
+            digest.update(f"ui/{os.path.relpath(path, WEB_UI_DIR)}".encode())
+            with open(path, "rb") as handle:
+                digest.update(handle.read())
         return f"{commit[:12]}-{digest.hexdigest()[:12]}"
+
+    @classmethod
+    def web_ui_files(cls) -> List[str]:
+        """
+        Lists the Mightling UI's source files (`desktop/ui`), in a stable order: what `ling web`
+        embeds is built from these.
+
+        Returns:
+            List[str]: Absolute paths, without the npm packages or a previous build's output.
+        """
+        found: List[str] = []
+        for root, dirs, files in os.walk(WEB_UI_DIR):
+            dirs[:] = sorted(d for d in dirs if d not in WEB_UI_IGNORED)
+            found.extend(os.path.join(root, name) for name in sorted(files))
+        return found
+
+    @classmethod
+    def build_web_ui(cls) -> Optional[str]:
+        """
+        Builds the Mightling UI that `ling web` embeds: `npm ci` once, then the UI's own
+        `npm run build` (a type check and Vite).
+
+        Returns:
+            Optional[str]: The build's folder, for `LING_WEB_UI_DIST`; None, having said why, when
+                it could not be built.
+        """
+        if not os.path.isfile(os.path.join(WEB_UI_DIR, "package.json")):
+            print(f"❌ The Mightling UI's project is missing ({WEB_UI_DIR}); `ling web` embeds it.")
+            return None
+        npm = shutil.which("npm")
+        if npm is None:
+            print("❌ npm is needed to build ling: `ling web` serves the Mightling UI from inside the binary.")
+            print("💡 Install Node.js 20 or later, then build again.")
+            return None
+        environment = DesktopRunner._environment()
+        if not os.path.isdir(os.path.join(WEB_UI_DIR, "node_modules")):
+            print("📦 Installing the Mightling UI's packages (desktop/ui)...")
+            if subprocess.call([npm, "ci", "--no-audit", "--no-fund"], cwd=WEB_UI_DIR, env=environment) != 0:
+                print("❌ npm ci failed in desktop/ui; see its output above.")
+                return None
+        print("🔨 Building the Mightling UI for ling web...")
+        if subprocess.call([npm, "run", "build"], cwd=WEB_UI_DIR, env=environment) != 0:
+            print("❌ The Mightling UI did not build; see its output above.")
+            return None
+        if not os.path.isfile(os.path.join(WEB_UI_DIST, "index.html")):
+            print(f"❌ The UI's build wrote no index.html to {WEB_UI_DIST}.")
+            return None
+        return WEB_UI_DIST
 
     @classmethod
     def launcher_files(cls) -> List[str]:
@@ -669,9 +731,13 @@ class CodexBrandedBuilder:
         rusty_v8 = cls.fetch_rusty_v8(source_dir)
         if rusty_v8 is None:
             return False
+        web_ui = cls.build_web_ui()
+        if web_ui is None:
+            return False
 
         environment = DesktopRunner._environment()
         environment.update(rusty_v8)
+        environment["LING_WEB_UI_DIST"] = web_ui
         environment["CARGO_TARGET_DIR"] = os.path.join(BUILD_CACHE_DIR, "target")
         environment.update(RELEASE_PROFILE_OVERRIDES)
         # No --locked: upstream's Cargo.lock records the workspace crates at version 0.0.0, which

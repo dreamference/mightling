@@ -23,5 +23,5 @@
     "minWidth": 480,
     "minHeight": 600
   },
-  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' app: blob: data:; connect-src 'self'; frame-src 'self' http://localhost:3000 http://localhost:33000; worker-src 'self' blob:; base-uri 'none'; form-action 'none'"
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' app: blob: data:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'"
 }

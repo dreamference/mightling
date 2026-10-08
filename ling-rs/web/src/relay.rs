@@ -139,7 +139,7 @@ impl Tab {
     async fn start(&mut self) -> Result<Value, String> {
         self.drop_finished();
         if self.upstream.is_some() {
-            return Ok(json!({ "served_model": self.server.served_model(), "started": false }));
+            return Ok(json!({ "served_model": self.server.served_model(), "started": false, "ask_root": self.ask_root() }));
         }
         let (upstream, started) = self.server.app_server.connect().await?;
         let (sink, mut stream) = upstream.split();
@@ -158,7 +158,15 @@ impl Tab {
             server.forget_tab(tab);
             let _ = out.send(event("work://exit", Value::Null));
         }));
-        Ok(json!({ "served_model": self.server.served_model(), "started": started }))
+        Ok(json!({ "served_model": self.server.served_model(), "started": started, "ask_root": self.ask_root() }))
+    }
+
+    /// Where Ask threads' folders are, as the server will name their `cwd` (canonical), so the UI
+    /// can tell Ask threads from Work's projects.
+    fn ask_root(&self) -> String {
+        let root = self.server.ask_root();
+        let _ = crate::auth::private_dir(&root);
+        root.canonicalize().unwrap_or(root).to_string_lossy().into_owned()
     }
 
     async fn send(&mut self, message: Value) -> Result<(), String> {

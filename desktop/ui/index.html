@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- The same policy the app:// scheme sends as a header (desktop/electron/app.json `csp`):
-         nothing but the bundle itself, as the Codex app's page carries. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' app: blob: data:; connect-src 'self'; frame-src 'self' http://localhost:3000 http://localhost:33000; worker-src 'self' blob:; base-uri 'none'; form-action 'none'" />
-    <title>Mightling — Work</title>
+    <!-- The same policy the app:// scheme sends as a header (desktop/electron/app.json `csp`), and
+         that `ling web` repeats in its own header: nothing but the bundle itself. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' app: blob: data:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'" />
+    <title>Mightling</title>
   </head>
   <body>
     <div id="root"></div>
