@@ -336,7 +336,15 @@ impl Renderer {
                     "parse_mode": "HTML",
                     "reply_markup": { "inline_keyboard": keyboard },
                 });
-                if let Ok(sent) = self.api.call("sendMessage", params).await
+                // A refused render must not hide the buttons: the request would be declined unseen.
+                let sent = match self.api.call("sendMessage", params).await {
+                    Err(err) if err.description.contains("can't parse entities") => {
+                        let plain = json!({ "chat_id": chat_id, "text": text, "reply_markup": { "inline_keyboard": keyboard } });
+                        self.api.call("sendMessage", plain).await
+                    }
+                    other => other,
+                };
+                if let Ok(sent) = sent
                     && let Some(message_id) = sent.get("message_id").and_then(Value::as_i64)
                 {
                     self.state.lock().await.approvals.insert(id, (chat_id, message_id, text));
@@ -364,19 +372,22 @@ impl Renderer {
     }
 }
 
-/// Starts both halves. Fails when the token is refused (`getMe`).
+/// Starts both halves, whether or not Telegram answers now: the poller backs off and retries, so a
+/// node that boots before its network still comes up. Returns the bot's username when `getMe`
+/// answered, or why it did not.
 pub async fn start(
     api: TelegramApi,
     dir: PathBuf,
     hub: mpsc::UnboundedSender<Inbound>,
     outbound: mpsc::UnboundedReceiver<Outbound>,
 ) -> Result<String, ApiError> {
-    let me = api.call("getMe", json!({})).await?;
-    let _ = api.call("setMyCommands", commands()).await;
-    let username = me.get("username").and_then(Value::as_str).unwrap_or_default().to_string();
+    let me = api.call("getMe", json!({})).await;
+    if me.is_ok() {
+        let _ = api.call("setMyCommands", commands()).await;
+    }
     tokio::spawn(Renderer::new(api.clone()).run(outbound));
     tokio::spawn(Poller::new(api, dir, hub).run());
-    Ok(username)
+    me.map(|me| me.get("username").and_then(Value::as_str).unwrap_or_default().to_string())
 }
 
 #[cfg(test)]

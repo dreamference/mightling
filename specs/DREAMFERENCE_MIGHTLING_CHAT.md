@@ -342,13 +342,15 @@ All tests use stand-ins. None reaches Telegram, a homeserver, `ling web` or Dock
 - **`requestUserInput` with several questions or a secret** is answered empty, and the chat says to answer it at a computer.
 - **`ling chat status` does not list running turns,** which needs the bridge's own state. It names the messengers, the paired users and whether the unit runs.
 - **The `[chat]` settings of §10 are read** from the user-level config file's `[chat]` table.
+- **Telegram starts even when Telegram does not answer at boot.** The poller backs off and retries, and only a refused token (`Unauthorized`) is reported as needing `ling chat telegram setup`.
+- **Approvals live in the bridge's memory.** One pending when the bridge restarts is forgotten by the bridge. The app-server's request stays open until another client (the web UI) answers it or the turn ends.
 
 **Verified (2026-10-08, on stand-ins only):**
 
-- **`cargo test`** in a copy of `ling-rs/chat` beside `web/` and `airgapped/`: **45 tests**, and `cargo clippy --all-targets` is clean.
+- **`cargo test`** in a copy of `ling-rs/chat` beside `web/` and `airgapped/`: **47 tests**, and `cargo clippy --all-targets` is clean.
   - 19 unit tests: renderer, splitter, state files, CLI helpers, the air-gap reading.
   - 11 hub tests against a scripted agent: threads, `/new`, `/use`, steering and its fallback, approvals with every payload of §3, timeouts, the air gap pausing Telegram only, reconnect recovery, stop, failures.
-  - 9 Telegram tests against a stand-in Bot API (axum): pairing, strangers, groups, drafts with the stop button and the typing fallback, HTML with the plain-text fallback, splitting, buttons, rate limits, no token in errors.
+  - 11 Telegram tests against a stand-in Bot API (axum): pairing, strangers, groups, drafts with the stop button and the typing fallback, HTML with the plain-text fallback (approvals included), splitting, buttons, rate limits, starting while Telegram is unreachable, no token in errors.
   - 5 Matrix tests against a stand-in homeserver: invites, encrypted and crowded rooms, the first sync, formatting, typing, reactions, one room per user, `next_batch`.
   - **1 end-to-end test** through the real `ling-web-server` (its sign-in, `/ws` relay and bridge policy) to a stand-in app-server on a Unix socket:
     - the chat's `prompt: ask` arrives as the composed prompt in an Ask folder;

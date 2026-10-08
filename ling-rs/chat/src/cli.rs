@@ -187,13 +187,14 @@ async fn serve(environment: &Environment) -> i32 {
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let api = telegram::TelegramApi::new(telegram::API_ROOT, &config.token);
         match telegram::start(api, dir.clone(), inbound_tx.clone(), out_rx).await {
-            Ok(username) => {
-                hub.add_adapter("telegram", out_tx);
-                adapters += 1;
-                eprintln!("ling chat: Telegram: answering as @{username}");
+            Ok(username) => eprintln!("ling chat: Telegram: answering as @{username}"),
+            Err(err) if err.description.contains("Unauthorized") => {
+                eprintln!("ling chat: Telegram refused the bot token ({err}); run `ling chat telegram setup` again.")
             }
-            Err(err) => eprintln!("ling chat: Telegram refused the bot token ({err}); run `ling chat telegram setup` again."),
+            Err(err) => eprintln!("ling chat: Telegram is not answering yet ({err}); retrying."),
         }
+        hub.add_adapter("telegram", out_tx);
+        adapters += 1;
     }
     if let Some(config) = matrix_config {
         let (out_tx, out_rx) = mpsc::unbounded_channel();
@@ -406,7 +407,10 @@ fn telegram_remove(dir: &Path, which: &str) -> i32 {
 fn telegram_off(dir: &Path) -> i32 {
     let _ = std::fs::remove_file(TelegramConfig::path(dir));
     store::withdraw_pairing_codes(dir);
-    println!("Telegram is off: the token and the pairings are deleted. Revoke the token in @BotFather (/revoke) too.");
+    println!(
+        "Telegram is off: the token and the pairings are deleted. Revoke the token in @BotFather (/revoke) too.\n\
+         A running bridge stops reading Telegram at once; restart it (`ling chat start`) to drop the adapter entirely."
+    );
     0
 }
 

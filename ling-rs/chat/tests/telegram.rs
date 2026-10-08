@@ -251,3 +251,37 @@ async fn the_token_never_appears_in_an_error() {
     assert!(!err.description.contains("SECRET"), "{}", err.description);
     assert!(!format!("{err:?}").contains("SECRET"));
 }
+
+#[tokio::test]
+async fn an_approval_whose_html_is_refused_still_shows_its_buttons() {
+    let picky: Answer = Arc::new(|method, body, _| {
+        if method == "sendMessage" && body.get("parse_mode").is_some() {
+            (StatusCode::BAD_REQUEST, json!({ "ok": false, "error_code": 400, "description": "Bad Request: can't parse entities" }))
+        } else {
+            ok(json!({ "message_id": 901 }))
+        }
+    });
+    let (stand, api) = stand_in(picky).await;
+    let renderer = Renderer::new(api);
+    renderer
+        .render(Outbound::Approval { chat: "telegram:111".into(), id: 8, text: "Run <this>?".into(), options: vec!["Approve once".into(), "Decline".into()] })
+        .await;
+    let sent = stand.bodies("sendMessage");
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1]["text"], "Run <this>?");
+    assert_eq!(sent[1]["reply_markup"]["inline_keyboard"][1][0]["callback_data"], "a:8:1");
+}
+
+#[tokio::test]
+async fn telegram_starts_even_when_it_does_not_answer_yet() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let api = TelegramApi::new(&format!("http://127.0.0.1:{port}"), TOKEN);
+    let (hub, _inbound) = mpsc::unbounded_channel();
+    let (out_tx, out_rx) = mpsc::unbounded_channel();
+    let started = ling_chat::telegram::start(api, scratch("unreachable"), hub, out_rx).await;
+    assert!(started.is_err());
+    // The renderer is running all the same: its channel is still open.
+    assert!(out_tx.send(Outbound::TurnEnded { chat: "telegram:111".into() }).is_ok());
+}
