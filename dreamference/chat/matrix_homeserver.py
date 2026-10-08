@@ -396,8 +396,14 @@ class MatrixHomeserver:
 
     @classmethod
     def stop(cls) -> int:
-        """Stops the container and the proxy; the accounts and messages stay in the volume."""
-        cls._run(["systemctl", "--user", "stop", PROXY_SOCKET_UNIT, PROXY_SERVICE_UNIT], timeout=60)
+        """
+        Turns the homeserver off until the next `start`: `tailscale serve` no longer offers it, the
+        proxy socket is disabled (so a reboot does not listen again) and the container is stopped
+        (`unless-stopped` keeps it stopped). The accounts and messages stay in the volume.
+        """
+        cls._run(["tailscale", "serve", "--https=443", "off"], timeout=60)
+        cls._run(["systemctl", "--user", "disable", "--now", PROXY_SOCKET_UNIT], timeout=60)
+        cls._run(["systemctl", "--user", "stop", PROXY_SERVICE_UNIT], timeout=60)
         cls._run(["docker", "stop", MATRIX_CONTAINER], timeout=660)
         print("✅ The Matrix homeserver is stopped; its accounts and messages are kept.")
         return 0

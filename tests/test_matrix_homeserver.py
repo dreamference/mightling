@@ -181,6 +181,19 @@ def test_remove_needs_yes_and_then_deletes_everything(machine):
     assert not os.path.exists(MatrixHomeserver._path("matrix-admin.json"))
 
 
+def test_stop_turns_it_off_until_the_next_start(machine):
+    # Off means off across a reboot: the socket is disabled, not only stopped, and the tailnet no
+    # longer offers the name. The accounts stay.
+    assert MatrixHomeserver.start() == 0
+    machine.runs.clear()
+    assert MatrixHomeserver.stop() == 0
+    assert machine.argv("tailscale", "serve", "--https=443", "off")
+    assert machine.argv("systemctl", "--user", "disable", "--now", mh.PROXY_SOCKET_UNIT)
+    assert machine.argv("docker", "stop", mh.MATRIX_CONTAINER)
+    assert not any("volume" in argv for argv in machine.runs)
+    assert os.path.exists(MatrixHomeserver._path("matrix-admin.json"))
+
+
 def test_the_cli_routes_matrix_commands(machine, monkeypatch):
     from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
     called = []

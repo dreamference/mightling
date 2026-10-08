@@ -74,6 +74,11 @@ WEB_UI_PORT: Final[int] = 3000
 # an outside service by itself, and only once the user set it up. It runs as its own system unit,
 # outside any traced session, so the report names it instead of passing silently.
 SIGNAL_UNIT: Final[str] = "mightling-signal.service"
+# The messenger bridge (specs/DREAMFERENCE_MIGHTLING_CHAT.md): `ling chat start`'s user unit, and the
+# loopback proxy socket `ling-admin matrix start` enables in front of the homeserver. Named the
+# same way when on; off, nothing of either runs.
+CHAT_UNIT: Final[str] = "mightling-chat.service"
+MATRIX_PROXY_UNIT: Final[str] = "mightling-matrix-proxy.socket"
 
 # How long `ling web serve` may take to listen.
 WEB_START_TIMEOUT_S: Final[int] = 30
@@ -331,21 +336,56 @@ class EgressAudit:
         return StraceParser.parse(text)
 
     @classmethod
+    def _unit_enabled(cls, unit: str, user: bool) -> bool:
+        """Whether a systemd unit is enabled (`--user` for the user's own units). Reads only."""
+        command = ["systemctl"] + (["--user"] if user else []) + ["is-enabled", "--quiet", unit]
+        return subprocess.run(command, capture_output=True).returncode == 0
+
+    @classmethod
+    def _chat_file(cls, name: str) -> Dict[str, Any]:
+        """One of the messenger bridge's JSON files in `$CODEX_HOME/chat`; empty when absent or unreadable."""
+        from dreamference.runner.codex_installer import CodexInstaller
+
+        try:
+            with open(os.path.join(CodexInstaller.home_dir(), "chat", name), encoding="utf-8") as handle:
+                value = json.load(handle)
+        except (OSError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @classmethod
     def declared_exceptions(cls) -> List[str]:
         """
         Names what the user turned on that reaches outside this machine by design, which no traced
-        session shows: today, the Signal bridge (SIGNAL §10).
+        session shows: the messenger bridges, each off until its own command turns it on
+        (SIGNAL §10, CHAT §10). Off, none of them is named and none adds a destination to the trace.
+
+        - Signal: the system unit `mightling-signal.service` (`ling signal setup`); signal-cli
+          connects to Signal's servers.
+        - The chat bridge: the user unit `mightling-chat.service` (`ling chat start`) with a
+          Telegram bot set up (`ling chat telegram setup`) connects to Telegram's Bot API.
+        - The Matrix homeserver (`ling-admin matrix start`): its loopback proxy socket is enabled
+          and `tailscale serve` offers it to the user's tailnet; with push on, push notifications
+          can leave the machine.
 
         Returns:
             List[str]: One line per enabled exception; empty when there is none.
         """
         if shutil.which("systemctl") is None:
             return []
-        enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", SIGNAL_UNIT], capture_output=True).returncode == 0
-        if not enabled:
-            return []
-        return [f"Signal bridge enabled ({SIGNAL_UNIT}): signal-cli connects to Signal's servers, outside this trace. "
-                "`ling-signal remove` turns it off."]
+        lines: List[str] = []
+        if cls._unit_enabled(SIGNAL_UNIT, user=False):
+            lines.append(f"Signal bridge enabled ({SIGNAL_UNIT}): signal-cli connects to Signal's servers, outside this trace. "
+                         "`ling signal remove` turns it off.")
+        if cls._unit_enabled(CHAT_UNIT, user=True) and cls._chat_file("telegram.json").get("token"):
+            lines.append(f"Telegram bridge enabled ({CHAT_UNIT}): `ling chat serve` connects to Telegram's Bot API, outside this trace. "
+                         "`ling chat telegram off` or `ling chat stop` turns it off.")
+        if cls._unit_enabled(MATRIX_PROXY_UNIT, user=True):
+            push = bool(cls._chat_file("matrix-admin.json").get("push"))
+            lines.append("Matrix homeserver enabled (`ling-admin matrix`): offered to your tailnet by `tailscale serve`"
+                         + ("; push is on, so push notifications (event ids, no text) can leave this machine" if push else ", with no route out")
+                         + ". `ling-admin matrix stop` turns it off.")
+        return lines
 
     @classmethod
     def render(cls, trace: EgressTrace, verdict: EgressVerdict, allowed: Dict[int, str]) -> List[str]:

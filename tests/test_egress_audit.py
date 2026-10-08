@@ -624,18 +624,66 @@ def test_a_labelled_resolver_socket_still_yields_its_query_names():
 
 # -- declared exceptions ---------------------------------------------------------------------------
 
-def test_an_enabled_signal_bridge_is_named_not_passed_over(monkeypatch):
+def _fake_units(monkeypatch, enabled_units):
+    """systemctl answers is-enabled for the given units only; every call is recorded."""
     calls = []
 
     def fake_run(command, **kwargs):
         calls.append(command)
-        return subprocess.CompletedProcess(command, 0 if enabled else 1)
+        return subprocess.CompletedProcess(command, 0 if command[-1] in enabled_units else 1)
 
     monkeypatch.setattr("dreamference.audit.egress_audit.shutil.which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr("dreamference.audit.egress_audit.subprocess.run", fake_run)
-    enabled = True
-    lines = EgressAudit.declared_exceptions()
-    assert len(lines) == 1 and "Signal bridge enabled" in lines[0] and "ling-signal remove" in lines[0]
-    assert calls[-1] == ["systemctl", "is-enabled", "--quiet", "mightling-signal.service"]
-    enabled = False
+    return calls
+
+
+def _chat_files(monkeypatch, tmp_path, files):
+    home = tmp_path / "mightling"
+    (home / "chat").mkdir(parents=True)
+    for name, value in files.items():
+        (home / "chat" / name).write_text(json.dumps(value))
+    monkeypatch.setenv("CODEX_HOME", str(home))
+
+
+def test_with_every_bridge_off_nothing_is_declared_and_only_reads_are_made(monkeypatch, tmp_path):
+    # The default: no messenger is set up, so the report names nothing.
+    _chat_files(monkeypatch, tmp_path, {})
+    calls = _fake_units(monkeypatch, set())
     assert EgressAudit.declared_exceptions() == []
+    assert calls and all(command[0] == "systemctl" and "is-enabled" in command for command in calls)
+
+
+def test_an_enabled_signal_bridge_is_named_not_passed_over(monkeypatch, tmp_path):
+    _chat_files(monkeypatch, tmp_path, {})
+    calls = _fake_units(monkeypatch, {"mightling-signal.service"})
+    lines = EgressAudit.declared_exceptions()
+    assert len(lines) == 1 and "Signal bridge enabled" in lines[0] and "`ling signal remove`" in lines[0]
+    assert ["systemctl", "is-enabled", "--quiet", "mightling-signal.service"] in calls
+
+
+def test_the_chat_bridge_is_named_only_with_telegram_set_up(monkeypatch, tmp_path):
+    # The unit alone, with Matrix only, talks to loopback: not an exception by itself.
+    _chat_files(monkeypatch, tmp_path, {"matrix.json": {"user_id": "@mightling:x"}})
+    calls = _fake_units(monkeypatch, {"mightling-chat.service"})
+    assert EgressAudit.declared_exceptions() == []
+    assert ["systemctl", "--user", "is-enabled", "--quiet", "mightling-chat.service"] in calls
+    _chat_files(monkeypatch, tmp_path / "t", {"telegram.json": {"token": "123:secret", "users": []}})
+    lines = EgressAudit.declared_exceptions()
+    assert len(lines) == 1 and "Telegram bridge enabled" in lines[0]
+    assert "123:secret" not in lines[0], "the token is never printed"
+
+
+def test_the_matrix_homeserver_is_named_with_its_push_setting(monkeypatch, tmp_path):
+    _chat_files(monkeypatch, tmp_path, {"matrix-admin.json": {"server_name": "n.ts.net", "push": False}})
+    _fake_units(monkeypatch, {"mightling-matrix-proxy.socket"})
+    lines = EgressAudit.declared_exceptions()
+    assert len(lines) == 1 and "Matrix homeserver enabled" in lines[0] and "tailscale serve" in lines[0]
+    assert "no route out" in lines[0]
+    _chat_files(monkeypatch, tmp_path / "p", {"matrix-admin.json": {"server_name": "n.ts.net", "push": True}})
+    assert "push notifications" in EgressAudit.declared_exceptions()[0]
+
+
+def test_every_bridge_on_is_three_lines(monkeypatch, tmp_path):
+    _chat_files(monkeypatch, tmp_path, {"telegram.json": {"token": "t"}, "matrix-admin.json": {"push": False}})
+    _fake_units(monkeypatch, {"mightling-signal.service", "mightling-chat.service", "mightling-matrix-proxy.socket"})
+    assert [line.split(" ")[0] for line in EgressAudit.declared_exceptions()] == ["Signal", "Telegram", "Matrix"]

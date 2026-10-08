@@ -134,9 +134,10 @@ pub async fn run_cli(args: &[String], environment: Environment) -> i32 {
     match args.first().map(String::as_str) {
         Some("serve") => serve(&environment).await,
         Some("start") => start(&environment),
-        Some("stop") => match systemctl(&["stop", UNIT_NAME]) {
+        // Disabled as well as stopped, so it stays off across a reboot until `ling chat start`.
+        Some("stop") => match systemctl(&["disable", "--now", UNIT_NAME]) {
             Ok(()) => {
-                println!("Mightling chat bridge stopped.");
+                println!("Mightling chat bridge stopped; it stays off until `ling chat start`.");
                 0
             }
             Err(err) => {

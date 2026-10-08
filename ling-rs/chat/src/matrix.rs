@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn path_segments_are_encoded() {
         assert_eq!(encode("!abc:host.ts.net"), "%21abc%3Ahost.ts.net");
-        assert_eq!(encode("@owner:x"), "%40stan%3Ax");
+        assert_eq!(encode("@owner:x"), "%40owner%3Ax");
     }
 
     #[test]
