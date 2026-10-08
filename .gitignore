@@ -76,3 +76,6 @@ site/
 /pgy
 .cbmignore
 
+
+# Cargo build output of any crate folder (the rename once committed two by mistake).
+**/target/
