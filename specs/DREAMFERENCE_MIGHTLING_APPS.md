@@ -1,7 +1,7 @@
 # Mightling Apps: Gmail, Google Drive and Google Calendar through `/apps`, with no a cloud sign-in
 
 **Status:** Phases 1–3 written on 2026-10-03 (§14), compiled and unit-tested, **not yet built into `ling` or watched live**. Before that: proposed (2026-10-03). §1 is read from the pinned Codex source (`rust-v0.158.0`); Phase 0's source checks and the Drive and Calendar scope test are done (§11.1; the read-only scopes are refused, the full ones work), its live checks are not. The user decided the patch cap and §12's questions on 2026-10-03 (§12), which adds Calendar as a third app; Phase 1 can start.
-**Goal:** the standard Codex `/apps` command works in `ling` without a ChatGPT sign-in. It lists **Mightling's own apps** (Gmail, Google Drive, Google Calendar), connects them through Mightling's local Google sign-in, switches them on and off, and hands their tools to the model. Nothing goes to `chatgpt.com`.
+**Goal:** the standard Codex `/apps` command works in `ling` without the vendor's sign-in. It lists **Mightling's own apps** (Gmail, Google Drive, Google Calendar), connects them through Mightling's local Google sign-in, switches them on and off, and hands their tools to the model. Nothing goes to `chatgpt.com`.
 **Builds on:**
 - [MIGHTLING_GMAIL](./DREAMFERENCE_MIGHTLING_GMAIL.md): the read-only Gmail service (`dreamference-gmail`, port 8767) and `ling-admin gmail`;
 - [GOA](./DREAMFERENCE_GOA.md): Google sign-in through GNOME's verified OAuth client, the token sealed on the machine; Drive is its unbuilt half;
@@ -21,7 +21,7 @@ Read from the pinned source:
 | **The gate** | `tui/src/chatwidget/connectors.rs:150` `connectors_enabled()` | `Feature::Apps && has_chatgpt_account`. False hides `/apps` from the popup (`bottom_pane/slash_commands.rs:76`) and makes the command print "Apps are disabled." |
 | **The list** | app-server `app/list` → `apps_processor.rs` `apps_list_inner` | Returns empty unless `features.apps_enabled_for_auth(uses_codex_backend)`; otherwise merges the upstream vendor's directory (`chatgpt/src/connectors.rs`, a `chatgpt.com` GET that needs "Codex backend auth") with the apps whose tools the `codex_apps` MCP server exposes |
 | **Installed apps for `$` mentions** | app-server `app/installed` (`apps_processor/installed.rs:64`) | Same auth gate |
-| **The tools** | `codex-mcp/src/mcp/mod.rs` | `codex_apps` is an MCP server at `chatgpt.com/backend-api/ps/mcp`, started only when `host_owned_codex_apps_enabled` (ChatGPT auth) |
+| **The tools** | `codex-mcp/src/mcp/mod.rs` | `codex_apps` is an MCP server at `chatgpt.com/backend-api/ps/mcp`, started only when `host_owned_codex_apps_enabled` (the vendor's sign-in) |
 | **Connecting** | `AppInfo.install_url` → `AppEvent::OpenAppLink` → `AppLinkView` → `webbrowser::open` | Opens the URL as given. Host validation (`chatgpt.com` only) applies to MCP *elicitations*, not to `/apps` list items |
 | **After connecting** | `AppLinkView::complete_external_flow_and_close` | Sends `RefreshConnectors { force_refetch: true }`, so the list is fetched again |
 | **On / off** | `AppEvent::SetAppEnabled` | Writes `[apps.<id>] enabled = false` (and clears it to re-enable) in `config.toml` |
@@ -34,7 +34,7 @@ So the screen, the browser hand-off, the refresh and the on/off switch are all g
 **Keep Codex's `/apps` screen and replace its two the upstream vendor-bound inputs with Mightling's own, in one small patch.** The list comes from the machine, connecting opens Mightling's local Google sign-in, and the tools come from an MCP server the launcher declares.
 
 Rejected:
-- **A made-up ChatGPT sign-in pointed at a local stand-in backend.** A sign-in switches on token refresh to `auth.openai.com`, usage analytics and the other ChatGPT-backed channels that patches `0013`/`0015` closed, so the egress audit would fail. The stand-in API would also have to follow the upstream vendor's undocumented directory and `ps/mcp` formats through every Codex release.
+- **A made-up vendor sign-in pointed at a local stand-in backend.** A sign-in switches on token refresh to `auth.openai.com`, usage analytics and the other channels to the vendor's backend that patches `0013`/`0015` closed, so the egress audit would fail. The stand-in API would also have to follow the upstream vendor's undocumented directory and `ps/mcp` formats through every Codex release.
 - **A command of our own (`/gmail`, `/connect`).** It is cheaper to keep, but it is not the standard command, and the request is for `/apps`.
 - **A local `/plugins` marketplace.** `/plugins` is visible without a sign-in and could install a Gmail MCP server and skill with no patch at all, but it has no notion of *connected*, no sign-in hand-off and no per-app on/off. Kept as the fallback if §11's Phase 0 finds the `/apps` hooks larger than §4 allows.
 
@@ -86,7 +86,7 @@ The keys are camelCase, the serde shape of the connectors crate's `AppInfo` (§1
 | H1 | `tui`, `ChatWidget::connectors_enabled` | `… && (self.has_chatgpt_account \|\| ling_apps::offered())` |
 | H2 | `app-server`, `apps_list_inner`, before the auth gate | `if let Some(apps) = ling_apps::list() { return Ok(Some(mightling_apps_response(apps, &config, &params))); }`, where the helper (in the same file, added by the patch) deserialises into the protocol's `AppInfo`, applies Codex's own `AppToolPolicyEvaluator::apply_app_enabled_state` (so `[apps.<id>] enabled` from §1's on/off switch shows), and paginates with the existing `paginate_apps` |
 
-H2 returns **before** the directory request and the `codex_apps` lookup, so no `chatgpt.com` call is made; `codex_apps` itself still never starts, because `host_owned_codex_apps_enabled` still requires a ChatGPT sign-in. Plus one line in each of the two crates' `Cargo.toml` (`ling-apps = { path = "../ling/apps" }`).
+H2 returns **before** the directory request and the `codex_apps` lookup, so no `chatgpt.com` call is made; `codex_apps` itself still never starts, because `host_owned_codex_apps_enabled` still requires the vendor's sign-in. Plus one line in each of the two crates' `Cargo.toml` (`ling-apps = { path = "../ling/apps" }`).
 
 ### 4.3 What is deliberately not hooked
 
@@ -230,7 +230,7 @@ Read from the pinned submodule, nothing compiled; the hooks were drafted in a sc
    - The probe's grant stays listed under the account's Security → Third-party connections; it was not revoked, because revoking would also cut the Gmail grant on the same client.
 6. **Patch size as drafted: 2,385 bytes** (H1, H2, a 10-line helper, two manifest lines), above §4.4's 1.5–2 KB estimate. With it the series would be 36,071 bytes against today's 33,750 cap. Not raised: that is the user's decision (§4.4).
 
-Also found: H1 also opens the `$` mention prefetch (`connector_mentions.rs:9`), which calls `app/installed`. Without a ChatGPT sign-in `runtime_enabled` is false there, so it never refreshes `codex_apps` and answers from the (empty) cached snapshot: no network call, and `$` stays empty as §4.3 intends. Confirm live with the first build.
+Also found: H1 also opens the `$` mention prefetch (`connector_mentions.rs:9`), which calls `app/installed`. Without the vendor's sign-in `runtime_enabled` is false there, so it never refreshes `codex_apps` and answers from the (empty) cached snapshot: no network call, and `$` stays empty as §4.3 intends. Confirm live with the first build.
 
 ### Tests
 
@@ -254,7 +254,7 @@ Also decided: the patch series may grow to 37.5 KB in all (§4.4).
 ## 13. Not proposed
 
 - **Sending, drafting, labelling, writing to Drive, or creating, changing or answering calendar events.** Out of scope for every phase; a draft-only Gmail verb would be a separate spec with its own risk section.
-- **The upstream vendor's connectors alongside Mightling's.** With a ChatGPT sign-in, H2 would still answer with Mightling's list, hiding the upstream vendor's; Mightling never holds that sign-in, so the case does not arise in a supported setup.
+- **The upstream vendor's connectors alongside Mightling's.** With the vendor's sign-in, H2 would still answer with Mightling's list, hiding the upstream vendor's; Mightling never holds that sign-in, so the case does not arise in a supported setup.
 - **A web UI change.** The web UI's Gmail tool and Settings page are unchanged; Drive in the web UI is GOA's concern.
 
 ## 14. As written (2026-10-03, branch `apps/phase1`)

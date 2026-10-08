@@ -87,7 +87,7 @@ On any other Linux machine the same script installs the client only. Already on 
 
 ### Other
 - Start-up lines (air gap, skills, Night Shift, prompt) appear inside the TUI's history.
-- `puffin app-server` threads get the served model and Puffin's prompt, and the TUI's `/model` lists the local model without a ChatGPT sign-in.
+- `puffin app-server` threads get the served model and Puffin's prompt, and the TUI's `/model` lists the local model without the vendor's sign-in.
 - SWE-bench's runtime carries `liblzma`, which `puffin` now links.
 - Night Shift holds the tasks of a night to the model server's KV pool.
 - The compaction ledger hook is on by default; the interactive compaction limit follows the KV pool.
