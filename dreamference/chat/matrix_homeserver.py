@@ -62,8 +62,12 @@ class MatrixHomeserver:
 
     @classmethod
     def _run(cls, argv: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
-        """Runs a command, capturing its output."""
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+        """Runs a command, capturing its output. A missing program (Tailscale removed since `start`,
+        say) is a failed step, not an exception, so `stop` and `remove` still do the rest."""
+        try:
+            return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+        except FileNotFoundError as error:
+            return subprocess.CompletedProcess(argv, 127, "", str(error))
 
     @classmethod
     def _http(cls, method: str, url: str, body: Optional[Dict[str, Any]] = None,

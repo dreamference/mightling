@@ -112,7 +112,7 @@ With a dedicated number, the same exchange happens in a conversation with that c
 |---|---|---|
 | System account `mightling-signal` (no login shell, no home) | `/etc/passwd` | Keys out of the agent's reach (§0.3) |
 | Java runtime | `/opt/mightling/jdk-25.0.4.1+1-jre/` | signal-cli 0.14 needs Java 25 or later. Eclipse Temurin's JRE, fetched by setup and pinned by URL and SHA-256 for arm64 and x86_64 (§17); no apt package, whose pool URL would vanish with the next security update |
-| signal-cli | `/opt/mightling/signal-cli-<version>/` | The release tarball, checked against the `.asc` signature from signal-cli's release and a SHA-256 pinned in Mightling's source |
+| signal-cli | `/opt/mightling/signal-cli-<version>/` | The release tarball, checked against a SHA-256 pinned in Mightling's source (§17: the `.asc` signature check is not built) |
 | libsignal JNI for arm64 | `/opt/mightling/signal-cli-<version>/lib/libsignal_jni.so`, put inside the `libsignal-client-<v>.jar` | signal-cli bundles it only for x86_64 Linux, Windows and macOS (its wiki, "Provide native lib for libsignal") |
 | The bridge | `/usr/local/lib/mightling/ling-signal` (root, 0755) | Users' homes are 0750 on Ubuntu 24.04, so the system account cannot run a binary from the user's install |
 | The unit | `/etc/systemd/system/mightling-signal.service` | A system unit: no lingering needed, survives logout |
@@ -634,3 +634,5 @@ The account, the keys and the pairing are left alone. `status` already pointed a
 - Anything against a real Signal account.
 - `ling signal setup` and `--refresh` past `--dry-run`, which would need sudo and a phone.
 - A release build of the new asset in CI.
+
+**Not built:** the `.asc` signature check on the signal-cli tarball (§3). Its SHA-256 pin is the only check.
