@@ -1,8 +1,9 @@
 //! `ling app`: opens Mightling's desktop window, `ling-app`.
 //!
-//! Upstream `codex app` opens OpenAI's closed-source desktop app, and is compiled only on macOS and
-//! Windows. Mightling's own window is the Tauri shell in `desktop/` (`ling-app`), which renders the
-//! local Onyx web UI, so the launcher answers `app` itself before Codex parses the command line.
+//! Upstream `codex app` opens the upstream vendor's closed-source desktop app, and is compiled only
+//! on macOS and Windows. Mightling's own window is the Electron app in `desktop/electron`
+//! (`ling-app`, specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), which renders the local Onyx web
+//! UI, so the launcher answers `app` itself before Codex parses the command line.
 //! It does what `ling-admin desktop run` does before opening the window, minus building it:
 //! check Onyx is answering and empty the webview's HTTP cache.
 //!
@@ -25,12 +26,13 @@ const ONYX_WEB_URL: &str = "http://localhost:3000";
 const EXECUTABLE: &str = "ling-app";
 const DESKTOP_ENTRY: &str = "ling-app.desktop";
 
-/// The webview's data directory is named after the Tauri identifier in `tauri.conf.json`. Its
-/// HTTP cache is emptied on every launch: Onyx serves stylesheets as `immutable` under names that
-/// never change, so a cached copy would hide the last `ling-admin chat configure`. The sibling
-/// `cookies` file is left alone, which is what keeps the user signed in.
+/// The app's data directory, named after its identifier (`desktop/electron/app.json`). Its HTTP
+/// cache is emptied on every launch: Onyx serves stylesheets as `immutable` under names that never
+/// change, so a cached copy would hide the last `ling-admin chat configure`. The app empties it
+/// too before opening Chat; this covers a window that was already open. Chromium's `Cookies` file
+/// beside it is left alone, which is what keeps the user signed in.
 const WEBVIEW_DATA_DIR: &str = "dev.dreamference.mightling";
-const WEBVIEW_CACHE_DIR: &str = "WebKitCache";
+const WEBVIEW_CACHE_DIR: &str = "Cache";
 
 /// Which window `ling app` opens: Chat (the Onyx web UI), or Work with the arguments
 /// `ling-app` takes for it (`--work`, `--cwd <folder>`, `--thread <id>`).

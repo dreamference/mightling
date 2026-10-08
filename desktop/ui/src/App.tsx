@@ -174,7 +174,13 @@ export function App() {
   const otherRequests = state.requests.length - threadRequests.length;
 
   return (
-    <div className="work">
+    <div className="work" onContextMenu={(event) => {
+      // The context menu is native, drawn by the main process (desktop/electron/src/shell.ts).
+      event.preventDefault();
+      const target = event.target as HTMLElement;
+      const editable = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable;
+      bridge.contextMenu(event.clientX, event.clientY, editable, window.getSelection()?.toString() ?? "").catch(() => {});
+    }}>
       <aside className="sidebar">
         <div className="new-thread">
           <input value={newCwd} onChange={(event) => setNewCwd(event.target.value)} placeholder="/path/to/project" aria-label="Project folder" />
@@ -194,7 +200,7 @@ export function App() {
       </aside>
 
       <main className="thread-pane">
-        <header className="bar">
+        <header className="bar" onDoubleClick={() => bridge.windowControl("maximize").catch(() => {})}>
           <span className="title">{selected ? selected.thread.name || selected.thread.preview || "New thread" : "Mightling"}</span>
           {selected ? <span className="cwd">{selected.thread.cwd}</span> : null}
           <span className="spacer" />

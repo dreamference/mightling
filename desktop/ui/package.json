@@ -2,7 +2,7 @@
   "name": "mightling-work",
   "private": true,
   "version": "0.1.0",
-  "description": "The Work window of ling-app: a client of ling app-server (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md).",
+  "description": "The Work window of ling-app: a client of ling app-server (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md), bundled into the Electron app by desktop/electron.",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
@@ -11,7 +11,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.11.1",
     "marked": "18.0.14",
     "react": "19.3.0",
     "react-dom": "19.3.0"

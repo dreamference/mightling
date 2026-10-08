@@ -351,10 +351,11 @@ def test_building_without_source_says_how_to_install(release_install, capsys):
 
 def test_the_desktop_app_is_not_built_without_its_project(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("dreamference.chat.desktop_runner.DESKTOP_PROJECT_DIR", str(tmp_path / "desktop"))
+    monkeypatch.setattr("dreamference.chat.desktop_runner.ELECTRON_DIR", tmp_path / "desktop" / "electron")
     monkeypatch.setattr(DesktopRunner, "_ensure_toolchain", lambda: pytest.fail("no toolchain is needed"))
     assert not DesktopRunner.has_source()
     assert DesktopRunner.build() == 1 and DesktopRunner.install() == 1
-    assert ".deb or AppImage" in capsys.readouterr().out
+    assert "Mightling .deb" in capsys.readouterr().out
     # With the release's .deb installed, `desktop run` opens that app.
     monkeypatch.setattr(DesktopRunner, "onyx_is_up", classmethod(lambda cls, url=None: True))
     monkeypatch.setattr("dreamference.chat.desktop_runner.shutil.which", lambda name: "/usr/bin/ling-app")

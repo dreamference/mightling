@@ -2,25 +2,23 @@
 Toolchain Verification for the Mightling Desktop App.
 
 This module provides the DesktopInstaller class, which reports whether this machine can build the
-Tauri shell in `desktop/` and installs the parts it is allowed to install.
+Electron app in `desktop/electron` (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md) and installs
+the parts it is allowed to install.
 
-Tauri compiles a native binary, so its prerequisites are in three groups, and they differ in who
-can install them:
+The app is Electron, so its build needs Node and npm and nothing else: Electron itself comes from
+npm as a prebuilt binary, and Work's UI and the main process are built with Vite. There are no
+system headers to install, because the engine is bundled rather than linked from the platform.
 
-* **Rust** -- installed per user under `~/.cargo`, so `rustup` can be driven from here and undone
-  with `rustup self uninstall`.
-* **The Tauri CLI** -- taken from npm rather than `cargo install tauri-cli`, because npm ships a
-  prebuilt binary for this architecture while cargo would compile it, which is minutes of build for
-  a tool that is not the product.
-* **The GTK and WebKit development headers** -- system packages, so installing them needs root.
-  `install_system_packages()` runs `sudo apt-get install`, and the escalation is deliberately
-  *visible*: the command is printed before it runs and sudo prompts on the terminal, so nothing
-  happens to the machine without the operator typing a password. Where sudo cannot prompt -- a
-  non-interactive shell, no tty -- it falls back to printing the line rather than failing obscurely.
+One thing the *running* app needs that a build cannot give it: on Ubuntu 24.04 Chromium's sandbox
+creates a user namespace, which the kernel refuses to programs without an AppArmor profile
+(`kernel.apparmor_restrict_unprivileged_userns=1`). The `.deb` writes that profile in its
+`postinst`; for a checkout's build and dev run, `install_apparmor_profile()` writes one covering
+the binaries here, with sudo, and the escalation is deliberately *visible*: the command is
+printed before it runs and sudo prompts on the terminal.
 
-The webview itself is *not* bundled. Tauri renders through the platform webview, which is already
-present here as `libwebkit2gtk-4.1` -- the `-dev` package supplies only the headers needed to link
-against it.
+The Rust helpers (`has_rust`, `cargo_path`, `install_rust`) stay here because the Codex build
+(`CodexBrandedBuilder`, `CodexTestRunner`) drives rustup through them; the desktop app no longer
+needs Rust.
 """
 
 import os
@@ -28,47 +26,68 @@ import shutil
 import subprocess
 from typing import Final, List, Optional, Tuple
 
-# The Debian/Ubuntu packages Tauri v2 needs to link. `webkit2gtk-4.1` is the v2 series; v1 used 4.0,
-# and installing the wrong one produces a linker error that reads like a missing library.
-LINUX_BUILD_PACKAGES: Final[List[str]] = [
-    "libwebkit2gtk-4.1-dev",
-    "libgtk-3-dev",
-    "librsvg2-dev",
-    "libayatana-appindicator3-dev",
-    "build-essential",
-    "pkg-config",
-]
-
-# Where rustup puts the toolchain, and the installer that puts it there.
+# Where rustup puts the toolchain, and the installer that puts it there (used by the Codex build).
 CARGO_BIN: Final[str] = os.path.expanduser("~/.cargo/bin")
 RUSTUP_URL: Final[str] = "https://sh.rustup.rs"
 
-# The npm package that carries the prebuilt Tauri CLI.
-TAURI_CLI_PACKAGE: Final[str] = "@tauri-apps/cli@^2"
+# The oldest Node the build accepts: Vite 8 and Electron Forge 7 need Node 20 or later; the
+# release workflow builds with 22.
+MIN_NODE_MAJOR: Final[int] = 20
+
+# Where a checkout's AppArmor profile goes, and its name.
+APPARMOR_PROFILE_PATH: Final[str] = "/etc/apparmor.d/mightling-desktop-dev"
+APPARMOR_PROFILE_NAME: Final[str] = "mightling-desktop-dev"
 
 
 class DesktopInstaller:
     """
-    Verifies and provisions the toolchain the Mightling desktop app is built with.
+    Verifies and provisions what the Mightling desktop app is built and run with.
     """
 
     @classmethod
-    def missing_prerequisites(cls) -> List[str]:
+    def missing_prerequisites(cls, build: bool = False) -> List[str]:
         """
         Lists the prerequisites that are absent, in the order they should be installed.
 
+        Args:
+            build (bool): Whether the `.deb` is to be made, which Forge's maker does with `dpkg`
+                and `fakeroot`; a dev run needs neither.
+
         Returns:
-            List[str]: Short identifiers -- `"headers"`, `"rust"`, `"tauri-cli"` -- for whatever is
+            List[str]: Short identifiers -- `"node"`, `"npm"`, `"fakeroot"` -- for whatever is
                 missing. An empty list means the app can be built.
         """
         missing: List[str] = []
-        if not cls.has_webview_headers():
-            missing.append("headers")
-        if not cls.has_rust():
-            missing.append("rust")
-        if not cls.has_tauri_cli():
-            missing.append("tauri-cli")
+        if cls.node_major() is None or cls.node_major() < MIN_NODE_MAJOR:
+            missing.append("node")
+        if shutil.which("npm") is None:
+            missing.append("npm")
+        if build and (shutil.which("fakeroot") is None or shutil.which("dpkg") is None):
+            missing.append("fakeroot")
         return missing
+
+    @classmethod
+    def node_major(cls) -> Optional[int]:
+        """
+        The major version of the `node` on PATH.
+
+        Returns:
+            Optional[int]: The version, or None when there is no node.
+        """
+        node = shutil.which("node")
+        if node is None:
+            return None
+        try:
+            result = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        text = result.stdout.strip().lstrip("v")
+        try:
+            return int(text.split(".")[0])
+        except ValueError:
+            return None
+
+    # -- Rust, for the Codex build -----------------------------------------------------------------
 
     @classmethod
     def has_rust(cls) -> bool:
@@ -95,40 +114,6 @@ class DesktopInstaller:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
         return shutil.which("cargo")
-
-    @classmethod
-    def has_tauri_cli(cls) -> bool:
-        """
-        Reports whether the Tauri CLI can be run.
-
-        Returns:
-            bool: True if a Tauri CLI is available through npm or on PATH.
-        """
-        if shutil.which("cargo-tauri"):
-            return True
-        if not shutil.which("npx"):
-            return False
-        result = subprocess.run(
-            ["npx", "--no-install", "tauri", "--version"],
-            capture_output=True, text=True, timeout=120, check=False,
-        )
-        return result.returncode == 0
-
-    @classmethod
-    def has_webview_headers(cls) -> bool:
-        """
-        Reports whether the WebKitGTK development headers are installed.
-
-        Returns:
-            bool: True if pkg-config can resolve `webkit2gtk-4.1`.
-        """
-        if not shutil.which("pkg-config"):
-            return False
-        result = subprocess.run(
-            ["pkg-config", "--exists", "webkit2gtk-4.1"],
-            capture_output=True, timeout=30, check=False,
-        )
-        return result.returncode == 0
 
     @classmethod
     def install_rust(cls) -> bool:
@@ -158,103 +143,111 @@ class DesktopInstaller:
             return False
         return cls.has_rust()
 
+    # -- the sandbox's user namespace ----------------------------------------------------------------
+
     @classmethod
-    def install_tauri_cli(cls) -> bool:
+    def userns_allowed(cls) -> bool:
         """
-        Installs the prebuilt Tauri CLI from npm.
+        Reports whether a program started from this shell may create a user namespace, which is
+        what Chromium's sandbox does first. Under a terminal with a permissive AppArmor profile
+        (PyCharm's) it may; from a plain terminal or the launcher it may not, until a profile
+        names the binary.
 
         Returns:
-            bool: True if the CLI can be run afterwards.
+            bool: True if `unshare -U true` succeeds.
         """
-        if cls.has_tauri_cli():
+        if shutil.which("unshare") is None:
             return True
-        if not shutil.which("npm"):
-            print("❌ npm is needed to install the Tauri CLI.")
-            print(f"💡 Or install it with cargo: cargo install tauri-cli --version '^2'")
-            return False
-
-        print(f"📦 Installing the Tauri CLI ({TAURI_CLI_PACKAGE})...")
-        result = subprocess.run(
-            ["npm", "install", "--global", TAURI_CLI_PACKAGE],
-            capture_output=True, text=True, timeout=900, check=False,
-        )
-        if result.returncode != 0:
-            print(f"❌ npm install failed: {result.stderr.strip()[:200]}")
-            return False
-        return cls.has_tauri_cli()
-
-    @classmethod
-    def apt_available(cls) -> bool:
-        """
-        Reports whether this is a Debian-family system with apt.
-
-        Returns:
-            bool: True if `apt-get` is on PATH.
-        """
-        return shutil.which("apt-get") is not None
-
-    @classmethod
-    def install_system_packages(cls) -> bool:
-        """
-        Installs the GTK and WebKit development headers with apt, prompting for sudo.
-
-        Returns:
-            bool: True if the headers are present afterwards.
-        """
-        if cls.has_webview_headers():
-            return True
-        if not cls.apt_available() or not shutil.which("sudo"):
-            print("❌ The WebKitGTK development headers are missing and apt is not available here.")
-            print(f"💡 Install the equivalent of: {' '.join(LINUX_BUILD_PACKAGES)}")
-            return False
-
-        # Printed before it runs, because this is the one step that changes the machine outside
-        # this user's home directory.
-        print("📦 Installing the desktop build dependencies (sudo will ask for your password):")
-        print(f"   {cls.header_install_command()}")
         try:
-            result = subprocess.run(
-                ["sudo", "apt-get", "install", "-y", *LINUX_BUILD_PACKAGES],
-                timeout=1800, check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            print(f"❌ apt failed: {exc}")
-            return False
-        if result.returncode != 0:
-            print("❌ apt exited non-zero — the headers were not installed.")
-            print(f"💡 Run it yourself, then try again:\n   {cls.header_install_command()}")
-            return False
-        return cls.has_webview_headers()
+            # `aa-exec -p unconfined` asks as an unconfined program would, which is how the
+            # launcher starts the app; without aa-exec, this shell's own confinement answers.
+            command = ["aa-exec", "-p", "unconfined", "--", "unshare", "-U", "true"] if shutil.which("aa-exec") else ["unshare", "-U", "true"]
+            return subprocess.run(command, capture_output=True, timeout=10, check=False).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return True
 
     @classmethod
-    def header_install_command(cls) -> str:
+    def apparmor_profile(cls, binaries: List[str]) -> str:
         """
-        Returns the command that installs the system build dependencies.
+        The AppArmor profile text that grants `userns` to the given binaries: the shape of the
+        `.deb`'s profile (desktop/electron/linux/postinst) and of Ubuntu's own sandbox profiles.
+
+        Args:
+            binaries (List[str]): Absolute paths of the Electron binaries a checkout runs.
 
         Returns:
-            str: An `apt install` line, for the operator to run themselves.
+            str: The profile.
         """
-        return "sudo apt install -y " + " ".join(LINUX_BUILD_PACKAGES)
+        lines = [
+            "# Written by `ling-admin desktop install` (Mightling by Dreamference). It lets the desktop",
+            "# app's Chromium create the user namespace its sandbox needs, which Ubuntu otherwise refuses",
+            "# to programs without a profile (kernel.apparmor_restrict_unprivileged_userns=1).",
+            "abi <abi/4.0>,",
+            "include <tunables/global>",
+            "",
+        ]
+        for index, binary in enumerate(binaries):
+            name = APPARMOR_PROFILE_NAME if index == 0 else f"{APPARMOR_PROFILE_NAME}-{index}"
+            lines += [f'profile {name} "{binary}" flags=(unconfined) {{', "  userns,", "}", ""]
+        return "\n".join(lines)
 
     @classmethod
-    def report(cls) -> Tuple[bool, List[str]]:
+    def install_apparmor_profile(cls, binaries: List[str]) -> bool:
+        """
+        Writes and loads the profile with sudo, printing the command first.
+
+        Args:
+            binaries (List[str]): The binaries to cover.
+
+        Returns:
+            bool: True once a user namespace can be created, or when nothing needed doing.
+        """
+        binaries = [binary for binary in binaries if os.path.isfile(binary)]
+        if not binaries:
+            return cls.userns_allowed()
+        if not shutil.which("sudo") or not shutil.which("apparmor_parser"):
+            print("⚠️  Chromium's sandbox needs a user namespace, and this machine refuses one without an")
+            print("   AppArmor profile; sudo or apparmor_parser is missing, so write it yourself:")
+            print(cls.apparmor_profile(binaries))
+            return False
+        print("📦 Installing the AppArmor profile the desktop app's sandbox needs (sudo will ask for your password):")
+        print(f"   sudo tee {APPARMOR_PROFILE_PATH} && sudo apparmor_parser -r -T -W {APPARMOR_PROFILE_PATH}")
+        try:
+            written = subprocess.run(["sudo", "tee", APPARMOR_PROFILE_PATH], input=cls.apparmor_profile(binaries),
+                                     text=True, capture_output=True, timeout=300, check=False)
+            if written.returncode != 0:
+                print("❌ The profile was not written.")
+                return False
+            loaded = subprocess.run(["sudo", "apparmor_parser", "-r", "-T", "-W", APPARMOR_PROFILE_PATH],
+                                    timeout=300, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"❌ Could not install the profile: {exc}")
+            return False
+        return loaded.returncode == 0
+
+    @classmethod
+    def report(cls, build: bool = False) -> Tuple[bool, List[str]]:
         """
         Prints what is missing and how to get it.
+
+        Args:
+            build (bool): Whether the `.deb` is to be made (see `missing_prerequisites`).
 
         Returns:
             Tuple[bool, List[str]]: Whether the toolchain is complete, and what is missing.
         """
-        missing = cls.missing_prerequisites()
+        missing = cls.missing_prerequisites(build)
         if not missing:
-            print("✅ The desktop build toolchain is complete.")
+            print("✅ The desktop build toolchain is complete (Node and npm" + (", dpkg and fakeroot)." if build else ")."))
             return True, missing
 
         print("⚠️  The Mightling desktop toolchain is incomplete:")
-        if "headers" in missing:
-            print("   • WebKitGTK/GTK development headers — installed with sudo apt on first build.")
-        if "rust" in missing:
-            print("   • No Rust toolchain — installed with rustup on first build.")
-        if "tauri-cli" in missing:
-            print("   • No Tauri CLI — installed from npm on first build.")
-        print("💡 `ling-admin desktop install` fetches all of it.")
+        if "node" in missing:
+            print(f"   • Node.js {MIN_NODE_MAJOR} or later is needed (Electron, Vite and Forge run on it).")
+        if "npm" in missing:
+            print("   • npm is needed to install the app's packages.")
+        if "fakeroot" in missing:
+            print("   • dpkg and fakeroot are needed to make the .deb: sudo apt install fakeroot")
+        if "node" in missing or "npm" in missing:
+            print("💡 Install Node.js from your distribution or nodejs.org, then `ling-admin desktop install`.")
         return False, missing

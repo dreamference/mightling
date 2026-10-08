@@ -3,8 +3,8 @@
 # Builds the Python distribution (the `ling-admin` command), the prebuilt `ling` agent that
 # `ling update` downloads, and, optionally, the Mightling desktop bundle, then publishes them as a
 # GitHub release tagged v<version> on the commit the workflow was dispatched from. The version is
-# stamped into setup.py, tauri.conf.json and the ling binary inside the runner's checkout only --
-# nothing is committed back, so the tag is the record of the release.
+# stamped into setup.py, the desktop app's package and the ling binary inside the runner's checkout
+# only -- nothing is committed back, so the tag is the record of the release.
 name: Release
 
 on:
@@ -27,7 +27,7 @@ on:
         type: boolean
         default: true
       build_desktop:
-        description: "Build the Mightling desktop app (.deb and AppImage)"
+        description: "Build the Mightling desktop app (.deb; needs the ling build, which it bundles)"
         type: boolean
         default: true
       desktop_runner:
@@ -128,47 +128,52 @@ jobs:
           if-no-files-found: error
 
   desktop:
-    needs: [validate, test]
-    if: ${{ inputs.build_desktop && !failure() && !cancelled() }}
+    # The Electron app bundles `ling` and `codex-code-mode-host` (desktop/electron, built the way
+    # the Codex desktop app is built), so it waits for the `ling` job and takes its binaries.
+    needs: [validate, test, ling]
+    if: ${{ inputs.build_desktop && inputs.build_mightling && !failure() && !cancelled() }}
     runs-on: ${{ inputs.desktop_runner }}
+    env:
+      MIGHTLING_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      # The same packages DesktopInstaller.LINUX_BUILD_PACKAGES installs locally; 4.1 is Tauri v2.
-      - name: System packages
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mightling-binaries
+          path: dist
+      - name: Bundled binaries
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
-            build-essential pkg-config file
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: desktop/src-tauri
+          # Named exactly: `ling-*` would also match ling-search, ling-fetch and ling-code.
+          target="$(uname -m)-unknown-linux-gnu"
+          mkdir -p desktop/electron/resources
+          gunzip -c "dist/ling-$target.gz" > desktop/electron/resources/ling
+          gunzip -c "dist/codex-code-mode-host-$target.gz" > desktop/electron/resources/codex-code-mode-host
+          chmod 755 desktop/electron/resources/ling desktop/electron/resources/codex-code-mode-host
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-      - name: Tauri CLI
-        run: npm install --global "@tauri-apps/cli@^2"
-      # The Work window's frontend (desktop/ui), which tauri.conf.json bundles as frontendDist; the
-      # Chat window still loads the local Onyx server directly. Its tests run first: they need no
-      # webview and no app-server.
+      # Work's UI (desktop/ui), bundled into the app by its Vite build; its tests need no Electron.
       - name: Work window frontend
         working-directory: desktop/ui
         run: |
           npm ci
           npm test
-          npm run build
-      - name: Build bundles
-        working-directory: desktop
-        run: tauri build --config "{\"version\":\"$VERSION\"}"
+      # The main process's unit tests, the typecheck, then Forge: Vite builds, `package` writes
+      # out/Mightling-linux-<arch>/ and flips the fuses, `make` wraps it in the .deb (and a zip).
+      - name: Build the app
+        working-directory: desktop/electron
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run make
+          # Again, now that the bundles exist: no credential string in the preload or Work's page.
+          npx vitest run src/credentials.test.ts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-bundles
           path: |
-            desktop/src-tauri/target/release/bundle/deb/*.deb
-            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/electron/out/make/deb/*/*.deb
           if-no-files-found: error
 
   ling:
@@ -330,6 +335,8 @@ jobs:
           flags=(--generate-notes --target "$GITHUB_SHA" --title "Mightling $TAG")
           [[ "${{ inputs.prerelease }}" == "true" ]] && flags+=(--prerelease)
           [[ "${{ inputs.draft }}" == "true" ]] && flags+=(--draft)
+          # merge-multiple keeps each artifact's own subdirectories (deb/), so collect the
+          # files themselves; handing gh a directory fails the upload after the release is created.
           mapfile -t files < <(find artifacts -type f | sort)
           files+=(SHA256SUMS SHA256SUMS.sig)
           printf 'Uploading %s\n' "${files[@]}"

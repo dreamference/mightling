@@ -1,0 +1,49 @@
+#!/bin/sh
+# Mightling's .deb, after install (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3, decision 7).
+#
+# 1. The AppArmor profile that lets the app's binary create the user namespace Chromium's sandbox
+#    uses. Ubuntu 24.04 refuses that to programs without a profile
+#    (kernel.apparmor_restrict_unprivileged_userns=1); without it the app aborts at start with
+#    "The SUID sandbox helper binary was found, but is not configured correctly". The same shape
+#    as the Codex app's profile and as Ubuntu's own profiles for sandboxing programs.
+# 2. `ling-app`, the command `ling app` runs: a launcher script beside the package's own
+#    `/usr/bin/mightling` link, so the launcher entry, `ling app` and a shell all start the same
+#    binary with the same arguments.
+set -e
+
+APP_DIR=/usr/lib/mightling
+BINARY="$APP_DIR/Mightling"
+PROFILE=/etc/apparmor.d/mightling
+
+cat > "$PROFILE" <<'EOF'
+# Written by Mightling's package. It lets the desktop app create the user namespace that
+# Chromium's sandbox needs, which Ubuntu otherwise refuses to programs without a profile
+# (kernel.apparmor_restrict_unprivileged_userns=1). Same shape as Ubuntu's own profiles for
+# sandboxing programs (chrome, linux-sandbox).
+abi <abi/4.0>,
+include <tunables/global>
+
+profile mightling "/usr/lib/mightling/Mightling" flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/mightling>
+}
+EOF
+if command -v apparmor_parser >/dev/null 2>&1 && [ -d /sys/kernel/security/apparmor ]; then
+    apparmor_parser -r -T -W "$PROFILE" || true
+fi
+
+cat > /usr/bin/ling-app <<'EOF'
+#!/bin/sh
+exec /usr/lib/mightling/Mightling "$@"
+EOF
+chmod 755 /usr/bin/ling-app
+
+# The binary's own Chromium sandbox: the user-namespace path above, never a SUID helper.
+[ -x "$BINARY" ] || echo "Mightling: $BINARY is missing" >&2
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+exit 0

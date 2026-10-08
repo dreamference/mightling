@@ -353,6 +353,7 @@ Trace one real ling session and list every network destination and process, with
 | Option | Description |
 |---|---|
 | `--tui` | Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte) |
+| `--app` | Trace the desktop app (ling-app) with both windows hidden, on the display DISPLAY names. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
 | `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
 
@@ -592,7 +593,7 @@ Mightling desktop app (a native window onto the local deployment).
 
 #### `ling-admin desktop install`
 
-Install the desktop build toolchain (system packages, Rust, Tauri CLI).
+Install the desktop app's packages (Electron, from npm) and the AppArmor profile its sandbox needs.
 
 #### `ling-admin desktop run`
 

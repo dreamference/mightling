@@ -186,8 +186,11 @@ pub fn run_cli(args: &[String]) -> i32 {
     let lines = match args.first().map(String::as_str) {
         None => command(None::<String>, ""),
         Some("default") => command(None::<String>, &args.join(" ")),
+        // The level a thread is at, for a client that is not inside the session: the desktop
+        // app's Work window shows it in its title bar (desktop/electron/src/airgapped.ts).
+        Some("--thread") if args.len() == 2 => command(args.get(1), ""),
         Some(_) => vec![
-            "Usage: ling airgapped [default <off|on>]".to_string(),
+            "Usage: ling airgapped [default <off|on>] [--thread <id>]".to_string(),
             format!("For one run: {ENV_VAR}=on ling exec …; inside a session: /airgapped <level>."),
         ],
     };

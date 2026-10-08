@@ -168,8 +168,8 @@ open(args[len(args) - 2], "w").write("pong")
     out = capsys.readouterr().out
     assert code == 0 and "✅ Egress audit: pass" in out
     call = json.loads(calls.read_text())
-    assert call["args"][:7] == ["-f", "-qq", "-e", "trace=connect,sendto,sendmsg,sendmmsg,execve", "-s", "256", "-o"]
-    assert call["args"][8:11] == ["/opt/ling", "exec", "--skip-git-repo-check"]
+    assert call["args"][:8] == ["-f", "-qq", "-yy", "-e", "trace=connect,sendto,sendmsg,sendmmsg,execve,write,writev", "-s", "256", "-o"]
+    assert call["args"][9:12] == ["/opt/ling", "exec", "--skip-git-repo-check"]
     assert call["args"][-1] == "Reply with exactly: pong"
     # Neither the user's home nor the user's repository: both are scratch, and gone afterwards.
     assert call["CODEX_HOME"] != str(home) and not os.path.exists(call["CODEX_HOME"])
@@ -308,8 +308,8 @@ def test_the_interface_is_opened_prompted_and_quit_on_a_pseudo_terminal(tmp_path
     assert code == 0 and "✅ Egress audit: pass" in out and "full-screen `ling` session" in out
     call = json.loads(calls.read_text())
     # The interface itself: `ling` with no subcommand, on a terminal.
-    assert call["args"][:7] == ["-f", "-qq", "-e", "trace=connect,sendto,sendmsg,sendmmsg,execve", "-s", "256", "-o"]
-    assert call["args"][8:] == ["/opt/ling"]
+    assert call["args"][:8] == ["-f", "-qq", "-yy", "-e", "trace=connect,sendto,sendmsg,sendmmsg,execve,write,writev", "-s", "256", "-o"]
+    assert call["args"][9:] == ["/opt/ling"]
     assert call["tty"] is True and call["term"] == "xterm-256color"
     # It typed the prompt, and after the reply it quit.
     assert call["typed"] == ["Reply with exactly: pong", "/quit"]
@@ -419,3 +419,151 @@ def test_codex_build_audits_a_new_binary_and_keeps_its_own_exit_code(argv, was_c
         controller.main()
     assert exit_info.value.code == (0 if built else 1)
     assert calls == (["audit"] if audited else [])
+
+
+# -- the desktop app's session --------------------------------------------------------------------
+
+def test_the_desktop_app_is_traced_hidden_with_the_web_ui_allowed(tmp_path, monkeypatch, capsys):
+    # A stand-in for strace: records how it was called, plays back the recorded trace, exits 0 as
+    # an app that ran its audit session to the end does.
+    calls = tmp_path / "calls.json"
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{os.sys.executable}
+import json, os, shutil, sys
+args = sys.argv[1:]
+json.dump({{"args": args, "HOME": os.environ.get("HOME"), "audit": os.environ.get("MIGHTLING_APP_AUDIT"),
+           "bin": os.environ.get("MIGHTLING_BIN"), "CODEX_HOME": os.environ.get("CODEX_HOME")}}, open({str(calls)!r}, "w"))
+shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
+""")
+    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    code = EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", app=True, app_bin="/opt/Mightling")
+    out = capsys.readouterr().out
+    assert code == 0 and "✅ Egress audit: pass" in out and "desktop app session" in out
+    call = json.loads(calls.read_text())
+    assert call["args"][-2:] == ["/opt/Mightling", "--work"]
+    assert call["audit"] == "40" and call["bin"] == "/opt/ling"
+    # Chromium's profile and the app's data folder land in the scratch home, never the user's.
+    assert call["HOME"] != os.path.expanduser("~") and call["HOME"].endswith("home-dir")
+    assert call["CODEX_HOME"] != str(tmp_path / "codex-home")
+    assert 3000 in EgressAudit.allowed_ports("http://localhost:8000", "app")
+    assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000")
+
+
+def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
+    if __import__("shutil").which("strace") is None:
+        pytest.skip("strace is not installed here")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x", app=True, app_bin="/opt/Mightling") == 2
+    assert "needs a display" in capsys.readouterr().out
+    monkeypatch.setattr(EgressAudit, "app_executable", classmethod(lambda cls: None))
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x", app=True) == 2
+    assert "ling-admin desktop build" in capsys.readouterr().out
+
+
+# -- the desktop app's session --------------------------------------------------------------------
+
+def test_the_desktop_app_is_traced_hidden_with_the_web_ui_allowed(tmp_path, monkeypatch, capsys):
+    # A stand-in for strace: records how it was called, plays back the recorded trace, exits 0 as
+    # an app that ran its audit session to the end does.
+    calls = tmp_path / "calls.json"
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{os.sys.executable}
+import json, os, shutil, sys
+args = sys.argv[1:]
+json.dump({{"args": args, "HOME": os.environ.get("HOME"), "audit": os.environ.get("MIGHTLING_APP_AUDIT"),
+           "bin": os.environ.get("MIGHTLING_BIN"), "CODEX_HOME": os.environ.get("CODEX_HOME")}}, open({str(calls)!r}, "w"))
+shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
+""")
+    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    code = EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://localhost:8000", app=True, app_bin="/opt/Mightling")
+    out = capsys.readouterr().out
+    assert code == 0 and "✅ Egress audit: pass" in out and "desktop app session" in out
+    call = json.loads(calls.read_text())
+    assert call["args"][-2:] == ["/opt/Mightling", "--work"]
+    assert call["audit"] == "40" and call["bin"] == "/opt/ling"
+    # Chromium's profile and the app's data folder land in the scratch home, never the user's.
+    assert call["HOME"] != os.path.expanduser("~") and call["HOME"].endswith("home-dir")
+    assert call["CODEX_HOME"] != str(tmp_path / "codex-home")
+    assert 3000 in EgressAudit.allowed_ports("http://localhost:8000", "app")
+    assert 3000 not in EgressAudit.allowed_ports("http://localhost:8000")
+
+
+def test_the_desktop_app_needs_a_display_and_a_build(monkeypatch, capsys):
+    if __import__("shutil").which("strace") is None:
+        pytest.skip("strace is not installed here")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x", app=True, app_bin="/opt/Mightling") == 2
+    assert "needs a display" in capsys.readouterr().out
+    monkeypatch.setattr(EgressAudit, "app_executable", classmethod(lambda cls: None))
+    assert EgressAudit.run(mightling_bin="/opt/ling", vllm_host="http://x", app=True) == 2
+    assert "ling-admin desktop build" in capsys.readouterr().out
+
+
+# -- route lookups ---------------------------------------------------------------------------------
+# Recorded from the desktop app on 2026-10-07: Chromium's IPv6 reachability check, a UDP connect
+# to Google's resolver address that fails here (no IPv6 route) and is never followed by a payload.
+CHROMIUM_PROBE = (
+    '2628928 connect(23<UDPv6:[10868489]>, {sa_family=AF_INET6, sin6_port=htons(443), sin6_flowinfo=htonl(0), '
+    'inet_pton(AF_INET6, "2001:4860:4860::8888", &sin6_addr), sin6_scope_id=0}, 28) = -1 ENETUNREACH (Network is unreachable)\n'
+    '2628930 connect(24<TCP:[10873001]>, {sa_family=AF_INET, sin_port=htons(3000), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)\n'
+    '2628931 execve("/opt/Mightling", ["/opt/Mightling", "--type=utility"], 0xffff /* 40 vars */) = 0\n'
+)
+
+
+def test_a_udp_connect_with_nothing_sent_is_a_route_lookup_not_a_destination():
+    trace = StraceParser.parse(CHROMIUM_PROBE)
+    assert trace.route_lookups == {"[2001:4860:4860::8888]:443": 1}
+    assert trace.destinations == {"127.0.0.1:3000": 1}
+    allowed = EgressAudit.allowed_ports("http://localhost:8000", "app")
+    verdict = EgressAudit.judge(trace, allowed, replied=True)
+    assert verdict.status == PASS, verdict.problems
+    lines = EgressAudit.render(trace, verdict, allowed)
+    assert "Route lookups (UDP connect, nothing sent): [2001:4860:4860::8888]:443 (1x)" in lines
+
+
+@pytest.mark.parametrize("payload", [
+    # write() on the connected socket, still labelled by inode...
+    '2628928 write(23<UDPv6:[10868489]>, "x", 1) = 1',
+    # ...or labelled with its peer once strace can read it, via send().
+    '2628929 sendto(23<UDPv6:[[2a00::5]:40000->[2001:4860:4860::8888]:443]>, "x", 1, 0, NULL, 0) = 1',
+])
+def test_a_payload_on_that_socket_makes_it_a_destination_again(payload):
+    text = CHROMIUM_PROBE.replace("= -1 ENETUNREACH (Network is unreachable)", "= 0") + payload + "\n"
+    trace = StraceParser.parse(text)
+    assert trace.destinations.get("[2001:4860:4860::8888]:443") == 1
+    verdict = EgressAudit.judge(trace, EgressAudit.allowed_ports("http://localhost:8000", "app"), replied=True)
+    assert verdict.status == FAIL and "not on this machine" in verdict.problems[0]
+
+
+def test_without_socket_labels_every_connect_is_still_a_destination():
+    unlabelled = CHROMIUM_PROBE.replace("23<UDPv6:[10868489]>", "23").replace("24<TCP:[10873001]>", "24")
+    trace = StraceParser.parse(unlabelled)
+    assert trace.route_lookups == {} and "[2001:4860:4860::8888]:443" in trace.destinations
+
+
+def test_a_tcp_connect_is_never_a_route_lookup():
+    tcp = CHROMIUM_PROBE.replace("UDPv6", "TCPv6")
+    trace = StraceParser.parse(tcp)
+    assert trace.route_lookups == {} and "[2001:4860:4860::8888]:443" in trace.destinations
+
+
+def test_a_labelled_resolver_socket_still_yields_its_query_names():
+    # With -yy the descriptor's label changes between connect and send (inode, then the peer);
+    # the resolver socket is still the same descriptor.
+    query = "\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x07example\\x03com\\x00\\x00\\x01\\x00\\x01"
+    text = (
+        '5 connect(7<UDP:[555]>, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, 16) = 0\n'
+        f'5 sendmmsg(7<UDP:[127.0.0.1:40000->127.0.0.53:53]>, [{{msg_hdr={{msg_name=NULL, msg_namelen=0, msg_iov=[{{iov_base="{query}", iov_len=29}}], msg_iovlen=1, msg_controllen=0, msg_flags=0}}, msg_len=29}}], 1, MSG_NOSIGNAL) = 1\n'
+    )
+    trace = StraceParser.parse(text)
+    assert trace.dns_names == {"example.com": 1} and trace.destinations == {}

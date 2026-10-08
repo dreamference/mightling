@@ -1052,6 +1052,7 @@ class DreamferenceCLIController:
         audit_egress_parser = audit_subparsers.add_parser(
             "egress", help="Trace one real ling session and list every network destination and process, with a verdict")
         audit_egress_parser.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
+        audit_egress_parser.add_argument("--app", action="store_true", help="Trace the desktop app (ling-app) with both windows hidden, on the display DISPLAY names")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")
         audit_egress_parser.add_argument("--json", action="store_true", help="Also write the full result to $CODEX_HOME/audit/<timestamp>.json")
 
@@ -1202,7 +1203,7 @@ class DreamferenceCLIController:
             dest="desktop_command", help="Desktop app operations"
         )
         desktop_subparsers.add_parser(
-            "install", help="Install the desktop build toolchain (system packages, Rust, Tauri CLI)"
+            "install", help="Install the desktop app's packages (Electron, from npm) and the AppArmor profile its sandbox needs"
         )
         desktop_subparsers.add_parser("run", help="Open the Mightling desktop window")
         desktop_subparsers.add_parser("build", help="Build a distributable desktop bundle")
@@ -2349,7 +2350,7 @@ class DreamferenceCLIController:
             from dreamference.audit import EgressAudit
             if args.audit_command == "egress":
                 # 0 on a pass, 1 on an unexpected destination, 2 when the trace itself failed.
-                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui))
+                sys.exit(EgressAudit.run(prompt=args.prompt, write_json=args.json, tui=args.tui, app=args.app))
             print("usage: ling-admin audit {egress}")
             sys.exit(2)
 

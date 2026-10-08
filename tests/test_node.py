@@ -12,6 +12,7 @@ import subprocess
 import uuid
 
 import pytest
+from pathlib import Path
 
 from dreamference.chat.onyx_runner import ONYX_LOOPBACK_ENV, OnyxRunner
 from dreamference.chat.searxng_sidecar import SearxngSidecar
@@ -314,8 +315,8 @@ def test_the_web_crates_locator_is_a_byte_identical_copy():
     repo = Path(__file__).resolve().parent.parent
     leaf = repo / "ling-rs" / "node-locator" / "src" / "lib.rs"
     assert (repo / "ling-web-rs" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
-    # ling-app is a third build of its own (Tauri), with a third copy.
-    assert (repo / "desktop" / "src-tauri" / "src" / "node_locator.rs").read_bytes() == leaf.read_bytes()
+    # ling-app is Electron (desktop/electron/src/node_locator.ts), a port of the crate rather
+    # than a copy; its own tests mirror the crate's.
     # ...and it agrees with the node about the service type and the contract's version.
     from dreamference.node import PROTO, SERVICE_TYPE
     text = leaf.read_text()
@@ -1092,77 +1093,25 @@ def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_
 
 
 # -- ling-app's one-time sign-in (§7) -------------------------------------------------------------
+# The behaviour (once per window, only without a session, no second try, a client gets the login
+# page) is tested where it lives, in desktop/electron/src/sign-in.test.ts. These pin the contract
+# the Python side shares with it: the password is per install, read by the main process only.
 
-SIGN_IN_HARNESS = r"""
-const script = require("fs").readFileSync(process.argv[2], "utf8")
-  .replace("__MIGHTLING_EMAIL_JSON__", JSON.stringify("admin@dreamference.dev"))
-  .replace("__MIGHTLING_PASSWORD_JSON__", JSON.stringify("g3n\"er'ated&=+Ml7!"));
-const scenario = JSON.parse(process.argv[3]);
-const store = {};
-const calls = [];
-let navigated = null;
-global.window = {
-  sessionStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } },
-  location: { replace: (url) => { navigated = url; } },
-};
-global.fetch = (url, options) => {
-  calls.push({ url, method: (options && options.method) || "GET", body: options && options.body });
-  if (url === "/api/me") return Promise.resolve({ status: scenario.me, ok: scenario.me === 200 });
-  return Promise.resolve({ status: scenario.login, ok: scenario.login < 300 });
-};
-(async () => {
-  for (let i = 0; i < scenario.loads; i++) { eval(script); await new Promise((r) => setTimeout(r, 20)); }
-  console.log(JSON.stringify({ calls, navigated }));
-})();
-"""
+ELECTRON_SRC = Path(__file__).resolve().parent.parent / "desktop" / "electron" / "src"
 
 
-def run_sign_in(tmp_path, **scenario):
-    import shutil
-    if not shutil.which("node"):
-        pytest.skip("node is not installed")
-    from pathlib import Path
-    harness = tmp_path / "harness.js"
-    harness.write_text(SIGN_IN_HARNESS)
-    script = Path(__file__).resolve().parent.parent / "desktop" / "src-tauri" / "src" / "auto_sign_in.js"
-    result = subprocess.run(["node", str(harness), str(script), json.dumps(scenario)],
-                            capture_output=True, text=True, timeout=60, check=True)
-    return json.loads(result.stdout)
-
-
-def test_the_window_signs_in_with_the_stored_account_once(tmp_path):
-    # No session: one login with the stored account, then the app. The password is passed as a
-    # JSON literal, so quotes, ampersands and the like arrive intact and cannot break the script.
-    out = run_sign_in(tmp_path, me=403, login=204, loads=1)
-    assert [call["url"] for call in out["calls"]] == ["/api/me", "/api/auth/login"]
-    assert out["calls"][1]["method"] == "POST"
-    assert out["calls"][1]["body"] == (
-        "username=admin%40dreamference.dev&password=g3n%22er'ated%26%3D%2BMl7!"
-    )
-    assert out["navigated"] == "/app"
-
-
-def test_a_changed_password_gets_the_login_page_and_no_second_attempt(tmp_path):
-    out = run_sign_in(tmp_path, me=403, login=400, loads=3)
-    assert [call["url"] for call in out["calls"]].count("/api/auth/login") == 1    # tried once per window
-    assert out["navigated"] is None
-
-
-def test_a_signed_in_window_is_left_alone(tmp_path):
-    out = run_sign_in(tmp_path, me=200, login=204, loads=2)
-    assert [call["url"] for call in out["calls"]] == ["/api/me", "/api/me"]
-    assert out["navigated"] is None
-
-
-def test_the_window_reads_the_account_configure_stores_and_compiles_none_in():
-    from pathlib import Path
-    from dreamference.chat.onyx_runner import LEGACY_ONYX_PASSWORD
-    main = (Path(__file__).resolve().parent.parent / "desktop" / "src-tauri" / "src" / "main.rs").read_text()
-    # The same file ChatAdminCredentials writes, read at run time.
-    assert '.join(".config").join("dreamference").join("chat-admin.json")' in main
-    # The published default spells the same as the config folder; it may appear only there.
-    assert main.count(f'"{LEGACY_ONYX_PASSWORD}"') == main.count('.join("dreamference")')
-    assert "DEFAULT_PASSWORD" not in main and "__MIGHTLING_PASSWORD__" not in main
+def test_the_window_signs_in_from_the_main_process_with_the_per_install_account():
+    sign_in = (ELECTRON_SRC / "sign-in.ts").read_text()
+    assert 'path.join(".config", "dreamference", "chat-admin.json")' in sign_in
+    assert "if (me !== 401 && me !== 403)" in sign_in
+    chat = (ELECTRON_SRC / "chat.ts").read_text()
+    # No script is injected into Onyx's page and no default account is baked in.
+    assert "executeJavaScript" not in chat and "preload" not in chat.replace("No preload", "")
+    assert "net.request({ method, url, session" in chat and "window.webContents.session" in chat
+    assert not (ELECTRON_SRC / "auto_sign_in.js").exists()
+    for source in ELECTRON_SRC.glob("*.ts"):
+        text = source.read_text()
+        assert "admin@dreamference.dev" not in text or source.name == "credentials.test.ts", source.name
 
 
 def test_node_id_prints_the_id_and_writes_it_once(monkeypatch, capsys):

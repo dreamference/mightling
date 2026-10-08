@@ -1,0 +1,13 @@
+#!/bin/sh
+# Mightling's .deb, before removal: unload and remove the AppArmor profile postinst wrote, and the
+# `ling-app` launcher script.
+set -e
+PROFILE=/etc/apparmor.d/mightling
+if [ -f "$PROFILE" ]; then
+    if command -v apparmor_parser >/dev/null 2>&1 && [ -d /sys/kernel/security/apparmor ]; then
+        apparmor_parser -R "$PROFILE" >/dev/null 2>&1 || true
+    fi
+    rm -f "$PROFILE"
+fi
+rm -f /usr/bin/ling-app
+exit 0

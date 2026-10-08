@@ -3,12 +3,22 @@ Reading an `strace` of a `ling` session (specs/DREAMFERENCE_MIGHTLING_EGRESS.md 
 
 This module provides the StraceParser class. It reads the output of
 
-    strace -f -qq -e trace=connect,sendto,sendmsg,sendmmsg,execve -s 256 -o <file> ling …
+    strace -f -qq -yy -e trace=connect,sendto,sendmsg,sendmmsg,execve,write,writev -s 256 -o <file> ling …
 
 and extracts where the session's processes connected, which names they asked a resolver for,
 which unix sockets they opened and which programs they started. `sendmmsg` is in the list because
 it is how glibc sends a lookup's A and AAAA queries: without it a DNS query leaves no name in the
 trace, only a connect to the resolver.
+
+`-yy` labels every descriptor with its socket type and inode (`23<UDPv6:[10868489]>`), which is
+what tells a route lookup from a connection: `connect()` on a UDP socket sends no packet, it only
+asks the kernel for a route and fixes the peer. Chromium does exactly that before resolving any
+host (its IPv6 reachability check: a UDP connect to `[2001:4860:4860::8888]:443`, then reading
+the local address it was given), and no switch turns it off. Such a connect is recorded under
+`route_lookups`, not `destinations`; the first payload sent on that socket (`send*`, or `write`/
+`writev`, which a connected UDP socket also accepts) moves its destination back into
+`destinations`, where the verdict judges it like any other. A trace without `-yy` labels keeps
+the old reading, every connect a destination.
 """
 
 import ipaddress
@@ -32,6 +42,15 @@ LINE: Final[re.Pattern] = re.compile(r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?([a-z_0-
 INET: Final[re.Pattern] = re.compile(r'sa_family=AF_INET, sin_port=htons\((\d+)\), sin_addr=inet_addr\("([^"]+)"\)')
 INET6: Final[re.Pattern] = re.compile(r'sa_family=AF_INET6, sin6_port=htons\((\d+)\),.*?inet_pton\(AF_INET6, "([^"]+)"')
 UNIX: Final[re.Pattern] = re.compile(r'sa_family=AF_UNIX, sun_path=(@?)"((?:[^"\\]|\\.)*)"')
+
+# A descriptor as `-yy` prints it: `23<UDPv6:[10868489]>`, or once connected
+# `23<UDP:[127.0.0.1:40000->127.0.0.53:53]>`.
+FD_LABEL: Final[re.Pattern] = re.compile(r"^(\d+)(?:<([A-Za-z0-9]+):\[(.*)\]>)?$")
+
+# The remote end of a connected socket's label: `->127.0.0.53:53` or `->[::1]:53`.
+LABEL_PEER: Final[re.Pattern] = re.compile(r"->\[?([0-9A-Fa-f:.]+?)\]?:(\d+)$")
+
+UDP_KINDS: Final[frozenset] = frozenset({"UDP", "UDPv6", "UDPLITE", "UDPLITEv6"})
 
 # `1234 <... execve resumed>) = 0`: the result of a call another process's line interrupted.
 RESUMED_EXECVE: Final[re.Pattern] = re.compile(r"^(?:\[pid\s+(\d+)\]\s+|(\d+)\s+)?<\.\.\. execve resumed>.*\)\s*=\s*(-?\d+)")
@@ -58,6 +77,8 @@ class StraceParser:
         trace = EgressTrace()
         # (pid, fd) of sockets connected to a resolver, whose later payloads are DNS queries.
         resolver_sockets: Dict[Tuple[str, str], str] = {}
+        # Inode of a UDP socket that was only connected so far, to the destination it names.
+        udp_routes: Dict[str, str] = {}
         # An execve whose result is on a later line (`<unfinished ...>`), by pid.
         pending_execve: Dict[str, str] = {}
         for line in text.splitlines():
@@ -79,14 +100,22 @@ class StraceParser:
                 pending_execve[pid] = rest
             elif syscall == "execve":
                 cls._read_execve(rest, trace)
-            elif syscall in ("connect", "sendto", "sendmsg", "sendmmsg"):
-                cls._read_socket_call(pid, syscall, rest, trace, resolver_sockets)
+            elif syscall in ("connect", "sendto", "sendmsg", "sendmmsg", "write", "writev"):
+                cls._read_socket_call(pid, syscall, rest, trace, resolver_sockets, udp_routes)
         return trace
 
     @classmethod
     def _read_socket_call(cls, pid: str, syscall: str, rest: str, trace: EgressTrace,
-                          resolver_sockets: Dict[Tuple[str, str], str]) -> None:
-        fd = rest.split(",", 1)[0].strip()
+                          resolver_sockets: Dict[Tuple[str, str], str],
+                          udp_routes: Optional[Dict[str, str]] = None) -> None:
+        udp_routes = {} if udp_routes is None else udp_routes
+        fd, kind, inner = cls.fd_label(rest.split(",", 1)[0].strip())
+        udp = kind in UDP_KINDS
+        if syscall in ("write", "writev"):
+            # Only a UDP socket's payload matters here: a stream's connect was already counted.
+            if udp:
+                cls._udp_payload(inner, trace, udp_routes)
+            return
         destination = cls.destination_in(rest)
         if destination is not None:
             address, port = destination
@@ -95,12 +124,20 @@ class StraceParser:
                 trace.dns_servers[target] = trace.dns_servers.get(target, 0) + 1
                 if syscall == "connect":
                     resolver_sockets[(pid, fd)] = target
+            elif syscall == "connect" and udp and inner.isdigit():
+                # A route lookup: nothing is sent until a payload follows on this socket.
+                trace.route_lookups[target] = trace.route_lookups.get(target, 0) + 1
+                udp_routes[inner] = target
+                resolver_sockets.pop((pid, fd), None)
             else:
                 trace.destinations[target] = trace.destinations.get(target, 0) + 1
                 resolver_sockets.pop((pid, fd), None)
         elif syscall == "connect":
             # A unix socket, netlink or anything else: this fd is not a resolver's any more.
             resolver_sockets.pop((pid, fd), None)
+        elif udp:
+            # A payload on a connected UDP socket, which names no destination of its own.
+            cls._udp_payload(inner, trace, udp_routes)
         unix = UNIX.search(rest)
         if unix:
             path = ("@" if unix.group(1) else "") + cls.unescape(unix.group(2)).decode("utf-8", "replace")
@@ -114,6 +151,37 @@ class StraceParser:
                 name = cls.dns_query_name(payload)
                 if name:
                     trace.dns_names[name] = trace.dns_names.get(name, 0) + 1
+
+    @classmethod
+    def _udp_payload(cls, inner: str, trace: EgressTrace, udp_routes: Dict[str, str]) -> None:
+        """A payload sent on a UDP socket: its destination counts as reached, whatever the connect was."""
+        target = udp_routes.get(inner)
+        if target is None:
+            peer = LABEL_PEER.search(inner)
+            if peer is None:
+                return
+            address, port = peer.group(1), int(peer.group(2))
+            if port == DNS_PORT:
+                return  # A resolver's payload is read as a query by the caller's DNS rule.
+            target = cls.format_destination(address, port)
+        trace.destinations[target] = trace.destinations.get(target, 0) + 1
+
+    @classmethod
+    def fd_label(cls, text: str) -> Tuple[str, str, str]:
+        """
+        Splits a descriptor as strace printed it.
+
+        Args:
+            text (str): `23`, or with `-yy` `23<UDPv6:[10868489]>`.
+
+        Returns:
+            Tuple[str, str, str]: The descriptor number, the socket kind (`""` without a label)
+            and what the brackets hold (an inode, or `local->remote` once connected).
+        """
+        match = FD_LABEL.match(text)
+        if match is None:
+            return text, "", ""
+        return match.group(1), match.group(2) or "", match.group(3) or ""
 
     @classmethod
     def _read_execve(cls, rest: str, trace: EgressTrace) -> None:

@@ -36,7 +36,11 @@ pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
 .running { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; margin-left: auto; }
 
 .thread-pane { display: flex; flex-direction: column; min-width: 0; height: 100%; }
-.bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+/* The window is frameless (desktop/electron/src/work.ts): this bar is the title bar the page draws,
+   draggable, with room on the right for the native minimise/maximise/close controls the overlay
+   paints (36px high). Its own controls opt out of dragging. */
+.bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 150px 6px 14px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; user-select: none; }
+.bar button, .bar input, .bar select, .bar .link-button { -webkit-app-region: no-drag; }
 .bar .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .bar .cwd { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spacer { flex: 1; }

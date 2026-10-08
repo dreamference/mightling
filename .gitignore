@@ -42,18 +42,19 @@ ENV/
 .claude/
 /config/
 
-# Tauri build output
-desktop/src-tauri/target/
-desktop/bridge/target/
+# The Electron app: npm's install, Vite's and Forge's output, the binaries copied in for bundling
+desktop/electron/node_modules/
+desktop/electron/.vite/
+desktop/electron/out/
+desktop/electron/resources/
+desktop/electron/e2e/results/
 
 # The Work window's frontend: npm's install and Vite's build (dist/ is covered above)
 desktop/ui/node_modules/
+desktop/ui/.vite/
 
 # ling-code build output
 ling-code-rs/target/
-
-# Tauri generated schemas (regenerated on every build)
-desktop/src-tauri/gen/schemas/
 
 # MkDocs build output (the product site)
 site/
