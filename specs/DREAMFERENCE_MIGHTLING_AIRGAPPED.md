@@ -128,6 +128,7 @@ Every command the agent runs goes through Codex's sandbox. Under `workspace-writ
 ### 5.2 What `on` switches off beside the sandbox
 
 - **`ling update`** keeps working at `on` (decided 2026-10-03). The level is about what a session's commands may reach; an update is the user replacing the binaries from a shell, outside any session and its sandbox, so it is not refused. `update` is one of the launcher's offline subcommands and reads no level. From inside a session at `on` it fails like any other command, since the sandbox has no network.
+- **`/node`** keeps working at `on` (decided 2026-10-07): it is a deliberate exception for the local network only. Like a `!` command, it is the user's own and runs outside the agent's sandbox: the TUI suspends itself and runs `ling-admin node …` in the terminal, and nothing it prints or asks for reaches the model. Before it runs it prints `airgapped is on: /node talks to machines on your local network only`, so the user knows why it is allowed. Everything this machine sends for it goes to machines on the LAN (mDNS, SSH, the other node's `ling-admin`). `node provision` installs Mightling on the *new* node, which may then reach PyPI and its image registry **from that node**, not from this one; this machine's own traffic stays on the LAN. Under the app server or `ling exec`, where there is no terminal to hand over, `/node` refuses and says to run `ling-admin node …` in a shell (§14.8).
 - **The Gmail check at start** is skipped, and Gmail is not advertised (§3).
 - **`ling-code session`** is unaffected: indexing already runs in a network-less sandbox.
 
@@ -406,3 +407,9 @@ Full Access has no sandbox, and the sandbox is the only thing that enforces `on`
 **Watched in the build of `258c3b5` (2026-10-03), in tmux:** `--yolo` at `DREAMFERENCE_MIGHTLING_AIRGAPPED=on` ended with exit 1 and the launch message above; `/permissions` in a session at `on` listed `Full Access (disabled)` with the reason and offered only the other two rows; `/airgapped on` typed in a session started with `-s danger-full-access` printed the two refusal lines and changed nothing.
 
 Patch `0019` grew by 1,261 bytes (the series from 32,425 to 33,686; `test_the_patches_stay_small` raised to 33,750).
+
+### 14.8 Added on 2026-10-07: `/node` runs at `on`
+
+`/node` (patch `0025`, `ling-rs/src/node_command.rs`, MIGHTLING_NODE §18.9) suspends the TUI and runs `ling-admin node …` in the terminal, outside the agent's sandbox. It is not refused at `on`: the user trusts the local network, and the command is the user's own, like a `!` command (§5.2). At `on` it first prints `airgapped is on: /node talks to machines on your local network only`, and the history keeps that line beside the summary. Whatever `node provision` installs reaches PyPI and an image registry from the new node, never from this one.
+
+**Watched in a build of this branch (2026-10-07), in tmux,** with a scratch `HOME` and `CODEX_HOME` and a stand-in `ling-admin` that asks for a password: at `DREAMFERENCE_MIGHTLING_AIRGAPPED=on`, `/node status spark-1` printed the notice, ran the stand-in with `node status spark-1`, which read a password typed without echo, and after Enter the TUI came back with the notice and `node status spark-1: done (exit 0)` in the history. In the same check at `off`, the 13-character password reached the stand-in and appears nowhere under `CODEX_HOME` (its logs database included), and text typed at the "Press Enter" prompt did not reach the composer.

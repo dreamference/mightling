@@ -42,7 +42,7 @@ reqwest = { workspace = true, features = ["json"] }
 semver = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["rt", "time"] }
 toml = { workspace = true }
 toml_edit = { workspace = true }
 
@@ -51,6 +51,10 @@ toml_edit = { workspace = true }
 # openssl-sys every other crate links -- which is what keeps this out of a patch to codex-core.
 [target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
 openssl-sys = { workspace = true, features = ["vendored"] }
+
+# `/node` ignores Ctrl-C while its child has the terminal (src/node_command.rs).
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 [dev-dependencies]
 clap = { workspace = true, features = ["derive"] }

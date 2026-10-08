@@ -43,6 +43,7 @@ pub mod ledger;
 pub mod mask;
 pub mod night;
 pub mod node;
+pub mod node_command;
 pub mod notice;
 pub mod prompt;
 pub mod release_signature;
