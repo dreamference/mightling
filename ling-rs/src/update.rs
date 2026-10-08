@@ -5,14 +5,17 @@
 //! here instead. The release workflow attaches, per target, a gzipped `ling`, a gzipped
 //! `codex-code-mode-host`, the gzipped web commands `ling-search` and `ling-fetch`, the gzipped
 //! code index router `ling-code`, and a `sha256sums` file covering all of them; this downloads
-//! the latest published release's assets, verifies every archive against the checksum file, and
+//! the latest published release's assets, checks the release's signature (from 1.5.0 on, the
+//! release-wide `SHA256SUMS` signed by Mightling's release key, which lists the per-target
+//! checksum file; src/release_signature.rs), verifies every archive against the checksum file, and
 //! swaps the binaries in next to the running executable. The web commands and `ling-code` are
 //! optional, because earlier releases do not carry them (v1.3.0 has the web commands and no
 //! `ling-code`); the installed ones are then kept.
 //!
-//! The repository is public, so no token is needed; one is sent when present (`GH_TOKEN`,
-//! `GITHUB_TOKEN`, or whatever `gh auth token` prints), which raises GitHub's rate limit and reads
-//! a private fork named by `MIGHTLING_RELEASE_REPO`.
+//! The repository is public, so no token is needed. `GH_TOKEN` or `GITHUB_TOKEN` is sent when set,
+//! which raises GitHub's rate limit; a logged-in `gh`'s token is used only for a fork named by
+//! `MIGHTLING_RELEASE_REPO`. A token only ever goes to `api.github.com`, never to a download URL
+//! the release names (security review 2026-10).
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -23,6 +26,8 @@ use anyhow::Context;
 use anyhow::bail;
 use sha2::Digest;
 use sha2::Sha256;
+
+use crate::release_signature;
 
 /// Where releases are published. `MIGHTLING_RELEASE_REPO` overrides it, e.g. for a fork.
 pub const RELEASE_REPO: &str = "dreamference/mightling";
@@ -112,13 +117,30 @@ fn hex_sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn github_token() -> Option<String> {
+/// The only host a token is ever sent to. The release JSON names each asset's download URL, and
+/// a token must not follow such a URL anywhere else: a release that was tampered with, or an old
+/// repository name taken over by someone else, would otherwise collect the user's GitHub token.
+const GITHUB_API: &str = "https://api.github.com/";
+
+/// Whether a request to `url` may carry the token.
+fn sends_token(url: &str) -> bool {
+    url.starts_with(GITHUB_API)
+}
+
+/// The token to send, if any. `GH_TOKEN` and `GITHUB_TOKEN` are used when set; the token of a
+/// logged-in `gh` is asked for only when `MIGHTLING_RELEASE_REPO` names another repository (a
+/// private fork). The public repository needs none, and a `gh` login usually carries far more
+/// access than reading a release.
+fn github_token(repo: &str) -> Option<String> {
     for name in ["GH_TOKEN", "GITHUB_TOKEN"] {
         if let Ok(token) = std::env::var(name)
             && !token.trim().is_empty()
         {
             return Some(token.trim().to_string());
         }
+    }
+    if repo == RELEASE_REPO {
+        return None;
     }
     let output = std::process::Command::new("gh")
         .args(["auth", "token"])
@@ -137,19 +159,21 @@ pub async fn run() -> anyhow::Result<()> {
         .ok()
         .filter(|repo| !repo.is_empty())
         .unwrap_or_else(|| RELEASE_REPO.to_string());
-    let token = github_token();
+    let token = github_token(&repo);
     let client = reqwest::Client::builder()
         .user_agent(format!("ling/{}", MIGHTLING_VERSION.unwrap_or("source")))
         .connect_timeout(Duration::from_secs(15))
         .build()?;
-    let authorized = |request: reqwest::RequestBuilder| match &token {
-        Some(token) => request.bearer_auth(token),
-        None => request,
+    let authorized = |url: &str, request: reqwest::RequestBuilder| match &token {
+        Some(token) if sends_token(url) => request.bearer_auth(token),
+        _ => request,
     };
 
+    let latest_url = format!("{GITHUB_API}repos/{repo}/releases/latest");
     let response = authorized(
+        &latest_url,
         client
-            .get(format!("https://api.github.com/repos/{repo}/releases/latest"))
+            .get(&latest_url)
             .header("Accept", "application/vnd.github+json"),
     )
     .send()
@@ -199,9 +223,11 @@ pub async fn run() -> anyhow::Result<()> {
     }
 
     let download = |name: String| {
+        let url = assets[name.as_str()];
         let request = authorized(
+            url,
             client
-                .get(assets[name.as_str()])
+                .get(url)
                 .header("Accept", "application/octet-stream"),
         );
         async move {
@@ -211,7 +237,23 @@ pub async fn run() -> anyhow::Result<()> {
         }
     };
 
-    let sums = parse_sums(&String::from_utf8(download(sums_asset.clone()).await?)?);
+    let sums_bytes = download(sums_asset.clone()).await?;
+    let signed = signature_expected(
+        latest,
+        assets.contains_key(release_signature::SUMS_ASSET),
+        assets.contains_key(release_signature::SIGNATURE_ASSET),
+    )
+    .with_context(|| format!("release {tag}"))?;
+    if signed {
+        verify_signed_sums(&assets, &download, tag, &sums_asset, &sums_bytes).await?;
+    } else {
+        println!(
+            "⚠️  release {tag} predates signed releases ({}); it is checked against its \
+             checksums only",
+            release_signature::SIGNED_SINCE
+        );
+    }
+    let sums = parse_sums(&String::from_utf8(sums_bytes)?);
     let exe = std::env::current_exe()?.canonicalize()?;
     let install_dir = exe
         .parent()
@@ -255,6 +297,96 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Whether a release's signature is checked: always when it carries one. A release of
+/// `SIGNED_SINCE` or later without one is refused, since an unsigned one did not come from
+/// Mightling's release job; only an older release installs on its checksums alone.
+pub fn signature_expected(
+    version: &str,
+    has_sums: bool,
+    has_signature: bool,
+) -> anyhow::Result<bool> {
+    let missing = match (has_sums, has_signature) {
+        (true, true) => return Ok(true),
+        (false, true) => release_signature::SUMS_ASSET,
+        (_, false) => release_signature::SIGNATURE_ASSET,
+    };
+    if has_signature || release_signature::signing_required(version) {
+        bail!(
+            "is not signed (it has no {missing}); nothing was installed. Every release from {} on \
+             is signed by Mightling's release key, so an unsigned one did not come from its \
+             release job",
+            release_signature::SIGNED_SINCE
+        );
+    }
+    Ok(false)
+}
+
+/// Downloads a release's `SHA256SUMS`, its signature and any key transition, and checks them with
+/// [`check_signed_sums`].
+async fn verify_signed_sums<F, Fut>(
+    assets: &HashMap<&str, &str>,
+    download: &F,
+    tag: &str,
+    sums_asset: &str,
+    sums_bytes: &[u8],
+) -> anyhow::Result<()>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<Vec<u8>>>,
+{
+    let all_sums = download(release_signature::SUMS_ASSET.to_string()).await?;
+    let signature = String::from_utf8(download(release_signature::SIGNATURE_ASSET.to_string()).await?)?;
+    let transition = if assets.contains_key(release_signature::TRANSITION_KEY_ASSET)
+        && assets.contains_key(release_signature::TRANSITION_SIGNATURE_ASSET)
+    {
+        Some((
+            String::from_utf8(download(release_signature::TRANSITION_KEY_ASSET.to_string()).await?)?,
+            String::from_utf8(
+                download(release_signature::TRANSITION_SIGNATURE_ASSET.to_string()).await?,
+            )?,
+        ))
+    } else {
+        None
+    };
+    let trusted = release_signature::parse_keys(release_signature::TRUSTED_KEYS)?;
+    let signer = check_signed_sums(
+        sums_asset,
+        sums_bytes,
+        &all_sums,
+        &signature,
+        transition.as_ref().map(|(key, sig)| (key.as_str(), sig.as_str())),
+        &trusted,
+    )
+    .with_context(|| format!("release {tag} failed its signature check; nothing was installed"))?;
+    println!("🔏 {} is signed by {signer}", release_signature::SUMS_ASSET);
+    Ok(())
+}
+
+/// The signature check without the network: `SHA256SUMS` must be signed by a trusted key (or one a
+/// trusted key endorses), and the per-target checksum file must be the one it lists, which is what
+/// ties every binary to the signature.
+pub fn check_signed_sums(
+    sums_asset: &str,
+    sums_bytes: &[u8],
+    all_sums: &[u8],
+    signature: &str,
+    transition: Option<(&str, &str)>,
+    trusted: &[[u8; 32]],
+) -> anyhow::Result<String> {
+    let signer = release_signature::verify_release(all_sums, signature, transition, trusted)?;
+    let listed = parse_sums(&String::from_utf8_lossy(all_sums));
+    let expected = listed.get(sums_asset).with_context(|| {
+        format!("{} has no checksum for {sums_asset}", release_signature::SUMS_ASSET)
+    })?;
+    if &hex_sha256(sums_bytes) != expected {
+        bail!(
+            "{sums_asset} does not match its checksum in {}",
+            release_signature::SUMS_ASSET
+        );
+    }
+    Ok(signer)
+}
+
 /// Links `~/.local/bin/<name>` to the installed command, as `ling-admin codex build` does. Only
 /// a missing file or an existing link is replaced: a real file of that name belongs to something
 /// else, and is reported instead.
@@ -294,6 +426,86 @@ fn replace(dir: &Path, name: &str, binary: &[u8]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::release_signature::testing::{key_line, sign};
+    use ed25519_dalek::SigningKey;
+
+    /// A release's per-target sums file and the SHA256SUMS that lists it, as the release job
+    /// writes them.
+    fn signed_release(key: &SigningKey) -> (Vec<u8>, Vec<u8>, String) {
+        let per_target = b"aaaa  ling-x.gz\nbbbb  codex-code-mode-host-x.gz\n".to_vec();
+        let all = format!(
+            "{}  ling-x.sha256sums\ncccc  ling-admin.whl\n",
+            hex_sha256(&per_target)
+        )
+        .into_bytes();
+        let signature = sign(&all, key, release_signature::RELEASE_NAMESPACE);
+        (per_target, all, signature)
+    }
+
+    #[test]
+    fn an_unsigned_release_from_the_cut_over_on_is_refused() {
+        assert!(signature_expected("1.5.0", true, true).unwrap());
+        assert!(signature_expected("1.4.1", true, true).unwrap());
+        assert!(!signature_expected("1.4.1", false, false).unwrap());
+        for (version, sums, signature) in
+            [("1.5.0", true, false), ("1.6.0", false, false), ("1.4.1", false, true)]
+        {
+            let error = signature_expected(version, sums, signature).unwrap_err();
+            assert!(format!("{error:#}").contains("is not signed"), "{version}");
+        }
+    }
+
+    #[test]
+    fn a_signed_release_ties_the_target_sums_to_the_signature() {
+        let key = SigningKey::from_bytes(&[3; 32]);
+        let trusted = [key.verifying_key().to_bytes()];
+        let (per_target, all, signature) = signed_release(&key);
+        check_signed_sums("ling-x.sha256sums", &per_target, &all, &signature, None, &trusted)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_swapped_target_sums_file_is_refused_even_with_a_good_signature() {
+        let key = SigningKey::from_bytes(&[3; 32]);
+        let trusted = [key.verifying_key().to_bytes()];
+        let (_, all, signature) = signed_release(&key);
+        let swapped = b"ffff  ling-x.gz\n";
+        let error =
+            check_signed_sums("ling-x.sha256sums", swapped, &all, &signature, None, &trusted)
+                .unwrap_err();
+        assert!(format!("{error:#}").contains("does not match its checksum in SHA256SUMS"));
+    }
+
+    #[test]
+    fn a_release_signed_by_another_key_is_refused() {
+        let key = SigningKey::from_bytes(&[3; 32]);
+        let attacker = SigningKey::from_bytes(&[4; 32]);
+        let trusted = [key.verifying_key().to_bytes()];
+        let (per_target, all, signature) = signed_release(&attacker);
+        assert!(
+            check_signed_sums("ling-x.sha256sums", &per_target, &all, &signature, None, &trusted)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_release_after_a_key_rotation_installs_through_the_transition() {
+        let old = SigningKey::from_bytes(&[3; 32]);
+        let new = SigningKey::from_bytes(&[5; 32]);
+        let trusted = [old.verifying_key().to_bytes()];
+        let (per_target, all, signature) = signed_release(&new);
+        let line = key_line(&new);
+        let endorsement = sign(line.as_bytes(), &old, release_signature::KEY_NAMESPACE);
+        check_signed_sums(
+            "ling-x.sha256sums",
+            &per_target,
+            &all,
+            &signature,
+            Some((&line, &endorsement)),
+            &trusted,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn versions_decide_whether_to_install() {
@@ -302,6 +514,15 @@ mod tests {
         assert_eq!(decide(Some("1.4.0"), "1.3.0"), Decision::NewerThanRelease);
         assert_eq!(decide(Some("1.3.0-rc.1"), "1.3.0"), Decision::Install);
         assert_eq!(decide(None, "1.3.0"), Decision::Install);
+    }
+
+    #[test]
+    fn the_token_goes_to_the_github_api_and_nowhere_else() {
+        assert!(sends_token("https://api.github.com/repos/o/r/releases/assets/1"));
+        assert!(!sends_token("https://objects.githubusercontent.com/x"));
+        assert!(!sends_token("https://api.github.com.evil.example/repos/o/r"));
+        assert!(!sends_token("http://api.github.com/repos/o/r"));
+        assert!(!sends_token("https://evil.example/?https://api.github.com/"));
     }
 
     #[test]

@@ -15,11 +15,15 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+# Release signatures: SHA256SUMS.sig is checked before `ling update` installs anything
+# (src/release_signature.rs).
+base64 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-utils-home-dir = { workspace = true }
+ed25519-dalek = { workspace = true }
 flate2 = { workspace = true }
 # Pure-Rust mDNS browsing, one code path on Linux, macOS and Windows; no async runtime, no logging.
 mdns-sd = { version = "0.21.4", default-features = false }

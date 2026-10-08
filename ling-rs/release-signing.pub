@@ -1,0 +1,6 @@
+# Mightling's release signing keys (specs/DREAMFERENCE_RELEASE_SIGNING.md). Every release from
+# 1.5.0 on carries SHA256SUMS.sig, an OpenSSH signature (`ssh-keygen -Y sign -n mightling-release`)
+# of SHA256SUMS by one of these keys. `ling update` compiles this file in (src/release_signature.rs),
+# install.sh embeds the same lines (a test compares them), and the release job checks its own
+# signature against it before publishing. One OpenSSH public key per line; '#' starts a comment.
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKIG5+J3RTa4AaoT0o2qIhVr7bGvaa+T5b84rDv31ptj mightling-release-2026-10

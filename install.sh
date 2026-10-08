@@ -25,8 +25,18 @@
 # MIGHTLING_RELEASE_REPO names another repository (a fork), MIGHTLING_RELEASE_API another API root (the
 # tests' stand-in server); MIGHTLING_INSTALL_DIR and MIGHTLING_VENV move the two directories.
 #
+# Releases from 1.5.0 on are signed: SHA256SUMS, which lists every file of the release, carries an
+# Ed25519 signature by Mightling's release key (SHA256SUMS.sig), checked here with OpenSSH's
+# `ssh-keygen -Y verify` (OpenSSH 8.1 or newer, which Linux distributions and macOS ship) against
+# the key below. Nothing is installed from a signed release whose signature does not verify, or
+# from a release from 1.5.0 on that is unsigned. specs/DREAMFERENCE_RELEASE_SIGNING.md.
+#
 # For a development install from a checkout, use scripts/install_gb10.sh instead.
 set -euo pipefail
+
+# The release keys, the lines of ling-rs/release-signing.pub (a test keeps them equal).
+RELEASE_KEYS='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKIG5+J3RTa4AaoT0o2qIhVr7bGvaa+T5b84rDv31ptj mightling-release-2026-10'
+SIGNED_SINCE="1.5.0"
 
 REPO="${MIGHTLING_RELEASE_REPO:-dreamference/mightling}"
 API="${MIGHTLING_RELEASE_API:-https://api.github.com}"
@@ -40,7 +50,7 @@ ADVERTISE=1
 say()  { printf '%s\n' "$*"; }
 fail() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -109,8 +119,12 @@ fi
 
 # -- the release -----------------------------------------------------------------------------
 
+# A token is used when GH_TOKEN or GITHUB_TOKEN is set; a logged-in gh's token only for a fork
+# named by MIGHTLING_RELEASE_REPO (the public repository needs none, and a gh login carries far more
+# access than reading a release). It is only ever sent to the API root, never to a download URL
+# the release names.
 TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-if [ -z "$TOKEN" ] && command -v gh >/dev/null 2>&1; then
+if [ -z "$TOKEN" ] && [ -n "${MIGHTLING_RELEASE_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
     TOKEN="$(gh auth token 2>/dev/null || true)"
 fi
 auth=()
@@ -151,7 +165,9 @@ asset_url() { awk -F'\t' -v name="$1" '$1 == name {print $2; exit}' "$WORK/asset
 fetch() {  # fetch <asset name>: downloads it into $WORK, or fails
     local url; url="$(asset_url "$1")"
     [ -n "$url" ] || return 1
-    curl -fsSL ${auth[@]+"${auth[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
+    local header=()
+    case "$url" in "$API"/*) header=(${auth[@]+"${auth[@]}"}) ;; esac
+    curl -fsSL ${header[@]+"${header[@]}"} -H "Accept: application/octet-stream" "$url" -o "$WORK/$1"
 }
 
 say "🐧 Mightling $TAG for $TARGET, role: $ROLE"
@@ -159,6 +175,57 @@ say "🐧 Mightling $TAG for $TARGET, role: $ROLE"
 SUMS="ling-$TARGET.sha256sums"
 if ! fetch "$SUMS"; then
     fail "release $TAG has no binaries for $TARGET (no $SUMS). Published targets: $(awk -F'\t' '/sha256sums/ {sub(/^ling-/, "", $1); sub(/\.sha256sums$/, "", $1); printf "%s ", $1}' "$WORK/assets.tsv")"
+fi
+
+# -- the signature ---------------------------------------------------------------------------
+
+# Whether a tag is SIGNED_SINCE or newer. A tag that is not a version is treated as new: a name
+# nobody can read is no reason to skip the check (`ling update` decides the same way).
+signing_required() {
+    awk -v tag="${1#v}" -v since="$SIGNED_SINCE" 'BEGIN {
+        if (tag !~ /^[0-9]+\.[0-9]+\.[0-9]+/) exit 0
+        split(tag, a, /[.+-]/); split(since, b, ".")
+        for (i = 1; i <= 3; i++) { if (a[i] + 0 > b[i] + 0) exit 0; if (a[i] + 0 < b[i] + 0) exit 1 }
+        exit 0
+    }'
+}
+signers() {  # the allowed-signers lines for the keys of a public-key file on stdin
+    awk 'NF && $1 !~ /^#/ { print "mightling-release " $1 " " $2 }'
+}
+
+if [ -n "$(asset_url SHA256SUMS.sig)" ]; then
+    command -v ssh-keygen >/dev/null 2>&1 || fail "ssh-keygen (OpenSSH 8.1 or newer) is needed to \
+check the release's signature and was not found. On Debian and Ubuntu: sudo apt install openssh-client."
+    fetch SHA256SUMS.sig || fail "could not download SHA256SUMS.sig."
+    fetch SHA256SUMS || fail "release $TAG has SHA256SUMS.sig but no SHA256SUMS; nothing was installed."
+    printf '%s\n' "$RELEASE_KEYS" | signers > "$WORK/allowed_signers"
+    # A key rotation: the release names the new key, signed by a key trusted here under a namespace
+    # of its own (specs/DREAMFERENCE_RELEASE_SIGNING.md §5).
+    if [ -n "$(asset_url release-key-transition.pub)" ]; then
+        fetch release-key-transition.pub && fetch release-key-transition.pub.sig \
+            || fail "release $TAG names a new release key but its endorsement could not be downloaded."
+        ssh-keygen -Y verify -f "$WORK/allowed_signers" -I mightling-release -n mightling-release-key \
+            -s "$WORK/release-key-transition.pub.sig" < "$WORK/release-key-transition.pub" >/dev/null 2>&1 \
+            || fail "release $TAG names a new release key that no trusted key has signed; nothing was installed."
+        signers < "$WORK/release-key-transition.pub" >> "$WORK/allowed_signers"
+    fi
+    if ! ssh-keygen -Y verify -f "$WORK/allowed_signers" -I mightling-release -n mightling-release \
+        -s "$WORK/SHA256SUMS.sig" < "$WORK/SHA256SUMS" > "$WORK/verify.out" 2>&1; then
+        fail "release $TAG failed its signature check: SHA256SUMS is not signed by Mightling's \
+release key ($(tail -n 1 "$WORK/verify.out")). Nothing was installed."
+    fi
+    # The per-target sums file is one of the files SHA256SUMS lists, which is what ties every
+    # binary checked below to the signature.
+    wanted="$(awk -v file="$SUMS" '{ f = $2; sub(/^\*/, "", f); if (f == file) { print $1; exit } }' "$WORK/SHA256SUMS")"
+    [ -n "$wanted" ] || fail "SHA256SUMS has no checksum for $SUMS; nothing was installed."
+    [ "$(sha256 "$WORK/$SUMS")" = "$wanted" ] \
+        || fail "$SUMS does not match its checksum in SHA256SUMS; nothing was installed."
+    say "🔏 Release $TAG is signed by Mightling's release key."
+elif signing_required "$TAG"; then
+    fail "release $TAG is not signed (it has no SHA256SUMS.sig); nothing was installed. Every release \
+from $SIGNED_SINCE on is signed by Mightling's release key, so an unsigned one did not come from its release job."
+else
+    say "⚠️  Release $TAG predates signed releases ($SIGNED_SINCE); it is checked against its checksums only."
 fi
 
 # Required, then optional: releases before the web commands and the code index were Rust binaries
@@ -225,6 +292,17 @@ if [ "$ROLE" = "node" ]; then
     wheel="$(awk -F'\t' '$1 ~ /^dreamference-.*\.whl$/ {print $1; exit}' "$WORK/assets.tsv")"
     [ -n "$wheel" ] || fail "release $TAG has no Python wheel, so the node cannot be installed from it."
     fetch "$wheel" || fail "could not download $wheel."
+    # The wheel is checked like the binaries, against the release-wide SHA256SUMS (signed, and
+    # already checked above, from 1.5 on); an older release has none, which is said rather than
+    # skipped silently.
+    if [ -f "$WORK/SHA256SUMS" ] || fetch SHA256SUMS; then
+        wanted="$(awk -v file="$wheel" '{ f = $2; sub(/^\*/, "", f); if (f == file) { print $1; exit } }' "$WORK/SHA256SUMS")"
+        [ -n "$wanted" ] || fail "SHA256SUMS has no checksum for $wheel; nothing was installed."
+        [ "$(sha256 "$WORK/$wheel")" = "$wanted" ] \
+            || fail "$wheel does not match its checksum in SHA256SUMS; nothing was installed."
+    else
+        say "⚠️  Release $TAG has no SHA256SUMS, so $wheel is installed without a checksum check."
+    fi
 
     if [ ! -x "$VENV_DIR/bin/python" ]; then
         say "🐍 Creating $VENV_DIR ..."

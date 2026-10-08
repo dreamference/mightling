@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -83,15 +84,61 @@ class FakeRelease:
         self.server.shutdown()
 
 
-def binaries(names=("ling", "codex-code-mode-host", "ling-search", "ling-fetch"), corrupt=None):
-    """Release assets for `names`: gzipped scripts that print their own name, and the sums file."""
+# -- release signing (specs/DREAMFERENCE_RELEASE_SIGNING.md) -----------------------------------------
+#
+# The tests sign with keys of their own, made once per session, and run a copy of install.sh whose
+# trusted key is the test key: the release key's private half never leaves its owner's machine.
+
+KEYS = {}
+RELEASE_KEYS_LINE = re.compile(r"^RELEASE_KEYS='[^']*'$", re.MULTILINE)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def release_keys(tmp_path_factory):
+    folder = tmp_path_factory.mktemp("release-keys")
+    for name in ("release", "next", "attacker"):
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", name, "-f", str(folder / name)],
+                       check=True)
+        KEYS[name] = folder / name
+    installer = folder / "install.sh"
+    public = KEYS["release"].with_suffix(".pub").read_text().strip()
+    installer.write_text(RELEASE_KEYS_LINE.sub(f"RELEASE_KEYS='{public}'", INSTALL_SH.read_text(), count=1))
+    KEYS["installer"] = installer
+    yield KEYS
+
+
+def ssh_sign(data, key="release", namespace="mightling-release"):
+    """What the release job does: `ssh-keygen -Y sign` of `data`, returned as the .sig bytes."""
+    folder = Path(KEYS[key]).parent / f"sign-{os.getpid()}-{threading.get_ident()}"
+    folder.mkdir(exist_ok=True)
+    message = folder / "message"
+    message.write_bytes(data)
+    Path(f"{message}.sig").unlink(missing_ok=True)
+    subprocess.run(["ssh-keygen", "-q", "-Y", "sign", "-f", str(KEYS[key]), "-n", namespace, str(message)],
+                   check=True, capture_output=True)
+    return Path(f"{message}.sig").read_bytes()
+
+
+def sign(assets, key="release", listed=None):
+    """Adds SHA256SUMS over every asset (`listed` overrides a file's checksum) and its signature."""
+    listed = listed or {}
+    lines = [f"{listed.get(name) or hashlib.sha256(body).hexdigest()}  {name}"
+             for name, body in sorted(assets.items()) if name not in ("SHA256SUMS", "SHA256SUMS.sig")]
+    assets["SHA256SUMS"] = ("\n".join(lines) + "\n").encode()
+    assets["SHA256SUMS.sig"] = ssh_sign(assets["SHA256SUMS"], key)
+    return assets
+
+
+def binaries(names=("ling", "codex-code-mode-host", "ling-search", "ling-fetch"), corrupt=None, signed=True):
+    """Release assets for `names`: gzipped scripts that print their own name, the per-target sums
+    file and, unless `signed` is false, SHA256SUMS signed by the test's release key."""
     assets, sums = {}, []
     for name in names:
         archive = gzip.compress(f"#!/bin/sh\necho {name} from the release\n".encode())
         sums.append(f"{hashlib.sha256(archive).hexdigest()}  {name}-{TARGET}.gz")
         assets[f"{name}-{TARGET}.gz"] = archive + (b"tampered" if name == corrupt else b"")
     assets[f"ling-{TARGET}.sha256sums"] = ("\n".join(sums) + "\n").encode()
-    return assets
+    return sign(assets) if signed else assets
 
 
 @pytest.fixture
@@ -131,7 +178,7 @@ def run_install(home, server, *args, token=None, uname_m="aarch64", gpu="Some Ot
            "MIGHTLING_RELEASE_API": server.url, "MIGHTLING_RELEASE_REPO": "test/ling"}
     if token:
         env["GH_TOKEN"] = token
-    return subprocess.run(["bash", str(INSTALL_SH), *args], env=env, capture_output=True, text=True,
+    return subprocess.run(["bash", str(KEYS["installer"]), *args], env=env, capture_output=True, text=True,
                           stdin=subprocess.DEVNULL, timeout=120, check=False)
 
 
@@ -149,6 +196,7 @@ def test_the_client_is_installed_from_the_release_checked_and_linked(tmp_path, r
     # Codex finds its Code Mode host beside its own executable; it is not a command to type.
     assert not (tmp_path / ".local/bin/codex-code-mode-host").exists()
     assert "v9.9.9" in result.stdout and "role: client" in result.stdout
+    assert "signed by Mightling's release key" in result.stdout
     # Nothing of the node: no virtualenv, no ling-admin.
     assert not (tmp_path / ".local/share/dreamference/venv").exists()
 
@@ -594,3 +642,127 @@ def test_the_cli_has_the_host_commands(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 0
+
+
+# -- the token stays with the API (security review 2026-10) ----------------------------------------
+
+def test_the_token_is_not_sent_to_download_urls_on_another_host(tmp_path, release_server):
+    # The release JSON names where each asset downloads from. A token sent along to such a URL
+    # would reach whoever controls it: a tampered release, or an old repository name taken over.
+    downloads = release_server(binaries())
+    api = release_server(binaries())
+    api.document = lambda port: FakeRelease.document(api, downloads.server.server_address[1]).replace(
+        f'"url": "http://127.0.0.1:{downloads.server.server_address[1]}/repos/test/ling/releases/1"',
+        f'"url": "{api.url}/repos/test/ling/releases/1"')
+    result = run_install(tmp_path, api, "--role", "client", token="sekret")
+    assert result.returncode == 0, result.stderr
+    assert any(header == "Bearer sekret" for _, header in api.requests)
+    assert downloads.requests and all(header is None for _, header in downloads.requests)
+
+
+def test_a_wheel_that_does_not_match_the_release_sums_is_not_installed(tmp_path, release_server):
+    assets = binaries(signed=False)
+    wheel = "dreamference-9.9.9-py3-none-any.whl"
+    assets[wheel] = b"not the wheel that was built"
+    sign(assets, listed={wheel: hashlib.sha256(b"the wheel that was built").hexdigest()})
+    result = run_install(tmp_path, release_server(assets), "--role", "node")
+    assert result.returncode == 1
+    assert "does not match its checksum in SHA256SUMS" in result.stderr
+    assert not (tmp_path / ".local/share/dreamference/venv").exists()
+
+
+# -- signed releases (specs/DREAMFERENCE_RELEASE_SIGNING.md) ----------------------------------------
+
+def nothing_installed(home):
+    return not (home / ".local/share/dreamference/mightling").exists() and not (home / ".local/bin").exists()
+
+
+def test_the_installer_trusts_the_keys_ling_update_compiles_in():
+    keys = [line for line in (INSTALL_SH.parent / "ling-rs/release-signing.pub").read_text().splitlines()
+            if line.strip() and not line.startswith("#")]
+    embedded = RELEASE_KEYS_LINE.search(INSTALL_SH.read_text()).group(0)
+    assert keys and embedded == f"RELEASE_KEYS='{chr(10).join(keys)}'"
+
+
+def test_an_unsigned_release_from_the_cut_over_on_is_refused(tmp_path, release_server):
+    for tag in ("v1.5.0", "v9.9.9", "nightly"):
+        result = run_install(tmp_path, release_server(binaries(signed=False), tag=tag), "--role", "client")
+        assert result.returncode == 1, tag
+        assert f"release {tag} is not signed" in result.stderr
+        assert nothing_installed(tmp_path)
+
+
+def test_a_release_without_its_signature_file_is_refused(tmp_path, release_server):
+    assets = binaries()
+    del assets["SHA256SUMS.sig"]
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 1 and "is not signed" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
+def test_a_release_older_than_signing_installs_with_a_warning(tmp_path, release_server):
+    server = release_server(binaries(signed=False), tag="v1.4.1")
+    result = run_install(tmp_path, server, "--role", "client", "--version", "1.4.1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "predates signed releases (1.5.0)" in result.stdout
+    assert (tmp_path / ".local/bin/ling").is_symlink()
+
+
+def test_a_tampered_checksum_file_fails_the_signature_check(tmp_path, release_server):
+    assets = binaries()
+    assets["SHA256SUMS"] += b"0000  something-added-after-signing\n"
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 1
+    assert "failed its signature check" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
+def test_a_release_signed_by_another_key_is_refused(tmp_path, release_server):
+    assets = binaries(signed=False)
+    sign(assets, key="attacker")
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 1
+    assert "failed its signature check" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
+def test_binaries_swapped_with_their_sums_file_do_not_pass_the_signed_sums(tmp_path, release_server):
+    # Someone who can replace release assets but has no key can make the binaries and their
+    # per-target sums agree; the signed SHA256SUMS still names the original sums file.
+    assets = binaries()
+    replaced = binaries(signed=False)
+    replaced[f"ling-{TARGET}.gz"] = gzip.compress(b"#!/bin/sh\necho not ours\n")
+    replaced[f"ling-{TARGET}.sha256sums"] = replaced[f"ling-{TARGET}.sha256sums"].replace(
+        hashlib.sha256(binaries(signed=False)[f"ling-{TARGET}.gz"]).hexdigest().encode(),
+        hashlib.sha256(replaced[f"ling-{TARGET}.gz"]).hexdigest().encode())
+    assets.update({name: body for name, body in replaced.items() if name.startswith("ling-")})
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 1
+    assert f"ling-{TARGET}.sha256sums does not match its checksum in SHA256SUMS" in result.stderr
+    assert nothing_installed(tmp_path)
+
+
+def test_a_new_key_endorsed_by_the_current_one_is_accepted(tmp_path, release_server):
+    next_key = KEYS["next"].with_suffix(".pub").read_bytes()
+    assets = binaries(signed=False)
+    assets["release-key-transition.pub"] = next_key
+    assets["release-key-transition.pub.sig"] = ssh_sign(next_key, "release", "mightling-release-key")
+    sign(assets, key="next")
+    result = run_install(tmp_path, release_server(assets), "--role", "client")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "signed by Mightling's release key" in result.stdout
+
+
+def test_a_new_key_that_endorses_itself_is_refused(tmp_path, release_server):
+    attacker = KEYS["attacker"].with_suffix(".pub").read_bytes()
+    for endorser, namespace in (("attacker", "mightling-release-key"), ("release", "mightling-release")):
+        assets = binaries(signed=False)
+        assets["release-key-transition.pub"] = attacker
+        # Signed by itself, or by the real key but under the checksums' namespace (a signature
+        # over checksums must never pass as one over a key).
+        assets["release-key-transition.pub.sig"] = ssh_sign(attacker, endorser, namespace)
+        sign(assets, key="attacker")
+        result = run_install(tmp_path, release_server(assets), "--role", "client")
+        assert result.returncode == 1, (endorser, namespace)
+        assert "no trusted key has signed" in result.stderr
+        assert nothing_installed(tmp_path)
