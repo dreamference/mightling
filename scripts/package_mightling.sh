@@ -4,7 +4,8 @@
 #   scripts/package_mightling.sh <target> <bin dir> <out dir>
 #
 # Writes <name>-<target>.gz for ling, codex-code-mode-host, ling-search, ling-fetch and
-# ling-code, and ling-<target>.sha256sums covering them: the names and the checksum file that
+# ling-code, and for ling-docs where it was built (Linux only), and ling-<target>.sha256sums
+# covering them: the names and the checksum file that
 # install.sh and `ling update` (ling-rs/src/update.rs) look for. Portable between Linux and
 # macOS (sha256sum or shasum).
 set -euo pipefail
@@ -21,6 +22,11 @@ for name in "${names[@]}"; do
     gzip -9 -c "$bin/$name" > "$out/$name-$target.gz"
     files+=("$name-$target.gz")
 done
+# The local file index is built on Linux only; elsewhere the release simply does not carry it.
+if [ -x "$bin/ling-docs" ]; then
+    gzip -9 -c "$bin/ling-docs" > "$out/ling-docs-$target.gz"
+    files+=("ling-docs-$target.gz")
+fi
 
 if command -v sha256sum >/dev/null 2>&1; then
     (cd "$out" && sha256sum "${files[@]}" > "ling-$target.sha256sums")

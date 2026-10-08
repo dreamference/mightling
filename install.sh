@@ -7,8 +7,8 @@
 # What it installs depends on the machine:
 #
 #   client   the `ling` terminal agent and its commands (`ling-search`, `ling-fetch`,
-#            `ling-code` when the release carries it): prebuilt binaries, downloaded from the
-#            release, checked against its checksum file, placed in
+#            `ling-code` and, on Linux, `ling-docs` when the release carries them): prebuilt
+#            binaries, downloaded from the release, checked against its checksum file, placed in
 #            ~/.local/share/dreamference/mightling/bin and linked into ~/.local/bin. Releases carry it
 #            for arm64 and x86-64 Linux and for macOS (Apple silicon and Intel).
 #   node     the client, plus `ling-admin` (the Python package, from the release's wheel, in a
@@ -17,7 +17,8 @@
 #            (`ling-admin host setup --yes`); you in the `docker` group; lingering, so jobs and
 #            Night Shift tasks outlive a logout; the node offered to the local network
 #            (`ling-admin node enable --yes`), so `ling` on your other computers finds it with no
-#            address typed; and the default model, downloaded and served (`ling-admin model
+#            address typed; what the local file index loads (`ling-admin docs setup`, about
+#            320 MB); and the default model, downloaded and served (`ling-admin model
 #            download`, `ling-admin server start`, logged to ~/.local/state/dreamference/
 #            install-<time>.log). It ends with a summary of every step, done or failed. This is
 #            what a GB10 (DGX Spark and its siblings) gets by default; every other machine gets
@@ -401,9 +402,11 @@ else
 fi
 
 # Required, then optional: releases before the web commands and the code index were Rust binaries
-# do not carry them, which is how `ling update` treats them too.
+# do not carry them, which is how `ling update` treats them too. The local file index, ling-docs,
+# is built for Linux only (and from 1.6.0 on).
 REQUIRED="ling codex-code-mode-host"
 OPTIONAL="ling-search ling-fetch ling-code"
+[ "$(uname -s)" = Linux ] && OPTIONAL="$OPTIONAL ling-docs"
 INSTALLED=""
 for name in $REQUIRED $OPTIONAL; do
     asset="$name-$TARGET.gz"
@@ -583,6 +586,24 @@ if [ "$ROLE" = "node" ]; then
             sg docker -c "$(printf '%q ' "$VENV_DIR/bin/ling-admin" "$@") < /dev/null"
         fi
     }
+    # The local file index's run-time files: PDFium, ONNX Runtime and its embedding model, about
+    # 320 MB, each pinned and checked (`ling-admin docs setup`; ling-docs itself opens no socket).
+    case " $INSTALLED " in
+        *" ling-docs "*)
+            if [ "$MODEL" = 1 ]; then
+                say ""
+                say "⬇️  Downloading what the local file index loads (about 320 MB) ... log: $LOG"
+                if admin docs setup >> "$LOG" 2>&1; then
+                    step done "local file index: PDFium, ONNX Runtime and its embedding model installed"
+                else
+                    step failed "local file index: \`ling-admin docs setup\` failed, see $LOG"
+                fi
+            else
+                step off "local file index: --no-model (\`ling-admin docs setup\` installs what it loads)"
+            fi
+            ;;
+    esac
+
     if [ "$MODEL" = 1 ]; then
         say ""
         say "⬇️  Downloading the default model (tens of GB; this is the long part) ... log: $LOG"

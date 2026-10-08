@@ -33,7 +33,9 @@ EXCLUDE_FILES = {
     "install.sh",
     ".github/workflows/release.yml",
 }
-EXCLUDE_PREFIXES = ("codex/", "desktop/ui/src/protocol/", "tests/fixtures/code_index/")
+# ling-docs-rs/eval/ is the file index's evaluation corpus: its Wikipedia puffin articles are the
+# bird, and their URLs and checksums must stay as published.
+EXCLUDE_PREFIXES = ("codex/", "desktop/ui/src/protocol/", "tests/fixtures/code_index/", "ling-docs-rs/eval/")
 
 # Internal names that are persisted and never shown as a product name (§2, "Kept on purpose"), and
 # old names that code keeps on purpose.

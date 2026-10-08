@@ -216,18 +216,24 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-registry-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'ling-rs/**', 'ling-web-rs/Cargo.lock', 'ling-code-rs/Cargo.lock') }}
+          key: cargo-registry-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'codex-patches/**', 'ling-rs/**', 'ling-web-rs/Cargo.lock', 'ling-code-rs/Cargo.lock', 'ling-docs-rs/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.arch }}-
       # The same build `ling-admin codex build` runs locally: export the submodule, add
       # ling-rs/, apply codex-patches/, cargo build with prebuilt V8 fetched and verified; then
-      # the web commands from ling-web-rs/ and the code index router from ling-code-rs/, each a
-      # separate --locked build.
+      # the web commands from ling-web-rs/, the code index router from ling-code-rs/ and the local
+      # file index from ling-docs-rs/, each a separate --locked build. The file index's build also
+      # fetches what it loads (PDFium, ONNX Runtime, its model), pinned; none of that is packaged.
       - name: Build ling
         run: ling-admin codex build --force
       # Their own tests run the two binaries against a local stand-in for SearXNG and for web
       # pages; the build above has installed the toolchain they need.
       - name: Test the web commands
         working-directory: ling-web-rs
+        run: ~/.cargo/bin/cargo test --release --locked
+      # Its scopes and sandbox are stand-ins in the tests; the PDF and model cases run only when
+      # MIGHTLING_DOCS_LIB_DIR and MIGHTLING_DOCS_MODEL_DIR are set, which they are not here.
+      - name: Test the local file index
+        working-directory: ling-docs-rs
         run: ~/.cargo/bin/cargo test --release --locked
       - name: Package
         run: |
@@ -240,6 +246,9 @@ jobs:
           gzip -9 -c "$bin/ling-fetch" > "dist/ling-fetch-$target.gz"
           # The router only: `ling-admin code setup` fetches the indexers it runs.
           gzip -9 -c "$bin/ling-code" > "dist/ling-code-$target.gz"
+          # The local file index, binary only: `ling-admin docs setup` fetches PDFium, ONNX Runtime
+          # and the embedding model it loads, each pinned (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md §17).
+          gzip -9 -c "$bin/ling-docs" > "dist/ling-docs-$target.gz"
           # Mightling began as a fork of the Codex CLI (Apache 2.0), whose licence and notice must
           # travel with the binaries (Apache 2.0 section 4); the names say what they belong to.
           cp codex/LICENSE dist/THIRD-PARTY-LICENSE-codex-cli.txt
@@ -247,7 +256,7 @@ jobs:
           # `ling update` checks every archive against this file before installing any.
           (cd dist && sha256sum "ling-$target.gz" "codex-code-mode-host-$target.gz" \
             "ling-search-$target.gz" "ling-fetch-$target.gz" "ling-code-$target.gz" \
-            > "ling-$target.sha256sums")
+            "ling-docs-$target.gz" > "ling-$target.sha256sums")
           # The transition from Puffin (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.1): a 1.4.x
           # `puffin update` asks for these exact names, so the same binaries are published under
           # them too, with a checksum file that lists them. The new binary migrates the old

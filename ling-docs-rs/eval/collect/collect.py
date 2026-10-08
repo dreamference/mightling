@@ -72,14 +72,14 @@ for rel, url in [
 
 # Wikipedia, pinned to revision ids.
 WIKI = "CC BY-SA 4.0 (Wikipedia contributors)"
-html_titles = ["Atlantic_mightling", "Transport_Layer_Security", "HTTP", "Rust_(programming_language)",
+html_titles = ["Atlantic_puffin", "Transport_Layer_Security", "HTTP", "Rust_(programming_language)",
                "Python_(programming_language)", "SQLite", "Unicode", "Photosynthesis", "Plate_tectonics", "Black_hole",
                "Roman_Empire", "French_Revolution", "Penicillin", "Vaccine", "Inflation", "Supply_and_demand",
                "Machine_learning", "Transformer_(deep_learning)", "Public-key_cryptography", "Bitcoin",
                "Iceland", "Volcano", "Coral_reef", "Honey_bee", "Coffee", "Chess", "Mount_Everest", "Amazon_River",
                "Electric_vehicle", "Lithium-ion_battery", "Solar_panel", "Wind_power", "General_Data_Protection_Regulation", "Copyright",
                "Open-source_software", "Linux_kernel", "Git", "Docker_(software)", "Kubernetes", "Graphics_processing_unit"]
-pdf_titles = ["Mightling", "Auk", "Seabird", "Arctic_tern", "Guillemot"]
+pdf_titles = ["Puffin", "Auk", "Seabird", "Arctic_tern", "Guillemot"]
 docx_titles = ["Tea", "Chocolate", "Bread", "Cheese", "Olive_oil", "Wine", "Rice", "Potato", "Tomato", "Apple",
                "Banana", "Salt", "Sugar", "Honey", "Vanilla"]
 

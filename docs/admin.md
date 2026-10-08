@@ -361,6 +361,7 @@ Trace one real ling session and list every network destination and process, with
 | `--tui` | Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte) |
 | `--app` | Trace the desktop app (ling-app) with both windows hidden, on the display DISPLAY names. |
 | `--web` | Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`. |
+| `--docs` | Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
 | `--json` | Also write the full result to $CODEX_HOME/audit/<timestamp>.json. |
 
@@ -672,6 +673,14 @@ Show which accounts are connected.
 | Option | Description |
 |---|---|
 | `--json` | Emit raw JSON. |
+
+### `ling-admin docs`
+
+Manage the local file index's run-time files (ling-docs).
+
+#### `ling-admin docs setup`
+
+Install PDFium, ONNX Runtime and the embedding model ling-docs loads (pinned, checked).
 
 ### `ling-admin searxng`
 

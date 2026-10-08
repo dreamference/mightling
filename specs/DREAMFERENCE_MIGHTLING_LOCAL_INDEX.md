@@ -1,13 +1,15 @@
 # Mightling Local File Index — Specification
 
-**Status:** proposed 2026-10-07, not built. Part of the plan to drop Onyx while keeping a web UI: the
-"Ask" threads and Mightling's own web server are specified separately; this document covers the
-index of the user's own files that both of them, and the coding agent, search.
-**Names:** written with the post-rename names (product Mightling, command `ling`, admin `ling-admin`,
-home `~/.mightling`, crates `ling-*`). Until the rename lands, read `puffin` for `ling`.
+**Status:** Phase 1 built (§16) and integrated on the renamed tree for 1.6.0 (§16.7, §17); Phases 2
+and 3 proposed. Part of the plan to drop Onyx while keeping a web UI: the "Ask" threads and
+Mightling's own web server are specified separately; this document covers the index of the user's
+own files that both of them, and the coding agent, search.
 **Phase 0 measured on 2026-10-07** on the GB10 with the model server resident (§15): the PDF
 extractor, the multilingual embedding model, the chunk size, OCR and the first index of a
 Documents+Downloads folder are chosen with numbers. Apple Silicon was not measured here.
+**Phase 1 built on 2026-10-08** (§16): `ling-docs` with text, Markdown and PDF, the §12 acceptance
+passed on that part of the set; ported onto the renamed tree the same day (§16.7) and shipped as
+the release says in §17.
 
 ---
 
@@ -303,7 +305,7 @@ Environment: `DREAMFERENCE_MIGHTLING_DOCS_*`, same resolution order as other lau
 | Phase | Delivers | Gate |
 |---|---|---|
 | 0 | Measurements: PDFium text quality vs the Python reference (PyMuPDF) on the eval PDFs; the multilingual embedding candidates' quality, speed and memory on 4 cores of the GB10 and on an Apple Silicon laptop; chunk-size sweep; RapidOCR on scanned fixtures; skipping a Downloads folder's unsupported files | **Done 2026-10-07 on the GB10 (§15); Apple Silicon not measured here** |
-| 1 | `ling-docs` with text/Markdown/PDF; collections; hybrid search; CLI; MCP tools; prompt block; admission; egress scenario | §12 acceptance on text + PDF |
+| 1 | `ling-docs` with text/Markdown/PDF; collections; hybrid search; CLI; MCP tools; prompt block; admission; egress scenario | §12 acceptance on text + PDF: **built and passed 2026-10-08 (§16)** |
 | 2 | DOCX/ODT, HTML, `.eml`/`.mbox` (+ attachments), CSV; change scan + inotify; settings page in the desktop app and web UI; citation opening; **OCR of scanned PDFs and images with RapidOCR** (Apache-2.0, its PP-OCR ONNX models, CPU, sandboxed); pages with low recognition confidence queued for **Qwen3.8's vision** in Night Shift's idle hours, and any page read by Qwen3.8 on demand when the user asks about it | Same, all formats; OCR recall measured on scanned fixtures |
 | 3 | XLSX; anything left from Phase 2 | Same |
 
@@ -405,6 +407,9 @@ Speeds are for the whole set at batch 16, and at batch 1 where measured (160-chu
 | potion-multilingual-128M (static) | MIT | 489 MB | 256 | 1,512 | 1.2 GB | 0.1 ms | 0.608 | 0.773 / 0.528 | 52, 38 | 23, 22 | 3 / 5 |
 | BM25 alone (with trigrams) | — | — | — | — | — | 1.5 ms | — | 0.790 / 0.645 | 54, 41 | 24, 18 | — / 6 |
 
+- *Note (Phase 1, §16.2): the recall columns were measured with document vectors embedded at
+  batch 16, and the int8 export's vectors depend on the batch; ling-docs embeds at batch 1, and
+  its own recall is §16.5.*
 - **Chosen: snowflake-arctic-embed-m-v2.0, int8, one chunk at a time** (§7.3). It has the best
   dense recall (0.901), the best hybrid MRR and the best cross-lingual recall of everything that
   fits. **Batch 1 is both its fastest and its smallest setting**: a batch pads every chunk to the
@@ -562,3 +567,202 @@ DOCX, 4 TeX, 2 Markdown, 1 `.eml`) and 1,957 it skips unopened (10 archives, 498
 561 MB; 16 spreadsheets and presentations, not v1; 163 images, 15 MB, which are OCR candidates in
 Phase 2; 1,766 other files, 49 MB). At the corpus's 73 KB per PDF page that is roughly 1,600 pages
 and 3,500 chunks: about a minute of extraction and five of embedding.
+
+## 16. Phase 1: what was built (2026-10-08)
+
+`ling-docs-rs/` (binary `ling-docs`, its own `Cargo.lock`, toolchain 1.95.0, built `--locked`),
+with the Python and launcher pieces listed in §16.7. Measured on this GB10 with the model server
+resident and a 100-task SWE-bench run on it all day (so every speed here is under load); nothing
+called the model server, and every run used a throwaway `HOME`.
+
+### 16.1 The crate
+
+| Module | What it does |
+|---|---|
+| `collections` | `docs.toml` in the agent's home (mode 600, written whole); `documents`/`downloads` added when the folders exist (the XDG user directories when `user-dirs.dirs` names them), a removed default remembered in `removed_defaults`; `~`, `/`, any folder containing the home and anything inside the secret folders refused |
+| `discover` | The metadata-only walk of §15.8: extension allow-list (`txt md markdown rst org tex pdf`), hidden files, `node_modules`/`__pycache__`/`site-packages`, any folder with `CACHEDIR.TAG` or `pyvenv.cfg`, secret-like names, `.lingignore` (exclusions only), the collection's globs, `max_file_mb`; symlinks skipped unless followed and never out of the root; then the 8 KiB sniff and SHA-256 for new or changed files only; a browser's `x (1).pdf` is the duplicate, not the original |
+| `extract` | Text units (Markdown and reST as Phase 0, plus Org and LaTeX headings, 40-line blocks for plain text; a Markdown heading inside a code fence is not a heading) and PDF pages through PDFium's raw API (`pdfium-render` bindings, dlopen) with the ordered pass and `unicode-bidi`; a page without text is recorded `needs OCR` |
+| `chunk` | `evallib.chunk` ported: structure first, 512 tokens, 15% overlap, windows over sentence pieces, now with each window's own line range |
+| `embed` | `snowflake-arctic-embed-m-v2.0` int8 through ONNX Runtime (`ort`, `load-dynamic`), batch 1, CLS, `query: ` on queries, 512-token inputs |
+| `store` | One SQLite file per collection: `documents`, `units` (what `read` serves), `chunks` with float32 vectors, `chunks_fts` (`porter unicode61`) and `chunks_cjk` (`trigram`, only chunks with Chinese or Japanese), both contentless; rollback journal, not WAL, so a reader in the read-only sandbox needs no `-shm` |
+| `search` | §7.4: stop-word-free OR query (title weighted 2), trigram query for CJK runs fused by RRF, exact dense, weighted RRF (k 60, BM25 0.25); lists from several collections merged by score before the fusion; filters (collection, path glob, type, modified-after); at most three adjacent chunks merged into one result |
+| `read` | `p.7`, `lines 120-180` (and the forms models write); output under 6,000 estimated tokens with the next locator named |
+| `index`, `host`, `sandbox` | §16.3 |
+| `session`, `requests` | The process the launcher starts: one per user (`docs/session.lock`), defaults added, a change scan at start and every `docs_scan_interval_min`, requests (`index`, `index <name>`, `rebuild <name>`; anything else ignored, a planted symlink never followed) drained every 3 s; none while Night Shift's `runner.lock` is held (read from `/proc/locks`, so the probe never holds the lock a starting run wants) |
+| `mcp`, `prompt`, `untrusted` | §16.4 |
+
+### 16.2 Fidelity to Phase 0, checked against its outputs
+
+- **PDF text: identical.** All 31 corpus PDFs, 1,439 of 1,439 pages, equal to Phase 0's
+  `pdfium-ordered` output (stripped). The Arabic Wikipedia PDF yields 0.922 of PyMuPDF's Arabic
+  words, Phase 0's figure exactly. Speed: the 1,439 pages in 2.0 s in one process (Phase 0's
+  Python pass: 78–131 pages/s). The pinned PDFium (`chromium/8076`) is byte-identical to the
+  library Phase 0 measured.
+- **Chunks:** 4,129 for the 96 text and PDF documents against Phase 0's 4,151 (the fence rule and
+  `\n`-only line counting are the differences).
+- **Query vectors: identical** (cosine 1.0 with Phase 0's on 13 questions). **Document vectors
+  are not, and should not be:** Phase 0 embedded documents at batch 16, and the int8 export
+  quantizes activations dynamically over the whole batch, so a chunk's vector depends on what it
+  was padded with (cosine 0.95–0.98 with Phase 0's; the same chunk alone in Python's ONNX Runtime
+  matches ling-docs at 1.0000, and padded with two longer chunks drops to 0.89 against Phase 0's).
+  The recall of §15.3 was therefore measured with batch-16 document vectors; ling-docs ships the
+  batch-1 vectors §15.3 chose for speed and memory, and §16.5 is measured with them.
+- **Found on the way:** the model's `tokenizer.json` carries a 512-token truncation, which made
+  every long unit count as 512 tokens and never be windowed (half the chunks, and chunks whose tail
+  the model never read); the counter now runs without it and `embed` cuts inputs itself.
+
+### 16.3 Indexing, sandbox and admission
+
+- **One ledger with the code index.** `host.rs` and `sandbox.rs` are copies of `ling-code`'s:
+  the same slice (`mightling-index.slice`), lock (`$XDG_RUNTIME_DIR/mightling-index/admission.lock`),
+  reserve (earlyoom's line + 4 GiB) and formula, so a code-index run and a docs run never both take
+  the last of the budget. Kinds: extractor (floor 256 MiB, ceiling 1 GiB, the PDF cap), embedder
+  (floor 1.5 GiB, ceiling 2 GiB). Units are `mightling-index-docs-<collection>-…`, so
+  `server start`'s `systemctl --user stop 'mightling-index-*'` and Night Shift's host check see them.
+- Each scope: `systemd-run --user --scope` with `MemoryMax`, no swap and **`OOMPolicy=continue`**
+  (with systemd's default, `stop`, an over-cap PDF ended the whole scope with SIGTERM, which reads
+  as a stop from outside and would retry that file forever: measured on `hostile/text-ops.pdf`),
+  `choom -n 1000`, `nice`, `ionice -c3`, bwrap with `--unshare-net`, the home, `/tmp` and `/run`
+  hidden, the collection, the binary and the libraries (every directory a symlink passes through)
+  read-only, only the run's scratch writable (and the collection's database for the embedder). The
+  run writes its cgroup's peak itself before it exits; the workers' logs are kept in `docs/logs/`.
+- The extractor reports each file before reading it; a file over `docs_extract_timeout_s` or one
+  that kills the worker is recorded `failed: …` and a new worker goes on with the rest (tested with
+  a stand-in that hangs and one that dies); a failed file is not retried until it changes. On the
+  hostile set: the flate bomb and two million text operators end `failed: killed: over the
+  extractor's memory cap (1 GiB)`, the encrypted file `failed: password-protected`, the truncated
+  one `failed: not a PDF, or damaged`; the run goes on.
+- Chunks are written before they are embedded, so keyword search works within seconds of a first
+  index; a search says how many chunks are not embedded yet. Vectors of another model are cleared.
+- No model, no PDFium or no ONNX Runtime: indexing is deferred and `status` says to run
+  `ling-admin docs setup`. A database over `docs_max_index_gb` defers further indexing.
+- **Model loads are yielded to by `server start` stopping the scopes**, not by probing the model
+  server: ling-docs opens no socket at all (§10.2), and the egress scenario would count the probe.
+
+### 16.4 Tools, prompt block, untrusted text
+
+- `docs_search(query, collection?, k?)` and `docs_read(doc_id, locator?)`, both `readOnlyHint`;
+  every passage is `<untrusted source="docs" id="documents:42">` with path and locator, any
+  spelling of an `untrusted` tag inside defused (the escaping of `security/review-1`, copied and
+  tested on the same hostile spellings); answers stay under 6,000 estimated tokens. The embedding
+  model is loaded on the first search, not at start (about 0.8 GB while loaded).
+- The block, measured with Qwen3.8's own tokenizer: **86 tokens** for `documents` and `downloads`
+  with the tools, 94 with the shell commands, 104–112 with nine long-named collections (the list
+  is cut at 100 characters and the rest counted). Empty, and no tools offered, without a collection.
+
+### 16.5 Acceptance (§12) on the text and PDF part of the set
+
+The 96 text, Markdown, reST and PDF documents of `eval/corpus` indexed as one collection by
+`ling-docs index` itself, sandboxed and admitted (the 130 HTML, DOCX, email and CSV files left
+unopened); the 56 questions about them (`eval/phase1_acceptance.py`,
+`eval/results/phase1-acceptance.json`).
+
+| | R@5 | R@10 | MRR | Query p50 / p95 |
+|---|---|---|---|---|
+| **ling-docs, as it answers (adjacent chunks merged)** | **0.946** | **1.000** | **0.832** | 15 / 19 ms |
+| ling-docs, per chunk (Phase 0's counting) | 0.929 | 0.946 | 0.732 | 14 / 18 ms |
+| Phase 0's pipeline on the same 56, text and PDF chunks only | 0.929 | 0.964 | 0.750 | — |
+| Phase 0's pipeline on the same 56, all 7,477 chunks | 0.929 | 0.946 | 0.743 | — |
+
+- **Recall@10 ≥ 0.85: passed** (1.000; 0.946 counted per chunk). Lexical 26/26 and paraphrase
+  30/30 merged; per chunk the three misses are PDF paraphrase questions.
+- **Query p95 < 300 ms at 50k chunks: passed.** The collection's chunks repeated to 50,000 with
+  noise on the vectors (300 MB database), all 181 questions in one process: p50 70 ms, p95 94 ms
+  (exact dense over 50k 768-d vectors plus both FTS tables).
+- **Indexing never beyond its cap: held.** Extractor peak 84 MB under a 1 GiB cap, embedder
+  845 MB under 2 GiB; the hostile files were stopped at the cap (§16.3).
+- **Zero network: passed** (§16.6).
+- Throughput, under the day's load: the whole collection in 8 min 30 s, of which extraction and
+  chunk writing about 12 s; 8.3 chunks/s embedding on the slice's four cores (12.8 measured alone
+  in Phase 0). Cross-lingual and CJK recall need the HTML documents (Phase 2); the trigram path is
+  covered by tests on a Chinese Markdown fixture.
+
+### 16.6 The egress scenario
+
+`ling-admin audit egress --docs` (`dreamference/audit/docs_egress_audit.py`): a throwaway home
+whose `~/Documents` holds a Markdown note, a text file, a PDF and an installer; `ling-docs index`
+(which adds `documents` as the default collection) and `ling-docs search` under `strace -f`. A
+pass needs no destination of any kind, loopback included, and no DNS query, plus the index `ok`
+and the answer found. Run on this machine: **pass**: no destination, no DNS query; unix sockets
+only the user's systemd and nscd; processes `ling-docs`, `systemd-run`, `choom`, `nice`, `ionice`,
+`bwrap`, `sh`, `systemctl` (strace follows into the scopes: `systemd-run --scope` execs the
+command).
+
+### 16.7 Integration on the renamed tree (2026-10-08)
+
+Phase 1 was written before the rename and ported onto it on branch `docs-index/1.6.0`: the merge
+of `docs-index/phase1`, then `scripts/rename_mightling.py` over the files it brought in, then the
+names the script cannot know. Every name below is final; there are no aliases for the old ones.
+
+1. `ling-rs/src/docs_index.rs` and four hooks in `ling-rs/src/lib.rs` (the module, the `docs`
+   subcommand, the session start and block, `with_tools`) plus `Parts.docs` in
+   `ling-rs/src/prompt.rs` (also in `current_parts`, so `ling prompt show --composed` and the Ask
+   bridge see the block). `docs_index::binary()` looks in
+   `~/.local/share/dreamference/mightling/bin` (`MIGHTLING_DOCS_BIN` overrides it), finds the
+   home as `code_index.rs` does, and starts the session process in its own process group on Unix
+   only, so the launcher still builds for Windows, where there is no `ling-docs`.
+2. `dreamference/runner/codex_branded_builder.py`: `DOCS_*` constants, `build_docs_index()`
+   (Linux only: elsewhere it builds nothing and succeeds), the `~/.local/bin/ling-docs` link.
+3. `dreamference/runner/docs_index_setup.py` and `ling-admin docs setup`.
+4. `dreamference/audit/docs_egress_audit.py` and `ling-admin audit egress --docs` (one of the
+   mutually exclusive modes, beside `--tui`, `--app` and `--web`).
+5. In the crate: `config::home()` (`$CODEX_HOME`, else `~/.mightling`), the secret folders
+   (`.mightling`), `host::SLICE` (`mightling-index.slice`), the lock directory
+   (`$XDG_RUNTIME_DIR/mightling-index/`), the `mightling-index-docs-` unit prefix (covered by
+   `server start`'s `systemctl --user stop 'mightling-index-*'` and Night Shift's host check).
+   The crate's own test and diagnostic variables follow the code index's `MIGHTLING_CODE_*`:
+   `MIGHTLING_DOCS_TEST_EMBEDDER`, `MIGHTLING_DOCS_TRACE_SCOPES`, `MIGHTLING_DOCS_PROMPT_TOKENIZER`.
+6. **Found on the way, fixed in both crates:** the rename turned the slice's parent in the cgroup
+   path from `puffin.slice` into `ling.slice`, but a slice named `mightling-index.slice` lives in
+   `mightling.slice`. `live_scopes()` then read a directory that does not exist and saw no running
+   index scope at all, so neither index counted the other's (or its own other) runs against the
+   budget. `ling-code-rs/src/index/host.rs` and `ling-docs-rs/src/host.rs` now read
+   `…/user@<uid>.service/mightling.slice/mightling-index.slice`, and CODE_INDEX §2's measurement
+   row says where the scope lands.
+7. **Also found:** the rename had turned the evaluation corpus's Wikipedia puffin articles into
+   `Atlantic_mightling` (URLs that do not exist, under checksums of the real pages). The bird is
+   back in `eval/manifest.json`, `questions.*`, `collect.py`, `make_ocr_fixtures.py` and the README,
+   the docs egress fixture keeps its puffins, and `scripts/rename_mightling.py` now leaves
+   `ling-docs-rs/eval/` alone.
+8. **§12 acceptance re-run on the ported build** (2026-10-08, same text and PDF part of the set,
+   a throwaway `HOME`, the model server and a 100-task SWE-bench run live): 96 documents indexed,
+   none failed, 4,129 chunks, as in §16.5; recall@10 **1.000** merged / 0.946 per chunk, recall@5
+   0.946 / 0.929, MRR 0.832 / 0.732, identical to §16.5. Query p50 / p95 38 / 45 ms merged (busier
+   machine than §16.5's 15 / 19 ms; the 300 ms gate holds). Whole index 9 min 13 s. The scopes
+   landed in `…/mightling.slice/mightling-index.slice/`. The 50k-chunk latency and the egress
+   scenario were not re-run.
+
+## 17. Shipping in 1.6.0
+
+Decided for 1.6.0 where this document left packaging open (§16.7 before the port listed it as not
+done), each the simplest choice that is correct:
+
+- **The release carries the binary only.** The `ling` job (aarch64 Linux, the GB10 target) builds
+  `ling-docs` with everything else (`ling-admin codex build --force`), runs the crate's tests, and
+  publishes `ling-docs-<target>.gz`, listed in `ling-<target>.sha256sums` and so covered by the
+  signed `SHA256SUMS`. `scripts/package_mightling.sh` adds it for a Linux client target when it was
+  built; macOS and Windows releases do not carry it. The 1.4.x transition names (`puffin-*`) get no
+  copy: no 1.4.x updater knows the file index.
+- **PDFium, ONNX Runtime and the embedding model are not re-hosted.** They are fetched from their
+  publishers by `ling-admin docs setup`, each pinned by URL and SHA-256 (about 320 MB in all,
+  almost all of it the model). Re-publishing them with every release would put 320 MB into each
+  release and into each `ling update`, for files that change far less often than Mightling does.
+- **`ling update` and `install.sh` treat `ling-docs` as an optional command** (like `ling-code`):
+  installed and linked into `~/.local/bin` when the release carries it, the installed one kept
+  when it does not. On macOS and Windows `ling update` does not look for it, and `install.sh` asks
+  for it on Linux only.
+- **A node gets the run-time files at install.** `install.sh --role node` runs
+  `ling-admin docs setup` after advertising the node and before the main model's download, as a
+  step of its own in the summary (a failed download is a failed step; the rest goes on).
+  `--no-model` skips it with the main model and says so; `ling-admin codex build` runs it after
+  building, as before.
+- **Not done in 1.6.0:** a client has no `ling-admin`, so a Linux client installed from the
+  release gets `ling-docs` without its run-time files, and `ling-docs status` names what is missing;
+  until a client-side setup exists the file index is a node feature. `ling-admin node provision`
+  does not copy the run-time files to the node it provisions (run `ling-admin docs setup` there).
+  The user unit that keeps collections current on a node with no open session (§6) is not built.
+  Night Shift and SWE-bench sessions get the block and the tools wherever a collection exists
+  (SWE-bench containers have no `ling-docs`, so in practice Night Shift only).
+- **CI reaches the publishers** during the `ling` job: the build's `docs setup` downloads the
+  pinned files (verifying them is a check of its own), and the build does not fail when the
+  download does.

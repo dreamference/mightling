@@ -1,0 +1,47 @@
+# ling-docs: the local file index (specs/DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md). A program of its own
+# beside ling, ling-admin and ling-code, outside the Codex workspace: it has its own lockfile, builds
+# with `cargo build --release --locked` here, and changing it never rebuilds Codex.
+#
+# Two native libraries are loaded at run time, never linked or downloaded by the build: PDFium
+# (`libpdfium.so`, pdfium-binaries) and ONNX Runtime (`libonnxruntime.so`). Where they are is
+# `config::lib_dir()`; `ling-admin docs setup` installs them with the embedding model.
+[package]
+name = "ling-docs"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "ling_docs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ling-docs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+globset = "0.4"
+ignore = "0.4"
+libc = "0.2"
+# ONNX Runtime, loaded with dlopen from the lib directory: no build-time download, no network.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-22"] }
+# PDFium bound at run time to the pdfium-binaries build (§7.1); no image support needed.
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+# XLM-R's SentencePiece vocabulary from the model's own tokenizer.json; pure-Rust regex, no hub.
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+toml = "0.8"
+unicode-bidi = "0.3"
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = "debuginfo"
