@@ -266,7 +266,7 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 **What Phase C deletes:**
 - `dreamference/chat/onyx_runner.py`, `onyx_installer.py`, `onyx_brand_assets.py`, `onyx_ui_fonts.py`, `onyx_ui_labels.py`, `onyx_ui_overrides.py`, `onyx_ui_scripts.py`, and their tests;
 - the `chat` command group's Onyx subcommands and `server start --no-onyx`;
-- the Onyx sections of AGENTS.md (about a third of it) and the docs' web-chat page. [ONYX](./DREAMFERENCE_ONYX.md) is kept as history, marked retired.
+- the Onyx notes (`docs/dev/onyx.md`, `docs/dev/onyx-ui-patches.md`) and the docs' web-chat page. [ONYX](./DREAMFERENCE_ONYX.md) is kept as history, marked retired.
 
 **Rollback:** until Phase C ships, `ling-admin chat start` brings Onyx back with the user's data.
 
