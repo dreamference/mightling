@@ -57,7 +57,7 @@ ling-admin voice start       # speech-to-text for the microphone button (Whisper
   `/airgapped on`. The button is shown in the app and in a browser on this machine; from another
   device the page is text only (see above).
 
-`ling-admin images status` and `ling-admin voice status` show whether each runs.
+On a node, `ling-admin server start` starts both when they are missing, as it starts the Google service; if one fails it prints a warning naming the command to retry, and the model starts anyway. `ling-admin images status` and `ling-admin voice status` show whether each runs.
 
 ## Coming from the Onyx web chat
 
