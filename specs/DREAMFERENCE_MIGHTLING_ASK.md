@@ -1,6 +1,6 @@
 # Mightling Ask, the Mightling web server, and retiring Onyx
 
-**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0), see §19. The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
+**Status:** proposed (2026-10-07); Phase A partly built, see §16, §17 (2026-10-08) and §18 (2026-10-09); **Phase C built** (Onyx retired, image search and voice moved, branch `chat/onyx-phase-c`, 2026-10-09, merged after 1.6.0, ships in **1.7.0**, the user's decision of 2026-10-09), see §19. The user decided the same day: **drop Onyx, keep a web UI.** This spec replaces everything Onyx does for the product with Mightling's own pieces, keeps a browser UI, and adds what Onyx Lite never did here: search over the user's own files.
 **Names:** written with the post-rename names ([RENAME_MIGHTLING](./DREAMFERENCE_RENAME_MIGHTLING.md), branch `rename/mightling`): `ling`, `ling-admin`, `ling-search`, `ling-fetch`, `ling-code`, `ling-app`, `~/.mightling`, `mightling_*` settings, `_mightling-node._tcp`. Where `main` still says Puffin, read `puffin` for `ling`.
 **Builds on:**
 - [MIGHTLING_DESKTOP](./DREAMFERENCE_MIGHTLING_DESKTOP.md): the Work window on `ling app-server`, the bridge's allow-list (§4.3), the air-gap rule in the server (§8.2, patch `0023`), Night Shift's busy marker (§8.3); and its Electron rebuild (branch `desktop/electron`), which copies the upstream vendor's desktop app;
@@ -258,10 +258,10 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 | Phase | Release | What ships | Onyx |
 |---|---|---|---|
 | **A** | next minor (1.6) | Ask threads, `ling web` (loopback; LAN with pairing on advertised nodes), `ling-search --read`, `ling-docs` Phase 1, image search, voice and apps in the Mightling UI, `policy.json` with vectors | Unchanged, still the default. The app shows Ask beside Chat |
-| **B** | the one after (1.7) | `ling-admin chat export`; the app's Chat entry opens Ask; installers stop installing Onyx | **Opt-in:** `ling-admin chat start` installs and starts it; existing installs keep it running until the user runs `ling-admin chat retire` |
-| **C** | the one after that (1.8); built 2026-10-09 (§19), merged after 1.6.0 | Onyx code removed | **Gone:** on upgrade, `ling-admin` offers to stop and remove the containers; the volumes are kept until the user confirms |
+| **B** | the one after (1.7); not shipped on its own: folded into 1.7.0 with Phase C (decided 2026-10-09) | `ling-admin chat export`; the app's Chat entry opens Ask; installers stop installing Onyx | **Opt-in:** `ling-admin chat start` installs and starts it; existing installs keep it running until the user runs `ling-admin chat retire` |
+| **C** | **1.7.0** (the user's decision of 2026-10-09; first planned for 1.8); built 2026-10-09 (§19), merged after 1.6.0 | Onyx code removed | **Gone:** on upgrade, `ling-admin` offers to stop and remove the containers; the volumes are kept until the user confirms |
 
-**For the 1.7.0 release notes** (the first release with Phase C, since it merges after 1.6.0; no 1.7.0 notes file exists yet, so the line is kept here until one does):
+**For the 1.7.0 release notes** (Phase C ships in 1.7.0; no 1.7.0 notes file exists yet, so the line is kept here until one does):
 - Saved Onyx chats aren't exported; `ling-admin chat remove` keeps them until you choose to delete them.
 
 **The history export (Phase B):** `ling-admin chat export` reads every chat session through Onyx's own API (with the per-install admin password) and writes each as a Markdown file in `~/.mightling/ask/imported/<date>-<title>.md`, with the question, answer and citations. It adds that folder to `ling-docs`, so old chats are searchable from Ask. They aren't converted into live threads, because the app-server's thread format isn't a stable public schema.
@@ -524,7 +524,7 @@ No live service was touched: no model server, no installed `ling`, a scratch `HO
 
 ## 19. What was built (Phase C and the minimal §6 and §7: branch `chat/onyx-phase-c`, 2026-10-09)
 
-Built: the "must be moved before Phase C" list of §1, the minimal image search and voice of §6 and §7 (the user's decision of 2026-10-09, after the first pass found them still on Onyx), then Phase C. Merged after the 1.6.0 release, not before. Phase B (`chat export`, `chat retire`) was never built: §14.3 dropped the export, and Phase C follows Phase A directly.
+Built: the "must be moved before Phase C" list of §1, the minimal image search and voice of §6 and §7 (the user's decision of 2026-10-09, after the first pass found them still on Onyx), then Phase C. Merged after the 1.6.0 release, not before, and shipped in 1.7.0 (the user's decision of 2026-10-09). Phase B (`chat export`, `chat retire`) was never built: §14.3 dropped the export, and Phase C follows Phase A directly.
 
 ### 19.1 Moved off Onyx first
 
