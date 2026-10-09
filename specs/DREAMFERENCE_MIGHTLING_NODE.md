@@ -92,15 +92,16 @@ Not checked, and so the first work of Part 1 (Phase 0 in §14):
 
 ## 4. What leaves loopback on the node
 
-A node that is not advertised keeps today's binds. `ling-admin node enable` (§5.2) is what changes them, and `node disable` puts them back.
+A node that is not advertised keeps today's binds. `ling-admin node enable` (§5.2) is what changes them, and `node disable` puts them back; `--no-web` keeps both web UIs on loopback. Since 2026-10-08 the advertisement's `web` key names `ling web`'s port 3100, not Onyx's 3000.
 
 | Service | Bind today | After `node enable` | Who needs it |
 |---|---|---|---|
 | Model server, 8000 | `0.0.0.0` | unchanged | `ling` on every client |
-| Web UI (nginx), 3000 | `127.0.0.1` | `0.0.0.0` | `ling-app`, and a plain browser, on clients |
-| Web UI (nginx), 80 | `127.0.0.1` | unchanged | nobody remote |
+| `ling web`, 3100 (since 2026-10-08) | `127.0.0.1` | every interface (`ling web start --lan`, a user unit `mightling-web.service`); a device is served only once paired (`ling web pair`) | a phone or another computer's browser; the messengers' bridges |
+| Onyx web UI (nginx), 3000 | `127.0.0.1` | `0.0.0.0`, until Onyx is retired | a plain browser on clients (`ling-app` used it until 2026-10-08) |
+| Onyx web UI (nginx), 80 | `127.0.0.1` | unchanged | nobody remote |
 | SearXNG, 8888 | `127.0.0.1` | `0.0.0.0` | `ling-search` on clients |
-| Gmail service, 8767 | `127.0.0.1` | unchanged | node only (§10) |
+| Google service (Gmail, Drive, Calendar), 8767 | `127.0.0.1` | unchanged | node only (§10) |
 | Diffusion sidecar, 8001 (switched off since 2026-10-03) | `127.0.0.1` | unchanged | node only |
 | Speech-to-text 8100, image search 8768 | `127.0.0.1` | unchanged | the web UI's own containers |
 
