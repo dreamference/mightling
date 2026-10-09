@@ -35,9 +35,10 @@ Keep it factual: say what you checked in the code and what you are inferring.
    function.
 4. Edge cases: inputs the example does not cover that the same fix must handle (other types,
    subclasses, ancestors, empty input, a sibling function with the same flaw).
-5. Must not change: behaviour outside the code paths the request touches that other code or the
-   existing tests rely on. Then "Expected to change": each existing test or documented behaviour
-   the requested change contradicts, with its new expected value.
+5. Must not change: behaviour that other code or the existing tests rely on, inside or outside
+   the code paths the request touches, unless the request contradicts it. Then
+   "Expected to change": each existing test or documented behaviour the request contradicts,
+   with its new expected value.
 6. Acceptance checks: commands or short scripts that will show the fix is complete, each with
    its expected output, on inputs whose result the bug changes: a check that passes before the
    fix checks nothing.

@@ -111,8 +111,8 @@ MEASURED = {
 # refine-v2's prompts as built for its first A/B night (spec §10). Not measured yet; pinned so that a
 # change to v2 after a night has run it is a deliberate one, with a new version or new pins.
 REFINE_V2 = {
-    ("study", False): "2c1dc4a53eb879dd33ca7a02cc3fd22f7039b080e5dd3f6bff0f30b413e71d5a",
-    ("study", True): "703c173f4083d15c50a3c0d6b0950b560b2f1f03f87143cdcb93988e33fcd6a2",
+    ("study", False): "3af9aab2b53706e30b0283fbdd2a38f978933b9f2a894af99df10bd6404888f3",
+    ("study", True): "d9efd5d1bd424200a3784ddf303aab76c2d2af2b1382f005391f7eb5c7d83079",
     ("fix", False): "c64b79208eb9388fd99de907829451351d95c98563cb329330448a88aa07b125",
     ("fix", True): "fa4d3ec27fef04c0bafa3218e4620cb294fb998186ce5abf1da5c1faa5702256",
     ("fix-empty", False): "7116d5536cae0ab1e5286049f286274546f15bf51232e638c4809c987c9e2be4",

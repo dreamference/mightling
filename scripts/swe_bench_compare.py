@@ -229,6 +229,8 @@ def load_run(runs_dir: Path, name: str) -> LocalRun:
     run = LocalRun(name, list(manifest["instances"]))
     run.config = {k: manifest.get(k) for k in
                   ("started", "prompt", "code_index", "masking", "refine", "issue_text")}
+    # Which refine texts the run used: a manifest written before refine-v2 existed ran v1.
+    run.config["refine_version"] = manifest.get("refine_version") or "v1"
     grading = d / "eval" / "1" / "grading.json"
     if grading.exists():
         results = json.loads(grading.read_text()).get("results", {})
@@ -508,14 +510,15 @@ def report(model: Model, runs: List[LocalRun], default_runs: List[str], top: int
             ra = model.rasch_overall(k)
             rg = model.regression_overall(k)
             c_lo, c_hi = model.calibrated(k)
-            rows.append([r.name, f"{k}/{n}", f"{pct(lo)} - {pct(hi)}", pct(ra), pct(rg),
+            refine = f"on ({r.config.get('refine_version') or 'v1'})" if r.config.get("refine") else "off"
+            rows.append([r.name, refine, f"{k}/{n}", f"{pct(lo)} - {pct(hi)}", pct(ra), pct(rg),
                          f"{pct(c_lo)} - {pct(c_hi)}",
                          f"{pct(model.rasch_overall(lo * n))} - {pct(model.rasch_overall(hi * n))}"])
             js["runs"][r.name] = {"k": k, "n": n, "rasch": ra, "regression": rg,
                                   "wilson": [lo, hi], "config": r.config}
         out.append("### Local runs\n")
-        out.append(md_table(["run", "resolved", "95% Wilson (subset)", "Rasch overall", "regression overall",
-                             "95% back-test", "95% Wilson (overall)"], rows) + "\n")
+        out.append(md_table(["run", "refine", "resolved", "95% Wilson (subset)", "Rasch overall",
+                             "regression overall", "95% back-test", "95% Wilson (overall)"], rows) + "\n")
         defaults = [len(r.resolved & set(tasks)) for r in graded if r.name in default_runs]
         if defaults:
             med = statistics.median(defaults)

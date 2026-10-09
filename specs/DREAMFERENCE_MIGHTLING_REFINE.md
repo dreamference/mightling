@@ -179,13 +179,13 @@ The thread that does the task is therefore fresh in the benchmark's sense: at th
 
 **Status:** built on 2026-10-09, not measured. Selectable on every surface (§4), the default nowhere: `ling`, `ling exec`, Night Shift and `swe-bench run --refine` all keep v1, the texts the 24-task and 100-task rounds measured, whose SWE-bench prompts stay pinned by SHA-256 (§5.1).
 
-**Why.** In the 100-task round, on the 68 tasks graded in both arms, refine lost six tasks the one-session agent resolved ([MIGHTLING_SWE_BENCH_FAILURES §10](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md), on the branch `analysis/refine-losses`). Three of the six came from one sentence: section 5 turned an existing test into a requirement although the issue asked for exactly the change that test rules out. Two more came from the description's form: a list of options where one was needed, and a check whose result the bug did not change. The agent survey's item 4, "refine with a claim check" ([agent-survey-2026-10-09 §3.4](./research/agent-survey-2026-10-09.md), on the branch `research/agent-2026-10-09`), adds a review of the description's claims against the repository: in the paper it comes from, dropping that review lost a third of the gain.
+**Why.** In the 100-task round, on the 68 tasks graded in both arms, refine lost six tasks the one-session agent resolved ([MIGHTLING_SWE_BENCH_FAILURES §10](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md), on the branch `analysis/refine-losses`). Three of the six came from one sentence: section 5 turned an existing test into a requirement although the issue asked for exactly the change that test rules out. Two more came from the description's form: a list of options where one was needed, and a check whose result the bug did not change. The agent survey's item 4, "refine with a claim check" ([agent-survey-2026-10-09 §3.4](./research/agent-survey-2026-10-09.md)), adds a review of the description's claims against the repository: in the paper it comes from, dropping that review lost a third of the gain.
 
 **What changes.** The study's six sections with their closing paragraph, and one fix rule. Every other piece, the count of six sections and each surface's framing are v1's.
 
 | # | Change | Where | Behind it |
 |---|---|---|---|
-| 1 | "Must not change" keeps only behaviour **outside** the code paths the request touches. Existing tests or documented behaviour that the requested change contradicts are listed separately, as "Expected to change", each with its new expected value | section 5; the new fix rule | Losses django 11206, 11276 and 14534: section 5 pinned `'1.234e-300'`, `&#39;` and `'id_name_0'`, the values the issue asked to change, and the fix kept them |
+| 1 | "Must not change" still protects what other code or the existing tests rely on, inside or outside the code paths the request touches, **unless the request contradicts it**. Existing tests or documented behaviour that the request contradicts are listed separately, as "Expected to change", each with its new expected value | section 5; the new fix rule | Losses django 11206, 11276 and 14534: section 5 pinned `'1.234e-300'`, `&#39;` and `'id_name_0'`, the values the issue asked to change, and the fix kept them |
 | 2 | The intent says whether the goal changes behaviour observable today, and which outputs, side effects the request implies included | section 1 | The same three: in each the issue asked for, or accepted, a visible change that the description then treated as a regression |
 | 3 | A claim check before the description is final: every file, function and code path named, the current behaviour and any "already fixed upstream" are checked by reading or running the code, and what could not be confirmed is deleted | the closing paragraph, in place of "Keep it factual" | Survey item 4 (TrajSpec: without its review step, 59.7 fell to 48.0 on Lite); the recalled fixes of FAILURES §9.1 (8 of 32); 16454, where the study stated as verified what an explicit `parser_class=` contradicts |
 | 4 | Where the request leaves a choice open, name one option, the one the codebase's sibling code uses, with a one-line reason; never a list of alternatives | section 2 | Loss 13401: "`id(self.model)` or `model_name`", and the fix chose the arbitrary one |
@@ -213,9 +213,10 @@ The v2 sections (`study-sections-v2`):
    function.
 4. Edge cases: inputs the example does not cover that the same fix must handle (other types,
    subclasses, ancestors, empty input, a sibling function with the same flaw).
-5. Must not change: behaviour outside the code paths the request touches that other code or the
-   existing tests rely on. Then "Expected to change": each existing test or documented behaviour
-   the requested change contradicts, with its new expected value.
+5. Must not change: behaviour that other code or the existing tests rely on, inside or outside
+   the code paths the request touches, unless the request contradicts it. Then
+   "Expected to change": each existing test or documented behaviour the request contradicts,
+   with its new expected value.
 6. Acceptance checks: commands or short scripts that will show the fix is complete, each with
    its expected output, on inputs whose result the bug changes: a check that passes before the
    fix checks nothing.
@@ -225,11 +226,11 @@ code path named, the current behaviour, any "already fixed upstream". Delete wha
 confirm; mark an inference as one.
 ```
 
-**Size.** The sections grow from 947 to 1,645 characters and the fix rules from 459 to 607. Composed without the task: SWE-bench's study prompt 1,588 → 2,286 and its fix prompt 931 → 1,075; the product's study prompt (Night Shift's wording) 1,571 → 2,269 and its fix block 590 → 733.
+**Size.** The sections grow from 947 to 1,685 characters and the fix rules from 459 to 607. Composed without the task: SWE-bench's study prompt 1,588 → 2,326 and its fix prompt 931 → 1,075; the product's study prompt (Night Shift's wording) 1,571 → 2,309 and its fix block 590 → 733.
 
 **Kept equal and pinned.** The pieces are in `ling-rs/prompts/refine.md` and `refine_prompt.py` byte for byte (the same test as v1's). v1's six SWE-bench prompt hashes are unchanged; v2's six are pinned beside them (`REFINE_V2` in `tests/test_refine.py`), so a change to v2 after a night has run it is a deliberate one. Tests also check that v2's prompts differ from v1's in the sections and the rules alone, on both sides.
 
-**A risk the night should look at.** Two of refine's nine wins (16100, 16950) came from section 5 naming an existing test that kept the fix from being too broad, and in 16100 that test exercises the very view the issue changes. Narrowing section 5 to behaviour outside the request's code paths may lose such wins; the "Expected to change" list is meant to take only what the request contradicts, but whether the study keeps the protective tests is measured, not assumed. The claim check also lengthens the study step (the survey estimates about a fifth more agent time).
+**Why section 5 keeps the touched code paths.** Two of refine's nine wins (16100, 16950) came from section 5 naming an existing test that kept the fix from being too broad, and in 16100 that test exercises the very view the issue changes. A first draft of v2 limited "must not change" to behaviour outside the request's code paths, which would have dropped such tests; v2 instead keeps every protected behaviour and removes only what the request contradicts. **What the night should look at** is the line between the two: whether the study still names the protective tests (16100's kind), and whether it moves to "Expected to change" only what the request contradicts (11206's kind), not tests the fix merely finds inconvenient. The claim check also lengthens the study step (the survey estimates about a fifth more agent time).
 
 **How it is selected.**
 

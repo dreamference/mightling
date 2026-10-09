@@ -36,10 +36,10 @@ STUDY_SECTIONS: Final[str] = """1. Intent: what the reporter is trying to achiev
 
 Keep it factual: say what you checked in the code and what you are inferring."""
 
-# refine-v2 (specs/DREAMFERENCE_MIGHTLING_REFINE.md §10): the same six sections, narrowed where the
-# 100-task comparison lost tasks to the description. Section 5 keeps only behaviour outside the
-# request's code paths and lists what the request changes on purpose; the intent says what it
-# changes; an open choice gets one answer; a check must be one the bug fails; and every claim is
+# refine-v2 (specs/DREAMFERENCE_MIGHTLING_REFINE.md §10): the same six sections, changed where the
+# 100-task comparison lost tasks to the description. Section 5 no longer protects what the request
+# contradicts and lists it with its new value instead; the intent says what the request changes;
+# an open choice gets one answer; a check must be one the bug fails; and every claim is
 # checked against the repository before the description is final.
 STUDY_SECTIONS_V2: Final[str] = """1. Intent: what the reporter is trying to achieve, from the title and their use case, not only
    from the example they give. Say whether it changes behaviour observable today, and which
@@ -53,9 +53,10 @@ STUDY_SECTIONS_V2: Final[str] = """1. Intent: what the reporter is trying to ach
    function.
 4. Edge cases: inputs the example does not cover that the same fix must handle (other types,
    subclasses, ancestors, empty input, a sibling function with the same flaw).
-5. Must not change: behaviour outside the code paths the request touches that other code or the
-   existing tests rely on. Then "Expected to change": each existing test or documented behaviour
-   the requested change contradicts, with its new expected value.
+5. Must not change: behaviour that other code or the existing tests rely on, inside or outside
+   the code paths the request touches, unless the request contradicts it. Then
+   "Expected to change": each existing test or documented behaviour the request contradicts,
+   with its new expected value.
 6. Acceptance checks: commands or short scripts that will show the fix is complete, each with
    its expected output, on inputs whose result the bug changes: a check that passes before the
    fix checks nothing.

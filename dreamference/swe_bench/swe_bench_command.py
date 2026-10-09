@@ -71,8 +71,8 @@ class SweBenchCommand:
                               "without changing the repository, then a fresh session that fixes it")
         run.add_argument("--refine-version", default=None, choices=list(REFINE_VERSIONS),
                          help="With --refine: which texts the two steps get. v1 (the default) is the measured one; "
-                              "v2 narrows what must not change to behaviour outside the issue's code paths, lists "
-                              "the tests the issue changes on purpose with their new values, names one option where "
+                              "v2 stops protecting what the issue contradicts and lists those tests with their new "
+                              "values, says what the issue changes, names one option where "
                               "the issue leaves a choice open, wants checks the bug fails, and checks every claim "
                               "against the repository (refine spec §10)")
         run.add_argument("--task-rules", default=None,
