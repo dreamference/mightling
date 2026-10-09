@@ -1,8 +1,10 @@
 # Signed releases
 
 *Built on `release/signing` (2026-10-07), closing finding 8 of
-[DREAMFERENCE_SECURITY_REVIEW_2026-10.md](./DREAMFERENCE_SECURITY_REVIEW_2026-10.md). Nothing has
-been released with it yet: 1.5.0 is the first release that will be signed.*
+[DREAMFERENCE_SECURITY_REVIEW_2026-10.md](./DREAMFERENCE_SECURITY_REVIEW_2026-10.md); merged into
+`main` (`829a206`). First used by 1.5.1 (2026-10-08), the first signed release: 1.5.0 was built
+but never published. The signing key lives in the `release` environment, whose approval is the
+release's last step.*
 
 ## 1. What it protects against
 
