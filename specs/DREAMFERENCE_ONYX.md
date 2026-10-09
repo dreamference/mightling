@@ -1,7 +1,7 @@
 # Mightling Onyx Integration & Branding (the web UI)
 
 > **Version:** 1.5.1
-> **Status:** in use until `ling web` matches it, then retired ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10, Phase C; decided 2026-10-07, with no history export). Since 2026-10-08 the desktop app's Chat entry opens Ask on `ling web`, not Onyx.
+> **Status:** **retired** (2026-10-09, [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10, Phase C, built as §19 there; decided 2026-10-07, with no history export). The code this spec describes (`onyx_runner.py`, `onyx_installer.py`, the brand assets, the four UI patch modules, `chat_admin_credentials.py`) is deleted and `ling-admin chat` only removes what an older install left (`ling-admin chat remove`). **Kept as history:** nothing below describes the current product.
 > **Subject:** Onyx Lite deployment; provider registration; Mightling branding; the four kinds of UI patch; voice, web search, image search and Gmail; telemetry
 > **Checked against the code:** 2026-09-29 (`dreamference/chat/`); §1 and §2 again on 2026-10-09
 

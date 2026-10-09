@@ -244,7 +244,7 @@ Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessW
 
 ### 3.5. `chat/`
 
-The web chat and its companions: Onyx deployment and configuration (retired once `ling web` matches it, MIGHTLING_ASK §10), the four kinds of UI patch (CSS, fonts, labels, scripts) plus brand assets and the per-install admin password, the Google service (Gmail, Drive and Calendar, also startable without Onyx by `ling-admin google`) and the Gmail client, the image-search sidecar, the SearXNG sidecar with the user-defined network the sidecars are created on, the Matrix homeserver behind `ling chat`, and the runner of the Electron desktop app. See `DREAMFERENCE_ONYX.md`, `docs/dev/onyx.md` and `docs/dev/onyx-ui-patches.md`.
+The sidecars and the desktop app: the Google service (Gmail, Drive and Calendar, `ling-admin google`) and the Gmail client, image search (`image_search_sidecar.py`, the service, and the `image_search` tool's MCP server `image_search_mcp.py`), speech-to-text (`speech_sidecar.py`), the SearXNG sidecar with the user-defined network the sidecars are created on, the Docker bridge rewrite (`docker_bridge.py`), the Matrix homeserver behind `ling chat`, the runner of the Electron desktop app, and `retired_web_chat.py`, which removes what the retired Onyx web chat left (MIGHTLING_ASK §10, §19; `DREAMFERENCE_ONYX.md` is its history).
 
 ### 3.6. `context_engine/`
 
