@@ -14,8 +14,8 @@
 
 - **`ling`:** the terminal coding agent, and the default. It is a Mightling-branded build of Codex CLI with a Rust launcher compiled in that points it at the local model. It is built from a pinned fork (`codex/` submodule) plus small patches (`codex-patches/`) and the launcher crate (`ling-rs/`).
 - **`ling web`:** Mightling's own web UI (`ling-rs/web/`, the page in `desktop/ui/`), served on port 3100. **Ask** threads are `ling` sessions under a bridge policy (the `ask` prompt, a scratch folder, uploads); **Work** drives `ling app-server`. A credential is checked on every request, and phones and other devices are paired. See `DREAMFERENCE_MIGHTLING_ASK.md`.
-- **The desktop app `ling-app`:** an Electron app (`desktop/electron/`) with `ling` bundled inside: its Chat entry opens Ask on `ling web`, its Work window drives `ling app-server` over stdio. A `.deb` for Linux; a Mac `.dmg` as an unsigned preview. See `DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md`.
-- **Onyx Lite**, the earlier web chat, deployed and patched by `ling-admin chat …`, with web search, image search, voice and Gmail. It stays until `ling web` matches it, then is retired (MIGHTLING_ASK §10, Phase C).
+- **The desktop app `ling-app`:** an Electron app (`desktop/electron/`) with `ling` bundled inside: one window showing Ask and Work on its own `ling app-server` over stdio (MIGHTLING_ASK §18.6). A `.deb` for Linux; a Mac `.dmg` as an unsigned preview. See `DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md`.
+- **Onyx Lite**, the earlier web chat, is retired (MIGHTLING_ASK §10, Phase C; §19 there). Its jobs moved: web search to `ling-search --read`, Gmail, Drive and Calendar to `/apps`, image search to the `image_search` tool (`ling-admin images start`), voice to `ling web` and the app (`ling-admin voice start`). `ling-admin chat remove` removes what an older install left.
 - **Messengers, off by default:** Signal (`ling signal`, linked to the owner's account, answering in Note to Self) and Matrix or Telegram (`ling chat`, with the homeserver from `ling-admin matrix`). Each is a paired client of `ling web`, so every message becomes an Ask thread. See `DREAMFERENCE_MIGHTLING_SIGNAL.md` and `DREAMFERENCE_MIGHTLING_CHAT.md`.
 - **Other agents:** Cline, Continue and OpenHands, through `ling-admin run --agent …`.
 
@@ -178,7 +178,8 @@ A stdio MCP server (`ling-admin mcp`) with `ide_*` tools over an in-process `IDE
 - [x] Puffin renamed Mightling (`ling`, `ling-admin`, `~/.mightling`) with a one-time migration; signed releases (Ed25519 over `SHA256SUMS`); the desktop app rebuilt on Electron; refine mode (off by default); clients for x86-64 Linux, macOS and Windows (preview), 2026-10-07 and 2026-10-08 (release 1.5.1)
 - [x] `node provision` / `node prepare` (FLEET Phases 1–3, tested offline; not yet run against a second machine) and the unattended node install (`install.sh`: one sudo prompt at most, host setup, `node enable`, model download and server start), 1.5.1
 - [x] `ling web` with Ask threads, the bridge policy and the browser view; `ling-docs` Phase 1; Signal and Matrix/Telegram bridges, off by default (on `main` for 1.6.0)
-- [ ] Onyx retired (MIGHTLING_ASK Phase C), messengers tried against real services, the Windows client run on Windows hardware
+- [x] Onyx retired (MIGHTLING_ASK Phase C, §19): its code deleted, image search and voice moved to `ling web` and the app, `ling-admin chat remove` for existing installs (branch `chat/onyx-phase-c`, merged after 1.6.0)
+- [ ] Messengers tried against real services, the Windows client run on Windows hardware
 - [ ] Proposed specs are marked *Proposed* in `specs/README.md`
 
 ---

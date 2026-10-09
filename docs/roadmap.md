@@ -45,4 +45,5 @@ come back on local infrastructure:
 
 - **`cloud`:** running tasks on a private cloud.
 - **`remote-control`:** driving sessions from another device through a relay you host.
-- **Voice in the terminal agent:** local speech-to-text is already running for the web chat.
+- **Voice in the terminal agent:** local speech-to-text already serves the microphone in the app and
+  in `ling web` (`ling-admin voice start`).
