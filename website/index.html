@@ -93,12 +93,34 @@
   <div class="wrap">
     <h2>SWE-bench Verified, measured on one DGX Spark</h2>
     <p class="sub">On 2026-10-08, Mightling 1.5.1's agent with Qwen3.8-27B resolved <b>68 of 100</b> SWE-bench Verified
-      tasks on one DGX Spark, offline: a sample of 100 tasks, one attempt per task, default mode. Scaled to all 500 tasks, that is an estimated <b>≈69%</b> (95% band 63.9–73.4%).</p>
+      tasks on one DGX Spark, offline: a fixed sample of 100 tasks, one attempt per task, default mode. Scaled to all 500 tasks, that is an estimated <b>≈69%</b> (95% band 63.9–73.4%).
+      This is our own measurement, on our own machine and on a subset, not a leaderboard entry.</p>
 
+    <!-- Sources for every competitor row (only officially published numbers are shown; anything not
+         published says "not published"):
+         - "All 500 tasks" is each submission's published score, resolved/500, from the SWE-bench
+           Verified leaderboard, https://www.swebench.com/, and its per-task results in
+           https://github.com/SWE-bench/experiments at commit 40f164d5b8f1d249bf95a6df8b74b577fd8e519d
+           (2026-09-03; no submission after 2026-09-01 is included).
+           Qwen3-Coder-480B-A35B, 69.6%: https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct
+           GLM-4.6, 68.2%: https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250930_zai_glm4-6
+           Kimi K2.5 high, 70.8%: https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_kimi-k2-5-high
+           DeepSeek V3.2 high, 70.0%: https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20260217_mini-v2.0.0_deepseek-3-2-high
+           Claude Opus 4.5 (four agents), 76.8-79.2%: the four folders linked in footnote 6
+           Gemini 3 Pro, 77.4%: https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251120_livesweagent_gemini-3-pro-preview
+           Qwen3-Coder-30B-A3B (EntroPO + R2E), 60.4% and 52.2%: the two folders linked in footnote 8
+           Devstral Small 2512, 56.4%: https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20251209_mini-v1.17.2_devstral-small-2512
+           GitHub Copilot agent mode, 56.0% (vendor page): https://github.blog/news-insights/product-news/github-copilot-agent-mode-activated/
+           Claude Code and Cursor publish no SWE-bench Verified figure for the product:
+           https://www.anthropic.com/engineering/swe-bench-sonnet, https://cursor.com/blog/composer
+         - "Same 100 tasks" is derived, not published by the vendors: each submission's published
+           per-task results restricted to the 100 tasks Mightling ran, computed by
+           scripts/swe_bench_compare.py (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_COMPARISON.md §4). -->
     <div class="tablewrap">
       <table class="bench">
         <tr><th>System</th><th>Same 100<br>tasks</th><th>All 500<br>tasks</th></tr>
         <tr class="mine"><td>Mightling 1.5.1 + Qwen3.8-27B (NVFP4), one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">68/100</td><td class="num">≈69% <span class="est">estimated</span></td></tr>
+        <tr class="mine"><td>Mightling {{TBD: version}} + Qwen3.8-27B, refine mode, one DGX Spark, offline<a class="fn" href="#fn1">1</a></td><td class="num">{{TBD: k}}/100</td><td class="num">≈{{TBD: estimate}}% <span class="est">estimated</span></td></tr>
         <tr><td>Qwen3-Coder-480B-A35B (OpenHands)<a class="fn" href="#fn2">2</a></td><td class="num">68/100</td><td class="num">69.6%</td></tr>
         <tr><td>GLM-4.6 (Z.ai's agent)<a class="fn" href="#fn3">3</a></td><td class="num">68/100</td><td class="num">68.2%</td></tr>
         <tr><td>Kimi K2.5, high (mini-SWE-agent)<a class="fn" href="#fn4">4</a></td><td class="num">70/100</td><td class="num">70.8%</td></tr>
@@ -119,7 +141,8 @@
     <p class="sub after">Read it as company, not a ranking. On the same 100 tasks Mightling resolved as many as
       Qwen3-Coder-480B and GLM-4.6, models many times its size, but every row uses a different agent, different
       hardware and, for the leaderboard rows, the official x86 test images, where ours ran on community arm64 images.
-      A refine mode is being measured and is not in these numbers.</p>
+      In refine mode a first session studies the task without changing anything and a fresh session does it:
+      {{TBD: one sentence on the refine result and its cost in time, and whether it is now the default}}.</p>
 
     <details class="method"><summary>How the ≈69% is estimated</summary>
       <p>100 tasks are a fifth of Verified, so the full-set figure is an estimate. A one-parameter item-response
@@ -127,7 +150,10 @@
         difficulty and every system an ability. Mightling's ability is the one that explains 68 resolved on these
         100 tasks; ≈69% is that ability's expected score on all 500 (a plain regression on the published scores
         agrees to within a point). To check it, every public submission was scored on these 100 tasks alone and its overall score
-        predicted the same way: the error was 2.4 points (RMSE), and the band above is ±1.96 times that.</p>
+        predicted the same way: the error was 2.4 points (RMSE), and the band above is ±1.96 times that.
+        Every number in the table is reproduced by
+        <a href="https://github.com/dreamference/mightling/blob/main/scripts/swe_bench_compare.py"><code>scripts/swe_bench_compare.py</code></a>
+        from the public per-task data of <a href="https://github.com/SWE-bench/experiments">SWE-bench/experiments</a>.</p>
       <p>The 100 tasks are spread across Verified's repositories in proportion to the full set, among the tasks
         whose test environment runs and validates on arm64 (the gold patch passes, an empty change fails). Published
         systems score 1.0 to 1.5 points lower on these 100 than on all 500, so the sample is not an easy one.
@@ -136,7 +162,7 @@
 
     <ol class="footnotes">
       <li id="fn1">Mightling: 100 tasks, one attempt each; one DGX Spark (GB10, 128 GB), model served locally,
-        no cloud; measured 2026-10-08. Estimate from the
+        no cloud; default mode measured 2026-10-08, refine mode {{TBD: date}}. Estimate from the
         <a href="https://github.com/SWE-bench/experiments">SWE-bench experiments</a> per-task data.</li>
       <li id="fn2">500 tasks, one attempt; hardware not stated. Source:
         <a href="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/20250805_openhands-Qwen3-Coder-480B-A35B-Instruct">experiments, 20250805_openhands-Qwen3-Coder-480B-A35B-Instruct</a>.
