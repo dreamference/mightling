@@ -16,7 +16,7 @@ SWE-bench runs `ling` inside each instance's own container (`dreamference/swe_be
 
 ## Arms and regrades from the failure analysis
 
-`run --task-rules tests` adds three lines of test discipline to the task prompt; `eval --drop-test-hunks` grades a run's predictions again with their test files left out, in a grading series of its own (`eval-drop-test-hunks/`). Fresh tasks outside `sample-100.txt` are validated and drawn with `scripts/swe_bench_fresh.py`, and `scripts/swe_bench_night1.sh` runs the first pair. See the failure analysis's §8.
+`run --task-rules tests` adds three lines of test discipline to the task prompt, and `tests-v2` the same three with the issue, not the old test, deciding whether a change that fails an old test is wrong; `eval --drop-test-hunks` grades a run's predictions again with their test files left out, in a grading series of its own (`eval-drop-test-hunks/`). Fresh tasks outside `sample-100.txt` are validated and drawn with `scripts/swe_bench_fresh.py`, and `scripts/swe_bench_night1.sh` runs the first pair, default against `tests-v2`. See the failure analysis's §8.
 
 ## The code index in a run
 

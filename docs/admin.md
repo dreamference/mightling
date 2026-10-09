@@ -314,7 +314,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
 | `--strip-names` | Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it. |
 | `--refine` | Two steps per instance: a session that studies the issue and writes a refined description without changing the repository, then a fresh session that fixes it. |
-| `--task-rules` | Rules added to the task prompt, comma-separated, of: tests (default none). tests: never change an existing test, keep your own scripts in /tmp, and compare failing tests by name with and without the change. |
+| `--task-rules` | Rules added to the task prompt, comma-separated, of: tests, tests-v2 (default none). tests: never change an existing test, keep your own scripts in /tmp, and compare failing tests by name with and without the change. tests-v2: the same, except that a test the change fails is weighed against the issue, which decides whether the test or the change is wrong. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing) |

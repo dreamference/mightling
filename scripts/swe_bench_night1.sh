@@ -1,8 +1,9 @@
 #!/bin/bash
 # Night 1 of the failure analysis's A/B (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §6.5):
-# the default arm against the test-discipline arm (`--task-rules tests`) on 50 fresh validated
-# tasks, two at a time, each graded as it finishes (`--eval`), then both regraded with the test
-# files dropped from every patch (`eval --drop-test-hunks`, no agent time), and the reports.
+# the default arm against the test-discipline arm (`--task-rules tests-v2`, FAILURES §9.3) on 50
+# fresh validated tasks, two at a time, each graded as it finishes (`--eval`), then both regraded
+# with the test files dropped from every patch (`eval --drop-test-hunks`, no agent time), and the
+# reports.
 #
 # Both arms carry the harness fixes of the same change: the per-file test reset at grading, the
 # wider "test patch failed" count and the completion nudge. Settings are those of `im100-default`
@@ -49,8 +50,8 @@ start() {
         git -C "$REPO" fetch origin || exit 1
         git -C "$REPO" worktree add --detach "$WT" origin/main || exit 1
     fi
-    if ! grep -q -- "--task-rules" "$WT/dreamference/swe_bench/swe_bench_command.py"; then
-        echo "❌ $WT does not have the task-rules arm: update it to origin/main."; exit 1
+    if ! grep -q -- '"tests-v2"' "$WT/dreamference/swe_bench/swe_bench_instance_run.py"; then
+        echo "❌ $WT does not have the tests-v2 task rule: update it to origin/main."; exit 1
     fi
     if [ ! -s "$LIST" ]; then
         echo "❌ No task list at $LIST: run scripts/swe_bench_fresh.py validate, then draw."; exit 1
@@ -69,7 +70,7 @@ start() {
     { cat "$WT/dreamference.toml"; printf '\n[swe_bench]\nmax_parallel = 2\ndisk_reserve = "%sG"\n' "$RESERVE_GB"; } \
         > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
-        --description="SWE-bench night 1: default against test discipline on 50 fresh tasks" \
+        --description="SWE-bench night 1: default against test discipline (tests-v2) on 50 fresh tasks" \
         --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
@@ -80,27 +81,27 @@ run() {
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
     log "night 1 from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12))"
-    for arm in default tests; do
+    for arm in default tests-v2; do
         extra=""
-        [ "$arm" = tests ] && extra="--task-rules tests"
+        [ "$arm" = tests-v2 ] && extra="--task-rules tests-v2"
         log "round $PREFIX-$arm"
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$arm" --code-index universal --mask off \
             --prompt default $extra --eval --remove-images
         log "$PREFIX-$arm finished ($?)"
         df -h / | tail -1
     done
-    for arm in default tests; do
+    for arm in default tests-v2; do
         log "regrade $PREFIX-$arm with the test files dropped"
         admin swe-bench eval "$PREFIX-$arm" --drop-test-hunks --remove-images
         log "regrade of $PREFIX-$arm finished ($?)"
     done
-    for arm in default tests; do
+    for arm in default tests-v2; do
         admin swe-bench report "$PREFIX-$arm" > "$D/report-$arm.txt"
         admin swe-bench report "$PREFIX-$arm" --drop-test-hunks --against "$PREFIX-$arm" > "$D/drop-test-hunks-$arm.txt"
     done
-    admin swe-bench report "$PREFIX-tests" --against "$PREFIX-default" > "$D/tests-against-default.txt"
-    admin swe-bench report "$PREFIX-tests" --drop-test-hunks --against "$PREFIX-default" \
-        > "$D/tests-dropped-against-default.txt"
+    admin swe-bench report "$PREFIX-tests-v2" --against "$PREFIX-default" > "$D/tests-v2-against-default.txt"
+    admin swe-bench report "$PREFIX-tests-v2" --drop-test-hunks --against "$PREFIX-default" \
+        > "$D/tests-v2-dropped-against-default.txt"
     touch "$D/done"
     log "all done; reports in $D"
 }

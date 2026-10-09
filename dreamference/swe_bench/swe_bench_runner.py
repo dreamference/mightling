@@ -294,7 +294,9 @@ class SweBenchRunner:
                 that fixes it with the issue and the description. A new run only, like
                 `code_index`.
             task_rules: Names of the rules added to the task prompt (`TASK_RULES`: `tests`, the
-                failure analysis's test discipline). A new run only, like `code_index`.
+                failure analysis's test discipline, and `tests-v2`, which lets the issue decide
+                whether a failing old test or the change is wrong). A new run only, like
+                `code_index`.
             settings: Benchmark settings; defaults to the config file's.
 
         Returns:

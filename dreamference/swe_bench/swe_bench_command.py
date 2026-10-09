@@ -72,7 +72,9 @@ class SweBenchCommand:
         run.add_argument("--task-rules", default=None,
                          help="Rules added to the task prompt, comma-separated, of: " + ", ".join(sorted(TASK_RULES))
                               + " (default none). tests: never change an existing test, keep your own scripts in "
-                                "/tmp, and compare failing tests by name with and without the change")
+                                "/tmp, and compare failing tests by name with and without the change. tests-v2: the "
+                                "same, except that a test the change fails is weighed against the issue, which "
+                                "decides whether the test or the change is wrong")
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")

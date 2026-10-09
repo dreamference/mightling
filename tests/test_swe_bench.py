@@ -1644,9 +1644,46 @@ def test_the_test_discipline_rules_are_an_arm_and_the_plain_prompt_is_unchanged(
     assert "Task rules          tests" in SweBenchReport.render(SweBenchRunStore("rules"))
 
 
+def test_tests_v2_lets_the_issue_decide_and_leaves_the_first_rule_as_it_was(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    # `tests` is the original arm, kept byte for byte so runs made with it stay comparable.
+    assert TASK_RULES["tests"] == (
+        "- Never change an existing test. If a test that passed before your change fails after it, your\n"
+        "  change is wrong: fix the source.\n"
+        "- Put any test or script of your own in /tmp, not in the repository.\n"
+        "- Before you stop, run the test files of every module you changed, with and without your change\n"
+        "  (git stash, then git stash pop), and compare the failing tests by name.\n")
+    v2 = TASK_RULES["tests-v2"]
+    for words in ("Never edit an existing test to make it pass", "decide from the issue",
+                  "leave the test as it is and say so", "fix the source", "in /tmp", "git stash",
+                  "compare the failing tests by name"):
+        assert words in v2
+    # The sentence the failure analysis (§9.2) found false for 19 resolved tasks is the one v2 leaves out.
+    assert "change is wrong" not in v2
+    for word in ("benchmark", "hidden", "reference", "swe"):
+        assert word not in v2.lower()
+    with_v2 = SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2"])
+    assert with_v2.replace(v2, "") == plain and with_v2.endswith(issue)
+    assert v2 in SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["tests-v2"])
+
+    assert run(bench, name="v2", instances=["acme__widget-1"], task_rules=["tests-v2"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["tests-v2"])]
+    assert SweBenchRunStore("v2").manifest()["task_rules"] == ["tests-v2"]
+    assert "Task rules          tests-v2" in SweBenchReport.render(SweBenchRunStore("v2"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--task-rules", "tests-v2", "--name", "x"])) == 0
+    assert seen["task_rules"] == ["tests-v2"]
+
+
 def test_an_unknown_task_rule_is_refused_and_the_option_reaches_the_runner(bench, monkeypatch, capsys):
     assert run(bench, instances=["acme__widget-1"], task_rules=["everything"]) == 1
-    assert "--task-rules takes: tests" in capsys.readouterr().out
+    assert "--task-rules takes: tests, tests-v2" in capsys.readouterr().out
     assert not SweBenchRunStore("r1").manifest_path.exists()
     import argparse
     seen = {}

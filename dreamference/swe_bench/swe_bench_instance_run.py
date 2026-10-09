@@ -52,9 +52,19 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
 # rewritten to match a wrong change, a regression hidden in a count, the agent's own test file
 # colliding with the benchmark's), not from finding the bug. In the task prompt, not the system
 # prompt, as `CODE_INDEX_HINT` is: long system prompts cost this model (MIGHTLING_PROMPT §1.5).
+# `tests-v2` (FAILURES §9.3, rank 2) drops `tests`' "your change is wrong": in 19 of the 68
+# resolved tasks the correct fix fails an old test because the issue asks for new behaviour, so
+# the agent decides from the issue which of the two is wrong. The other two lines are unchanged.
 TASK_RULES: Final[Dict[str, str]] = {
     "tests": """- Never change an existing test. If a test that passed before your change fails after it, your
   change is wrong: fix the source.
+- Put any test or script of your own in /tmp, not in the repository.
+- Before you stop, run the test files of every module you changed, with and without your change
+  (git stash, then git stash pop), and compare the failing tests by name.
+""",
+    "tests-v2": """- Never edit an existing test to make it pass. If a test that passed before your change fails
+  after it, decide from the issue whether the issue asks for the behaviour that test rules out:
+  if it does, leave the test as it is and say so when you stop; if not, fix the source.
 - Put any test or script of your own in /tmp, not in the repository.
 - Before you stop, run the test files of every module you changed, with and without your change
   (git stash, then git stash pop), and compare the failing tests by name.
