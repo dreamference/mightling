@@ -39,6 +39,19 @@ From the benchmark's `im-refine` round (2026-10-07, the 24-instance sample, code
 - **Where it misled.** In django 16502 the description placed the fix in the wrong handler and the fix followed it; in scikit-learn 25747 it wrote the symptom guard down as a requirement; in sympy 13798 it answered an open design question the other way from the reference. The "the task is authoritative" rule did not prevent any of them.
 - **Cost.** The study step took 3 h 35 min of the 6 h 15 min (median 7 min 33 s); 5 of 24 study steps hit the benchmark's 15-minute limit (4 of them had written their description by then), and their tokens are not in the count, so the token cost is understated.
 
+### 2.1 The 100-task pair (2026-10-08 to 2026-10-09)
+
+The pair §3 asked for: `im100-default` and `im100-refine` on `sample-100.txt`, the two arms differing only by `--refine` (code index universal, prompt `default`, masking off, two at a time), 100 of 100 graded in each (the refine arm finished 2026-10-09 17:29).
+
+| | Resolved | Median per task |
+|---|---|---|
+| `im100-refine` | **69 of 100** | 13.9 min |
+| `im100-default` | 68 of 100 | 6.5 min |
+
+- Refine alone resolved 10 tasks, the default alone 9: McNemar exact p = 1.0. Excluding the sample's tasks on the 68-entry PR-issue mismatch list (PAIChecker's human-labelled data, `verified-mismatch-exclude.txt`; from night 2 on they are left out of every list), it is 62 against 61.
+- The time cost is 2.2× per task (the study step alone has a median of 7.8 min).
+- So the 24-instance lead (§2: 20 against 17) did not hold on 100 tasks: one task, well inside the floor two identical arms show, at more than twice the time.
+
 ## 3. The decision, and the switch
 
 Decided by the user on 2026-10-07:
@@ -51,6 +64,8 @@ Decided by the user on 2026-10-07:
 The switch is `DEFAULT: bool = false` in `ling-rs/src/refine.rs` and `DEFAULT_MIGHTLING_REFINE: Final[bool] = False` in `dreamference_config.py`; `tests/test_refine.py` fails if the two differ, and a launcher test fails if the launcher's is changed without its comment being read (`off_unless_switched_on_and_the_variable_wins`, which asserts the current value and must be edited with it).
 
 What the 100-task pair should show before the switch (a proposal, not decided): more instances resolved with refine than without, by more than the floor two identical arms show on the same sample, and a McNemar exact p below 0.05; plus the time cost per instance, so the default is a known trade. The two arms should differ only by `--refine`.
+
+**Decided by the user on 2026-10-09, on the pair's result (§2.1):** refine is **not** made the default, "until we improve it". One more task resolved (69 against 68, p = 1.0) does not pay for 2.2× the time per task. Refine stays opt-in (`--refine`, `mightling_refine`), the switch stays `false`, and the 1.6.0 notes state the measured result and its time cost plainly. Refine v2 (the study that keeps the touched code paths) is the next attempt, scheduled for night 6 of the failure analysis.
 
 ## 4. The setting
 

@@ -91,7 +91,7 @@ QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
         "method": "DFLASH",
         "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
         "revision": "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1",
-        "num_speculative_tokens": 16,
+        "num_speculative_tokens": 12,
         "quantization": "modelopt_fp4",
     },
     # The checkpoint's own chat template refused two things our clients send, and
@@ -186,8 +186,10 @@ class ModelMatrixRegistry:
                 "73.0), context (262K against 32K) and memory (~20 GB of weights against ~71).\n\n"
                 "Recipe: github.com/hasso5703/dgx-spark-qwen38 (v1.18, measured 2026-09-17): the "
                 "pinned lmsysorg/sglang v0.5.19 image, RadixArk's NVFP4 conversion and the "
-                "RTN-calibrated NVFP4 DFlash2 drafter at the revisions pinned below, 16 draft "
-                "tokens, memory fraction 0.50, flashinfer attention, mamba radix cache in "
+                "RTN-calibrated NVFP4 DFlash2 drafter at the revisions pinned below, 12 draft "
+                "tokens (the recipe says 16; 12 measured +7% on the replay set, 48.3 against "
+                "45.1 tok/s single stream, speculation still exact, applied 2026-10-09), "
+                "memory fraction 0.50, flashinfer attention, mamba radix cache in "
                 "extra_buffer mode, torch.compile up to batch 4. Not copied: its API key and "
                 "keepalive proxy (Mightling reaches the server the way it reaches vLLM) and its "
                 "reasoning-effort default."
@@ -215,7 +217,7 @@ class ModelMatrixRegistry:
                 "reports BF16 quality within seed noise and decode at 47 against 51 tok/s for the "
                 "production recipe at concurrency 1 (RTX PRO 6000, vLLM 0.27.1).\n\n"
                 "Served by the production recipe unchanged (QWEN38_SGLANG_RECIPE: the same image, "
-                "flags, chat-template patches and DFlash2 drafter at 16 tokens), so a comparison "
+                "flags, chat-template patches and DFlash2 drafter at 12 tokens), so a comparison "
                 "differs in the target's weights alone. Two departures, both for that reason: "
                 "the checkpoint's own revision, and `--kv-cache-dtype bfloat16`, because SGLang "
                 "turns a compressed-tensors kv_cache_scheme into an FP8 KV pool under `auto`, "

@@ -124,7 +124,7 @@ to reach. [Privacy & security →](docs/privacy.md)
 | Reading your code (prefill) | **~1,700 tokens/s** |
 | Context window | **262K tokens** |
 
-A small drafter proposes 16 tokens at a time and the model checks them in one pass, which is why
+A small drafter proposes 12 tokens at a time and the model checks them in one pass, which is why
 code comes out fastest. Run four agents at once and they all keep going: no quota, no "please wait",
 nothing to pay per token, ever.
 
