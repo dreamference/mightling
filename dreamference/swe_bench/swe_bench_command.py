@@ -84,6 +84,10 @@ class SweBenchCommand:
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
         run.add_argument("--label", default=None,
                          help="What the model gate's refusal calls this run, e.g. \"night 1\" (default: SWE-bench run <name>)")
+        run.add_argument("--review-turn", action="store_true",
+                         help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
+                              "read its diff, run the tests of the modules it changed and fix what does not hold, "
+                              "within the task's time limit; the patch is collected after that turn (default off)")
 
         evaluate =commands.add_parser("eval", help="The grading phase: the upstream harness applies each patch and runs the tests")
         evaluate.add_argument("run", nargs="?", default=None, help="The run (default: the latest)")
@@ -130,7 +134,7 @@ class SweBenchCommand:
                 idle_minutes=args.idle_minutes, ignore_sessions=args.ignore_open_sessions,
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
-                task_rules=cls._ids(args.task_rules), label=args.label)
+                task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":

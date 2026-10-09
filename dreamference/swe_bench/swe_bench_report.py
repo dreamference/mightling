@@ -23,11 +23,11 @@ CAVEATS: Final[str] = (
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
     "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
-    "parallelism", "harness", "repository_commit",
+    "parallelism", "harness", "repository_commit", "review_turn",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
-                               "task_rules": []}
+                               "task_rules": [], "review_turn": False}
 
 
 class SweBenchReport:
@@ -85,6 +85,7 @@ class SweBenchReport:
             "puffin_code_users": sum(1 for entry in stats.values() if entry["puffin_code_calls"]),
             "refine": cls.refine_summary(store, manifest, states, finished & set(instances)),
             "nudges_fired": cls.nudge_counts(states, finished & set(instances)),
+            "review": cls.review_summary(store, manifest, states, finished & set(instances)),
             "dropped": {i: results[i]["dropped"] for i in graded if results[i].get("dropped")},
         }
 
@@ -148,6 +149,76 @@ class SweBenchReport:
         }
 
     @classmethod
+    def review_summary(cls, store: SweBenchRunStore, manifest: Dict[str, Any], states: Dict[str, Any],
+                       finished: Any) -> Optional[Dict[str, Any]]:
+        """
+        What the review turn did (spec §19): where it ran and why not elsewhere, how often it
+        changed the patch and by how many lines, its time limits reached, its time and tokens.
+
+        Args:
+            store: The run.
+            manifest: Its manifest.
+            states: Its instances' states.
+            finished: The instances that have a prediction.
+
+        Returns:
+            Optional[Dict[str, Any]]: None for a run without the review turn.
+        """
+        if not manifest.get("review_turn"):
+            return None
+        records = {i: (states.get(i) or {}).get("review") for i in finished}
+        ran = {i: record for i, record in records.items() if record and "skipped" not in record}
+        skipped: Dict[str, int] = {}
+        for record in records.values():
+            if record and "skipped" in record:
+                skipped[record["skipped"]] = skipped.get(record["skipped"], 0) + 1
+        tokens = {key: 0 for key in ("input_tokens", "cached_input_tokens", "output_tokens")}
+        for instance_id, record in ran.items():
+            counted = record.get("tokens")
+            if counted is None:
+                counted = store.log_stats(instance_id, int(record.get("log_offset") or 0))
+            for key in tokens:
+                tokens[key] += int(counted.get(key) or 0)
+        changed = sorted(i for i, record in ran.items() if record.get("changed"))
+        return {
+            "instances": len(records), "ran": len(ran), "skipped": skipped,
+            "fresh": sum(1 for record in ran.values() if not record.get("resumed")),
+            "changed": changed,
+            "added": sum(int(record.get("added") or 0) for record in ran.values()),
+            "removed": sum(int(record.get("removed") or 0) for record in ran.values()),
+            "timeouts": sorted(i for i, record in ran.items() if record.get("exec") == "timeout"),
+            "seconds": [int(record.get("seconds") or 0) for record in ran.values()],
+            "tokens": tokens,
+        }
+
+    @classmethod
+    def review_line(cls, review: Optional[Dict[str, Any]]) -> str:
+        """
+        Says whether the review turn was on and, when it was, what it did.
+
+        Args:
+            review: The summary's `review` entry; None when the run had no review turn.
+
+        Returns:
+            str: One line of the report.
+        """
+        if review is None:
+            return "Review turn         off: the patch was collected when the agent stopped"
+        if not review["ran"]:
+            return (f"Review turn         on: it ran in none of {review['instances']} finished instance(s)"
+                    + "".join(f"; {reason}: {count}" for reason, count in sorted(review["skipped"].items())))
+        tokens = review["tokens"]
+        skipped = ", ".join(f"{reason} {count}" for reason, count in sorted(review["skipped"].items()))
+        return (f"Review turn         on: ran in {review['ran']} of {review['instances']}"
+                + (f" (not run: {skipped})" if skipped else "")
+                + (f", {review['fresh']} as a fresh session" if review["fresh"] else "")
+                + f"; changed the patch in {len(review['changed'])} (+{review['added']} -{review['removed']} lines)"
+                + f", reached the time limit in {len(review['timeouts'])}"
+                + f"; median {cls.duration(statistics.median(review['seconds']))}, "
+                  f"{cls.duration(sum(review['seconds']))} in all; {tokens['input_tokens']:,} tokens in, "
+                  f"{tokens['output_tokens']:,} out")
+
+    @classmethod
     def render(cls, store: SweBenchRunStore, variant: Optional[str] = None) -> Optional[str]:
         """
         Renders a run's report.
@@ -182,6 +253,7 @@ class SweBenchReport:
         ]
         if manifest.get("task_rules"):
             lines.append(f"Task rules          {', '.join(manifest['task_rules'])} (lines added to the task prompt)")
+        lines.append(cls.review_line(summary["review"]))
         not_run = validated - summary["finished"]
         not_graded = summary["finished"] - summary["graded"]
         if not_run or not_graded:
@@ -390,6 +462,7 @@ class SweBenchReport:
                 "issue text": summary["manifest"].get("issue_text", "verbatim"),
                 "refine first": "on" if summary["refine"] is not None else "off",
                 "task rules": ",".join(summary["manifest"].get("task_rules") or []) or "none",
+                "review turn": "on" if summary["review"] is not None else "off",
                 "grading": "test files dropped" if summary.get("variant") == DROP_TEST_HUNKS else "plain",
                 "resolved": f"{resolved} ({100 * resolved / len(both):.1f}%)",
                 "median wall": cls.duration(statistics.median(walls)) if walls else "n/a",

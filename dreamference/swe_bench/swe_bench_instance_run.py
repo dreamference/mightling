@@ -231,6 +231,56 @@ git -c core.fileMode=false diff --cached --no-color --no-ext-diff "$base" -- "$@
 COMPLETION_NUDGE: Final[str] = ("You stopped in the middle of your work. Finish the fix, run the tests for the "
                                 "modules you changed, and end with a short summary.")
 
+# The review turn (`--review-turn`, FAILURES §9.3 rank 3, spec §19): one more turn of the same
+# session once the agent has stopped with a changed tree, before the patch is collected. The user
+# chose review and test: re-read the issue, read the diff, run the changed modules' tests, fix what
+# does not hold. In the style of `TASK_RULES`; `git status` because `git diff` leaves out new files.
+REVIEW_RULES: Final[str] = """- Re-read the issue.
+- Read your own diff: `git status`, then `git diff` (a file you added shows only in `git status`).
+- Run the test files of every module you changed.
+- If the diff does not do what the issue asks, or a test that passed before your change now
+  fails, fix it.
+Then stop with a short summary."""
+
+REVIEW_PROMPT: Final[str] = "Before you finish, review your work:\n" + REVIEW_RULES
+
+# Only when no session was recorded to resume: a fresh session is given the issue and the diff.
+REVIEW_FRESH_PROMPT: Final[str] = UNATTENDED + """
+
+An earlier session changed the repository's source files to fix the issue below; its diff follows
+the issue. Treat that work as yours and review it:
+""" + REVIEW_RULES + """
+
+Issue:
+{problem_statement}
+
+Diff:
+{diff}"""
+
+# How much of the diff a fresh review session is given.
+REVIEW_DIFF_LIMIT: Final[int] = 40000
+
+# Records the tree as the agent's own turns left it, before the review turn.
+REVIEW_SNAPSHOT_SCRIPT: Final[str] = r"""
+cd "${TESTBED:-/testbed}" || exit 3
+git add -A >/dev/null 2>&1
+git write-tree > "$SCRATCH/review-tree" || exit 5
+git read-tree HEAD
+"""
+
+# What the review turn changed: `git diff --numstat` from the tree before it to the tree after it.
+REVIEW_DIFF_SCRIPT: Final[str] = r"""
+cd "${TESTBED:-/testbed}" || exit 3
+before=$(cat "$SCRATCH/review-tree") || exit 4
+git add -A >/dev/null 2>&1
+after=$(git write-tree) || exit 5
+git read-tree HEAD
+git -c core.quotePath=false diff --numstat "$before" "$after"
+"""
+
+# The pre-review patch is kept beside the instance's scratch, so it can be graded apart.
+PATCH_BEFORE_REVIEW: Final[str] = "patch-before-review.diff"
+
 # A closing that announces nothing: "Let me know if …" ends many finished summaries.
 LET_ME_KNOW: Final[re.Pattern] = re.compile(r"\blet me know\b", re.IGNORECASE)
 
@@ -253,7 +303,7 @@ class SweBenchInstanceRun:
                  code_index: Optional[Dict[str, Any]] = None,
                  extra_mounts: Optional[List[str]] = None,
                  issue: Optional[Dict[str, Any]] = None, refine: bool = False,
-                 task_rules: Optional[List[str]] = None) -> None:
+                 task_rules: Optional[List[str]] = None, review_turn: bool = False) -> None:
         """
         Args:
             store: The run's files.
@@ -273,6 +323,9 @@ class SweBenchInstanceRun:
                 names `replaced` (name to phrase). None gives the agent the dataset's text.
             refine: Run the refine arm's two steps: study and describe, then fix.
             task_rules: Names of `TASK_RULES` added to the prompt that fixes the issue.
+            review_turn: Resume the agent's session once more (`REVIEW_PROMPT`) after it stops
+                with a changed tree and before the patch is collected, within the task's time
+                limit.
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -290,6 +343,7 @@ class SweBenchInstanceRun:
         self.extra_mounts: List[str] = list(extra_mounts or [])
         self.refine = refine
         self.task_rules: List[str] = list(task_rules or [])
+        self.review_turn = review_turn
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -389,6 +443,25 @@ class SweBenchInstanceRun:
                                  refined=refined.strip() or NO_REFINED,
                                  code_index=CODE_INDEX_HINT if code_index else "",
                                  task_rules=cls.task_rules_text(task_rules))
+
+    @classmethod
+    def compose_review_prompt(cls, problem_statement: str, diff: str, resumed: bool) -> str:
+        """
+        Builds the review turn's prompt.
+
+        Args:
+            problem_statement: The issue as the agent saw it.
+            diff: The patch as the agent's own turns left it.
+            resumed: Whether the turn resumes the agent's session, which has both already.
+
+        Returns:
+            str: `REVIEW_PROMPT` for a resumed session; otherwise `REVIEW_FRESH_PROMPT` with the
+            issue and the diff (cut at `REVIEW_DIFF_LIMIT` characters).
+        """
+        if resumed:
+            return REVIEW_PROMPT
+        cut = diff if len(diff) <= REVIEW_DIFF_LIMIT else diff[:REVIEW_DIFF_LIMIT] + "\n[diff cut here]\n"
+        return REVIEW_FRESH_PROMPT.format(problem_statement=problem_statement, diff=cut.rstrip("\n"))
 
     @classmethod
     def stopped_mid_work(cls, message: str) -> bool:
@@ -493,10 +566,13 @@ class SweBenchInstanceRun:
         state["exec"] = outcome
         if self.refine:
             state["refine"]["fix_s"] = int(time.time() - fix_started)
+        review_timed_out = False
+        if self.review_turn and not self.stop_event.is_set():
+            review_timed_out = self._review(state, outcome) == "timeout"
 
         if self.stop_event.is_set():
             return "interrupted", ""
-        if outcome == "timeout":
+        if outcome == "timeout" or review_timed_out:
             # The container was stopped to end the agent; its filesystem is still there.
             SweBenchDocker.run(["start", self.container], timeout=120)
         collected = self._script(COLLECT_SCRIPT, timeout=600)
@@ -555,6 +631,66 @@ class SweBenchInstanceRun:
         self.session = None
         self.deadline = time.time() + self.settings.task_timeout_s
         return refined, None
+
+    def _review(self, state: Dict[str, Any], outcome: str) -> Optional[str]:
+        """
+        The review turn: once the agent's turns have ended normally with a changed tree, one more
+        turn of the same session (a fresh one with the issue and the diff when no session was
+        recorded), under the task's own deadline. Records `state["review"]`: whether it ran or
+        why not, whether it resumed, its outcome, time and tokens, and what it changed.
+
+        Args:
+            state: The instance's state.
+            outcome: How the agent's last turn ended.
+
+        Returns:
+            Optional[str]: The review turn's outcome (`ok`, `error`, `timeout`), or None when it
+            did not run.
+        """
+        if outcome != "ok":
+            state["review"] = {"skipped": f"the agent's turn ended in {'a timeout' if outcome == 'timeout' else 'an error'}"}
+            return None
+        if not self._changed():
+            # A review of no diff would be a second attempt, not a review, and its last message
+            # would decide between `empty` and `stalled` in place of the agent's own.
+            state["review"] = {"skipped": "no change to review"}
+            return None
+        snapshot = self._script(REVIEW_SNAPSHOT_SCRIPT, timeout=300)
+        self._script(COLLECT_SCRIPT, timeout=600)
+        before = self._read(self.scratch / "patch.diff")
+        try:
+            (self.scratch / PATCH_BEFORE_REVIEW).write_text(before)
+        except OSError:
+            pass
+        resumed = self.session is not None
+        record: Dict[str, Any] = {"resumed": resumed, "patch_bytes_before": len(before.encode()),
+                                  "log_offset": self.log_path.stat().st_size if self.log_path.exists() else 0}
+        state["review"] = record
+        started = time.time()
+        review = self._exec(self.compose_review_prompt(self.problem_statement, before, resumed), resume=resumed)
+        record.update(exec=review, seconds=int(time.time() - started))
+        log_end = self.log_path.stat().st_size if self.log_path.exists() else 0
+        tokens = self.store.log_stats(self.instance_id, record["log_offset"], log_end)
+        record["tokens"] = {key: tokens[key] for key in ("input_tokens", "cached_input_tokens", "output_tokens")}
+        if review == "timeout" and not self.stop_event.is_set():
+            # The container was stopped to end the turn; the diff and the patch need it running.
+            SweBenchDocker.run(["start", self.container], timeout=120)
+            self.notes.append("the review turn reached the task's time limit: the patch was collected as it stood")
+        if snapshot.returncode != 0:
+            record["changed"] = None
+            self.notes.append(f"recording the tree before the review turn failed ({snapshot.returncode})")
+            return review
+        added, removed, files = 0, 0, []
+        diff = self._script(REVIEW_DIFF_SCRIPT, timeout=300)
+        for line in diff.stdout.splitlines():
+            parts = line.split("\t", 2)
+            if len(parts) != 3:
+                continue
+            added += int(parts[0]) if parts[0].isdigit() else 0
+            removed += int(parts[1]) if parts[1].isdigit() else 0
+            files.append(parts[2])
+        record.update(changed=bool(files), added=added, removed=removed, files=files[:50])
+        return review
 
     # -- steps ---------------------------------------------------------------------------------
 

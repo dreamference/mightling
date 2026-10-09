@@ -30,6 +30,7 @@ from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATC
 from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, COMPLETION_NUDGE,
                                                           NO_REFINED, PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT,
                                                           SCRUB_SCRIPT, TASK_RULES)
+from dreamference.swe_bench.swe_bench_instance_run import REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
 from dreamference.swe_bench.swe_bench_runner import RUN_NAME
 
@@ -85,6 +86,10 @@ class FakeDocker:
         self.modes = {}
         self.default_mode = "change"
         self.processes = []
+        # The review turn, per instance: `leave` (the default), `edit`, `hang`.
+        self.review_modes = {}
+        # True: `ling exec` reports no thread, so there is no session to resume.
+        self.no_thread = False
 
     # -- SweBenchDocker.run ------------------------------------------------------------------
     def run(self, args, timeout=None, input_text=None):
@@ -164,9 +169,28 @@ class FakeDocker:
         prompt = args[-1]
         resume = "resume" in args
         session = args[args.index("resume") + 1] if resume else f"session-{len(self.calls)}"
-        stdout.write((json.dumps({"type": "thread.started", "thread_id": session}) + "\n").encode())
+        if not self.no_thread:
+            stdout.write((json.dumps({"type": "thread.started", "thread_id": session}) + "\n").encode())
         stdout.flush()
         say = lambda text: (box["scratch"] / "last.txt").write_text(text)
+        if REVIEW_RULES in prompt:
+            # The review turn: leaves the fix alone, edits it, or runs past the time limit.
+            review = self.review_modes.get(instance, "leave")
+            stdout.write((json.dumps({"type": "turn.completed", "usage": {
+                "input_tokens": 70, "cached_input_tokens": 60, "output_tokens": 7}}) + "\n").encode())
+            stdout.flush()
+            if review == "hang":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX HALF-REVIEWED\n")
+                process = FakeProcess(0, hang=True)
+                self.processes.append(process)
+                return process
+            if review == "edit":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX REVIEWED\n")
+                (box["repo"] / "api.py").write_text("from widget import widget\n\n\ndef api():\n    return widget()\n")
+                say("Reviewed: the caller in api.py needed the fix too; the widget tests pass.")
+            else:
+                say("Reviewed: the diff does what the issue asks and the widget tests pass.")
+            return FakeProcess(0)
         if "This is the first of two steps" in prompt:
             # The refine arm's first step: writes the description, unless told to write nothing;
             # `refine_edits` also changes the tree it was told to leave alone.
@@ -2057,3 +2081,144 @@ def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch)
     hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
              for call in created}
     assert "http://172.30.0.1:40001" not in hosts and len(created) == 2
+
+
+# -- the review turn (spec §19) --------------------------------------------------------------------
+
+def test_the_review_prompts_are_terse_and_a_fresh_one_carries_the_issue_and_the_diff():
+    issue, diff = "The widget is broken.", "diff --git a/widget.py b/widget.py\n+    return 2\n"
+    assert SweBenchInstanceRun.compose_review_prompt(issue, diff, resumed=True) == REVIEW_PROMPT
+    for words in ("Re-read the issue", "`git status`, then `git diff`",
+                  "Run the test files of every module you changed",
+                  "does not do what the issue asks", "a test that passed before your change now", "Then stop"):
+        assert words in REVIEW_PROMPT
+    for word in ("benchmark", "hidden", "reference", "swe", "grad"):
+        assert word not in REVIEW_PROMPT.lower()
+    fresh = SweBenchInstanceRun.compose_review_prompt(issue, diff, resumed=False)
+    assert REVIEW_RULES in fresh and fresh.index(issue) < fresh.index(diff.rstrip("\n"))
+    assert fresh.endswith(diff.rstrip("\n")) and "Nobody will answer questions" in fresh
+    cut = SweBenchInstanceRun.compose_review_prompt(issue, "x" * 50000, resumed=False)
+    assert cut.endswith("[diff cut here]") and len(cut) < 42000
+
+
+def test_without_the_review_turn_the_patch_is_collected_when_the_agent_stops(bench):
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    store = SweBenchRunStore("r1")
+    assert [resumed for _, resumed in mightling_prompts(bench["docker"])] == [False]
+    assert store.manifest()["review_turn"] is False and "review" not in store.state("acme__widget-1")
+    assert "Review turn         off: the patch was collected when the agent stopped" in SweBenchReport.render(store)
+
+
+def test_the_review_turn_resumes_the_same_session_in_the_same_container_before_collecting(bench):
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    calls = [call for call in bench["docker"].calls if call[0] == "exec" and len(call) > 2 and call[2].endswith("/ling")]
+    assert [(call[-1], "resume" in call) for call in calls] == [
+        (SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1."), False), (REVIEW_PROMPT, True)]
+    # The same session, in the same container: the model gate passes it by the container's address.
+    first_session = json.loads(store.log_path("acme__widget-1").read_text().splitlines()[0])["thread_id"]
+    assert calls[1][calls[1].index("resume") + 1] == first_session and calls[1][1] == calls[0][1]
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done" and state["nudges"] == 0
+    review = state["review"]
+    assert review["resumed"] is True and review["exec"] == "ok" and review["changed"] is False
+    assert (review["added"], review["removed"], review["files"]) == (0, 0, [])
+    assert review["tokens"] == {"input_tokens": 70, "cached_input_tokens": 60, "output_tokens": 7}
+    before = (store.directory / "scratch" / "acme__widget-1" / "patch-before-review.diff").read_text()
+    assert before == prediction("r1", "acme__widget-1") and review["patch_bytes_before"] == len(before.encode())
+    assert store.manifest()["review_turn"] is True
+    SweBenchEvaluator.grade(store, bench["settings"])
+    text = SweBenchReport.render(store)
+    assert "Review turn         on: ran in 1 of 1; changed the patch in 0 (+0 -0 lines), reached the time limit in 0" in text
+    assert "70 tokens in, 7 out" in text
+
+
+def test_a_review_that_changes_the_diff_is_what_is_collected_and_its_lines_are_counted(bench):
+    bench["docker"].review_modes = {"acme__widget-1": "edit"}
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    patch = prediction("r1", "acme__widget-1")
+    assert "REVIEWED" in patch and "api.py" in patch
+    assert "REVIEWED" not in (store.directory / "scratch" / "acme__widget-1" / "patch-before-review.diff").read_text()
+    review = store.state("acme__widget-1")["review"]
+    assert review["changed"] is True and sorted(review["files"]) == ["api.py", "widget.py"]
+    assert (review["added"], review["removed"]) == (1 + 5, 1)
+    assert store.state("acme__widget-2")["review"]["changed"] is False
+    assert "changed the patch in 1 (+6 -1 lines)" in SweBenchReport.render(store)
+
+
+def test_a_review_that_reaches_the_time_limit_submits_the_tree_as_it_stands(bench):
+    bench["docker"].review_modes = {"acme__widget-1": "hang"}
+    bench["settings"] = SweBenchSettings({"task_timeout": "0.2s"})
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    state = store.state("acme__widget-1")
+    # The agent finished; only the review was cut off, so the status is the patch's, not a timeout.
+    assert state["status"] == "done" and state["exec"] == "ok"
+    assert state["review"]["exec"] == "timeout" and state["review"]["changed"] is True
+    assert any("review turn reached the task's time limit" in note for note in state["notes"])
+    assert "HALF-REVIEWED" in prediction("r1", "acme__widget-1")
+    assert any(call[0] == "stop" for call in bench["docker"].calls)
+    assert any(call[0] == "start" for call in bench["docker"].calls)
+    assert "reached the time limit in 1" in SweBenchReport.render(store)
+
+
+def test_no_review_without_a_change_or_after_an_error_and_the_report_says_why(bench):
+    bench["docker"].modes = {"acme__widget-1": "empty", "acme__widget-2": "error"}
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2", "beta__gadget-7"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    assert store.state("acme__widget-1")["status"] == "empty"
+    assert store.state("acme__widget-1")["review"] == {"skipped": "no change to review"}
+    assert store.state("acme__widget-2")["review"] == {"skipped": "the agent's turn ended in an error"}
+    assert sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT) == 1
+    text = SweBenchReport.render(store)
+    assert ("Review turn         on: ran in 1 of 3 (not run: no change to review 1, "
+            "the agent's turn ended in an error 1); changed the patch in 0") in text
+
+
+def test_without_a_session_to_resume_the_review_is_a_fresh_session_given_the_issue_and_the_diff(bench):
+    bench["docker"].no_thread = True
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    turns = mightling_prompts(bench["docker"])
+    assert len(turns) == 2 and turns[1][1] is False
+    assert "The widget is broken in acme__widget-1." in turns[1][0] and "+    return 2  # FIX" in turns[1][0]
+    assert store.state("acme__widget-1")["review"]["resumed"] is False
+    assert "1 as a fresh session" in SweBenchReport.render(store)
+
+
+def test_the_review_turn_is_an_arm_kept_on_resume_and_told_apart_by_against(bench, monkeypatch):
+    run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"])
+    run(bench, name="reviewed", instances=["acme__widget-1", "acme__widget-2"], review_turn=True)
+    # A resumed run keeps the arm it started with, whatever the flag says now: widget-2 is made
+    # unfinished and runs again without the flag.
+    store = SweBenchRunStore("reviewed")
+    kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
+    store.predictions_path.write_text("".join(line + "\n" for line in kept))
+    reviews = sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT)
+    run(bench, name="reviewed")
+    assert store.manifest()["review_turn"] is True
+    assert sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT) == reviews + 1
+    for name in ("plain", "reviewed"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("reviewed"), SweBenchRunStore("plain"))
+    assert "differs: review_turn: True | False" in text
+    review_row = next(line for line in text.splitlines() if line.startswith("review turn"))
+    assert review_row.split()[-2:] == ["on", "off"]
+    # A manifest written before the option existed ran without it.
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["review_turn"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "review_turn" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    assert "Review turn         off" in SweBenchReport.render(SweBenchRunStore("plain"))
+
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--review-turn", "--name", "x"])) == 0
+    assert seen["review_turn"] is True
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["review_turn"] is False

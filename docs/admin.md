@@ -332,6 +332,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing) |
 | `--label` | What the model gate's refusal calls this run, e.g. "night 1" (default: SWE-bench run <name>) |
+| `--review-turn` | After the agent stops with a changed tree, resume its session once more to re-read the issue, read its diff, run the tests of the modules it changed and fix what does not hold, within the task's time limit; the patch is collected after that turn (default off) |
 
 #### `ling-admin swe-bench eval`
 

@@ -699,3 +699,34 @@ No client swallows it, so no display was changed. `ling-admin run` with another 
 ### 18.10 Not built
 
 A per-run token as a second identification; removing the agent's `unexpected status …, url: …` wrapper (a patch); checking Onyx's and each bridge's display one by one; detecting a run that hangs while alive.
+
+## 19. The review turn (`--review-turn`, 2026-10-09)
+
+**Why.** [MIGHTLING_SWE_BENCH_FAILURES §9.3](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md), rank 3: in 9 of the 32 failures of the 100-task round the run's own output contradicted the fix and the agent carried on. A second look at the finished diff targets those. The user chose *review and test*: re-read the issue, read the diff, run the tests of the changed modules, fix what does not hold. It is an arm for nights 4 and 5 (§9.4), off by default.
+
+**What it does.** `swe-bench run --review-turn` (a new run only; the manifest records `review_turn`, and a resumed run keeps it). Once the agent's turns have ended (after its nudges) and before the patch is collected, the runner resumes the same session in the same container, `ling exec … resume <session> <prompt>`, as a nudge is resumed, with `REVIEW_PROMPT` (`swe_bench_instance_run.py`):
+
+```text
+Before you finish, review your work:
+- Re-read the issue.
+- Read your own diff: `git status`, then `git diff` (a file you added shows only in `git status`).
+- Run the test files of every module you changed.
+- If the diff does not do what the issue asks, or a test that passed before your change now
+  fails, fix it.
+Then stop with a short summary.
+```
+
+- **One turn, outside the `nudges` budget**, and no nudge after it. It is not counted among the nudges.
+- **Only on a changed tree after a turn that ended normally.** With no change there is no diff to review: a turn there would be a second attempt, not a review, and its last message would decide between `empty` and `stalled` in place of the agent's. After an error or a timeout the turn is skipped too. The state says why (`review.skipped`).
+- **The same container, so the model gate (§18) passes it**: the gate decides by the source subnet, and the turn comes from the instance's own container.
+- **No session to resume** (`ling exec` reported no thread): a fresh session gets `REVIEW_FRESH_PROMPT`, the unattended preamble, the same rules, the issue and the diff as the agent's turns left it (cut at 40,000 characters). Recorded as `resumed: false`, and counted in the report.
+- **The task's time limit covers it.** The deadline is not reset. If the limit is reached during the review, the container is stopped as for any timeout, started again, and the tree is collected as it stands; the instance's status is the one its patch earns (`done`), not `timeout`, because the agent itself finished. The state's `review.exec` is `timeout` and a note says the patch was collected as it stood.
+- **The patch collected is the tree after the review turn.** The patch before it is kept as `scratch/<id>/patch-before-review.diff`, so the two can be graded apart (not built as a command).
+
+**The record.** Per instance, `state.review`: `resumed`, `exec` (`ok`, `error`, `timeout`), `seconds`, `tokens` (the turn's own, from the log between its offsets, counted as everything else is), `log_offset`, `patch_bytes_before`, and what the turn changed: `changed`, `added` and `removed` lines (`git diff --numstat` from the tree before the turn to the tree after it), `files` (up to 50). The report prints a `Review turn` line in every run, `off` when the arm was not on; with it on, in how many instances it ran and why not in the rest, in how many it changed the patch and by how many lines, how many reached the time limit, its time and tokens. `report --against` lists `review_turn` among the differing fields (a manifest written before the option counts as `false`), and the side-by-side table has a `review turn` row.
+
+**Risk, as §9.2 says.** A second look can undo a correct fix, and "a test that passed before your change now fails" is the sentence §9.2 found false for 19 of the 68 resolved tasks, whose correct fix fails an old test. The measures are the patches the review changed and the instances resolved without it and unresolved with it; the second needs `patch-before-review.diff` graded.
+
+**Tests** (`tests/test_swe_bench.py`, +8): the prompts (terse, no benchmark words; the fresh one carries the issue, then the diff, cut when long); off by default and the report saying so; on, resuming the fix's session in the same container before collecting, with its tokens and the pre-review patch; a review that changes the diff, collected, with its lines counted; a review that reaches the time limit, its tree submitted, the status `done`, the note; no review after no change or an error, and the report's reasons; the fresh-session fallback; the arm kept by a resumed run, told apart by `--against`, `false` for an older manifest, and the option reaching the runner.
+
+**Not checked without a real container:** that `ling exec resume` in a container finds the session it wrote there (the nudges make the same call); how long the turn takes and what it costs in tokens; whether the agent follows the prompt; and whether a resumed process's `turn.completed` usage counts only the new turn (the report sums it as it sums the nudges').

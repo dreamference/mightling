@@ -152,7 +152,7 @@ class SweBenchRunner:
                        runtime_hash: str, mightling_bin: str, parallel: int,
                        code_index: str = "off", prompt: Optional[str] = None,
                        mask: str = "off", strip_names: bool = False, refine: bool = False,
-                       task_rules: Optional[List[str]] = None) -> Dict[str, Any]:
+                       task_rules: Optional[List[str]] = None, review_turn: bool = False) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -211,6 +211,7 @@ class SweBenchRunner:
             **({"stripped_issues": stripped} if strip_names else {}),
             "refine": refine,
             "task_rules": sorted(set(task_rules or [])),
+            "review_turn": review_turn,
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
             "task_memory": settings.task_memory,
@@ -275,7 +276,8 @@ class SweBenchRunner:
             refine: bool = False,
             task_rules: Optional[List[str]] = None,
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None,
-            label: Optional[str] = None) -> int:
+            label: Optional[str] = None,
+            review_turn: bool = False) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -313,6 +315,9 @@ class SweBenchRunner:
             settings: Benchmark settings; defaults to the config file's.
             label: What the model gate's refusal calls this run (e.g. `night 1`); defaults to
                 `SWE-bench run <name>`.
+            review_turn: Resume each agent's session once more after it stops with a changed
+                tree, to review and test its diff before the patch is collected (spec §19).
+                A new run only, like `code_index`.
 
         Returns:
             int: 0 when the run did what it could (whatever its instances did), 1 when it could
@@ -406,7 +411,8 @@ class SweBenchRunner:
                     excluded = {i: problem for i, problem in problems.items() if problem}
                     manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
                                                   served, runtime_hash, mightling_bin, parallel, code_index,
-                                                  prompt, mask, strip_names, refine, task_rules)
+                                                  prompt, mask, strip_names, refine, task_rules,
+                                                  review_turn)
                     store.write_manifest(manifest)
                 elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                     print(f"❌ Run {store.name} was started with another ling build or model "
@@ -633,7 +639,8 @@ class SweBenchRunner:
                             (indexes or {}).get(instance_id), extra_mounts,
                             issue=(manifest.get("stripped_issues") or {}).get(instance_id),
                             refine=bool(manifest.get("refine", False)),
-                            task_rules=manifest.get("task_rules") or [])
+                            task_rules=manifest.get("task_rules") or [],
+                            review_turn=bool(manifest.get("review_turn", False)))
                         run.lane_host = lane["host"]
                         if lane.get("node"):
                             run.notes.append(f"model server: {lane['name']} (a replica of this machine's model)")
