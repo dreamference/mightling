@@ -313,4 +313,6 @@ Night 2 is the 4-bit model A/B, and its winner becomes the model of every later 
 
 Rank 6 (context) goes last, or is folded into a night that already runs one arm, because it roughly halves throughput.
 
+**Changed on 2026-10-09:** night 1's arm B is `--task-rules tests-v2`, not `tests` (runs `n1-default` and `n1-tests-v2`; [MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md), "Night 1 runs `tests-v2`"), so rank 2 is measured on night 1 instead of night 4. The table above is as it was written before that change.
+
 **The list stays fresh only while nobody designs a rule from its transcripts.** Once night 1's or a later night's failures on `fresh-50.txt` are analysed, later measurements need a second list. `scripts/swe_bench_fresh.py draw` excludes only `sample-100.txt` and has no `--exclude` for an earlier fresh list (not built). There are 120 validated tasks, 100 of them in the sample. Night 1's validation adds about 60, and about 211 arm64 tasks would still be unvalidated.
