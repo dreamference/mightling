@@ -1,8 +1,8 @@
 # Mightling Docker & Model Caching
 
-> **Version:** 1.2.0
+> **Version:** 1.5.1
 > **Subject:** Docker vLLM Architecture, Model Downloads, Tensorization, Cache Management
-> **Checked against the code:** 2026-10-01 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `Dockerfile*`; the launch line against `build_launch_command()` output); §6 against `chat/`, `node/` and `swe_bench/` on 2026-10-02)
+> **Checked against the code:** 2026-10-09 (`hardware/model_downloader.py`, `vllm_server/vllm_server_manager.py`, `sglang_launch_builder.py`, `Dockerfile`, and every `docker run` in `chat/`, `node/`, `runner/` and `swe_bench/`)
 
 ---
 
@@ -101,7 +101,19 @@ Tensorizer serializes weights into one `model.tensors` file for faster loading. 
 1. `ensure_docker_image(image)` (§5.3).
 2. Force-remove any stale `dreamference-vllm-<port>` (`docker rm -f`).
 
-**Launch** (full flag list in `DREAMFERENCE_CODEBASE.md` §5):
+**Launch** (full flag list in `DREAMFERENCE_CODEBASE.md` §5). Both engines share the prefix up to the image (`_docker_run_prefix`), so the memory cap, CPU limit, OOM score, mounts and PSI watchdog do not depend on the engine. The main model is an `engine: sglang` recipe and runs the image's own entrypoint:
+```bash
+docker run --ipc=host --network host --restart unless-stopped \
+  --name dreamference-vllm-<port> --gpus all \
+  --cpus=<n> --memory=<N>g --memory-swap=<N>g --oom-score-adj=800 \
+  -v <$HF_HOME or ~/.cache/huggingface>:/root/.cache/huggingface \
+  -v ~/.cache/dreamference:/root/.cache/dreamference \
+  -e VLLM_NO_USAGE_STATS=1 -e DO_NOT_TRACK=1 [-e HF_TOKEN=<token>] [recipe env] \
+  -e HF_HUB_OFFLINE=1 -e TORCHINDUCTOR_CACHE_DIR=/root/.cache/dreamference/sglang/inductor \
+  lmsysorg/sglang@sha256:… python3 -m sglang.launch_server --model-path <snapshot dir> … [recipe extra_args]
+```
+
+A vLLM recipe (none in the registry since 2026-10-07; covered by the tests) runs:
 ```bash
 docker run --ipc=host --network host --restart unless-stopped \
   --name dreamference-vllm-<port> --gpus all \
@@ -130,7 +142,9 @@ docker run --ipc=host --network host --restart unless-stopped \
 | Mount | Purpose |
 | :---- | :------ |
 | `~/.cache/huggingface:/root/.cache/huggingface` | Model weights |
-| `~/.cache/dreamference:/root/.cache/dreamference` | Tensorized weights, plus the persistent torch.compile cache (`VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`) |
+| `~/.cache/dreamference:/root/.cache/dreamference` | Tensorized weights; the persistent torch.compile caches (vLLM's `VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`, SGLang's `sglang/inductor`); the patched chat templates (`sglang/chat-templates`) |
+
+The container name stays `dreamference-vllm-<port>` whatever the engine, so `server stop`, the watchdog and diagnostics find it the same way.
 
 ---
 
@@ -152,15 +166,13 @@ It is NVIDIA's NGC vLLM image, which includes the May 2026 SM12x FlashInfer back
 
 ### 5.2. Per-model images
 
-A recipe can pin its own image in `launch_overrides["docker_image"]`, and name its engine in `launch_overrides["engine"]`. The default model and the two 122B DFlash entries do:
+A recipe can pin its own image in `launch_overrides["docker_image"]`, and name its engine in `launch_overrides["engine"]`. The main model does:
 
 | Model | Image | Built from |
 | --- | --- | --- |
-| `qwen3.8-27b-nvfp4-dflash2` (default, SGLang) | `lmsysorg/sglang@sha256:d6e7288627be…` (pinned by digest) | Pulled from the registry, not built |
-| `qwen3.5-122b-a10b-hybrid-dflash` (fallback) | `dreamference-vllm-dflash:0.23.0-aeon-dense5` | `Dockerfile.dense`, on top of `dreamference-vllm-dflash:0.23.0-aeon-kvfix2` |
-| `qwen3.5-122b-a10b-int4-dflash` | `dreamference-vllm-dflash:0.23.0-aeon-dense9` | same lineage |
+| `qwen3.8-27b-nvfp4-dflash2` (SGLang) | `lmsysorg/sglang@sha256:d6e7288627be…` (v0.5.19, pinned by digest) | Pulled from the registry, not built |
 
-The DFlash vLLM chain begins at `Dockerfile.dflash`, `FROM ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`, which is the AEON sm121 vLLM the DGX Spark DFlash recipe is built on. The kvfix layers bake in KV page-size unification, mamba prefix alignment and block-table fixes. The dense layer adds the Entrpi dense-bandwidth patches. These images are ~41 GB each and are built by hand with `docker build -f Dockerfile.dense …`; nothing in the CLI builds them.
+**Removed 2026-10-07:** the DFlash vLLM images for the 122B recipes (`dreamference-vllm-dflash:0.23.0-aeon-dense5` and `-dense9`, ~41 GB each, built by hand from `Dockerfile.dflash` and `Dockerfile.dense` on top of the AEON sm121 vLLM) went with their recipes, and so did both Dockerfiles. Images already on a machine are not deleted by Mightling; `docker image rm` frees them.
 
 The diffusion sidecar, when diffusion is switched on, runs in the **main model's** resolved image, not in `DEFAULT_VLLM_IMAGE`.
 
@@ -169,7 +181,7 @@ The diffusion sidecar, when diffusion is switched on, runs in the **main model's
 - **Present locally:** used as is.
 - **Registry-qualified** (the name contains `/`): `docker pull`.
 - **`DEFAULT_VLLM_IMAGE`:** `docker build -t <tag> -f Dockerfile .`, using the **main** `Dockerfile`, the only image it produces.
-- **Any other bare tag** (the pinned `dreamference-vllm-dflash:…` images): refused with an explanation. These are built by hand from `Dockerfile.dflash` and then `Dockerfile.dense` (§5.2), before `server start`. Until 2026-09-29 they too were "built" from the main `Dockerfile`, which put the NGC engine under the DFlash tag and failed the DFlash recipe on it.
+- **Any other bare tag:** refused with an explanation, since the project `Dockerfile` builds only `DEFAULT_VLLM_IMAGE` and a pinned local tag has to be built by hand under that name. (Until 2026-09-29 such tags were "built" from the main `Dockerfile`, which put the NGC engine under the removed DFlash tag and failed its recipe.)
 
 `probe_image()` never acquires an image. It reports on one already present, because it is called from `build_launch_command`, where a missing image must not start a multi-gigabyte download.
 
@@ -185,8 +197,10 @@ The diffusion sidecar, when diffusion is switched on, runs in the **main model's
 | Container | Started by | Notes |
 | --- | --- | --- |
 | `dreamference-diffusion-8001` | `server start`, before vLLM, **only with `DIFFUSION_ENABLED` on** (off since 2026-10-03; a leftover is removed) | `--memory=8g`, swap equal; `diffusion_openai_service.py` |
-| `mightling-api_server-1`, `ling-web_server-1`, `mightling-relational_db-1`, `mightling-nginx-1`, `ling-code-interpreter-1` | `ling-admin chat start` (Onyx Lite via `onyx-cli`) | Container names pinned to `mightling-*` in the lite overlay |
-| `dreamference-gmail`, `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `ling-admin chat configure` | Sidecars **created on** Onyx's network (not joined afterwards, see below); published on loopback only (gmail 8767, image search 8768, stt 8100) |
+| Onyx Lite: services `api_server`, `web_server`, `relational_db`, `nginx`, `code-interpreter` | `ling-admin chat start` (Onyx Lite via `onyx-cli`, compose project `onyx`) | Found by their compose service label (`com.docker.compose.service=…`), not by container name; one service is recreated with `docker compose -p onyx … up -d --force-recreate --no-deps <service>`. Retired with Onyx (MIGHTLING_ASK Phase C) |
+| `dreamference-gmail` (the Google service) | `ling-admin google start`, and `server start` on a node when it is absent (`GoogleService`, `chat/google_service.py`); also `ling-admin chat configure` | `python:3-slim` running the staged `service.py`, as the invoking user, `127.0.0.1:8767`; created on `dreamference-sidecars` by `google start`, on Onyx's network by `configure`; either one serves `/apps` |
+| `dreamference-image-search`, `dreamference-siglip`, `dreamference-stt` | `ling-admin chat configure` | Sidecars **created on** Onyx's network (not joined afterwards, see below); published on loopback only (image search 8768, stt 8100) |
+| `dreamference-matrix` | `ling-admin matrix …` (`MatrixHomeserver`, `chat/matrix_homeserver.py`); off by default | tuwunel 1.9.3 pinned by digest; `--memory=1g`, swap equal; volume `dreamference-matrix-data`; on the **internal** network `dreamference-matrix` (subnet `172.31.231.0/24`, no route out), federation off, registration by token; reached through a loopback proxy on port 6167 and Tailscale (MIGHTLING_CHAT §15) |
 | `dreamference-searxng` | `ling-admin searxng start` (`SearxngSidecar`) | `127.0.0.1:8888`; created on the project's own network `dreamference-sidecars`; `configure` joins it to Onyx's network, and first recreates one still on the default bridge |
 | `dreamference-openhands` | `ling-admin run --agent openhands` | `ghcr.io/all-hands-ai/openhands:main`, pulled on demand, `--rm`, UI on **`127.0.0.1:3001`** (`OPENHANDS_HOST_PORT`): not 3000, which is Onyx's, and loopback only because the container mounts the Docker socket (`DREAMFERENCE_AGENTS.md` §5) |
 | `mightling-swe-<run>-<instance>` (one per SWE-bench instance, labelled `ling.swe-bench.run=<run>`) | `ling-admin swe-bench run` and `smoke` (`SweBenchInstanceRun`) | The instance's own image (third-party arm64 builds, `greynewell/swe-bench-arm64`); on the **internal** network `mightling-swe-bench` (`docker network create --internal`), which reaches the model server at the network's gateway and nothing else; `--memory` and `--memory-swap` at `[swe_bench] task_memory` (8G), `--cpus` 4, `--pids-limit 4096`; the relocated `ling` mounted read-only at `/opt/ling`. Grading containers are the upstream harness's own, capped afterwards at `eval_memory` (4G) with `docker update` |
