@@ -69,7 +69,7 @@ NVFP4 needs an SM121-safe kernel path. The CUTLASS FP4 kernels are compiled for 
 
 ### 2.2. Candidate: Minima, the all-NVFP4 Qwen3.8-27B (night 2; prepared 2026-10-09, not yet run)
 
-**The decision.** The ling-engine survey (ling-engine `SPEC.md` §16.2) found Minima, a published Qwen3.8-27B with every linear layer in NVFP4. Night 2 is a SWE-bench A/B of it against production on this machine with today's SGLang. Production switches only if Minima's quality holds **and** it is faster here. Its own paper saw it decode *slower* than the served recipe at batch 1 (47 against 51 tok/s, one RTX PRO 6000, vLLM 0.27.1), so being faster is not assumed.
+**The decision.** The ling-engine survey (ling-engine `specs/DREAMFERENCE_LING_ENGINE_RESEARCH.md` §16.2) found Minima, a published Qwen3.8-27B with every linear layer in NVFP4. Night 2 is a SWE-bench A/B of it against production on this machine with today's SGLang. Production switches only if Minima's quality holds **and** it is faster here. Its own paper saw it decode *slower* than the served recipe at batch 1 (47 against 51 tok/s, one RTX PRO 6000, vLLM 0.27.1), so being faster is not assumed.
 
 **The checkpoint.** `minima-ai/mnma_qwen3.8_27b_nvfp4` at commit `16e768e7d0461b0b86e565ecedd08a24eca53e9a` (published 2026-09-04, Apache 2.0; the paper's link, and the account's only model), from the paper [Why Gated DeltaNet Survives 4-Bit Quantization](https://arxiv.org/abs/2609.04098) (arXiv 2609.04098).
 - **What is quantized:** all 496 linear layers in NVFP4 W4A4, group 16. That covers the 48 Gated DeltaNet layers (`in_proj_qkv`, `in_proj_z`, `in_proj_a`, `in_proj_b`, `out_proj`), the 16 attention layers and all 64 MLPs.
