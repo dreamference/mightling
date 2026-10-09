@@ -48,7 +48,7 @@ Speculation reaches vLLM only as `--speculative-config` JSON, built by `resolve_
 
 ## Image input is a client-side claim
 
-`ModelSpec.supports_vision` records whether a checkpoint takes images (verified against each checkpoint's `config.json`, never inferred from the alias); the web chat needs it, see [onyx.md](onyx.md#image-input-is-a-client-side-claim-not-a-server-capability).
+`ModelSpec.supports_vision` records whether a checkpoint takes images (verified against each checkpoint's `config.json`, never inferred from the alias); the retired Onyx web chat refused uploads without it, and Ask relies on it when it sends an image as `localImage` (MIGHTLING_ASK §1).
 
 ## The torch.compile cache is persistent and only partly self-invalidating
 
