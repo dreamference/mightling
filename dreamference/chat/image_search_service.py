@@ -7,8 +7,8 @@ embed them inline. One ``POST /search`` call runs the whole funnel -- SearXNG's 
 with a wide candidate pool, in-memory thumbnail fetches behind a hardened SSRF guard, a SigLIP
 pre-filter over the thumbnails, perceptual-hash collapse of visual near-duplicates, a vision
 re-rank by the served multimodal model with the full downloads already prefetching
-speculatively, and finally persistence of the winners into a local store that the deployment's
-nginx serves back at ``/puffin-images/{file_id}.jpg``. Caching locally is the point: hotlinked
+speculatively, and finally persistence of the winners into a local store that ``ling web`` and the
+desktop app serve back at ``/images/{file_id}.jpg`` (specs/DREAMFERENCE_MIGHTLING_ASK.md §6). Caching locally is the point: hotlinked
 images die of CORP blocks and link rot; cached ones render forever.
 
 **Deviation from the spec, stated loudly:** the spec names FastAPI. This service is standard
@@ -745,7 +745,7 @@ class ImageSearchService:
                 "response": "No embeddable images were found for this search.",
                 "instructions": "Tell the user the image search came up empty.",
             }
-        lines = [f"![{w['title']}](/puffin-images/{w['file_id']}.jpg)" for w in winners]
+        lines = [f"![{w['title']}](/images/{w['file_id']}.jpg)" for w in winners]
         markdown = "\n\n".join(lines)
         # The instructions restate the embeds because models given only a pointer ("embed the
         # above") have answered `Done` and shown nothing -- the images render only if the model

@@ -279,7 +279,7 @@ def test_a_known_source_url_skips_all_network_work(tmp_path):
     service.store.persist(cand["image_url"], _jpeg("red"), "cached title", 1)
 
     result = service.search(["q"])
-    assert "/puffin-images/" in result["response"]
+    assert "](/images/" in result["response"]
     assert "cached title" in result["response"]
     assert fetcher.calls == []
 
@@ -295,7 +295,7 @@ def test_the_funnel_fetches_thumbnails_persists_winners_and_answers_markdown(tmp
     result = service.search(["q"])
     lines = [l for l in result["response"].splitlines() if l.startswith("![")]
     assert 1 <= len(lines) <= 4
-    assert all("/puffin-images/" in l and l.endswith(".jpg)") for l in lines)
+    assert all("](/images/" in l and l.endswith(".jpg)") for l in lines)
     # Thumbnail fetches carried the SearXNG exemption; full downloads carried none.
     thumb_calls = [c for c in fetcher.calls if "image_proxy" in c["url"]]
     full_calls = [c for c in fetcher.calls if "image_proxy" not in c["url"]]

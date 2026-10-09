@@ -5,6 +5,7 @@
 // is not the app's own page is cancelled by a session rule.
 
 import { createReadStream, promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { protocol, session } from "electron";
@@ -34,6 +35,19 @@ const MIME: Record<string, string> = {
   ".map": "application/json",
 };
 
+/**
+ * The image search service's store (`dreamference/chat/image_search_sidecar.py` IMAGE_STORE_DIR),
+ * served read-only at `app://-/images/<id>.jpg`, as `ling web` serves it at `/images/`
+ * (specs/DREAMFERENCE_MIGHTLING_ASK.md §6): the Markdown lines the `image_search` tool returns.
+ */
+export const IMAGE_STORE = path.join(os.homedir(), ".config", "dreamference", "image-search", "data", "images");
+
+/** The stored image a path names: `/images/` and a name the service writes (16 hex digits, `.jpg`), or null. */
+export function imageFile(store: string, pathname: string): string | null {
+  const match = /^\/images\/([0-9a-f]{16}\.jpg)$/.exec(pathname);
+  return match ? path.join(store, match[1]) : null;
+}
+
 /** Must run before `app.whenReady()`. */
 export function registerScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -47,6 +61,16 @@ export function serve(root: string): void {
   protocol.handle(SCHEME, async (request) => {
     const url = new URL(request.url);
     if (url.host !== HOST) return new Response("not found", { status: 404 });
+    if (url.pathname.startsWith("/images/")) {
+      // Read-only, by the only names the service writes; a link is not followed out of the store.
+      const image = imageFile(IMAGE_STORE, url.pathname);
+      const stat = image ? await fs.lstat(image).catch(() => null) : null;
+      if (!image || !stat?.isFile()) return new Response("not found", { status: 404 });
+      return new Response(Readable.toWeb(createReadStream(image)) as ReadableStream, {
+        status: 200,
+        headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=604800, immutable" },
+      });
+    }
     const relative = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
     const file = path.resolve(base, relative);
     if (file !== base && !file.startsWith(base + path.sep)) return new Response("not found", { status: 404 });

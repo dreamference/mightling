@@ -731,6 +731,46 @@ Remove the Google service container; connected accounts stay stored.
 
 Show whether it runs and which accounts hold which apps.
 
+### `ling-admin images`
+
+Manage image search (the image_search tool and /images/).
+
+#### `ling-admin images start`
+
+Start the image search service on 127.0.0.1:8768 (SigLIP pre-filter best-effort).
+
+| Option | Description |
+|---|---|
+| `--no-siglip` | Skip the SigLIP pre-filter; rank the first candidates directly. |
+
+#### `ling-admin images stop`
+
+Remove the image search containers; stored images stay.
+
+#### `ling-admin images status`
+
+Show the containers, the store and whether the tool is offered.
+
+#### `ling-admin images mcp`
+
+Serve the image_search tool over stdio (ling starts this).
+
+### `ling-admin voice`
+
+Manage speech-to-text for the microphone in the app and ling web.
+
+#### `ling-admin voice start`
+
+Start speech-to-text (Whisper on the CPU) on 127.0.0.1:8100.
+
+#### `ling-admin voice stop`
+
+Remove the speech-to-text container; its model stays cached.
+
+#### `ling-admin voice status`
+
+Show whether speech-to-text runs.
+
 ### `ling-admin matrix`
 
 Manage the private Matrix homeserver for chatting with Mightling from a phone.
