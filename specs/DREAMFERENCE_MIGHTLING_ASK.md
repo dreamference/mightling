@@ -261,6 +261,9 @@ Copying still works over plain HTTP: selecting and copying text, Ctrl+V and past
 | **B** | the one after (1.7) | `ling-admin chat export`; the app's Chat entry opens Ask; installers stop installing Onyx | **Opt-in:** `ling-admin chat start` installs and starts it; existing installs keep it running until the user runs `ling-admin chat retire` |
 | **C** | the one after that (1.8); built 2026-10-09 (§19), merged after 1.6.0 | Onyx code removed | **Gone:** on upgrade, `ling-admin` offers to stop and remove the containers; the volumes are kept until the user confirms |
 
+**For the 1.7.0 release notes** (the first release with Phase C, since it merges after 1.6.0; no 1.7.0 notes file exists yet, so the line is kept here until one does):
+- Saved Onyx chats aren't exported; `ling-admin chat remove` keeps them until you choose to delete them.
+
 **The history export (Phase B):** `ling-admin chat export` reads every chat session through Onyx's own API (with the per-install admin password) and writes each as a Markdown file in `~/.mightling/ask/imported/<date>-<title>.md`, with the question, answer and citations. It adds that folder to `ling-docs`, so old chats are searchable from Ask. They aren't converted into live threads, because the app-server's thread format isn't a stable public schema.
 
 **What Phase C deletes** (done, §19.3):
@@ -589,5 +592,23 @@ No container, live service, model server or real home was touched.
 - a real transcription by speaches;
 - the microphone prompt in the packaged app and in a browser;
 - `chat remove` against the real Onyx deployment on this machine, which still runs and was not touched;
-- `npm run e2e` and `ling-admin audit egress --web`. §9 wants an image search turn in that audit; port 8768 is not on its allowlist yet, so that is the follow-up.
+- `npm run e2e` and `ling-admin audit egress --web` (its image search turn is §19.6).
+
+### 19.6 The user's answers, built the same day
+
+- **`server start` on a node starts image search and voice when they are missing,** as it starts the Google service (`ensure_on_node` on each):
+  - Nothing happens on a client, or where the container exists, running or not.
+  - Image search starts without SigLIP and without waiting for its health route: its first boot installs Pillow. Speech-to-text fetches its model detached (`docker exec -d`).
+  - The vision re-rank is told the id the server will serve, the checkpoint's repository (`vision_model`), since the model is not answering yet.
+  - A failure, or an exception from Docker, is a warning naming the command to retry (`ling-admin images start`, `ling-admin voice start`). It never blocks the model start; a test runs `server start` with both failing and checks that the load still runs.
+  - conftest stubs both starts, as it stubs the Google service's (`REAL_IMAGE_SEARCH_START`, `REAL_SPEECH_START`).
+- **`audit egress --web` has an image search turn** (§9):
+  - Where image search is set up (its secret file exists and a `ling-admin` is found), the scratch home is laid out as a node, with a copy of the secret and a `ling-admin` link, so the traced session is offered the tool.
+  - A second question asks for one picture, and its MCP server is traced with the app-server.
+  - Port 8768 is on the allowlist of every session, and the report and the JSON say `Image search turn: answered with an image | answered, without an image | no answer | skipped: …`.
+  - The turn is reported, not judged: the verdict stays the egress one.
+  - Not run against the real sidecar here (§19.5).
+- **The old docs URL:** `docs/web-chat.md` is a stub that sends the browser to `web/` (a meta refresh and a link, out of the nav and the search), because the docs workflow installs no redirect plugin. `mkdocs build --strict` with the workflow's pins passes.
+- **The 1.7.0 release notes** get the line under §10's table.
+- **Verified:** the Python suite, 907 passed, 91 skipped, with the same one failure from the environment. One run also failed `test_night_shift.py::…bundled_ling…`, a timing race on a loaded machine; it passed on three reruns and on the full rerun. No Rust or front-end code changed in this part.
 
