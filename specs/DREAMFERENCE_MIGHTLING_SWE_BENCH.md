@@ -711,8 +711,10 @@ Before you finish, review your work:
 - Re-read the issue.
 - Read your own diff: `git status`, then `git diff` (a file you added shows only in `git status`).
 - Run the test files of every module you changed.
-- If the diff does not do what the issue asks, or a test that passed before your change now
-  fails, fix it.
+- If the diff does not do what the issue asks, fix it.
+- If a test that passed before your change now fails, decide from the issue whether the issue asks
+  for the behaviour that test rules out: if it does, leave the test as it is and say so; if not,
+  fix the source. Never edit an existing test to make it pass.
 Then stop with a short summary.
 ```
 
@@ -725,7 +727,7 @@ Then stop with a short summary.
 
 **The record.** Per instance, `state.review`: `resumed`, `exec` (`ok`, `error`, `timeout`), `seconds`, `tokens` (the turn's own, from the log between its offsets, counted as everything else is), `log_offset`, `patch_bytes_before`, and what the turn changed: `changed`, `added` and `removed` lines (`git diff --numstat` from the tree before the turn to the tree after it), `files` (up to 50). The report prints a `Review turn` line in every run, `off` when the arm was not on; with it on, in how many instances it ran and why not in the rest, in how many it changed the patch and by how many lines, how many reached the time limit, its time and tokens. `report --against` lists `review_turn` among the differing fields (a manifest written before the option counts as `false`), and the side-by-side table has a `review turn` row.
 
-**Risk, as §9.2 says.** A second look can undo a correct fix, and "a test that passed before your change now fails" is the sentence §9.2 found false for 19 of the 68 resolved tasks, whose correct fix fails an old test. The measures are the patches the review changed and the instances resolved without it and unresolved with it; the second needs `patch-before-review.diff` graded.
+**Risk, as §9.2 says.** A second look can undo a correct fix. "A test that passed before your change now fails, fix it" is the sentence §9.2 found false for 19 of the 68 resolved tasks, whose correct fix fails an old test, so the review weighs such a test against the issue, in tests-v2's words, instead of always fixing the source. The measures are the patches the review changed and the instances resolved without it and unresolved with it; the second needs `patch-before-review.diff` graded.
 
 **Tests** (`tests/test_swe_bench.py`, +9; the scripted agent checks, when reviewing, that the index is at `HEAD` and `git diff` shows its change): the prompts (terse, no benchmark words; the fresh one carries the issue, then the diff, cut when long); off by default and the report saying so; on, resuming the fix's session in the same container before collecting, with its tokens and the pre-review patch; a review that changes the diff, collected, with its lines counted; a review that reaches the time limit, its tree submitted, the status `done`, the note; no review with no time left, after no change or after an error, and the report's reasons; the fresh-session fallback; the arm kept by a resumed run, told apart by `--against`, `false` for an older manifest, and the option reaching the runner.
 

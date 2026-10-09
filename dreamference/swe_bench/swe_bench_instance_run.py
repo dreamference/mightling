@@ -241,8 +241,10 @@ COMPLETION_NUDGE: Final[str] = ("You stopped in the middle of your work. Finish 
 REVIEW_RULES: Final[str] = """- Re-read the issue.
 - Read your own diff: `git status`, then `git diff` (a file you added shows only in `git status`).
 - Run the test files of every module you changed.
-- If the diff does not do what the issue asks, or a test that passed before your change now
-  fails, fix it.
+- If the diff does not do what the issue asks, fix it.
+- If a test that passed before your change now fails, decide from the issue whether the issue asks
+  for the behaviour that test rules out: if it does, leave the test as it is and say so; if not,
+  fix the source. Never edit an existing test to make it pass.
 Then stop with a short summary."""
 
 REVIEW_PROMPT: Final[str] = "Before you finish, review your work:\n" + REVIEW_RULES

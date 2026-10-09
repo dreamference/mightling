@@ -2093,7 +2093,7 @@ def test_the_review_prompts_are_terse_and_a_fresh_one_carries_the_issue_and_the_
     assert SweBenchInstanceRun.compose_review_prompt(issue, diff, resumed=True) == REVIEW_PROMPT
     for words in ("Re-read the issue", "`git status`, then `git diff`",
                   "Run the test files of every module you changed",
-                  "does not do what the issue asks", "a test that passed before your change now", "Then stop"):
+                  "does not do what the issue asks", "a test that passed before your change now", "decide from the issue", "Never edit an existing test", "Then stop"):
         assert words in REVIEW_PROMPT
     for word in ("benchmark", "hidden", "reference", "swe", "grad"):
         assert word not in REVIEW_PROMPT.lower()
