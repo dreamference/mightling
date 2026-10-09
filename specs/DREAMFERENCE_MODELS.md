@@ -1,10 +1,8 @@
 # Mightling Supported Models & Hardware
 
-> **Version:** 1.2.0
+> **Version:** 1.5.1
 > **Subject:** NVIDIA GB10 Model Matrix & Default Model Selection
-> **Checked against the code:** 2026-10-01 (`dreamference/hardware/model_matrix_registry.py`: every alias, repo, memory range and recipe value below was compared with `MATRIX`)
-
-> **2026-10-07: four models removed.** `qwen3.5-122b-a10b-hybrid-dflash`, `qwen3.5-122b-a10b-int4-dflash`, `qwen3.5-122b-a10b-nvfp4`, `qwen3.6-35b-a3b-nvfp4` and the 122B drafter `qwen3.5-122b-a10b-dflash-draft` are no longer in `MATRIX`, and `Dockerfile.dflash`, `Dockerfile.dense` and `runtime/` went with them. The registry serves `qwen3.8-27b-nvfp4-dflash2` alone (with its drafter). Sections below that describe the removed entries are history.
+> **Checked against the code:** 2026-10-09 (`dreamference/hardware/model_matrix_registry.py` and `hardware_manager.py`: every alias, repo, memory range and recipe value below was compared with `MATRIX`)
 
 ---
 
@@ -19,35 +17,31 @@
 
 ## 1. Supported NVIDIA GB10 Model Matrix
 
-Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`. Each entry is a `ModelSpec`, and its `notes` field carries the full history of the recipe; read it before retuning one. All eight entries are `compatible_gb10`.
+Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`. Each entry is a `ModelSpec`, and its `notes` field carries the full history of the recipe; read it before retuning one. All three entries are `compatible_gb10`, and Mightling serves one main model.
 
 | Alias | Model | Params | Format | Memory (min–max GB) | Vision | Role |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `qwen3.8-27b-nvfp4-dflash2` | Qwen 3.8 27B (NVFP4 + DFlash2, SGLang) | 27B | NVFP4 | 20–70 | ✅ | **Default** main model (`DEFAULT_MODEL_ALIAS`, since 2026-09-29). Served by **SGLang**, not vLLM (`launch_overrides['engine']`) |
-| `qwen3.5-122b-a10b-hybrid-dflash` | Qwen 3.5 122B-A10B (INT4+FP8 hybrid + DFlash + dense-bandwidth stack) | 122B (10B active) | INT4+FP8 hybrid | 71.5–120 | ✅ | Fallback; the default from 2026-08-23 to 2026-09-29 |
-| `qwen3.5-122b-a10b-int4-dflash` | Qwen 3.5 122B-A10B (INT4 AutoRound + DFlash) | 122B (10B active) | AutoRound INT4 | 71.5–120 | ✅ | Tested fallback; the default until 2026-08-23 |
-| `qwen3.5-122b-a10b-nvfp4` | Qwen 3.5 122B-A10B (NVFP4) | 122B (10B active) | NVFP4 | 78–120 | ✅ | Earlier default (until 2026-08-15); fallback if DFlash does not come up |
-| `qwen3.6-35b-a3b-nvfp4` | Qwen 3.6 35B-A3B (NVFP4) | 35B (3B active) | NVFP4 | 25–60 | — | Small-model option |
-| `qwen3.8-27b-dflash2-draft` | Qwen 3.8 27B DFlash2 drafter (NVFP4) | 1B | NVFP4 | 1–2 | — | Drafter named by the default recipe's `speculative_config`; not served on its own |
-| `qwen3.5-122b-a10b-dflash-draft` | Qwen 3.5 122B-A10B DFlash drafter | 0.8B | BF16 | 1.5–2.5 | — | Drafter named by the DFlash recipes' `speculative_config`; not served on its own. Listed so memory gates and pre-download know its size |
-| `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion) | 0.6B | BF16 | 1.5–3 | — | **Default** diffusion model (`DEFAULT_DIFFUSION_MODEL_ALIAS`); **not offered while diffusion is switched off** (`DIFFUSION_ENABLED = False` since 2026-10-03: never started, downloaded or listed). `is_diffusion`: **not** servable by vLLM; runs in the diffusion sidecar |
+| `qwen3.8-27b-nvfp4-dflash2` | Qwen 3.8 27B (NVFP4 + DFlash2, SGLang) | 27B | NVFP4 | 20–70 | ✅ | **The** main model (`DEFAULT_MODEL_ALIAS`, since 2026-09-29). Served by **SGLang**, not vLLM (`launch_overrides['engine']`) |
+| `qwen3.8-27b-dflash2-draft` | Qwen 3.8 27B DFlash2 drafter (NVFP4) | 1B | NVFP4 | 1–2 | — | Drafter named by the main recipe's `speculative_config`; not served on its own. Listed so the memory gates have a size before the snapshot is on disk |
+| `tiny-a2d-coder-0.5b-diffusion` | Tiny-A2D Qwen2.5-Coder 0.5B (bd3lm diffusion) | 0.6B | BF16 | 1.5–3 | — | Default diffusion model (`DEFAULT_DIFFUSION_MODEL_ALIAS`); **not offered while diffusion is switched off** (`DIFFUSION_ENABLED = False` since 2026-10-03: never started, downloaded or listed). `is_diffusion`: **not** servable by vLLM; runs in the diffusion sidecar |
 
 **HF repos:**
-- `RadixArk/Qwen3.8-27B-NVFP4`: the default, pinned to a revision;
-- `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`: its drafter, pinned to a revision;
-- `Intel/Qwen3.5-122B-A10B-int4-AutoRound`: both DFlash entries;
-- `nvidia/Qwen3.5-122B-A10B-NVFP4`;
-- `nvidia/Qwen3.6-35B-A3B-NVFP4`;
-- `z-lab/Qwen3.5-122B-A10B-DFlash`;
-- `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1`.
+- `RadixArk/Qwen3.8-27B-NVFP4`: the main model, pinned to revision `52d1adc5…`;
+- `maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal`: its drafter, pinned to revision `bd7a9342…`;
+- `dllm-collection/Qwen2.5-Coder-0.5B-Instruct-diffusion-bd3lm-v0.1`: the diffusion model.
 
-**Recipes:**
-- **The default (`qwen3.8-27b-nvfp4-dflash2`)** runs on SGLang at a 262,144-token context (`max_model_len = 262144`), from the image `lmsysorg/sglang` pinned by digest. Tool calls use `qwen3_coder` with reasoning parser `qwen3`; the DFlash2 drafter speculates 16 tokens; sampling uses PyTorch, not FlashInfer (`--sampling-backend pytorch`); at most 8 requests run at once; `gpu_memory_utilization` is 0.5. Its chat template is patched on a copy at launch (`chat_template_patches`, applied by `ChatTemplatePatcher`).
-- **The three vLLM main-model recipes** (the two 122B DFlash entries, the 122B NVFP4 and the 35B) run at a 32k context (`max_model_len = 32768`). Tool calls use `qwen3_xml` with reasoning parser `qwen3`. The two DFlash entries pin their own Docker images (`dreamference-vllm-dflash:0.23.0-aeon-dense5` for hybrid, `…-dense9` for int4) and disable thinking via the chat template.
+**The recipe (`qwen3.8-27b-nvfp4-dflash2`)** runs on SGLang from `lmsysorg/sglang` pinned by digest (v0.5.19, from github.com/hasso5703/dgx-spark-qwen38 v1.18):
+- context 262,144 tokens (`max_model_len`); `gpu_memory_utilization` 0.50; `container_headroom_gb` 24;
+- tool calls `qwen3_coder`, reasoning parser `qwen3`;
+- DFlash2 drafter (`method: DFLASH`, `quantization: modelopt_fp4`) with 16 speculative tokens;
+- `extra_args`: flashinfer attention, the PyTorch sampler (`--sampling-backend pytorch`, not FlashInfer), chunked prefill 8,192, no prefill CUDA graph, CUDA graphs up to batch 8, no FlashInfer autotune, the mamba radix cache in `extra_buffer` mode with a bf16 SSM state and at most 96 cached states, at most 8 running requests, torch.compile up to batch 4, two continuous decode steps, `--sleep-on-idle` and `--enable-metrics`;
+- two `chat_template_patches`, applied on a copy at launch by `ChatTemplatePatcher`: reasoning efforts `max`/`high` map to `xhigh` and `minimal` to `low` (the stock template answered HTTP 400 to Codex's efforts), and a system message after the first becomes a `<system-reminder>` user turn instead of raising an exception.
 
- See `DREAMFERENCE_INFERENCE.md` and `DREAMFERENCE_CODEBASE.md` §5 for the full launch command.
+See `DREAMFERENCE_INFERENCE.md` and `DREAMFERENCE_CODEBASE.md` §5 for the full launch command.
 
-**Aliases outside the matrix:** a name that is not a matrix key (e.g. `qwen2.5-coder-32b`) still resolves to a tool-call parser by name guess (`hermes` / `mistral`), but has no recipe. The Qwen 2.5 Coder, DeepSeek-R1-Distill, Llama 3.3, StarCoder2 and DeepSeek-V3 entries this document used to list are no longer in the registry.
+**Removed models.** On 2026-10-07 the Qwen 3.5 122B-A10B entries (`qwen3.5-122b-a10b-hybrid-dflash`, `-int4-dflash`, `-nvfp4`), `qwen3.6-35b-a3b-nvfp4` and the 122B drafter `qwen3.5-122b-a10b-dflash-draft` were removed, with `Dockerfile.dflash`, `Dockerfile.dense` and `runtime/`. `REMOVED_MODELS` keeps their aliases, display names and repos, all mapped to release `1.5.1`. `ModelMatrixRegistry.removed_in()` recognises them, `is_offered()` refuses them, and `server start`, `model download` and `main-model set` print `removed_message()`: which release removed the model, whether it came from the configuration, and the `ling-admin main-model set` command that switches to the main model. The vLLM launcher is kept and tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`).
+
+**Aliases outside the matrix:** a name that is neither a matrix key nor a removed model (e.g. `qwen2.5-coder-32b`) still resolves to a tool-call parser by name guess (`hermes` / `mistral`), but has no recipe.
 
 **Vision:** `supports_vision` is recorded per checkpoint from its `config.json`, never inferred from the alias. `ling-admin chat configure` sends it to Onyx as `supports_image_input`, and registers the default vision model.
 
@@ -55,24 +49,15 @@ Aliases, HF repos and launch recipes are defined in `ModelMatrixRegistry.MATRIX`
 
 ## 2. Default Model Rationale
 
-Decode speed on GB10 is bounded by memory bandwidth, not compute. That favours mixture-of-experts models, whose speed tracks *active* parameters, and speculative decoding, which turns one bandwidth-bound step into several accepted tokens.
+Decode speed on GB10 is bounded by memory bandwidth, not compute. That favours speculative decoding, which turns one bandwidth-bound step into several accepted tokens, and small weights.
 
-**`qwen3.8-27b-nvfp4-dflash2`**, the default since 2026-09-29, is Qwen3.8-27B in NVFP4 with the DFlash2 drafter. DFlash2 runs only in SGLang, which is why this entry names its engine. Measured single-stream, greedy, on this machine: prose 25.5, code 50.3, JSON 87.0 tok/s; prefill about 1,700 tok/s (about 1,000 at 116K tokens); about 38.7 GB of host memory still free; four `ling` tasks at once finished in 23 s. It matches the 122B's decode speed with a 262k context where the 122B has 32k, and leaves the host far more memory. `DREAMFERENCE_INFERENCE.md` records the four traps its recipe handles.
+**`qwen3.8-27b-nvfp4-dflash2`**, the main model since 2026-09-29, is Qwen3.8-27B in NVFP4 with the DFlash2 drafter. DFlash2 runs only in SGLang (vLLM supports it only through an unmerged pull request), which is why this entry names its engine. Measured single-stream, temperature 0, thinking off, on this machine: prose 25.5, code 50.3, JSON 87.0 tok/s; time to first token 0.22 s; prefill about 1,700 tok/s (about 1,000 at 116K tokens); first boot 7.5 min (torch.compile); about 38.7 GB of host memory still free while serving; four `ling` tasks at once finished in 23 s. Against the removed 122B it matched decode speed on code (49.9) and prose (23.8), with a 262K context where the 122B had 32K, about 20 GB of weights against about 71, and the same `ling exec` task in 10 s against 34 s. `DREAMFERENCE_INFERENCE.md` records the four traps its recipe handles.
 
-**`qwen3.5-122b-a10b-hybrid-dflash`**, the fallback, combines:
-- Qwen 3.5 122B-A10B as Intel's AutoRound INT4 checkpoint;
-- the **z-lab DFlash drafter**, block-speculative: it drafts a whole block in one parallel forward, with 12 speculative tokens;
-- the **dense-bandwidth stack** from `github.com/Entrpi/qwen3.5-122B-A10B-on-spark`, baked into the pinned image: FP8 dispatch for dense layers, an int8 w8a16 Triton GEMV lm-head (which frees ~1.4 GiB back to KV), and FLA sm121 shared-memory tuning.
-
-It serves at 32k context with 8 sequences. Measured single-stream on this machine: prose 23.8, code 49.9, JSON 53.1 tok/s. Its first 131k-context launch was refused for KV (9.03 GiB needed, 5.78 free), and that refusal is where the 32k / 8-sequence tuning comes from.
-
-Two upstream defaults are deliberately **not** used:
-- **`gpu_memory_utilization` 0.82:** upstream's number assumes a headless machine. This one runs a desktop and froze at 0.80. The launched value is 0.7; the entry's notes still say 0.68.
-- **`fastsafetensors` loading:** without GPUDirect Storage, it is a double-residency load peak, which is what freezes this host. The launch passes no `--load-format`, so vLLM's default loader is used.
+**History.** From 2026-08-23 to 2026-09-29 the default was `qwen3.5-122b-a10b-hybrid-dflash`: Intel's AutoRound INT4 checkpoint of Qwen 3.5 122B-A10B with the z-lab DFlash drafter (12 speculative tokens) and the dense-bandwidth stack from `github.com/Entrpi/qwen3.5-122B-A10B-on-spark` in a pinned image, served by vLLM at 32K context and `gpu_memory_utilization` 0.7. Two upstream defaults were deliberately not used there and the lessons still hold for any vLLM recipe: 0.82 memory utilisation (it assumes a headless machine; this one froze at 0.80) and `fastsafetensors` loading (without GPUDirect Storage it is a double-residency load peak).
 
 ### 2.1. NVFP4 and the SM121 kernel path
 
-The NVFP4 entries only work on an SM121-safe kernel path. The CUTLASS FP4 kernels are compiled for the SM120 ISA, and on GB10 they run without erroring while producing corrupt output. The recognisable symptom is a response made only of `!` characters. The recipes pin the FlashInfer b12x path, which needs vLLM with the May 2026 SM12x backends.
+NVFP4 needs an SM121-safe kernel path. The CUTLASS FP4 kernels are compiled for the SM120 ISA, and on GB10 they run without erroring while producing corrupt output; the recognisable symptom is a response made only of `!` characters. The removed vLLM recipes pinned the FlashInfer b12x path for that reason. On SGLang the same symptom came from FlashInfer's untruncated-sampling kernel on the completions path (token 0, `!`, for every sampled request), which is why the recipe samples with PyTorch.
 
 **Post-launch canary:** `ling-admin server start` runs one completion (`"Hello"`, 10 tokens) after the server is ready, **only when the alias contains `nvfp4`** (the default's does). It prints `✅ NVFP4 Canary Passed` or `❌ NVFP4 Canary Failed: Output corrupted (all '!')`. It does **not** switch models or relaunch; recovery is manual. `ling-admin main-model inspect` runs a broader correctness canary on any model.
 
@@ -92,8 +77,10 @@ The NVFP4 entries only work on an SM121-safe kernel path. The CUTLASS FP4 kernel
 `HardwareManager` reads total and available memory from `/proc/meminfo`, and the GPU name, driver and memory from `nvidia-smi --query-gpu=name,driver_version,memory.total`.
 
 **Qualification** (`is_gb10`):
-- the GPU name contains `GB10` or `BLACKWELL`; **or**
-- total memory ≥ 100 GB. With no `nvidia-smi` GPU name, the GPU is then reported as "NVIDIA GB10 (Simulated / Unified Memory Node)".
+- the GPU name `nvidia-smi` reports contains `GB10`; **or**
+- the GB10's GPU is on the PCI bus (vendor `0x10de`, device `0x2e12`, read from `/sys/bus/pci/devices`), which covers a machine whose driver does not answer yet. The GPU is then reported as "NVIDIA GB10 (no driver answering: nvidia-smi is missing or failed)".
+
+Nothing else qualifies: "Blackwell" also names discrete cards (RTX PRO 6000 Blackwell), and a large x86 server has 100 GB of RAM, so the earlier `BLACKWELL` and memory-size rules were dropped. The vendor's DMI strings are never used either, since each GB10 machine names itself differently (this one says `GX10`). `HardwareTelemetry` also carries the machine and OS names.
 
 There is no environment override. The `DREAMFERENCE_GB10_OVERRIDE` variable this document used to describe does not exist in the code.
 
