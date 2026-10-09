@@ -25,14 +25,14 @@ rather than vLLM, because its speed comes from a drafter only SGLang runs: DFlas
 12 tokens at a time for the model to check in one pass. The recipe follows
 [hasso5703/dgx-spark-qwen38](https://github.com/hasso5703/dgx-spark-qwen38), measured on a GB10.
 
-Measured on a GB10, single-stream:
+Measured on a GB10, single-stream, 2026-10-09, with 12 draft tokens (`scripts/decode_speed.py`):
 
 | Output | Tokens per second |
 |---|---|
-| Prose | 25.5 |
-| Code | 50.3 |
-| JSON | 87.0 |
-| Reading a prompt | ~1,700 (a 13K-token prompt in 8 s; ~1,000 at 116K tokens) |
+| Prose | 32.0 |
+| Code | 68.6 |
+| JSON | 84.1 |
+| Reading a prompt | ~1,800 (a 13K-token prompt in 7.3 s; ~1,000 at 116K tokens) |
 
 It reads images, holds a 262K-token context (a fact planted in the middle of a 116K-token prompt was
 found), and while serving leaves about 38 GB of memory free, so several agents can work at once:
