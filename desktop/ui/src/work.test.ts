@@ -211,4 +211,11 @@ describe("the agent's markdown", async () => {
     expect(html).not.toContain("<img");
     expect(html).toContain('title="https://example.com"');
   });
+
+  it("shows the pictures the image_search tool stored, and no other image", () => {
+    const html = renderMarkdown('![A "puffin"](/images/0123456789abcdef.jpg) ![x](/images/../secret.jpg) ![y](//example.com/0123456789abcdef.jpg)');
+    expect(html).toContain('<img class="found-image" src="/images/0123456789abcdef.jpg" alt="A &quot;puffin&quot;"');
+    expect(html.match(/<img/g)?.length).toBe(1);
+    expect(html).toContain('<span class="image-alt">[x]</span>');
+  });
 });

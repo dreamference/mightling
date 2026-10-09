@@ -65,6 +65,9 @@ fn config(dir: &Path, port: u16, lan_names: Vec<String>) -> Config {
         codex_home,
         socket: dir.join("run").join("s.sock"),
         launch: Launch { ling: fake_ling(dir), env: Vec::new(), log: state_dir.join("app-server.log") },
+        images_dir: dir.join("images"),
+        // Nothing listens on port 9 (discard): a test that needs the service starts its own.
+        speech_addr: "127.0.0.1:9".to_string(),
         state_dir,
         port,
         lan_names,
@@ -110,7 +113,7 @@ const PROTECTED: &[(&str, &str)] = &[
     ("POST", "/api/transcribe"),
     ("GET", "/api/apps"),
     ("GET", "/api/airgapped"),
-    ("GET", "/images/a.png"),
+    ("GET", "/images/0123456789abcdef.jpg"),
     ("GET", "/devices"),
     ("POST", "/devices/pair"),
     ("POST", "/devices/revoke"),
@@ -682,4 +685,73 @@ async fn ling_web_ask_signs_in_like_a_browser_and_runs_one_ask_thread() {
     assert!(seen.iter().any(|frame| frame["method"] == "initialized"));
     let _ = stop.send(());
     serving.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn stored_images_are_served_by_their_names_and_nothing_else() {
+    let scratch = scratch("images");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let store = server.config.images_dir.clone();
+    std::fs::create_dir_all(&store).unwrap();
+    std::fs::write(store.join("0123456789abcdef.jpg"), b"\xff\xd8\xffjpeg").unwrap();
+    std::fs::write(scratch.dir.join("secret.jpg"), b"outside").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(scratch.dir.join("secret.jpg"), store.join("fedcba9876543210.jpg")).unwrap();
+    let cookie = sign_in(&server).await;
+    let get = |uri: &str| request("GET", uri).header(header::COOKIE, &cookie).body(Body::empty()).unwrap();
+    let (status, headers, body) = call(&server, get("/images/0123456789abcdef.jpg")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "image/jpeg");
+    assert!(headers[header::CACHE_CONTROL].to_str().unwrap().contains("immutable"));
+    assert!(body.ends_with("jpeg"));
+    for uri in ["/images/fedcba9876543210.jpg", "/images/../secret.jpg", "/images/%2e%2e%2fsecret.jpg", "/images/0123456789abcdef.png", "/images/aaaaaaaaaaaaaaaa.jpg"] {
+        assert_eq!(call(&server, get(uri)).await.0, StatusCode::NOT_FOUND, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn a_recording_is_passed_to_speech_to_text_and_the_text_comes_back() {
+    let scratch = scratch("speech");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut settings = config(&scratch.dir, 3100, Vec::new());
+    settings.speech_addr = listener.local_addr().unwrap().to_string();
+    let server = Server::new(settings).unwrap();
+    // The stand-in service: reads the whole request, checks the form, answers with text.
+    let service = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut raw = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            let read = stream.read(&mut buffer).await.unwrap();
+            raw.extend_from_slice(&buffer[..read]);
+            if read == 0 || raw.ends_with(b"--\r\n") {
+                break;
+            }
+        }
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 22\r\n\r\n{\"text\":\" Hello Ask \"}").await.unwrap();
+        String::from_utf8_lossy(&raw).into_owned()
+    });
+    let cookie = sign_in(&server).await;
+    let post = |content_type: &str, body: &'static [u8]| {
+        request("POST", "/api/transcribe")
+            .header(header::COOKIE, &cookie)
+            .header(header::ORIGIN, ORIGIN)
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let (status, _, body) = call(&server, post("audio/webm;codecs=opus", b"OPUSDATA")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["text"], "Hello Ask");
+    let sent = service.await.unwrap();
+    assert!(sent.starts_with("POST /v1/audio/transcriptions HTTP/1.1\r\n"), "{sent}");
+    assert!(sent.contains("Systran/faster-whisper-small") && sent.contains("filename=\"speech.webm\"") && sent.contains("OPUSDATA"));
+    // Not audio, empty, or no service: refused, each saying why.
+    assert_eq!(call(&server, post("text/plain", b"hi")).await.0, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(call(&server, post("audio/webm", b"")).await.0, StatusCode::BAD_REQUEST);
+    let (status, _, body) = call(&server, post("audio/webm", b"again")).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert!(body.contains("ling-admin voice start"));
 }

@@ -78,6 +78,10 @@ export function App() {
   const [sending, setSending] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Dictation (specs/DREAMFERENCE_MIGHTLING_ASK.md §7): only where the page may record at all.
+  const recorder = useRef<MediaRecorder | null>(null);
+  const [dictation, setDictation] = useState<"idle" | "recording" | "transcribing">("idle");
+  const canDictate = useMemo(() => bridge.canRecord(), []);
   const notice = useCallback((error: unknown) => dispatch({ type: "notice", message: error instanceof Error ? error.message : String(error) }), []);
   /** Shows Ask or Work: the view buttons, and in the app its menu. */
   const showView = useCallback((next: View) => {
@@ -250,6 +254,41 @@ export function App() {
       if (gone?.preview) URL.revokeObjectURL(gone.preview);
       return list.filter((item) => item.id !== id);
     });
+  };
+
+  /** Starts recording, or stops it and puts the text into the draft: read before it is sent. */
+  const toggleDictation = async () => {
+    if (dictation === "recording") {
+      recorder.current?.stop();
+      return;
+    }
+    if (dictation !== "idle") return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const media = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      media.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      media.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recorder.current = null;
+        const recording = new Blob(chunks, { type: media.mimeType || "audio/webm" });
+        if (recording.size === 0) return setDictation("idle");
+        setDictation("transcribing");
+        bridge.transcribe(recording)
+          .then((text) => {
+            if (text) setDraft((current) => (current.trim() ? `${current.replace(/\s+$/, "")} ${text}` : text));
+          })
+          .catch(notice)
+          .finally(() => setDictation("idle"));
+      };
+      recorder.current = media;
+      media.start();
+      setDictation("recording");
+    } catch (error) {
+      notice(error);
+    }
   };
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -503,6 +542,12 @@ export function App() {
                   ))}
                 </select>
               )}
+              {canDictate ? (
+                <button className={`mic${dictation === "recording" ? " recording" : ""}`} onClick={() => void toggleDictation()}
+                  disabled={dictation === "transcribing"} aria-pressed={dictation === "recording"}
+                  title={dictation === "recording" ? "Stop and write down what you said" : dictation === "transcribing" ? "Writing it down…" : "Dictate (speech-to-text on this machine)"}
+                  aria-label={dictation === "recording" ? "Stop dictation" : "Dictate"}>{dictation === "transcribing" ? "…" : "🎤"}</button>
+              ) : null}
               {selected?.activeTurnId ? <button onClick={stop}>Stop</button> : null}
               <button className="primary" disabled={sending} onClick={() => void send()}>{selected?.activeTurnId ? "Steer" : sending ? "Sending…" : "Send"}</button>
             </div>

@@ -90,6 +90,30 @@ export async function upload(thread: string, file: Blob & { name?: string }, kin
   return (await response.json()) as Uploaded;
 }
 
+/**
+ * Turns a recording from the microphone into text (specs/DREAMFERENCE_MIGHTLING_ASK.md §7): in a
+ * browser through `ling web`'s `/api/transcribe`, in the app through its main process; both pass it
+ * to the speech-to-text service on this machine. The text is for the composer, not sent anywhere.
+ */
+export async function transcribe(recording: Blob): Promise<string> {
+  const mime = recording.type || "audio/webm";
+  if (host() === "electron") {
+    const answer = await send<{ text: string }>({ type: "voice/transcribe", mime, data: await base64(recording) });
+    return answer.text;
+  }
+  const response = await fetch("/api/transcribe", { method: "POST", body: recording, headers: { "Content-Type": mime }, credentials: "same-origin" });
+  const answer = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
+  if (!response.ok || typeof answer.text !== "string") throw new Error(answer.error || `transcription failed (${response.status})`);
+  return answer.text;
+}
+
+/** Whether this page can record: a secure context (the app, or `ling web` on this machine) with a microphone API. */
+export function canRecord(): boolean {
+  return typeof window !== "undefined" && window.isSecureContext === true
+    && typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getUserMedia === "function"
+    && typeof MediaRecorder !== "undefined";
+}
+
 export interface BridgeEvents {
   message: (message: unknown) => void;
   stderr: (line: string) => void;

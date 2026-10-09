@@ -607,6 +607,64 @@ class DreamferenceCLIController:
         sys.exit(action())
 
     @classmethod
+    def _run_images(cls, args: argparse.Namespace, config: DreamferenceConfig) -> int:
+        """Runs `ling-admin images start|stop|status` (specs/DREAMFERENCE_MIGHTLING_ASK.md §6).
+
+        Args:
+            args (argparse.Namespace): The parsed arguments.
+            config (DreamferenceConfig): Where the model server is, for the vision re-rank.
+
+        Returns:
+            int: The exit code.
+        """
+        from dreamference.chat.image_search_sidecar import IMAGE_SEARCH_HOST_PORT, ImageSearchSidecar
+
+        if args.images_command == "start":
+            if not ImageSearchSidecar.start(config.vllm_host, config.model, siglip=not args.no_siglip):
+                print(f"❌ Image search did not start. {ImageSearchSidecar.problem}")
+                return 1
+            print(f"✅ Image search is running on http://127.0.0.1:{IMAGE_SEARCH_HOST_PORT}")
+            print("💡 New ling sessions on this machine get the image_search tool; it needs SearXNG "
+                  "(`ling-admin searxng start`) and the model server.")
+            return 0
+        if args.images_command == "stop":
+            return 0 if ImageSearchSidecar.stop() else 1
+        if args.images_command == "status":
+            for line in ImageSearchSidecar.status_lines():
+                print(line)
+            return 0
+        print("usage: ling-admin images {start,stop,status,mcp}")
+        return 2
+
+    @classmethod
+    def _run_voice(cls, command: Optional[str]) -> int:
+        """Runs `ling-admin voice start|stop|status` (specs/DREAMFERENCE_MIGHTLING_ASK.md §7).
+
+        Args:
+            command (Optional[str]): The subcommand.
+
+        Returns:
+            int: The exit code.
+        """
+        from dreamference.chat.speech_sidecar import STT_HOST_PORT, SpeechSidecar
+
+        if command == "start":
+            if not SpeechSidecar.start():
+                print(f"❌ Speech-to-text did not start. {SpeechSidecar.problem}")
+                return 1
+            print(f"✅ Speech-to-text is running on http://127.0.0.1:{STT_HOST_PORT}")
+            print("💡 The microphone button in the app and in `ling web` on this machine uses it.")
+            return 0
+        if command == "stop":
+            return 0 if SpeechSidecar.stop() else 1
+        if command == "status":
+            for line in SpeechSidecar.status_lines():
+                print(line)
+            return 0
+        print("usage: ling-admin voice {start,stop,status}")
+        return 2
+
+    @classmethod
     def _google_start(cls) -> int:
         """Starts the Google service (specs/DREAMFERENCE_MIGHTLING_APPS.md §5.1).
 
@@ -1365,6 +1423,27 @@ class DreamferenceCLIController:
             "status", help="Show whether it runs and which accounts hold which apps"
         )
 
+        # Command: ling-admin images (the image search sidecar and its MCP tool;
+        # specs/DREAMFERENCE_MIGHTLING_ASK.md §6)
+        images_parser = subparsers.add_parser("images", help="Manage image search (the image_search tool and /images/)")
+        images_subparsers = images_parser.add_subparsers(dest="images_command")
+        images_start_parser = images_subparsers.add_parser(
+            "start", help="Start the image search service on 127.0.0.1:8768 (SigLIP pre-filter best-effort)"
+        )
+        images_start_parser.add_argument(
+            "--no-siglip", action="store_true", help="Skip the SigLIP pre-filter; rank the first candidates directly"
+        )
+        images_subparsers.add_parser("stop", help="Remove the image search containers; stored images stay")
+        images_subparsers.add_parser("status", help="Show the containers, the store and whether the tool is offered")
+        images_subparsers.add_parser("mcp", help="Serve the image_search tool over stdio (ling starts this)")
+
+        # Command: ling-admin voice (the speech-to-text sidecar behind the microphone; ASK §7)
+        voice_parser = subparsers.add_parser("voice", help="Manage speech-to-text for the microphone in the app and ling web")
+        voice_subparsers = voice_parser.add_subparsers(dest="voice_command")
+        voice_subparsers.add_parser("start", help="Start speech-to-text (Whisper on the CPU) on 127.0.0.1:8100")
+        voice_subparsers.add_parser("stop", help="Remove the speech-to-text container; its model stays cached")
+        voice_subparsers.add_parser("status", help="Show whether speech-to-text runs")
+
         # Command: ling-admin matrix (the private homeserver behind `ling chat`'s Matrix adapter)
         matrix_parser = subparsers.add_parser(
             "matrix", help="Manage the private Matrix homeserver for chatting with Mightling from a phone"
@@ -1406,6 +1485,8 @@ class DreamferenceCLIController:
             "searxng": (searxng_parser, "searxng_command"),
             "docs": (docs_parser, "docs_command"),
             "google": (google_parser, "google_command"),
+            "images": (images_parser, "images_command"),
+            "voice": (voice_parser, "voice_command"),
             "matrix": (matrix_parser, "matrix_command"),
         }
         if diffusion_model_parser is not None:
@@ -1436,6 +1517,12 @@ class DreamferenceCLIController:
         if group is not None and not getattr(args, group[1], None):
             group[0].print_help()
             sys.exit(1)
+
+        # The image_search tool's MCP server: stdout is the protocol, and Codex starts it for a
+        # session, so nothing below (the rename migration, the sandbox check) may print or ask.
+        if args.command == "images" and args.images_command == "mcp":
+            from dreamference.chat.image_search_mcp import ImageSearchMcp
+            sys.exit(ImageSearchMcp.serve())
 
         # Puffin became Mightling: what a 1.4.x node left under the old names is moved once
         # (specs/DREAMFERENCE_RENAME_MIGHTLING.md §4.2). Not where stdout is a protocol: `mcp`, and
@@ -2753,6 +2840,12 @@ class DreamferenceCLIController:
 
         elif args.command == "google":
             cls._run_google(args.google_command)
+
+        elif args.command == "images":
+            sys.exit(cls._run_images(args, config))
+
+        elif args.command == "voice":
+            sys.exit(cls._run_voice(args.voice_command))
 
         elif args.command == "matrix":
             from dreamference.chat.matrix_homeserver import MatrixHomeserver

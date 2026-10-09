@@ -20,6 +20,8 @@ export type FromView =
   | { type: "work/airgapped"; thread: string | null }
   /** An attachment for an Ask thread, written into its folder (ask.ts); the bytes base64. */
   | { type: "ask/upload"; thread: string; name: string; kind: "image" | "file"; data: string }
+  /** The microphone's recording, for text (voice.ts); the bytes base64. */
+  | { type: "voice/transcribe"; mime: string; data: string }
   | { type: "context-menu"; x: number; y: number; editable: boolean; selection: string }
   | { type: "window/minimize" }
   | { type: "window/maximize" }

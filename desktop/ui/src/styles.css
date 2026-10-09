@@ -98,6 +98,8 @@ html[data-host="electron"] .bar button, html[data-host="electron"] .bar input, h
 .composer textarea { width: 100%; resize: vertical; }
 .composer-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
 .attachments { display: flex; gap: 6px; flex-wrap: wrap; }
+.mic.recording { color: #fff; background: #c0392b; border-color: #c0392b; }
+.found-image { display: inline-block; max-width: min(100%, 360px); max-height: 280px; margin: 4px 6px 4px 0; border-radius: 8px; vertical-align: top; object-fit: cover; }
 .attachment { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; border: 1px solid var(--line); border-radius: 6px; padding: 2px 2px 2px 6px; font-size: 12px; }
 .attachment img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; }
 .attachment-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

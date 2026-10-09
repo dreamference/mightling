@@ -17,6 +17,7 @@ import type { WorkTarget } from "./args";
 import { findLing } from "./bridge";
 import { AppServer } from "./server";
 import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
+import { transcribe } from "./voice";
 import { openWork } from "./work";
 
 export interface MainOptions {
@@ -95,6 +96,8 @@ export async function main(options: MainOptions): Promise<void> {
         return null;
       case "ask/upload":
         return server.upload(message);
+      case "voice/transcribe":
+        return transcribe(message);
       case "work/stop":
         server.stop();
         return null;
