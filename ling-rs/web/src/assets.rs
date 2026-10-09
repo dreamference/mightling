@@ -40,8 +40,13 @@ pub fn with_bridge(page: &str) -> String {
 
 /// The pairing page, with a message above the form when there is one.
 pub fn pair_html(message: Option<&str>) -> String {
+    pair_html_with(message, None)
+}
+
+/// The pairing page with the code field filled in, as the Devices page's QR code links to it.
+pub fn pair_html_with(message: Option<&str>, code: Option<&str>) -> String {
     let message = message.map(|text| format!("<p class=\"error\">{}</p>", escape(text))).unwrap_or_default();
-    PAIR_HTML.replace("<!--MESSAGE-->", &message)
+    PAIR_HTML.replace("<!--MESSAGE-->", &message).replace("<!--CODE-->", &escape(code.unwrap_or_default()))
 }
 
 fn escape(text: &str) -> String {
@@ -86,5 +91,7 @@ mod tests {
     fn the_pair_page_escapes_its_message() {
         assert!(pair_html(Some("<b>")).contains("&lt;b&gt;"));
         assert!(!pair_html(None).contains("<!--MESSAGE-->"));
+        assert!(!pair_html(None).contains("<!--CODE-->"));
+        assert!(pair_html_with(None, Some("01234567")).contains("value=\"01234567\""));
     }
 }

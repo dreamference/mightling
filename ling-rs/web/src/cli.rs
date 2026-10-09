@@ -5,7 +5,8 @@
 //! - `status`: whether it answers, where, and how many devices are paired.
 //! - `open [--no-browser | --print-url]`: signs this machine's browser in with a one-time link;
 //!   `--print-url` prints the link alone, for the desktop app's Ask window.
-//! - `pair`: an eight-digit code for another device, for ten minutes.
+//! - `pair`: an eight-digit code for another device, for ten minutes, and in a terminal its QR
+//!   code (the Devices page, `/devices`, shows the same).
 //! - `devices`, `revoke <device>`: paired devices, and ending one.
 //! - `ask [--port N] <question>`: one Ask thread through the running server, for scripts and the
 //!   egress audit (ask_client.rs).
@@ -13,6 +14,7 @@
 //! `--lan` is refused unless this machine is an advertised node (`ling-admin node enable`), the
 //! one case in which Mightling offers anything to the network.
 
+use std::io::IsTerminal;
 use std::io::Read;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -27,6 +29,7 @@ use serde_json::json;
 use crate::app_server;
 use crate::app_server::Launch;
 use crate::auth;
+use crate::qr;
 use crate::server;
 use crate::server::Config;
 use crate::server::DEFAULT_PORT;
@@ -388,7 +391,7 @@ fn pair(state: &Path) -> i32 {
             return 1;
         }
     };
-    let urls: Vec<String> = std::fs::read_to_string(server_file(state))
+    let mut urls: Vec<String> = std::fs::read_to_string(server_file(state))
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .and_then(|value| value.get("urls").and_then(Value::as_array).cloned())
@@ -398,14 +401,29 @@ fn pair(state: &Path) -> i32 {
         .filter(|url| !url.contains("127.0.0.1"))
         .map(|url| format!("{url}pair"))
         .collect();
+    // The address a phone most likely reaches first (qr.rs), and its code in the terminal.
+    urls.sort_by_key(|url| qr::reachability(url_host(url).unwrap_or_default()));
     println!("Pairing code: {} {}", &code[..4], &code[4..]);
     println!("It works once, for ten minutes.");
     if urls.is_empty() {
         println!("This server is on loopback only, so no other device can reach it; on an advertised node, `ling web start --lan` serves the LAN.");
-    } else {
-        println!("On the other device, open {} and type the code.", urls.join(" or "));
+        return 0;
+    }
+    println!("On the other device, open {} and type the code.", urls.join(" or "));
+    if std::io::stdout().is_terminal()
+        && let Some(drawn) = qr::terminal(&format!("{}?code={code}", urls[0]))
+    {
+        println!("Or scan this with it ({}):\n{drawn}", url_host(&urls[0]).unwrap_or_default());
     }
     0
+}
+
+/// The host of an `http://host:port/…` link, without brackets.
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://"))?;
+    let authority = rest.split('/').next()?;
+    let host = authority.rsplit_once(':').map_or(authority, |(host, _)| host);
+    Some(host.trim_start_matches('[').trim_end_matches(']'))
 }
 
 async fn ask_command(args: &[String], state: &Path) -> i32 {
@@ -475,13 +493,7 @@ fn revoke(state: &Path, which: &str) -> i32 {
 
 fn ago(seconds: u64) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let elapsed = now.saturating_sub(seconds);
-    match elapsed {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{} min ago", elapsed / 60),
-        3600..=86_399 => format!("{} h ago", elapsed / 3600),
-        _ => format!("{} days ago", elapsed / 86_400),
-    }
+    crate::devices::ago(seconds, now)
 }
 
 #[cfg(test)]

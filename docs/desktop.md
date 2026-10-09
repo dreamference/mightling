@@ -1,15 +1,16 @@
 # Desktop app
 
-`ling-app` shows the [web chat](web-chat.md) in a window of its own, with an application-menu
-entry, a dock icon and no browser tabs or address bar, and a second window, **Work**, that drives
-the coding agent. It is built the way the best-known desktop coding agents are built: an Electron
-app with its own rendering engine and the agent, `ling`, bundled inside, so typing stays smooth
-whatever graphics driver the machine has.
+`ling-app` is Mightling in a window of its own, with an application-menu entry, a dock icon and no
+browser tabs or address bar. Its main window has the same two views as
+[`ling web`](web-chat.md#ling-web-ask-and-work-in-a-browser) in a browser: **Ask**, questions with
+no project, and **Work**, the coding agent on your projects, one click apart. It is built the way
+the best-known desktop coding agents are built: an Electron app with its own rendering engine and
+the agent, `ling`, bundled inside, so typing stays smooth whatever graphics driver the machine has.
 
 ## Install and run
 
 The easiest way is the `.deb` on the release page: it installs the app, its launcher entry and the
-`ling-app` command. The web chat has to be running first (`ling-admin chat start`).
+`ling-app` command. It needs no web chat: the app runs the agent itself.
 
 From a checkout:
 
@@ -31,8 +32,8 @@ ling app
 
 The release page carries the app for macOS as a preview: `Mightling-<version>-arm64-preview.dmg`
 for Apple silicon and `Mightling-<version>-x64-preview.dmg` for Intel Macs. On a Mac the app is a
-client: Chat shows the web chat of the GB10 on your network, and Work runs the `ling` bundled in the
-app against that GB10's model. It finds the GB10 the way `ling` does (the node must have run
+client: Ask and Work run the `ling` bundled in the app against the model of the GB10 on your
+network. It finds the GB10 the way `ling` does (the node must have run
 `ling-admin node enable`); with several on the network, choose one with `ling node use <name>`.
 
 **It is not signed with an Apple Developer ID and not notarized.** The app carries an ad-hoc
@@ -71,16 +72,33 @@ What the preview does not do yet: `ling app` in a Mac terminal does not open it 
 Applications or Spotlight), it does not update itself (download the new dmg), and closing its last
 window quits it, as on Linux.
 
-## The Work window
+## Ask and Work in the app window
 
-**Work** drives the terminal agent from a desktop window, on your GB10. It talks to one
-`ling app-server` of its own, the `ling` bundled in the app, and needs no web chat:
+The app window talks to one `ling app-server` of its own, the `ling` bundled in the app. Its
+sidebar switches between the two views:
+
+- **Ask**: a question with no project. Each question is a thread in a scratch folder of its own
+  under `~/.mightling/ask/`, answered with the `ask` prompt (web search with numbered sources, your
+  files, your apps). Attach images or files with the clip button or by pasting a screenshot; they
+  are copied into the question's folder. Search, rename and archive questions in the sidebar.
+- **Work**: projects and their threads, as below.
+
+The app itself decides what an Ask thread is: the window only names the `ask` prompt, and the app
+composes its text, makes the folder and keeps the thread inside it, with the same rules `ling web`
+applies. So a question asked in the app and one asked in a browser live in the same place.
 
 ```bash
-ling app --work               # open Work
+ling app --work               # open the app window on Work
 ling app ~/my-project         # Work, with a new thread on that folder
 ling app --thread <id>        # Work, on an existing thread
 ```
+
+The menu's **Ask** entry (and `ling app` alone) still opens the separate Ask window, which shows
+`ling web` on this machine (see [`ling web`](web-chat.md#ling-web-ask-and-work-in-a-browser));
+the app starts it when nothing answers and stops it on quit. On Windows, where `ling web` is not
+available yet, the menu's Ask opens the app window on Ask instead.
+
+### Work
 
 - **Threads grouped by project**, with replies, commands and their output, file changes and the
   turn's diff as they stream.
@@ -91,21 +109,21 @@ ling app --thread <id>        # Work, on an existing thread
   that combination for every client.
 - **One app:** opening `ling app` again brings the running window forward; `mightling://thread/<id>`
   links open Work on that thread.
+- **Ask one click away**, in the same window's sidebar.
 
 Not there yet: review, git worktrees, settings pages and choosing a model (it is shown, not chosen).
 Night Shift holds back while a Work turn is running, and the machine stays awake until it ends.
 
 ## Notes
 
-- **The web chat must be running.** If it is not answering, `ling app` and
-  `ling-admin desktop run` say so and name the command that starts it, instead of opening an
-  empty window.
+- **No web chat needed.** Ask and Work run on the agent bundled in the app; the Ask window starts
+  `ling web` itself when it is not running.
 - **Nothing leaves the machine.** The app has no crash reporting, no update checks and none of the
   background services a browser engine normally talks to; `ling-admin audit egress --app` traces a
   whole session of it and lists every connection it made.
 - **Fresh styling on every launch.** The window clears its cached pages each time it opens, so
   changes to the web chat's look show up immediately. You stay signed in.
 - **Links open in your browser.** A link that would open a new tab (an external citation, for
-  example) opens in the system browser; the window stays on the chat.
+  example) opens in the system browser; the window stays where it is.
 - **Installed size.** The engine is bundled, so the package is larger than a window on the
   system's browser engine would be: see the release page for the current size.

@@ -1,12 +1,13 @@
 // The Mightling UI (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, specs/DREAMFERENCE_MIGHTLING_ASK.md):
 // Ask and Work, one page in two hosts. Ask is questions with no project, each thread in a scratch
-// folder the policy layer of `ling web` creates; Work is projects and their threads. The selected
+// folder the host's policy layer creates; Work is projects and their threads. The selected
 // thread's turns stream in the middle, approvals inline, and a composer starts a turn, steers a
 // running one, or stops it. Everything goes through `ling app-server`.
 //
 // Ask needs the policy layer that turns the `ask` prompt name into its text and confines the
-// thread to its folder, which `ling web` has (ling-rs/web/src/policy.rs). The desktop app's Work
-// window does not, so there it shows Work alone, and its Ask window is `ling web` itself.
+// thread to its folder. Both hosts have it, from the same `policy.json`: `ling web`
+// (ling-rs/web/src/policy.rs) and the desktop app's main process (desktop/electron/src/policy.ts).
+// So both show Ask by default and Work one click away (`#work`).
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ClipboardEvent } from "react";
 
@@ -43,11 +44,8 @@ const text = (value: string): UserInput => ({ type: "text", text: value, text_el
 type View = "ask" | "work";
 
 const HOST = bridge.host();
-/** Ask threads need `ling web`'s policy layer (see the top of this file). */
-const ASK_AVAILABLE = HOST === "web";
 
 function initialView(): View {
-  if (!ASK_AVAILABLE) return "work";
   return typeof location !== "undefined" && location.hash === "#work" ? "work" : "ask";
 }
 
@@ -81,6 +79,13 @@ export function App() {
   const [drawer, setDrawer] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const notice = useCallback((error: unknown) => dispatch({ type: "notice", message: error instanceof Error ? error.message : String(error) }), []);
+  /** Shows Ask or Work: the view buttons, and in the app its menu. */
+  const showView = useCallback((next: View) => {
+    setView(next);
+    setSearch("");
+    dispatch({ type: "select", threadId: null });
+    if (typeof history !== "undefined") history.replaceState(null, "", next === "work" ? "#work" : "#");
+  }, []);
 
   const answerUnasked = useCallback((request: ServerRequest) => {
     switch (request.method) {
@@ -132,6 +137,7 @@ export function App() {
     };
     let stop: (() => void) | undefined;
     bridge.listenBridge({
+      view: (next) => showView(next),
       message: (message) => client.receive(message),
       stderr: (line) => dispatch({ type: "stderr", line }),
       protocolError: (line) => dispatch({ type: "protocolError", line }),
@@ -147,7 +153,7 @@ export function App() {
       }
     }).catch(notice);
     return () => stop?.();
-  }, [client, connect, answerUnasked, notice]);
+  }, [client, connect, answerUnasked, notice, showView]);
 
   const selectedView: ThreadView | null = state.selected ? state.threads[state.selected] ?? null : null;
   // Each view shows only its own kind of thread.
@@ -200,12 +206,7 @@ export function App() {
     }
   };
 
-  const switchView = (next: View) => {
-    setView(next);
-    setSearch("");
-    dispatch({ type: "select", threadId: null });
-    if (typeof history !== "undefined") history.replaceState(null, "", next === "work" ? "#work" : "#");
-  };
+  const switchView = showView;
 
   const startThread = async () => {
     const cwd = newCwd.trim();
@@ -391,12 +392,10 @@ export function App() {
       bridge.contextMenu(event.clientX, event.clientY, editable, window.getSelection()?.toString() ?? "").catch(() => {});
     }}>
       <aside className="sidebar" aria-label="Threads">
-        {ASK_AVAILABLE ? (
-          <nav className="views" aria-label="View">
-            <button className={view === "ask" ? "selected" : ""} onClick={() => switchView("ask")}>Ask</button>
-            <button className={view === "work" ? "selected" : ""} onClick={() => switchView("work")}>Work</button>
-          </nav>
-        ) : null}
+        <nav className="views" aria-label="View">
+          <button className={view === "ask" ? "selected" : ""} onClick={() => switchView("ask")}>Ask</button>
+          <button className={view === "work" ? "selected" : ""} onClick={() => switchView("work")}>Work</button>
+        </nav>
         {view === "ask" ? (
           <>
             <button className="primary new-question" onClick={newQuestion}>New question</button>
@@ -424,6 +423,7 @@ export function App() {
             <input className="search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search threads" aria-label="Search threads" />
           </>
         )}
+        {HOST === "web" ? <a className="devices-link" href="/devices">Pair a phone or another device</a> : null}
       </aside>
       <div className="backdrop" onClick={() => setDrawer(false)} />
 
@@ -441,7 +441,6 @@ export function App() {
               <button className="link-button" onClick={() => selected && client.request("thread/compact/start", { threadId: selected.thread.id }).catch(notice)}>compress</button>
             </span>
           ) : null}
-          {HOST === "electron" ? <button onClick={() => bridge.openChat().catch(notice)} title="Questions with no project, in the Ask window">Ask</button> : null}
         </header>
 
         {state.notices.map((message, index) => (

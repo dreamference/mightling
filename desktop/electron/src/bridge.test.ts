@@ -1,10 +1,24 @@
-// The six cases of `ling-desktop-bridge`'s tests, kept as they were when the bridge was Rust.
+// The six cases of `ling-desktop-bridge`'s tests, kept as they were when the bridge was Rust. The
+// policy itself is held to `ling web`'s conformance cases in policy.test.ts.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { BusyTracker, busyMarker, classify, findLing, servedModel, vetOutgoing } from "./bridge";
+import { BusyTracker, busyMarker, classify, findLing, servedModel } from "./bridge";
+import { vetOutgoing as vet, type PromptSource } from "./policy";
+
+/** No prompt is named in these cases, and no thread is an Ask thread. */
+const NO_PROMPTS: PromptSource = {
+  composed: () => {
+    throw new Error("no prompt is composed here");
+  },
+  newScratchFolder: () => {
+    throw new Error("no folder is made here");
+  },
+  scratchFolderOf: () => null,
+};
+const vetOutgoing = (message: unknown, pending: Set<string>) => vet(message, pending, NO_PROMPTS);
 
 describe("the bridge", () => {
   it("tells apart what the server writes", () => {

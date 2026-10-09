@@ -1,8 +1,10 @@
-// The windows and the one IPC channel between Work's page and this process
+// The windows and the one IPC channel between the app window's page and this process
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3). Every message from the page is checked to
-// come from Work's own window before it is acted on. The Ask window (the menu's former Chat) is
-// the Mightling UI on `ling web` (chat.ts, web.ts): it has no preload and talks to that server,
-// never to this process.
+// come from that window before it is acted on. The app window (`app://`, the former Work window)
+// shows Ask and Work, as `ling web` does: this process enforces the same policy (policy.ts) and
+// keeps the Ask folders (ask.ts). The Ask window (the menu's former Chat) is still the Mightling UI
+// on `ling web` (chat.ts, web.ts): it has no preload and talks to that server, never to this
+// process (specs/DREAMFERENCE_MIGHTLING_ASK.md §18).
 
 import path from "node:path";
 import { BrowserWindow, app, ipcMain, nativeTheme, type IpcMainInvokeEvent } from "electron";
@@ -57,7 +59,7 @@ export async function main(options: MainOptions): Promise<void> {
   const web = ling && process.platform !== "win32" ? WebServer.for(ling) : null;
   const showChat = () => {
     if (!web) {
-      showWork();
+      showWork("ask");
       return;
     }
     if (chat && !chat.isDestroyed()) {
@@ -68,19 +70,20 @@ export async function main(options: MainOptions): Promise<void> {
     chat = openChat({ server: web, show });
     chat.on("closed", () => (chat = null));
   };
-  const showWork = () => {
+  const showWork = (view: "ask" | "work" = "work") => {
     if (work && !work.isDestroyed()) {
       work.show();
       work.focus();
+      deliver({ channel: "view", payload: view });
       return;
     }
-    work = openWork({ preload: path.join(__dirname, "preload.js"), show });
+    work = openWork({ preload: path.join(__dirname, "preload.js"), show, view });
     work.on("closed", () => (work = null));
   };
 
-  installMenu({ openChat: showChat, openWork: showWork });
+  installMenu({ openChat: showChat, openWork: () => showWork("work") });
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
-  installTray(path.join(__dirname, "..", "..", "icons"), { openChat: showChat, openWork: showWork });
+  installTray(path.join(__dirname, "..", "..", "icons"), { openChat: showChat, openWork: () => showWork("work") });
 
   // The one channel from Work's page.
   const fromView = new Reassembler();
@@ -100,8 +103,10 @@ export async function main(options: MainOptions): Promise<void> {
       case "work/start":
         return server.start();
       case "work/send":
-        server.send(message.message);
+        await server.send(message.message);
         return null;
+      case "ask/upload":
+        return server.upload(message);
       case "work/stop":
         server.stop();
         return null;

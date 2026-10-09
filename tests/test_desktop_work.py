@@ -87,9 +87,13 @@ def test_work_loads_nothing_from_the_network():
 
 
 def test_the_bridge_sends_only_methods_the_pinned_codex_has():
-    bridge = (SRC / "bridge.ts").read_text(encoding="utf-8")
-    listed = bridge.split("export const ALLOWED_REQUESTS", 1)[1].split("];", 1)[0]
-    allowed = set(re.findall(r'"([a-zA-Z/]+)"', listed))
+    # One policy for both hosts (ASK §2.3): the app's main process compiles in the file `ling web`
+    # compiles in, and runs its conformance cases (policy.test.ts).
+    policy_ts = (SRC / "policy.ts").read_text(encoding="utf-8")
+    assert 'import policyFile from "../../../ling-rs/web/policy.json";' in policy_ts
+    assert "ALLOWED_REQUESTS" not in (SRC / "bridge.ts").read_text(encoding="utf-8")
+    policy = json.loads((Path(ELECTRON_DIR).parent.parent / "ling-rs" / "web" / "policy.json").read_text(encoding="utf-8"))
+    allowed = set(policy["allowedRequests"])
     client_requests = (PROTOCOL_DIR / "ClientRequest.ts").read_text(encoding="utf-8")
     known = set(re.findall(r'"method": "([^"]+)"', client_requests))
     assert allowed

@@ -12,7 +12,7 @@ export interface Started {
   ask_root?: string | null;
 }
 
-/** Which host the page runs in: `ling web` in a browser (or the app's Ask window), or the app's Work window. */
+/** Which host the page runs in: `ling web` in a browser (or the app's Ask window), or the app's own window (`app://`). */
 export type Host = "web" | "electron";
 
 export function host(): Host {
@@ -53,7 +53,6 @@ export const bridgeTransport: Transport = {
 
 export const startServer = () => send<Started>({ type: "work/start" });
 export const stopServer = () => send<void>({ type: "work/stop" });
-export const openChat = () => send<void>({ type: "work/open-chat" });
 export const workTarget = () => send<WorkTarget>({ type: "work/target" });
 export const airgapped = (thread: string | null) => send<Airgapped>({ type: "work/airgapped", thread });
 export const contextMenu = (x: number, y: number, editable: boolean, selection: string) =>
@@ -65,13 +64,27 @@ export interface Uploaded {
   bytes: number;
 }
 
+/** A file's bytes as base64, built in pieces so a large file does not overflow the argument list. */
+export async function base64(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  }
+  return btoa(binary);
+}
+
 /**
- * Writes an attachment into an Ask thread's scratch folder through `ling web`'s `/api/upload`
- * (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1), and resolves with where it landed. Only `ling web`
- * serves the route: the app's Work window has no Ask threads.
+ * Writes an attachment into an Ask thread's scratch folder, and resolves with where it landed: in
+ * a browser through `ling web`'s `/api/upload` (specs/DREAMFERENCE_MIGHTLING_ASK.md §4.1), in the
+ * app through its main process, which applies the same checks (desktop/electron/src/ask.ts).
  */
 export async function upload(thread: string, file: Blob & { name?: string }, kind: "image" | "file", name?: string): Promise<Uploaded> {
-  const query = new URLSearchParams({ thread, name: name ?? file.name ?? "attachment", kind });
+  const fileName = name ?? file.name ?? "attachment";
+  if (host() === "electron") {
+    return send<Uploaded>({ type: "ask/upload", thread, name: fileName, kind, data: await base64(file) });
+  }
+  const query = new URLSearchParams({ thread, name: fileName, kind });
   const response = await fetch(`/api/upload?${query.toString()}`, { method: "POST", body: file, credentials: "same-origin" });
   if (!response.ok) throw new Error((await response.text()).trim() || `the upload failed (${response.status})`);
   return (await response.json()) as Uploaded;
@@ -84,6 +97,8 @@ export interface BridgeEvents {
   exit: (code: number | null) => void;
   /** The system theme changed; the page may restyle. */
   theme?: (theme: "light" | "dark") => void;
+  /** The app asked for Ask or Work (its menu, a second instance, a link). */
+  view?: (view: "ask" | "work") => void;
 }
 
 /** Subscribes to the bridge's events; resolves with a function that unsubscribes them all. */
@@ -102,6 +117,8 @@ export async function listenBridge(events: BridgeEvents): Promise<() => void> {
         return events.exit(typeof data.payload === "number" ? data.payload : null);
       case "theme":
         return events.theme?.(data.payload === "dark" ? "dark" : "light");
+      case "view":
+        return events.view?.(data.payload === "ask" ? "ask" : "work");
     }
   };
   window.addEventListener("message", onMessage);

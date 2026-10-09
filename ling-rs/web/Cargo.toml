@@ -19,6 +19,8 @@ path = "src/lib.rs"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query", "form"] }
 futures = { version = "0.3", default-features = false, features = ["std"] }
 ling-airgapped = { path = "../airgapped" }
+# The pairing QR code (src/qr.rs), drawn here: no dependencies of its own, no service asked.
+qrcodegen = "1.8"
 rand = "0.9"
 serde_json = "1"
 sha2 = "0.10"

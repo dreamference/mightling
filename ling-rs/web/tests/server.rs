@@ -111,6 +111,9 @@ const PROTECTED: &[(&str, &str)] = &[
     ("GET", "/api/apps"),
     ("GET", "/api/airgapped"),
     ("GET", "/images/a.png"),
+    ("GET", "/devices"),
+    ("POST", "/devices/pair"),
+    ("POST", "/devices/revoke"),
     ("GET", "/anything-else"),
 ];
 
@@ -287,6 +290,93 @@ async fn ten_wrong_codes_withdraw_the_pending_one() {
     }
     assert_eq!(call(&server, pair_form(&code, "x")).await.0, StatusCode::UNAUTHORIZED, "the right code no longer works");
     assert!(auth::load_devices(&server.config.state_dir).is_empty());
+}
+
+/// The eight digits the Devices page shows, from its `class="code"` paragraph.
+fn shown_code(page: &str) -> String {
+    let start = page.find("class=\"code\">").expect("the page shows a code") + "class=\"code\">".len();
+    page[start..].chars().take_while(|c| *c != '<').filter(char::is_ascii_digit).collect()
+}
+
+fn devices_post(uri: &str, cookie: &str, body: &str) -> Request<Body> {
+    request("POST", uri)
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn the_devices_page_pairs_a_phone_by_qr_code_and_only_this_machine_may_use_it() {
+    let scratch = scratch("devices");
+    let lan = vec!["172.17.0.1".to_string(), "192.168.50.105".to_string()];
+    let server = Server::new(config(&scratch.dir, 3100, lan)).unwrap();
+    let get = |cookie: Option<&str>| {
+        let builder = request("GET", "/devices");
+        let builder = match cookie {
+            Some(cookie) => builder.header(header::COOKIE, cookie),
+            None => builder,
+        };
+        builder.body(Body::empty()).unwrap()
+    };
+    assert_eq!(call(&server, get(None)).await.0, StatusCode::UNAUTHORIZED);
+    let owner = sign_in(&server).await;
+    let (status, _, page) = call(&server, get(Some(&owner))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("action=\"/devices/pair\"") && !page.contains("class=\"code\""), "no code until asked for");
+
+    // Asked for, a code and its QR codes, the LAN address first; nothing longer-lived is in them.
+    let (status, _, page) = call(&server, devices_post("/devices/pair", &owner, "")).await;
+    assert_eq!(status, StatusCode::OK);
+    let code = shown_code(&page);
+    assert_eq!(code.len(), 8);
+    assert!(page.contains("<svg") && page.contains("This code is for 192.168.50.105."));
+    let token = std::fs::read_to_string(server.config.state_dir.join("token")).unwrap();
+    assert!(!page.contains(token.trim()) && !page.contains(owner.split('=').nth(1).unwrap()));
+    // Changing something still needs the server's own origin.
+    let foreign = request("POST", "/devices/pair").header(header::ORIGIN, "http://evil.example").header(header::COOKIE, &owner);
+    assert_eq!(call(&server, foreign.body(Body::empty()).unwrap()).await.0, StatusCode::FORBIDDEN);
+
+    // The QR code's link opens the pairing form with the code filled in, and pairs nothing by itself.
+    let link = request("GET", &format!("/pair?code={code}")).header(header::HOST, "192.168.50.105:3100");
+    let (status, _, form) = call(&server, link.body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(form.contains(&format!("value=\"{code}\"")));
+    assert!(auth::load_devices(&server.config.state_dir).is_empty());
+    let (_, _, form) = call(&server, request("GET", "/pair?code=%22%3E%3Cb%3E").body(Body::empty()).unwrap()).await;
+    assert!(form.contains("value=\"\"") && !form.contains("<b>"), "only eight digits are shown back");
+    let (status, headers, _) = call(&server, pair_form(&code, "phone")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let device = headers[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+
+    // A paired device may use Mightling, but neither pair another device nor revoke one.
+    assert_eq!(call(&server, get(Some(&device))).await.0, StatusCode::FORBIDDEN);
+    let (status, _, page) = call(&server, devices_post("/devices/pair", &device, "")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(!page.contains("class=\"code\""));
+    let id = auth::load_devices(&server.config.state_dir)[0].id.clone();
+    assert_eq!(call(&server, devices_post("/devices/revoke", &device, &format!("device={id}"))).await.0, StatusCode::FORBIDDEN);
+
+    // This machine lists it and revokes it; its next request is refused.
+    let (_, _, page) = call(&server, get(Some(&owner))).await;
+    assert!(page.contains("phone") && page.contains(&format!("value=\"{id}\"")));
+    let (status, headers, _) = call(&server, devices_post("/devices/revoke", &owner, &format!("device={id}"))).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(headers[header::LOCATION], "/devices");
+    assert!(auth::load_devices(&server.config.state_dir).is_empty());
+    assert_eq!(call(&server, request("GET", "/healthz").header(header::COOKIE, &device).body(Body::empty()).unwrap()).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_loopback_server_issues_no_pairing_code_from_the_devices_page() {
+    let scratch = scratch("devlo");
+    let server = Server::new(config(&scratch.dir, 3100, Vec::new())).unwrap();
+    let owner = sign_in(&server).await;
+    let (status, _, page) = call(&server, devices_post("/devices/pair", &owner, "")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("loopback only") && !page.contains("class=\"code\""));
+    assert!(!server.config.state_dir.join("pairing").exists() || std::fs::read_dir(server.config.state_dir.join("pairing")).unwrap().next().is_none());
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
-// The Work window: Work's UI from `app://-/index.html`, frameless with native controls, as the
-// Codex app's primary window is on Linux (`titleBarStyle: hidden`, a transparent `titleBarOverlay`,
-// the page drawing its own title bar), its bounds remembered between runs.
+// The app window (the former Work window): the Mightling UI from `app://-/index.html`, Ask and Work
+// one click apart, frameless with native controls, as the Codex app's primary window is on Linux
+// (`titleBarStyle: hidden`, a transparent `titleBarOverlay`, the page drawing its own title bar),
+// its bounds remembered between runs.
 
 import path from "node:path";
 import { BrowserWindow, app, nativeTheme, shell } from "electron";
@@ -12,6 +13,8 @@ import { track } from "./window-state";
 export interface WorkOptions {
   preload: string;
   show: boolean;
+  /** The view the page opens on: Ask, or Work (`#work`), as `ling web`'s page does. */
+  view?: "ask" | "work";
 }
 
 export function openWork(options: WorkOptions): BrowserWindow {
@@ -47,6 +50,6 @@ export function openWork(options: WorkOptions): BrowserWindow {
   window.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(WORK_URL)) event.preventDefault();
   });
-  void window.loadURL(WORK_URL);
+  void window.loadURL(options.view === "ask" ? WORK_URL : `${WORK_URL}#work`);
   return window;
 }
