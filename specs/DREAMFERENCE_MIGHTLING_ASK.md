@@ -437,7 +437,7 @@ Built: Ask in the desktop app's own window, and pairing a device by QR code. Two
 - **Opening on Work.** The app window opens on Work when the menu's Work entry, `--work`, a folder, a thread or a `mightling://` link asked for it.
 - **Switching an open window.** A new `view` message on the for-view channel switches a window that is already open.
 - **The header's Ask button is gone.** It opened the separate Ask window; Ask is now in the sidebar.
-- **The menu.** The menu's Ask entry still opens the Ask window on `ling web` (§17), which the Python tests and `audit egress --app` pin. On Windows, where that window never existed, it now opens the app window on Ask, so Windows has Ask for the first time.
+- **The menu.** The menu's Ask entry still opens the Ask window on `ling web` (§17), which the Python tests and `audit egress --app` pin. On Windows, where that window never existed, it now opens the app window on Ask, so Windows has Ask for the first time. (Folded into the app window on every platform in §18.6.)
 
 ### 18.2 Pairing by QR code
 
@@ -460,7 +460,7 @@ Built: Ask in the desktop app's own window, and pairing a device by QR code. Two
 
 ### 18.3 The two app-servers: what this part learned
 
-This part did not decide §2.1. What it changes, and what was read on the way:
+This part did not decide §2.1. What it changes, and what was read on the way (the app's own second server is gone since §18.6; the risk below remains for a `ling web` the user runs beside the app):
 - **Two app-servers can run on one `~/.mightling` today.** With the app open, both windows are in use: the app window on its own stdio app-server, and the Ask window on `ling web`'s app-server on the socket. Ask threads from either live under the one `~/.mightling/ask/` and are recognised by the same `ask/<thread-id>` links. Because the folder rules are the same, either host can resume the other's Ask thread in its folder.
 - **The thread database is built for several connections.** Codex's state databases open read-write pools in WAL mode with a five-second busy timeout (`state/src/sqlite.rs`), which SQLite supports across processes. Read in the submodule's source, not measured.
 - **The rollout files may not be.** Codex appends a thread's history to its JSONL rollout file. A search for lock calls (`flock`, `lock_exclusive`, `try_lock_exclusive`, `fs2`, `fd_lock`) in `rollout/` and `core/src` found none. This was read, not measured, in the submodule checkout, not confirmed at the pinned tag. So the risk is the same thread loaded in both servers at once: two writers on one rollout file, each with its own in-memory turn state. The app makes that possible, since one question can be open in the app window and in the Ask window. Neither server knows about the other's turn: the busy markers are per process, and Night Shift reads them all.
@@ -486,7 +486,7 @@ No live service was touched: no model server, no installed `ling`, a scratch `HO
 
 ### 18.5 Still not built before Phase C
 
-- **The menu's Ask window.** It still uses `ling web` and its app-server, a second server on the same home (§18.3). Folding it into the app window is the §2.1 decision.
+- **The menu's Ask window.** It still uses `ling web` and its app-server, a second server on the same home (§18.3). Folding it into the app window is the §2.1 decision. (Built in §18.6.)
 - **Images, apps and voice in the UI.** `/images/*`, `/api/apps` and `/api/transcribe` still answer 501; out of scope by the user's decision (§17).
 - **The Onyx steps.** Retiring Onyx (§10) still needs these:
   - the `chat` command group;
@@ -496,3 +496,23 @@ No live service was touched: no model server, no installed `ling`, a scratch `HO
   - `node_advertiser.py`'s Onyx `.env` check;
   - the docs' Onyx section.
 - **Phase 0's measurements**, question 1 above all.
+
+### 18.6 One window, one app-server in the app (branch `desktop/one-app-server`, 2026-10-09)
+
+**The decision (the user's, 2026-10-09).** The menu's Ask no longer opens a window of its own on `ling web`: it brings the app window forward on Ask. While the app runs, the app itself starts exactly one app-server on `~/.mightling`, the app window's own over stdio (§18.1). This settles §2.1 for the desktop app the first way §17 named, the policy in the main process; `ling web` keeps its own app-server on its socket, for browsers and phones, unchanged.
+
+**What changed in the app** (`desktop/electron/`):
+- **One window.** `main.ts` keeps one `BrowserWindow`, the app window, and one `showView(view)`. The menu's Ask and Work (Ctrl+1, Ctrl+2), the tray's, `ling app` alone and a second instance with no target bring it forward on that view (restored if minimised), sending the page the `view` message of §18.1 when it is already open; `--work`, a folder, a thread or a `mightling://` link open it on Work. No path opens a second window.
+- **Removed:** `chat.ts` (the Ask window), `web.ts` (finding, starting and stopping `ling web`, the one-time sign-in link) and `web.test.ts`; the `chat` block of `app.json`; the page-to-main `work/open-chat` message, which nothing sent since the header's Ask button went (§18.1); the Windows special case, since every platform now does what Windows did. The window's title is "Mightling" (it opens on Ask; the page's `<title>` was already that).
+- **Unchanged:** the policy layer, the Ask folders and uploads (§18.1), `ling app`'s arguments (`ling-rs/src/app.rs`: comments, the help line and one error message only, which no longer name `ling web` or an Ask window), and `ling web`, including `open --print-url`, which no longer has a caller in the app.
+
+**The audit's app mode** (`dreamference/audit/egress_audit.py`). The app is started with no argument, as `ling app` starts it (it was `--work`), in the same hidden session: the window on Ask, its app-server started, quit after 40 seconds. Port 3100 is no longer on the app session's allowlist, which is now the `exec` session's: a regression to a window on `ling web`, and so to a second app-server, shows as a connect to 3100 and fails the audit (a test plays one back). `--app`'s help text and `docs/admin.md` say "its window hidden". The macOS workflow's start check runs the same audit session and needed only its comment changed.
+
+**What this does and does not settle.** The second server the app itself created is gone. A `ling web` the user runs (`ling web start`, or on an advertised node) beside the app is still a second app-server on the same home, so §18.3's risk, two writers on one rollout file when the same thread is open in both, remains for that case, and Phase 0 question 1 is still open for it.
+
+**Verified on this machine (2026-10-09)**, a scratch `HOME` for everything run, no live service touched:
+- `desktop/electron`: typecheck; 25 vitest cases (`web.test.ts`'s 5 gone with its module); the bundle check now anchors on the app-server's command line and checks that no `--print-url` is left in the main bundle. `npm run package` passes.
+- `npm run e2e` (Playwright-Electron, scripted `ling`, hidden windows): 3 passed. The new case starts the app with no argument and checks that the one window is on `app://-/index.html` (Ask), that the File menu's Work and then Ask switch it (`#work`, then `#`) with `BrowserWindow.getAllWindows()` still 1, and that the stand-in `ling` was run with `app-server` exactly once and never with `web`.
+- `desktop/ui`: 26 vitest cases and the typecheck (one comment changed).
+- The Python suite (`-k "not codex_branded_builder"`): 931 passed, 89 skipped.
+- Not run: the launcher's `cargo test` (`app.rs` changed in comments and two message strings only), and `ling-admin audit egress --app` against a real build (it needs the installed `ling` and a model server).

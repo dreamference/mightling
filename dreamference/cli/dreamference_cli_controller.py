@@ -1054,7 +1054,7 @@ class DreamferenceCLIController:
             "egress", help="Trace one real ling session and list every network destination and process, with a verdict")
         audit_egress_mode = audit_egress_parser.add_mutually_exclusive_group()
         audit_egress_mode.add_argument("--tui", action="store_true", help="Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte)")
-        audit_egress_mode.add_argument("--app", action="store_true", help="Trace the desktop app (ling-app) with both windows hidden, on the display DISPLAY names")
+        audit_egress_mode.add_argument("--app", action="store_true", help="Trace the desktop app (ling-app) with its window hidden, on the display DISPLAY names")
         audit_egress_mode.add_argument("--web", action="store_true", help="Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`")
         audit_egress_mode.add_argument("--docs", action="store_true", help="Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing")
         audit_egress_parser.add_argument("--prompt", default=None, help="Prompt for the traced session (default: a one-word reply)")

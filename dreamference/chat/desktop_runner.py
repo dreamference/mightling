@@ -5,12 +5,12 @@ This module provides the DesktopRunner class, which builds and launches the Elec
 `desktop/electron` (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md), built the way the Codex
 desktop app is built: Electron Forge, with `ling` bundled inside as `resources/ling`.
 
-The app has two windows, both the Mightling UI built from `desktop/ui`. Work drives
-`ling app-server` with the UI bundled by the same Vite build as the main process. Ask (the menu's
-former Chat, which showed the Onyx web UI until 2026-10-08) is the same UI served by `ling web` on
-this machine, which the app starts itself when nothing answers on its port
-(specs/DREAMFERENCE_MIGHTLING_ASK.md §10). Neither needs Onyx, so nothing is checked before the
-window opens: each window says on its own start-up screen what it is waiting for.
+The app has one window, the Mightling UI built from `desktop/ui` and bundled by the same Vite
+build as the main process. It shows Ask (the menu's former Chat, which showed the Onyx web UI until
+2026-10-08 and was a window of its own on `ling web` until 2026-10-09) and Work, both on the one
+`ling app-server` the app starts (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6). It needs neither
+Onyx nor `ling web`, so nothing is checked before the window opens: it says on its own start-up
+screen what it is waiting for.
 
 It follows the same shape as the agent runners: provision the tooling if it is missing, then hand
 off to a subprocess.
@@ -59,8 +59,8 @@ WINDOW_CLASS: Final[str] = "Mightling"
 LEGACY_ENTRY_NAMES: Final[tuple] = ("puffin-desktop", "puffin-ui", "puffin-app")
 
 # Chromium's HTTP cache, inside the app's data directory, emptied on launch so a window never
-# shows a page from before an upgrade. Emptying it costs little: the UI is bundled, and `ling web`
-# is on loopback. The `Cookies` file beside it is left alone.
+# shows a page from before an upgrade. Emptying it costs little: the UI is bundled in the app.
+# The `Cookies` file beside it is left alone.
 WEBVIEW_CACHE_DIR_NAME: Final[str] = "Cache"
 
 
@@ -115,7 +115,7 @@ class DesktopRunner:
         Returns:
             bool: True when both have their `node_modules`.
         """
-        for directory, what in ((UI_DIR, "the Work window's packages (desktop/ui)"), (ELECTRON_DIR, "the app's packages (desktop/electron: Electron, Forge, Vite)")):
+        for directory, what in ((UI_DIR, "the app window's packages (desktop/ui)"), (ELECTRON_DIR, "the app's packages (desktop/electron: Electron, Forge, Vite)")):
             if (directory / "node_modules").is_dir():
                 continue
             print(f"📦 Installing {what}...")
@@ -225,8 +225,8 @@ class DesktopRunner:
         """
         Builds the distributable `.deb` (and a zip) with Electron Forge.
 
-        `ling` must be built, because it is bundled into the app: Work's server and Ask's
-        (`ling web`) are both that binary.
+        `ling` must be built, because it is bundled into the app: the app-server Ask and Work
+        share is that binary.
 
         Returns:
             int: 0 on success, non-zero on failure.

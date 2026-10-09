@@ -1149,27 +1149,24 @@ def test_a_job_is_not_sent_from_outside_a_repository_or_to_an_unpaired_node(tmp_
     assert NodeJobSender.logs("20261002-1200-abc") == 1 and NodeJobSender.fetch("../x") == 1
 
 
-# -- ling-app's Ask window (ASK §10) -------------------------------------------------------------
+# -- ling-app's Ask (ASK §10, §18.6) -------------------------------------------------------------
 # Until 2026-10-08 the app's Chat window was the Onyx web UI, reached on a client through a loopback
-# forwarder to the node and signed in with the per-install Onyx password. It is now the Mightling
-# UI on `ling web` on the same machine (desktop/electron/src/web.ts, tested in web.test.ts): an Ask
-# thread runs where the app runs, against the node's model server, so nothing is forwarded and no
-# password is read.
+# forwarder to the node and signed in with the per-install Onyx password; until 2026-10-09 the
+# menu's Ask was a window on `ling web` on the same machine. Ask is now a view of the app window,
+# on the app's own app-server: an Ask thread runs where the app runs, against the node's model
+# server, so nothing is forwarded, nothing is signed in to and no password is read.
 
 ELECTRON_SRC = Path(__file__).resolve().parent.parent / "desktop" / "electron" / "src"
 
 
-def test_the_ask_window_signs_in_with_ling_webs_one_time_link_and_no_password():
-    chat = (ELECTRON_SRC / "chat.ts").read_text()
-    web = (ELECTRON_SRC / "web.ts").read_text()
-    assert '["web", "open", "--print-url"]' in web
-    # No script is injected, no preload, and no account or credential file anywhere in the app.
-    assert "executeJavaScript" not in chat and "preload:" not in chat
-    assert not (ELECTRON_SRC / "sign-in.ts").exists() and not (ELECTRON_SRC / "forwarder.ts").exists()
+def test_ask_in_the_app_reaches_no_server_and_reads_no_password():
+    for retired in ("chat.ts", "web.ts", "sign-in.ts", "forwarder.ts", "discover.ts", "node_locator.ts"):
+        assert not (ELECTRON_SRC / retired).exists(), retired
     for source in ELECTRON_SRC.glob("*.ts"):
-        text = source.read_text()
-        if source.name == "credentials.test.ts":
+        if source.name == "credentials.test.ts":  # the test that names what must be absent
             continue
+        text = source.read_text()
+        assert "executeJavaScript" not in text and "--print-url" not in text, source.name
         assert "admin@dreamference.dev" not in text and "chat-admin.json" not in text, source.name
 
 

@@ -69,7 +69,7 @@ Local Network turns it back on). Because the signature is ad hoc, macOS may ask 
 update.
 
 What the preview does not do yet: `ling app` in a Mac terminal does not open it (open it from
-Applications or Spotlight), it does not update itself (download the new dmg), and closing its last
+Applications or Spotlight), it does not update itself (download the new dmg), and closing its
 window quits it, as on Linux.
 
 ## Ask and Work in the app window
@@ -91,12 +91,14 @@ applies. So a question asked in the app and one asked in a browser live in the s
 ling app --work               # open the app window on Work
 ling app ~/my-project         # Work, with a new thread on that folder
 ling app --thread <id>        # Work, on an existing thread
+ling app                      # the app window on Ask
 ```
 
-The menu's **Ask** entry (and `ling app` alone) still opens the separate Ask window, which shows
-`ling web` on this machine (see [`ling web`](web-chat.md#ling-web-ask-and-work-in-a-browser));
-the app starts it when nothing answers and stops it on quit. On Windows, where `ling web` is not
-available yet, the menu's Ask opens the app window on Ask instead.
+There is one window. The menu's **Ask** and **Work** entries (Ctrl+1 and Ctrl+2), the tray icon's
+and `ling app` bring it forward on the view asked for; none opens a second window. In 1.5 the
+menu's Ask opened a separate window on [`ling web`](web-chat.md#ling-web-ask-and-work-in-a-browser),
+which ran a second agent server on the same `~/.mightling`; the app no longer starts or uses
+`ling web`. `ling web` itself is unchanged, for browsers and phones.
 
 ### Work
 
@@ -116,13 +118,13 @@ Night Shift holds back while a Work turn is running, and the machine stays awake
 
 ## Notes
 
-- **No web chat needed.** Ask and Work run on the agent bundled in the app; the Ask window starts
-  `ling web` itself when it is not running.
+- **No web chat needed.** Ask and Work run on the agent bundled in the app, one agent server for
+  the whole app; neither the Onyx web chat nor `ling web` has to be running.
 - **Nothing leaves the machine.** The app has no crash reporting, no update checks and none of the
   background services a browser engine normally talks to; `ling-admin audit egress --app` traces a
   whole session of it and lists every connection it made.
-- **Fresh styling on every launch.** The window clears its cached pages each time it opens, so
-  changes to the web chat's look show up immediately. You stay signed in.
+- **Fresh pages on every launch.** `ling app` clears the window's cached pages each time it opens
+  Ask, so an upgraded app never shows a page from before the upgrade.
 - **Links open in your browser.** A link that would open a new tab (an external citation, for
   example) opens in the system browser; the window stays where it is.
 - **Installed size.** The engine is bundled, so the package is larger than a window on the

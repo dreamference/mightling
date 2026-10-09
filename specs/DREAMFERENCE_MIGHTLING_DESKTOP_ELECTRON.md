@@ -72,7 +72,7 @@ So the slowness is WebKitGTK's GPU design meeting NVIDIA's X11 driver, and the a
 
 ## 6. The egress audit's app mode
 
-`ling-admin audit egress --app` traces `ling-app` under `strace -f` on the display `DISPLAY` names: the app starts in audit mode (`MIGHTLING_APP_AUDIT=<seconds>`: both windows hidden, Chat on the web UI, Work's app-server started, then quit), and the trace is judged by the same rules as `exec` and `tui`, with the web UI's loopback port added to the allowlist for this kind of session. Electron's `--ozone-platform=headless` crashes (SIGSEGV) on this machine (measured with 44.6.0 in the probe), so the audit needs a real display or `xvfb-run`. The app's session runs in a scratch `HOME` (Chromium's profile and the data folder) and `CODEX_HOME`, with `DREAMFERENCE_VLLM_HOST` naming the server so nothing browses.
+`ling-admin audit egress --app` traces `ling-app` under `strace -f` on the display `DISPLAY` names: the app starts in audit mode (`MIGHTLING_APP_AUDIT=<seconds>`: both windows hidden, Chat on the web UI, Work's app-server started, then quit), and the trace is judged by the same rules as `exec` and `tui`, with the web UI's loopback port added to the allowlist for this kind of session. Electron's `--ozone-platform=headless` crashes (SIGSEGV) on this machine (measured with 44.6.0 in the probe), so the audit needs a real display or `xvfb-run`. The app's session runs in a scratch `HOME` (Chromium's profile and the data folder) and `CODEX_HOME`, with `DREAMFERENCE_VLLM_HOST` naming the server so nothing browses. Since 2026-10-09 (ASK §18.6) there is one window: the session opens it hidden on Ask, as `ling app` does, starts its app-server and quits, with no web UI port on the allowlist.
 
 ## 7. Size
 

@@ -1,10 +1,11 @@
-// The windows and the one IPC channel between the app window's page and this process
+// The app window and the one IPC channel between its page and this process
 // (specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md §3). Every message from the page is checked to
-// come from that window before it is acted on. The app window (`app://`, the former Work window)
-// shows Ask and Work, as `ling web` does: this process enforces the same policy (policy.ts) and
-// keeps the Ask folders (ask.ts). The Ask window (the menu's former Chat) is still the Mightling UI
-// on `ling web` (chat.ts, web.ts): it has no preload and talks to that server, never to this
-// process (specs/DREAMFERENCE_MIGHTLING_ASK.md §18).
+// come from that window before it is acted on. The app window (`app://`) shows Ask and Work, as
+// `ling web` does: this process enforces the same policy (policy.ts) and keeps the Ask folders
+// (ask.ts). It is the app's only window, and its app-server the app's only one: the menu's Ask,
+// the tray's and `ling app` alone show Ask in it. Until 2026-10-09 they opened a second window on
+// `ling web`, whose own app-server shared `~/.mightling` with this one
+// (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6).
 
 import path from "node:path";
 import { BrowserWindow, app, ipcMain, nativeTheme, type IpcMainInvokeEvent } from "electron";
@@ -14,34 +15,33 @@ import { airgapped } from "./airgapped";
 import { serve } from "./app-protocol";
 import type { WorkTarget } from "./args";
 import { findLing } from "./bridge";
-import { openChat } from "./chat";
 import { AppServer } from "./server";
 import { installMenu, installTray, keepAwake, notifyTurnDone, showContextMenu } from "./shell";
-import { WebServer } from "./web";
 import { openWork } from "./work";
 
 export interface MainOptions {
   /** What `ling app` asked for: Work with a folder or thread, or `null` for Ask. */
   work: WorkTarget | null;
-  /** The audit's session: hidden windows, Ask and Work both opened, quit after this many seconds. */
+  /** The audit's session: the window hidden, its app-server started, quit after this many seconds. */
   audit: number | null;
 }
+
+type View = "ask" | "work";
 
 const resourcesPath = () => (app.isPackaged ? process.resourcesPath : null);
 
 export async function main(options: MainOptions): Promise<void> {
-  // Work's page is the built renderer beside this bundle, packaged or not: app:// serves files,
+  // The page is the built renderer beside this bundle, packaged or not: app:// serves files,
   // never Vite's dev server.
   serve(path.join(__dirname, "..", "renderer", "main_window"));
 
-  let chat: BrowserWindow | null = null;
-  let work: BrowserWindow | null = null;
+  let window: BrowserWindow | null = null;
   let target: WorkTarget = options.work ?? { cwd: null, thread: null };
   // Hidden for the audit's session and for an end-to-end test (`MIGHTLING_HIDDEN=1`).
   const show = options.audit === null && !process.env.MIGHTLING_HIDDEN;
 
   const deliver = (message: ForView) => {
-    const contents = work?.webContents;
+    const contents = window?.webContents;
     if (!contents || contents.isDestroyed()) return;
     for (const piece of chunked(message)) contents.send(CHANNEL_FOR_VIEW, piece);
   };
@@ -49,46 +49,34 @@ export async function main(options: MainOptions): Promise<void> {
     deliver,
     busyChanged: (busy) => {
       keepAwake(busy);
-      if (!busy) notifyTurnDone(work, "The agent finished a turn.");
+      if (!busy) notifyTurnDone(window, "The agent finished a turn.");
     },
   });
 
-  // Ask runs on `ling web`, which reaches its app-server over a Unix socket: Windows has no
-  // `ling web` yet, so there the menu's Ask opens Work.
-  const ling = findLing(resourcesPath());
-  const web = ling && process.platform !== "win32" ? WebServer.for(ling) : null;
-  const showChat = () => {
-    if (!web) {
-      showWork("ask");
-      return;
-    }
-    if (chat && !chat.isDestroyed()) {
-      chat.show();
-      chat.focus();
-      return;
-    }
-    chat = openChat({ server: web, show });
-    chat.on("closed", () => (chat = null));
-  };
-  const showWork = (view: "ask" | "work" = "work") => {
-    if (work && !work.isDestroyed()) {
-      work.show();
-      work.focus();
+  /** Brings the app window forward on `view`, opening it when it is not open. */
+  const showView = (view: View) => {
+    if (window && !window.isDestroyed()) {
+      if (window.isMinimized()) window.restore();
+      if (show) {
+        window.show();
+        window.focus();
+      }
       deliver({ channel: "view", payload: view });
       return;
     }
-    work = openWork({ preload: path.join(__dirname, "preload.js"), show, view });
-    work.on("closed", () => (work = null));
+    window = openWork({ preload: path.join(__dirname, "preload.js"), show, view });
+    window.on("closed", () => (window = null));
   };
+  const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };
 
-  installMenu({ openChat: showChat, openWork: () => showWork("work") });
+  installMenu(actions);
   // `.vite/build/../../icons`: inside the asar when packaged, the project's folder otherwise.
-  installTray(path.join(__dirname, "..", "..", "icons"), { openChat: showChat, openWork: () => showWork("work") });
+  installTray(path.join(__dirname, "..", "..", "icons"), actions);
 
-  // The one channel from Work's page.
+  // The one channel from the page.
   const fromView = new Reassembler();
   ipcMain.handle(CHANNEL_FROM_VIEW, async (event: IpcMainInvokeEvent, data: unknown) => {
-    if (!work || event.sender.id !== work.webContents.id) throw new Error("only the Work window talks to the agent");
+    if (!window || event.sender.id !== window.webContents.id) throw new Error("only the app window talks to the agent");
     let message = data;
     if (isChunk(data)) {
       message = fromView.take(data);
@@ -110,9 +98,6 @@ export async function main(options: MainOptions): Promise<void> {
       case "work/stop":
         server.stop();
         return null;
-      case "work/open-chat":
-        showChat();
-        return null;
       case "work/target":
         return target;
       case "work/airgapped": {
@@ -120,61 +105,53 @@ export async function main(options: MainOptions): Promise<void> {
         return ling ? airgapped(ling, message.thread) : { level: "off", source: "ling is not installed" };
       }
       case "context-menu":
-        if (work) showContextMenu(work, message);
+        if (window) showContextMenu(window, message);
         return null;
       case "window/minimize":
-        work?.minimize();
+        window?.minimize();
         return null;
       case "window/maximize":
-        if (work?.isMaximized()) work.unmaximize();
-        else work?.maximize();
+        if (window?.isMaximized()) window.unmaximize();
+        else window?.maximize();
         return null;
       case "window/close":
-        work?.close();
+        window?.close();
         return null;
       default:
-        throw new Error(`the Work window does not send ${(message as { type: string }).type}`);
+        throw new Error(`the app window does not send ${(message as { type: string }).type}`);
     }
   }
 
   nativeTheme.on("updated", () => deliver({ channel: "theme", payload: nativeTheme.shouldUseDarkColors ? "dark" : "light" }));
 
-  // A second instance, or a `mightling://` link: show what it asked for.
+  // A second instance, or a `mightling://` link: show what it asked for, in the one window.
   app.on("second-instance", (_event, argv, _cwd, data) => {
     const extra = (data as { argv?: string[] } | undefined)?.argv ?? argv.slice(1);
     const asked = require("./args").workTarget(extra) as WorkTarget | null;
     if (asked) {
       target = asked;
-      showWork();
+      showView("work");
       deliver({ channel: "work://message", payload: { method: "mightling/target", params: target } });
-    } else showChat();
+    } else showView("ask");
   });
   app.on("open-url", (event, url) => {
     event.preventDefault();
     target = require("./args").linkTarget(url) as WorkTarget;
-    showWork();
+    showView("work");
   });
   app.on("window-all-closed", () => {
     server.stop();
-    web?.stop();
     app.quit();
   });
-  app.on("before-quit", () => {
-    server.stop();
-    web?.stop();
-  });
+  app.on("before-quit", () => server.stop());
 
+  showView(options.work ? "work" : "ask");
   if (options.audit !== null) {
-    showChat();
-    showWork();
     try {
       server.start();
     } catch (error) {
       console.error(`ling-app: ${error instanceof Error ? error.message : String(error)}`);
     }
     setTimeout(() => app.quit(), options.audit * 1000);
-    return;
   }
-  if (options.work) showWork();
-  else showChat();
 }

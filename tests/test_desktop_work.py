@@ -1,9 +1,10 @@
-"""The desktop app's Work window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, on Electron per
+"""The desktop app's window (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md, on Electron per
 specs/DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md).
 
-Ask (the former Chat) is the Mightling UI on `ling web` and gets no IPC, the bridge only sends
-methods the pinned Codex has, and the committed protocol types are the ones the pinned Codex would
-generate.
+Ask and Work share the one app window and its one app-server (the separate Ask window on
+`ling web` was folded into it on 2026-10-09, specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6), the
+bridge only sends methods the pinned Codex has, and the committed protocol types are the ones the
+pinned Codex would generate.
 """
 
 import json
@@ -20,19 +21,6 @@ from dreamference.chat.desktop_runner import ELECTRON_DIR, UI_DIR
 SRC = Path(ELECTRON_DIR) / "src"
 NPM = "/usr/bin/npm"
 
-# The Ask window (the menu's former Chat): its frame as Chat's was, on `ling web` instead of the
-# Onyx web UI since 2026-10-08. Any difference is a change to what every current user sees.
-CHAT_WINDOW = {
-    "label": "ling",
-    "title": "Mightling",
-    "url": "http://127.0.0.1:3100/",
-    "width": 1280,
-    "height": 860,
-    "minWidth": 720,
-    "minHeight": 520,
-    "backgroundColor": "#ffffff",
-}
-
 # §4.3: method families the window must never send.
 NEVER_SENT = (
     "feedback/", "account/login", "account/bedrock", "remoteControl/", "thread/realtime/",
@@ -44,32 +32,36 @@ def app_config() -> dict:
     return json.loads((Path(ELECTRON_DIR) / "app.json").read_text(encoding="utf-8"))
 
 
-def test_the_ask_window_is_ling_web_signed_in_with_a_one_time_link():
-    assert app_config()["chat"] == CHAT_WINDOW
-    chat = (SRC / "chat.ts").read_text(encoding="utf-8")
-    web = (SRC / "web.ts").read_text(encoding="utf-8")
-    # Signed in as a browser is by `ling web open`: a one-time code this process writes, traded
-    # for a session cookie. No password, no credential file, no injected script.
-    assert '["web", "open", "--print-url"]' in web and '["web", "serve"]' in web
-    assert "options.server.loginUrl()" in chat and "executeJavaScript" not in chat
-    for retired in ("sign-in.ts", "forwarder.ts", "discover.ts"):
+def test_ask_is_a_view_of_the_one_app_window_not_a_window_on_ling_web():
+    # The menu's Ask, the tray's and `ling app` alone show Ask in the app window; nothing in the
+    # app starts, signs in to or loads `ling web`, so its app-server is the only one on the home.
+    config = app_config()
+    assert "chat" not in config and config["work"]["title"] == "Mightling"
+    for retired in ("chat.ts", "web.ts", "sign-in.ts", "forwarder.ts", "discover.ts"):
         assert not (SRC / retired).exists(), retired
-    # Windows has no `ling web` yet: there the menu's Ask opens Work.
+    for source in SRC.glob("*.ts"):
+        if source.name == "credentials.test.ts":  # names what must be absent from the bundles
+            continue
+        text = source.read_text(encoding="utf-8")
+        assert '"web", "serve"' not in text and "--print-url" not in text and "127.0.0.1:3100" not in text, source.name
     main = (SRC / "main.ts").read_text(encoding="utf-8")
-    assert 'process.platform !== "win32" ? WebServer.for(ling) : null' in main
-    # Work opens only when asked for: no argument, no Work window.
-    main = (SRC / "main.ts").read_text(encoding="utf-8")
-    assert "if (options.work) showWork();\n  else showChat();" in main
+    assert "openWork(" in main and main.count("new BrowserWindow") == 0
+    assert 'const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };' in main
+    assert "installMenu(actions);" in main
+    # No argument opens Ask; `--work`, a folder, a thread or a link open Work.
+    assert 'showView(options.work ? "work" : "ask");' in main
+    # A window already open is switched, never doubled.
+    assert 'deliver({ channel: "view", payload: view });' in main
+    assert '"work/open-chat"' not in (SRC / "api.ts").read_text(encoding="utf-8")
 
 
-def test_chat_has_no_ipc_and_work_only_its_own():
-    # Ask has no preload: its page talks to `ling web`, never to the main process; Work's one
-    # channel is answered only for Work's own window (§4.2, §8.1).
-    chat = (SRC / "chat.ts").read_text(encoding="utf-8")
-    assert "preload:" not in chat
-    assert "sandbox: true, contextIsolation: true, nodeIntegration: false" in chat
+def test_the_app_window_alone_has_ipc_and_only_for_itself():
+    # The one channel is answered only for the app window's own webContents (§4.2, §8.1), and the
+    # window's renderer gets no Node.
+    work = (SRC / "work.ts").read_text(encoding="utf-8")
+    assert re.search(r"sandbox: true,\s*contextIsolation: true,\s*nodeIntegration: false", work)
     main = (SRC / "main.ts").read_text(encoding="utf-8")
-    assert 'if (!work || event.sender.id !== work.webContents.id) throw new Error("only the Work window talks to the agent");' in main
+    assert 'if (!window || event.sender.id !== window.webContents.id) throw new Error("only the app window talks to the agent");' in main
     preload = (SRC / "preload.ts").read_text(encoding="utf-8")
     assert "contextBridge.exposeInMainWorld" in preload and "require(" not in preload.replace('require("electron")', "")
 

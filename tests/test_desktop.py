@@ -21,11 +21,12 @@ def electron_sources() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted((ELECTRON / "src").glob("*.ts")))
 
 
-def test_the_ask_window_points_at_ling_web_on_this_machine():
-    # Ask (the menu's former Chat) is the Mightling UI on `ling web`, the same page a browser gets,
-    # with the policy layer Ask threads need (specs/DREAMFERENCE_MIGHTLING_ASK.md §10). Not Onyx.
+def test_the_app_names_one_window_and_no_web_page():
+    # Ask (the menu's former Chat) is a view of the app window, served from app:// with the
+    # policy layer in the main process (specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6): no window on
+    # `ling web` and none on Onyx.
     config = app_config()
-    assert config["chat"]["url"] == "http://127.0.0.1:3100/"
+    assert "chat" not in config and "work" in config and "csp" in config
     assert config["productName"] == "Mightling"
     assert config["identifier"] == "dev.dreamference.mightling"
     assert config["command"] == "ling-app" and config["scheme"] == "mightling"
@@ -98,8 +99,8 @@ def test_the_checkouts_profile_has_the_same_shape():
 
 
 def test_the_app_no_longer_waits_for_onyx():
-    # Ask (the former Chat) is the Mightling UI on `ling web`, which the app starts itself; Work
-    # never needed Onyx. Nothing checks port 3000 before a window opens.
+    # Ask (the former Chat) and Work run in the app window on its own app-server; neither needs
+    # Onyx. Nothing checks port 3000 before the window opens.
     assert not hasattr(DesktopRunner, "onyx_is_up")
     source = (Path(DESKTOP_PROJECT_DIR).parent / "dreamference" / "chat" / "desktop_runner.py").read_text(encoding="utf-8")
     assert "onyx_is_up" not in source and "3000" not in source and "chat start" not in source
@@ -285,8 +286,10 @@ def test_identifier_comes_from_the_app_config():
 
 
 def test_window_background_is_painted_rather_than_left_black():
-    # A repaint gap shows the window's own background; painted the UI's white it is invisible.
-    assert app_config()["chat"]["backgroundColor"] == "#ffffff"
+    # A repaint gap shows the window's own background. The app window's is transparent (its title
+    # bar overlay needs that), so the page paints the white itself.
+    styles = (ELECTRON.parent / "ui" / "src" / "styles.css").read_text(encoding="utf-8")
+    assert "body { background: #fff; }" in styles
 
 
 def test_run_packages_the_app_and_opens_the_packaged_binary():

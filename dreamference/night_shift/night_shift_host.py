@@ -286,7 +286,7 @@ class NightShiftHost:
 
     @classmethod
     def busy_app_server_pids(cls, mightling_bin: str, codex_home: str | None = None) -> list[int]:
-        """Finds `ling app-server` processes running a turn for the desktop app's Work window.
+        """Finds `ling app-server` processes running a turn for the desktop app's window.
 
         An app-server is not a session by its command line (`NON_INTERACTIVE`): an idle
         window left open must not hold every night back. While a turn runs, `ling-app` keeps a

@@ -138,7 +138,7 @@ Outside the package:
 
 **The web chat** is Onyx Lite, a service under `ling-admin chat`, configured through its admin API (provider, branding, telemetry off, loopback binding, voice, vision, SearXNG). Details: [docs/dev/onyx.md](docs/dev/onyx.md). Its UI is changed by four kinds of patch (fonts, appended CSS, labels, scripts), anchored to what a build cannot renumber: [docs/dev/onyx-ui-patches.md](docs/dev/onyx-ui-patches.md).
 
-**The desktop app** is stock Electron with `ling` inside: the Ask window (the former Chat) is the Mightling UI on `ling web` with no preload and no IPC; the app window shows Ask and Work and talks to its own `ling app-server` over one IPC channel, vetted by the main process against `ling-rs/web/policy.json`, the file `ling web` enforces (both run its conformance cases); egress is closed in the main process and audited with `--app`. Details: [docs/dev/desktop.md](docs/dev/desktop.md).
+**The desktop app** is stock Electron with `ling` inside and one window: it shows Ask and Work (the menu, the tray and `ling app` switch its view, never open another) and talks to its own `ling app-server`, the app's only one, over one IPC channel, vetted by the main process against `ling-rs/web/policy.json`, the file `ling web` enforces (both run its conformance cases); egress is closed in the main process and audited with `--app`. Details: [docs/dev/desktop.md](docs/dev/desktop.md).
 
 **The code index**, `ling-code` (`ling-code-rs/`), answers `def`/`refs`/`callers`/… from codebase-memory's graph and scip stores; queries only read, indexing runs outside the sandbox under one host-wide memory budget, and a submodule is indexed only if it is yours or you ask. Details: [docs/dev/code-index.md](docs/dev/code-index.md).
 

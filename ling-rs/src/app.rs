@@ -6,12 +6,12 @@
 //! itself before Codex parses the command line. It does what `ling-admin desktop run` does before
 //! opening the window, minus building it: empty the webview's HTTP cache.
 //!
-//! The app has two windows. Ask (the former Chat, which showed the Onyx web UI until 2026-10-08)
-//! is the Mightling UI on `ling web`, which the app starts itself when nothing answers
-//! (specs/DREAMFERENCE_MIGHTLING_ASK.md §10); `ling app` alone opens it. Work is the coding agent
-//! on `ling app-server` (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md): `ling app --work`,
-//! `ling app <folder>` and `ling app --thread <id>` open it. Neither needs Onyx, and both wait for
-//! the model server on their own start-up screen rather than refusing.
+//! The app has one window with two views on the app's own `ling app-server`. Ask (the former
+//! Chat, which showed the Onyx web UI until 2026-10-08 and was a window of its own on `ling web`
+//! until 2026-10-09, specs/DREAMFERENCE_MIGHTLING_ASK.md §18.6) is questions with no project;
+//! `ling app` alone opens it. Work is the coding agent (specs/DREAMFERENCE_MIGHTLING_DESKTOP.md):
+//! `ling app --work`, `ling app <folder>` and `ling app --thread <id>` open it. Neither needs
+//! Onyx, and both wait for the model server on the window's start-up screen rather than refusing.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -28,8 +28,8 @@ const DESKTOP_ENTRY: &str = "ling-app.desktop";
 const WEBVIEW_DATA_DIR: &str = "dev.dreamference.mightling";
 const WEBVIEW_CACHE_DIR: &str = "Cache";
 
-/// Which window `ling app` opens: Ask (the Mightling UI on `ling web`), or Work with the
-/// arguments `ling-app` takes for it (`--work`, `--cwd <folder>`, `--thread <id>`).
+/// Which view `ling app` opens the window on: Ask, or Work with the arguments `ling-app` takes
+/// for it (`--work`, `--cwd <folder>`, `--thread <id>`).
 #[derive(Debug, PartialEq)]
 pub enum Window {
     Ask,
@@ -63,7 +63,7 @@ pub fn window(args: &[String]) -> Result<Window, String> {
         }
     }
     if ask && (work || !forwarded.is_empty()) {
-        return Err("--ask opens the Ask window, which takes no folder or thread".to_string());
+        return Err("--ask opens Ask, which takes no folder or thread".to_string());
     }
     if work || !forwarded.is_empty() {
         forwarded.insert(0, "--work".to_string());
@@ -76,7 +76,7 @@ pub fn window(args: &[String]) -> Result<Window, String> {
 pub async fn open(args: &[String]) -> i32 {
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
         println!("Open Mightling's desktop window (ling-app).\n");
-        println!("Usage: ling app [--ask]                Ask: questions with no project, on ling web");
+        println!("Usage: ling app [--ask]                Ask: questions with no project");
         println!("       ling app --work [<folder>]      the coding agent (Work), on a project folder");
         println!("       ling app --thread <id>          a thread in Work");
         return 0;
@@ -94,7 +94,7 @@ pub async fn open(args: &[String]) -> i32 {
         eprintln!("💡 Build and register it with: ling-admin desktop build");
         return 1;
     };
-    // Nothing to check first: the app starts `ling web` for Ask itself, and says in its window
+    // Nothing to check first: the app starts its own app-server, and says in its window
     // what it is waiting for.
     if window == Window::Ask {
         if let Some(home) = home_dir() {

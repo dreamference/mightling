@@ -16,7 +16,6 @@ export type FromView =
   | { type: "work/start" }
   | { type: "work/send"; message: unknown }
   | { type: "work/stop" }
-  | { type: "work/open-chat" }
   | { type: "work/target" }
   | { type: "work/airgapped"; thread: string | null }
   /** An attachment for an Ask thread, written into its folder (ask.ts); the bytes base64. */

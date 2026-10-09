@@ -5,19 +5,9 @@
   "executable": "Mightling",
   "command": "ling-app",
   "packageName": "mightling",
-  "chat": {
-    "label": "ling",
-    "title": "Mightling",
-    "url": "http://127.0.0.1:3100/",
-    "width": 1280,
-    "height": 860,
-    "minWidth": 720,
-    "minHeight": 520,
-    "backgroundColor": "#ffffff"
-  },
   "work": {
     "label": "work",
-    "title": "Mightling — Work",
+    "title": "Mightling",
     "width": 1280,
     "height": 860,
     "minWidth": 480,

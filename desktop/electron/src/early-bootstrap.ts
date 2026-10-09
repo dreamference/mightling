@@ -16,7 +16,7 @@ import { applySwitches } from "./egress";
 applySwitches();
 registerScheme();
 
-// The data folder is the one the Tauri app used (and the rename migration moves), so Chat's cookies
+// The data folder is the one the Tauri app used (and the rename migration moves), so the cookies
 // and the window state live where `ling app` and `ling-admin desktop` expect them.
 app.setName(appConfig.productName);
 const home = process.env.HOME || process.env.USERPROFILE;

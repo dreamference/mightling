@@ -1,4 +1,4 @@
-// The Work window's end of the app's main process (desktop/electron/src/main.ts): one object the
+// The app window's end of the main process (desktop/electron/src/main.ts): one object the
 // preload exposes, `window.electronBridge.sendMessageFromView(message)`, and window `MessageEvent`s
 // for what the main process sends — the Codex app's shape, so this page could also run in a
 // browser against another transport. Nothing else in the UI touches Electron.
@@ -12,7 +12,7 @@ export interface Started {
   ask_root?: string | null;
 }
 
-/** Which host the page runs in: `ling web` in a browser (or the app's Ask window), or the app's own window (`app://`). */
+/** Which host the page runs in: `ling web` in a browser, or the desktop app's window (`app://`). */
 export type Host = "web" | "electron";
 
 export function host(): Host {

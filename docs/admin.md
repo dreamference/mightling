@@ -363,7 +363,7 @@ Trace one real ling session and list every network destination and process, with
 | Option | Description |
 |---|---|
 | `--tui` | Trace the full-screen interface on a pseudo-terminal instead of `ling exec` (needs pexpect and pyte) |
-| `--app` | Trace the desktop app (ling-app) with both windows hidden, on the display DISPLAY names. |
+| `--app` | Trace the desktop app (ling-app) with its window hidden, on the display DISPLAY names. |
 | `--web` | Trace the web server, `ling web serve`, answering one Ask thread instead of `ling exec`. |
 | `--docs` | Trace the local file index instead: `ling-docs index` and `search` over a fixture folder must reach nothing. |
 | `--prompt` | Prompt for the traced session (default: a one-word reply) |
