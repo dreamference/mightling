@@ -1,6 +1,6 @@
 # Mightling Context Budget — what fills the context, and how to keep it small
 
-**Status:** proposed on 2026-10-03, revised the same day (v2). Phase 1's build is done (§8): masking, the per-output cap and `ling-code`'s output; its live checks and the A/B are not. §1 is measured from the rollouts of the SWE-bench pair `idx14b-on` / `idx14b-off` (14 instances each, same `ling` build `runtime_hash bd978d3ede04`, Qwen3.8-27B, compaction limit 44,000 tokens, three instances at once), plus a probe of the model server's prefix cache (§1.7). §3 is read from the pinned Codex source (`rust-v0.158.0`). §2 and the sources are published work. The effect figures in §4 come from replaying the recorded trajectories (§1.6), not from new runs.
+**Status:** proposed on 2026-10-03, revised the same day (v2). Phase 1's build is done (§8) and was released in 1.4.0, masking off by default; one A/B round was run on 2026-10-06 (§8.1) and showed no difference within noise, so masking stays off. §1 is measured from the rollouts of the SWE-bench pair `idx14b-on` / `idx14b-off` (14 instances each, same `ling` build `runtime_hash bd978d3ede04`, Qwen3.8-27B, compaction limit 44,000 tokens, three instances at once), plus a probe of the model server's prefix cache (§1.7). §3 is read from the pinned Codex source (`rust-v0.158.0`). §2 and the sources are published work. The effect figures in §4 come from replaying the recorded trajectories (§1.6), not from new runs.
 **What v2 changed, and why:**
 - **Compaction costs about 104 s here, not 24 s** (§1.8). The v1 time table used COMPACTION §9.2's single-stream 14K figure. With the measured cost, masking is a clear time win at 44K and 49K, not "about even".
 - **A masking move re-prefills from the first masked item,** not from the oldest newly masked one (§1.7). Every move costs about the whole tail, so moves should be rarer and larger: the defaults are now 0.85/0.50 of the limit with a 16,000-token step (§4.1).
@@ -356,6 +356,10 @@ Branch `ctx/budget`, on `main` at the merge of this spec's v2.
 - **§4.2:** `truncation_policy.limit` is `min(8,000, window)` (`TOOL_OUTPUT_TOKEN_LIMIT`), with a test.
 - **§4.3, `ling-code`:** `show` prints 100 lines a page (`SHOW_LINES`) with a last line `… lines A-B not shown; next: offset N`, in the tool and in the shell (`ling-code show <name> --offset N`); a Python docstring longer than 12 lines folds after them with a line naming the folded range; the nine tool descriptions went from 964 to 543 characters (the per-tool argument schemas are unchanged: MCP gives each tool its own, so "one shared schema" is not available); both prompt blocks name `outline` before reading a file not yet seen. `cargo test --locked`: 128 passed.
 - **Not done:** the live checks of §6 (they need `codex build`, which no one ran on this branch) and the A/B.
+
+### 8.1 Measured (2026-10-06)
+
+Four SWE-bench rounds on the same 24 instances, one after another, default prompt (`--mask` is `swe-bench run`'s switch, [CLI §4.23](./DREAMFERENCE_CLI.md)): `im-index-on` (code index, masking off) resolved **17**, `im-index-mask` (code index, masking on) **16**, and the two rounds without the index 16 and 17 ([SWE_BENCH_COMPARISON](./DREAMFERENCE_MIGHTLING_SWE_BENCH_COMPARISON.md) §1). Two identical rounds already differ by one task on this sample, so one round says nothing either way: masking neither gained nor lost a measurable task. It stays off by default; a decision needs the 50-task fresh-sample A/B of [SWE_BENCH_FAILURES](./DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md) §6, where it is not yet queued.
 
 ## Sources
 
