@@ -35,7 +35,7 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
-| [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md) | The model matrix (eight entries), the default model (Qwen3.8-27B on SGLang), GB10 detection |
+| [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md) | The model matrix, the default model (Qwen3.8-27B on SGLang), the night-2 candidate (Minima, §2.2), GB10 detection |
 | [DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md) | The launch engines (vLLM, and SGLang for the default model), recipes and precedence, speculative decoding, host safety |
 | [DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md) | Images (project default and pinned DFlash images), caches, tensorization, containers |
 | [DREAMFERENCE_PREFIX_CACHE.md](./DREAMFERENCE_PREFIX_CACHE.md) | Prefix caching on the hybrid GDN + DFlash stack: findings and runtime patches |

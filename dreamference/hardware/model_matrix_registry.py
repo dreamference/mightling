@@ -69,6 +69,89 @@ DEFAULT_DIFFUSION_MODEL_ALIAS: Final[str] = "tiny-a2d-coder-0.5b-diffusion"
 # restores all of it.
 DIFFUSION_ENABLED: Final[bool] = False
 
+# The production recipe: the SGLang launch of qwen3.8-27b-nvfp4-dflash2. A module constant so an
+# entry measured against it (night 2's all-NVFP4 checkpoint, specs/DREAMFERENCE_MODELS.md §2.2)
+# can take it whole and change only the checkpoint, which is what makes that A/B fair.
+QWEN38_SGLANG_RECIPE: Final[Dict[str, Any]] = {
+    "engine": "sglang",
+    "docker_image": (
+        "lmsysorg/sglang@sha256:"
+        "d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9"
+    ),
+    "revision": "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854",
+    "max_model_len": 262144,
+    # SGLang's --mem-fraction-static: weights plus KV pool. What lies outside it (CUDA
+    # graphs, torch.compile, activations) is why the container needs more headroom
+    # than a vLLM arena of the same fraction.
+    "gpu_memory_utilization": 0.50,
+    "container_headroom_gb": 24.0,
+    "tool_call_parser": "qwen3_coder",
+    "reasoning_parser": "qwen3",
+    "speculative_config": {
+        "method": "DFLASH",
+        "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
+        "revision": "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1",
+        "num_speculative_tokens": 16,
+        "quantization": "modelopt_fp4",
+    },
+    # The checkpoint's own chat template refused two things our clients send, and
+    # reasoned at its most expensive level by default. Applied to a copy at launch
+    # (ChatTemplatePatcher); each anchor must match exactly once or the start stops.
+    "chat_template_patches": [
+        # Codex offers `minimal`/`high` (and `max` exists elsewhere); the template knew
+        # only xhigh/medium/low and answered HTTP 400. The default drops from xhigh to
+        # medium: hasso5703 measured xhigh at 3.19x medium's thinking tokens and a
+        # lower HumanEval (93.9% against 98.2%), five failures being budget
+        # truncations. ling itself sends `none` and is unaffected.
+        [
+            "    {%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}\n"
+            "    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}",
+            "    {%- set resolved_reasoning_effort = reasoning_effort|default('medium') %}\n"
+            "    {%- if resolved_reasoning_effort in ('max', 'high') %}\n"
+            "        {%- set resolved_reasoning_effort = 'xhigh' %}\n"
+            "    {%- elif resolved_reasoning_effort == 'minimal' %}\n"
+            "        {%- set resolved_reasoning_effort = 'low' %}\n"
+            "    {%- endif %}\n"
+            "    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}",
+        ],
+        # A system message after the first one raised "System message must be at the
+        # beginning" on the chat-completions path; it becomes a reminder in the turn.
+        [
+            "        {%- if not loop.first %}\n"
+            "            {{- raise_exception('System message must be at the beginning.') }}\n"
+            "        {%- endif %}",
+            "        {%- if not loop.first %}\n"
+            "            {{- '<|im_start|>user\\n<system-reminder>\\n' + content + "
+            "'\\n</system-reminder><|im_end|>\\n' }}\n"
+            "        {%- endif %}",
+        ],
+    ],
+    "extra_args": [
+        "--attention-backend", "flashinfer",
+        # FlashInfer's plain sampling kernel, used only when a request asks for no
+        # truncation at all (top_p 1 and no top_k: what the completions endpoint does
+        # by default), returned token 0 ('!') for 16 of 16 sampled requests on this
+        # GB10; any top_p < 1 or any top_k was clean. PyTorch's sampler: 0 of 16, and
+        # no measurable speed cost (greedy 25.5 / 50.3 / 87.0 tok/s prose/code/JSON).
+        "--sampling-backend", "pytorch",
+        "--chunked-prefill-size", "8192",
+        "--disable-prefill-cuda-graph",
+        "--cuda-graph-max-bs", "8",
+        "--disable-flashinfer-autotune",
+        "--mamba-radix-cache-strategy", "extra_buffer",
+        "--mamba-ssm-dtype", "bfloat16",
+        "--max-mamba-cache-size", "96",
+        "--max-running-requests", "8",
+        "--enable-torch-compile",
+        "--torch-compile-max-bs", "4",
+        "--num-continuous-decode-steps", "2",
+        # Stops the scheduler busy-polling a CPU core while no request is running,
+        # which on a box that is always on is most of the time.
+        "--sleep-on-idle",
+        "--enable-metrics",
+    ],
+}
+
 class ModelMatrixRegistry:
     """
     Registry holding qualified models for NVIDIA GB10 hardware and short alias resolution logic.
@@ -110,86 +193,51 @@ class ModelMatrixRegistry:
                 "reasoning-effort default."
             ),
             hf_repo_id="RadixArk/Qwen3.8-27B-NVFP4",
-            launch_overrides={
-                "engine": "sglang",
-                "docker_image": (
-                    "lmsysorg/sglang@sha256:"
-                    "d6e7288627be8b02be88e4bba38e73f6d50e2826869f753c13a4c4385ab3eda9"
-                ),
-                "revision": "52d1adc5f38aa5ebf099c29ed7025ba34cfbb854",
-                "max_model_len": 262144,
-                # SGLang's --mem-fraction-static: weights plus KV pool. What lies outside it (CUDA
-                # graphs, torch.compile, activations) is why the container needs more headroom
-                # than a vLLM arena of the same fraction.
-                "gpu_memory_utilization": 0.50,
-                "container_headroom_gb": 24.0,
-                "tool_call_parser": "qwen3_coder",
-                "reasoning_parser": "qwen3",
-                "speculative_config": {
-                    "method": "DFLASH",
-                    "model": "maurienne-ai/Qwen3.8-27B-DFlash2-NVFP4-RTNcal",
-                    "revision": "bd7a934213c47a9e7ef69eef36bb3325f47fd1f1",
-                    "num_speculative_tokens": 16,
-                    "quantization": "modelopt_fp4",
-                },
-                # The checkpoint's own chat template refused two things our clients send, and
-                # reasoned at its most expensive level by default. Applied to a copy at launch
-                # (ChatTemplatePatcher); each anchor must match exactly once or the start stops.
-                "chat_template_patches": [
-                    # Codex offers `minimal`/`high` (and `max` exists elsewhere); the template knew
-                    # only xhigh/medium/low and answered HTTP 400. The default drops from xhigh to
-                    # medium: hasso5703 measured xhigh at 3.19x medium's thinking tokens and a
-                    # lower HumanEval (93.9% against 98.2%), five failures being budget
-                    # truncations. ling itself sends `none` and is unaffected.
-                    [
-                        "    {%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}\n"
-                        "    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}",
-                        "    {%- set resolved_reasoning_effort = reasoning_effort|default('medium') %}\n"
-                        "    {%- if resolved_reasoning_effort in ('max', 'high') %}\n"
-                        "        {%- set resolved_reasoning_effort = 'xhigh' %}\n"
-                        "    {%- elif resolved_reasoning_effort == 'minimal' %}\n"
-                        "        {%- set resolved_reasoning_effort = 'low' %}\n"
-                        "    {%- endif %}\n"
-                        "    {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}",
-                    ],
-                    # A system message after the first one raised "System message must be at the
-                    # beginning" on the chat-completions path; it becomes a reminder in the turn.
-                    [
-                        "        {%- if not loop.first %}\n"
-                        "            {{- raise_exception('System message must be at the beginning.') }}\n"
-                        "        {%- endif %}",
-                        "        {%- if not loop.first %}\n"
-                        "            {{- '<|im_start|>user\\n<system-reminder>\\n' + content + "
-                        "'\\n</system-reminder><|im_end|>\\n' }}\n"
-                        "        {%- endif %}",
-                    ],
-                ],
-                "extra_args": [
-                    "--attention-backend", "flashinfer",
-                    # FlashInfer's plain sampling kernel, used only when a request asks for no
-                    # truncation at all (top_p 1 and no top_k: what the completions endpoint does
-                    # by default), returned token 0 ('!') for 16 of 16 sampled requests on this
-                    # GB10; any top_p < 1 or any top_k was clean. PyTorch's sampler: 0 of 16, and
-                    # no measurable speed cost (greedy 25.5 / 50.3 / 87.0 tok/s prose/code/JSON).
-                    "--sampling-backend", "pytorch",
-                    "--chunked-prefill-size", "8192",
-                    "--disable-prefill-cuda-graph",
-                    "--cuda-graph-max-bs", "8",
-                    "--disable-flashinfer-autotune",
-                    "--mamba-radix-cache-strategy", "extra_buffer",
-                    "--mamba-ssm-dtype", "bfloat16",
-                    "--max-mamba-cache-size", "96",
-                    "--max-running-requests", "8",
-                    "--enable-torch-compile",
-                    "--torch-compile-max-bs", "4",
-                    "--num-continuous-decode-steps", "2",
-                    # Stops the scheduler busy-polling a CPU core while no request is running,
-                    # which on a box that is always on is most of the time.
-                    "--sleep-on-idle",
-                    "--enable-metrics",
-                ],
-            },
+            launch_overrides=QWEN38_SGLANG_RECIPE,
             supports_vision=True,
+        ),
+        # Night 2's candidate (specs/DREAMFERENCE_MODELS.md §2.2), not a default: production
+        # switches to it only if a SWE-bench A/B on this machine holds quality and it is faster.
+        "qwen3.8-27b-minima-nvfp4-dflash2": ModelSpec(
+            name="Qwen 3.8 27B Minima (all-NVFP4 + DFlash2, SGLang)",
+            params_b=27.0,
+            supported_precisions=["NVFP4"],
+            min_memory_gb=19.0,
+            max_memory_gb=70.0,
+            compatible_gb10=True,
+            notes=(
+                "Minima (arXiv 2609.04098): Qwen3.8-27B with all 496 linear layers in NVFP4 W4A4, "
+                "the Gated DeltaNet projections and gates included, by post-training quantization "
+                "with llm-compressor (compressed-tensors `nvfp4-pack-quantized`), plus static FP8 "
+                "KV-cache scales; embeddings, lm_head, conv1d and norms stay BF16. 18.8 GB on disk "
+                "against the production checkpoint's FP8/NVFP4 mix. A text-only "
+                "Qwen3_5ForCausalLM extraction: no vision tower, so no image input. Its own paper "
+                "reports BF16 quality within seed noise and decode at 47 against 51 tok/s for the "
+                "production recipe at concurrency 1 (RTX PRO 6000, vLLM 0.27.1).\n\n"
+                "Served by the production recipe unchanged (QWEN38_SGLANG_RECIPE: the same image, "
+                "flags, chat-template patches and DFlash2 drafter at 16 tokens), so a comparison "
+                "differs in the target's weights alone. Two departures, both for that reason: "
+                "the checkpoint's own revision, and `--kv-cache-dtype bfloat16`, because SGLang "
+                "turns a compressed-tensors kv_cache_scheme into an FP8 KV pool under `auto`, "
+                "while production's pool is BF16. The drafter fits: it carries no embeddings or "
+                "lm_head of its own, and reads hidden states of width 5,120 at layers 5, 19, 33, "
+                "47 and 61 of 64, which this checkpoint has; its acceptance is measured, not "
+                "assumed, because it was trained against other hidden states.\n\n"
+                "SGLang v0.5.19 serves the architecture (models/qwen3_5_text.py, with DFlash "
+                "capture and the extra_buffer mamba cache) and the format "
+                "(CompressedTensorsW4A4Fp4). That scheme takes the largest global scale of a fused "
+                "group (qkv+z, b+a, q/k/v, gate/up) without rescaling, which the paper shows "
+                "silently mis-scales the DeltaNet gates; this checkpoint ships its fused groups "
+                "harmonized to one global scale each, checked on the download "
+                "(specs/DREAMFERENCE_MODELS.md §2.2, scripts/check_nvfp4_fused_scales.py)."
+            ),
+            hf_repo_id="minima-ai/mnma_qwen3.8_27b_nvfp4",
+            launch_overrides={
+                **QWEN38_SGLANG_RECIPE,
+                "revision": "16e768e7d0461b0b86e565ecedd08a24eca53e9a",
+                "extra_args": [*QWEN38_SGLANG_RECIPE["extra_args"], "--kv-cache-dtype", "bfloat16"],
+            },
+            supports_vision=False,
         ),
         "qwen3.8-27b-dflash2-draft": ModelSpec(
             name="Qwen 3.8 27B DFlash2 Drafter (NVFP4, Draft Model)",
