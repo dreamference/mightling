@@ -119,7 +119,7 @@ With a dedicated number, the same exchange happens in a conversation with that c
 | State | `/var/lib/mightling-signal/` (0700, `StateDirectory=`) | signal-cli's data, the bridge's state, the device cookie |
 
 **The arm64 libsignal library:**
-- **Phase 1:** use `exquo/signal-libs-build`'s `libsignal_jni.so-v<ver>-aarch64-unknown-linux-gnu.tar.gz` for the exact version the signal-cli release bundles. The version is read from the `libsignal-client-<ver>.jar` name in its `lib/`. The file is pinned by SHA-256 in `ling-rs/signal/pins.json`.
+- **Phase 1:** use `exquo/signal-libs-build`'s `libsignal_jni.so-v<ver>-aarch64-unknown-linux-gnu.tar.gz` for the exact version the signal-cli release bundles. The version is read from the `libsignal-client-<ver>.jar` name in its `lib/`. The file is pinned by SHA-256 in `ling-rs/signal/src/setup.rs` (`LIBSIGNAL_AARCH64_SHA256`, beside the signal-cli and JRE pins).
 - **Later:** Mightling's release workflow builds it from Signal's source (`java/build_jni.sh desktop` in signalapp/libsignal) and attaches it to each release, signed with the release key, so no third-party binary is trusted.
 
 **The unit:**
@@ -433,7 +433,7 @@ Each item is answered on this machine (gx10-1a2b), not on node-b (that machine i
 ### 12.1 Phase 0 results (2026-10-08, gx10-1a2b)
 
 - **Item 1, arm64: works.**
-  - **What was run:** signal-cli 0.14.9 with Java 25.0.4 (Temurin, in a scratch folder; Ubuntu's `openjdk-25-jre-headless` 25.0.4 is the package setup installs) and exquo's `libsignal_jni.so` 0.103.0 for aarch64, the version the release bundles as `libsignal-client-0.103.0.jar`.
+  - **What was run:** signal-cli 0.14.9 with Java 25.0.4 (Temurin, in a scratch folder; Ubuntu's `openjdk-25-jre-headless` 25.0.4 was the package setup installed then; since §17 setup fetches the pinned Temurin JRE instead) and exquo's `libsignal_jni.so` 0.103.0 for aarch64, the version the release bundles as `libsignal-client-0.103.0.jar`.
   - **How the library is found:** `-Djava.library.path=<dir>` through `JAVA_OPTS`, with no change to the jar.
   - **Result:** `signal-cli --version` answered, and `signal-cli link` reached Signal's provisioning service and printed a `sgnl://linkdevice?…` link. Nothing was linked; the process was stopped there.
 - **Item 2, memory: about 190 MB** resident for the JVM at the link step, with `-Xmx256m -XX:+UseSerialGC`. Idle and receiving are still to be measured with an account. `MemoryMax=768M` stays until then.
@@ -574,7 +574,7 @@ A second end-to-end test runs the daemon with `ling web` answering `on`. The own
 
   The stand-in accepts any shape. A mismatch would show up only as a logged error, or, for `listIdentities`, as the owner's messages being refused.
 
-**Verified without installing anything:** the Java home `setup` uses, `/usr/lib/jvm/java-25-openjdk-arm64`, is the directory Ubuntu 24.04's `openjdk-25-jre-headless` 25.0.4.1 (arm64) installs to. This was read from the package's contents with `apt-get download` and `dpkg -c`.
+**Verified without installing anything** (superseded by §17, which replaced the apt package with a pinned Temurin JRE): the Java home `setup` used then, `/usr/lib/jvm/java-25-openjdk-arm64`, is the directory Ubuntu 24.04's `openjdk-25-jre-headless` 25.0.4.1 (arm64) installs to. This was read from the package's contents with `apt-get download` and `dpkg -c`.
 
 ## 17. Merged, off by default (branch `messengers/optional`, 2026-10-08)
 
