@@ -19,7 +19,17 @@ Four traps, all handled:
 
 Measured (single stream, greedy): prose 25.5, code 50.3, JSON 87.0 tok/s, prefill ~1,700 tok/s (~1,000 at 116K tokens), ~38.7 GB of host memory still free; four ling tasks at once finished in 23 s.
 
-It is the only model served, and the only model in the registry since 2026-10-07: the Qwen 3.5 122B fallbacks and Qwen 3.6 35B were removed on that date, with their vLLM recipes, their images (`Dockerfile.dflash`, `Dockerfile.dense`) and the `runtime/` patches. The vLLM launcher stays, tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`).
+It is the only model served, and was the only model in the registry from 2026-10-07 to 2026-10-09: the Qwen 3.5 122B fallbacks and Qwen 3.6 35B were removed on 2026-10-07, with their vLLM recipes, their images (`Dockerfile.dflash`, `Dockerfile.dense`) and the `runtime/` patches. The vLLM launcher stays, tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`).
+
+## A candidate checkpoint: Minima (night 2)
+
+`qwen3.8-27b-minima-nvfp4-dflash2` serves `minima-ai/mnma_qwen3.8_27b_nvfp4`, Qwen3.8-27B with all 496 linear layers in NVFP4 (compressed-tensors, text only, 18.8 GB). It exists for night 2's SWE-bench A/B against production and is never the default. Spec: `specs/DREAMFERENCE_MODELS.md` §2.2.
+
+- **One recipe.** Production's launch overrides are the module constant `QWEN38_SGLANG_RECIPE`. The candidate takes the constant whole and changes the `revision` plus one flag, so the A/B differs in the weights alone. A change to production's recipe therefore changes the candidate's too, which is intended for as long as the two are compared.
+- **`--kv-cache-dtype bfloat16` is load-bearing.** SGLang turns a compressed-tensors `kv_cache_scheme` into an FP8 KV pool under `auto`, and production's pool is BF16.
+- **Fused NVFP4 groups must share one global scale.** SGLang's `CompressedTensorsW4A4Fp4` takes the largest scale of a fused group (`in_proj_qkv`+`in_proj_z`, `in_proj_b`+`in_proj_a`, `q/k/v`, `gate/up`) and does not rescale, which serves a per-module-calibrated checkpoint silently wrong. `scripts/check_nvfp4_fused_scales.py <snapshot>` checks a checkpoint: Minima's 352 groups are equal. Run it on any NVFP4 checkpoint before serving it.
+- **No image input.** The candidate is a text-only extraction (`supports_vision=False`).
+- **Speed** is measured by `scripts/decode_speed.py` (stdlib only), which checks every answer it times. The prompts behind production's 25.5 / 50.3 / 87.0 were not recorded, so a comparison measures both arms on the same night.
 
 ## A model may pin its own vLLM image
 

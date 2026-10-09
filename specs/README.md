@@ -36,7 +36,7 @@ This directory holds the specification, split into focused documents. This page 
 
 | Document | What it covers |
 |---|---|
-| [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md) | The model matrix (three entries since 2026-10-07: the model, its drafter and the switched-off diffusion model), Qwen3.8-27B on SGLang and why, the removed models, GB10 detection |
+| [DREAMFERENCE_MODELS.md](./DREAMFERENCE_MODELS.md) | The model matrix (three entries since 2026-10-07: the model, its drafter and the switched-off diffusion model; a fourth since 2026-10-09, the night-2 candidate Minima, §2.2), Qwen3.8-27B on SGLang and why, the removed models, GB10 detection |
 | [DREAMFERENCE_INFERENCE.md](./DREAMFERENCE_INFERENCE.md) | The launch engines (SGLang for the model; vLLM kept for future recipes), recipes and precedence, speculative decoding, host safety |
 | [DREAMFERENCE_DOCKER.md](./DREAMFERENCE_DOCKER.md) | Images (the pinned SGLang image; the removed DFlash images), caches, tensorization, every container (Onyx, the Google service, SearXNG, Matrix, SWE-bench) |
 | [DREAMFERENCE_PREFIX_CACHE.md](./DREAMFERENCE_PREFIX_CACHE.md) | *History since 2026-10-07:* prefix caching on the removed 122B hybrid GDN + DFlash stack: findings and runtime patches |

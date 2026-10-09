@@ -18,6 +18,10 @@ SWE-bench runs `ling` inside each instance's own container (`dreamference/swe_be
 
 `run --task-rules tests` adds three lines of test discipline to the task prompt, and `tests-v2` the same three with the issue, not the old test, deciding whether a change that fails an old test is wrong; `eval --drop-test-hunks` grades a run's predictions again with their test files left out, in a grading series of its own (`eval-drop-test-hunks/`). Fresh tasks outside `sample-100.txt` are validated and drawn with `scripts/swe_bench_fresh.py`, and `scripts/swe_bench_night1.sh` runs the first pair, default against `tests-v2`. See the failure analysis's §8.
 
+## Night 2: production against a candidate checkpoint
+
+`scripts/swe_bench_night2.sh` compares two models instead of two harness arms. It runs production's arm, swaps the model server to the candidate `qwen3.8-27b-minima-nvfp4-dflash2` by the normal `server stop` / `server start --model` path, runs the candidate's arm, and serves production again whatever happens: an EXIT trap restores it on an error, and a separate unit restores it on a stop or a signal. It times both checkpoints with `scripts/decode_speed.py`. `check` changes nothing, and `DRY_RUN=1 … run` prints the night without executing it. Plan, fairness and decision rule: `specs/DREAMFERENCE_MODELS.md` §2.2.
+
 ## The code index in a run
 
 `--code-index universal` indexes each instance's `/testbed` on the host (copied out of the image) and mounts the index read-only with a relocated `ling-code`. In the first with/without pair (24 instances, 13 resolved in each) **the agent never queried it**, so that pair says nothing about the index, and the report says so whenever that happens.

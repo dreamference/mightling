@@ -185,7 +185,11 @@ def allocate(total: int, weights: Dict[str, int]) -> Dict[str, int]:
     return counts
 
 
-def draw(count: int, seed: int, out: Path, experiments: Path) -> int:
+FAILURES_PURPOSE: Final[str] = ("the failure analysis's A/B rounds\n"
+                                "# (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §6.5)")
+
+
+def draw(count: int, seed: int, out: Path, experiments: Path, purpose: str = FAILURES_PURPOSE) -> int:
     used = set(read_ids(SAMPLE_100))
     if not used:
         print(f"❌ {SAMPLE_100} is missing: the fresh tasks are defined against it.")
@@ -196,8 +200,7 @@ def draw(count: int, seed: int, out: Path, experiments: Path) -> int:
         return 1
     rng = random.Random(seed)
     rates = strong_rates(experiments)
-    lines = [f"# {count} fresh SWE-bench Verified tasks for the failure analysis's A/B rounds",
-             f"# (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH_FAILURES.md §6.5), drawn {time.strftime('%Y-%m-%d')}",
+    lines = [f"# {count} fresh SWE-bench Verified tasks for {purpose}, drawn {time.strftime('%Y-%m-%d')}",
              f"# from the {len(pool)} tasks validated on this machine outside sample-100.txt, seed {seed}."]
     if rates is None:
         chosen = sorted(rng.sample(pool, count))
@@ -248,6 +251,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     drawing.add_argument("--count", type=int, default=50)
     drawing.add_argument("--seed", type=int, required=True)
     drawing.add_argument("--out", type=Path, default=DEFAULT_LIST)
+    drawing.add_argument("--purpose", default=FAILURES_PURPOSE,
+                         help="what the list is for, written into its header (default: the failure analysis)")
     drawing.add_argument("--experiments", type=Path,
                          default=swe_bench_settings.CACHE_DIR / "experiments")
     args = parser.parse_args(argv)
@@ -258,7 +263,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     if args.command == "validate":
         return validate(args.count, args.batch, args.wait_for_unit, args.disk_reserve)
-    return draw(args.count, args.seed, args.out, args.experiments)
+    return draw(args.count, args.seed, args.out, args.experiments, args.purpose)
 
 
 if __name__ == "__main__":
