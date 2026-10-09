@@ -180,6 +180,8 @@ One entry is served by SGLang, because its speed is in a drafter only SGLang run
 | Prefill, 116K fresh tokens (needle retrieved) | 1,004 tok/s | beyond its 32K window |
 | Image input | correct ("Red; 42") | — |
 | 4 ling tasks at once | all pass, 23 s wall, ≥39.8 GB available | not measured |
+
+**Measured again on 2026-10-09 at 12 draft tokens** (`scripts/decode_speed.py --runs 3`, whose prompts are in the script, so this row can be reproduced; the 2026-09-29 prompts were not recorded, so the two rows are not a like-for-like comparison): prose 32.0 tok/s, code 68.6, JSON 84.1 (accepted drafts per step 3.4, 4.4 and 5.9), time to first token 0.19–0.20 s, prefill of 13,243 fresh tokens in 7.3 s (1,805 tok/s); every output passed its check and the three runs of each prompt were identical. The change from 16 to 12 draft tokens was decided on ling-engine's replay of recorded agent sessions (+7% single-stream, 48.3 against 45.1 tok/s; neutral with two streams, +1.7% aggregate, within noise; `ling-engine/reports/M0.md`).
 | Host memory available while serving | ~38.7 GB | ~10 GB |
 | Live slash-command suite | 75 pass, 2 skip (651 s with the fixed harness; 1,101 s before) | 75 pass, 2 skip (807 s, old harness) |
 
