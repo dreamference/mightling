@@ -30,7 +30,7 @@ Until 2026-10-07 it was a Tauri shell on the system's WebKitGTK, and typing into
 ## Also
 
 - **`ling airgapped --thread <id>`** is how Work learns a thread's air-gap level (`airgapped.ts` parses the first line): the launcher's own resolver, not a fourth copy of the crate.
-- `ling-admin desktop {install,run,build,status}` needs **Node 22.13+ and npm only** (Forge 8's floor; and `fakeroot` for the `.deb`); `desktop run` packages the app and runs the packaged binary, never `electron-forge start`, whose dev server Work's `app://` page does not use.
+- `ling-admin desktop {install,run,build,status}` needs **Node 22.13+ and npm only** (Forge 8's floor; and `dpkg` for the `.deb`, no `fakeroot`); `desktop run` packages the app and runs the packaged binary, never `electron-forge start`, whose dev server Work's `app://` page does not use.
 - Night Shift recognises the `ling` bundled inside the app as an app-server by name and `app-server` in its command line, not only the installed binary (`NightShiftHost._is_app_server`).
 - `DesktopInstaller`'s rustup helpers stay because the Codex build drives them.
 - `DesktopRunner.has_source()` tells a checkout from a release install ([install-modes.md](install-modes.md)).

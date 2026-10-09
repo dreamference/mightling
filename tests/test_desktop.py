@@ -213,6 +213,18 @@ def test_the_toolchain_is_node_only():
         assert DesktopInstaller.missing_prerequisites() == ["node", "npm"]
 
 
+def test_the_deb_needs_dpkg_and_no_fakeroot():
+    # Forge 8's deb maker runs `dpkg-deb --root-owner-group` itself: fakeroot is not asked for.
+    present = {"npm", "dpkg", "dpkg-deb"}
+    which = lambda name: f"/usr/bin/{name}" if name in present else None
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 13)), patch("shutil.which", side_effect=which):
+        assert DesktopInstaller.missing_prerequisites(build=True) == []
+    present.discard("dpkg-deb")
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 13)), patch("shutil.which", side_effect=which):
+        assert DesktopInstaller.missing_prerequisites(build=True) == ["dpkg"]
+        assert DesktopInstaller.missing_prerequisites() == []
+
+
 def test_the_node_floor_is_forge_s_own():
     # MIN_NODE_VERSION repeats the `engines` field of the Forge CLI the lockfile pins.
     from dreamference.chat.desktop_installer import MIN_NODE_VERSION

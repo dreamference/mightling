@@ -51,10 +51,11 @@ class DesktopInstaller:
 
         Args:
             build (bool): Whether the `.deb` is to be made, which Forge's maker does with `dpkg`
-                and `fakeroot`; a dev run needs neither.
+                and `dpkg-deb` (no `fakeroot`: since Forge 8 it runs `dpkg-deb --root-owner-group`
+                itself); a dev run needs neither.
 
         Returns:
-            List[str]: Short identifiers -- `"node"`, `"npm"`, `"fakeroot"` -- for whatever is
+            List[str]: Short identifiers -- `"node"`, `"npm"`, `"dpkg"` -- for whatever is
                 missing. An empty list means the app can be built.
         """
         missing: List[str] = []
@@ -63,8 +64,8 @@ class DesktopInstaller:
             missing.append("node")
         if shutil.which("npm") is None:
             missing.append("npm")
-        if build and (shutil.which("fakeroot") is None or shutil.which("dpkg") is None):
-            missing.append("fakeroot")
+        if build and (shutil.which("dpkg") is None or shutil.which("dpkg-deb") is None):
+            missing.append("dpkg")
         return missing
 
     @classmethod
@@ -240,7 +241,7 @@ class DesktopInstaller:
         """
         missing = cls.missing_prerequisites(build)
         if not missing:
-            print("✅ The desktop build toolchain is complete (Node and npm" + (", dpkg and fakeroot)." if build else ")."))
+            print("✅ The desktop build toolchain is complete (Node and npm" + (" and dpkg)." if build else ")."))
             return True, missing
 
         print("⚠️  The Mightling desktop toolchain is incomplete:")
@@ -248,8 +249,8 @@ class DesktopInstaller:
             print(f"   • Node.js {MIN_NODE_VERSION[0]}.{MIN_NODE_VERSION[1]} or later is needed (Electron, Vite and Forge run on it).")
         if "npm" in missing:
             print("   • npm is needed to install the app's packages.")
-        if "fakeroot" in missing:
-            print("   • dpkg and fakeroot are needed to make the .deb: sudo apt install fakeroot")
+        if "dpkg" in missing:
+            print("   • dpkg and dpkg-deb are needed to make the .deb (a Debian or Ubuntu system has both).")
         if "node" in missing or "npm" in missing:
             print("💡 Install Node.js from your distribution or nodejs.org, then `ling-admin desktop install`.")
         return False, missing

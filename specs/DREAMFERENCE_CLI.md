@@ -388,7 +388,7 @@ Each piece has its own opt-out. Since 2026-10-07 the admin account gets a random
 
 ### 4.20. `ling-admin desktop`
 
-`install`, `run`, `build`, `status` for the Electron desktop app (binary `ling-app`, project `desktop/electron/`). `install` checks Node 20+ and npm (and `fakeroot`/`dpkg` for the `.deb`) and, on Ubuntu, writes the dev AppArmor profile Chromium's sandbox needs, with sudo; `build` makes the `.deb`; `run` opens it. `ling app` opens the same app. On a release install the `.deb` is the app. See `DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md` and `docs/dev/desktop.md`.
+`install`, `run`, `build`, `status` for the Electron desktop app (binary `ling-app`, project `desktop/electron/`). `install` checks Node 20+ and npm (and `dpkg` for the `.deb`; no `fakeroot` since Forge 8) and, on Ubuntu, writes the dev AppArmor profile Chromium's sandbox needs, with sudo; `build` makes the `.deb`; `run` opens it. `ling app` opens the same app. On a release install the `.deb` is the app. See `DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md` and `docs/dev/desktop.md`.
 
 ### 4.21. `ling-admin night`
 

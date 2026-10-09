@@ -88,7 +88,7 @@ class DesktopRunner:
     @classmethod
     def _ensure_toolchain(cls, build: bool = False) -> bool:
         """
-        Checks Node and npm are present (and, for the `.deb`, dpkg and fakeroot); nothing is
+        Checks Node and npm are present (and, for the `.deb`, dpkg); nothing is
         installed, since all of them come from the system.
 
         Args:

@@ -40,7 +40,7 @@
   - `perl` and a C compiler, because OpenSSL is built from source;
   - no `libssl-dev` or `libcap-dev` is needed.
 - **For the web UI:** `onyx-cli`, installed via pip by `OnyxInstaller` when missing.
-- **For the desktop app (a checkout's build):** Node.js 20 or newer and npm (Electron comes from npm as a prebuilt binary; Vite builds the UI); `fakeroot` and `dpkg` only to make the `.deb`. No Rust and no system headers. A dev run on Ubuntu 24.04 needs an AppArmor profile for Chromium's sandbox, which `ling-admin desktop install` writes with sudo (`/etc/apparmor.d/mightling-desktop-dev`); the `.deb` writes its own in `postinst`.
+- **For the desktop app (a checkout's build):** Node.js 20 or newer and npm (Electron comes from npm as a prebuilt binary; Vite builds the UI); `dpkg` only to make the `.deb` (no `fakeroot` since Forge 8, whose maker runs `dpkg-deb --root-owner-group` itself). No Rust and no system headers. A dev run on Ubuntu 24.04 needs an AppArmor profile for Chromium's sandbox, which `ling-admin desktop install` writes with sudo (`/etc/apparmor.d/mightling-desktop-dev`); the `.deb` writes its own in `postinst`.
 - **For the document index:** `ling-admin docs setup` fetches what `ling-docs` loads (PDFium, ONNX Runtime, the embedding model; about 320 MB, each pinned).
 - **For the code index:** `ling-admin code setup` installs the pinned tools `ling-code` runs; Go, a JDK 17+ and a .NET SDK 8+ are optional and only enable their languages' exact indexers.
 - **For Night Shift:** a systemd user session (`ling-admin night enable` installs a user timer; lingering must be on for it to fire while logged out).
