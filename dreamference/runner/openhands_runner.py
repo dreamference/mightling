@@ -69,10 +69,10 @@ class OpenHandsRunner:
         subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # From inside the container `localhost` is the container itself, so a loopback vLLM URL
-        # is rewritten to the Docker bridge gateway -- the same fix Onyx's provider needs.
-        from dreamference.chat.onyx_runner import OnyxRunner
+        # is rewritten to the Docker bridge gateway.
+        from dreamference.chat.docker_bridge import DockerBridge
 
-        api_base = OnyxRunner.resolve_container_vllm_url(self.config.vllm_host)
+        api_base = DockerBridge.container_vllm_url(self.config.vllm_host)
 
         cmd: List[str] = [
             "docker", "run", "--rm", "-it",

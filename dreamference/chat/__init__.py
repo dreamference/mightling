@@ -19,6 +19,7 @@ homeserver `ling chat` answers on (MIGHTLING_CHAT §5).
 
 from dreamference.chat.desktop_installer import DesktopInstaller
 from dreamference.chat.desktop_runner import DesktopRunner
+from dreamference.chat.docker_bridge import DockerBridge
 from dreamference.chat.gmail_client import GmailClient
 from dreamference.chat.gmail_credentials import GmailCredentials
 from dreamference.chat.gmail_search_service import GmailSearchService
@@ -40,6 +41,7 @@ __all__ = [
     "ChatAdminCredentials",
     "DesktopInstaller",
     "DesktopRunner",
+    "DockerBridge",
     "GmailClient",
     "GmailCredentials",
     "GmailSearchService",
