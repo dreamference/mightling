@@ -194,6 +194,16 @@ Allow it when macOS asks whether Mightling may find devices on your local networ
 reaches the GB10. The preview does not update itself, and `ling app` in a Mac terminal does not open
 it yet. Full steps: the Desktop app page of the documentation.
 
+**Faster decoding: 12 draft tokens.** The DFlash2 drafter now proposes 12 tokens per step instead
+of 16. Measured on replayed agent sessions: +7% single-stream decode (48.3 against 45.1 tokens/s,
+acceptance 5.23 against 4.99 per step) and neutral with two agents at once; the output is unchanged,
+because speculative decoding preserves the model's distribution.
+
+**A benchmark run now has priority over the model server.** `ling-admin server start` puts a small
+gate container in front of the engine on the public port. While a SWE-bench run holds the gate, a
+request that is not the run's is answered 503, naming the run and its time left, instead of slowing
+it down; `ling-admin night pause [--for 2h]` lets you through meanwhile. With no run, nothing changes.
+
 **Fixed:**
 - **The code index's memory budget saw no running index.** Since the rename the code index looked
   for its running scopes under a folder that does not exist, so a new index run was admitted without
