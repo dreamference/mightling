@@ -28,6 +28,11 @@
 //! Night Shift runs its two steps itself (dreamference/night_shift), and SWE-bench's `--refine`
 //! arm too; both set `DREAMFERENCE_MIGHTLING_REFINE=off` for the sessions they start. All of them
 //! compose from `prompts/refine.md`, which the Python side carries byte for byte.
+//!
+//! The texts come in two versions (spec §10): `v1`, the measured one, and `v2`, which differs in
+//! the study's sections and the fix rules. The version is `--refine-version`, then
+//! `DREAMFERENCE_MIGHTLING_REFINE_VERSION`, then `mightling_refine_version`, then [`DEFAULT_VERSION`],
+//! exported like the switch so the study step and the hook use the same one.
 
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -60,6 +65,18 @@ pub const DEFAULT: bool = false;
 /// The command-line switches, taken off the command line before Codex parses it.
 pub const FLAG_ON: &str = "--refine";
 pub const FLAG_OFF: &str = "--no-refine";
+
+/// Which texts refine mode uses: `--refine-version <v>` (or `=<v>`), the variable, the config key.
+pub const FLAG_VERSION: &str = "--refine-version";
+pub const VERSION_ENV: &str = "DREAMFERENCE_MIGHTLING_REFINE_VERSION";
+pub const VERSION_KEY: &str = "mightling_refine_version";
+
+/// The versions of the texts. A piece named `<name>-v2` replaces `<name>` in v2 (spec §10).
+pub const VERSIONS: &[&str] = &["v1", "v2"];
+
+/// v1, the measured texts, until an A/B night says otherwise; `DEFAULT_MIGHTLING_REFINE_VERSION`
+/// in dreamference_config.py is the same, which a test keeps equal.
+pub const DEFAULT_VERSION: &str = "v1";
 
 /// Set on the study step's process: it composes the study prompt and never refines again.
 pub const STEP_ENV: &str = "MIGHTLING_REFINE_STEP";
@@ -117,7 +134,9 @@ pub fn piece(name: &str) -> String {
         let marker = line
             .strip_prefix("<!-- ")
             .and_then(|rest| rest.strip_suffix(" -->"))
-            .filter(|word| !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
+            .filter(|word| {
+                !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            });
         if let Some(marker) = marker {
             if current == Some(name) {
                 return lines.join("\n");
@@ -135,33 +154,44 @@ fn task_piece(name: &str) -> String {
     piece(name).replace("{subject}", "task")
 }
 
+/// The piece `name` in `version`: `<name>-<version>` where the file has one, `name` otherwise.
+pub fn versioned_piece(name: &str, version: &str) -> String {
+    if version != "v1" {
+        let own = piece(&format!("{name}-{version}"));
+        if !own.is_empty() {
+            return own;
+        }
+    }
+    piece(name)
+}
+
 /// The study step's prompt for `task`. `writes` says what writing does in this step
 /// ([`READ_ONLY_WRITES`], [`UNSANDBOXED_WRITES`]); `code_index` adds the sentence that sends the
-/// study to the code index's tools for every path.
-pub fn study_prompt(task: &str, writes: &str, code_index: bool) -> String {
+/// study to the code index's tools for every path; `version` picks the texts ([`VERSIONS`]).
+pub fn study_prompt(task: &str, writes: &str, code_index: bool, version: &str) -> String {
     let hint = if code_index { format!("{}\n", task_piece("study-code-index")) } else { String::new() };
     // `{task}` last, so the task's own text is never searched for placeholders.
     piece("study")
         .replace("{intro}", &task_piece("study-intro"))
         .replace("{writes}", writes)
         .replace("{code_index}", &hint)
-        .replace("{sections}", &piece("study-sections"))
+        .replace("{sections}", &versioned_piece("study-sections", version))
         .replace("{task}", task)
 }
 
-/// What the doing step is given after the task: the rules, then the description.
-pub fn fix_block(refined: &str) -> String {
+/// What the doing step is given after the task: the rules of `version`, then the description.
+pub fn fix_block(refined: &str, version: &str) -> String {
     let refined = refined.trim();
     let refined = if refined.is_empty() { task_piece("no-refined") } else { refined.to_string() };
     piece("fix")
-        .replace("{rules}", &task_piece("fix-rules"))
+        .replace("{rules}", &versioned_piece("fix-rules", version).replace("{subject}", "task"))
         .replace("{heading}", &piece("refined-heading"))
         .replace("{refined}", &refined)
 }
 
 /// The doing step's prompt in `ling exec`: the task as given, then [`fix_block`].
-pub fn fix_prompt(task: &str, refined: &str) -> String {
-    format!("{task}\n\n{}", fix_block(refined))
+pub fn fix_prompt(task: &str, refined: &str, version: &str) -> String {
+    format!("{task}\n\n{}", fix_block(refined, version))
 }
 
 // -- the setting -------------------------------------------------------------------------------
@@ -197,6 +227,66 @@ pub fn source_now() -> String {
     }
 }
 
+/// A known version, from a variable's or the config file's value; None for anything else.
+fn known_version(value: Option<&str>) -> Option<&'static str> {
+    let value = value?.trim().to_lowercase();
+    VERSIONS.iter().copied().find(|version| *version == value)
+}
+
+/// `DREAMFERENCE_MIGHTLING_REFINE_VERSION`, then `mightling_refine_version`, then [`DEFAULT_VERSION`].
+/// A value that is not a version passes to the next tier.
+pub fn version(env: Option<&str>, settings: &toml::Table) -> &'static str {
+    known_version(env)
+        .or_else(|| known_version(settings.get(VERSION_KEY).and_then(toml::Value::as_str)))
+        .unwrap_or(DEFAULT_VERSION)
+}
+
+/// The texts' version for this process.
+pub fn version_now() -> &'static str {
+    version(std::env::var(VERSION_ENV).ok().as_deref(), &settings())
+}
+
+/// Where the version in force comes from, for `ling refine`.
+pub fn version_source_now() -> String {
+    let env = std::env::var(VERSION_ENV).ok();
+    if known_version(env.as_deref()).is_some() {
+        return format!("{VERSION_ENV} (or {FLAG_VERSION})");
+    }
+    let ignored = env
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("; {VERSION_ENV}={value} is not a version"))
+        .unwrap_or_default();
+    match crate::config_file() {
+        Some(path) if known_version(settings().get(VERSION_KEY).and_then(toml::Value::as_str)).is_some() => {
+            format!("{VERSION_KEY} in {}{ignored}", path.display())
+        }
+        _ => format!("the default{ignored}"),
+    }
+}
+
+/// The value of the last `--refine-version <v>` or `--refine-version=<v>` before a `--`, if any.
+pub fn version_flag(args: &[OsString]) -> Option<String> {
+    let mut found = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].to_str() {
+            Some("--") => break,
+            Some(FLAG_VERSION) => {
+                found = args.get(index + 1).map(|value| value.to_string_lossy().into_owned());
+                index += 1;
+            }
+            Some(arg) => {
+                if let Some(value) = arg.strip_prefix(FLAG_VERSION).and_then(|rest| rest.strip_prefix('=')) {
+                    found = Some(value.to_string());
+                }
+            }
+            None => {}
+        }
+        index += 1;
+    }
+    found
+}
+
 /// The last `--refine` or `--no-refine` before a `--`, if any.
 pub fn flag_setting(args: &[OsString]) -> Option<bool> {
     let mut setting = None;
@@ -211,15 +301,26 @@ pub fn flag_setting(args: &[OsString]) -> Option<bool> {
     setting
 }
 
-/// The command line without the switches, which Codex does not know.
+/// The command line without the switches and `--refine-version` with its value, which Codex
+/// does not know.
 pub fn without_flags(args: Vec<OsString>) -> Vec<OsString> {
     let mut out = Vec::with_capacity(args.len());
     let mut after_dashes = false;
+    let mut skip_value = false;
     for (index, arg) in args.into_iter().enumerate() {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
         if index > 0 && !after_dashes {
             match arg.to_str() {
                 Some("--") => after_dashes = true,
                 Some(FLAG_ON) | Some(FLAG_OFF) => continue,
+                Some(FLAG_VERSION) => {
+                    skip_value = true;
+                    continue;
+                }
+                Some(other) if other.strip_prefix(FLAG_VERSION).is_some_and(|rest| rest.starts_with('=')) => continue,
                 _ => {}
             }
         }
@@ -237,6 +338,13 @@ pub fn export_flag() {
     if let Some(on) = flag_setting(&args) {
         // SAFETY: see above; no other thread can be reading the environment yet.
         unsafe { std::env::set_var(ENV, if on { "on" } else { "off" }) };
+    }
+    if let Some(value) = version_flag(&args) {
+        if known_version(Some(&value)).is_none() {
+            eprintln!("refine: `{FLAG_VERSION} {value}` is not a version ({}); it is ignored.", VERSIONS.join(", "));
+        }
+        // SAFETY: as above.
+        unsafe { std::env::set_var(VERSION_ENV, value) };
     }
 }
 
@@ -428,7 +536,7 @@ pub fn around_exec(command: &Command, original: &[OsString], prepared: Vec<OsStr
     if std::env::var(STEP_ENV).is_ok_and(|step| step == STUDY) {
         let Some(task) = task_text(&user_args, &position) else { return prepared };
         let writes = if has_full_access(&user_args) { UNSANDBOXED_WRITES } else { READ_ONLY_WRITES };
-        return with_prompt(prepared, &position, &study_prompt(&task, writes, code_index));
+        return with_prompt(prepared, &position, &study_prompt(&task, writes, code_index, version_now()));
     }
     if !enabled_now() {
         return prepared;
@@ -440,7 +548,8 @@ pub fn around_exec(command: &Command, original: &[OsString], prepared: Vec<OsStr
     let dir = crate::code_index::session_dir(&user_args);
     let before = tree_fingerprint(&dir);
     let kind = if has_full_access(&user_args) { "separate session with Full Access" } else { "separate read-only session" };
-    eprintln!("refine: studying the task first, in a {kind} ({}); then a fresh session does it.", source_now());
+    let texts = if version_now() == DEFAULT_VERSION { String::new() } else { format!(", the {} texts", version_now()) };
+    eprintln!("refine: studying the task first, in a {kind} ({}{texts}); then a fresh session does it.", source_now());
     // The study step's stdout goes to this process's stderr: stdout is the doing step's alone.
     let stdout = stderr_as_stdio();
     let result = run_study(&study, &task, &out, stdout, Stdio::inherit());
@@ -465,7 +574,7 @@ pub fn around_exec(command: &Command, original: &[OsString], prepared: Vec<OsStr
         minutes(study.elapsed),
         study.refined.chars().count()
     );
-    with_prompt(prepared, &position, &fix_prompt(&task, &study.refined))
+    with_prompt(prepared, &position, &fix_prompt(&task, &study.refined, version_now()))
 }
 
 // -- the interactive session -------------------------------------------------------------------
@@ -558,7 +667,7 @@ pub fn first_interactive_prompt(transcript: &str) -> bool {
 
 /// The hook's answer: the rules and the description as context for the model, and a line for the
 /// person. With no description there is no context, and the turn goes on as without refine mode.
-pub fn hook_answer(study: &Study, log: &Path) -> Value {
+pub fn hook_answer(study: &Study, log: &Path, version: &str) -> Value {
     if study.refined.is_empty() {
         let exit = study.exit.map_or("killed".to_string(), |code| format!("exit {code}"));
         return json!({
@@ -578,7 +687,7 @@ pub fn hook_answer(study: &Study, log: &Path) -> Value {
         ),
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": fix_block(&study.refined),
+            "additionalContext": fix_block(&study.refined, version),
         },
     })
 }
@@ -617,7 +726,7 @@ fn hook() -> i32 {
     };
     // The hook's own stdout is Codex's channel for the answer: nothing else may be written to it.
     let Ok(study) = run_study(&args, &task, &out, stdout, stderr) else { return 0 };
-    println!("{}", hook_answer(&study, &log_path));
+    println!("{}", hook_answer(&study, &log_path, version_now()));
     0
 }
 
@@ -644,10 +753,12 @@ pub fn run_cli(args: &[String]) -> i32 {
         None | Some("status") => {
             let state = if enabled_now() { "on" } else { "off" };
             println!("refine: {state} (from {})", source_now());
+            println!("refine texts: {} (from {})", version_now(), version_source_now());
             println!(
                 "Each new task is first studied by a read-only session that writes a refined description; a fresh session then does it. \
                  Applies to `ling exec`, the first prompt of each interactive session, and Night Shift. \
-                 Set it with {FLAG_ON}/{FLAG_OFF}, {ENV}=on|off, or {KEY} = true|false in dreamference.toml."
+                 Set it with {FLAG_ON}/{FLAG_OFF}, {ENV}=on|off, or {KEY} = true|false in dreamference.toml; \
+                 choose the texts with {FLAG_VERSION} v1|v2, {VERSION_ENV}=v1|v2, or {VERSION_KEY} = \"v1\"|\"v2\"."
             );
             0
         }
@@ -728,6 +839,31 @@ mod tests {
     }
 
     #[test]
+    fn the_texts_are_v1_unless_a_tier_names_another_version() {
+        let table = |text: &str| text.parse::<toml::Table>().unwrap_or_default();
+        assert_eq!(version(None, &table("")), "v1");
+        assert_eq!(version(None, &table("mightling_refine_version = \"v2\"")), "v2");
+        assert_eq!(version(Some(" V2 "), &table("")), "v2");
+        assert_eq!(version(Some("v1"), &table("mightling_refine_version = \"v2\"")), "v1");
+        // Anything but a version passes to the next tier.
+        assert_eq!(version(Some("v3"), &table("mightling_refine_version = \"v2\"")), "v2");
+        assert_eq!(version(Some(""), &table("mightling_refine_version = 2")), "v1");
+        assert_eq!(DEFAULT_VERSION, "v1", "refine-v2 is chosen, never the default, until an A/B night decides");
+    }
+
+    #[test]
+    fn the_version_flag_is_read_in_both_forms_and_taken_off_with_its_value() {
+        assert_eq!(version_flag(&os(&["ling", "--refine-version", "v2", "exec", "x"])), Some("v2".into()));
+        assert_eq!(version_flag(&os(&["ling", "--refine-version=v1", "--refine-version", "v2"])), Some("v2".into()));
+        assert_eq!(version_flag(&os(&["ling", "exec", "--", "--refine-version", "v2"])), None);
+        assert_eq!(version_flag(&os(&["ling", "--refine-version"])), None);
+        assert_eq!(
+            without_flags(os(&["ling", "--refine", "--refine-version", "v2", "exec", "--refine-version=v2", "x", "--", "--refine-version", "v2"])),
+            os(&["ling", "exec", "x", "--", "--refine-version", "v2"])
+        );
+    }
+
+    #[test]
     fn the_flags_are_read_before_a_double_dash_and_taken_off_the_command_line() {
         assert_eq!(flag_setting(&os(&["ling", "--refine", "exec", "x"])), Some(true));
         assert_eq!(flag_setting(&os(&["ling", "--refine", "--no-refine"])), Some(false));
@@ -792,27 +928,51 @@ mod tests {
 
     #[test]
     fn every_piece_is_present_and_the_study_prompt_carries_the_six_sections() {
-        for name in ["study-intro", "study-sections", "study-code-index", "study", "fix-rules", "refined-heading", "no-refined", "fix"] {
+        for name in [
+            "study-intro",
+            "study-sections",
+            "study-sections-v2",
+            "study-code-index",
+            "study",
+            "fix-rules",
+            "fix-rules-v2",
+            "refined-heading",
+            "no-refined",
+            "fix",
+        ] {
             assert!(!piece(name).is_empty(), "{name}");
         }
         assert_eq!(piece("nothing"), "");
-        let prompt = study_prompt("Make `{writes}` work.", READ_ONLY_WRITES, false);
+        let prompt = study_prompt("Make `{writes}` work.", READ_ONLY_WRITES, false, "v1");
         assert!(prompt.starts_with("This is the first of two steps. Do not fix anything yet: study the task below"));
         assert!(prompt.contains("1. Intent:") && prompt.contains("6. Acceptance checks:"));
         assert!(prompt.contains(READ_ONLY_WRITES));
         assert!(!prompt.contains("code_callers"));
         assert!(prompt.ends_with("Task:\nMake `{writes}` work."), "a task's own braces stay as written: {prompt}");
         assert!(!prompt.contains("{subject}") && !prompt.contains("{sections}") && !prompt.contains("{code_index}"));
-        assert!(study_prompt("x", UNSANDBOXED_WRITES, true).contains("`code_search` with the task's words"));
+        assert!(study_prompt("x", UNSANDBOXED_WRITES, true, "v1").contains("`code_search` with the task's words"));
+    }
+
+    #[test]
+    fn refine_v2_changes_the_sections_and_the_rules_and_nothing_else() {
+        let (one, two) = (study_prompt("T", READ_ONLY_WRITES, true, "v1"), study_prompt("T", READ_ONLY_WRITES, true, "v2"));
+        assert_eq!(one.replace(&piece("study-sections"), "S"), two.replace(&piece("study-sections-v2"), "S"));
+        assert!(two.contains("\"Expected to change\"") && two.contains("never a list of alternatives."));
+        assert!(!two.contains("{subject}") && !two.contains("{sections}"));
+        let (one, two) = (fix_block("D", "v1"), fix_block("D", "v2"));
+        assert!(two.contains("the task is authoritative") && two.contains("do not keep the old one"));
+        assert!(!two.contains("{subject}"));
+        assert_eq!(one.replace(&task_piece("fix-rules"), "R"), two.replace(&task_piece("fix-rules-v2"), "R"));
+        assert_eq!(versioned_piece("study-intro", "v2"), piece("study-intro"), "a piece with no v2 is shared");
     }
 
     #[test]
     fn the_fix_prompt_is_the_task_then_the_rules_then_the_description() {
-        let prompt = fix_prompt("Add a flag.", "1. Intent: a flag.");
+        let prompt = fix_prompt("Add a flag.", "1. Intent: a flag.", "v1");
         assert!(prompt.starts_with("Add a flag.\n\n- A first step studied the task"));
         assert!(prompt.contains("the task is authoritative: where the two disagree, follow the task."));
         assert!(prompt.ends_with("Refined description (written by the first step; it may be incomplete or wrong):\n1. Intent: a flag."));
-        assert!(fix_block("  ").ends_with("(The first step wrote no description: work from the task alone.)"));
+        assert!(fix_block("  ", "v1").ends_with("(The first step wrote no description: work from the task alone.)"));
     }
 
     fn transcript(lines: &[Value]) -> String {
@@ -853,11 +1013,11 @@ mod tests {
     #[test]
     fn the_hook_answers_with_context_only_when_there_is_a_description() {
         let study = Study { refined: "1. Intent: x".into(), exit: Some(0), elapsed: Duration::from_secs(95) };
-        let answer = hook_answer(&study, Path::new("/h/refine/s.log"));
+        let answer = hook_answer(&study, Path::new("/h/refine/s.log"), "v2");
         assert_eq!(answer["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit");
-        assert_eq!(answer["hookSpecificOutput"]["additionalContext"], fix_block("1. Intent: x"));
+        assert_eq!(answer["hookSpecificOutput"]["additionalContext"], fix_block("1. Intent: x", "v2"));
         assert!(answer["systemMessage"].as_str().is_some_and(|line| line.contains("1 min 35 s")));
-        let empty = hook_answer(&Study { exit: Some(1), ..Study::default() }, Path::new("/l"));
+        let empty = hook_answer(&Study { exit: Some(1), ..Study::default() }, Path::new("/l"), "v1");
         assert!(empty.get("hookSpecificOutput").is_none());
     }
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Final, Optional, Tuple
 
 from dreamference.config.config_path_resolver import ConfigPathResolver
+from dreamference.night_shift.refine_prompt import VERSIONS as REFINE_VERSIONS
 
 DEFAULT_WINDOW: Final[str] = "01:00-07:00"
 DEFAULT_MAX_PARALLEL: Final[int] = 3
@@ -66,6 +67,11 @@ class NightShiftSettings:
         # here, absent for the configured `mightling_refine` (`refine_enabled`).
         refine = table.get("refine")
         self.refine: Optional[bool] = refine if isinstance(refine, bool) else None
+        # Which texts it uses (spec §10): "v1" or "v2" here, absent (or not a version) for the
+        # configured `mightling_refine_version` (`refine_version_in_force`).
+        version = table.get("refine_version")
+        version = version.strip().lower() if isinstance(version, str) else None
+        self.refine_version: Optional[str] = version if version in REFINE_VERSIONS else None
         self.task_context: int = max(1, int(table.get("task_context", DEFAULT_TASK_CONTEXT)))
         # Where a task's session compacts, passed to every `ling exec` of the task (compaction
         # spec §4.1). Absent (None, the default): the task's share of the KV pool, so the tasks of
@@ -94,6 +100,19 @@ class NightShiftSettings:
             return self.refine
         from dreamference.config.dreamference_config import DreamferenceConfig
         return DreamferenceConfig().mightling_refine
+
+    def refine_version_in_force(self) -> str:
+        """
+        Which refine texts night tasks get: `[night] refine_version`, then `mightling_refine_version`
+        through its own tiers (`DREAMFERENCE_MIGHTLING_REFINE_VERSION`, the config file, the default).
+
+        Returns:
+            str: "v1" or "v2".
+        """
+        if self.refine_version is not None:
+            return self.refine_version
+        from dreamference.config.dreamference_config import DreamferenceConfig
+        return DreamferenceConfig().mightling_refine_version
 
     @classmethod
     def read_table(cls, path: Optional[Path] = None, section: str = "night") -> Dict[str, Any]:

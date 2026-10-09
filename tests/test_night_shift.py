@@ -22,6 +22,7 @@ from dreamference.night_shift import (
     NightShiftSettings, NightShiftTaskRun,
 )
 from dreamference.night_shift.night_shift_task_run import NUDGE
+from dreamference.night_shift.refine_prompt import FIX_RULES_V2, STUDY_SECTIONS_V2, RefinePrompt
 
 FAKE_MIGHTLING = textwrap.dedent("""\
     #!{python}
@@ -225,6 +226,28 @@ def test_refine_follows_the_configured_setting_unless_night_says_otherwise(setup
     monkeypatch.setenv("DREAMFERENCE_MIGHTLING_REFINE", "off")
     status, _, _ = refined_run(setup, monkeypatch, {}, task_id="20261001-0100-ghi")
     assert status == "done" and len(calls(setup)) == 1
+
+
+def test_refine_v2_follows_night_then_the_configured_version(setup, monkeypatch):
+    # specs/DREAMFERENCE_MIGHTLING_REFINE.md §10: `[night] refine_version`, then `mightling_refine_version`.
+    monkeypatch.delenv("DREAMFERENCE_MIGHTLING_REFINE_VERSION", raising=False)
+    status, record, _ = refined_run(setup, monkeypatch, {"refine": True, "refine_version": "v2"})
+    assert status == "done"
+    study, fix = calls(setup)
+    assert STUDY_SECTIONS_V2 in study[-1] and RefinePrompt.subject(FIX_RULES_V2, "task") in fix[-1]
+    assert record["result"]["refine"]["version"] == "v2"
+    text = NightShiftReport.render(datetime.now().astimezone(), [record], [])
+    assert "description; it changed the worktree, which was put back (refine-v2)" in text
+    setup["calls"].unlink()
+    monkeypatch.setenv("DREAMFERENCE_MIGHTLING_REFINE_VERSION", "v2")
+    status, record, _ = refined_run(setup, monkeypatch, {"refine": True, "refine_version": "v1"},
+                                    task_id="20261001-0100-def")
+    study, fix = calls(setup)
+    assert STUDY_SECTIONS_V2 not in study[-1] and record["result"]["refine"]["version"] == "v1"
+    assert "(refine-v" not in NightShiftReport.render(datetime.now().astimezone(), [record], [])
+    setup["calls"].unlink()
+    status, record, _ = refined_run(setup, monkeypatch, {"refine": True}, task_id="20261001-0100-ghi")
+    assert STUDY_SECTIONS_V2 in calls(setup)[0][-1] and record["result"]["refine"]["version"] == "v2"
 
 
 def test_a_resumed_task_is_not_studied_again(setup, monkeypatch):

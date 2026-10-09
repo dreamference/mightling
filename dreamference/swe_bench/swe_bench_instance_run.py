@@ -19,8 +19,9 @@ from typing import Any, Dict, Final, List, Optional
 
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_task_run import ANNOUNCES_WORK, NUDGE, NightShiftTaskRun
-from dreamference.night_shift.refine_prompt import (FIX_RULES, NO_REFINED as NO_REFINED_PIECE, REFINED_HEADING,
-                                                    STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS, RefinePrompt)
+from dreamference.night_shift.refine_prompt import (FIX_RULES, FIX_RULES_V2, NO_REFINED as NO_REFINED_PIECE,
+                                                    REFINED_HEADING, STUDY_CODE_INDEX, STUDY_INTRO, STUDY_SECTIONS,
+                                                    STUDY_SECTIONS_V2, RefinePrompt)
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
@@ -131,6 +132,18 @@ Issue:
 
 """ + REFINED_HEADING + """
 {refined}""")
+
+# refine-v2 (`--refine-version v2`, specs/DREAMFERENCE_MIGHTLING_REFINE.md §10): the same two prompts
+# with v2's sections and rules in place of v1's, which stay the measured ones above.
+REFINE_PROMPTS: Final[Dict[str, str]] = {
+    "v1": REFINE_PROMPT,
+    "v2": REFINE_PROMPT.replace(STUDY_SECTIONS, STUDY_SECTIONS_V2),
+}
+FIX_PROMPTS: Final[Dict[str, str]] = {
+    "v1": FIX_PROMPT,
+    "v2": FIX_PROMPT.replace(RefinePrompt.subject(FIX_RULES, "issue"), RefinePrompt.subject(FIX_RULES_V2, "issue")),
+}
+REFINE_VERSIONS: Final[tuple] = tuple(REFINE_PROMPTS)
 
 # What the second step is told when the first wrote nothing.
 NO_REFINED: Final[str] = RefinePrompt.subject(NO_REFINED_PIECE, "issue")
@@ -308,7 +321,8 @@ class SweBenchInstanceRun:
                  code_index: Optional[Dict[str, Any]] = None,
                  extra_mounts: Optional[List[str]] = None,
                  issue: Optional[Dict[str, Any]] = None, refine: bool = False,
-                 task_rules: Optional[List[str]] = None, review_turn: bool = False) -> None:
+                 task_rules: Optional[List[str]] = None, review_turn: bool = False,
+                 refine_version: str = "v1") -> None:
         """
         Args:
             store: The run's files.
@@ -331,6 +345,7 @@ class SweBenchInstanceRun:
             review_turn: Resume the agent's session once more (`REVIEW_PROMPT`) after it stops
                 with a changed tree and before the patch is collected, within the task's time
                 limit.
+            refine_version: Which refine texts the two steps get (`REFINE_PROMPTS`).
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -347,6 +362,7 @@ class SweBenchInstanceRun:
         self.code_index = code_index
         self.extra_mounts: List[str] = list(extra_mounts or [])
         self.refine = refine
+        self.refine_version = refine_version
         self.task_rules: List[str] = list(task_rules or [])
         self.review_turn = review_turn
         self.container: str = self.container_name(store.name, self.instance_id)
@@ -414,24 +430,25 @@ class SweBenchInstanceRun:
         return "".join(text for name, text in TASK_RULES.items() if name in wanted)
 
     @classmethod
-    def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False) -> str:
+    def compose_refine_prompt(cls, problem_statement: str, code_index: bool = False, version: str = "v1") -> str:
         """
         Builds the refine arm's first prompt: study the issue and write the refined description.
 
         Args:
             problem_statement: The dataset row's `problem_statement`.
             code_index: Whether the agent has the code index, which adds `REFINE_CODE_INDEX_HINT`.
+            version: Which texts (`REFINE_PROMPTS`).
 
         Returns:
             str: The prompt.
         """
-        return REFINE_PROMPT.format(problem_statement=problem_statement,
-                                    refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
-                                    code_index=REFINE_CODE_INDEX_HINT if code_index else "")
+        return REFINE_PROMPTS[version].format(problem_statement=problem_statement,
+                                              refined_path=f"{SCRATCH_MOUNT}/{REFINED_FILE}",
+                                              code_index=REFINE_CODE_INDEX_HINT if code_index else "")
 
     @classmethod
     def compose_fix_prompt(cls, problem_statement: str, refined: str, code_index: bool = False,
-                           task_rules: Optional[List[str]] = None) -> str:
+                           task_rules: Optional[List[str]] = None, version: str = "v1") -> str:
         """
         Builds the refine arm's second prompt: the issue verbatim, then the first step's description.
 
@@ -440,14 +457,15 @@ class SweBenchInstanceRun:
             refined: What the first step wrote; empty when it wrote nothing.
             code_index: Whether the agent has the code index, which adds `CODE_INDEX_HINT`.
             task_rules: Names of `TASK_RULES` to add, in `TASK_RULES`' order.
+            version: Which texts (`FIX_PROMPTS`).
 
         Returns:
             str: The prompt.
         """
-        return FIX_PROMPT.format(problem_statement=problem_statement,
-                                 refined=refined.strip() or NO_REFINED,
-                                 code_index=CODE_INDEX_HINT if code_index else "",
-                                 task_rules=cls.task_rules_text(task_rules))
+        return FIX_PROMPTS[version].format(problem_statement=problem_statement,
+                                           refined=refined.strip() or NO_REFINED,
+                                           code_index=CODE_INDEX_HINT if code_index else "",
+                                           task_rules=cls.task_rules_text(task_rules))
 
     @classmethod
     def compose_review_prompt(cls, problem_statement: str, diff: str, resumed: bool) -> str:
@@ -556,7 +574,7 @@ class SweBenchInstanceRun:
             if self.stop_event.is_set():
                 return "interrupted", ""
             prompt = self.compose_fix_prompt(self.problem_statement, refined, bool(self.code_index),
-                                             self.task_rules)
+                                             self.task_rules, self.refine_version)
         else:
             prompt = self.compose_prompt(self.problem_statement, bool(self.code_index), self.task_rules)
         fix_started = time.time()
@@ -609,7 +627,8 @@ class SweBenchInstanceRun:
         if REFINE_TIMEOUT_S is not None:
             self.deadline = min(task_deadline, started + REFINE_TIMEOUT_S)
         try:
-            outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index)),
+            outcome = self._exec(self.compose_refine_prompt(self.problem_statement, bool(self.code_index),
+                                                            self.refine_version),
                                  resume=False)
         finally:
             self.deadline = task_deadline
