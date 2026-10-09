@@ -44,7 +44,7 @@ Rejected:
 /apps
   Apps
   Installed 1 of 3 available apps.
-› Gmail             Installed · owner@…, work@…        Enter: manage, enable/disable
+› Gmail             Installed · me@…, work@…        Enter: manage, enable/disable
   Google Drive      Can be installed                   Enter: connect in your browser
   Google Calendar   Can be installed                   Enter: connect in your browser
 ```
