@@ -24,7 +24,7 @@
 - `ling-admin`: the administration CLI (`dreamference.cli:main`, controller `DreamferenceCLIController` in `dreamference/cli/`). Everything in this document.
 - `ling`: **not** a Python entry point. It is the Rust binary built by `ling-admin codex build`: Codex with Mightling's branding and launcher compiled in, linked at `~/.local/bin/ling`. It takes Codex's command line, plus subcommands the launcher answers itself before Codex parses anything:
   - `ling app` (the desktop app), `ling night …`, `ling airgapped [default <level>]`, `ling node list|use|forget`;
-  - `ling prompt [list|show [<name>]|use <name>]`, which chooses the system prompt new sessions get (`default`, `high-swe`, `ask`, `refine` or a custom one; `DREAMFERENCE_MIGHTLING_PROMPT` or `mightling_prompt`, see `DREAMFERENCE_MIGHTLING_PROMPT.md`);
+  - `ling prompt [list|show [<name>]|use <name>]`, which chooses the system prompt new sessions get (`default`, `high-swe`, `ask` or a custom one; `DREAMFERENCE_MIGHTLING_PROMPT` or `mightling_prompt`, see `DREAMFERENCE_MIGHTLING_PROMPT.md`);
   - `ling skill …` (other agents' skills, `DREAMFERENCE_MIGHTLING_SKILLS.md`) and `ling docs add|remove|search|read|status` (the document index, `DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md`);
   - `ling web serve|start|stop|status|open|pair` (the web UI on port 3100, `DREAMFERENCE_MIGHTLING_ASK.md`), `ling chat …` (Matrix and Telegram) and `ling signal setup|status|start|stop|trust|remove|unit` (Linux), both off until set up (`DREAMFERENCE_MIGHTLING_CHAT.md`, `DREAMFERENCE_MIGHTLING_SIGNAL.md`);
   - `ling update`, a subcommand patch `0008` adds to Codex's own parser.
