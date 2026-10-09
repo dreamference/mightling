@@ -96,7 +96,7 @@ Warnings (not vulnerabilities), all in the Codex workspace:
 | `faster-hex` 0.10.0 | RUSTSEC-2026-0306 | unsound | 0.10.1 | through `gix`; semver-compatible, next bump |
 | `memmap2` 0.9.10 | RUSTSEC-2026-0186 | unsound | 0.9.11 | through `gix`; semver-compatible, next bump |
 | `scc` 2.4.0 | RUSTSEC-2026-0205 | unsound | 3.8.4 | through `serial_test`, tests only |
-| `spin` 0.9.8 | | yanked | | through `flume`, which `mdns-sd` (the launcher's own dependency) shares with the workspace |
+| `spin` 0.9.8 | | yanked | | through `flume` (required by `mdns-sd`, `rama-net` and `sqlx-sqlite`) and `heapless` 0.7 |
 | `atomic-polyfill` 1.0.3 | RUSTSEC-2023-0089 | unmaintained | | through `heapless` 0.7 |
 | `bincode` 1.3.3 | RUSTSEC-2025-0141 | unmaintained | | through `syntect` |
 | `derivative` 2.2.0 | RUSTSEC-2024-0388 | unmaintained | | through `starlark` (exec policy) |
@@ -104,8 +104,8 @@ Warnings (not vulnerabilities), all in the Codex workspace:
 | `paste` 1.0.15 | RUSTSEC-2024-0436 | unmaintained | | through `starlark`, `v8` |
 | `proc-macro-error2` 2.0.1 | RUSTSEC-2026-0173 | unmaintained | | through `age` (secrets) |
 
-`spin` and `flume` are the one item here that a change to `ling-rs/` could affect: `mdns-sd` is
-declared by the launcher, not by Codex.
+The launcher's own `mdns-sd` also reaches `spin` through `flume`, but Codex's crates reach it too,
+so dropping `mdns-sd` would not clear it; every item in this table waits on the Codex workspace.
 
 ## 5. Python
 
