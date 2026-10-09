@@ -6,10 +6,17 @@ your mail, files and calendar. Reports about anything that weakens that are welc
 ## Reporting a vulnerability
 
 Please report privately, through GitHub: the repository's **Security** tab → **Report a
-vulnerability**. Do not open a public issue for a vulnerability.
+vulnerability**. If you cannot use GitHub, email **security@dreamference.ai** instead. Do not open a
+public issue for a vulnerability.
 
 Include what you ran, what you expected and what happened, and the output of `ling --version`
 and `ling-admin status`. You will get an answer within a week.
+
+## Disclosure
+
+Disclosure is coordinated, with a window of **90 days** from your report. Please keep the details
+private until a fixed release is out or the 90 days have passed, whichever comes first; if a fix
+needs longer, we will say why and agree a later date with you.
 
 ## What is in scope
 

@@ -11,4 +11,5 @@ Thank you for your interest. Two things to know before you open a pull request:
    design is in [`specs/`](specs/README.md) and the longer notes are in [`docs/dev/`](docs/dev/).
 
 Bugs and ideas are welcome as issues, no agreement needed. Security problems go through
-[SECURITY.md](SECURITY.md) instead.
+[SECURITY.md](SECURITY.md) instead. How decisions are made and releases are cut is in
+[GOVERNANCE.md](GOVERNANCE.md).
