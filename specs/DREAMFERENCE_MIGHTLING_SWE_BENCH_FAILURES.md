@@ -1,6 +1,6 @@
 # Mightling on SWE-bench: why 32 of 100 tasks failed (`im100-default`)
 
-**Status:** analysis, 2026-10-08. §6 proposes four changes, each to be measured as an A/B on 50 tasks that are not among these 100. The harness defects of §5, Proposals 1, 2 and 4, and the scripts for the first A/B night are built (§8); nothing is measured yet.
+**Status:** analysis, 2026-10-08. §6 proposes four changes, each to be measured as an A/B on 50 tasks that are not among these 100. The harness defects of §5, Proposals 1, 2 and 4, and the scripts for the first A/B night are built (§8); nothing is measured yet. §9 (2026-10-09) reads every failure more closely, finds the moment each run went wrong and ranks the candidate fixes for night 3 onwards. Where §9 and §6.5 disagree on order, §9 is current.
 **Data:** the round `im100-default` in `~/.local/share/dreamference/swe-bench/runs/im100-default/`, read only: `manifest.json`, `predictions.jsonl`, `instances/<id>.json`, `logs/<id>.jsonl` (the agent's event stream), `scratch/<id>/codex-home/sessions/` (the session rollouts), `eval/1/grading.json` and the harness's per-task `report.json` and `test_output.txt`. Each task's difficulty comes from [MIGHTLING_SWE_BENCH_COMPARISON](./DREAMFERENCE_MIGHTLING_SWE_BENCH_COMPARISON.md)'s per-task table (175 published submissions, 78 of them at 60% or more overall).
 **Builds on:** [MIGHTLING_SWE_BENCH](./DREAMFERENCE_MIGHTLING_SWE_BENCH.md) (the harness), [MIGHTLING_PROMPT](./DREAMFERENCE_MIGHTLING_PROMPT.md) §1.4 and §5.2 (the first failure classes, from 11 failures on 24 tasks) and [MIGHTLING_REFINE](./DREAMFERENCE_MIGHTLING_REFINE.md) (the study-then-fix arm, whose 100-task round `im100-refine` started on the evening of 2026-10-08).
 
@@ -210,3 +210,107 @@ Branch `swe-bench/night1`. Tests in `tests/test_swe_bench.py`; nothing below has
 3. `scripts/swe_bench_night1.sh start` checks that the 100-task unit has finished, that the list exists and that the largest repository's images (about 3 GB each) fit beside the reserve (`RESERVE_GB`, default 100), writes a config with `max_parallel = 2` and that reserve as `disk_reserve`, and starts the user unit `ling-swe-night1`: `n1-default`, then `n1-tests` (`--task-rules tests`), each `--code-index universal --mask off --prompt default --eval --remove-images`; then `eval --drop-test-hunks --remove-images` on both, and the reports in `~/.local/share/dreamference/swe-bench/night1/`.
 
 The two arms run one after the other, not interleaved: a run's instance list is fixed in its manifest. Two identical arms differed on 15% of tasks in earlier sessions (§6.5 item 4), so night 1 is read by its behaviour measures first.
+
+## 9. Candidate fixes, ranked (2026-10-09)
+
+§2 says what went wrong in each failure. This section reads every failed run from start to end and finds the first item where its trajectory left a path that would have resolved the task. It then names the change most likely to have prevented that, and checks each change against the 68 resolved runs to see whether it would also have changed what they did. The data is the same round, read only. `[n]` is the n-th completed item in `logs/<id>.jsonl`. The agent sees only the issue, never `hints_text`, so a fix that only the hints give counts as unrecoverable here.
+
+### 9.1 The first wrong moment in each failure
+
+Levers: **contract** is reading the issue literally: run its example last and match the expected output exactly, use the function or result type it names, and make the smallest change that does what it asks without broadening a condition. **sweep** means changing every sibling implementation and the stand-alone entry point, and never ruling one "out of scope". **tests** means not editing an existing test to make it pass. **review** is a final turn that re-reads the diff against the issue. **harness** means the built grading fixes of §8. **nudge** is the built completion nudge. **context** is a larger `task_context`. **U** means the hidden test checks a choice the issue does not imply. Confidence is the chance the lever alone flips the task: high above 60%, medium 25% to 60%, low below 25%.
+
+| Task | First wrong moment | Lever | Conf. |
+|---|---|---|---|
+| django-13837 | [37] an old test fails, so it rewrites 6 existing autoreload tests; the source rule is the reference's | harness (tests) | high |
+| django-16100 | [25] wraps the whole view; [39]-[40] rewrites a `captured_queries[4]` assertion its own stash run [38] showed passing at base | tests (contract: narrow the block) | high |
+| matplotlib-14623 | [63]-[65] the issue's example prints `linear ylim: (1.0, 100000.0)` and it reports success; its swap-back **broke linear inversion** | contract (tests: compare by name) | high |
+| sympy-13615 | [8]-[9] takes `{x, y}`, the output the issue calls wrong, as the target; `code_show` [4] had shown `Set._complement` | contract | high |
+| django-12193 | [20] drops the fix it had named at [14] (`CheckboxInput.get_context`, which the issue names) for a remembered "upstream fix" in postgres | contract | high |
+| django-16877 | [18] `escape` not `conditional_escape`; at [43] sees `mark_safe` items double-escaped and keeps it. [31] creates the test patch's file | sweep (mirror the sibling filter) + harness | medium |
+| sympy-18211 | [49] falls back to `solveset` after planning at [54] to return the `ConditionSet` the issue names | contract | medium |
+| django-12774 | [15] accepts a field in *any* total constraint; its own check [105] tries only a single-field one | contract (no broadening) | medium |
+| django-15037 | [44] keyword before positional; its repro [81] and own test [96] print invalid code, unnoticed | review (contract) | medium |
+| django-13512 | [12]-[13] greps `JSONField` in two admin files and never opens `admin/utils.py display_for_field`, although the title says "Admin" | sweep (refine) | medium |
+| django-14376 | [51] its grep at [6] listed `client.py`; it rules it "not part of this issue" | sweep | medium |
+| pylint-4970 | [23] guards the checker after [13]-[14] showed the tests drive the stand-alone `similar.Run` | sweep | medium |
+| sphinx-11445 | [20] hard-codes a list of docinfo names; at [151] rewrites `test_prepend_prolog` after seeing it fail [127] | tests | medium |
+| django-16950 | [224] 4 `test_uuid` failures describe the reference's condition; [262] reverts the near-correct fix, [438] rewrites 5 assertions; a constraint seen at [377] is lost in the compaction at [379] | tests (context) | medium |
+| django-15957 | [148] names the per-category need at [147], then picks a global slice; [287] claims that is "what Django upstream implemented" | refine (contract) | medium |
+| django-13212 | [44] leaves out `DecimalValidator` "consistent with upstream", having listed every raise site at [14] | sweep | low |
+| django-15629 | [31] collation added to `db_parameters` only; the schema editor's FK rebuild is never read | sweep | low |
+| django-16502 | [60] fixes `WSGIHandler` though the issue names runserver and it read `basehttp` at [10]; HEAD also needs header changes | sweep / contract | low |
+| sympy-23413 | [21] wrong loop bound; [96] calls new failures "pre-existing"; [112] `git checkout` loses the work; [166] accepts a mismatch "up to row order" | contract (tests: compare by name) | low |
+| django-15563 | [19] blames the filter column; the repro at [59] still shows the bug; ends mid-thought | nudge (refine) | low |
+| django-11885 | [21]-[53] per-model `where` merge; first test run only at [133]; ends mid-sentence | nudge (refine) | low |
+| django-12325 | [22] keeps a fallback that makes a plain OneToOne the parent link; 2 compactions, then trusts the handoff [208] | refine | low |
+| django-11790 | [48] `maxlength` becomes the string `'254'`; rendered HTML is right, the test checks the type | U | low |
+| django-12406 | [37] fixes `ForeignKey.formfield`; the test passes a new `blank=` argument | U | low |
+| django-15252 | [46] does what the issue proposes (router gate); the test wants no `ensure_schema` for an empty plan | U | low |
+| sympy-13798 | [26]-[29] pads the symbol, following the issue's own example; the test wants it verbatim | U | low |
+| sympy-13974 | [80] integer powers only; the test uses a symbolic exponent | U | low |
+| sympy-17318 | [80] guards the callee; the test asserts an internal return value | U | low |
+| sympy-22080 | [190] lowers Mod's precedence instead of fixing unary minus; the test changes existing `ccode` outputs | U | low |
+| pylint-4661 | [26] XDG path as the issue says; the test expects `appdirs`, named only in the hints | U | low |
+| sklearn-25747 | [23]-[25] guards the override; the test needs it removed, which the issue does not imply | U | low |
+| sklearn-26194 | [19] `max + eps` as the issue suggests; the test wants `inf` | U | low |
+
+**Corrections to §2 and §3.** Matplotlib 14623 is worse than "second path missed": the patch broke linear-axis inversion, and the issue's own example showed it. Django prints the next test's name on the line of a failing subTest, and the log parser then marks that next test failed too, so `test_clean_model_instance` (12406), `test_in_bulk_with_field` (12774) and `test_label_for_field` (13512) in the grading are parser artifacts, not regressions. No outcome changes. 12406's test edit did not leak.
+
+**Patterns the classification did not show:**
+- **The run's own output contradicted it and it carried on, in 9 of 32:** 14623, 13615, 15037, 15563, 15957, 16877, 16950, 16100 (it rewrote an assertion its own stash run had shown passing) and 23413. This is the strongest pattern. It is cheaper to act on than wrong-file failures, because the evidence was already on screen.
+- **It found the right place and talked itself out of it, in 6 of 32:** 12193 [14], 14376 [6], 4970 [13], 16502 [10], 13615 [4] and 18211 [54].
+- **Remembered "upstream fixes" in 8 of 32:** 12193, 13212, 11790, 12325, 12406, 11885, 15957 and 16100. A fix that does not exist was cited and then built to. It decided 12193 and 13212. The web commands were called 94 times in 41 of 100 tasks (15 of 32 failed, 26 of 68 resolved), and every call failed for lack of a network. The prompt's web block asks for them.
+- **The "pre-existing" dismissals the deep read followed up were mostly checked properly.** They were compared by name with `git stash` in 13212, 15037, 15252, 16100, 4970, 4661, 26194, 13798, 17318 and 22080. The exceptions are 14623 (`tail -6`, 2 of 183 names compared) and 23413. Comparing by name would flip at most those two.
+- **Compaction did harm in 3 runs:** a constraint was lost (16950), work was reverted and rebuilt from the summary (23413), and a handoff was trusted (12325).
+- **10 of 32 are U**: the hidden test pins a choice the issue does not imply. No prompt rule reaches them.
+
+### 9.2 What the 68 resolved runs say about risk
+
+| Behaviour a candidate would change | Resolved (68) | Failed (32) | Consequence |
+|---|---|---|---|
+| Patch removes lines from an existing test | 13 | 8 | In 11 of the 13 resolved runs (11276, 11848, 15315, 20154, 9698, 8265, 13028, 13236, 25102, 16938, 11206) the reference test patch changes the same assertions. These issues *ask* for the behaviour change that an old test pinned, as the issue texts of 11276, 11848, 15315, 20154 and 9698 show. |
+| Test patch changes existing assertions (the correct fix makes an old test fail) | 19 | 15 | The night-1 rule says "If a test that passed before your change fails after it, your change is wrong". That is false for these 19, and it could talk the agent out of a correct fix. The failures 26194, 4661, 25747, 12325 and 23413 are the same shape. |
+| Changes more source files than the reference | 8 | 4 | This is the exposure of a sweep rule: a sibling changed that should not be can break PASS_TO_PASS. |
+| Changes fewer source files than the reference | 1 (sphinx 10673) | 10 | A missed second file is almost only a failure. |
+| Messages mention "upstream" | 33 | 22 | 14539 was resolved by applying a remembered "canonical fix", so banning memory is a risk. Only the web calls are pure waste. |
+| Any test run piped through `tail`/`head`/`grep` | 68 | 31 | It is universal, and it decided one task (14623). Forbidding it is not worth the context. |
+| `code_callers`/`code_impact`/`code_refs` used | 57 | 22 | In no failure did these tools move the agent to a new file. In 13615 and 15957 they showed the reference's code and the agent did not act on it. 12193's `code_impact` returned 0. |
+| One or more compactions / three or more | 25 / 4 | 15 / 4 | Compaction follows difficulty. It harmed 3 failures. |
+
+### 9.3 The candidates, ranked
+
+*Expected* sums the per-task confidences of §9.1 (high 0.65, medium 0.4, low 0.15; a secondary lever counts half), then halves for a 50-task fresh list of the same mix. Every gain here is below the about 7 discordant tasks a McNemar test needs on 50 (§6.5 item 4). Each arm is therefore decided by its **behaviour measure** first and its resolve count second.
+
+| Rank | Candidate | Targets (from §9.1) | Expected on 100 / on 50 | Exposure in the 68 | Arm and what it needs | Exists? |
+|---|---|---|---|---|---|---|
+| 1 | **Contract and sweep task rules.** Run the issue's example last and match its expected output exactly. Use the function or result type the issue names. Do not widen a condition beyond the case asked for. Change every sibling implementation and the stand-alone entry point of the behaviour you changed, and never rule one out of scope | contract: 13615, 14623, 12193, 18211, 12774, 15037, 15957, 23413; sweep: 13512, 14376, 4970, 16877, 13212, 15629, 16502 | about 5.3 / **2.5-3** | Low for contract: running an example costs a turn. 13798 is the counterexample, where the issue's example was itself wrong. The sweep's exposure is the 8 runs that already edit extra files | `--task-rules <record>,contract` on the record arm. Measures: the issue's example run after the last edit; final patch ∩ the sibling set of §9.1; failures classed "second path"/"not asked for" | Plumbing yes (`TASK_RULES`); the `contract` entry **no**: draft text in §6.3, reworded as above |
+| 2 | **`tests-v2`.** Never edit an existing test to make it pass. If one fails after your change, decide from the issue whether the issue asks for the behaviour that test checks. If it does, leave the test and say so; if not, fix the source. Compare failing tests by name with and without your change (`git stash`) | 16100, 11445, 16950 (and 13837 with the harness) | about 1.5 / **0.75**, the same as v1 | v2 removes v1's exposure, the 19 resolved runs whose correct fix fails an old test | `--task-rules tests-v2` against `tests`. Measures: assertion edits where the issue did not ask for the change; correct fixes reverted after an old test failed | **No**: a second `TASK_RULES` entry. Gated on night 1 (§9.4) |
+| 3 | **A review turn.** One resume after the agent stops: "Re-read the issue and `git diff`. Does the issue's example now print what the issue expects? Is every place that implements this behaviour changed? Then stop with a summary." | 15037, plus half of 12193, 12774, 4970, 13615, 13974 | about 1.0-1.5 / **0.5-0.75** after rank 1 | All 68: a second look can undo a correct fix. Plus about 1-2 minutes per task | `[swe_bench] review = true`. Measures: patches changed by the review turn; resolved turned unresolved | **No**: a third nudge kind on `_exec(resume=True)`, outside the `nudges` budget |
+| 4 | **Grading fixes (drop test hunks, per-file reset)** | 13837 | about 0.65 / 0.3 | None (grading only) | Already in night 1: `eval --drop-test-hunks` regrades every arm with no agent run | **Yes** (§8) |
+| 5 | **Offline system prompt.** `default` without the web and email blocks, which describe commands that cannot work in the container | 13212, 11790 (half); turns saved in 41 tasks | about 0.15 / **0-0.1** | Lowest of all: the web calls fail anyway | `--prompt offline`, from `$CODEX_HOME/system-prompts/offline.md`. Measure: web calls (94 in 41 tasks here) go to 0; median turns and wall time | Mechanism yes (custom prompts); the file **no** |
+| 6 | **Larger context budget.** `task_context` 49,152 → 98,304 | 16950, 23413, 15957 (half each) | about 0.5 / 0.25 | Low for correctness. Fewer tasks run at once, because the host sizes parallelism from it, so a night holds about one arm | `[swe_bench] task_context = 98304`. Measure: compactions per task; constraints lost after one | **Yes** (config only) |
+| — | Completion nudge | 11885, 15563 | about 0.3 | Fires on 6 of 219 earlier runs, none a summary | In every night-1 arm; read its firings | **Yes** |
+| — | Refine on fresh tasks | 15957, 12325, 13512, 11885, 15563, 15629 | about 1 by this reading; +3 of 24 measured on the sample | About 4× the agent time (one arm per night) | `--refine` | **Yes**. Whether it gets a night depends on `im100-refine`, which runs on the 100 and so is analysis, not a measurement |
+
+**Not proposed, on this evidence:**
+- **A rule against recalled upstream fixes.** It decided 12193 and 13212, but 14539 was resolved by one. Removing the web block (rank 5) and the contract line on what the issue names (rank 1) cover the harm without the ban.
+- **More code-index use.** The tools never led a failed run to a file it was not already reading, and in 13615 and 15957 `code_show` showed the reference's code and the agent went elsewhere. The problem is acting on what was found, which rank 1 targets.
+- **"Don't pipe test output."** 99 of 100 runs pipe; one task turned on it, and compare-by-name in `tests-v2` covers that one.
+- **A longer time limit or a sympy runner hint.** As §6.6 says: one timeout, with a wrong approach; `pytest` missing decided no outcome.
+
+### 9.4 Order of the nights
+
+Night 2 is the 4-bit model A/B, and its winner becomes the model of every later arm. Every night below runs on `fresh-50.txt`. That is clean, because every candidate here comes from the 100, and comparable, because each night uses the same list. Each night carries its own *record arm*: the configuration of record re-run that night, which absorbs drift between nights and, from night 3 on, gives the in-session noise floor of §6.5 item 3.
+
+| Night | Arm A (record) | Arm B | Decided by |
+|---|---|---|---|
+| 1 (prepared) | `default` | `--task-rules tests` | assertion edits, test-patch collisions, nudges fired; both regraded with `--drop-test-hunks` |
+| 2 (reserved) | current model | all-4-bit model | resolve rate, speed |
+| **3** | record (night 1's winner on night 2's model) | record + `contract` (rank 1) | example run after the last edit; second-path misses |
+| **4** | record | record with `tests-v2` in place of `tests` (rank 2), *if* night 1's `tests` arm lost a task whose issue asked for an assertion change, or reverted a correct fix after an old test failed. Otherwise the review turn (rank 3) | assertion edits not asked for, and fixes reverted / patches the review changed |
+| **5** | record | the one of rank 2 or 3 not run on night 4 | as above |
+| **6** | record | `--prompt offline` (rank 5), or `--refine` if `im100-refine` favours it (one arm takes the night, so night 6's record is night 5's arm A) | web calls, wall time / resolve rate |
+
+Rank 6 (context) goes last, or is folded into a night that already runs one arm, because it roughly halves throughput.
+
+**The list stays fresh only while nobody designs a rule from its transcripts.** Once night 1's or a later night's failures on `fresh-50.txt` are analysed, later measurements need a second list. `scripts/swe_bench_fresh.py draw` excludes only `sample-100.txt` and has no `--exclude` for an earlier fresh list (not built). There are 120 validated tasks, 100 of them in the sample. Night 1's validation adds about 60, and about 211 arm64 tasks would still be unvalidated.
