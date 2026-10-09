@@ -255,6 +255,7 @@ In the `night` table of `dreamference.toml`, resolved like every other setting (
 | `idle_minutes` | `10` | How long the model must have been idle before a night starts (§5.2). |
 | `index` | `true` | Refresh each repository's code index before its tasks start (§11.1). |
 | `index_timeout` | `20m` | The most one repository's refresh may take; never more than half of what is left of the window. |
+| `nodes` | `paired` | Other nodes' model servers a run may also use, as extra lanes ([MIGHTLING_NODE §12.3](./DREAMFERENCE_MIGHTLING_NODE.md)): every paired node serving the same model by default, `none`, or a list of node names. |
 
 ---
 
