@@ -223,6 +223,9 @@ git -c core.quotePath=false diff --cached --numstat "$base" | awk -F'\t' '$1 == 
 set -- .
 while IFS= read -r file; do set -- "$@" ":(exclude,literal)$file"; done < "$SCRATCH/binary-files"
 git -c core.fileMode=false diff --cached --no-color --no-ext-diff "$base" -- "$@" > "$SCRATCH/patch.diff"
+# The index goes back to HEAD, as the other scripts leave it: the review turn runs after a
+# collect, and with everything staged its `git diff` would show nothing.
+git read-tree HEAD
 """
 
 # What a turn that ended mid-work is resumed with (failure analysis §5.3, §6.4). Night Shift's
@@ -649,6 +652,9 @@ class SweBenchInstanceRun:
         """
         if outcome != "ok":
             state["review"] = {"skipped": f"the agent's turn ended in {'a timeout' if outcome == 'timeout' else 'an error'}"}
+            return None
+        if time.time() >= self.deadline:
+            state["review"] = {"skipped": "no time left"}
             return None
         if not self._changed():
             # A review of no diff would be a second attempt, not a review, and its last message

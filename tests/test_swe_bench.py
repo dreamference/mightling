@@ -176,6 +176,9 @@ class FakeDocker:
         if REVIEW_RULES in prompt:
             # The review turn: leaves the fix alone, edits it, or runs past the time limit.
             review = self.review_modes.get(instance, "leave")
+            # What the prompt relies on: the index at HEAD, so `git diff` shows the agent's change.
+            assert git(box["repo"], "diff", "--cached", "--quiet").returncode == 0
+            assert "widget.py" in git(box["repo"], "diff").stdout
             stdout.write((json.dumps({"type": "turn.completed", "usage": {
                 "input_tokens": 70, "cached_input_tokens": 60, "output_tokens": 7}}) + "\n").encode())
             stdout.flush()
@@ -2149,7 +2152,7 @@ def test_a_review_that_changes_the_diff_is_what_is_collected_and_its_lines_are_c
 
 def test_a_review_that_reaches_the_time_limit_submits_the_tree_as_it_stands(bench):
     bench["docker"].review_modes = {"acme__widget-1": "hang"}
-    bench["settings"] = SweBenchSettings({"task_timeout": "0.2s"})
+    bench["settings"] = SweBenchSettings({"task_timeout": "1s"})
     assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
     store = SweBenchRunStore("r1")
     state = store.state("acme__widget-1")
@@ -2161,6 +2164,15 @@ def test_a_review_that_reaches_the_time_limit_submits_the_tree_as_it_stands(benc
     assert any(call[0] == "stop" for call in bench["docker"].calls)
     assert any(call[0] == "start" for call in bench["docker"].calls)
     assert "reached the time limit in 1" in SweBenchReport.render(store)
+
+
+def test_a_task_with_no_time_left_is_not_reviewed(bench):
+    bench["settings"] = SweBenchSettings({"task_timeout": "0s"})
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    assert store.state("acme__widget-1")["review"] == {"skipped": "no time left"}
+    assert store.state("acme__widget-1")["status"] == "done"
+    assert [resumed for _, resumed in mightling_prompts(bench["docker"])] == [False]
 
 
 def test_no_review_without_a_change_or_after_an_error_and_the_report_says_why(bench):
