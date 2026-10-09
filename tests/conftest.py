@@ -30,6 +30,12 @@ REAL_GOOGLE_SERVICE_START = GoogleService.start
 # Every interactive `ling-admin` run may offer to remove the retired web chat's containers; the
 # fixture below never lets it, and its own tests restore this.
 REAL_RETIRED_OFFER = RetiredWebChat.offer
+from dreamference.chat.image_search_sidecar import ImageSearchSidecar  # noqa: E402
+from dreamference.chat.speech_sidecar import SpeechSidecar  # noqa: E402
+
+# `server start` on a node also starts image search and speech-to-text when absent (ASK §19.6).
+REAL_IMAGE_SEARCH_START = ImageSearchSidecar.start
+REAL_SPEECH_START = SpeechSidecar.start
 from dreamference.node.node_advertiser import NodeAdvertiser as _NodeAdvertiser  # noqa: E402
 
 # Runs a command through sudo; the fixture below replaces it, and a test of it restores it.
@@ -55,11 +61,14 @@ LEAK_GRACE_S = 2.0
 
 @pytest.fixture(autouse=True)
 def _isolate_services(monkeypatch):
-    # `server start` stops the code index's scopes and starts the Google service on a node; a
+    # `server start` stops the code index's scopes and starts the Google service, image search and
+    # speech-to-text on a node; a
     # `ling-admin` run may offer to remove Onyx's leftovers. None of it may happen for real.
     monkeypatch.setattr(VLLMServerManager, "_stop_index_scopes", classmethod(lambda cls: None))
     monkeypatch.setattr(GoogleService, "start", classmethod(lambda cls: True))
     monkeypatch.setattr(RetiredWebChat, "offer", classmethod(lambda cls, command: None))
+    monkeypatch.setattr(ImageSearchSidecar, "start", classmethod(lambda cls, *a, **k: True))
+    monkeypatch.setattr(SpeechSidecar, "start", classmethod(lambda cls, *a, **k: True))
 
 
 @pytest.fixture(autouse=True)
