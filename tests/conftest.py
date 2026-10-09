@@ -1,9 +1,10 @@
-"""Guards shared by every test: nothing may touch the real Onyx deployment or the real home folder.
+"""Guards shared by every test: nothing may touch the machine's containers, services or the real
+home folder.
 
-`OnyxRunner.configure()` writes Onyx's `.env` and recreates containers. A test that reaches it
-without mocking a step once rewrote the user's real `~/.config/onyx/deployment/.env` and recreated
-the live nginx container. These fixtures point the env file at a scratch copy and make any
-unmocked container recreate fail the test instead of running `docker compose`.
+Until Onyx's retirement the first guard here kept tests away from the live web chat: a test that
+reached its `configure()` unmocked once rewrote the real Onyx `.env` and recreated the live nginx
+container. Its successors are below: no real `docker` command that changes something, no sudo, no
+systemd unit, and the one-time offer to remove Onyx's leftovers never made.
 """
 
 import os
@@ -21,27 +22,14 @@ REAL_HOME = os.path.realpath(os.path.expanduser("~"))
 CHECKOUT = os.path.realpath(os.path.join(os.path.dirname(__file__), os.pardir))
 import dreamference.cli.dreamference_cli_controller  # noqa: E402,F401 - imports every subsystem
 import dreamference.mcp_server  # noqa: E402,F401
-from dreamference.chat.onyx_runner import OnyxRunner  # noqa: E402
-
-from dreamference.chat.onyx_brand_assets import OnyxBrandAssets  # noqa: E402
-from dreamference.chat.onyx_ui_fonts import OnyxUIFonts  # noqa: E402
-from dreamference.chat.onyx_ui_labels import OnyxUILabels  # noqa: E402
-from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides  # noqa: E402
-from dreamference.chat.onyx_ui_scripts import OnyxUIScripts  # noqa: E402
-
-# Kept for the tests that exercise the real methods (the fixture below replaces them).
-REAL_SERVED_MODEL_KEY = OnyxRunner.served_model_key
-REAL_LOGIN = OnyxRunner._login
-REAL_START_GMAIL_SERVICE = OnyxRunner._start_gmail_service
-REAL_ATTACH_SEARXNG = OnyxRunner._attach_searxng
-REAL_BRAND_INSTALL = OnyxBrandAssets.install
-REAL_FONTS_INSTALL = OnyxUIFonts.install
-REAL_START_STT_SERVER = OnyxRunner._start_stt_server
-REAL_ALLOW_LOCAL_VOICE_ENDPOINT = OnyxRunner._allow_local_voice_endpoint
 from dreamference.chat.google_service import GoogleService  # noqa: E402
+from dreamference.chat.retired_web_chat import RetiredWebChat  # noqa: E402
 
 # `server start` starts the Google service on a node, and `google start` creates its container.
 REAL_GOOGLE_SERVICE_START = GoogleService.start
+# Every interactive `ling-admin` run may offer to remove the retired web chat's containers; the
+# fixture below never lets it, and its own tests restore this.
+REAL_RETIRED_OFFER = RetiredWebChat.offer
 from dreamference.node.node_advertiser import NodeAdvertiser as _NodeAdvertiser  # noqa: E402
 
 # Runs a command through sudo; the fixture below replaces it, and a test of it restores it.
@@ -60,52 +48,18 @@ from dreamference.vllm_server.model_gate import ModelGate  # noqa: E402
 # Asks the model server's gate what it does: an HTTP request to the configured server, which in the
 # suite would be this machine's live one. The fixture below answers "no gate"; its tests restore it.
 REAL_GATE_PROBE = ModelGate.probe
-# The UI patchers write into the live web-server container (`docker cp`, `docker exec node`).
-UI_PATCHERS = (OnyxBrandAssets, OnyxUIFonts, OnyxUILabels, OnyxUIOverrides, OnyxUIScripts)
 # The name MemoryPressureWatchdog gives its thread, and how long a stopped one may take to exit.
 PSI_THREAD_NAME = "psi-watchdog"
 LEAK_GRACE_S = 2.0
 
 
 @pytest.fixture(autouse=True)
-def _isolate_onyx_deployment(tmp_path_factory, monkeypatch):
-    from dreamference.chat import onyx_runner
-
-    # Already-configured by default, as a real deployment is after its first `configure()`, so the
-    # telemetry and loopback steps are no-ops unless a test sets up its own file to exercise them.
-    env = tmp_path_factory.mktemp("onyx") / ".env"  # not tmp_path: tests index that folder
-    settings = {**onyx_runner.ONYX_PRIVACY_ENV, **onyx_runner.ONYX_LOOPBACK_ENV}
-    env.write_text("".join(f'{key}="{value}"\n' for key, value in settings.items()))
-    monkeypatch.setattr(onyx_runner, "ONYX_ENV_FILE", str(env))
-
-    def refuse(*args, **kwargs):
-        raise AssertionError("a test tried to recreate a real Onyx container; mock _recreate_service")
-
-    monkeypatch.setattr(onyx_runner.OnyxRunner, "_recreate_service", classmethod(refuse))
-
-    def refuse_login(*args, **kwargs):
-        raise AssertionError("a test tried to sign in to a real web chat; mock _login or _admin_session")
-
-    # Signing in is the first step of a password change: an unmocked _login in a test would sign in
-    # to the web chat running on this machine and could replace its admin password.
-    monkeypatch.setattr(onyx_runner.OnyxRunner, "_login", refuse_login)
-    # configure() asks the live server which model it serves; tests use the configured one, so
-    # their result does not depend on what happens to be running on this machine.
-    monkeypatch.setattr(onyx_runner.OnyxRunner, "served_model_key", lambda self: self.config.model)
-    # configure() also starts sidecars and writes into live containers. Until 2026-09-29 every
-    # offline test run did so for real: it recreated the Gmail sidecar (with a pytest temp folder
-    # and secret once HOME was isolated, which broke Gmail search until the next configure),
-    # joined SearXNG and the speech-to-text sidecar to Onyx's network, copied test logos into the
-    # web server and rewrote its bundle through `docker exec`. A test of one of these methods
-    # restores it from the REAL_* names above.
-    monkeypatch.setattr(onyx_runner.OnyxRunner, "_start_gmail_service", lambda self, secret: True)
-    monkeypatch.setattr(onyx_runner.OnyxRunner, "_attach_searxng", lambda self: True)
-    monkeypatch.setattr(onyx_runner.OnyxRunner, "_start_stt_server", lambda self: True)
-    monkeypatch.setattr(onyx_runner.OnyxRunner, "_allow_local_voice_endpoint", lambda self, *a, **k: True)
-    for patcher in UI_PATCHERS:
-        monkeypatch.setattr(patcher, "install", classmethod(lambda cls, container=None: True))
+def _isolate_services(monkeypatch):
+    # `server start` stops the code index's scopes and starts the Google service on a node; a
+    # `ling-admin` run may offer to remove Onyx's leftovers. None of it may happen for real.
     monkeypatch.setattr(VLLMServerManager, "_stop_index_scopes", classmethod(lambda cls: None))
     monkeypatch.setattr(GoogleService, "start", classmethod(lambda cls: True))
+    monkeypatch.setattr(RetiredWebChat, "offer", classmethod(lambda cls, command: None))
 
 
 @pytest.fixture(autouse=True)
@@ -172,10 +126,10 @@ def _no_model_gate_probe(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _refuse_real_docker(monkeypatch, request):
-    # A test that reached OnyxRunner._start_gmail_service ran `docker rm -f dreamference-gmail` and
-    # `docker run` for real, replacing the live Gmail sidecar with one mounting a pytest temp
-    # folder and a test secret: Gmail search in the web chat answered "unauthorised" until the
-    # next `configure` (2026-09-29). Every real docker command from a test now fails that test;
+    # A test that reached the retired web chat's Gmail start ran `docker rm -f dreamference-gmail`
+    # and `docker run` for real, replacing the live Gmail sidecar with one mounting a pytest temp
+    # folder and a test secret: Gmail search answered "unauthorised" until it was recreated
+    # (2026-09-29). Every real docker command from a test now fails that test;
     # tests that exercise docker paths mock subprocess themselves, which replaces this guard.
     import subprocess
 

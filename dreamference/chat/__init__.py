@@ -1,20 +1,15 @@
 """
-Onyx Lite chat subsystem for Dreamference.
+The services around the agent that are not the agent: the desktop app, the sidecars and the
+Google service.
 
-Onyx is a *service*, not one of the terminal agents: a browser chat UI in front of the same vLLM
-endpoint the agents use, run as a set of long-lived containers rather than a CLI that Dreamference
-execs and waits on. That is why it lives here rather than under `runner/`, whose modules are all
-one-process-per-invocation agent wrappers.
-
-The package holds the deployment lifecycle (`onyx_installer`, `onyx_runner`), the three kinds of
-patch Dreamference applies to a running Onyx -- replaced brand assets (`onyx_brand_assets`),
-substituted and appended stylesheets (`onyx_ui_fonts`, `onyx_ui_overrides`), and rewritten strings
-in the compiled bundle (`onyx_ui_labels`) -- and the desktop shell that offers the same deployment
-in a window of its own (`desktop_installer`, `desktop_runner`). `searxng_sidecar` and
-`sidecar_network` start the search container the web UI, `ling-search` and the MCP server share;
-`google_service` starts the Google service without the web UI, and `google_workspace_reader` is its
-read-only Drive and Calendar half (Mightling's apps). `matrix_homeserver` runs the private Matrix
-homeserver `ling chat` answers on (MIGHTLING_CHAT §5).
+The desktop app is a window onto `ling app-server` (`desktop_installer`, `desktop_runner`).
+`searxng_sidecar` and `sidecar_network` start the search container `ling-search` and the MCP server
+share; `image_search_sidecar` and `image_search_mcp` are image search and its `image_search` tool,
+`speech_sidecar` the speech-to-text behind the microphone (MIGHTLING_ASK §6, §7); `google_service`
+starts the Google service, and `google_workspace_reader` is its read-only Drive and Calendar half
+(Mightling's apps). `matrix_homeserver` runs the private Matrix homeserver `ling chat` answers on
+(MIGHTLING_CHAT §5). The Onyx web chat this package was named for is retired (MIGHTLING_ASK §10);
+`retired_web_chat` removes what an older install left of it.
 """
 
 from dreamference.chat.desktop_installer import DesktopInstaller
@@ -25,20 +20,15 @@ from dreamference.chat.gmail_credentials import GmailCredentials
 from dreamference.chat.gmail_search_service import GmailSearchService
 from dreamference.chat.google_service import GoogleService
 from dreamference.chat.google_workspace_reader import GoogleWorkspaceReader
-from dreamference.chat.chat_admin_credentials import ChatAdminCredentials
+from dreamference.chat.image_search_mcp import ImageSearchMcp
+from dreamference.chat.image_search_sidecar import ImageSearchSidecar
 from dreamference.chat.matrix_homeserver import MatrixHomeserver
-from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
-from dreamference.chat.onyx_installer import OnyxInstaller
-from dreamference.chat.onyx_runner import OnyxRunner
-from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
-from dreamference.chat.onyx_ui_labels import OnyxUILabels
-from dreamference.chat.onyx_ui_overrides import OnyxUIOverrides
-from dreamference.chat.onyx_ui_scripts import OnyxUIScripts
+from dreamference.chat.retired_web_chat import RetiredWebChat
 from dreamference.chat.searxng_sidecar import SearxngSidecar
 from dreamference.chat.sidecar_network import SidecarNetwork
+from dreamference.chat.speech_sidecar import SpeechSidecar
 
 __all__ = [
-    "ChatAdminCredentials",
     "DesktopInstaller",
     "DesktopRunner",
     "DockerBridge",
@@ -47,14 +37,11 @@ __all__ = [
     "GmailSearchService",
     "GoogleService",
     "GoogleWorkspaceReader",
+    "ImageSearchMcp",
+    "ImageSearchSidecar",
     "MatrixHomeserver",
-    "OnyxBrandAssets",
-    "OnyxInstaller",
-    "OnyxRunner",
-    "OnyxUIFonts",
-    "OnyxUILabels",
-    "OnyxUIOverrides",
-    "OnyxUIScripts",
+    "RetiredWebChat",
     "SearxngSidecar",
     "SidecarNetwork",
+    "SpeechSidecar",
 ]

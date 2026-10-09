@@ -16,7 +16,7 @@ from dreamference.vllm_server import VLLMServerManager
 from dreamference.runner.openhands_installer import OpenHandsInstaller, OPENHANDS_IMAGE
 from dreamference.hardware import resolve_model_hf_repo
 
-# Where the OpenHands web UI is published on the host; Onyx's web UI already owns 3000.
+# Where the OpenHands web UI is published on the host: 3001, as since the retired Onyx web UI owned 3000.
 OPENHANDS_HOST_PORT: Final[int] = 3001
 
 class OpenHandsRunner:
@@ -83,7 +83,7 @@ class OpenHandsRunner:
             "-e", f"WORKSPACE_BASE={cwd}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
             "-v", f"{cwd}:/opt/workspace_base",
-            # 3001, not 3000: Onyx's web UI owns 3000. And 127.0.0.1 only: this container mounts
+            # 3001, as it has been since Onyx owned 3000. And 127.0.0.1 only: this container mounts
             # the Docker socket, so its UI on the network would hand root on this host to anyone
             # who can reach it.
             "-p", f"127.0.0.1:{OPENHANDS_HOST_PORT}:3000",
