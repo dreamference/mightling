@@ -1,6 +1,6 @@
 # Prefix Caching on the Hybrid GDN + DFlash Stack — Findings and Patch Design
 
-**Status:** v5 — Deployed. As of the registry on 2026-09-28: `hybrid-dflash` on `dense5` (region-adaptive chunking, 9048 budget), and the `int4-dflash` fallback moved to `dense9` (1120 grid + opt-in caching, §6.1), with `enable_prefix_caching: True` on both.
+**Status:** v5 — history since 2026-10-07. Both recipes this document covers were removed from the registry on 2026-10-07, together with `runtime/`, `Dockerfile.dflash` and `Dockerfile.dense`, so none of the patches named below exists in the tree any more; they are in git history. The findings are kept for any future vLLM recipe on a hybrid GDN + drafter stack. As deployed until then (the registry on 2026-09-28): `hybrid-dflash` on `dense5` (region-adaptive chunking, 9048 budget), and the `int4-dflash` fallback moved to `dense9` (1120 grid + opt-in caching, §6.1), with `enable_prefix_caching: True` on both.
 
 **Scope (noted 2026-10-01):** this document covers the two vLLM 122B DFlash recipes, of which `hybrid-dflash` is now the fallback. The default model since 2026-09-29, `qwen3.8-27b-nvfp4-dflash2`, runs on SGLang, whose prefix caching is its own radix cache (`--mamba-radix-cache-strategy extra_buffer` in the recipe) and is not described here.
 
