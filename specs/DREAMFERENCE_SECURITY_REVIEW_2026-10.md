@@ -1,7 +1,7 @@
 # Security review, October 2026
 
 **Status:** review of `main` at `61d00d5` (2026-10-07), the day after the repository became public,
-with fixes on branch `security/review-1`. Read from an attacker's side: what a stranger on the
+with fixes on branch `security/review-1`, merged through the signing branch (`7d3c14b`) and released in 1.5.1. Read from an attacker's side: what a stranger on the
 internet, a page in the user's browser, a machine on the same network, or a paired machine can
 reach. Findings that are fixed name the change; findings that are documented or accepted say why.
 Anything serious that is not yet fixed is tracked privately and is not described here.
