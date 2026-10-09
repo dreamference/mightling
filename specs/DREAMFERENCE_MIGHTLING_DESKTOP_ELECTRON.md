@@ -175,3 +175,14 @@ The ad-hoc signatures are what Apple silicon needs to run the app at all; they s
 - **App Translocation**: run from the dmg or from Downloads without moving it, macOS starts it from a random read-only path; the docs say to drag it to Applications first.
 - **The keychain**: the cookie-encryption key is stored in the login keychain (CI used Chromium's mock keychain). macOS may ask once whether Mightling may use it.
 - **Gaps known from the code:** `ling app` (`ling-rs/src/app.rs`) looks for `ling-app` on PATH or a `.desktop` entry, neither of which exists on a Mac, so it does not open the app there (`open -b dev.dreamference.mightling` would); closing the last window quits the app (Linux behaviour, not the Mac convention); the data folder is `~/.local/share/dev.dreamference.mightling`, not `~/Library/Application Support`; no auto-update; the tray icon is the colour icon scaled down, not a template image; the `.icns` tops out at 512 px (no 1024 px entry, as `icons/` has none).
+
+## 11. Chat becomes Ask (2026-10-08, `3febddb`)
+
+The app's first window no longer shows Onyx. It is **Ask**: the Mightling UI loaded from `ling web` on this machine (`http://127.0.0.1:3100`, [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10, Phase B), signed in with a one-time link from `ling web open --print-url`, which the window trades for a session cookie as a browser does; the app reads no credential file itself (`desktop/electron/src/web.ts`). When nothing answers on the port the app starts `ling web serve` (loopback only) as its child and stops it on quit; a server the user runs as a unit (`ling web start`) is used as it is.
+
+- **Removed with it:** the Onyx sign-in, the loopback forwarder and the node discovery that fed it, and the `multicast-dns` dependency. No permission but clipboard writes is granted to the window.
+- **`ling app`** opens Ask without checking for Onyx (`--ask`; `--chat` is kept as an alias); `ling app --work`, a folder or `--thread <id>` open Work. `ling-admin desktop run` and `status` no longer need Onyx.
+- **The app's egress audit** (`ling-admin audit egress --app`) allows `ling web`'s 3100 instead of Onyx's 3000.
+- **On Windows**, which has no `ling web` yet, Ask opens Work.
+- **Ask inside the Work window** is the next step (MIGHTLING_ASK's list of what is not built), not part of this change.
+
