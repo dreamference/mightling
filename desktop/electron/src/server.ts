@@ -148,7 +148,10 @@ export class AppServer {
     const root = home ? askRoot(home) : "";
     const name = namedPrompt(message);
     if (name && !home) throw new Error("ling's home folder is unknown: HOME is not set");
-    const prompt = name ? { name, text: await composePrompt(launch.ling, name, root, launch.env) } : null;
+    // The app-server's environment without its log settings, which are the server's alone: the
+    // composed text is stdout, whole.
+    const { LOG_FORMAT: _format, RUST_LOG: _level, ...composeEnv } = launch.env;
+    const prompt = name ? { name, text: await composePrompt(launch.ling, name, root, composeEnv) } : null;
     const prompts = new MessagePrompts(root, prompt);
     const vetted = vetOutgoing(message, this.pending, prompts);
     const child = this.child;
