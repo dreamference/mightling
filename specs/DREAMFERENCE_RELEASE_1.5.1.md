@@ -1,8 +1,9 @@
 # Mightling 1.5.1 — release notes
 
-**Status:** draft, 2026-10-08, built from `integration/1.5.0` (every open branch of 2026-10-07 merged,
-the rename applied, history rewritten). Not published: the release waits for the maintainer's
-approval. 1.5.1 is the first release under the name Mightling and the first signed one. 1.4.2 was
+**Status:** published 2026-10-08 22:05 UTC as Latest (`v1.5.1`, tag on `480b10a`), after the
+maintainer's approval in the `release` environment; the signed `SHA256SUMS` verified with the
+published key, and a second GB10 upgraded from 1.4.1 with it. Drafted 2026-10-08 from
+`integration/1.5.0` (every open branch of 2026-10-07 merged, the rename applied, history rewritten). 1.5.1 is the first release under the name Mightling and the first signed one. 1.4.2 was
 prepared and never released; its changes are in this release (specs/DREAMFERENCE_RELEASE_1.4.2.md).
 1.5.0 was built and signed-ready but never published (the maintainer chose to ship it together with the
 unattended installer as 1.5.1, 2026-10-08); there is no v1.5.0 tag or release.
