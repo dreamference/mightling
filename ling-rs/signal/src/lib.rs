@@ -14,6 +14,7 @@ pub mod command;
 pub mod envelope;
 pub mod format;
 pub mod gate;
+pub mod release_signature;
 pub mod rpc;
 pub mod serve;
 pub mod setup;
