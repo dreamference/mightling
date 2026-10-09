@@ -27,6 +27,8 @@ from dreamference.hardware import (
     model_supports_vision,
 )
 from dreamference.chat.chat_admin_credentials import ChatAdminCredentials
+from dreamference.chat.docker_bridge import DockerBridge
+from dreamference.chat.google_service import GMAIL_AUTH_HEADER, GOOGLE_HOST_PORT, GoogleService
 from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
 from dreamference.chat.onyx_ui_fonts import OnyxUIFonts
 from dreamference.chat.onyx_ui_labels import OnyxUILabels
@@ -120,13 +122,10 @@ ONYX_LOOPBACK_ENV: Final[dict] = {"HOST_PORT_80": "127.0.0.1:80", "HOST_PORT": "
 # secret header is what actually protects it.
 GMAIL_CONTAINER_NAME: Final[str] = "dreamference-gmail"
 GMAIL_CONTAINER_URL: Final[str] = f"http://{GMAIL_CONTAINER_NAME}:8000"
-GMAIL_HOST_PORT: Final[int] = 8767
 GMAIL_SERVICE_IMAGE: Final[str] = "python:3-slim"
 GMAIL_TOOL_NAME: Final[str] = "Gmail"
 GMAIL_TOOL_DESCRIPTION: Final[str] = "Search and read the user's Gmail mailbox."
 
-# Kept in step with the service module, which enforces it.
-GMAIL_AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
 SEARXNG_CONTAINER_URL: Final[str] = f"http://{SEARXNG_CONTAINER_NAME}:8080"
 
 # Onyx ships first-class SearXNG support as a web *search provider*, which is why this module
@@ -293,57 +292,6 @@ class OnyxRunner:
         self.config: DreamferenceConfig = config or DreamferenceConfig()
         self.vllm_manager: VLLMServerManager = VLLMServerManager(host=self.config.vllm_host)
 
-    @classmethod
-    def resolve_container_vllm_url(cls, vllm_host: str) -> str:
-        """
-        Rewrites a host-side vLLM URL into one reachable from inside an Onyx container.
-
-        This is the step that silently breaks an otherwise correct setup. Dreamference launches
-        vLLM with `--network host`, so on the host it answers on localhost:8000 -- but Onyx's
-        containers are on the default bridge, where `localhost` is the container itself and the
-        provider merely fails to connect. The bridge gateway is the host as seen from those
-        containers, so a loopback host is swapped for the gateway address. A non-loopback host is
-        left alone: it is already routable, and rewriting it would be wrong.
-
-        Args:
-            vllm_host (str): The vLLM base URL as configured for host-side use.
-
-        Returns:
-            str: A base URL including the `/v1` suffix, reachable from an Onyx container.
-        """
-        from urllib.parse import urlparse
-
-        parsed = urlparse(vllm_host if "//" in vllm_host else f"http://{vllm_host}")
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 8000
-
-        if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
-            host = cls.docker_bridge_gateway()
-        return f"http://{host}:{port}/v1"
-
-    @classmethod
-    def docker_bridge_gateway(cls) -> str:
-        """
-        Reports the default bridge network's gateway address, which is the host from a container.
-
-        Returns:
-            str: The gateway IP, or Docker's conventional 172.17.0.1 if it cannot be read.
-        """
-        try:
-            result = subprocess.run(
-                [
-                    "docker", "network", "inspect", "bridge",
-                    "--format", "{{(index .IPAM.Config 0).Gateway}}",
-                ],
-                capture_output=True, text=True, timeout=15, check=False,
-            )
-            gateway = result.stdout.strip()
-            if gateway:
-                return gateway
-        except (OSError, subprocess.SubprocessError):
-            pass
-        return "172.17.0.1"
-
     def _cli(self, *args: str) -> List[str]:
         """
         Builds an onyx-cli argument vector, provisioning the CLI if it is missing.
@@ -509,7 +457,7 @@ class OnyxRunner:
         model_name = resolve_model_hf_repo(model_key)
         overrides = get_model_launch_overrides(model_key) or {}
         vision = model_supports_vision(model_key)
-        api_base = self.resolve_container_vllm_url(self.config.vllm_host)
+        api_base = DockerBridge.container_vllm_url(self.config.vllm_host)
 
         payload = {
             "name": ONYX_PROVIDER_NAME,
@@ -1172,8 +1120,11 @@ class OnyxRunner:
         # someone who has never run a Gmail command at all. Cheap, and the alternative is a page
         # that recommends the hardest of the three paths on a desktop where the easiest is ready.
 
-        secret = self._gmail_secret()
-        if not secret or not self._start_gmail_service(secret):
+        secret = GoogleService.secret()
+        if not secret:
+            print(f"⚠️  {GoogleService.problem}")
+            return False
+        if not self._start_gmail_service(secret):
             return False
 
         payload = {
@@ -1201,36 +1152,6 @@ class OnyxRunner:
 
         print("📬 Gmail search registered.")
         return True
-
-    @classmethod
-    def _gmail_secret(cls) -> Optional[str]:
-        """
-        Returns the shared secret the service and Onyx authenticate with, creating it once.
-
-        Args:
-            None.
-
-        Returns:
-            Optional[str]: The secret, or None if it could not be stored.
-        """
-        import secrets as secrets_module
-
-        from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
-
-        path = os.path.join(CREDENTIALS_DIR, "service-secret")
-        try:
-            if os.path.exists(path):
-                with open(path) as handle:
-                    return handle.read().strip() or None
-            os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
-            secret = secrets_module.token_urlsafe(32)
-            with open(path, "w") as handle:
-                handle.write(secret)
-            os.chmod(path, 0o600)
-            return secret
-        except OSError as exc:
-            print(f"⚠️  Could not store the Gmail service secret: {exc}")
-            return None
 
     def _start_gmail_service(self, secret: str) -> bool:
         """
@@ -1289,7 +1210,7 @@ class OnyxRunner:
              # Also published on loopback, because two callers reach it from outside the Docker
              # network -- the browser asking whether Gmail is connected, and Google redirecting
              # back after consent.
-             "-p", f"127.0.0.1:{GMAIL_HOST_PORT}:8000",
+             "-p", f"127.0.0.1:{GOOGLE_HOST_PORT}:8000",
              "-e", f"MIGHTLING_GMAIL_SECRET={secret}",
              GMAIL_SERVICE_IMAGE, "python3", "/config/service.py"],
             capture_output=True, text=True, timeout=300, check=False,
@@ -1477,7 +1398,7 @@ class OnyxRunner:
              "-e", f"MIGHTLING_SEARXNG_URL={SEARXNG_CONTAINER_URL}",
              "-e", f"MIGHTLING_SIGLIP_URL={SIGLIP_CONTAINER_URL}",
              "-e", "MIGHTLING_VISION_URL="
-                   f"{self.resolve_container_vllm_url(self.config.vllm_host)}",
+                   f"{DockerBridge.container_vllm_url(self.config.vllm_host)}",
              "-e", f"MIGHTLING_VISION_MODEL={resolve_model_hf_repo(self.served_model_key())}",
              "-e", "MIGHTLING_DATA_DIR=/config/data",
              IMAGE_SEARCH_SERVICE_IMAGE, "sh", "-c", boot],

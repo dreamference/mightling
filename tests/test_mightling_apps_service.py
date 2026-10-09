@@ -361,11 +361,10 @@ def test_start_adopts_an_existing_container_and_creates_one_otherwise(
     from conftest import REAL_GOOGLE_SERVICE_START
 
     import dreamference.chat.gmail_credentials as credentials
-    from dreamference.chat.onyx_runner import OnyxRunner
 
     monkeypatch.setattr(GoogleService, "start", REAL_GOOGLE_SERVICE_START)
     monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(tmp_path))
-    monkeypatch.setattr(OnyxRunner, "_gmail_secret", classmethod(lambda cls: "s3cret"))
+    monkeypatch.setattr(GoogleService, "secret", classmethod(lambda cls: "s3cret"))
     fake = FakeDocker(state)
     monkeypatch.setattr(subprocess, "run", fake)
     assert GoogleService.start() is True
@@ -402,3 +401,17 @@ def test_the_google_command_group_exists():
     assert "google" in parser.command_groups
     args = parser.parse_args(["google", "status"])
     assert args.google_command == "status"
+
+
+def test_the_shared_secret_is_created_once_and_kept_private(monkeypatch, tmp_path):
+    # The service and every client read the same file; a second call must not mint a new one,
+    # or the running container and `ling-admin gmail` would disagree.
+    import dreamference.chat.gmail_credentials as credentials
+
+    folder = tmp_path / "gmail"
+    monkeypatch.setattr(credentials, "CREDENTIALS_DIR", str(folder))
+    first = GoogleService.secret()
+    assert first and GoogleService.secret() == first
+    path = folder / "service-secret"
+    assert path.read_text() == first
+    assert path.stat().st_mode & 0o777 == 0o600

@@ -8,7 +8,8 @@ answers `/status`, the connect pages and the read-only Gmail, Drive and Calendar
 node without the web UI had none and `/apps` could not connect anything. It is now created here
 too, on the sidecar network (never Docker's default bridge, DOCKER §6), and started by default on a
 node by `server start` when it is absent. `configure` still creates its own on Onyx's network,
-which publishes the same loopback port, so either one serves `/apps`.
+which publishes the same loopback port, so either one serves `/apps`. The shared secret both use is
+this module's (`GoogleService.secret`), not the web UI's.
 
 Nothing here prints: a failure is kept in `GoogleService.problem` for the CLI to say.
 """
@@ -25,6 +26,12 @@ GOOGLE_CONTAINER_NAME: Final[str] = "dreamference-gmail"
 GOOGLE_SERVICE_IMAGE: Final[str] = "python:3-slim"
 GOOGLE_HOST_PORT: Final[int] = 8767
 RUNNING: Final[str] = "running"
+
+# The header every request but `/status` and the connect pages carries the shared secret in; kept
+# in step with the service module (`gmail_search_service.AUTH_HEADER`), which enforces it.
+GMAIL_AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
+# The shared secret's file, inside the credentials folder; created once, mode 0600.
+SECRET_FILE_NAME: Final[str] = "service-secret"
 
 # The files staged into the mounted credentials folder; the service imports the reader from
 # beside itself.
@@ -53,6 +60,32 @@ class GoogleService:
             check=False,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
+
+    @classmethod
+    def secret(cls) -> str | None:
+        """Returns the shared secret the service and its clients authenticate with, creating it once.
+
+        Returns:
+            str | None: The secret, or None if it could not be stored (see `problem`).
+        """
+        import secrets as secrets_module
+
+        from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
+
+        path = os.path.join(CREDENTIALS_DIR, SECRET_FILE_NAME)
+        try:
+            if os.path.exists(path):
+                with open(path) as handle:
+                    return handle.read().strip() or None
+            os.makedirs(CREDENTIALS_DIR, mode=0o700, exist_ok=True)
+            value = secrets_module.token_urlsafe(32)
+            with open(path, "w") as handle:
+                handle.write(value)
+            os.chmod(path, 0o600)
+            return value
+        except OSError as exc:
+            cls.problem = f"Could not store the Google service's shared secret: {exc}"
+            return None
 
     @classmethod
     def stage(cls, directory: str) -> bool:
@@ -109,11 +142,9 @@ class GoogleService:
         Returns:
             bool: True if `docker run` succeeded.
         """
-        from dreamference.chat.onyx_runner import OnyxRunner
-
-        secret = OnyxRunner._gmail_secret()
+        secret = cls.secret()
         if not secret:
-            cls.problem = "Could not store the service's shared secret."
+            cls.problem = cls.problem or "Could not store the service's shared secret."
             return False
         if not SidecarNetwork.ensure():
             cls.problem = f"Could not create the Docker network {SIDECAR_NETWORK}."
