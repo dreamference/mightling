@@ -29,7 +29,7 @@ You queue coding tasks during the day with `/night add …`, from inside a `ling
 **Non-goals:**
 - **Merging or pushing:** a branch and a report are the whole output.
 - **Scheduling on other machines.**
-- **Running while you work:** the night run gives way to interactive use (§6.3).
+- **Running while you work:** the night run gives way to interactive use (§5.5).
 - **Choosing tasks for you:** the queue holds only what was added explicitly.
 
 ---
@@ -395,5 +395,5 @@ Every task is a sandboxed `ling exec` and its tests run under `ling sandbox`, an
 
 ### 11.7 Busy app servers and `ling web` (2026-10-07)
 
-An app server is not an interactive session by its command line, so an idle desktop window or web UI left open never holds a night back. While a turn runs, its client keeps a marker named after the server's pid in `$CODEX_HOME/night/busy/`: the desktop app for its Work window's `ling app-server` (`desktop/electron/src/bridge.ts`), and `ling web serve` itself for every tab's Ask and Work turns (`ling-rs/web/src/server.rs`, the threads that are running, as JSON). `NightShiftHost.busy_app_server_pids()` counts a marker whose pid is alive and is the installed `ling` (which `ling web serve` is) or a bundled `ling` running `app-server`; any other marker was left by a client killed hard, or names a reused pid, and is deleted. A running turn in either counts as an open session (§6.3), so the run waits for it.
+An app server is not an interactive session by its command line, so an idle desktop window or web UI left open never holds a night back. While a turn runs, its client keeps a marker named after the server's pid in `$CODEX_HOME/night/busy/`: the desktop app for its Work window's `ling app-server` (`desktop/electron/src/bridge.ts`), and `ling web serve` itself for every tab's Ask and Work turns (`ling-rs/web/src/server.rs`, the threads that are running, as JSON). `NightShiftHost.busy_app_server_pids()` counts a marker whose pid is alive and is the installed `ling` (which `ling web serve` is) or a bundled `ling` running `app-server`; any other marker was left by a client killed hard, or names a reused pid, and is deleted. A running turn in either counts as an open session (§5.5), so the run waits for it.
 
