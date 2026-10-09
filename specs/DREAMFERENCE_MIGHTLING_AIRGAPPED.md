@@ -413,3 +413,19 @@ Patch `0019` grew by 1,261 bytes (the series from 32,425 to 33,686; `test_the_pa
 `/node` (patch `0025`, `ling-rs/src/node_command.rs`, MIGHTLING_NODE §18.9) suspends the TUI and runs `ling-admin node …` in the terminal, outside the agent's sandbox. It is not refused at `on`: the user trusts the local network, and the command is the user's own, like a `!` command (§5.2). At `on` it first prints `airgapped is on: /node talks to machines on your local network only`, and the history keeps that line beside the summary. Whatever `node provision` installs reaches PyPI and an image registry from the new node, never from this one.
 
 **Watched in a build of this branch (2026-10-07), in tmux,** with a scratch `HOME` and `CODEX_HOME` and a stand-in `ling-admin` that asks for a password: at `DREAMFERENCE_MIGHTLING_AIRGAPPED=on`, `/node status spark-1` printed the notice, ran the stand-in with `node status spark-1`, which read a password typed without echo, and after Enter the TUI came back with the notice and `node status spark-1: done (exit 0)` in the history. In the same check at `off`, the 13-character password reached the stand-in and appears nowhere under `CODEX_HOME` (its logs database included), and text typed at the "Press Enter" prompt did not reach the composer.
+
+### 14.9 The surfaces added since (recorded 2026-10-09)
+
+Each later surface follows the same resolver (`ling-airgapped`, the strictest of the repository's and the user's level) and is specified in its own document; this is the list in one place.
+
+| Surface | At `on` | Where |
+|---|---|---|
+| The app server (every client: the desktop app's Work window, `ling web`) | Full Access is refused, as in the TUI (patch `0023`, 2026-10-06) | [MIGHTLING_CODEX §3](./DREAMFERENCE_MIGHTLING_CODEX.md) |
+| Windows | the elevated sandbox clears a command's network through its offline account (patch `0024`); only the elevated sandbox, set up, starts | [MIGHTLING_WINDOWS_ARM §7.6](./DREAMFERENCE_MIGHTLING_WINDOWS_ARM.md) |
+| `/apps` (Gmail, Drive, Calendar) | no server declared and no prompt section at a configured `on`; each tool call checks the level and the session's seal itself, so a switch mid-session also stops them; the rows show no link | [MIGHTLING_APPS §8](./DREAMFERENCE_MIGHTLING_APPS.md) |
+| `ling web` and its Ask threads | the agent has no network, as any session; the UI says why search, apps and image search are unavailable; voice still works (transcription is local) | [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) |
+| `ling-docs` | unaffected: indexing and querying never touch the network, so the tools stay available | [MIGHTLING_LOCAL_INDEX](./DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md) |
+| `ling chat` | the Telegram adapter stops relaying and answers with one line saying why; Matrix keeps working (the whole path stays on the machine) | [MIGHTLING_CHAT §3](./DREAMFERENCE_MIGHTLING_CHAT.md) |
+| `ling signal` | the bridge runs only at `off`, because Signal needs the internet | [MIGHTLING_SIGNAL](./DREAMFERENCE_MIGHTLING_SIGNAL.md) |
+| `/node` | runs, after a line saying it talks to the local network only (§14.8) | [MIGHTLING_NODE §18.9](./DREAMFERENCE_MIGHTLING_NODE.md) |
+
