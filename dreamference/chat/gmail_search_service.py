@@ -1,8 +1,9 @@
 """
-Gmail Search Service for Onyx.
+The Google service: Gmail, Drive and Calendar for Mightling's apps and `ling-admin gmail`.
 
 This module provides the GmailSearchService class, an HTTP service that turns a Gmail mailbox into
-the two operations an assistant needs, and the OpenAPI description Onyx registers it under.
+the two operations an assistant needs (Drive and Calendar are `google_workspace_reader.py`). The
+agent reaches it through `/apps`' MCP tools (`ling-rs/apps`), on loopback with the shared secret.
 
 It mirrors how web search already works rather than inventing a new shape. Web search gives the
 model `web_search` to find things and `open_url` to read one; this gives it `gmail_search` to find
@@ -37,10 +38,10 @@ The module is deliberately **standard library only and self-contained**. It runs
 `python:3-slim` container with nothing installed into it, and it is copied next to the credentials
 rather than mounted from the source tree, so the container has no idea where Dreamference lives.
 
-**The shared secret is the security boundary.** The service sits on Onyx's Docker network holding a
-credential for a real mailbox, and Onyx's custom-tool client performs no SSRF validation -- it
-calls whatever URL the tool names. The header check is what stops anything else on that network
-reading the user's mail.
+**The shared secret is the security boundary.** The service sits on a Docker network holding a
+credential for a real mailbox, published on loopback, where a sandboxed command can reach it while
+the network is on. The header check is what stops anything without the secret reading the user's
+mail.
 """
 
 import base64
@@ -117,9 +118,8 @@ OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
 # nor `gdbus` to ask with. One line the host knows and the container does not.
 GNOME_HINT_NAME: Final[str] = "gnome-accounts.json"
 
-# Onyx sends this with every tool call. The service is on a private Docker network, but so is
-# everything else Onyx runs, and a private network is not an authorisation boundary -- the shared
-# secret is what distinguishes Onyx from everything else.
+# Every client sends this: `/apps`' tools and `ling-admin gmail`. A private network and a loopback
+# port are not an authorisation boundary -- the shared secret is.
 AUTH_HEADER: Final[str] = "X-Mightling-Gmail-Token"
 
 IMAP_HOST: Final[str] = "imap.gmail.com"
@@ -127,7 +127,7 @@ IMAP_PORT: Final[int] = 993
 
 # Gmail allows fifteen simultaneous IMAP connections per account. The service opens one per request
 # and closes it, which keeps it far below that without any pooling; the timeout is what stops a
-# stalled connection holding an Onyx tool call open indefinitely.
+# stalled connection holding a tool call open indefinitely.
 IMAP_TIMEOUT_SECONDS: Final[int] = 30
 
 # Gmail's own name for the folder holding every message exactly once. Selecting it rather than
@@ -148,21 +148,16 @@ MAX_BODY_CHARACTERS: Final[int] = 20_000
 
 SERVICE_PORT: Final[int] = 8000
 
-# The service is also published on this loopback port, because the browser reaches it from outside
-# the Docker network: the Onyx page asks whether Gmail is connected so it knows whether to show the
-# Connect button, and the setup page is served from here.
+# The service is published on this loopback port: `/apps` and `ling-admin gmail` call it here, and
+# the connect pages a browser opens are served from it. The only page origin allowed to post is the
+# service's own (the web chat's, port 3000, went with Onyx's retirement).
 HOST_PORT: Final[int] = 8767
 HOST_ORIGIN: Final[str] = f"http://localhost:{HOST_PORT}"
-
-# The page origin allowed to read the status endpoint. The browser calls it cross-origin, from the
-# Onyx UI to this service.
-ONYX_ORIGIN: Final[str] = "http://localhost:3000"
 
 # The setup page. It only ever explains -- there is nothing to submit.
 CONNECT_PATH: Final[str] = "/connect"
 
-# What the button pointed at under earlier designs. Kept as a redirect because Onyx serves its
-# bundles `immutable`, so a browser that has not hard-refreshed still holds a script aiming here.
+# What the connect button pointed at under earlier designs; kept as a redirect for an old link.
 LEGACY_START_PATH: Final[str] = "/oauth/start"
 
 # Where the user signs into Google. GNOME's Settings panel, opened by URI so the page can link
@@ -172,14 +167,13 @@ GNOME_SETTINGS_URI: Final[str] = "gnome-control-center://online-accounts"
 # What an unconnected search answers with. It names the place the user can act rather than a
 # command they would have to leave the app to run -- the model reads this and relays it.
 NOT_CONNECTED_MESSAGE: Final[str] = (
-    "Gmail is not connected. Open Settings -> Gmail Accounts in Mightling and choose Connect to Google."
+    "Gmail is not connected. Connect it with /apps in ling, which opens this machine's Google sign-in."
 )
 
 # Enough styling that the setup page reads as part of Mightling rather than as a server error. It is
 # the only page this project serves directly, and the user arrives at it from a polished UI.
 PAGE_STYLE: Final[str] = (
-    # The same neutral idiom as the patched Onyx UI (the share sheet, the connector card):
-    # near-black text, grey secondary, hairline borders, a black pill for the one primary action.
+    # A neutral idiom: near-black text, grey secondary, hairline borders, a black pill for the one primary action.
     "body{margin:0;padding:48px 24px;background:#fff;color:#111827;"
     "font-family:Roboto,system-ui,sans-serif;font-size:14px;line-height:1.55}"
     "main{max-width:520px;margin:0 auto}"
@@ -214,7 +208,7 @@ PAGE_STYLE: Final[str] = (
 
 class GmailSearchService:
     """
-    Serves Gmail search and message retrieval over HTTP for Onyx's custom tool.
+    Serves Gmail search and message retrieval over HTTP for Mightling's apps.
     """
 
     # ------------------------------------------------------------------ storage
@@ -1099,8 +1093,7 @@ class GmailSearchService:
         """
         if origin is None:
             return None
-        allowed = {ONYX_ORIGIN, HOST_ORIGIN, f"http://127.0.0.1:{HOST_PORT}",
-                   ONYX_ORIGIN.replace("localhost", "127.0.0.1")}
+        allowed = {HOST_ORIGIN, f"http://127.0.0.1:{HOST_PORT}"}
         if origin.rstrip("/") in allowed:
             return None
         return f"requests from {origin} are not accepted"
@@ -1122,7 +1115,6 @@ class GmailSearchService:
                 encoded = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", ONYX_ORIGIN)
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
@@ -1133,22 +1125,13 @@ class GmailSearchService:
                 self.end_headers()
 
             def _html(self, inner: str) -> None:
-                # The link back matters more than it looks. In the browser this page opens in a new
-                # tab and is disposable, but the desktop app has no new window to open, so it
-                # navigates in place -- and without a way back the user is left staring at a bare
-                # paragraph with no chrome to return from.
+                # A page of its own, opened in the browser by `/apps`; it closes like any tab.
                 body = (
                     '<!doctype html><html><head><meta charset="utf-8">'
                     '<title>Mightling</title><meta name="viewport" '
                     'content="width=device-width,initial-scale=1">'
                     f"<style>{PAGE_STYLE}</style></head><body><main>"
                     f"{inner}"
-                    f'<p><a href="{ONYX_ORIGIN}/app">Back to Mightling</a></p>'
-                    # Framed (in the connect modal) the link is surplus -- the modal has its own
-                    # close, and navigating the iframe to the app would nest Mightling inside itself.
-                    "<script>if(window.top!==window.self){var L=document.querySelectorAll('a');"
-                    "for(var i=0;i<L.length;i++){if(L[i].textContent==='Back to Mightling')"
-                    "L[i].style.display='none';}}</script>"
                     "</main></body></html>"
                 ).encode()
                 self.send_response(200)
@@ -1206,15 +1189,6 @@ class GmailSearchService:
                     """
                 )
 
-
-            def do_OPTIONS(self) -> None:
-                # The preflight must name the *page's* origin (Onyx), not this service's own;
-                # answering with HOST_ORIGIN made the browser veto the POST before sending it.
-                self.send_response(204)
-                self.send_header("Access-Control-Allow-Origin", ONYX_ORIGIN)
-                self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type")
-                self.end_headers()
 
             def do_POST(self) -> None:
                 parsed = urllib.parse.urlparse(self.path)
@@ -1331,8 +1305,8 @@ class GmailSearchService:
                     self._html("<h2>Error</h2><p>Invalid state or token exchange failed.</p>")
                     return
 
-                # Read by the browser, cross-origin from the Onyx page, to decide whether to offer
-                # the Connect button. It exposes no mail and needs no secret.
+                # Read by `/apps` and `ling-admin google status` to show what is connected. It
+                # exposes no mail and needs no secret.
                 if parsed.path in ("/health", "/status"):
                     self._reply(200, cls.status())
                     return
@@ -1373,66 +1347,6 @@ class GmailSearchService:
                 """Silenced: request logs would record the user's search terms."""
 
         ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
-
-
-def openapi_definition(base_url: str) -> Dict[str, Any]:
-    """
-    Builds the OpenAPI document Onyx registers the tool from.
-
-    Onyx derives one tool per operation and uses `operationId` as the tool name and `summary` as
-    what the model reads when deciding to call it, so both are written for the model rather than
-    for a developer browsing a schema.
-
-    Args:
-        base_url (str): URL the service is reachable at from Onyx's container.
-
-    Returns:
-        Dict[str, Any]: An OpenAPI 3 document.
-    """
-    return {
-        "openapi": "3.0.0",
-        "info": {"title": "Gmail", "version": "1.0.0",
-                 "description": "Search and read the user's Gmail mailbox."},
-        "servers": [{"url": base_url}],
-        "paths": {
-            "/search": {
-                "get": {
-                    "operationId": "gmail_search",
-                    "summary": (
-                        "Search the user's Gmail. Use this for anything about their email: what "
-                        "someone sent, when something arrived, receipts, bookings, threads on a "
-                        "topic. Accepts Gmail search syntax such as 'from:alice invoice', "
-                        "'subject:renewal', 'has:attachment', 'newer_than:7d'. Returns message "
-                        "summaries; call gmail_message to read one in full."
-                    ),
-                    "parameters": [
-                        {"name": "query", "in": "query", "required": True,
-                         "schema": {"type": "string"},
-                         "description": "Gmail search query."},
-                        {"name": "limit", "in": "query", "required": False,
-                         "schema": {"type": "integer", "default": DEFAULT_RESULT_LIMIT},
-                         "description": f"How many messages to return (max {MAX_RESULT_LIMIT})."},
-                    ],
-                    "responses": {"200": {"description": "Matching messages."}},
-                }
-            },
-            "/message/{message_id}": {
-                "get": {
-                    "operationId": "gmail_message",
-                    "summary": (
-                        "Read one Gmail message in full, using an id from gmail_search. Returns "
-                        "the sender, recipients, subject, date and the plain-text body."
-                    ),
-                    "parameters": [
-                        {"name": "message_id", "in": "path", "required": True,
-                         "schema": {"type": "string"},
-                         "description": "Message id from a gmail_search result."},
-                    ],
-                    "responses": {"200": {"description": "The message."}},
-                }
-            },
-        },
-    }
 
 
 if __name__ == "__main__":

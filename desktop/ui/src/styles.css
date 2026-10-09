@@ -3,7 +3,7 @@
    (html[data-host="electron"]: a frameless window whose header is the title bar) and in a browser
    on `ling web`, phones included (the @media rules at the end). */
 :root {
-  --accent: #0abab5; /* TIFFANY_BLUE, dreamference/chat/onyx_brand_assets.py */
+  --accent: #0abab5; /* Tiffany Blue, the mark's colour (desktop/electron/icons) */
   --accent-soft: #e6f8f7;
   --text: #111;
   --muted: #666;

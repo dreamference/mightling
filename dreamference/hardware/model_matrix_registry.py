@@ -393,9 +393,9 @@ class ModelMatrixRegistry:
         Reports whether the model accepts image input alongside text.
 
         vLLM needs no telling -- it reads the modality off the checkpoint -- but API clients do.
-        Onyx, for one, refuses an upload with "The current model does not support image input"
-        unless the model entry it holds advertises the capability, so the fact has to travel from
-        this registry into that client's configuration.
+        The retired Onyx web chat refused an upload unless its model entry advertised the
+        capability; Ask sends an image as `localImage` and relies on the served model having
+        vision, which this records (specs/DREAMFERENCE_MIGHTLING_ASK.md §1).
 
         Args:
             model_key (str): Short model alias, HF repo ID, or display name.

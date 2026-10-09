@@ -633,7 +633,7 @@ class VLLMServerManager:
         token_env = hf_token or os.getenv("HF_TOKEN") or os.getenv("DREAMFERENCE_HF_TOKEN")
 
         # Behind the gate the engine is on loopback at an internal port; otherwise it is the
-        # public server itself, on every interface (Onyx and the benchmark's containers reach it
+        # public server itself, on every interface (image search and the benchmark's containers reach it
         # from Docker's networks).
         from dreamference.vllm_server.model_gate import ENGINE_BIND_ADDRESS, PUBLIC_BIND_ADDRESS, ModelGate
         engine_host = ENGINE_BIND_ADDRESS if gate else PUBLIC_BIND_ADDRESS

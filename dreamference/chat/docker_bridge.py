@@ -2,7 +2,7 @@
 The host as a container on Docker's default bridge sees it.
 
 The model server runs with `--network host`, so on the host it answers on localhost:8000. A
-container on the default bridge (OpenHands, and the Onyx web UI until it is retired) has a
+container on the default bridge (OpenHands; the retired Onyx web chat was one too) has a
 `localhost` of its own, where the model server is not; the bridge gateway is the host from inside
 such a container. Moved out of `OnyxRunner` before Onyx's removal (specs/DREAMFERENCE_MIGHTLING_ASK.md
 §1, "Other code that leans on Onyx"), because OpenHands needs the same rewrite.

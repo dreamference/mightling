@@ -56,9 +56,10 @@ def test_codex_runner_hands_arguments_and_host_to_mightling(tmp_path, monkeypatc
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://gb10:9000"
 
 
-def test_openhands_stays_on_this_machine_and_off_onyx_port(monkeypatch):
-    # It mounts the Docker socket, so its UI must not be published on the network; 3000 belongs
-    # to Onyx; and from inside the container a loopback vLLM URL would point at the container.
+def test_openhands_stays_on_this_machine_and_off_port_3000(monkeypatch):
+    # It mounts the Docker socket, so its UI must not be published on the network; it stays on
+    # 3001, as since Onyx had 3000; and from inside the container a loopback vLLM URL would point
+    # at the container.
     from dreamference.config import DreamferenceConfig
     from dreamference.runner.openhands_runner import OpenHandsRunner, OPENHANDS_HOST_PORT
     from dreamference.runner.openhands_installer import OpenHandsInstaller

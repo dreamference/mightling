@@ -14,7 +14,6 @@ import uuid
 import pytest
 from pathlib import Path
 
-from dreamference.chat.onyx_runner import ONYX_LOOPBACK_ENV, OnyxRunner
 from dreamference.chat.searxng_sidecar import SearxngSidecar
 from dreamference.chat.sidecar_network import SidecarNetwork
 from dreamference.node import (
@@ -130,32 +129,6 @@ def test_settings_default_to_loopback_and_live_outside_the_working_directory(tmp
 
 # -- the two binds ---------------------------------------------------------------------------------
 
-def test_the_web_ui_leaves_loopback_only_on_an_advertised_node_and_port_80_never_does():
-    assert OnyxRunner.web_bind_env() == ONYX_LOOPBACK_ENV
-    NodeSettings.save(advertise=True)
-    assert OnyxRunner.web_bind_env() == {"HOST_PORT_80": "127.0.0.1:80", "HOST_PORT": "0.0.0.0:3000"}
-    NodeSettings.save(advertise=True, web=False)
-    assert OnyxRunner.web_bind_env() == ONYX_LOOPBACK_ENV
-
-
-def test_configure_keeps_the_advertised_bind_and_recreates_nginx_only_on_a_change(monkeypatch):
-    recreated = []
-    monkeypatch.setattr(OnyxRunner, "_recreate_service",
-                        classmethod(lambda cls, service, wait_healthy: recreated.append(service) or True))
-    runner = OnyxRunner()
-    assert runner.bind_to_loopback() is True
-    NodeSettings.save(advertise=True)
-    assert runner.bind_to_loopback() is True
-    assert runner.bind_to_loopback() is True          # already as wanted: no second recreate
-    from dreamference.chat import onyx_runner
-    env = open(onyx_runner.ONYX_ENV_FILE).read()
-    assert 'HOST_PORT="0.0.0.0:3000"' in env and 'HOST_PORT_80="127.0.0.1:80"' in env
-    NodeSettings.save(advertise=False)
-    assert runner.bind_to_loopback() is True
-    assert 'HOST_PORT="127.0.0.1:3000"' in open(onyx_runner.ONYX_ENV_FILE).read()
-    assert recreated.count("nginx") in (2, 3)         # 3 if the scratch .env did not start on loopback
-
-
 def test_searxng_is_published_where_the_settings_say():
     assert "127.0.0.1:8888:8080" in SearxngSidecar.run_command()
     NodeSettings.save(advertise=True, web=False)      # --no-web does not hide web search
@@ -188,7 +161,7 @@ def test_searxng_is_recreated_when_its_address_no_longer_matches(monkeypatch):
     assert commands[2][:4] == ["docker", "network", "connect", "onyx_default"]
 
 
-def test_the_advert_follows_searxng_and_the_web_ui_started_after_enable(monkeypatch):
+def test_the_advert_follows_searxng_started_after_enable(monkeypatch):
     path = NodeServiceFile.service_path
     path.write_text(NodeServiceFile.render(8000, NODE_ID, "1.3.0", "ready"))
     monkeypatch.setattr(NodeAdvertiser, "search_port", classmethod(lambda cls: 8888))
@@ -198,11 +171,6 @@ def test_the_advert_follows_searxng_and_the_web_ui_started_after_enable(monkeypa
     NodeSettings.save(advertise=True)
     NodeAdvertiser.on_searxng_started()
     assert NodeServiceFile.read()["search"] == "8888"
-    NodeAdvertiser.on_web_ui_bound()                  # `ling web`, part of `ling`, serves it
-    assert NodeServiceFile.read()["web"] == "3100"
-    NodeSettings.save(advertise=True, web=False)
-    NodeAdvertiser.on_web_ui_bound()
-    assert "web" not in NodeServiceFile.read() and NodeServiceFile.read()["search"] == "8888"
 
 
 # -- enable, disable, status -----------------------------------------------------------------------
@@ -220,15 +188,13 @@ def ling_web(tmp_path, monkeypatch):
 
 @pytest.fixture
 def machine(monkeypatch, ling_web):
-    """A node with the web UIs and SearXNG installed, none touched for real."""
+    """A node with `ling` and SearXNG installed, none touched for real."""
     applied = []
     monkeypatch.setattr(NodeAdvertiser, "is_gb10", classmethod(lambda cls: True))
     monkeypatch.setattr(NodeAdvertiser, "model_answers", classmethod(lambda cls, port: True))
     monkeypatch.setattr(NodeAdvertiser, "search_port", classmethod(lambda cls: 8888))
     monkeypatch.setattr(NodeAdvertiser, "searxng_published_address",
                         classmethod(lambda cls: NodeSettings.search_bind_address()))
-    monkeypatch.setattr(OnyxRunner, "_recreate_service",
-                        classmethod(lambda cls, service, wait_healthy: applied.append(service) or True))
     monkeypatch.setattr(SidecarNetwork, "network_mode", classmethod(lambda cls, name: "dreamference-sidecars"))
     monkeypatch.setattr(SearxngSidecar, "start", classmethod(lambda cls: applied.append("searxng") or True))
     monkeypatch.setattr(NodeBrowser, "browse", classmethod(lambda cls, timeout=6: []))
@@ -261,8 +227,8 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(ma
     monkeypatch.setattr(NodeAdvertiser, "run_privileged", classmethod(privileged))
     assert NodeAdvertiser.enable() is True
     out = capsys.readouterr().out
-    assert "one account" in out and "Gmail" in out    # what sharing the web UI means, said at enable
-    assert "searxng" in machine and "nginx" in machine
+    assert "paired" in out and "Onyx" not in out      # what sharing the web UI means, said at enable
+    assert "searxng" in machine
     assert asked[0][:3] == ["install", "-m", "644"] and asked[0][-1] == str(NodeServiceFile.service_path)
     records = NodeServiceFile.read()
     assert records["node"] == NodeIdentity.read()
@@ -279,13 +245,12 @@ def test_enable_installs_through_sudo_once_and_rewrites_without_it_afterwards(ma
     assert len(asked) == 1
     assert ling_web()[-1] == "web start"               # back on loopback
     assert "web" not in NodeServiceFile.read() and NodeServiceFile.read()["search"] == "8888"
-    assert "one account" not in capsys.readouterr().out.split("advertised as")[-1]
+    assert "ling web pair" not in capsys.readouterr().out.split("advertised as")[-1]
 
     assert NodeAdvertiser.disable() is True
     assert asked[-1] == ["rm", "-f", str(NodeServiceFile.service_path)]
     assert not NodeServiceFile.service_path.exists()
     assert NodeSettings.load() == {"advertise": False, "web": False}
-    assert OnyxRunner.web_bind_env() == ONYX_LOOPBACK_ENV
 
 
 def test_disable_without_root_still_stops_the_advertisement(machine, capsys):

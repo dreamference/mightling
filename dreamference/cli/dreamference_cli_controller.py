@@ -607,6 +607,36 @@ class DreamferenceCLIController:
         sys.exit(action())
 
     @classmethod
+    def _run_retired_chat(cls, args: argparse.Namespace) -> int:
+        """`ling-admin chat …` after the Onyx web chat's retirement (ASK §10, Phase C).
+
+        Args:
+            args (argparse.Namespace): The parsed arguments.
+
+        Returns:
+            int: The exit code: 2 for a former subcommand, which no longer does anything.
+        """
+        from dreamference.chat.retired_web_chat import RETIRED_MESSAGE, RetiredWebChat
+
+        # The flags may follow the subcommand, where the catch-all positional takes them.
+        rest = list(args.chat_rest or [])
+        yes = args.yes or "--yes" in rest
+        delete_data = args.delete_data or "--delete-data" in rest
+        if args.chat_command == "remove":
+            unknown = [arg for arg in rest if arg not in ("--yes", "--delete-data")]
+            if unknown:
+                print(f"usage: ling-admin chat remove [--yes] [--delete-data] (not {' '.join(unknown)})")
+                return 2
+            return RetiredWebChat.remove(yes=yes, delete_data=delete_data)
+        if args.chat_command == "status":
+            print(RETIRED_MESSAGE)
+            for line in RetiredWebChat.describe():
+                print(f"  {line}")
+            return 0
+        print(RETIRED_MESSAGE)
+        return 2
+
+    @classmethod
     def _run_images(cls, args: argparse.Namespace, config: DreamferenceConfig) -> int:
         """Runs `ling-admin images start|stop|status` (specs/DREAMFERENCE_MIGHTLING_ASK.md §6).
 
@@ -677,7 +707,7 @@ class DreamferenceCLIController:
             print(f"❌ The Google service did not start. {GoogleService.problem}")
             return 1
         print(f"✅ The Google service is running on http://127.0.0.1:{GOOGLE_HOST_PORT}")
-        print("💡 Connect accounts with /apps in ling, or in the web UI's Settings.")
+        print("💡 Connect accounts with /apps in ling.")
         return 0
 
     @classmethod
@@ -910,7 +940,7 @@ class DreamferenceCLIController:
         if args.gmail_command == "status":
             if not payload.get("connected"):
                 print("❌ No Gmail account is connected.")
-                print("💡 Connect one in Mightling: Settings → Gmail Accounts → Connect to Google")
+                print("💡 Connect one with /apps in ling (`ling-admin google start` first if the service is not running).")
                 return 1
             print(f"connected: {payload.get('email')}")
             return 0
@@ -1017,10 +1047,6 @@ class DreamferenceCLIController:
         main_model_subparsers = main_model_parser.add_subparsers(dest="main_model_command", help="Main model commands")
         main_model_set_parser = main_model_subparsers.add_parser("set", help="Set the main model")
         main_model_set_parser.add_argument("model_name", type=str, help="Name of the model to set as main")
-        main_model_set_parser.add_argument(
-            "--no-onyx", action="store_true",
-            help="Skip re-registering the model with a running Onyx deployment",
-        )
 
         main_model_inspect_parser = main_model_subparsers.add_parser("inspect", help="Inspect the currently running main model by running sample prompts")
         main_model_inspect_parser.add_argument(
@@ -1275,86 +1301,29 @@ class DreamferenceCLIController:
         bench_parser.add_argument("--num-prompts", type=int, default=8, help="Number of prompts to benchmark")
         bench_parser.add_argument("--max-concurrency", type=int, default=1, help="Max concurrency for requests")
 
-        # Command: ling-admin chat
-        #
-        # A subcommand group rather than an `--agent onyx` runner, because Onyx is a service and
-        # not a terminal session. Every entry in the --agent switch is a CLI that ling-admin
-        # execs and waits on; Onyx is a set of long-lived containers with a lifecycle of its own,
-        # so it mirrors `ling-admin server` instead.
-        # "chat" is the command's name (it was `puffin` before the product became Mightling, and
-        # `ling-admin mightling start` would read as nonsense); "onyx" remains, as it was before.
-        onyx_parser = subparsers.add_parser(
+        # Command: ling-admin chat: what is left of the retired Onyx web chat
+        # (specs/DREAMFERENCE_MIGHTLING_ASK.md §10, Phase C). `remove` and `status` handle what an
+        # older install left; every former subcommand (start, configure, password, …) is taken as
+        # it was typed and answered with where its job went, rather than with argparse's error.
+        chat_parser = subparsers.add_parser(
             "chat", aliases=["onyx"],
-            help="Manage the Mightling web chat UI (Onyx Lite) backed by local vLLM"
+            help="The retired Onyx web chat: remove what an older install left (`ling web` replaces it)"
         )
-        onyx_subparsers = onyx_parser.add_subparsers(dest="onyx_command", help="Onyx operations")
-
-        onyx_start_parser = onyx_subparsers.add_parser(
-            "start", help="Deploy (or restart) Onyx Lite and wait until it is healthy"
+        chat_parser.add_argument(
+            "chat_command", nargs="?", default=None, metavar="{remove,status}",
+            help="remove: stop and remove its containers, then (asked again) its data; status: show what is left"
         )
-        onyx_start_parser.add_argument(
-            "--no-wait", action="store_true", help="Return as soon as containers start"
-        )
-
-        onyx_configure_parser = onyx_subparsers.add_parser(
-            "configure", help="Point Onyx at the local vLLM model as its default provider"
-        )
-        onyx_configure_parser.add_argument(
-            "--email", default=None,
-            help="Your own admin e-mail (registered if no account exists); default: a generated account",
-        )
-        onyx_configure_parser.add_argument(
-            "--password", default=None,
-            help="Your own admin password, with --email; stored in ~/.config/dreamference/chat-admin.json",
-        )
-        onyx_configure_parser.add_argument(
-            "--no-web", action="store_true",
-            help="Skip registering SearXNG as Onyx's web search provider",
-        )
-        onyx_configure_parser.add_argument(
-            "--no-brand", action="store_true",
-            help="Skip rebranding the deployment as Mightling",
-        )
-        onyx_configure_parser.add_argument(
-            "--no-voice", action="store_true",
-            help="Skip the local Whisper server and the microphone button",
-        )
-        onyx_configure_parser.add_argument(
-            "--no-gmail", action="store_true",
-            help="Skip the Gmail service and its search tool",
-        )
-        onyx_configure_parser.add_argument(
-            "--no-image-search", action="store_true",
-            help="Skip the image search sidecar and its tool",
-        )
-
-        # Google sign-in is additive in Onyx 4.5: it appears beside the password form rather than
-        # replacing it, so this is its own command rather than a flag on `configure`.
-        onyx_google_parser = onyx_subparsers.add_parser(
-            "google-auth", help="Add Google sign-in to the login page, keeping username/password"
-        )
-        onyx_google_parser.add_argument(
-            "--client-id", required=True, help="Google OAuth client ID"
-        )
-        onyx_google_parser.add_argument(
-            "--client-secret", required=True, help="Google OAuth client secret"
-        )
-        onyx_gmail_parser = onyx_subparsers.add_parser(
-            "gmail", help="Connect Gmail and give the assistant a mailbox search tool"
-        )
-        onyx_gmail_parser.add_argument(
-            "--refresh", action="store_true", help=argparse.SUPPRESS,
-        )
-        onyx_subparsers.add_parser("status", help="Show Onyx version, containers and health")
-        onyx_subparsers.add_parser(
-            "password", help="Show the web chat's admin e-mail and generated password"
+        chat_parser.add_argument("chat_rest", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
+        chat_parser.add_argument("--yes", action="store_true", help="Remove the containers without asking")
+        chat_parser.add_argument(
+            "--delete-data", action="store_true",
+            help="Also delete its volumes (saved chats, accounts), images and leftover sidecars without asking"
         )
 
         # Command: ling-admin desktop {run,build,status}
         #
-        # The desktop shell is a window onto the same deployment `ling-admin chat` manages, so it is a
-        # sibling command rather than an `--agent` entry: nothing is exec'd and waited on here
-        # except the window itself.
+        # The desktop app is a window, so it is a command of its own rather than an `--agent`
+        # entry: nothing is exec'd and waited on here except the window itself.
         desktop_parser = subparsers.add_parser(
             "desktop", help="Mightling desktop app (a native window onto the local deployment)"
         )
@@ -1369,15 +1338,6 @@ class DreamferenceCLIController:
         desktop_subparsers.add_parser(
             "status", help="Report whether the desktop app can be built and launched"
         )
-        onyx_logs_parser = onyx_subparsers.add_parser("logs", help="Show Onyx container logs")
-        onyx_logs_parser.add_argument(
-            "--follow", "-f", action="store_true", help="Stream new log lines"
-        )
-        onyx_subparsers.add_parser("stop", help="Stop the Onyx containers, keeping their data")
-        onyx_subparsers.add_parser(
-            "uninstall", help="Permanently delete the Onyx deployment and all its data"
-        )
-
         # Web access is not here. Searching and fetching are the agent's commands, `ling-search`
         # and `ling-fetch`: Rust binaries built from ling-web-rs/ and installed beside `ling`,
         # so they work from any shell without this virtualenv. `ling-admin fetch` was retired on
@@ -1414,7 +1374,7 @@ class DreamferenceCLIController:
         google_parser = subparsers.add_parser("google", help="Manage the local Google service (Gmail, Drive, Calendar)")
         google_subparsers = google_parser.add_subparsers(dest="google_command")
         google_subparsers.add_parser(
-            "start", help="Start the Google service on 127.0.0.1:8767 (adopts the web UI's if it exists)"
+            "start", help="Start the Google service on 127.0.0.1:8767 (adopts an existing container)"
         )
         google_subparsers.add_parser(
             "stop", help="Remove the Google service container; connected accounts stay stored"
@@ -1479,8 +1439,6 @@ class DreamferenceCLIController:
             "main-model": (main_model_parser, "main_model_command"),
             "clear": (clear_parser, "clear_command"),
             "server": (server_parser, "server_command"),
-            "chat": (onyx_parser, "onyx_command"),
-            "onyx": (onyx_parser, "onyx_command"),
             "desktop": (desktop_parser, "desktop_command"),
             "searxng": (searxng_parser, "searxng_command"),
             "docs": (docs_parser, "docs_command"),
@@ -1539,6 +1497,12 @@ class DreamferenceCLIController:
         subcommand = getattr(args, args.command.replace("-", "_") + "_command", None)
         if not SandboxPrerequisite.gate(args.command, subcommand):
             sys.exit(1)
+
+        # An install from before Onyx's retirement is offered, once, the removal of what it left
+        # (specs/DREAMFERENCE_MIGHTLING_ASK.md §10); only at a terminal, never where stdout is read.
+        if not machine_read:
+            from dreamference.chat.retired_web_chat import RetiredWebChat
+            RetiredWebChat.offer(args.command)
 
         # Handle stdio MCP server command immediately
         if args.command == "mcp":
@@ -1673,28 +1637,12 @@ class DreamferenceCLIController:
                 out_console.print(f"[bold green]✅ Main model set to '{args.model_name}'[/bold green]")
                 out_console.print(f"   [cyan]Config saved to:[/cyan] {saved_path}")
 
-                # A model change is not local to vLLM: Onyx's LLM provider is registered by
-                # name, its vision flag follows the checkpoint, and the image search sidecar
-                # carries the served model id in its environment. Left alone, all three keep
-                # pointing at the previous model until someone remembers `ling-admin chat configure`
-                # -- so it runs here, when Onyx is up. configure() is idempotent, and skipping
-                # when Onyx is absent keeps `main-model set` usable before any deployment.
-                if not args.no_onyx:
-                    import subprocess as _subprocess
-
-                    onyx_up = _subprocess.run(
-                        ["docker", "ps", "--filter",
-                         "label=com.docker.compose.service=api_server",
-                         "--format", "{{.Names}}"],
-                        capture_output=True, text=True, timeout=30, check=False,
-                    ).stdout.strip()
-                    if onyx_up:
-                        out_console.print(
-                            "[cyan]🔁 Re-registering the model with Onyx "
-                            "(skip with --no-onyx)...[/cyan]")
-                        from dreamference.chat import OnyxRunner
-
-                        OnyxRunner(config).configure()
+                # The image search service carries the served model's id in its environment
+                # (the vision re-rank), so a running one is restarted with the new model in mind.
+                from dreamference.chat.image_search_sidecar import ImageSearchSidecar
+                if ImageSearchSidecar.state() == "running":
+                    out_console.print("[cyan]💡 Image search runs with the previous model: "
+                                      "`ling-admin images start` once the new one is served.[/cyan]")
                 sys.exit(0)
             elif args.main_model_command == "inspect":
                 cls.display_header()
@@ -2255,38 +2203,7 @@ class DreamferenceCLIController:
                 sys.exit(DesktopRunner.status())
 
         elif args.command in ("chat", "onyx"):
-            from dreamference.chat import OnyxRunner
-
-            onyx_runner = OnyxRunner(config=config)
-            if args.onyx_command == "start":
-                sys.exit(onyx_runner.start(wait=not args.no_wait))
-            elif args.onyx_command == "configure":
-                kwargs = {}
-                if args.email:
-                    kwargs["email"] = args.email
-                if args.password:
-                    kwargs["password"] = args.password
-                sys.exit(onyx_runner.configure(
-                    enable_web=not args.no_web, brand=not args.no_brand,
-                    enable_voice=not args.no_voice, enable_gmail=not args.no_gmail,
-                    enable_image_search=not args.no_image_search, **kwargs
-                ))
-            elif args.onyx_command == "google-auth":
-                sys.exit(0 if onyx_runner.enable_google_login(
-                    args.client_id, args.client_secret
-                ) else 1)
-            elif args.onyx_command == "gmail":
-                sys.exit(0 if onyx_runner.connect_gmail() else 1)
-            elif args.onyx_command == "status":
-                sys.exit(onyx_runner.status())
-            elif args.onyx_command == "password":
-                sys.exit(onyx_runner.show_admin_credentials())
-            elif args.onyx_command == "logs":
-                sys.exit(onyx_runner.logs(follow=args.follow))
-            elif args.onyx_command == "stop":
-                sys.exit(onyx_runner.stop())
-            elif args.onyx_command == "uninstall":
-                sys.exit(onyx_runner.uninstall())
+            sys.exit(cls._run_retired_chat(args))
 
         elif args.command == "gmail":
             sys.exit(cls.handle_gmail(args))

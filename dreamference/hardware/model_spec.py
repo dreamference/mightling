@@ -37,8 +37,8 @@ class ModelSpec:
             Unset means DEFAULT_VLLM_IMAGE.
         supports_vision (bool): Whether the checkpoint accepts image input as well as text. Not a
             launch flag -- vLLM reads this from the checkpoint's own config and needs no telling --
-            but clients do: Onyx refuses an upload with "The current model does not support image
-            input" unless its model entry advertises the capability, so something has to state it.
+            but clients do: the retired Onyx web chat refused an upload unless told, and Ask relies
+            on it when it sends an image (specs/DREAMFERENCE_MIGHTLING_ASK.md §1).
             The signal is the checkpoint's architecture (`...ForConditionalGeneration` with a
             `vision_config`) rather than the name, which is why it is recorded per entry here
             rather than guessed from the alias.
