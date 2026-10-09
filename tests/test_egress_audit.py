@@ -15,6 +15,7 @@ import pytest
 
 from dreamference.audit import EgressAudit, EgressTrace, StraceParser, TuiSession
 from dreamference.audit.egress_verdict import FAIL, PASS, TRACE_FAILED
+from dreamference.audit.egress_audit import IMAGE_PROMPT
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "egress")
 ALLOWED = EgressAudit.allowed_ports("http://localhost:8000")
@@ -657,3 +658,68 @@ def test_every_bridge_on_is_three_lines(monkeypatch, tmp_path):
     _chat_files(monkeypatch, tmp_path, {"telegram.json": {"token": "t"}, "matrix-admin.json": {"push": False}})
     _fake_units(monkeypatch, {"mightling-signal.service", "mightling-chat.service", "mightling-matrix-proxy.socket"})
     assert [line.split(" ")[0] for line in EgressAudit.declared_exceptions()] == ["Signal", "Telegram", "Matrix"]
+
+
+# -- image search in the --web session (ASK §9, §19.6) ---------------------------------------------
+
+def test_the_image_search_service_is_on_the_allowlist_of_every_session():
+    for session in ("exec", "tui", "app", "web"):
+        assert EgressAudit.allowed_ports("http://localhost:8000", session)[8768] == "image search service"
+    trace = StraceParser.parse(CHROMIUM_PROBE.replace("htons(8000)", "htons(8768)"))
+    assert EgressAudit.judge(trace, EgressAudit.allowed_ports("http://localhost:8000", "web"), replied=True).status == PASS
+
+
+def test_the_web_audit_asks_an_image_search_question_where_image_search_is_set_up(tmp_path, monkeypatch, capsys):
+    from dreamference.chat import image_search_sidecar
+
+    secret = tmp_path / "image-search" / "secret"
+    secret.parent.mkdir()
+    secret.write_text("s3cret")
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_SECRET_FILE", str(secret))
+    admin = tmp_path / "ling-admin"
+    admin.write_text("#!/bin/sh\n")
+    admin.chmod(0o755)
+    monkeypatch.setattr(EgressAudit, "admin_executable", classmethod(lambda cls: str(admin)))
+    strace = tmp_path / "bin" / "strace"
+    strace.parent.mkdir()
+    strace.write_text(f"""#!{os.sys.executable}
+import os, shutil, signal, sys, time
+args = sys.argv[1:]
+shutil.copy({os.path.join(FIXTURES, "exec_pass.strace")!r}, args[args.index("-o") + 1])
+web = os.path.join(os.environ["CODEX_HOME"], "web")
+os.makedirs(web, exist_ok=True)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+open(os.path.join(web, "server.json"), "w").write("{{}}")
+time.sleep(60)
+""")
+    strace.chmod(strace.stat().st_mode | stat.S_IEXEC)
+    # The stand-in client records each question and what the scratch home held when it was asked.
+    asked = tmp_path / "asked.jsonl"
+    ling = tmp_path / "ling"
+    ling.write_text(f"""#!{os.sys.executable}
+import json, os, sys
+home = os.environ["HOME"]
+config = os.path.join(home, ".config", "dreamference")
+link = os.path.join(home, ".local", "bin", "ling-admin")
+with open({str(asked)!r}, "a") as out:
+    out.write(json.dumps({{"prompt": sys.argv[-1], "node": os.path.isfile(os.path.join(config, "node-id")),
+                          "secret": open(os.path.join(config, "image-search", "secret")).read(),
+                          "admin": os.path.realpath(link)}}) + "\\n")
+print("![A puffin](/images/0123456789abcdef.jpg)" if "image_search" in sys.argv[-1] else "pong")
+""")
+    ling.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{strace.parent}{os.pathsep}{os.environ['PATH']}")
+    code = EgressAudit.run(mightling_bin=str(ling), vllm_host="http://localhost:8000", web=True)
+    out = capsys.readouterr().out
+    assert code == 0 and "Image search turn: answered with an image" in out
+    rows = [json.loads(line) for line in asked.read_text().splitlines()]
+    assert [row["prompt"] for row in rows] == ["Reply with exactly: pong", IMAGE_PROMPT]
+    assert all(row["node"] and row["secret"] == "s3cret" and row["admin"] == str(admin) for row in rows)
+
+
+def test_without_image_search_the_turn_is_skipped_and_says_so(tmp_path, monkeypatch, capsys):
+    from dreamference.chat import image_search_sidecar
+
+    monkeypatch.setattr(image_search_sidecar, "IMAGE_SEARCH_SECRET_FILE", str(tmp_path / "absent"))
+    assert EgressAudit.prepare_image_search(str(tmp_path / "home")) is False
+    assert not (tmp_path / "home").exists()

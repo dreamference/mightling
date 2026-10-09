@@ -240,7 +240,27 @@ class ImageSearchSidecar:
         return False
 
     @classmethod
-    def start(cls, vllm_host: str, model: str, siglip: bool = True) -> bool:
+    def vision_model(cls, vllm_host: str, model: str) -> str:
+        """The id the vision re-rank asks the model server for.
+
+        Args:
+            vllm_host (str): The model server's base URL on the host.
+            model (str): The configured model's registry key.
+
+        Returns:
+            str: The served id from `/v1/models`; while the server is not answering (at `server
+            start`, before the load), the id it will serve: the checkpoint's repository, which
+            both engines report (`--served-model-name`).
+        """
+        try:
+            from dreamference.hardware import resolve_model_hf_repo
+            fallback = resolve_model_hf_repo(model) or model
+        except (ImportError, KeyError, ValueError):
+            fallback = model
+        return cls.served_model(vllm_host, fallback)
+
+    @classmethod
+    def start(cls, vllm_host: str, model: str, siglip: bool = True, wait: bool = True) -> bool:
         """Makes the service run on the sidecar network, recreated so the staged file and the
         served model take effect.
 
@@ -248,9 +268,11 @@ class ImageSearchSidecar:
             vllm_host (str): The model server's base URL on the host.
             model (str): The configured model, named when the server does not answer.
             siglip (bool): Whether to try the SigLIP pre-filter.
+            wait (bool): Whether to wait for the health route; `server start` does not, since
+                the first boot installs Pillow and the model load must not wait for it.
 
         Returns:
-            bool: True if the service answers its health route once this returns.
+            bool: True if the container started (and, when waiting, answers its health route).
         """
         cls.problem = ""
         secret = cls.secret()
@@ -263,15 +285,40 @@ class ImageSearchSidecar:
         subprocess.run(["docker", "rm", "-f", IMAGE_SEARCH_CONTAINER_NAME],
                        capture_output=True, timeout=60, check=False)
         command = cls.run_command(
-            secret, DockerBridge.container_vllm_url(vllm_host), cls.served_model(vllm_host, model), with_siglip)
+            secret, DockerBridge.container_vllm_url(vllm_host), cls.vision_model(vllm_host, model), with_siglip)
         result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
         if result.returncode != 0:
             cls.problem = f"Could not start the image search service: {result.stderr.strip()[:200]}"
             return False
-        if not cls.healthy():
+        if wait and not cls.healthy():
             cls.problem = "The image search service did not answer its health check."
             return False
         return True
+
+    @classmethod
+    def ensure_on_node(cls, vllm_host: str, model: str) -> Optional[bool]:
+        """Starts the service on a node when it is absent, as `server start` does for the Google
+        service (decided 2026-10-09). Never raises and never waits for its health: the model
+        server must start anyway. SigLIP is left to `ling-admin images start`, since its image
+        is large and has no arm64 build upstream.
+
+        Args:
+            vllm_host (str): The model server's base URL on the host.
+            model (str): The configured model's registry key.
+
+        Returns:
+            Optional[bool]: None when this machine is not a node or the container exists already
+            (running or not); otherwise whether it started (see `problem` when it did not).
+        """
+        from dreamference.node.node_identity import NodeIdentity
+
+        try:
+            if not NodeIdentity.read() or cls.state():
+                return None
+            return cls.start(vllm_host, model, siglip=False, wait=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            cls.problem = f"Image search was not started: {exc}"
+            return False
 
     @classmethod
     def stop(cls) -> bool:

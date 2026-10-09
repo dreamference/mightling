@@ -49,6 +49,15 @@ class FakeDocker:
         return [c for c in self.commands if c[:2] == ["docker", "run"] and c[c.index("--name") + 1] == name]
 
 
+@pytest.fixture(autouse=True)
+def real_starts(monkeypatch):
+    # conftest stubs both starts for `server start`'s sake; these tests exercise them.
+    from conftest import REAL_IMAGE_SEARCH_START, REAL_SPEECH_START
+
+    monkeypatch.setattr(ImageSearchSidecar, "start", REAL_IMAGE_SEARCH_START)
+    monkeypatch.setattr(SpeechSidecar, "start", REAL_SPEECH_START)
+
+
 @pytest.fixture
 def store(monkeypatch, tmp_path):
     data = tmp_path / "image-search"
@@ -219,3 +228,93 @@ def test_images_mcp_runs_before_anything_that_could_print(monkeypatch, capsys):
         DreamferenceCLIController.run_cli(["images", "mcp"])
     assert exit_info.value.code == 0
     assert json.loads(capsys.readouterr().out) == {"jsonrpc": "2.0", "id": 7, "result": {}}
+
+
+# -- started by `server start` on a node (ASK §19.6) ------------------------------------------------
+
+
+@pytest.mark.parametrize("sidecar", [ImageSearchSidecar, SpeechSidecar])
+def test_server_start_starts_each_only_on_a_node_without_one(monkeypatch, sidecar):
+    from dreamference.node.node_identity import NodeIdentity
+
+    calls = []
+    monkeypatch.setattr(sidecar, "start", classmethod(lambda cls, *a, **k: calls.append(k) or True))
+    ensure = (lambda: sidecar.ensure_on_node("http://localhost:8000", "m")) if sidecar is ImageSearchSidecar else sidecar.ensure_on_node
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: None))
+    assert ensure() is None
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: "node-1"))
+    for existing in ("running", "exited"):
+        monkeypatch.setattr(sidecar, "state", classmethod(lambda cls, *a: existing))
+        assert ensure() is None
+    monkeypatch.setattr(sidecar, "state", classmethod(lambda cls, *a: ""))
+    assert ensure() is True
+    # Never waits: no health check for image search (and no SigLIP), the model download detached.
+    assert calls == ([{"siglip": False, "wait": False}] if sidecar is ImageSearchSidecar else [{"wait_for_model": False}])
+
+
+@pytest.mark.parametrize("sidecar", [ImageSearchSidecar, SpeechSidecar])
+def test_a_failed_start_is_reported_never_raised(monkeypatch, sidecar):
+    from dreamference.node.node_identity import NodeIdentity
+
+    monkeypatch.setattr(NodeIdentity, "read", classmethod(lambda cls: "node-1"))
+    monkeypatch.setattr(sidecar, "state", classmethod(lambda cls, *a: ""))
+    ensure = (lambda: sidecar.ensure_on_node("http://localhost:8000", "m")) if sidecar is ImageSearchSidecar else sidecar.ensure_on_node
+
+    def broken(cls, *a, **k):
+        raise OSError("docker is not installed")
+
+    monkeypatch.setattr(sidecar, "start", classmethod(broken))
+    assert ensure() is False and "docker is not installed" in sidecar.problem
+
+
+def test_the_detached_model_download_does_not_hold_server_start(monkeypatch):
+    fake = FakeDocker()
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert SpeechSidecar.start(wait_for_model=False) is True
+    (fetch,) = [c for c in fake.commands if c[:2] == ["docker", "exec"]]
+    assert fetch[2] == "-d"
+
+
+def test_without_a_served_model_the_vision_ranker_gets_the_id_the_server_will_serve(monkeypatch):
+    from dreamference.hardware import resolve_model_hf_repo
+
+    monkeypatch.setattr(ImageSearchSidecar, "served_model", classmethod(lambda cls, host, fallback: fallback))
+    key = "qwen3.8-27b-nvfp4-dflash2"
+    assert ImageSearchSidecar.vision_model("http://localhost:8000", key) == resolve_model_hf_repo(key)
+
+
+def test_server_start_warns_and_still_loads_the_model_when_a_sidecar_fails(monkeypatch, capsys):
+    from dreamference.cli import dreamference_cli_controller as controller
+    from dreamference.cli.dreamference_cli_controller import DreamferenceCLIController
+    from dreamference.vllm_server import DiffusionServerManager, VLLMServerManager
+
+    class Monitor:
+        server_ready = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    loads = []
+
+    def load(self, **_):
+        loads.append(True)
+        raise SystemExit(0)
+
+    def failed(cls, *a, **k):
+        cls.problem = f"{cls.__name__} could not start."
+        return False
+
+    monkeypatch.setattr(ImageSearchSidecar, "ensure_on_node", classmethod(failed))
+    monkeypatch.setattr(SpeechSidecar, "ensure_on_node", classmethod(failed))
+    monkeypatch.setattr(controller, "create_model_loading_monitor", lambda *a, **k: Monitor())
+    monkeypatch.setattr(VLLMServerManager, "start_server", load)
+    monkeypatch.setattr(DiffusionServerManager, "remove_leftover", classmethod(lambda cls, port=8001: None))
+    with pytest.raises(SystemExit):
+        DreamferenceCLIController.run_cli(["server", "start", "--no-diffusion"])
+    assert loads == [True]
+    out = capsys.readouterr().out
+    assert "ImageSearchSidecar could not start. The model starts anyway; retry with `ling-admin images start`." in out
+    assert "SpeechSidecar could not start. The model starts anyway; retry with `ling-admin voice start`." in out
