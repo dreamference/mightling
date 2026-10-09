@@ -30,7 +30,9 @@ from dreamference.swe_bench.swe_bench_harness import FORBIDDEN_FIELDS, NOOP_PATC
 from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLLECT_SCRIPT, COMPLETION_NUDGE,
                                                           NO_REFINED, PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT,
                                                           SCRUB_SCRIPT, TASK_RULES)
+from dreamference.swe_bench.swe_bench_instance_run import REVIEW_PROMPT, REVIEW_RULES
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
+from dreamference.swe_bench.swe_bench_runner import RUN_NAME
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -84,6 +86,10 @@ class FakeDocker:
         self.modes = {}
         self.default_mode = "change"
         self.processes = []
+        # The review turn, per instance: `leave` (the default), `edit`, `hang`.
+        self.review_modes = {}
+        # True: `ling exec` reports no thread, so there is no session to resume.
+        self.no_thread = False
 
     # -- SweBenchDocker.run ------------------------------------------------------------------
     def run(self, args, timeout=None, input_text=None):
@@ -163,9 +169,31 @@ class FakeDocker:
         prompt = args[-1]
         resume = "resume" in args
         session = args[args.index("resume") + 1] if resume else f"session-{len(self.calls)}"
-        stdout.write((json.dumps({"type": "thread.started", "thread_id": session}) + "\n").encode())
+        if not self.no_thread:
+            stdout.write((json.dumps({"type": "thread.started", "thread_id": session}) + "\n").encode())
         stdout.flush()
         say = lambda text: (box["scratch"] / "last.txt").write_text(text)
+        if REVIEW_RULES in prompt:
+            # The review turn: leaves the fix alone, edits it, or runs past the time limit.
+            review = self.review_modes.get(instance, "leave")
+            # What the prompt relies on: the index at HEAD, so `git diff` shows the agent's change.
+            assert git(box["repo"], "diff", "--cached", "--quiet").returncode == 0
+            assert "widget.py" in git(box["repo"], "diff").stdout
+            stdout.write((json.dumps({"type": "turn.completed", "usage": {
+                "input_tokens": 70, "cached_input_tokens": 60, "output_tokens": 7}}) + "\n").encode())
+            stdout.flush()
+            if review == "hang":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX HALF-REVIEWED\n")
+                process = FakeProcess(0, hang=True)
+                self.processes.append(process)
+                return process
+            if review == "edit":
+                (box["repo"] / "widget.py").write_text("def widget():\n    return 2  # FIX REVIEWED\n")
+                (box["repo"] / "api.py").write_text("from widget import widget\n\n\ndef api():\n    return widget()\n")
+                say("Reviewed: the caller in api.py needed the fix too; the widget tests pass.")
+            else:
+                say("Reviewed: the diff does what the issue asks and the widget tests pass.")
+            return FakeProcess(0)
         if "This is the first of two steps" in prompt:
             # The refine arm's first step: writes the description, unless told to write nothing;
             # `refine_edits` also changes the tree it was told to leave alone.
@@ -283,7 +311,7 @@ class QuietMachine:
         return cls.refuse
 
     @classmethod
-    def start_blocker(cls, vllm_host, mightling_bin, active, settings):
+    def start_blocker(cls, vllm_host, mightling_bin, active, settings, priority=False):
         return cls.blocker
 
 
@@ -1681,9 +1709,90 @@ def test_tests_v2_lets_the_issue_decide_and_leaves_the_first_rule_as_it_was(benc
     assert seen["task_rules"] == ["tests-v2"]
 
 
+def test_issue_v1_reads_the_issue_and_follows_the_sibling_code(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    rule = TASK_RULES["issue-v1"]
+    for words in ("Before you edit, read the whole issue", "exactly what behaviour it asks for",
+                  "every edge case it mentions", "do not widen a condition", "follow its pattern",
+                  "Where a sibling has the same defect, fix it there too", "after your last edit"):
+        assert words in rule
+    for word in ("benchmark", "hidden", "reference", "swe", "upstream"):
+        assert word not in rule.lower()
+    with_rule = SweBenchInstanceRun.compose_prompt(issue, task_rules=["issue-v1"])
+    assert with_rule.replace(rule, "") == plain and with_rule.endswith(issue)
+    assert rule in SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["issue-v1"])
+
+    assert run(bench, name="iv1", instances=["acme__widget-1"], task_rules=["issue-v1"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["issue-v1"])]
+    assert SweBenchRunStore("iv1").manifest()["task_rules"] == ["issue-v1"]
+    assert "Task rules          issue-v1" in SweBenchReport.render(SweBenchRunStore("iv1"))
+
+
+def test_issue_v1_stacks_with_tests_v2_once_each_and_in_the_order_of_the_work(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    rule, v2 = TASK_RULES["issue-v1"], TASK_RULES["tests-v2"]
+    # The issue comes before the test discipline, whatever order the rules are named in.
+    both = SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2", "issue-v1"])
+    assert both == SweBenchInstanceRun.compose_prompt(issue, task_rules=["issue-v1", "tests-v2"])
+    assert both == SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2", "issue-v1", "tests-v2"])
+    assert both.replace(rule + v2, "") == plain
+    assert both.count(rule) == 1 and both.count(v2) == 1 and both.index(rule) < both.index(v2)
+    # No line is said twice.
+    lines = (rule + v2).splitlines()
+    assert len(lines) == len(set(lines))
+    fix = SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["tests-v2", "issue-v1"])
+    assert fix.count(rule + v2) == 1
+
+    assert run(bench, name="n3-tests-v2-issue-v1", instances=["acme__widget-1"],
+               task_rules=["tests-v2", "issue-v1"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["issue-v1", "tests-v2"])]
+    assert SweBenchRunStore("n3-tests-v2-issue-v1").manifest()["task_rules"] == ["issue-v1", "tests-v2"]
+    assert "Task rules          issue-v1, tests-v2" in SweBenchReport.render(SweBenchRunStore("n3-tests-v2-issue-v1"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(
+        ["swe-bench", "run", "--task-rules", "tests-v2,issue-v1", "--name", "x"])) == 0
+    assert seen["task_rules"] == ["tests-v2", "issue-v1"]
+
+
+def test_an_arm_named_after_its_rules_is_a_distinct_name_the_grader_accepts():
+    import itertools
+    arms = {}
+    for size in range(1, len(TASK_RULES) + 1):
+        for rules in itertools.permutations(TASK_RULES, size):
+            # The night scripts' shape, <prefix>-<rules joined by ->, and the grader's run ids.
+            name = "n3-" + "-".join(rules)
+            for run_id in (f"{name}-1", f"{name}-drop-test-hunks-1"):
+                assert RUN_NAME.fullmatch(run_id), run_id
+            # Whatever order the rules are named in, no name stands for two different sets of rules.
+            assert arms.setdefault(name, frozenset(rules)) == frozenset(rules), name
+    assert arms["n3-tests-v2-issue-v1"] == {"tests-v2", "issue-v1"}
+
+
+def test_a_new_run_whose_name_the_grader_would_refuse_is_refused_and_an_old_one_resumes(bench, capsys):
+    for name in ("n3-tests-v2+issue-v1", "tests-v2,issue-v1", "a b", "-x"):
+        assert run(bench, name=name, instances=["acme__widget-1"], task_rules=["tests-v2", "issue-v1"]) == 1
+        assert "a run's name is letters, digits" in capsys.readouterr().out
+        assert not SweBenchRunStore(name).manifest_path.exists()
+    assert mightling_prompts(bench["docker"]) == []
+    # A run already on disk under such a name (from before the check) is still resumed.
+    assert run(bench, name="old", instances=["acme__widget-1"]) == 0
+    old, odd = SweBenchRunStore("old"), SweBenchRunStore("old+name")
+    old.directory.rename(odd.directory)
+    assert run(bench, name="old+name", instances=["acme__widget-2"]) == 0
+    assert "a run's name is letters, digits" not in capsys.readouterr().out
+
+
 def test_an_unknown_task_rule_is_refused_and_the_option_reaches_the_runner(bench, monkeypatch, capsys):
     assert run(bench, instances=["acme__widget-1"], task_rules=["everything"]) == 1
-    assert "--task-rules takes: tests, tests-v2" in capsys.readouterr().out
+    assert "--task-rules takes: issue-v1, tests, tests-v2" in capsys.readouterr().out
     assert not SweBenchRunStore("r1").manifest_path.exists()
     import argparse
     seen = {}
@@ -1838,3 +1947,290 @@ def test_without_cycling_the_index_pass_keeps_the_images(bench):
     assert run(bench, code_index="universal") == 0
     assert not any(call[0] == "rmi" for call in bench["docker"].calls)
     assert len(bench["docker"].present) == 3
+
+
+# -- the model gate (spec §18) ---------------------------------------------------------------------
+
+@pytest.fixture
+def gated(bench, monkeypatch):
+    """The benchmark network has a subnet, and a gate answers from this (test) home's files."""
+    from dreamference.swe_bench import swe_bench_gate_hold
+    from dreamference.vllm_server.model_gate import ModelGate
+    docker = bench["docker"]
+
+    def run_with_subnet(args, timeout=None, input_text=None):
+        if args[:2] == ["network", "inspect"]:
+            docker.calls.append(list(args))
+            return subprocess.CompletedProcess(args, 0, json.dumps([{"Internal": True, "IPAM": {"Config": [
+                {"Gateway": "172.30.0.1", "Subnet": "172.30.0.0/16"}]}}]), "")
+        return docker.run(args, timeout, input_text)
+    monkeypatch.setattr(SweBenchDocker, "run", classmethod(lambda cls, *a, **k: run_with_subnet(*a, **k)))
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: ModelGate.state()))
+    monkeypatch.setattr(swe_bench_gate_hold, "HEARTBEAT_S", 0.02)
+    written = []
+    real_write = ModelGate.write_run.__func__
+    monkeypatch.setattr(ModelGate, "write_run", classmethod(lambda cls, record: written.append(dict(record))
+                                                            or real_write(cls, record)))
+    return dict(bench, written=written, gate=ModelGate)
+
+
+class OthersBusy(QuietMachine):
+    """A session is open and another request is running: only the gate's priority lets a start through."""
+    admitted = []
+
+    @classmethod
+    def admit(cls, vllm_host, mightling_bin, idle_minutes, end):
+        cls.admitted.append((idle_minutes, cls.ignore_sessions))
+        return None
+
+    @classmethod
+    def start_blocker(cls, vllm_host, mightling_bin, active, settings, local=True, priority=False):
+        return None if priority else "the model server is serving a request that is not the night run's"
+
+
+def test_a_run_closes_the_gate_to_everyone_but_its_network_and_opens_it_after(gated, monkeypatch):
+    monkeypatch.setattr(SweBenchRunner, "admission", OthersBusy)
+    monkeypatch.setattr(OthersBusy, "admitted", [])
+    assert run(gated, instances=["acme__widget-1", "acme__widget-2"], label="night 1, default arm") == 0
+    records = gated["written"]
+    assert records and all(r["networks"] == ["172.30.0.0/16"] and r["run"] == "r1" for r in records)
+    assert records[-1]["label"] == "night 1, default arm" and records[-1]["total"] == 2
+    # Nobody else can reach the model: admission waits only for requests in flight, and neither an
+    # open session nor another request held a start back.
+    assert OthersBusy.admitted == [(0, True)]
+    assert set(SweBenchRunStore("r1").finished()) == {"acme__widget-1", "acme__widget-2"}
+    # Open again once the run is over, and the run's record says the gate was in force.
+    assert gated["gate"].run_record() is None and gated["gate"].state()["state"] == "open"
+    sessions = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["sessions"]
+    assert [s["gate"] for s in sessions] == ["in force"] and sessions[0]["ended"]
+    report = SweBenchReport.render(SweBenchRunStore("r1"))
+    assert "Model gate          in force: requests from anything but the run were refused" in report
+    assert "Gate paused" not in report
+
+
+def test_the_refusal_counts_progress_and_estimates_the_time_left(gated):
+    from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
+    assert run(gated, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("r1")
+    for instance_id, wall in (("acme__widget-1", 600), ("acme__widget-2", 1200)):
+        state = store.state(instance_id)
+        state["wall_s"] = wall
+        store.write_state(instance_id, state)
+    hold = SweBenchGateHold(store, "http://localhost:8000", "172.30.0.0/16")
+    hold.instances, hold.total, hold.parallel = ["acme__widget-1", "acme__widget-2", "x-1", "x-2", "x-3", "x-4"], 6, 2
+    assert hold.progress() == {"done": 2, "total": 6, "eta_s": 1800}  # 4 left x median 900 s / 2 at once
+
+
+def test_while_paused_the_run_waits_for_others_and_its_report_names_the_pause(gated, monkeypatch):
+    monkeypatch.setattr(SweBenchRunner, "admission", OthersBusy)
+    gated["gate"].pause(0.6)
+    started = time.time()
+    assert run(gated, instances=["acme__widget-1"]) == 0
+    assert time.time() - started >= 0.5, "no instance started while the pause let others through"
+    pauses = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["pauses"]
+    assert len(pauses) == 1 and 0.3 < pauses[0]["end"] - pauses[0]["start"] <= 0.7
+    assert "Gate paused         1 time(s)" in SweBenchReport.render(SweBenchRunStore("r1"))
+
+
+def test_without_the_networks_subnet_the_gate_stays_open_and_the_run_waits_as_before(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: ModelGate.state()))
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert ModelGate.run_record() is None
+    sessions = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["sessions"]
+    assert sessions[0]["gate"].startswith("open: ")
+
+
+def test_with_no_gate_in_front_of_the_server_the_report_says_others_were_served(bench):
+    # The suite's probe answers "no gate", as a model server started before the gate existed does.
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert "Model gate          none in front of the model server" in SweBenchReport.render(SweBenchRunStore("r1"))
+
+
+def test_the_report_names_the_instances_that_ran_during_a_pause(bench):
+    from datetime import datetime
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("r1")
+    for offset, instance_id in enumerate(["acme__widget-1", "acme__widget-2"]):
+        state = store.state(instance_id)
+        state.update(started=datetime.fromtimestamp(10_000 + offset * 1000).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z"),
+                     wall_s=100)
+        store.write_state(instance_id, state)
+    (store.directory / "gate.json").write_text(json.dumps({
+        "sessions": [{"start": 9_000, "end": 20_000, "gate": "in force", "ended": True}],
+        "pauses": [{"start": 10_050, "end": 10_500}]}))
+    lines = SweBenchReport.gate_lines(store, store.states(), ["acme__widget-1", "acme__widget-2"])
+    assert lines[1].startswith("Gate paused         1 time(s), 7 min 30 s in all")
+    assert lines[1].endswith(": acme__widget-1")
+
+
+def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "parallel": 1, "budget": None}
+    monkeypatch.setattr(SweBenchRunner, "lanes", classmethod(
+        lambda cls, vllm_host, served, settings, parallel: (
+            [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel, "budget": None},
+             dict(replica)], [])))
+
+    def relays(cls, gateway, lanes):
+        for lane in lanes:
+            lane["model_url"] = f"http://{gateway}:40001"
+        return []
+    monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(relays))
+    monkeypatch.setattr(ModelGate, "probe", classmethod(
+        lambda cls, host, timeout=2.0: {"gate": "mightling", "state": "closed"} if "192.168" in host else None))
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    created = [call for call in bench["docker"].calls if call[0] == "run"]
+    hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
+             for call in created}
+    assert "http://172.30.0.1:40001" not in hosts and len(created) == 2
+
+
+# -- the review turn (spec §19) --------------------------------------------------------------------
+
+def test_the_review_prompts_are_terse_and_a_fresh_one_carries_the_issue_and_the_diff():
+    issue, diff = "The widget is broken.", "diff --git a/widget.py b/widget.py\n+    return 2\n"
+    assert SweBenchInstanceRun.compose_review_prompt(issue, diff, resumed=True) == REVIEW_PROMPT
+    for words in ("Re-read the issue", "`git status`, then `git diff`",
+                  "Run the test files of every module you changed",
+                  "does not do what the issue asks", "a test that passed before your change now", "decide from the issue", "Never edit an existing test", "Then stop"):
+        assert words in REVIEW_PROMPT
+    for word in ("benchmark", "hidden", "reference", "swe", "grad"):
+        assert word not in REVIEW_PROMPT.lower()
+    fresh = SweBenchInstanceRun.compose_review_prompt(issue, diff, resumed=False)
+    assert REVIEW_RULES in fresh and fresh.index(issue) < fresh.index(diff.rstrip("\n"))
+    assert fresh.endswith(diff.rstrip("\n")) and "Nobody will answer questions" in fresh
+    cut = SweBenchInstanceRun.compose_review_prompt(issue, "x" * 50000, resumed=False)
+    assert cut.endswith("[diff cut here]") and len(cut) < 42000
+
+
+def test_without_the_review_turn_the_patch_is_collected_when_the_agent_stops(bench):
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    store = SweBenchRunStore("r1")
+    assert [resumed for _, resumed in mightling_prompts(bench["docker"])] == [False]
+    assert store.manifest()["review_turn"] is False and "review" not in store.state("acme__widget-1")
+    assert "Review turn         off: the patch was collected when the agent stopped" in SweBenchReport.render(store)
+
+
+def test_the_review_turn_resumes_the_same_session_in_the_same_container_before_collecting(bench):
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    calls = [call for call in bench["docker"].calls if call[0] == "exec" and len(call) > 2 and call[2].endswith("/ling")]
+    assert [(call[-1], "resume" in call) for call in calls] == [
+        (SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1."), False), (REVIEW_PROMPT, True)]
+    # The same session, in the same container: the model gate passes it by the container's address.
+    first_session = json.loads(store.log_path("acme__widget-1").read_text().splitlines()[0])["thread_id"]
+    assert calls[1][calls[1].index("resume") + 1] == first_session and calls[1][1] == calls[0][1]
+    state = store.state("acme__widget-1")
+    assert state["status"] == "done" and state["nudges"] == 0
+    review = state["review"]
+    assert review["resumed"] is True and review["exec"] == "ok" and review["changed"] is False
+    assert (review["added"], review["removed"], review["files"]) == (0, 0, [])
+    assert review["tokens"] == {"input_tokens": 70, "cached_input_tokens": 60, "output_tokens": 7}
+    before = (store.directory / "scratch" / "acme__widget-1" / "patch-before-review.diff").read_text()
+    assert before == prediction("r1", "acme__widget-1") and review["patch_bytes_before"] == len(before.encode())
+    assert store.manifest()["review_turn"] is True
+    SweBenchEvaluator.grade(store, bench["settings"])
+    text = SweBenchReport.render(store)
+    assert "Review turn         on: ran in 1 of 1; changed the patch in 0 (+0 -0 lines), reached the time limit in 0" in text
+    assert "70 tokens in, 7 out" in text
+
+
+def test_a_review_that_changes_the_diff_is_what_is_collected_and_its_lines_are_counted(bench):
+    bench["docker"].review_modes = {"acme__widget-1": "edit"}
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    patch = prediction("r1", "acme__widget-1")
+    assert "REVIEWED" in patch and "api.py" in patch
+    assert "REVIEWED" not in (store.directory / "scratch" / "acme__widget-1" / "patch-before-review.diff").read_text()
+    review = store.state("acme__widget-1")["review"]
+    assert review["changed"] is True and sorted(review["files"]) == ["api.py", "widget.py"]
+    assert (review["added"], review["removed"]) == (1 + 5, 1)
+    assert store.state("acme__widget-2")["review"]["changed"] is False
+    assert "changed the patch in 1 (+6 -1 lines)" in SweBenchReport.render(store)
+
+
+def test_a_review_that_reaches_the_time_limit_submits_the_tree_as_it_stands(bench):
+    bench["docker"].review_modes = {"acme__widget-1": "hang"}
+    bench["settings"] = SweBenchSettings({"task_timeout": "1s"})
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    state = store.state("acme__widget-1")
+    # The agent finished; only the review was cut off, so the status is the patch's, not a timeout.
+    assert state["status"] == "done" and state["exec"] == "ok"
+    assert state["review"]["exec"] == "timeout" and state["review"]["changed"] is True
+    assert any("review turn reached the task's time limit" in note for note in state["notes"])
+    assert "HALF-REVIEWED" in prediction("r1", "acme__widget-1")
+    assert any(call[0] == "stop" for call in bench["docker"].calls)
+    assert any(call[0] == "start" for call in bench["docker"].calls)
+    assert "reached the time limit in 1" in SweBenchReport.render(store)
+
+
+def test_a_task_with_no_time_left_is_not_reviewed(bench):
+    bench["settings"] = SweBenchSettings({"task_timeout": "0s"})
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    assert store.state("acme__widget-1")["review"] == {"skipped": "no time left"}
+    assert store.state("acme__widget-1")["status"] == "done"
+    assert [resumed for _, resumed in mightling_prompts(bench["docker"])] == [False]
+
+
+def test_no_review_without_a_change_or_after_an_error_and_the_report_says_why(bench):
+    bench["docker"].modes = {"acme__widget-1": "empty", "acme__widget-2": "error"}
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2", "beta__gadget-7"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    assert store.state("acme__widget-1")["status"] == "empty"
+    assert store.state("acme__widget-1")["review"] == {"skipped": "no change to review"}
+    assert store.state("acme__widget-2")["review"] == {"skipped": "the agent's turn ended in an error"}
+    assert sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT) == 1
+    text = SweBenchReport.render(store)
+    assert ("Review turn         on: ran in 1 of 3 (not run: no change to review 1, "
+            "the agent's turn ended in an error 1); changed the patch in 0") in text
+
+
+def test_without_a_session_to_resume_the_review_is_a_fresh_session_given_the_issue_and_the_diff(bench):
+    bench["docker"].no_thread = True
+    assert run(bench, instances=["acme__widget-1"], review_turn=True) == 0
+    store = SweBenchRunStore("r1")
+    turns = mightling_prompts(bench["docker"])
+    assert len(turns) == 2 and turns[1][1] is False
+    assert "The widget is broken in acme__widget-1." in turns[1][0] and "+    return 2  # FIX" in turns[1][0]
+    assert store.state("acme__widget-1")["review"]["resumed"] is False
+    assert "1 as a fresh session" in SweBenchReport.render(store)
+
+
+def test_the_review_turn_is_an_arm_kept_on_resume_and_told_apart_by_against(bench, monkeypatch):
+    run(bench, name="plain", instances=["acme__widget-1", "acme__widget-2"])
+    run(bench, name="reviewed", instances=["acme__widget-1", "acme__widget-2"], review_turn=True)
+    # A resumed run keeps the arm it started with, whatever the flag says now: widget-2 is made
+    # unfinished and runs again without the flag.
+    store = SweBenchRunStore("reviewed")
+    kept = [line for line in store.predictions_path.read_text().splitlines() if "acme__widget-2" not in line]
+    store.predictions_path.write_text("".join(line + "\n" for line in kept))
+    reviews = sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT)
+    run(bench, name="reviewed")
+    assert store.manifest()["review_turn"] is True
+    assert sum(1 for prompt, _ in mightling_prompts(bench["docker"]) if prompt == REVIEW_PROMPT) == reviews + 1
+    for name in ("plain", "reviewed"):
+        SweBenchEvaluator.grade(SweBenchRunStore(name), bench["settings"])
+    text = SweBenchReport.against(SweBenchRunStore("reviewed"), SweBenchRunStore("plain"))
+    assert "differs: review_turn: True | False" in text
+    review_row = next(line for line in text.splitlines() if line.startswith("review turn"))
+    assert review_row.split()[-2:] == ["on", "off"]
+    # A manifest written before the option existed ran without it.
+    manifest_path = SweBenchRunStore("plain").manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["review_turn"]
+    manifest_path.write_text(json.dumps(manifest))
+    assert "review_turn" not in SweBenchReport.against(SweBenchRunStore("plain"), SweBenchRunStore("plain"))
+    assert "Review turn         off" in SweBenchReport.render(SweBenchRunStore("plain"))
+
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--review-turn", "--name", "x"])) == 0
+    assert seen["review_turn"] is True
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--name", "y"])) == 0
+    assert seen["review_turn"] is False

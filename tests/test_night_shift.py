@@ -697,6 +697,17 @@ def test_an_outside_request_or_session_blocks_the_next_start(fake_host):
     assert "GiB is free" in NightShiftRunner.start_blocker("http://x", "p", [], settings)
 
 
+def test_with_the_gates_priority_only_memory_holds_a_start_back(fake_host):
+    # A SWE-bench run whose model gate refuses everyone else (SWE_BENCH spec §18): an open session
+    # cannot start a turn and another request is one already in flight, so neither waits it.
+    settings = NightShiftSettings({})
+    FakeHost.samples = [{"running": 3.0, "served": 1.0, "kv_pool": 1.0}]
+    FakeHost.sessions = [1]
+    assert NightShiftRunner.start_blocker("http://x", "p", [], settings, priority=True) is None
+    FakeHost.available = 12 * 1024 ** 3
+    assert "GiB is free" in NightShiftRunner.start_blocker("http://x", "p", [], settings, priority=True)
+
+
 def test_one_wait_is_noted_once_whatever_its_figures(fake_host, monkeypatch):
     # Live run, 2026-10-02: the memory reason's free-memory figure changed on every poll, and the
     # report carried "waiting to start the next task" eight times in one minute.

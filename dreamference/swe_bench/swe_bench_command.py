@@ -54,7 +54,7 @@ class SweBenchCommand:
         run.add_argument("--instances", default=None, help="Comma-separated instance ids")
         run.add_argument("--subset", default=None, help="A file of instance ids, one per line")
         run.add_argument("--limit", type=int, default=None, help="Only the first N selected instances, sorted by id")
-        run.add_argument("--name", default=None, help="The run's name; an existing run of that name is resumed")
+        run.add_argument("--name", default=None, help="The run's name (letters, digits, ., _ and -); an existing run of that name is resumed")
         run.add_argument("--eval", action="store_true", help="Grade the predictions when the agent phase ends")
         run.add_argument("--remove-images", action="store_true", help="With --eval: work one repository at a time and remove its images once it is graded")
         run.add_argument("--code-index", default="off", choices=["off", "universal", "exact"],
@@ -70,16 +70,26 @@ class SweBenchCommand:
                          help="Two steps per instance: a session that studies the issue and writes a refined description "
                               "without changing the repository, then a fresh session that fixes it")
         run.add_argument("--task-rules", default=None,
-                         help="Rules added to the task prompt, comma-separated, of: " + ", ".join(sorted(TASK_RULES))
+                         help="Rules added to the task prompt, comma-separated, of: " + ", ".join(TASK_RULES)
                               + " (default none). tests: never change an existing test, keep your own scripts in "
                                 "/tmp, and compare failing tests by name with and without the change. tests-v2: the "
                                 "same, except that a test the change fails is weighed against the issue, which "
-                                "decides whether the test or the change is wrong")
+                                "decides whether the test or the change is wrong. issue-v1: work out exactly what "
+                                "the issue asks for before editing, follow the pattern of the sibling code that "
+                                "does the same thing, and run the issue's example after the last edit. Rules "
+                                "stack (e.g. tests-v2,issue-v1); the prompt has them in the order listed here, "
+                                "whatever order they are given in")
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
+        run.add_argument("--label", default=None,
+                         help="What the model gate's refusal calls this run, e.g. \"night 1\" (default: SWE-bench run <name>)")
+        run.add_argument("--review-turn", action="store_true",
+                         help="After the agent stops with a changed tree, resume its session once more to re-read the issue, "
+                              "read its diff, run the tests of the modules it changed and fix what does not hold, "
+                              "within the task's time limit; the patch is collected after that turn (default off)")
 
-        evaluate = commands.add_parser("eval", help="The grading phase: the upstream harness applies each patch and runs the tests")
+        evaluate =commands.add_parser("eval", help="The grading phase: the upstream harness applies each patch and runs the tests")
         evaluate.add_argument("run", nargs="?", default=None, help="The run (default: the latest)")
         evaluate.add_argument("--drop-test-hunks", action="store_true",
                               help="Grade the same predictions again with every test file left out of each patch, "
@@ -124,7 +134,7 @@ class SweBenchCommand:
                 idle_minutes=args.idle_minutes, ignore_sessions=args.ignore_open_sessions,
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
-                task_rules=cls._ids(args.task_rules))
+                task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":
@@ -370,6 +380,10 @@ class SweBenchCommand:
         swe_bench_settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
         free = shutil.disk_usage(swe_bench_settings.CACHE_DIR).free
         print(f"Disk: {free / 1024 ** 3:.0f} GiB free; reserve {swe_bench_settings.SweBenchSettings().disk_reserve}")
+        from dreamference.config import DreamferenceConfig
+        from dreamference.vllm_server.model_gate import ModelGate
+        for line in ModelGate.describe(DreamferenceConfig().vllm_host):
+            print(line)
         return 0
 
     @classmethod

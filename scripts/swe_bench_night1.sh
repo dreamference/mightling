@@ -7,7 +7,9 @@
 #
 # Both arms carry the harness fixes of the same change: the per-file test reset at grading, the
 # wider "test patch failed" count and the completion nudge. Settings are those of `im100-default`
-# (code index universal, masking off, prompt default, no refine), with `max_parallel = 2`.
+# (code index universal, masking off, prompt default), with `max_parallel = 2`. Refine is off unless
+# REFINE=1, which adds `--refine` to both arms: set it when refine has become the default, so the
+# night tests tests-v2 on top of what users run.
 #
 #   scripts/swe_bench_night1.sh start   checks, then runs `run` as the user unit ling-swe-night1
 #   scripts/swe_bench_night1.sh run     the night itself (what the unit runs)
@@ -35,6 +37,7 @@ LIVE_UNIT=${LIVE_UNIT:-puffin-swe-im100-refine}
 # and the runner's own check (which stops starting instances below it) use the same number.
 IMAGE_GB=3
 RESERVE_GB=${RESERVE_GB:-100}
+REFINE=${REFINE:-0}
 
 log() { echo "$(date -Is) $*"; }
 admin() { "$PY" -c "import sys; from dreamference.cli.dreamference_cli_controller import main; sys.exit(main(sys.argv[1:]))" "$@"; }
@@ -71,7 +74,7 @@ start() {
         > "$D/dreamference.toml"
     systemd-run --user --unit="$UNIT" -p OOMPolicy=continue \
         --description="SWE-bench night 1: default against test discipline (tests-v2) on 50 fresh tasks" \
-        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" \
+        --setenv=WT="$WT" --setenv=PY="$PY" --setenv=LIST="$LIST" --setenv=D="$D" --setenv=PREFIX="$PREFIX" --setenv=REFINE="$REFINE" \
         /usr/bin/bash -c "'$WT/scripts/swe_bench_night1.sh' run >> '$D/run.log' 2>&1"
     echo "✅ Started $UNIT; log: $D/run.log"
 }
@@ -80,13 +83,15 @@ run() {
     export PYTHONPATH="$WT"
     export DREAMFERENCE_CONFIG_PATH="$D/dreamference.toml"
     cd "$WT" || exit 1
-    log "night 1 from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12))"
+    log "night 1 from $(git -C "$WT" rev-parse --short HEAD), list $LIST ($(sha256sum "$LIST" | cut -c1-12)), refine $REFINE"
     for arm in default tests-v2; do
         extra=""
         [ "$arm" = tests-v2 ] && extra="--task-rules tests-v2"
+        [ "$REFINE" = 1 ] && extra="$extra --refine"
         log "round $PREFIX-$arm"
+        # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$arm" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images
+            --prompt default $extra --eval --remove-images --label "night 1, $arm arm"
         log "$PREFIX-$arm finished ($?)"
         df -h / | tail -1
     done

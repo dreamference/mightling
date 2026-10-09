@@ -8,19 +8,21 @@ setup(
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     ],
     packages=find_packages(),
+    # Floors for requests, sentence-transformers, sqlite-vec, fonttools and Pillow are the first
+    # releases without a published advisory (specs/DREAMFERENCE_MIGHTLING_DEPENDENCY_AUDIT.md).
     install_requires=[
         "pyyaml>=6.0",
         "toml>=0.10.2",
         "rich>=13.0.0",
-        "requests>=2.28.0",
-        "sentence-transformers>=3.0.0",
-        "sqlite-vec>=0.1.0",
+        "requests>=2.33.0",
+        "sentence-transformers>=5.6.0",
+        "sqlite-vec>=0.1.3",
         "tensorizer>=2.0.0",
         "einops>=0.7.0",
-        "fonttools[woff]>=4.50.0",
+        "fonttools[woff]>=4.60.2",
         # Imported directly (brand assets, image search, web tools), not just a dependency of a
         # dependency: they were only ever present locally because another package pulled them in.
-        "Pillow>=10.0.0",
+        "Pillow>=12.3.0",
         "beautifulsoup4>=4.12.0",
     ],
     extras_require={

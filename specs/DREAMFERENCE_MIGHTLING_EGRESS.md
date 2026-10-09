@@ -289,3 +289,13 @@ So the audit now tells a route lookup from a connection, and still judges anythi
 Cost, measured on the app session: 2.4 MB of trace and 10,522 lines for 25 seconds, finishing normally; the `exec` session's verdict and destinations are unchanged. Results on this machine: `--app` **pass** (loopback ports 3000, 8000 and 8767 only; 11 route lookups to the probe address, nothing sent), `exec` **pass**.
 
 Tests added (36 in all): the recorded probe line is a route lookup and the app session passes; a `write` or a `sendto` on that socket (labelled by inode, or by its peer) makes it a destination and fails; without labels it is a destination as before; a TCP connect is never a route lookup; a labelled resolver socket still yields its query's name; the app session runs hidden with a scratch `HOME` and needs a display and a build.
+
+### 10.8 Three more scenarios (2026-10-08)
+
+`ling-admin audit egress` now traces one of five things, chosen by a flag ([CLI §4.24](./DREAMFERENCE_CLI.md)); the verdict and the exit codes are the same for all.
+
+- **`--app`, changed on 2026-10-08:** the desktop app's first window is Ask on `ling web` (DESKTOP_ELECTRON §11), so the allowlist for that session names `ling web`'s port 3100 instead of Onyx's 3000. Since 2026-10-09 (ASK §18.6) the app starts no `ling web` and that session's allowlist is the `exec` session's, with neither port on it.
+- **`--web`:** `ling web serve` on a free loopback port, traced, while an untraced `ling web ask` asks it one question through the bridge (MIGHTLING_ASK §13). Everything the server starts is traced with it: the app server it launches on its own socket, and `ling prompt show ask --composed`. `HOME` and `XDG_RUNTIME_DIR` are scratch too, so the server finds no advertised node, no user unit and no app server of the user's to join. MIGHTLING_ASK makes a pass a condition of shipping Phase A.
+- **`--docs`** (`DocsEgressAudit`, `audit/docs_egress_audit.py`): `ling-docs index` over a fixture folder and a `ling-docs search`, both under `strace -f` in a throwaway home. It passes only with **no network destination at all**, loopback included, and no DNS query, because the document index never talks to anything; it needs no model server. The extractor and the embedder run in `systemd-run --scope` inside bwrap with an empty network namespace, and the trace follows them ([MIGHTLING_LOCAL_INDEX](./DREAMFERENCE_MIGHTLING_LOCAL_INDEX.md) §10.2).
+
+`codex build` still runs only the `exec` and `--tui` scenarios after a new build (§10.5).

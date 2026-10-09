@@ -620,6 +620,46 @@ class DreamferenceCLIController:
         return 0
 
     @classmethod
+    def handle_gate_pause(cls, vllm_host: str, duration: Optional[str]) -> int:
+        """
+        `ling-admin night pause [--for DURATION]` and `night resume`: while paused, the model gate
+        lets every request through although a SWE-bench run holds it; the run then waits for
+        other requests before starting an instance, as it did before the gate, and records the
+        interval for its report (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18).
+
+        Args:
+            vllm_host: This machine's model server.
+            duration: How long to pause (`90m`, `2h`, minutes); None to resume.
+
+        Returns:
+            int: The exit code.
+        """
+        from dreamference.night_shift import NightShiftSettings
+        from dreamference.vllm_server.model_gate import ModelGate
+        if duration is None:
+            if ModelGate.resume():
+                print("▶️  Pause ended: the model gate refuses every request but the benchmark run's again.")
+            else:
+                print("💡 No pause was in force.")
+            print("\n".join(ModelGate.describe(vllm_host)))
+            return 0
+        try:
+            seconds = NightShiftSettings.parse_duration(duration)
+        except ValueError as error:
+            print(f"❌ --for: {error}")
+            return 2
+        if seconds <= 0:
+            print("❌ --for must be longer than nothing; `ling-admin night resume` ends a pause.")
+            return 2
+        record = ModelGate.pause(seconds)
+        until = time.strftime("%H:%M", time.localtime(record["until"]))
+        print(f"⏸️  The model gate lets every request through until {until}. A benchmark run starts no new "
+              "instance while others use the model, and its report names the pause; "
+              "`ling-admin night resume` ends it early.")
+        print("\n".join(ModelGate.describe(vllm_host)))
+        return 0
+
+    @classmethod
     def _refuse_during_night_run(cls, what: str) -> None:
         """
         Stops `ling-admin <what>` while a Night Shift run or a SWE-bench run holds the runner
@@ -947,6 +987,7 @@ class DreamferenceCLIController:
         # checkpoint on the old image and only the /v1/models listing told the truth.
         start_server_parser.add_argument("--model", default=None, help=f"Model name to serve (default: the configured main model; examples: {DEFAULT_MODEL}, llama-3.3-70b)")
         start_server_parser.add_argument("--port", type=int, default=8000, help="Port for the model server's /v1 API")
+        start_server_parser.add_argument("--no-gate", action="store_true", help="Serve the port from the engine itself, without the model gate that lets a SWE-bench run refuse other requests")
         start_server_parser.add_argument("--quantization", default=None, help="Quantization method (int8, fp8, awq)")
         start_server_parser.add_argument("--draft-model", default=None, help="Speculative decoding draft model (e.g. qwen2.5-coder-1.5b)")
         start_server_parser.add_argument("--num-speculative-tokens", type=int, default=None, help="Number of speculative tokens to propose")
@@ -1042,6 +1083,9 @@ class DreamferenceCLIController:
         night_run_parser.add_argument("--minutes", type=float, default=None, help="Run for this many minutes instead")
         night_run_parser.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         night_run_parser.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing; their requests still pause the run)")
+        night_pause_parser = night_subparsers.add_parser("pause", help="Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate)")
+        night_pause_parser.add_argument("--for", dest="duration", default="1h", help="How long: 90m, 2h, 45s, or minutes (default 1h)")
+        night_subparsers.add_parser("resume", help="End a pause: the model gate refuses everyone but the benchmark run again")
 
         # Command: ling-admin swe-bench (run ling over SWE-bench instances and grade the patches)
         from dreamference.swe_bench.swe_bench_command import SweBenchCommand
@@ -2291,7 +2335,8 @@ class DreamferenceCLIController:
                         guided_decoding_backend=args.guided_decoding_backend or config.guided_decoding_backend,
                         use_tensorizer=getattr(args, "tensorize", None),
                         background=True,
-                        docker_image=getattr(args, "docker_image", None)
+                        docker_image=getattr(args, "docker_image", None),
+                        gate=not getattr(args, "no_gate", False),
                     )
                 
                     # Print progress while server is initializing
@@ -2516,12 +2561,16 @@ class DreamferenceCLIController:
                 sys.exit(0 if NightShiftScheduler.disable() else 1)
             if args.night_command == "status":
                 print(NightShiftScheduler.status())
+                from dreamference.vllm_server.model_gate import ModelGate
+                print("\n".join(ModelGate.describe(config.vllm_host)))
                 sys.exit(0)
             if args.night_command == "run":
                 sys.exit(NightShiftRunner.run(until=args.until, minutes=args.minutes,
                                               idle_minutes=args.idle_minutes,
                                               ignore_sessions=args.ignore_open_sessions))
-            print("usage: ling-admin night {enable,disable,status,run}")
+            if args.night_command in ("pause", "resume"):
+                sys.exit(cls.handle_gate_pause(config.vllm_host, args.duration if args.night_command == "pause" else None))
+            print("usage: ling-admin night {enable,disable,status,run,pause,resume}")
             sys.exit(2)
 
         elif args.command == "code":

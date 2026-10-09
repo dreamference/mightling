@@ -1,7 +1,7 @@
 # Security review, October 2026
 
 **Status:** review of `main` at `61d00d5` (2026-10-07), the day after the repository became public,
-with fixes on branch `security/review-1`. Read from an attacker's side: what a stranger on the
+with fixes on branch `security/review-1`, merged through the signing branch (`7d3c14b`) and released in 1.5.1. Read from an attacker's side: what a stranger on the
 internet, a page in the user's browser, a machine on the same network, or a paired machine can
 reach. Findings that are fixed name the change; findings that are documented or accepted say why.
 Anything serious that is not yet fixed is tracked privately and is not described here.
@@ -104,7 +104,7 @@ A remembered node is found again by the id in its mDNS advert, and the address i
 (a node that moves is real). An advert's id is only a claim. With two adverts claiming the
 remembered id, the launcher now uses the one at the remembered address; if neither is there, it
 asks (`ling-rs/src/node.rs`), and the desktop app keeps the remembered address
-(`desktop/src-tauri/src/discover.rs`). One claimant at a new address is still followed with a note,
+(`desktop/src-tauri/src/discover.rs`; that Tauri app was replaced by the Electron app, which browses for nothing itself). One claimant at a new address is still followed with a note,
 which is the documented behaviour for a node that has moved (see 11).
 
 ### 7. `restrict` on paired keys (fixed)

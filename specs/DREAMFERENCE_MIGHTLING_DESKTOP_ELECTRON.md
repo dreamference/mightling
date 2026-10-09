@@ -176,7 +176,19 @@ The ad-hoc signatures are what Apple silicon needs to run the app at all; they s
 - **The keychain**: the cookie-encryption key is stored in the login keychain (CI used Chromium's mock keychain). macOS may ask once whether Mightling may use it.
 - **Gaps known from the code:** `ling app` (`ling-rs/src/app.rs`) looks for `ling-app` on PATH or a `.desktop` entry, neither of which exists on a Mac, so it does not open the app there (`open -b dev.dreamference.mightling` would); closing the last window quits the app (Linux behaviour, not the Mac convention); the data folder is `~/.local/share/dev.dreamference.mightling`, not `~/Library/Application Support`; no auto-update; the tray icon is the colour icon scaled down, not a template image; the `.icns` tops out at 512 px (no 1024 px entry, as `icons/` has none).
 
-## 11. Electron Forge 8 (branch `desktop/forge8`, 2026-10-09; not merged before 1.6.0)
+## 11. Chat becomes Ask (2026-10-08, `3febddb`)
+
+The app's first window no longer shows Onyx. It is **Ask**: the Mightling UI loaded from `ling web` on this machine (`http://127.0.0.1:3100`, [MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §10, Phase B), signed in with a one-time link from `ling web open --print-url`, which the window trades for a session cookie as a browser does; the app reads no credential file itself (`desktop/electron/src/web.ts`). When nothing answers on the port the app starts `ling web serve` (loopback only) as its child and stops it on quit; a server the user runs as a unit (`ling web start`) is used as it is.
+
+- **Removed with it:** the Onyx sign-in, the loopback forwarder and the node discovery that fed it, and the `multicast-dns` dependency. No permission but clipboard writes is granted to the window.
+- **`ling app`** opens Ask without checking for Onyx (`--ask`; `--chat` is kept as an alias); `ling app --work`, a folder or `--thread <id>` open Work. `ling-admin desktop run` and `status` no longer need Onyx.
+- **The app's egress audit** (`ling-admin audit egress --app`) allows `ling web`'s 3100 instead of Onyx's 3000.
+- **On Windows**, which has no `ling web` yet, Ask opens Work.
+- **Ask inside the Work window** is the next step (MIGHTLING_ASK's list of what is not built), not part of this change.
+
+**Superseded in part on 2026-10-09** ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §18.6): Ask is now a view of the one app window, served by the app's own app-server over stdio, on every platform. The app no longer finds, starts or signs in to `ling web` (`web.ts` and `chat.ts` are removed), and `audit egress --app` allows neither 3100 nor 3000.
+
+## 12. Electron Forge 8 (branch `desktop/forge8`, 2026-10-09)
 
 **Why.** Every `npm audit` finding in `desktop/electron` was a development dependency behind Forge 7.11.2 (the dependency audit on branch `security/dep-audit`, its §6): `tar` 6.2.1 (1 critical, 8 high, 3 moderate advisories), `extract-zip` 2.0.1 (2 high), `tmp` 0.0.33 (1 high, 1 low), `braces` 3.0.3 (1 high, no fixed release), `sprintf-js` 1.1.3 (1 moderate). None is in the shipped app; they run on a developer's machine and in the release workflow, where `tar` and `extract-zip` unpack what is downloaded while the app is packaged. `npm audit fix` without `--force` offered only Forge 8.
 
