@@ -336,7 +336,7 @@ fn choose(adverts: &[Advert], gone: Option<&str>, interactive: bool) -> anyhow::
 }
 
 async fn answers(host: &str) -> bool {
-    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(2)).build() else {
+    let Ok(client) = crate::proxy::direct_client(Duration::from_secs(2)) else {
         return false;
     };
     crate::served_model(&client, host).await.is_some()
@@ -474,7 +474,7 @@ pub async fn run_cli(args: &[String]) -> i32 {
 }
 
 async fn served(host: &str) -> Option<crate::ServedModel> {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().ok()?;
+    let client = crate::proxy::direct_client(Duration::from_secs(2)).ok()?;
     crate::served_model(&client, host).await
 }
 

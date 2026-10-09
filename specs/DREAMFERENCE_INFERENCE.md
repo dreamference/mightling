@@ -44,7 +44,7 @@ Run the container under the PSI MemoryPressureWatchdog
     ↓
 Stream logs and Docker memory; poll /v1/models until healthy
     ↓
-NVFP4 canary (nvfp4 aliases only); report diffusion sidecar state (when diffusion is on)
+NVFP4 canary (nvfp4 aliases only); tool-call check through /v1/responses (every model; MODELS §2.1); report diffusion sidecar state (when diffusion is on)
     ↓
 Exit; the containers keep running (--restart unless-stopped)
 ```

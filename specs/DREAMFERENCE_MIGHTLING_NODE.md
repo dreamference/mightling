@@ -816,3 +816,7 @@ A second GB10 (an ASUS GX10, renamed `node-b`, on Wi-Fi like this one) was insta
 - **The upgrade to 1.5.1 on both machines** moved the advertisement to `_mightling-node._tcp` and rewrote the paired key's forced command in `authorized_keys` to the renamed `ling-admin` (RENAME_MIGHTLING §4.2), which is what the pairing between the two needed to keep working.
 
 Not yet run between the two: jobs (`node run`), lanes for Night Shift or SWE-bench (the second machine is reserved), `/night add --on`, and `node provision`.
+
+### 18.11 Added on 2026-10-09: a proxy left in the environment
+
+A node's address is exempt from any `HTTP_PROXY` the user's shell carries (EGRESS §11): `ling` adds the configured host and the remembered node's address to `NO_PROXY` before Codex starts, and Night Shift adds a lane's host to each task's environment. A node found by a browse for the first time is not in it for that first session, because the variable can only be set before any thread exists and the browse comes later; the launcher's own requests to it skip proxies regardless, and from the next start it is the remembered node and exempt.

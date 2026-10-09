@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from dreamference.config import DreamferenceConfig
+from dreamference.config import DreamferenceConfig, ProxyBypass
 from dreamference.config.dreamference_config import DEFAULT_MODEL, DEFAULT_DIFFUSION_MODEL
 from dreamference.runner import (
     ClineRunner, ClineInstaller,
@@ -315,6 +315,39 @@ class DreamferenceCLIController:
             )
 
         return rows
+
+    @classmethod
+    def _run_tool_call_canary(cls, vllm_mgr, requested_model: Optional[str]) -> Optional[bool]:
+        """
+        Checks that the served model returns a well-formed tool call through `ling`'s own API path,
+        a streamed `/v1/responses` request (ToolCallCanary). A failure is a warning naming the parser
+        or template likely at fault; it does not stop the start, since the server is up and the chat
+        UI needs no tools (specs/DREAMFERENCE_MODELS.md §2.1).
+
+        Args:
+            vllm_mgr: The server manager; its `host` and `get_models()` are used.
+            requested_model (Optional[str]): The model `server start` was asked for, preferred when the
+                served id maps to more than one registry entry.
+
+        Returns:
+            Optional[bool]: Whether the call was well formed; None when no model was reported.
+        """
+        from dreamference.hardware import model_key_for_served_id
+        from dreamference.vllm_server.tool_call_canary import ToolCallCanary, TOOL_CALL_CANARY_TIMEOUT_S
+        models = vllm_mgr.get_models()
+        if not models:
+            print("⚠️  Tool-call check skipped: the server reported no model.")
+            return None
+        print(f"🧪 Checking a tool call through /v1/responses (at most {TOOL_CALL_CANARY_TIMEOUT_S:.0f} s)...")
+        # The server is asked which model it serves, never the configuration.
+        model_key = model_key_for_served_id(models[0], requested_model)
+        passed, line = ToolCallCanary.run(vllm_mgr.host, models[0], model_key)
+        if passed:
+            print(f"✅ Tool call well formed: {line}")
+        else:
+            print(f"⚠️  Tool-call check failed: {line}.")
+            print("   The server is up, but ling's sessions will not get tool calls until this is fixed.")
+        return passed
 
     @classmethod
     def _read_kv_pool_facts(cls, container: str, max_model_len: Optional[str]) -> "dict[str, str]":
@@ -1390,6 +1423,11 @@ class DreamferenceCLIController:
         parser = cls.build_parser()
         args = parser.parse_args(argv)
 
+        # Loopback and the model server never go through a proxy a shell left set, for every request
+        # made here and every process started from here (specs/DREAMFERENCE_MIGHTLING_EGRESS.md §11).
+        # The configured host is added below, once the configuration is read.
+        ProxyBypass.apply(os.environ, os.environ.get("DREAMFERENCE_VLLM_HOST"))
+
         if not args.command:
             parser.print_help()
             sys.exit(0)
@@ -1452,6 +1490,7 @@ class DreamferenceCLIController:
             use_tensorizer=tensorize_opt,
             guided_decoding_backend=guided_decoding_backend
         )
+        ProxyBypass.apply(os.environ, config.vllm_host)
 
         # Instantiate selected runner (Codex by default, or Cline/Continue/OpenHands)
         if config.agent_runner == "cline":
@@ -2389,6 +2428,8 @@ class DreamferenceCLIController:
                                     print(f"⚠️  NVFP4 Canary skipped: API returned {resp.status_code}")
                             except Exception as e:
                                 print(f"⚠️  NVFP4 Canary failed to execute: {e}")
+
+                        cls._run_tool_call_canary(vllm_mgr, args.model)
 
                         # By now the sidecar's 0.6B load has usually finished under the main
                         # model's. A brief poll reports its state either way — its /health is the

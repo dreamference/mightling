@@ -48,6 +48,8 @@ const CARRY_OVER_DB_PREFIXES: &[&str] =
 pub fn use_mightling_home() {
     // Refine mode's `--refine`/`--no-refine` become its variable here, for the same reason.
     crate::refine::export_flag();
+    // Loopback and the model server never go through a proxy a shell left set (proxy.rs).
+    crate::proxy::export();
     // A Windows update moved the binaries it replaced aside; this start is the first moment they
     // can be deleted.
     #[cfg(windows)]

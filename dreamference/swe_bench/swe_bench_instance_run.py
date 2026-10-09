@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional
 
+from dreamference.config.proxy_bypass import ProxyBypass
 from dreamference.night_shift.night_shift_host import NIGHT_RUN_ENV
 from dreamference.night_shift.night_shift_task_run import ANNOUNCES_WORK, NUDGE, NightShiftTaskRun
 from dreamference.night_shift.refine_prompt import (FIX_RULES, FIX_RULES_V2, NO_REFINED as NO_REFINED_PIECE,
@@ -742,6 +743,11 @@ class SweBenchInstanceRun:
             "GIT_CONFIG_VALUE_0": "/testbed",
             **self.extra_env,
         }
+        # The model server (the network's gateway, or a relay to a lane there) and loopback never go
+        # through a proxy: neither one the host's environment names nor one Docker's client
+        # configuration puts into every container. The host's own exemptions are kept.
+        environment.update({key: os.environ[key] for key in ("NO_PROXY", "no_proxy") if key in os.environ})
+        ProxyBypass.apply(environment, self.model_url)
         mounts: List[str] = list(self.extra_mounts)
         if self.code_index:
             environment.update(self.code_index["env"])

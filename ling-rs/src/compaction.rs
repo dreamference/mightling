@@ -99,7 +99,7 @@ pub async fn prepare(args: Vec<OsString>, codex_home: &Path, host: &str, model: 
 /// `sglang:max_total_num_tokens`, or vLLM's `num_gpu_blocks` times `block_size`. `None` when the
 /// endpoint does not answer or names neither.
 pub async fn kv_pool(host: &str) -> Option<u64> {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(1)).build().ok()?;
+    let client = crate::proxy::direct_client(Duration::from_secs(1)).ok()?;
     let response = client
         .get(format!("{}/metrics", host.trim_end_matches('/')))
         .send()

@@ -19,6 +19,8 @@ Four traps, all handled:
 
 Measured (single stream, greedy): prose 25.5, code 50.3, JSON 87.0 tok/s, prefill ~1,700 tok/s (~1,000 at 116K tokens), ~38.7 GB of host memory still free; four ling tasks at once finished in 23 s.
 
+After the NVFP4 canary, `server start` checks a **tool call through `/v1/responses`**, the path `ling` uses (`ToolCallCanary`): one streamed request with a trivial tool, 60 s at most. A failure is a warning naming the parser or template likely at fault (`--tool-call-parser`, `--reasoning-parser`, `chat_template_patches`) and does not stop the start. A chat-completions probe would not catch it: the Responses path converts tools and parses calls in code of its own (specs/DREAMFERENCE_MODELS.md §2.1).
+
 It is the only model served, and was the only model in the registry from 2026-10-07 to 2026-10-09: the Qwen 3.5 122B fallbacks and Qwen 3.6 35B were removed on 2026-10-07, with their vLLM recipes, their images (`Dockerfile.dflash`, `Dockerfile.dense`) and the `runtime/` patches. The vLLM launcher stays, tested against test-only recipes (`vllm_recipes` in `tests/conftest.py`).
 
 ## A candidate checkpoint: Minima (night 2)

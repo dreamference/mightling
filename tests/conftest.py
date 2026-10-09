@@ -240,6 +240,12 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     # The rename migration's switch (legacy_name_migration.py): a developer's shell setting must not
     # decide whether a test migrates. A test that means to migrate sets it.
     monkeypatch.delenv("MIGHTLING_LEGACY_MIGRATION", raising=False)
+    # `ling-admin` extends NO_PROXY in its own environment (ProxyBypass), so a test that runs the
+    # CLI would leave the value behind for the rest of the suite. Set first, so that it is restored
+    # (deleted) even when the developer's shell had none; a test that needs one sets it.
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
 
     # HOME alone does not reach paths a module resolved at import, like VLLM_CACHE_HOME: a test
     # that ran start_server stamped the real ~/.cache/dreamference/vllm/.compile_signature with a

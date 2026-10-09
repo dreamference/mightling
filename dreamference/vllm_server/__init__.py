@@ -6,6 +6,7 @@ from dreamference.vllm_server.vllm_startup_monitor import VLLMStartupMonitor
 from dreamference.vllm_server.host_safety_setup import HostSafetySetup
 from dreamference.vllm_server.sandbox_prerequisite import SandboxPrerequisite
 from dreamference.vllm_server.model_gate import ModelGate
+from dreamference.vllm_server.tool_call_canary import ToolCallCanary
 from dreamference.vllm_server.model_gate_service import ModelGateService
 from dreamference.vllm_server.diffusion_server_manager import (
     DiffusionServerManager,
@@ -22,6 +23,7 @@ __all__ = [
     "HostSafetySetup",
     "SandboxPrerequisite",
     "ModelGate",
+    "ToolCallCanary",
     "ModelGateService",
     "DiffusionServerManager",
     "DEFAULT_VLLM_HOST",

@@ -550,6 +550,9 @@ def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
     assert any(mount.endswith(":/opt/ling:ro") for mount in created)
     env = dict(a.split("=", 1) for i, a in enumerate(created) if created[i - 1] == "-e")
     assert env["DREAMFERENCE_VLLM_HOST"] == "http://172.30.0.1:8000"
+    # Neither a proxy in the host's environment nor one Docker puts into containers sees the model.
+    for key in ("NO_PROXY", "no_proxy"):
+        assert {"localhost", "127.0.0.1", "::1", "172.30.0.1"} <= set(env[key].split(","))
     assert env["PATH"].startswith("/opt/miniconda3/envs/testbed/bin:")
     assert env["MIGHTLING_NIGHT_RUN"] == "1"
     assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("safe.directory", "/testbed")
