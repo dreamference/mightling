@@ -1,6 +1,6 @@
 # Mightling — Google Auth via GOA Client
 
-**Status:** partly implemented (Gmail only) · **Owner:** Dreamference · **Scope:** Gmail + Drive connectors, single-user and multi-account
+**Status:** partly implemented: Gmail (2026-09-29), then Google Drive and Google Calendar read-only (2026-10-03, released in 1.4.0 through `/apps`, [MIGHTLING_APPS](./DREAMFERENCE_MIGHTLING_APPS.md) §9–§9a) · **Owner:** Dreamference · **Scope:** Gmail + Drive connectors, single-user and multi-account
 
 ## 0. As built (checked against `dreamference/chat/gmail_search_service.py`, 2026-09-29)
 
@@ -16,7 +16,8 @@ The Gmail half of this design is implemented inside the **Gmail service containe
 - **Storage:** one account per Google address. The refresh token is **sealed** with a key kept in the same directory (obfuscation with a stated threat model, not secret management), alongside the current access token and `expires_at`. Access tokens refresh when less than 60 s remain.
 - **Transport:** IMAP XOAUTH2 against `imap.gmail.com:993`, on `[Gmail]/All Mail`, found by the `\All` attribute, with `X-GM-RAW` search, read-only (`BODY.PEEK`). The Gmail REST API is not used.
 - **Multi-account (§8):** yes. Accounts can be disconnected with `POST /disconnect`, and search reports failures per account.
-- **Not implemented:** Drive, Docs, Sheets and Contacts (§7 rows 2–4); the `invalid_grant` / `invalid_client` / `accessNotConfigured` error mapping (§6); the fleet-wide alert and fallback UI (§10); DWD for Workspace.
+- **Since 2026-10-03:** Drive (My Drive and shared drives; Docs and Slides exported as text, Sheets as CSV, small `text/*` files) and Calendar, read-only, in `google_workspace_reader.py` beside the service, each asked for with its own consent (`/api/google/oauth/start?app=`), with the granted scopes recorded per account. GNOME's client is refused the read-only Drive and Calendar scopes, so the full ones are requested and the service only reads (MIGHTLING_APPS §11.1).
+- **Not implemented:** Contacts (§7 row 4); the `invalid_grant` / `invalid_client` / `accessNotConfigured` error mapping (§6); the fleet-wide alert and fallback UI (§10); DWD for Workspace.
 - **Earlier design, now gone from the code:** GNOME Online Accounts on the host holding the refresh token, with a systemd user timer pushing access tokens into a service that accepted no POST. The module docstring now describes the flow above and records that design as removed, and the leftover `GNOME_TOKEN_UNIT` constant is gone from `onyx_runner.py` (both until 2026-09-29).
 
 ## 1. Summary
