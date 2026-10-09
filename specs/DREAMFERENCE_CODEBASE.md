@@ -1,8 +1,8 @@
 # Mightling Codebase Architecture & Reference
 
-> **Version:** 1.2.0
+> **Version:** 1.5.1
 > **Subject:** Source Code Layout, Module Organization, Package Structure
-> **Checked against the code:** 2026-10-02 (module tree against the tracked source tree, by script: every Python module under `dreamference/` and every Rust source file of the launcher, the web commands and the desktop shell is named below; §5 against `build_launch_command()` output on 2026-10-01)
+> **Checked against the code:** 2026-10-09 (module tree against the tracked source tree, by script: every Python module under `dreamference/` is named below, and every Rust crate and the desktop projects by folder; §5 against the registry, its command last recorded from `build_launch_command()` on 2026-10-01)
 
 ---
 
@@ -12,15 +12,15 @@
 - [2. Module Structure](#2-module-structure)
 - [3. Subsystem Packages](#3-subsystem-packages)
 - [4. Import Conventions](#4-import-conventions)
-- [5. Launch Commands for the Default and Fallback Models](#5-launch-commands-for-the-default-and-fallback-models)
+- [5. Launch Command for the Main Model](#5-launch-command-for-the-main-model)
 
 ---
 
 ## 1. Package Overview
 
-**Version:** `dreamference.__version__ == "1.2.0"`.
+**Version:** `dreamference.__version__ == "1.5.1"`.
 
-**Architecture:** twelve subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `ling-rs/`, the web commands `ling-web-rs/`, the code index `ling-code-rs/`, the Codex fork `codex/` with its patches `codex-patches/`, and the Tauri project `desktop/`.
+**Architecture:** twelve subsystem packages under `dreamference/`. Each `__init__.py` is a re-export facade with an explicit `__all__`. Alongside them sit the Rust launcher `ling-rs/` (with its member crates: the web UI server, Signal and chat bridges, apps, skills and the leaf crates), the web commands `ling-web-rs/`, the code index `ling-code-rs/`, the document index `ling-docs-rs/`, the Codex fork `codex/` (submodule) with its patches `codex-patches/`, the desktop app `desktop/` (Electron shell `desktop/electron/` and the shared UI `desktop/ui/`), and the `ling-engine/` submodule (the future model server's own repository; nothing here builds it).
 
 **Dead shims:** the top-level `dreamference/<name>.py` modules (`cli.py`, `config.py`, `hardware.py`, …) contain `from dreamference.<name>.__init__ import *`. They **never execute**: Python resolves the same-named package directory first. Editing them has no effect.
 
@@ -37,15 +37,15 @@
 | `dreamference/config/` | 4-tier config resolution, config generation |
 | `dreamference/hardware/` | GB10 detection and telemetry, model matrix, HF downloads and tensorization |
 | `dreamference/vllm_server/` | Docker model-server lifecycle (vLLM and SGLang), launch arguments, chat-template patching, host-safety guards, diffusion sidecar |
-| `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, the `ling` builder, the Codex test runner |
-| `dreamference/chat/` | Onyx Lite (Mightling web UI) lifecycle and patches, Gmail, image search, the SearXNG sidecar and the sidecar network, desktop window |
+| `dreamference/runner/` | Four agent installer/runner pairs, the readiness waiter, the `ling` builder, the Codex test runner, `ling-docs`'s model setup |
+| `dreamference/chat/` | Onyx Lite (the web chat until its retirement) lifecycle and patches, the Google service (Gmail, Drive, Calendar), image search, the SearXNG sidecar and the sidecar network, the Matrix homeserver, the desktop app's runner |
 | `dreamference/context_engine/` | AST symbols, TF-IDF, FTS5 and dense retrieval |
 | `dreamference/mcp_server/` | stdio MCP server for JetBrains / VS Code, web tools, and code search through `ling-code` |
-| `dreamference/cli/` | `ling-admin`, deep model inspection, benchmark dataset, code-index tool setup |
+| `dreamference/cli/` | `ling-admin`, deep model inspection, benchmark dataset, code-index tool setup, the Puffin → Mightling migration |
 | `dreamference/night_shift/` | Night Shift: the overnight run of the `/night` queue, its timer and report |
 | `dreamference/swe_bench/` | `ling-admin swe-bench`: `ling` over SWE-bench instances, graded by the upstream harness |
 | `dreamference/audit/` | `ling-admin audit egress`: a traced `ling` session and a verdict on where it connected |
-| `dreamference/node/` | The node half of the client/server split: the advertised service, the node id, what is published to the LAN, and managing other nodes over an SSH pairing |
+| `dreamference/node/` | The node half of the client/server split: the advertised service, the node id, what is published to the LAN, managing other nodes over an SSH pairing, jobs, model sync, lanes, and provisioning more GB10s (`node prepare`, `node provision`) |
 
 ---
 
@@ -53,7 +53,7 @@
 
 ```
 dreamference/
-├── __init__.py                       # __version__ = "1.2.0" only (no re-exports)
+├── __init__.py                       # __version__ = "1.5.1" only (no re-exports)
 ├── web_canvas.py                     # CanvasHandler + start_web_canvas_server (ling-admin web)
 ├── {cli,config,context_engine,hardware,mcp_server,runner,vllm_server}.py   # dead shims (see §1)
 │
@@ -61,7 +61,8 @@ dreamference/
 │   ├── dreamference_cli_controller.py    # DreamferenceCLIController, main()
 │   ├── model_deep_inspector.py           # ModelDeepInspector (main-model inspect --deep)
 │   ├── sonnet_dataset.py                 # embedded Sonnet corpus for benchmark_server
-│   └── code_index_setup.py               # CodeIndexSetup, PinnedTool (ling-admin code setup)
+│   ├── code_index_setup.py               # CodeIndexSetup, PinnedTool (ling-admin code setup)
+│   └── legacy_name_migration.py          # LegacyNameMigration (ling-admin's half of the Puffin → Mightling move)
 ├── config/
 │   ├── dreamference_config.py            # DreamferenceConfig: 4-tier resolution
 │   ├── config_path_resolver.py           # ConfigPathResolver
@@ -77,7 +78,7 @@ dreamference/
 ├── vllm_server/
 │   ├── vllm_server_manager.py            # VLLMServerManager
 │   ├── vllm_launch_options.py            # VLLMLaunchOptions
-│   ├── sglang_launch_builder.py          # SGLangLaunchBuilder (engine: sglang, the default model)
+│   ├── sglang_launch_builder.py          # SGLangLaunchBuilder (engine: sglang, the main model)
 │   ├── chat_template_patcher.py          # ChatTemplatePatcher (chat_template_patches, on a copy)
 │   ├── vllm_log_streamer.py              # VLLMLogStreamer
 │   ├── vllm_server_status.py             # VLLMServerStatus
@@ -85,6 +86,8 @@ dreamference/
 │   ├── model_loading_monitor.py          # ModelLoadingMonitor
 │   ├── psi_watchdog.py                   # MemoryPressureWatchdog
 │   ├── diagnostics.py                    # ContainerDiagnostics
+│   ├── host_safety_setup.py              # HostSafetySetup (ling-admin host check|setup)
+│   ├── sandbox_prerequisite.py           # SandboxPrerequisite (bubblewrap's AppArmor profile, checked every run)
 │   ├── diffusion_server_manager.py       # DiffusionServerManager
 │   └── diffusion_openai_service.py       # DiffusionModelRunner (runs inside the sidecar container)
 ├── runner/
@@ -94,6 +97,7 @@ dreamference/
 │   ├── cline_runner.py / cline_installer.py
 │   ├── continue_runner.py / continue_installer.py
 │   ├── openhands_runner.py / openhands_installer.py
+│   ├── docs_index_setup.py                      # DocsIndexSetup (ling-admin docs setup: what ling-docs loads)
 │   └── vllm_readiness_waiter.py                 # VLLMReadinessWaiter (wait_for_vllm)
 ├── chat/
 │   ├── onyx_runner.py / onyx_installer.py       # OnyxRunner / OnyxInstaller
@@ -102,12 +106,17 @@ dreamference/
 │   ├── onyx_ui_labels.py                        # OnyxUILabels (string rewrites in JS)
 │   ├── onyx_ui_scripts.py                       # OnyxUIScripts (injected behaviour)
 │   ├── onyx_brand_assets.py                     # OnyxBrandAssets (logos, favicon, app icon)
-│   ├── gmail_search_service.py                  # GmailSearchService (container service)
+│   ├── chat_admin_credentials.py                # ChatAdminCredentials (the web chat's per-install admin password)
+│   ├── gmail_search_service.py                  # GmailSearchService (the Google service inside its container)
+│   ├── google_workspace_reader.py               # GoogleWorkspaceReader (read-only Drive and Calendar, staged beside it)
+│   ├── google_service.py                        # GoogleService (ling-admin google start|stop|status, without the web UI)
 │   ├── gmail_credentials.py                     # GmailCredentials
 │   ├── gmail_client.py                          # GmailClient (ling-admin gmail)
+│   ├── matrix_homeserver.py                     # MatrixHomeserver (ling-admin matrix: tuwunel on an internal network)
 │   ├── image_search_service.py                  # ImageSearchService, HardenedFetcher, ImageStore, SearxngClient, SiglipClient, VisionRanker, FetchRejected
 │   ├── searxng_sidecar.py                       # SearxngSidecar (ling-admin searxng start)
 │   ├── sidecar_network.py                       # SidecarNetwork (the user-defined network sidecars are created on)
+│   ├── desktop_protocol_types.py                # DesktopProtocolTypes (the app-server's TypeScript types for Work)
 │   └── desktop_runner.py / desktop_installer.py # DesktopRunner / DesktopInstaller (ling-app)
 ├── context_engine/
 │   ├── context_engine.py                 # ContextEngine
@@ -130,6 +139,8 @@ dreamference/
 │   ├── night_shift_queue.py              # NightShiftQueue (the files under $CODEX_HOME/night, the runner lock)
 │   ├── night_shift_host.py               # NightShiftHost (read-only probes of the server and the host)
 │   ├── night_shift_index.py              # NightShiftIndex (refreshes a repository's code index before its tasks)
+│   ├── night_shift_remote.py             # NightShiftRemote (/night add --on <node>: tasks worked by another node)
+│   ├── refine_prompt.py                  # RefinePrompt (refine mode's texts: study, then solve)
 │   ├── night_shift_settings.py           # NightShiftSettings (the [night] table)
 │   ├── night_shift_report.py             # NightShiftReport (the morning report)
 │   └── night_shift_scheduler.py          # NightShiftScheduler (the systemd user timer)
@@ -143,11 +154,16 @@ dreamference/
 │   ├── swe_bench_runner.py               # SweBenchRunner (swe-bench run: admission, scheduling, resume)
 │   ├── swe_bench_instance_run.py         # SweBenchInstanceRun (one instance: container, ling exec, prediction)
 │   ├── swe_bench_code_index.py           # SweBenchCodeIndex (--code-index universal: index on the host, mount read-only)
+│   ├── swe_bench_name_stripper.py        # SweBenchNameStripper (swe-bench run --strip-names)
+│   ├── swe_bench_patch_filter.py         # SweBenchPatchFilter (eval --drop-test-hunks: test files out of a patch)
+│   ├── swe_bench_relay.py                # SweBenchRelay (the gateway relay to another node's model server)
 │   ├── swe_bench_evaluator.py            # SweBenchEvaluator (validation and grading through the harness)
 │   ├── swe_bench_run_store.py            # SweBenchRunStore (one run's files)
 │   └── swe_bench_report.py               # SweBenchReport (a run's report, two runs compared)
 ├── audit/
 │   ├── egress_audit.py                   # EgressAudit (ling-admin audit egress: the traced session)
+│   ├── tui_session.py                    # TuiSession (--tui: a session driven on a pseudo-terminal)
+│   ├── docs_egress_audit.py              # DocsEgressAudit (--docs: the local file index's scenario)
 │   ├── strace_parser.py                  # StraceParser (reads the strace output)
 │   ├── egress_trace.py                   # EgressTrace (destinations, DNS names, processes)
 │   └── egress_verdict.py                 # EgressVerdict (pass, fail or trace failed, with reasons)
@@ -159,21 +175,50 @@ dreamference/
     ├── node_browser.py                   # NodeBrowser (what a browse of the network returns)
     ├── node_remote.py                    # NodeRemote (node list|set|start|stop: managing other nodes from this one)
     ├── node_pairing.py                   # NodePairing (node add|remove: a key restricted to one forced command)
-    └── node_serve.py                     # NodeServe (node serve-job: the operations a paired key may ask for)
+    ├── node_serve.py                     # NodeServe (node serve-job: the operations a paired key may ask for)
+    ├── node_job.py                       # NodeJob (a job sent to this node, from record to result branch)
+    ├── node_job_sender.py                # NodeJobSender (node run|jobs|logs|cancel|fetch)
+    ├── node_model_sync.py                # NodeModelSync (node sync-model)
+    ├── node_lanes.py                     # NodeLanes (the model servers one run spreads its tasks over)
+    ├── node_prepare.py                   # NodePrepare (sudo ling-admin node prepare: the root steps of a node install)
+    ├── node_provisioner.py               # NodeProvisioner (ling-admin node provision)
+    ├── fleet_probe.py                    # FleetProbe (a machine's state before provisioning changes it)
+    ├── fleet_session.py                  # FleetSession (the provisioning SSH session to one machine)
+    ├── fleet_askpass.py                  # FleetAskpass (answers ssh's password prompt during provisioning)
+    ├── fleet_bundle.py                   # FleetBundle (the bundle install.sh --from installs)
+    └── fleet_model_plan.py               # FleetModelPlan (what a node needs for its model)
 
 scripts/                                  # at the repository root, not inside the package
-├── install_gb10.sh                       # full installation
+├── install_gb10.sh                       # full installation from a checkout
 ├── run_vllm_gb10.sh                      # thin wrapper over ling-admin server start
+├── package_mightling.sh                  # the release packaging of the binaries
 ├── gen_admin_reference.py                # regenerates docs/admin.md from build_parser()
+├── rename_mightling.py                   # the Puffin → Mightling rename check
+├── context_budget_cache_probe.py, context_budget_replay.py   # CONTEXT_BUDGET measurements
+├── swe_bench_compare.py                  # the published-results comparison (SWE_BENCH_COMPARISON)
+├── swe_bench_fresh.py, swe_bench_night1.sh   # fresh validated tasks and the nightly quality A/B
 └── cave_mode_bench/                      # the cave-mode benchmark and its level texts
 
-ling-rs/src/{lib,help,home,app,update,usage,cave,night,code_index,airgapped,node}.rs   # launcher compiled into ling
-ling-rs/airgapped/src/lib.rs                  # crate ling-airgapped: the three levels and their resolution (std only)
-ling-rs/node-locator/src/lib.rs               # crate ling-node-locator: where the node is (std only)
-ling-web-rs/src/{lib,search,fetch,html_text,airgapped,node_locator}.rs, src/bin/   # ling-search, ling-fetch
+ling-rs/src/*.rs                              # the launcher compiled into ling: lib, help, home, app, update, usage,
+                                              # cave, night, code_index, docs_index, airgapped, node, node_command,
+                                              # apps, audit, compaction, ledger, mask, notice, prompt, refine,
+                                              # release_signature, rename, skills, signal, chat, web
+ling-rs/airgapped/                            # crate ling-airgapped: the levels and their resolution (std only)
+ling-rs/node-locator/                         # crate ling-node-locator: where the node is (std only)
+ling-rs/masking/                              # crate ling-masking: observation masking (patch 0021)
+ling-rs/skills/                               # crate ling-skills: links, preflight and budget for other agents' skills
+ling-rs/apps/                                 # crate ling-apps: /apps over MCP (Gmail, Drive, Calendar)
+ling-rs/tools/                                # crate ling-tools
+ling-rs/web/                                  # crate ling-web-server: ling web (UI server, Ask threads, bridge policy)
+ling-rs/signal/                               # crate ling-signal: the Signal bridge (library and daemon binary)
+ling-rs/chat/                                 # crate ling-chat: ling chat (Matrix and Telegram)
+ling-rs/cave/, ling-rs/prompts/               # data: cave-mode level texts; the named system prompts (ask, high-swe, refine)
+ling-web-rs/src/{lib,search,fetch,read,html_text,airgapped,node_locator}.rs, src/bin/   # ling-search, ling-fetch
 ling-code-rs/src/                             # ling-code, the code index (router, SCIP stores, submodules, session, MCP)
-codex-patches/00NN-*.patch                      # patch series for the codex/ submodule (17 patches, 0001–0019)
-desktop/src-tauri/src/{main,discover,forwarder,node_locator}.rs   # Tauri shell (binary ling-app)
+ling-docs-rs/src/                             # ling-docs, the local document index (collections, extraction, embeddings, MCP)
+codex-patches/00NN-*.patch                    # patch series for the codex/ submodule (23 patches, 0001–0025; 0003–0004 retired)
+desktop/electron/src/                         # the Electron desktop app (main process, bridge, egress, Work)
+desktop/ui/src/                               # the Mightling UI (Ask and Work), served by ling web and app://
 ```
 
 ---
@@ -195,11 +240,11 @@ desktop/src-tauri/src/{main,discover,forwarder,node_locator}.rs   # Tauri shell 
 
 ### 3.4. `runner/`
 
-Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessWaiter` (the non-Codex runners' wait for the server), `CodexBrandedBuilder` and `CodexTestRunner`. See `DREAMFERENCE_AGENTS.md`.
+Four pairs: Codex (default), Cline, Continue and OpenHands, plus `VLLMReadinessWaiter` (the non-Codex runners' wait for the server), `CodexBrandedBuilder`, `CodexTestRunner` and `DocsIndexSetup`. See `DREAMFERENCE_AGENTS.md`.
 
 ### 3.5. `chat/`
 
-The Mightling web UI and its companions: Onyx deployment and configuration, the four kinds of UI patch (CSS, fonts, labels, scripts) plus brand assets, the Gmail service and client, the image-search sidecar, the SearXNG sidecar with the user-defined network the sidecars are created on, and the Tauri desktop window. See `DREAMFERENCE_ONYX.md`, `docs/dev/onyx.md` and `docs/dev/onyx-ui-patches.md`.
+The web chat and its companions: Onyx deployment and configuration (retired once `ling web` matches it, MIGHTLING_ASK §10), the four kinds of UI patch (CSS, fonts, labels, scripts) plus brand assets and the per-install admin password, the Google service (Gmail, Drive and Calendar, also startable without Onyx by `ling-admin google`) and the Gmail client, the image-search sidecar, the SearXNG sidecar with the user-defined network the sidecars are created on, the Matrix homeserver behind `ling chat`, and the runner of the Electron desktop app. See `DREAMFERENCE_ONYX.md`, `docs/dev/onyx.md` and `docs/dev/onyx-ui-patches.md`.
 
 ### 3.6. `context_engine/`
 
@@ -216,23 +261,23 @@ AST symbol extraction, TF-IDF, SQLite FTS5 and embeddings stored as plain float3
 
 ### 3.8. `cli/`
 
-`DreamferenceCLIController.build_parser()` / `run_cli()`, `ModelDeepInspector`, the Sonnet dataset and `CodeIndexSetup`. See `DREAMFERENCE_CLI.md`.
+`DreamferenceCLIController.build_parser()` / `run_cli()`, `ModelDeepInspector`, the Sonnet dataset, `CodeIndexSetup` and `LegacyNameMigration` (which runs only from an installed copy with no source beside it, and never when `MIGHTLING_LEGACY_MIGRATION=0`). See `DREAMFERENCE_CLI.md`.
 
 ### 3.9. `night_shift/`
 
-`NightShiftRunner.run()` is `ling-admin night run`: admission, then a scheduling loop that starts one `NightShiftTaskRun` per queued task, each in its own git worktree under a memory-capped systemd scope. `NightShiftQueue` reads and writes the task files the launcher (`ling-rs/src/night.rs`) creates, under the same per-task locks, and holds the runner lock, which records who holds it and which `ling-admin swe-bench` shares. `NightShiftIndex` refreshes each repository's code index before its tasks start. See `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md`.
+`NightShiftRunner.run()` is `ling-admin night run`: admission, then a scheduling loop that starts one `NightShiftTaskRun` per queued task, each in its own git worktree under a memory-capped systemd scope. `NightShiftQueue` reads and writes the task files the launcher (`ling-rs/src/night.rs`) creates, under the same per-task locks, and holds the runner lock, which records who holds it and which `ling-admin swe-bench` shares. `NightShiftIndex` refreshes each repository's code index before its tasks start, `NightShiftRemote` hands a task to another node's runner, and `RefinePrompt` holds refine mode's texts. See `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md`.
 
 ### 3.10. `swe_bench/`
 
-`SweBenchCommand.dispatch()` is `ling-admin swe-bench`. `SweBenchRunner` runs the agent phase with Night Shift's admission and runner lock: one `SweBenchInstanceRun` per instance, each a `ling exec` inside that instance's container on an internal Docker network that reaches only the model server, using the relocated `ling` that `SweBenchRuntime` builds. `SweBenchEvaluator` validates instances and grades predictions through the upstream harness (`SweBenchHarness`); `SweBenchReport` prints a run and compares two. Every docker command goes through `SweBenchDocker`. See `DREAMFERENCE_MIGHTLING_SWE_BENCH.md`.
+`SweBenchCommand.dispatch()` is `ling-admin swe-bench`. `SweBenchRunner` runs the agent phase with Night Shift's admission and runner lock: one `SweBenchInstanceRun` per instance, each a `ling exec` inside that instance's container on an internal Docker network that reaches only the model server, using the relocated `ling` that `SweBenchRuntime` builds. `SweBenchEvaluator` validates instances and grades predictions through the upstream harness (`SweBenchHarness`); `SweBenchReport` prints a run and compares two. Every docker command goes through `SweBenchDocker`. `SweBenchNameStripper` (`--strip-names`), `SweBenchPatchFilter` (`eval --drop-test-hunks`) and `SweBenchRelay` (a lane on another node) serve particular arms. See `DREAMFERENCE_MIGHTLING_SWE_BENCH.md`.
 
 ### 3.11. `audit/`
 
-`EgressAudit.run()` is `ling-admin audit egress`: one real `ling exec` under `strace`, in a throwaway repository and `CODEX_HOME`. `StraceParser` turns the trace into an `EgressTrace`, and `EgressVerdict` passes it only if the session reached nothing but the model server and the other allowlisted loopback services. See `DREAMFERENCE_MIGHTLING_EGRESS.md`.
+`EgressAudit.run()` is `ling-admin audit egress`: one real `ling exec` under `strace`, in a throwaway repository and `CODEX_HOME` (`--tui` drives a full-screen session through `TuiSession`; `--docs` runs `DocsEgressAudit`, the local file index's scenario). `StraceParser` turns the trace into an `EgressTrace`, and `EgressVerdict` passes it only if the session reached nothing but the model server and the other allowlisted loopback services. See `DREAMFERENCE_MIGHTLING_EGRESS.md`.
 
 ### 3.12. `node/`
 
-`NodeAdvertiser` is `ling-admin node enable|disable|status`, and `NodeRemote`, `NodePairing` and `NodeServe` are `node list|add|remove|set|start|stop` (other nodes are listed from their open model port and changed only over an SSH pairing). `NodeAdvertiser` installs the Avahi service file `NodeServiceFile` renders, publishes the web UI and SearXNG beyond loopback, and records both switches in `NodeSettings`. `NodeIdentity` is the id clients remember a node by. The client side is Rust: `ling-rs/src/node.rs` and the `ling-node-locator` crate, with byte-identical copies of the locator in `ling-web-rs/` and `desktop/src-tauri/` (a test compares them, as one does for the `ling-airgapped` copy in `ling-web-rs/`). See `DREAMFERENCE_MIGHTLING_NODE.md`.
+`NodeAdvertiser` is `ling-admin node enable|disable|status`, and `NodeRemote`, `NodePairing` and `NodeServe` are `node list|add|remove|set|start|stop` (other nodes are listed from their open model port and changed only over an SSH pairing). `NodeAdvertiser` installs the Avahi service file `NodeServiceFile` renders, publishes the web UI and SearXNG beyond loopback, and records both switches in `NodeSettings`. `NodeIdentity` is the id clients remember a node by. `NodeJob`, `NodeJobSender`, `NodeModelSync` and `NodeLanes` are jobs, `node sync-model` and lanes (NODE §12–§13); `NodePrepare`, `NodeProvisioner` and the `Fleet*` classes are `node prepare` and `node provision` (MIGHTLING_FLEET). The client side is Rust: `ling-rs/src/node.rs` and the `ling-node-locator` crate, with a byte-identical copy of the locator in `ling-web-rs/` (a test compares them, as one does for the `ling-airgapped` copy in `ling-web-rs/`). The Tauri shell, which held a third copy, was replaced by the Electron app, which locates nothing itself: it runs the bundled `ling` (`ling app-server` for Work, `ling web` on port 3100 for Ask), whose launcher resolves the model server. See `DREAMFERENCE_MIGHTLING_NODE.md`.
 
 ---
 
@@ -263,9 +308,9 @@ __all__ = ["DreamferenceConfig", "ConfigPathResolver", ...]
 
 ---
 
-## 5. Launch Commands for the Default and Fallback Models
+## 5. Launch Command for the Main Model
 
-### 5.1. The default: `qwen3.8-27b-nvfp4-dflash2` (SGLang)
+### 5.1. `qwen3.8-27b-nvfp4-dflash2` (SGLang)
 
 The output of `VLLMServerManager().build_launch_command("qwen3.8-27b-nvfp4-dflash2")` on this machine on 2026-10-01, with default config:
 
@@ -287,29 +332,9 @@ The output of `VLLMServerManager().build_launch_command("qwen3.8-27b-nvfp4-dflas
 | `--mamba-radix-cache-strategy`, `--mamba-ssm-dtype`, `--max-mamba-cache-size` | `extra_buffer`, `bfloat16`, `96` | Recipe `extra_args` |
 | `--trust-remote-code`, `--tp-size 1`, `--disable-prefill-cuda-graph`, `--disable-flashinfer-autotune`, `--enable-torch-compile`, `--sleep-on-idle`, `--enable-metrics` | flags | Builder and recipe `extra_args` |
 
-### 5.2. The fallback: `qwen3.5-122b-a10b-hybrid-dflash` (vLLM)
+### 5.2. The removed vLLM fallback
 
-The output of `VLLMServerManager().build_launch_command("qwen3.5-122b-a10b-hybrid-dflash")` on this machine, with default config (first recorded 2026-09-28, re-run 2026-10-01):
-
-| Parameter / Flag | Value | Source |
-| :--- | :--- | :--- |
-| Docker image | `dreamference-vllm-dflash:0.23.0-aeon-dense5` | `launch_overrides["docker_image"]`; the project default `DEFAULT_VLLM_IMAGE` is `dreamference-vllm-tensorizer:26.07-py3` |
-| Container limits | `--cpus=14.0 --memory=93g --memory-swap=93g --oom-score-adj=800`, `--restart unless-stopped` | Derived from the host and `gpu_memory_utilization` |
-| Container env | `VLLM_MARLIN_USE_ATOMIC_ADD=1`, `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` (recipe); `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1`, `VLLM_CACHE_ROOT`, `CUTE_DSL_ARCH=sm_121a`, `VLLM_LOGGING_LEVEL=DEBUG`, request/response debug logging (always) | Recipe `env` plus the launcher |
-| Model | `Intel/Qwen3.5-122B-A10B-int4-AutoRound` | `hf_repo_id` |
-| `--max-model-len` | `32768` | Recipe |
-| `--gpu-memory-utilization` | `0.7` | Recipe |
-| `--max-num-batched-tokens` | `9048` | Recipe |
-| `--attention-backend` | `flash_attn` | Recipe |
-| `--kv-cache-dtype` | `auto` | Recipe; the config leaves it unset |
-| `--tool-call-parser` / `--reasoning-parser` | `qwen3_xml` / `qwen3` | Recipe |
-| `--speculative-config` | `{"method": "dflash", "model": "z-lab/Qwen3.5-122B-A10B-DFlash", "num_speculative_tokens": 12, "attention_backend": "FLASH_ATTN"}` | Recipe |
-| `--structured-outputs-config.backend` | `xgrammar` | `DEFAULT_GUIDED_DECODING_BACKEND` |
-| `--override-generation-config` | `{"temperature": 0.0, "top_p": 1.0, "top_k": 0}` | `DEFAULT_GENERATION_OVERRIDES` in the launcher; a recipe may override or disable it via `generation_overrides` |
-| `--default-chat-template-kwargs` | `{"enable_thinking": false}` | Recipe `extra_args` |
-| `--max-num-seqs` / `--tensor-parallel-size` / `--dtype` | `8` / `1` / `auto` | Recipe `extra_args` |
-| `--enable-prefix-caching`, `--enable-chunked-prefill` | flags | Config defaults |
-| `--async-scheduling`, `--trust-remote-code`, `--enable-log-requests`, `--enable-log-outputs`, `--max-log-len 2048`, `--enable-auto-tool-choice` | flags | Launcher |
+Until 2026-10-07 this section also listed the vLLM command of `qwen3.5-122b-a10b-hybrid-dflash` (image `dreamference-vllm-dflash:0.23.0-aeon-dense5`, 32K context, DFlash with 12 tokens). It was removed with the model (`DREAMFERENCE_MODELS.md` §1, `DREAMFERENCE_INFERENCE.md` §5.2); the flags vLLM always gets are in INFERENCE §4 and §6.
 
 The recipe is data in `hardware/model_matrix_registry.py`. Change it there, not in the launch builder. Tests assert the layering.
 
