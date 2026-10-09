@@ -319,7 +319,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--instances` | Comma-separated instance ids. |
 | `--subset` | A file of instance ids, one per line. |
 | `--limit` | Only the first N selected instances, sorted by id. |
-| `--name` | The run's name; an existing run of that name is resumed. |
+| `--name` | The run's name (letters, digits, ., _ and -); an existing run of that name is resumed. |
 | `--eval` | Grade the predictions when the agent phase ends. |
 | `--remove-images` | With --eval: work one repository at a time and remove its images once it is graded. |
 | `--code-index` | universal: index each instance's repository on the host and give the agent ling-code (default off); exact: the same with the SCIP stores alone and no graph. One of: `off`, `universal`, `exact`. |
@@ -327,7 +327,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--mask` | on: mask old tool outputs in the agent's requests (context budget spec §4.1; default off) One of: `off`, `on`. |
 | `--strip-names` | Take the files, modules, functions and classes the reference fix touches out of each issue's text before the agent sees it. |
 | `--refine` | Two steps per instance: a session that studies the issue and writes a refined description without changing the repository, then a fresh session that fixes it. |
-| `--task-rules` | Rules added to the task prompt, comma-separated, of: tests, tests-v2 (default none). tests: never change an existing test, keep your own scripts in /tmp, and compare failing tests by name with and without the change. tests-v2: the same, except that a test the change fails is weighed against the issue, which decides whether the test or the change is wrong. |
+| `--task-rules` | Rules added to the task prompt, comma-separated, of: issue-v1, tests, tests-v2 (default none). tests: never change an existing test, keep your own scripts in /tmp, and compare failing tests by name with and without the change. tests-v2: the same, except that a test the change fails is weighed against the issue, which decides whether the test or the change is wrong. issue-v1: work out exactly what the issue asks for before editing, follow the pattern of the sibling code that does the same thing, and run the issue's example after the last edit. Rules stack (e.g. tests-v2,issue-v1); the prompt has them in the order listed here, whatever order they are given in. |
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing) |

@@ -55,7 +55,24 @@ CODE_INDEX_HINT: Final[str] = """- Find the code with the `code_*` tools before 
 # `tests-v2` (FAILURES §9.3, rank 2) drops `tests`' "your change is wrong": in 19 of the 68
 # resolved tasks the correct fix fails an old test because the issue asks for new behaviour, so
 # the agent decides from the issue which of the two is wrong. The other two lines are unchanged.
+# `issue-v1` (FAILURES §9.3, rank 1: contract and sweep) is about the issue and the code around
+# the fix: in the 100-task round the agent fixed an example instead of what the issue asked,
+# dropped the function or result type the issue names, widened a condition, missed a sibling or
+# a second entry point with the same defect, wrote a new pattern beside the module's own, and
+# reported success on an example whose output still contradicted the issue. Rules are added in
+# this dict's order, whatever order `--task-rules` names them in, so `issue-v1` comes first: it
+# is the order of the work (understand the issue, edit, then the test discipline before stopping),
+# and the refusal and the help then list the rules in the same order.
 TASK_RULES: Final[Dict[str, str]] = {
+    "issue-v1": """- Before you edit, read the whole issue and work out exactly what behaviour it asks for: the
+  result it expects, any function, type or code path it names, and every edge case it mentions.
+  Change that behaviour and no more: do not widen a condition beyond the case it asks for.
+- Find the code nearby that does the same thing (sibling functions and classes, other backends
+  and entry points, how the module handles the analogous case) and follow its pattern instead of
+  inventing a new one. Where a sibling has the same defect, fix it there too.
+- If the issue shows an example with its expected output, run that example after your last edit
+  and check that the output matches the issue.
+""",
     "tests": """- Never change an existing test. If a test that passed before your change fails after it, your
   change is wrong: fix the source.
 - Put any test or script of your own in /tmp, not in the repository.

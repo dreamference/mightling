@@ -31,6 +31,7 @@ from dreamference.swe_bench.swe_bench_instance_run import (CODE_INDEX_HINT, COLL
                                                           NO_REFINED, PREPARE_SCRIPT, REFINE_CODE_INDEX_HINT,
                                                           SCRUB_SCRIPT, TASK_RULES)
 from dreamference.swe_bench.swe_bench_patch_filter import SweBenchPatchFilter
+from dreamference.swe_bench.swe_bench_runner import RUN_NAME
 
 REPOSITORY = "greynewell/swe-bench-arm64"
 
@@ -1681,9 +1682,90 @@ def test_tests_v2_lets_the_issue_decide_and_leaves_the_first_rule_as_it_was(benc
     assert seen["task_rules"] == ["tests-v2"]
 
 
+def test_issue_v1_reads_the_issue_and_follows_the_sibling_code(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    rule = TASK_RULES["issue-v1"]
+    for words in ("Before you edit, read the whole issue", "exactly what behaviour it asks for",
+                  "every edge case it mentions", "do not widen a condition", "follow its pattern",
+                  "Where a sibling has the same defect, fix it there too", "after your last edit"):
+        assert words in rule
+    for word in ("benchmark", "hidden", "reference", "swe", "upstream"):
+        assert word not in rule.lower()
+    with_rule = SweBenchInstanceRun.compose_prompt(issue, task_rules=["issue-v1"])
+    assert with_rule.replace(rule, "") == plain and with_rule.endswith(issue)
+    assert rule in SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["issue-v1"])
+
+    assert run(bench, name="iv1", instances=["acme__widget-1"], task_rules=["issue-v1"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["issue-v1"])]
+    assert SweBenchRunStore("iv1").manifest()["task_rules"] == ["issue-v1"]
+    assert "Task rules          issue-v1" in SweBenchReport.render(SweBenchRunStore("iv1"))
+
+
+def test_issue_v1_stacks_with_tests_v2_once_each_and_in_the_order_of_the_work(bench, monkeypatch):
+    issue = "The widget is broken."
+    plain = SweBenchInstanceRun.compose_prompt(issue)
+    rule, v2 = TASK_RULES["issue-v1"], TASK_RULES["tests-v2"]
+    # The issue comes before the test discipline, whatever order the rules are named in.
+    both = SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2", "issue-v1"])
+    assert both == SweBenchInstanceRun.compose_prompt(issue, task_rules=["issue-v1", "tests-v2"])
+    assert both == SweBenchInstanceRun.compose_prompt(issue, task_rules=["tests-v2", "issue-v1", "tests-v2"])
+    assert both.replace(rule + v2, "") == plain
+    assert both.count(rule) == 1 and both.count(v2) == 1 and both.index(rule) < both.index(v2)
+    # No line is said twice.
+    lines = (rule + v2).splitlines()
+    assert len(lines) == len(set(lines))
+    fix = SweBenchInstanceRun.compose_fix_prompt(issue, "x", task_rules=["tests-v2", "issue-v1"])
+    assert fix.count(rule + v2) == 1
+
+    assert run(bench, name="n3-tests-v2-issue-v1", instances=["acme__widget-1"],
+               task_rules=["tests-v2", "issue-v1"]) == 0
+    assert [prompt for prompt, _ in mightling_prompts(bench["docker"])] == [
+        SweBenchInstanceRun.compose_prompt("The widget is broken in acme__widget-1.", task_rules=["issue-v1", "tests-v2"])]
+    assert SweBenchRunStore("n3-tests-v2-issue-v1").manifest()["task_rules"] == ["issue-v1", "tests-v2"]
+    assert "Task rules          issue-v1, tests-v2" in SweBenchReport.render(SweBenchRunStore("n3-tests-v2-issue-v1"))
+    import argparse
+    seen = {}
+    monkeypatch.setattr(SweBenchRunner, "run", classmethod(lambda cls, **kwargs: seen.update(kwargs) or 0))
+    parser = argparse.ArgumentParser()
+    SweBenchCommand.add_parser(parser.add_subparsers(dest="command"))
+    assert SweBenchCommand.dispatch(parser.parse_args(
+        ["swe-bench", "run", "--task-rules", "tests-v2,issue-v1", "--name", "x"])) == 0
+    assert seen["task_rules"] == ["tests-v2", "issue-v1"]
+
+
+def test_an_arm_named_after_its_rules_is_a_distinct_name_the_grader_accepts():
+    import itertools
+    arms = {}
+    for size in range(1, len(TASK_RULES) + 1):
+        for rules in itertools.permutations(TASK_RULES, size):
+            # The night scripts' shape, <prefix>-<rules joined by ->, and the grader's run ids.
+            name = "n3-" + "-".join(rules)
+            for run_id in (f"{name}-1", f"{name}-drop-test-hunks-1"):
+                assert RUN_NAME.fullmatch(run_id), run_id
+            # Whatever order the rules are named in, no name stands for two different sets of rules.
+            assert arms.setdefault(name, frozenset(rules)) == frozenset(rules), name
+    assert arms["n3-tests-v2-issue-v1"] == {"tests-v2", "issue-v1"}
+
+
+def test_a_new_run_whose_name_the_grader_would_refuse_is_refused_and_an_old_one_resumes(bench, capsys):
+    for name in ("n3-tests-v2+issue-v1", "tests-v2,issue-v1", "a b", "-x"):
+        assert run(bench, name=name, instances=["acme__widget-1"], task_rules=["tests-v2", "issue-v1"]) == 1
+        assert "a run's name is letters, digits" in capsys.readouterr().out
+        assert not SweBenchRunStore(name).manifest_path.exists()
+    assert mightling_prompts(bench["docker"]) == []
+    # A run already on disk under such a name (from before the check) is still resumed.
+    assert run(bench, name="old", instances=["acme__widget-1"]) == 0
+    old, odd = SweBenchRunStore("old"), SweBenchRunStore("old+name")
+    old.directory.rename(odd.directory)
+    assert run(bench, name="old+name", instances=["acme__widget-2"]) == 0
+    assert "a run's name is letters, digits" not in capsys.readouterr().out
+
+
 def test_an_unknown_task_rule_is_refused_and_the_option_reaches_the_runner(bench, monkeypatch, capsys):
     assert run(bench, instances=["acme__widget-1"], task_rules=["everything"]) == 1
-    assert "--task-rules takes: tests, tests-v2" in capsys.readouterr().out
+    assert "--task-rules takes: issue-v1, tests, tests-v2" in capsys.readouterr().out
     assert not SweBenchRunStore("r1").manifest_path.exists()
     import argparse
     seen = {}

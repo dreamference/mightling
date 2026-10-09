@@ -47,6 +47,12 @@ BUILT_IN_PROMPTS: Final[tuple] = ("default", "high-swe")
 DEFAULT_RUN_PROMPT: Final[str] = "default"
 PROMPT_DIR: Final[str] = "system-prompts"
 
+# What a new run's name may hold. Grading passes `<name>-<n>` to the harness as its run id, which
+# names Docker containers (`sweb.eval.<instance>.<run id>`), so a `+` or a `,` would let the agent
+# phase run all night and then fail at grading. An arm with several task rules joins their names
+# with `-`, the record arm's first: `n3-tests-v2-issue-v1`.
+RUN_NAME: Final[re.Pattern] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
 
 class SweBenchRunner:
     """One agent-phase run."""
@@ -300,9 +306,10 @@ class SweBenchRunner:
                 that fixes it with the issue and the description. A new run only, like
                 `code_index`.
             task_rules: Names of the rules added to the task prompt (`TASK_RULES`: `tests`, the
-                failure analysis's test discipline, and `tests-v2`, which lets the issue decide
-                whether a failing old test or the change is wrong). A new run only, like
-                `code_index`.
+                failure analysis's test discipline, `tests-v2`, which lets the issue decide
+                whether a failing old test or the change is wrong, and `issue-v1`, which has the
+                agent work out what the issue asks for and follow the sibling code's pattern).
+                They stack, in `TASK_RULES`' order. A new run only, like `code_index`.
             settings: Benchmark settings; defaults to the config file's.
             label: What the model gate's refusal calls this run (e.g. `night 1`); defaults to
                 `SWE-bench run <name>`.
@@ -328,6 +335,10 @@ class SweBenchRunner:
         unknown_rules = sorted(set(task_rules or []) - set(TASK_RULES))
         if unknown_rules:
             print(f"❌ --task-rules takes: {', '.join(TASK_RULES)} (not {', '.join(unknown_rules)}).")
+            return 1
+        if name is not None and not RUN_NAME.fullmatch(name) and SweBenchRunStore(name).manifest() is None:
+            print(f"❌ --name {name!r}: a run's name is letters, digits, '.', '_' and '-', because the grader "
+                  "names Docker containers after it (join task rules with '-': n3-tests-v2-issue-v1).")
             return 1
         if require_smoke and not cls.smoke_passed():
             print("❌ No smoke has passed on this machine with this harness version: "
