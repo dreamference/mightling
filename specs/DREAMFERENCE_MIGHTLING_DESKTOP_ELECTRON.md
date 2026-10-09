@@ -186,3 +186,4 @@ The app's first window no longer shows Onyx. It is **Ask**: the Mightling UI loa
 - **On Windows**, which has no `ling web` yet, Ask opens Work.
 - **Ask inside the Work window** is the next step (MIGHTLING_ASK's list of what is not built), not part of this change.
 
+**Superseded in part on 2026-10-09** ([MIGHTLING_ASK](./DREAMFERENCE_MIGHTLING_ASK.md) §18.6): Ask is now a view of the one app window, served by the app's own app-server over stdio, on every platform. The app no longer finds, starts or signs in to `ling web` (`web.ts` and `chat.ts` are removed), and `audit egress --app` allows neither 3100 nor 3000.
