@@ -9,6 +9,7 @@ pulls an image, installs a package or reaches the network.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -19,6 +20,7 @@ import pytest
 
 from dreamference.night_shift import NightShiftQueue
 from dreamference.night_shift.night_shift_task_run import NUDGE
+from dreamference.night_shift.refine_prompt import FIX_RULES, FIX_RULES_V2, STUDY_SECTIONS, STUDY_SECTIONS_V2, RefinePrompt
 from dreamference.swe_bench import (
     SweBenchCodeIndex, SweBenchCommand, SweBenchDocker, SweBenchEvaluator, SweBenchHarness, SweBenchImages,
     SweBenchInstanceRun, SweBenchNameStripper, SweBenchReport, SweBenchRunStore, SweBenchRunner,
@@ -499,10 +501,44 @@ def test_the_report_counts_the_refine_steps_apart(bench):
     assert summary["refine"]["refine_tokens"] == {"input_tokens": 600, "cached_input_tokens": 0, "output_tokens": 60}
     assert summary["tokens"]["input_tokens"] == 2 * (300 + 1000)
     text = SweBenchReport.render(SweBenchRunStore("r1"))
-    assert "Refine first        on:" in text and "changed the tree in 0 of 2" in text
+    assert "Refine first        on (v1):" in text and "changed the tree in 0 of 2" in text
     assert "Refine first" not in SweBenchReport.render(SweBenchRunStore("r2"))
     compared = SweBenchReport.against(SweBenchRunStore("r1"), SweBenchRunStore("r2"))
     assert "differs: refine: True | False" in compared
+    assert "refine_version" not in compared, "a run without --refine records the default version"
+
+def test_refine_v2_is_chosen_recorded_and_compared(bench):
+    # specs/DREAMFERENCE_MIGHTLING_REFINE.md §10: `--refine-version v2` gives both steps v2's texts,
+    # and the manifest, the report and `--against` say which version an arm ran.
+    issue = "The widget is broken in acme__widget-1."
+    described = "1. Intent: widget() returns 2 (acme__widget-1).\n"
+    assert run(bench, instances=["acme__widget-1"], refine=True, evaluate=True) == 0
+    bench["docker"].calls.clear()
+    assert run(bench, instances=["acme__widget-1"], name="r2", refine=True, refine_version="v2", evaluate=True) == 0
+    assert mightling_prompts(bench["docker"]) == [
+        (SweBenchInstanceRun.compose_refine_prompt(issue, version="v2"), False),
+        (SweBenchInstanceRun.compose_fix_prompt(issue, described, version="v2"), False)]
+    assert SweBenchRunStore("r2").manifest()["refine_version"] == "v2"
+    assert SweBenchRunStore("r1").manifest()["refine_version"] == "v1"
+    assert "Refine first        on (v2):" in SweBenchReport.render(SweBenchRunStore("r2"))
+    compared = SweBenchReport.against(SweBenchRunStore("r2"), SweBenchRunStore("r1"))
+    assert "differs: refine_version: v2 | v1" in compared and "differs: refine:" not in compared
+    assert re.search(r"refine first\s+on \(v2\)\s+on \(v1\)", compared)
+    # A manifest written before the field existed ran v1.
+    store = SweBenchRunStore("r1")
+    manifest = store.manifest()
+    del manifest["refine_version"]
+    store.manifest_path.write_text(json.dumps(manifest))
+    assert "differs: refine_version: v2 | v1" in SweBenchReport.against(SweBenchRunStore("r2"), store)
+
+def test_refine_v2_differs_from_v1_only_in_the_sections_and_the_rules():
+    issue = "ISSUE"
+    one, two = (SweBenchInstanceRun.compose_refine_prompt(issue, True, version) for version in ("v1", "v2"))
+    assert one.replace(STUDY_SECTIONS, "S") == two.replace(STUDY_SECTIONS_V2, "S") and one != two
+    one, two = (SweBenchInstanceRun.compose_fix_prompt(issue, "D", True, ["tests-v2"], version) for version in ("v1", "v2"))
+    assert one.replace(RefinePrompt.subject(FIX_RULES, "issue"), "R") == \
+        two.replace(RefinePrompt.subject(FIX_RULES_V2, "issue"), "R") and one != two
+    assert "the issue is authoritative" in two and "do not keep the old one" in two
 
 
 def test_the_container_is_capped_isolated_and_runs_as_the_user(bench):
@@ -1188,6 +1224,11 @@ def test_the_command_line_parses_every_subcommand():
                   ["status"], ["clean", "--images"]):
         assert parser.parse_args(["swe-bench", *words]).swe_bench_command == words[0]
     assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench"])) == 2
+    args = parser.parse_args(["swe-bench", "run", "--refine", "--refine-version", "v2"])
+    assert (args.refine, args.refine_version) == (True, "v2")
+    assert parser.parse_args(["swe-bench", "run", "--refine"]).refine_version is None
+    # The version chooses the texts of --refine and means nothing without it.
+    assert SweBenchCommand.dispatch(parser.parse_args(["swe-bench", "run", "--refine-version", "v2"])) == 2
 
 
 def test_status_and_clean_touch_only_the_benchmarks_own_things(bench, capsys):

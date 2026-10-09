@@ -189,7 +189,9 @@ class NightShiftTaskRun:
         else:
             prompt = self.compose_prompt(test_command)
             if refined is not None:
-                prompt = RefinePrompt.compose_fix(prompt, refined)
+                # The fix rules of the version the study step was given.
+                prompt = RefinePrompt.compose_fix(prompt, refined,
+                                                  version=(self.refine_record or {}).get("version", "v1"))
         outcome = self._exec(prompt, resume=bool(self.session))
         if outcome == "interrupted":
             return self._interrupted()
@@ -259,6 +261,11 @@ class NightShiftTaskRun:
         check = getattr(self.settings, "refine_enabled", None)
         return bool(check()) if callable(check) else False
 
+    def refine_version(self) -> str:
+        """Which refine texts this task gets (`[night] refine_version`, then `mightling_refine_version`)."""
+        check = getattr(self.settings, "refine_version_in_force", None)
+        return str(check()) if callable(check) else "v1"
+
     def _refine(self) -> Optional[str]:
         """
         Refine mode's first step (specs/DREAMFERENCE_MIGHTLING_REFINE.md §5.3): a session that studies
@@ -277,9 +284,10 @@ class NightShiftTaskRun:
         refined_path.parent.mkdir(parents=True, exist_ok=True)
         refined_path.unlink(missing_ok=True)
         offset = self.log_path.stat().st_size if self.log_path.exists() else 0
-        outcome = self._exec(RefinePrompt.compose_study(self.text, NIGHT_WRITES), resume=False,
+        version = self.refine_version()
+        outcome = self._exec(RefinePrompt.compose_study(self.text, NIGHT_WRITES, version=version), resume=False,
                              last_message=refined_path, record_session=False)
-        record: Dict[str, Any] = {"study_exit": outcome, "study_s": int(time.time() - started)}
+        record: Dict[str, Any] = {"study_exit": outcome, "study_s": int(time.time() - started), "version": version}
         session = self.thread_id_in(self.log_path, offset)
         if session:
             record["study_session"] = session

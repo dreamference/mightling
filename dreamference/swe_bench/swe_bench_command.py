@@ -18,7 +18,7 @@ from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
-from dreamference.swe_bench.swe_bench_instance_run import TASK_RULES
+from dreamference.swe_bench.swe_bench_instance_run import REFINE_VERSIONS, TASK_RULES
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
 
@@ -69,6 +69,12 @@ class SweBenchCommand:
         run.add_argument("--refine", action="store_true",
                          help="Two steps per instance: a session that studies the issue and writes a refined description "
                               "without changing the repository, then a fresh session that fixes it")
+        run.add_argument("--refine-version", default=None, choices=list(REFINE_VERSIONS),
+                         help="With --refine: which texts the two steps get. v1 (the default) is the measured one; "
+                              "v2 narrows what must not change to behaviour outside the issue's code paths, lists "
+                              "the tests the issue changes on purpose with their new values, names one option where "
+                              "the issue leaves a choice open, wants checks the bug fails, and checks every claim "
+                              "against the repository (refine spec §10)")
         run.add_argument("--task-rules", default=None,
                          help="Rules added to the task prompt, comma-separated, of: " + ", ".join(TASK_RULES)
                               + " (default none). tests: never change an existing test, keep your own scripts in "
@@ -128,13 +134,17 @@ class SweBenchCommand:
         if command == "smoke":
             return cls.smoke(args.idle_minutes, args.ignore_open_sessions)
         if command == "run":
+            if args.refine_version and not args.refine:
+                print("❌ --refine-version chooses the texts of --refine: give both.")
+                return 2
             return SweBenchRunner.run(
                 dataset=args.dataset, instances=cls._ids(args.instances), limit=args.limit,
                 subset=args.subset, name=args.name, evaluate=args.eval, until=args.until,
                 idle_minutes=args.idle_minutes, ignore_sessions=args.ignore_open_sessions,
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
-                task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn)
+                task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn,
+                refine_version=args.refine_version or "v1")
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":

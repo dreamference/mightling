@@ -22,11 +22,12 @@ CAVEATS: Final[str] = (
 # Manifest fields `--against` lists when they differ between two runs.
 COMPARED_FIELDS: Final[tuple] = (
     "model_name_or_path", "served_model", "model_alias", "puffin_version", "runtime_hash",
-    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
+    "cave_mode", "prompt", "prompt_sha256", "airgapped", "code_index", "masking", "issue_text", "refine", "refine_version", "task_rules", "task_context", "task_timeout_s", "task_memory", "nudges",
     "parallelism", "harness", "repository_commit", "review_turn",
 )
 # What a manifest written before a field existed ran with.
 MISSING_FIELDS: Final[dict] = {"code_index": "off", "prompt": "default", "masking": "off", "issue_text": "verbatim", "refine": False,
+                               "refine_version": "v1",
                                "task_rules": [], "review_turn": False}
 
 
@@ -139,6 +140,7 @@ class SweBenchReport:
             for key in first:
                 first[key] += stats[key]
         return {
+            "version": manifest.get("refine_version") or "v1",
             "instances": len(records),
             "refine_s": [record.get("refine_s", 0) for record in records.values()],
             "fix_s": [record["fix_s"] for record in records.values() if "fix_s" in record],
@@ -335,12 +337,13 @@ class SweBenchReport:
         Returns:
             str: One line of the report.
         """
+        state = f"on ({refine.get('version', 'v1')})"
         if not refine["instances"]:
-            return "Refine first        on: no instance has finished its first step yet"
+            return f"Refine first        {state}: no instance has finished its first step yet"
         tokens = refine["refine_tokens"]
         fix = (f", median {cls.duration(statistics.median(refine['fix_s']))} fixing"
                if refine["fix_s"] else "")
-        return (f"Refine first        on: median {cls.duration(statistics.median(refine['refine_s']))} studying"
+        return (f"Refine first        {state}: median {cls.duration(statistics.median(refine['refine_s']))} studying"
                 f"{fix}; the first step took {cls.duration(sum(refine['refine_s']))} and "
                 f"{tokens['input_tokens']:,} tokens in, {tokens['output_tokens']:,} out; it wrote nothing in "
                 f"{refine['empty']}, timed out in {refine['timeouts']} and changed the tree in {refine['edited']} "
@@ -460,7 +463,7 @@ class SweBenchReport:
             return {
                 "code index": summary["code_index"],
                 "issue text": summary["manifest"].get("issue_text", "verbatim"),
-                "refine first": "on" if summary["refine"] is not None else "off",
+                "refine first": f"on ({summary['refine']['version']})" if summary["refine"] is not None else "off",
                 "task rules": ",".join(summary["manifest"].get("task_rules") or []) or "none",
                 "review turn": "on" if summary["review"] is not None else "off",
                 "grading": "test files dropped" if summary.get("variant") == DROP_TEST_HUNKS else "plain",
