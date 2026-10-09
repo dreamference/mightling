@@ -142,7 +142,7 @@ docker run --ipc=host --network host --restart unless-stopped \
 | Mount | Purpose |
 | :---- | :------ |
 | `~/.cache/huggingface:/root/.cache/huggingface` | Model weights |
-| `~/.cache/dreamference:/root/.cache/dreamference` | Tensorized weights; the persistent torch.compile caches (vLLM's `VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`, SGLang's `sglang/inductor`); the patched chat templates (`sglang/chat-templates`) |
+| `~/.cache/dreamference:/root/.cache/dreamference` | Tensorized weights; the persistent torch.compile caches (vLLM's `VLLM_CACHE_ROOT=/root/.cache/dreamference/vllm`, SGLang's `sglang/inductor`); the patched chat templates (`chat-templates`) |
 
 The container name stays `dreamference-vllm-<port>` whatever the engine, so `server stop`, the watchdog and diagnostics find it the same way.
 
