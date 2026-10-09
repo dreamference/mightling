@@ -1,8 +1,8 @@
 # Mightling Code Indexing & Context Engine
 
-> **Version:** 1.2.0
+> **Version:** 1.5.1
 > **Subject:** AST Extraction, Hybrid Search, SQLite/FTS5 Indexing, Testing
-> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`); §6's test table against `tests/` on 2026-10-02 (all 28 test files are listed)
+> **Checked against the code:** 2026-09-29 (`dreamference/context_engine/`); §6's test table against `tests/` on 2026-10-09 (all 45 test files are listed)
 
 ---
 
@@ -120,7 +120,7 @@ These are recorded here because the spec used to promise otherwise.
 
 ## 6. Tests Architecture
 
-- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-10-02 pytest collects 655 tests (at `cebd6db`). On 2026-10-01, at 521, 63 were skipped without a model server and the rest took about 25 s; neither figure was re-measured for 655. The skips are the live slash-command tests, which need a running model server; with one, the full run takes about 13 minutes.
+- **Runner:** `.venv/bin/python -m pytest tests/ -q`. No GPU, Docker or model server is needed; hardware, subprocess and Docker calls are mocked. On 2026-10-09 pytest collects 1,046 tests (655 on 2026-10-02, 521 on 2026-10-01, when 63 were skipped without a model server and the rest took about 25 s). The skips are the live slash-command tests, which need a running model server; with one, the full run takes about 13 minutes.
 - **Style:** `tmp_path` isolation, and no external services except in tests that detect them and skip.
 
 | Test File | Scope |
@@ -153,8 +153,24 @@ These are recorded here because the spec used to promise otherwise.
 | `test_sidecar_network.py` | Sidecars are created on a user-defined network, never Docker's default bridge |
 | `test_cache_clearing.py` | `ling-admin clear` removes weights only |
 | `test_admin_reference.py` | `docs/admin.md` is generated from the CLI and in step with it |
+| `test_chat_admin_credentials.py` | The web chat's per-install admin password, and moving an install off the published default |
+| `test_desktop_work.py` | The desktop app's Work window on Electron |
+| `test_diffusion_switched_off.py` | Diffusion switched off: never started, downloaded or shown; and everything back when the switch is on |
+| `test_docs_index.py` | `ling-admin docs setup`'s pinned files and the document index's egress verdict (fetches stubbed) |
+| `test_fleet_provision.py` | `ling-admin node provision` and `node prepare`, with stand-ins for every machine; any real `ssh`, `scp`, `rsync`, `sudo` or `sg` fails the test |
+| `test_google_service_origin.py` | The Google service's state-changing POSTs refuse other origins |
+| `test_legacy_name_migration.py` | `ling-admin`'s one-time Puffin → Mightling migration, in a scratch home with `systemctl` and `sudo` stubbed |
+| `test_matrix_homeserver.py` | `ling-admin matrix`, with Docker, systemd, Tailscale and the homeserver replaced |
+| `test_mightling_apps_service.py` | `/apps`'s Python half: scopes per app, the Drive and Calendar reader, the connect page |
+| `test_mightling_prompt.py` | Named system prompts' Python side, the shipped `high-swe` text, Night Shift's pass-through |
+| `test_night_shift_compaction.py` | Night Shift's per-task KV budget and compaction limit |
+| `test_refine.py` | Refine mode's setting tiers and the texts the product and the benchmark share |
+| `test_release_install.py` | Installing from a release with no checkout: `install.sh` against a stand-in server, `ling-admin host`, the builder without source |
+| `test_removed_models.py` | A configuration naming a removed model is refused with what to do |
+| `test_sandbox_prerequisite.py` | The bubblewrap check every `ling-admin` run makes |
+| `test_skills.py` | What the Python side and the docs must agree on with the launcher's skills |
 
-The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p ling-launcher` (`DREAMFERENCE_MIGHTLING_CODEX.md`); `ling-web-rs/` and `ling-code-rs/` are tested with `cargo test --locked` in their own directories.
+The Rust launcher has its own unit tests, run in the build export with `cargo test --release -p ling-launcher` (`DREAMFERENCE_MIGHTLING_CODEX.md`); `ling-web-rs/`, `ling-code-rs/` and `ling-docs-rs/` are tested with `cargo test --locked` in their own directories, and the member crates (`ling-signal`, `ling-chat`, `ling-web-server`, `ling-apps`, `ling-skills`) with `cargo test -p <crate>` in the export; the Electron app and the UI with `vitest` in `desktop/electron/` and `desktop/ui/`.
 
 ---
 
