@@ -16,7 +16,7 @@ Nothing here prints: a failure is kept in `SpeechSidecar.problem` for the CLI to
 """
 
 import subprocess
-from typing import ClassVar, Final, List
+from typing import ClassVar, Final, List, Optional
 
 from dreamference.chat.sidecar_network import SIDECAR_NETWORK, SidecarNetwork
 
@@ -63,11 +63,15 @@ class SpeechSidecar:
         ]  # fmt: skip
 
     @classmethod
-    def start(cls) -> bool:
+    def start(cls, wait_for_model: bool = True) -> bool:
         """Makes the server run on the sidecar network and fetches its model.
 
         A stopped container on the sidecar network is started; one on another network (Onyx's,
         the default bridge) is replaced.
+
+        Args:
+            wait_for_model (bool): Wait for the model download (~500 MB once); otherwise it runs
+                in the container's background (`server start`, which must not wait for it).
 
         Returns:
             bool: True if the container is running once this returns.
@@ -93,11 +97,31 @@ class SpeechSidecar:
                 return False
         # The model downloads on demand; fetching it now keeps the first dictation from timing out.
         subprocess.run(
-            ["docker", "exec", STT_CONTAINER_NAME, "curl", "-s", "-X", "POST",
+            ["docker", "exec", *([] if wait_for_model else ["-d"]), STT_CONTAINER_NAME, "curl", "-s", "-X", "POST",
              f"http://127.0.0.1:8000/v1/models/{STT_MODEL}"],
             capture_output=True, timeout=900, check=False,
         )
         return True
+
+    @classmethod
+    def ensure_on_node(cls) -> Optional[bool]:
+        """Starts the server on a node when it is absent, as `server start` does for the Google
+        service (decided 2026-10-09). Never raises, and the model downloads in the background:
+        the model server must start anyway.
+
+        Returns:
+            Optional[bool]: None when this machine is not a node or the container exists already
+            (running or not); otherwise whether it started (see `problem` when it did not).
+        """
+        from dreamference.node.node_identity import NodeIdentity
+
+        try:
+            if not NodeIdentity.read() or cls.state():
+                return None
+            return cls.start(wait_for_model=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            cls.problem = f"Speech-to-text was not started: {exc}"
+            return False
 
     @classmethod
     def stop(cls) -> bool:

@@ -2317,6 +2317,16 @@ class DreamferenceCLIController:
                 from dreamference.chat.google_service import GoogleService
                 if GoogleService.ensure_on_node() is False:
                     print(f"⚠️  {GoogleService.problem}")
+                # Image search and speech-to-text the same way (decided 2026-10-09; ASK §19.6):
+                # started when absent, a failure a warning that names the command to retry.
+                from dreamference.chat.image_search_sidecar import ImageSearchSidecar
+                from dreamference.chat.speech_sidecar import SpeechSidecar
+                if ImageSearchSidecar.ensure_on_node(config.vllm_host, args.model) is False:
+                    print(f"⚠️  {ImageSearchSidecar.problem} The model starts anyway; "
+                          "retry with `ling-admin images start`.")
+                if SpeechSidecar.ensure_on_node() is False:
+                    print(f"⚠️  {SpeechSidecar.problem} The model starts anyway; "
+                          "retry with `ling-admin voice start`.")
 
                 # The diffusion sidecar starts *before* the vLLM launch on purpose: vLLM's
                 # pre-flight reads current free memory, so a sidecar already resident is

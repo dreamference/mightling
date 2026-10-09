@@ -34,6 +34,13 @@ from dreamference.audit.strace_parser import StraceParser
 from dreamference.audit.tui_session import TuiSession
 
 DEFAULT_PROMPT: Final[str] = "Reply with exactly: pong"
+# The second question of a `--web` audit, where image search is set up on this machine
+# (specs/DREAMFERENCE_MIGHTLING_ASK.md §9, §19.6): the `image_search` tool's MCP server is then
+# started by the traced app-server, and its one connection, to the sidecar, is on the allowlist.
+IMAGE_PROMPT: Final[str] = (
+    "Use the image_search tool to find one picture of a puffin, then answer with the Markdown image "
+    "line it returns and nothing else."
+)
 
 # The syscalls traced. `sendmmsg` is how glibc sends a lookup's queries (the spec's first list
 # had only sendto and sendmsg, which leaves a DNS query without its name). `write` and `writev`
@@ -46,6 +53,8 @@ SESSION_TIMEOUT_S: Final[int] = 300
 # Loopback services a session may reach besides the model server (spec §4.3).
 GMAIL_PORT: Final[int] = 8767
 SEARXNG_PORT: Final[int] = 8888
+# The image search sidecar (`ling-admin images start`), which the `image_search` tool asks.
+IMAGE_SEARCH_PORT: Final[int] = 8768
 
 # Where the launcher points `chatgpt_base_url`, so that a ChatGPT-backend call no patch closed
 # fails on this machine. A connect there is exactly such a call.
@@ -91,6 +100,8 @@ class EgressAudit:
     # How far the last `tui` session got (`start`, `composer`, `reply`, `quit`), for the report
     # of a trace that failed: "no reply" alone does not say whether the interface ever opened.
     tui_stage: str = ""
+    # What became of the last `web` session's image search turn, for the report.
+    image_turn: str = ""
 
     @classmethod
     def allowed_ports(cls, vllm_host: str, session: str = EXEC) -> Dict[int, str]:
@@ -107,7 +118,8 @@ class EgressAudit:
         """
         parsed = urlparse(vllm_host if "://" in vllm_host else f"http://{vllm_host}")
         model_port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        return {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG"}
+        return {model_port: "model server", GMAIL_PORT: "Gmail search service", SEARXNG_PORT: "SearXNG",
+                IMAGE_SEARCH_PORT: "image search service"}
 
     @classmethod
     def judge(cls, trace: EgressTrace, allowed: Dict[int, str], replied: bool) -> EgressVerdict:
@@ -262,10 +274,13 @@ class EgressAudit:
                      home: str, prompt: str) -> bool:
         """
         Traces `ling web serve` on a free loopback port while `ling web ask`, untraced, asks it
-        one question through the bridge (specs/DREAMFERENCE_MIGHTLING_ASK.md §13). Everything the
-        server starts is traced with it: the app-server it launches on its own socket, and
-        `ling prompt show ask --composed`. `HOME` and `XDG_RUNTIME_DIR` are scratch too, so the
-        server finds no advertised node, no user unit and no app-server of the user's to join.
+        one question through the bridge (specs/DREAMFERENCE_MIGHTLING_ASK.md §13), then, where
+        image search is set up here, a second that calls `image_search` (§9, §19.6). Everything
+        the server starts is traced with it: the app-server it launches on its own socket, `ling
+        prompt show ask --composed` and the tool's MCP server. `HOME` and `XDG_RUNTIME_DIR` are
+        scratch too, so the server finds no advertised node, no user unit and no app-server of the
+        user's to join; the scratch home is a node only for the image search turn
+        (`prepare_image_search`).
 
         Args:
             strace (List[str]): The strace command line, ending with the `ling` executable.
@@ -284,6 +299,8 @@ class EgressAudit:
         os.makedirs(run_dir, mode=0o700)
         os.makedirs(user_home)
         env.update({"HOME": user_home, "XDG_RUNTIME_DIR": run_dir})
+        image_search = cls.prepare_image_search(user_home)
+        cls.image_turn = "skipped: image search is not set up on this machine (`ling-admin images start`)"
         port = cls.free_port()
         server_file = os.path.join(home, "web", "server.json")
         try:
@@ -305,6 +322,8 @@ class EgressAudit:
                     replied = ask.returncode == 0 and bool(ask.stdout.strip())
                 except (OSError, subprocess.TimeoutExpired):
                     replied = False
+                if image_search:
+                    cls.image_turn = cls._image_turn(mightling_bin, port, repo, env)
         finally:
             # SIGTERM first: the server stops the app-server it started and removes its marker.
             for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -315,6 +334,73 @@ class EgressAudit:
                 except (ProcessLookupError, subprocess.TimeoutExpired):
                     continue
         return replied
+
+    @classmethod
+    def admin_executable(cls) -> Optional[str]:
+        """
+        Returns:
+            Optional[str]: The `ling-admin` that serves the `image_search` tool: the link `codex
+            build` makes, else the one beside this interpreter, else the one on PATH.
+        """
+        for candidate in (os.path.expanduser("~/.local/bin/ling-admin"),
+                          os.path.join(os.path.dirname(sys.executable), "ling-admin"),
+                          shutil.which("ling-admin")):
+            if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return os.path.realpath(candidate)
+        return None
+
+    @classmethod
+    def prepare_image_search(cls, user_home: str) -> bool:
+        """
+        Lays out the scratch home so the traced session is offered `image_search`, as the launcher
+        offers it on a node (`ling-rs/src/images.rs`): a node id, a copy of this machine's image
+        search secret (so the tool reaches the real sidecar) and a `ling-admin` link. Nothing is
+        laid out, and the turn is skipped, where image search was never set up.
+
+        Args:
+            user_home (str): The session's scratch `HOME`.
+
+        Returns:
+            bool: True when the session will be offered the tool.
+        """
+        import uuid
+
+        from dreamference.chat.image_search_sidecar import IMAGE_SEARCH_SECRET_FILE
+        admin = cls.admin_executable()
+        if not admin or not os.path.isfile(IMAGE_SEARCH_SECRET_FILE):
+            return False
+        config = os.path.join(user_home, ".config", "dreamference")
+        secret = os.path.join(config, "image-search", "secret")
+        bin_dir = os.path.join(user_home, ".local", "bin")
+        try:
+            os.makedirs(os.path.dirname(secret), mode=0o700, exist_ok=True)
+            shutil.copyfile(IMAGE_SEARCH_SECRET_FILE, secret)
+            os.chmod(secret, 0o600)
+            with open(os.path.join(config, "node-id"), "w") as handle:
+                handle.write(f"{uuid.uuid4()}\n")
+            os.makedirs(bin_dir, exist_ok=True)
+            os.symlink(admin, os.path.join(bin_dir, "ling-admin"))
+        except OSError:
+            return False
+        return True
+
+    @classmethod
+    def _image_turn(cls, mightling_bin: str, port: int, repo: str, env: Dict[str, str]) -> str:
+        """
+        Asks the traced server the image search question, untraced, as the first one was asked.
+
+        Returns:
+            str: What came of it, for the report.
+        """
+        try:
+            ask = subprocess.run([mightling_bin, "web", "ask", "--port", str(port), IMAGE_PROMPT], cwd=repo, env=env,
+                                 stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                 timeout=SESSION_TIMEOUT_S, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return "no answer"
+        if ask.returncode != 0 or not ask.stdout.strip():
+            return "no answer"
+        return "answered with an image" if "](/images/" in ask.stdout else "answered, without an image"
 
     @classmethod
     def free_port(cls) -> int:
@@ -537,6 +623,8 @@ class EgressAudit:
                 print(line)
             for exception in cls.declared_exceptions():
                 print(f"ℹ️  Declared exception: {exception}")
+            if web:
+                print(f"ℹ️  Image search turn: {cls.image_turn}")
             if verdict.status == TRACE_FAILED:
                 if tui and cls.tui_stage == "composer":
                     print("💡 The interface opened and took the prompt, but no reply was recorded.")
@@ -627,6 +715,7 @@ class EgressAudit:
             "verdict": verdict.status,
             "problems": verdict.problems,
             "allowed_loopback_ports": {str(port): service for port, service in allowed.items()},
+            **({"image_search_turn": cls.image_turn} if session == WEB else {}),
             **asdict(trace),
             **identity,
         }
