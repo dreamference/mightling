@@ -18,6 +18,7 @@ from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_report import SweBenchReport
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
+from dreamference.swe_bench.swe_bench_hooks import HOOK_SETS
 from dreamference.swe_bench.swe_bench_instance_run import REFINE_VERSIONS, TASK_RULES
 from dreamference.swe_bench.swe_bench_runner import SweBenchRunner
 from dreamference.swe_bench.swe_bench_runtime import SweBenchRuntime
@@ -85,6 +86,10 @@ class SweBenchCommand:
                                 "does the same thing, and run the issue's example after the last edit. Rules "
                                 "stack (e.g. tests-v2,issue-v1); the prompt has them in the order listed here, "
                                 "whatever order they are given in")
+        run.add_argument("--hooks", default=None,
+                         help="Rules enforced in the agent's session by Codex hooks, comma-separated, of: "
+                              + ", ".join(HOOK_SETS) + " (default none). issue-v1: "
+                              + HOOK_SETS["issue-v1"] + ". Independent of --task-rules, which only asks")
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
@@ -144,7 +149,8 @@ class SweBenchCommand:
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
                 task_rules=cls._ids(args.task_rules), label=args.label, review_turn=args.review_turn,
-                refine_version=args.refine_version or "v1")
+                refine_version=args.refine_version or "v1",
+                hooks=cls._ids(args.hooks))
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":

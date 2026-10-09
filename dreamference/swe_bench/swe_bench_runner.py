@@ -28,6 +28,7 @@ from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
 from dreamference.swe_bench.swe_bench_evaluator import SweBenchEvaluator
 from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
 from dreamference.swe_bench.swe_bench_harness import SweBenchHarness
+from dreamference.swe_bench.swe_bench_hooks import HOOK_SETS, SweBenchHooks
 from dreamference.swe_bench.swe_bench_images import SweBenchImages
 from dreamference.swe_bench.swe_bench_instance_run import SCRATCH_MOUNT, TASK_RULES, SweBenchInstanceRun
 from dreamference.swe_bench.swe_bench_name_stripper import SweBenchNameStripper
@@ -153,7 +154,8 @@ class SweBenchRunner:
                        code_index: str = "off", prompt: Optional[str] = None,
                        mask: str = "off", strip_names: bool = False, refine: bool = False,
                        task_rules: Optional[List[str]] = None, review_turn: bool = False,
-                       refine_version: str = "v1") -> Dict[str, Any]:
+                       refine_version: str = "v1",
+                       hooks: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Collects what a run measured (§6.4). Written once, when the run starts.
 
@@ -214,6 +216,8 @@ class SweBenchRunner:
             "refine_version": refine_version,
             "task_rules": sorted(set(task_rules or [])),
             "review_turn": review_turn,
+            "hooks": sorted(set(hooks or [])),
+            **({"hooks_gate_sha256": SweBenchHooks.gate_digest()} if hooks else {}),
             "task_context": settings.task_context,
             "task_timeout_s": settings.task_timeout_s,
             "task_memory": settings.task_memory,
@@ -280,7 +284,8 @@ class SweBenchRunner:
             settings: Optional["swe_bench_settings.SweBenchSettings"] = None,
             label: Optional[str] = None,
             review_turn: bool = False,
-            refine_version: str = "v1") -> int:
+            refine_version: str = "v1",
+            hooks: Optional[List[str]] = None) -> int:
         """
         Runs the agent over a run's instances, resuming a run of the same name.
 
@@ -323,6 +328,10 @@ class SweBenchRunner:
                 A new run only, like `code_index`.
             refine_version: Which refine texts `refine` uses: `v1`, the measured ones, or `v2`
                 (refine spec §10). A new run only, like `code_index`.
+            hooks: Hook sets registered in each instance's session (`HOOK_SETS`: `issue-v1`
+                holds the first edit once until the files and functions the issue names have
+                been read, and the first stop once until its example has been run; spec §20).
+                Independent of `task_rules`. A new run only, like `code_index`.
 
         Returns:
             int: 0 when the run did what it could (whatever its instances did), 1 when it could
@@ -345,6 +354,10 @@ class SweBenchRunner:
         unknown_rules = sorted(set(task_rules or []) - set(TASK_RULES))
         if unknown_rules:
             print(f"❌ --task-rules takes: {', '.join(TASK_RULES)} (not {', '.join(unknown_rules)}).")
+            return 1
+        unknown_hooks = sorted(set(hooks or []) - set(HOOK_SETS))
+        if unknown_hooks:
+            print(f"❌ --hooks takes: {', '.join(HOOK_SETS)} (not {', '.join(unknown_hooks)}).")
             return 1
         if name is not None and not RUN_NAME.fullmatch(name) and SweBenchRunStore(name).manifest() is None:
             print(f"❌ --name {name!r}: a run's name is letters, digits, '.', '_' and '-', because the grader "
@@ -417,7 +430,7 @@ class SweBenchRunner:
                     manifest = cls.build_manifest(store.name, dataset, selected, excluded, settings,
                                                   served, runtime_hash, mightling_bin, parallel, code_index,
                                                   prompt, mask, strip_names, refine, task_rules,
-                                                  review_turn, refine_version)
+                                                  review_turn, refine_version, hooks)
                     store.write_manifest(manifest)
                 elif manifest.get("runtime_hash") != runtime_hash or manifest.get("served_model") != served[0]:
                     print(f"❌ Run {store.name} was started with another ling build or model "
@@ -647,7 +660,8 @@ class SweBenchRunner:
                             task_rules=manifest.get("task_rules") or [],
                             review_turn=bool(manifest.get("review_turn", False)),
                             # A run made before refine-v2 existed has no key: it ran v1.
-                            refine_version=str(manifest.get("refine_version") or "v1"))
+                            refine_version=str(manifest.get("refine_version") or "v1"),
+                            hooks=manifest.get("hooks") or [])
                         run.lane_host = lane["host"]
                         if lane.get("node"):
                             run.notes.append(f"model server: {lane['name']} (a replica of this machine's model)")

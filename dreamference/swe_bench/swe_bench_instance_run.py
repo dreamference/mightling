@@ -8,6 +8,7 @@ nothing else. The container is the sandbox: Codex's own cannot start inside one.
 the agent, collects the patch.
 """
 
+import json
 import os
 import re
 import shutil
@@ -25,6 +26,9 @@ from dreamference.night_shift.refine_prompt import (FIX_RULES, FIX_RULES_V2, NO_
                                                     STUDY_SECTIONS_V2, RefinePrompt)
 from dreamference.swe_bench import swe_bench_settings
 from dreamference.swe_bench.swe_bench_docker import SweBenchDocker
+from dreamference.swe_bench.swe_bench_hooks import GATE_DIRECTORY, GATE_MOUNT, SweBenchHooks
+from dreamference.swe_bench.swe_bench_issue_gate import CONDITIONS_FILE
+from dreamference.swe_bench.swe_bench_issue_targets import SweBenchIssueTargets
 from dreamference.swe_bench.swe_bench_run_store import SweBenchRunStore
 from dreamference.swe_bench.swe_bench_runtime import CONTAINER_MOUNT
 
@@ -323,7 +327,8 @@ class SweBenchInstanceRun:
                  extra_mounts: Optional[List[str]] = None,
                  issue: Optional[Dict[str, Any]] = None, refine: bool = False,
                  task_rules: Optional[List[str]] = None, review_turn: bool = False,
-                 refine_version: str = "v1") -> None:
+                 refine_version: str = "v1",
+                 hooks: Optional[List[str]] = None) -> None:
         """
         Args:
             store: The run's files.
@@ -347,6 +352,9 @@ class SweBenchInstanceRun:
                 with a changed tree and before the patch is collected, within the task's time
                 limit.
             refine_version: Which refine texts the two steps get (`REFINE_PROMPTS`).
+            hooks: Hook sets (`HOOK_SETS`) registered in the instance's `CODEX_HOME`: `issue-v1`
+                holds the first edit until what the issue names has been read, and the first
+                stop until the issue's example has been run (spec §20).
         """
         self.store = store
         self.instance_id: str = row["instance_id"]
@@ -366,6 +374,7 @@ class SweBenchInstanceRun:
         self.refine_version = refine_version
         self.task_rules: List[str] = list(task_rules or [])
         self.review_turn = review_turn
+        self.hooks: List[str] = list(hooks or [])
         self.container: str = self.container_name(store.name, self.instance_id)
         self.scratch: Path = store.directory / "scratch" / self.instance_id
         self.log_path: Path = store.log_path(self.instance_id)
@@ -538,6 +547,8 @@ class SweBenchInstanceRun:
             self.notes.append(f"runner error: {error}")
         finally:
             SweBenchDocker.run(["rm", "-f", self.container], timeout=120)
+        if self.hooks:
+            state["hooks"] = dict(state.get("hooks") or {}, **SweBenchHooks.outcome(self.scratch / GATE_DIRECTORY))
         if self.stop_event.is_set():
             status = "interrupted"
         state.update(status=status, session=self.session, nudges=self.nudges_used, nudge_kinds=self.nudge_kinds,
@@ -578,6 +589,9 @@ class SweBenchInstanceRun:
                                              self.task_rules, self.refine_version)
         else:
             prompt = self.compose_prompt(self.problem_statement, bool(self.code_index), self.task_rules)
+        if self.hooks:
+            # Only now: the refine arm's study step is neither held nor counted.
+            self._prepare_gate(state)
         fix_started = time.time()
         outcome = self._exec(prompt, resume=False)
         while outcome == "ok" and self.nudges_used < self.settings.nudges:
@@ -720,6 +734,31 @@ class SweBenchInstanceRun:
         record.update(changed=bool(files), added=added, removed=removed, files=files[:50])
         return review
 
+    def _prepare_gate(self, state: Dict[str, Any]) -> None:
+        """
+        Writes the `issue-v1` hooks' conditions, which switches them on: the names the issue
+        holds, resolved in the container (`SweBenchIssueTargets`), and its runnable examples.
+        Records them in `state["hooks"]`. A failed resolution leaves the hooks with nothing to
+        read before the first edit; the example check still applies.
+
+        Args:
+            state: The instance's state.
+        """
+        names = SweBenchIssueTargets.names_to_resolve(self.problem_statement)
+        listed = self._script(SweBenchIssueTargets.resolve_script(names), timeout=300)
+        if listed.returncode != 0:
+            self.notes.append(f"resolving what the issue names failed ({listed.returncode})")
+        root, _, listing = listed.stdout.partition("\n")
+        conditions = SweBenchIssueTargets.conditions(self.problem_statement, listing if listed.returncode == 0 else "",
+                                                     root.strip() or "/testbed")
+        directory = self.scratch / GATE_DIRECTORY
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / CONDITIONS_FILE).write_text(json.dumps(conditions, indent=1))
+        state["hooks"] = {"sets": self.hooks, "conditions": {
+            "targets": [{"label": t["label"], "from": t["from"]} for t in conditions["targets"]],
+            "dropped": conditions["dropped"],
+            "examples": [example.get("first") for example in conditions["examples"]]}}
+
     # -- steps ---------------------------------------------------------------------------------
 
     def _start_container(self) -> Optional[str]:
@@ -749,6 +788,13 @@ class SweBenchInstanceRun:
         environment.update({key: os.environ[key] for key in ("NO_PROXY", "no_proxy") if key in os.environ})
         ProxyBypass.apply(environment, self.model_url)
         mounts: List[str] = list(self.extra_mounts)
+        if self.hooks:
+            # Registered before the launcher's first start, with their trust entries; the gate
+            # does nothing until its conditions are written (`_prepare_gate`).
+            (self.scratch / GATE_DIRECTORY).mkdir(parents=True, exist_ok=True)
+            SweBenchHooks.register(self.scratch / "codex-home", f"{SCRATCH_MOUNT}/codex-home",
+                                   f"{SCRATCH_MOUNT}/{GATE_DIRECTORY}")
+            mounts.append(f"{SweBenchHooks.gate_source()}:{GATE_MOUNT}:ro")
         if self.code_index:
             environment.update(self.code_index["env"])
             environment["PATH"] = f"{self.code_index['path']}:{CONTAINER_PATH}"
