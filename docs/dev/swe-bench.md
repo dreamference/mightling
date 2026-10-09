@@ -30,6 +30,10 @@ SWE-bench runs `ling` inside each instance's own container (`dreamference/swe_be
 
 Admission, the start checks and the runner lock are Night Shift's, imported: a benchmark run and a night run exclude each other, and the lock file names its holder. A paired node serving the same model can be an extra lane (`[swe_bench] nodes`), reached through a relay on the run's network gateway; see [node.md](node.md).
 
+## The model gate: the benchmark first
+
+Since 2026-10-09 a run has priority over the model server (spec §18). `server start` puts the engine on `127.0.0.1:<port + 10000>` and starts `dreamference-gate-<port>`, a small streaming proxy in the engine's image (`vllm_server/model_gate_service.py`, standard library only), on the public port. While a run holds it (`SweBenchGateHold`: `~/.local/state/dreamference/model-gate/run.json`, heartbeat every 15 s, ignored after 180 s), a request from outside the run's network subnet is answered 503 with the run, its progress and time left, and `Retry-After: 0` (the agent retries 5xx about 30 times and honours `Retry-After` without a cap). The run then neither waits for open sessions nor for other requests. `ling-admin night pause|resume` lets others through; the run waits for them as before and records the interval in `gate.json`, which the report prints. Keep when touching this: one request per connection (`Connection: close` towards the engine), read-only `GET`s always pass (the launcher reads `/v1/models`), the gate's log never contains the loading monitor's readiness words, and tests never probe a real gate (conftest stubs `ModelGate.probe`; restore it from `REAL_GATE_PROBE`).
+
 ## Tests
 
 Every `docker` call goes through `SweBenchDocker`, and the cache and results directories are module-level constants, so the tests (`tests/test_swe_bench.py`, where a container is a scratch git repository) never start a container or touch the real cache.

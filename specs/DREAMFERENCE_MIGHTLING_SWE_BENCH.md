@@ -182,7 +182,7 @@ Reused from Night Shift wherever the mechanism is the same, with the one differe
 - **Admission** (`NightShiftRunner.admit`): the server answers, host-safety checks pass, the memory reserve holds, no heavy job is running, and the model has been idle for `idle_minutes`. A SWE-bench run adds one check: free disk above `disk_reserve` (§6.2).
 - **One runner at a time:** a SWE-bench run takes `runner.lock`, so it and a night run exclude each other, and `server start`, `codex build` and `index` refuse while it holds the lock. `_refuse_during_night_run` prints a fixed "A Night Shift run is in progress" today; the lock file must record who holds it, and the message must name the holder.
 - **Parallelism:** `max(1, min(max_parallel, floor(KV pool / task_context)))`, 3 today.
-- **Interactive use wins:** an open `ling` session or an outside request stops new instances from starting; running ones finish.
+- **Interactive use wins:** an open `ling` session or an outside request stops new instances from starting; running ones finish. **Since 2026-10-09 the benchmark wins instead (§18):** behind the model gate, other requests are refused while a run lasts, and this rule applies only while the gate is paused or absent.
 - **Memory:** each agent container is capped by Docker (`task_memory`), and a start is admitted only if `MemAvailable`, less what the running containers may still grow into, leaves the 8 GiB reserve plus one more cap. Night Shift's probe reads a systemd scope's `MemoryCurrent`, which says nothing about a container: a container's processes belong to dockerd's cgroup, not to the scope of the `docker run` client. This run reads the container's own cgroup (`docker stats --no-stream`, or `memory.current` under the container's cgroup path). That probe is new; the admission arithmetic around it is the shared one.
 
 The shared pieces move out of `dreamference/night_shift/` into a neutral module both import, in the same change; the spec does not allow a second copy of the admission logic.
@@ -609,3 +609,91 @@ Two arms of `swe-bench run` had no section here; both are in the code and in [CL
 ## 17. Night 2: production against Minima (prepared 2026-10-09, not yet run)
 
 The first A/B of two models rather than two harness arms. The candidate is Minima, `qwen3.8-27b-minima-nvfp4-dflash2`: Qwen3.8-27B with every linear layer in NVFP4, served by production's recipe with only the checkpoint swapped. The two arms run on 50 fresh tasks drawn the way night 1's were, with seed 20261010. `scripts/swe_bench_night2.sh` swaps the model server between the arms by the normal `server stop` / `server start --model` path, times both checkpoints with `scripts/decode_speed.py`, and serves production again whatever happens. The findings (servable by the pinned SGLang as-is, the drafter applies, the fused-group scales checked), the fairness argument and the decision rule are in [MODELS §2.2](./DREAMFERENCE_MODELS.md).
+
+## 18. The model gate: the benchmark first (2026-10-09)
+
+**The user's decision.** During a benchmark run (the A/B nights, about 16 hours each) the benchmark has priority over the model server. Until now the run gave way instead (§5.5): whenever the server was serving a request that was not the run's, no instance started, and on one night the run waited fifteen times. Now one gate in front of the model server refuses, while a run lasts, every request that is not the run's: `ling` in a terminal, `ling web`, the desktop app, the messenger bridges, `ling-docs`, the Gmail and image-search sidecars, Onyx, anything. `ling-admin night pause` lets them through for a while.
+
+### 18.1 Where the gate is, and why there
+
+How the model server is reached today decides it. The engine (SGLang, from the registry) runs in `dreamference-vllm-<port>` with `--network host` and listens on every interface, and every client comes to that one port: `ling` and the host's tools on loopback, Onyx through Docker's bridge gateway, the benchmark's containers through the gateway of `mightling-swe-bench`, other machines over the LAN, and a replica lane through the run's relay, which connects to the other node's public port.
+
+So `server start` now moves the engine to **loopback at the public port plus 10,000** (`127.0.0.1:18000` for 8000) and starts the gate on the public port, on every interface, as the engine served it. The container is still named after the public port, so the PSI watchdog, `server stop|logs` and every client address nothing new. Nothing in a container or on the LAN can reach a loopback port, so the gate is the one way in; a process on this machine that names the internal port deliberately is an override, not a leak.
+
+The gate is a **container of its own**, `dreamference-gate-<port>`, started by `server start` (`ModelGate`, `dreamference/vllm_server/model_gate.py`) and stopped and removed with the engine:
+
+- **Not the SWE-bench relay.** The relay exists only while a run lasts and only on the run's gateway; the gate must stand in front of every client all the time, so that a run can close it.
+- **Not a host process or a user unit.** The engine comes back at boot through Docker's restart policy; a user unit would need lingering to do the same, and a process started by `server start` would not come back at all. The gate has the engine's policy (`unless-stopped`), so the two come back together.
+- **Not inside the engine's container.** In a container of its own, a crashed gate is restarted by Docker in about a second without touching the engine; its log is not the engine's, which the model-loading monitor reads for its readiness words; and the engine's launch command changes only in `--host` and `--port`.
+- **In the engine's image**, which carries a Python, so nothing is pulled for it (as the diffusion sidecar's service runs in the main model's image), with `--user` the user's, 256 MiB, two CPUs, and its state mounted read-only.
+- **Python, standard library only** (`model_gate_service.py`, asyncio). It needs no change to `codex-patches/`, whose series stands at 42,741 of its 43,000 bytes. The file is copied beside the gate's state (`~/.local/state/dreamference/model-gate/`) at every start, so the container never mounts a path inside an installation an upgrade removes.
+
+If the gate cannot start, or started but does not answer its probe within 10 seconds (the port held, say), it is removed and the engine serves the public port itself, as before, and `server start` says so; `--no-gate` does the same on purpose and removes a gate an earlier start left.
+
+### 18.2 What passes
+
+- **No run holds the gate, or a pause is in force:** everything, as it was.
+- **A run holds it:** the run's own requests (§18.3); read-only probes that do not run the model (`GET` of `/v1/models`, `/metrics`, `/health`, `/get_model_info`, `/get_server_info`, `/server_info`, `/model_info`, `/version`, `/ping`), so `ling` still starts and says what the model is, and the run's admission and `ling-code` can read `/metrics`; and `GET /mightling-gate`, which the gate answers itself with what it is doing. Everything else is refused (§18.4), and the engine never sees it.
+- **One request per connection.** The gate decides on the request's head, sends it to the engine with `Connection: close` in place of the client's connection headers, forwards that one request's body (by `Content-Length` or chunked), and never forwards anything the client sends after it. The engine's answer goes back with `Connection: close` too, whatever the engine said, so a client never pools a connection the gate let through. A kept-alive connection opened while the gate was open therefore cannot carry a later request past it once it closes; the client opens a new connection, which is decided anew.
+- **Streaming is untouched.** The answer is copied as it arrives, never buffered. Measured on scratch ports against a stand-in that sent one SSE event every 400 ms: each arrived through the gate 3-4 ms after it was sent. 200 small `GET`s took 6.65 ms each directly and 7.02 ms through the gate (curl's own start included). When the client goes away, the gate closes the engine's connection, so the engine stops generating.
+
+### 18.3 How the run's requests are known
+
+**By their source address: the run's internal network's subnet.** The run reads it from `docker network inspect mightling-swe-bench` and writes it into its record. The gate is on the host's network, so it sees the instance container's own address: checked from a container on a scratch internal network, the gate passed it with that subnet recorded and refused it (logging `172.21.0.2`) with another. No other client can send from that subnet: a process on the host or a container elsewhere has another address, the LAN cannot route to it, and only the Docker socket (which can do anything anyway) could put a container on that network. A port, a path or a header would be guessable or visible to any client; no token is used.
+
+A replica lane is reached through the relay, which connects to the replica's public port, so its requests meet the replica's gate, which is open unless the replica runs a benchmark of its own. The run then gives that lane no instance (it asks the replica's `/mightling-gate`). The gate protects the machine whose run it is.
+
+### 18.4 The refusal, and what a refused user sees
+
+HTTP **503** in the API's own error shape, `Content-Type: application/json`, `Connection: close`, **`Retry-After: 0`**:
+
+```json
+{"error": {"message": "The model is running a benchmark (night 1, default arm, 37/100 done, about 9 h left). Try later or run `ling-admin night pause`.", "type": "service_unavailable", "code": "benchmark_running", "param": null}}
+```
+
+The label is `swe-bench run --label` (the night script passes `night 1, <arm> arm`; default `SWE-bench run <name>`); the progress is the run's finished instances over its instances, and the time left is the instances left times the median instance's time over the parallelism, refreshed every 15 seconds.
+
+**Why `Retry-After: 0`.** The agent retries a 5xx at two layers, five HTTP attempts with a backoff from 0.2 to 1.6 s and then five turn retries, about 30 requests and 25 seconds before the error shows, and it honours `Retry-After` with no upper bound. Zero makes those retries immediate, so the message shows in about a second; any real delay would hang the turn (an hour would hang it for more than a day). The code is not `server_is_overloaded` or `slow_down`, which the agent replaces with a generic message of its own.
+
+**What each client shows.** Checked with the installed build against a scratch gate:
+
+- **`ling exec`** prints `Reconnecting... 1/5` to `5/5`, then `ERROR: unexpected status 503 Service Unavailable: The model is running a benchmark (night 1, default arm, 37/100 done, about 9 h left). Try later or run `ling-admin night pause`., url: http://…/v1/responses`, 1.1 s after it started.
+- **The TUI**, by reading the code: the same text in an error cell, after a `Reconnecting… n/5` status line.
+- **The app-server** sends an `error` notification carrying that message; the **desktop app** and **`ling web`** (the same UI build) show the turn's `error.message`, and `ling web ask` prints the error's parameters, the message included.
+
+No client swallows it, so no display was changed. `ling-admin run` with another agent (Cline, Continue, OpenHands) waits for the server with a one-token completion, which the gate refuses: it now prints the gate's message and stops instead of waiting out the run, and `ling-admin status` shows the server as not answering completions. The wrapper `unexpected status 503 Service Unavailable: …, url: …` is the agent's own and stays: removing it would need a patch. Onyx, the bridges and the sidecars show whatever their client libraries make of a 503 with that body; they were not checked one by one.
+
+### 18.5 The run's side
+
+`SweBenchGateHold` (`dreamference/swe_bench/swe_bench_gate_hold.py`) closes the gate once the run holds the runner lock and has its network, before admission, and opens it when the run ends:
+
+- It writes `run.json` beside the gate's state: the run's name, a random id, the label, the subnet, progress and time left, its pid, and a heartbeat, refreshed every 15 seconds from a thread of its own. It removes the file at the end, only if the file is still its own.
+- **While the gate is in force**, nobody else can reach the model, so admission skips the open-session check and the idle wait (it waits only for requests already in flight to finish), and an open session or another request no longer holds a start back. Memory and disk still do.
+- **While paused, or with no gate answering** (a server started before the gate, or with `--no-gate`), everything is as before the gate: an open session or another request holds new starts back, and running instances finish. A run says when it finds no gate.
+- **Why the run waits during a pause** rather than going on starting instances: an instance that shares the model with someone's work is not timed like the others, and a pause is meant to give the model back for a while.
+- **The record:** `runs/<run>/gate.json` keeps, per run session, whether the gate was in force, and every pause interval clipped to the run. The report prints a `Model gate` line, and for pauses `Gate paused  N time(s), X in all (spans); K instance(s) ran during a pause … not comparable: <ids>`. `report --against` notes a differing gate and a paused run.
+
+### 18.6 Pause and resume
+
+`ling-admin night pause [--for DURATION]` (default one hour; `90m`, `2h`, `45s` or minutes) writes `pause.json` (`since`, `until`). A second `pause` while one is in force extends it from now and keeps its start, so a run records one interval. `ling-admin night resume` sets its end to now. A pause given with no run holding the gate also covers a run that starts before it ends. The gate reads the file on every request; the run, at every heartbeat. `night status` and `swe-bench status` say what the gate is doing.
+
+### 18.7 Failure modes
+
+- **The gate crashes:** Docker restarts it in about a second; the engine is untouched, and since its state is in files nothing is lost. Clients see a refused connection meanwhile.
+- **The run dies without cleaning up** (SIGKILL, out of memory, a reboot): its heartbeat stops and the gate ignores a record older than 180 seconds, so it opens on its own. A missing or unreadable record means open. A run that ends normally removes its record at once.
+- **A run hangs but its process lives:** the heartbeat thread keeps the gate closed. `ling-admin night pause --for 24h`, or stopping the run, opens it. Not detected automatically.
+- **The engine is down or loading:** the gate answers 502 ("not answering behind its gate; it may still be loading"); readiness polls see a non-200, as they saw a refused connection before.
+- **Egress:** the gate connects only to the engine on loopback. `ling` still connects to the model server's public port, so the egress audit's allowlist is unchanged.
+
+### 18.8 At the switch to the new install
+
+- The gate exists only once `ling-admin server start` of the new install has started the model server. The server running before was started without one and keeps the public port itself; a run against it prints that no gate answers and waits as before. Night 2 (§17) swaps models with `server stop` and `server start` from its checkout, so its first swap brings the gate; night 1 swaps nothing and needs the server restarted before it starts. Both scripts label their runs (`--label "night 1, <arm> arm"`, `"night 2, <run>"`).
+- `server start` refuses while a run holds the runner lock under the new `CODEX_HOME`. A run of the old install holds its lock under the old home, which the new code does not see, so the model server must be restarted only once such a run has finished.
+
+### 18.9 Tests
+
+`tests/test_model_gate.py` (32): the rules (open without a live run, with a stale, unreadable or network-less record; closed by a live one; opened by a pause); the time-left wording; who passes a closed gate; the request head rewritten to one request per connection; the proxy live on loopback in front of a stand-in, streaming through without buffering (the stand-in sends its second event only once the client has read the first), refusing with the message, `Retry-After: 0` and the engine never seeing the request, passing the run's network and a pause, a chunked body reaching the engine whole, a kept-alive connection unable to carry a second request past a gate that closed, the answer's head rewritten to `Connection: close` after an interim `100 Continue` from an engine that wanted to keep the connection, 502 with the engine down, and the probe; the service file run on its own with `python3 -I` as the container runs it, its log free of the loading monitor's words; the container command; the copy at start and the probe that must answer, a gate that never answers removed; the readiness waiter of the other agents printing the message; pause, extension and resume; a hold removing only its own record; `server start` starting the gate after the old engine is removed and before the new one, falling back without it, and `--no-gate`; `night pause|resume` from the command line. `tests/test_swe_bench.py` (+7): a run writing its subnet and label into the record, admission waiting only for requests in flight, starts no longer held back, the gate open again after the run, the report line; the time left; a pause making the run wait and its report naming it; no subnet, no gate; the instances that ran during a pause; a replica with a closed gate getting no instance. `tests/test_night_shift.py` (+1): with priority only memory holds a start back. `tests/conftest.py` answers the gate probe with "no gate" for every test, since the real probe is an HTTP request to the configured server.
+
+### 18.10 Not built
+
+A per-run token as a second identification; removing the agent's `unexpected status …, url: …` wrapper (a patch); checking Onyx's and each bridge's display one by one; detecting a run that hangs while alive.

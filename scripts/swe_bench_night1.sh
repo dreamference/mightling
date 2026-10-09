@@ -85,8 +85,9 @@ run() {
         extra=""
         [ "$arm" = tests-v2 ] && extra="--task-rules tests-v2"
         log "round $PREFIX-$arm"
+        # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
         admin swe-bench run --subset "$LIST" --name "$PREFIX-$arm" --code-index universal --mask off \
-            --prompt default $extra --eval --remove-images
+            --prompt default $extra --eval --remove-images --label "night 1, $arm arm"
         log "$PREFIX-$arm finished ($?)"
         df -h / | tail -1
     done

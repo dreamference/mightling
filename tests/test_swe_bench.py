@@ -283,7 +283,7 @@ class QuietMachine:
         return cls.refuse
 
     @classmethod
-    def start_blocker(cls, vllm_host, mightling_bin, active, settings):
+    def start_blocker(cls, vllm_host, mightling_bin, active, settings, priority=False):
         return cls.blocker
 
 
@@ -1838,3 +1838,140 @@ def test_without_cycling_the_index_pass_keeps_the_images(bench):
     assert run(bench, code_index="universal") == 0
     assert not any(call[0] == "rmi" for call in bench["docker"].calls)
     assert len(bench["docker"].present) == 3
+
+
+# -- the model gate (spec §18) ---------------------------------------------------------------------
+
+@pytest.fixture
+def gated(bench, monkeypatch):
+    """The benchmark network has a subnet, and a gate answers from this (test) home's files."""
+    from dreamference.swe_bench import swe_bench_gate_hold
+    from dreamference.vllm_server.model_gate import ModelGate
+    docker = bench["docker"]
+
+    def run_with_subnet(args, timeout=None, input_text=None):
+        if args[:2] == ["network", "inspect"]:
+            docker.calls.append(list(args))
+            return subprocess.CompletedProcess(args, 0, json.dumps([{"Internal": True, "IPAM": {"Config": [
+                {"Gateway": "172.30.0.1", "Subnet": "172.30.0.0/16"}]}}]), "")
+        return docker.run(args, timeout, input_text)
+    monkeypatch.setattr(SweBenchDocker, "run", classmethod(lambda cls, *a, **k: run_with_subnet(*a, **k)))
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: ModelGate.state()))
+    monkeypatch.setattr(swe_bench_gate_hold, "HEARTBEAT_S", 0.02)
+    written = []
+    real_write = ModelGate.write_run.__func__
+    monkeypatch.setattr(ModelGate, "write_run", classmethod(lambda cls, record: written.append(dict(record))
+                                                            or real_write(cls, record)))
+    return dict(bench, written=written, gate=ModelGate)
+
+
+class OthersBusy(QuietMachine):
+    """A session is open and another request is running: only the gate's priority lets a start through."""
+    admitted = []
+
+    @classmethod
+    def admit(cls, vllm_host, mightling_bin, idle_minutes, end):
+        cls.admitted.append((idle_minutes, cls.ignore_sessions))
+        return None
+
+    @classmethod
+    def start_blocker(cls, vllm_host, mightling_bin, active, settings, local=True, priority=False):
+        return None if priority else "the model server is serving a request that is not the night run's"
+
+
+def test_a_run_closes_the_gate_to_everyone_but_its_network_and_opens_it_after(gated, monkeypatch):
+    monkeypatch.setattr(SweBenchRunner, "admission", OthersBusy)
+    monkeypatch.setattr(OthersBusy, "admitted", [])
+    assert run(gated, instances=["acme__widget-1", "acme__widget-2"], label="night 1, default arm") == 0
+    records = gated["written"]
+    assert records and all(r["networks"] == ["172.30.0.0/16"] and r["run"] == "r1" for r in records)
+    assert records[-1]["label"] == "night 1, default arm" and records[-1]["total"] == 2
+    # Nobody else can reach the model: admission waits only for requests in flight, and neither an
+    # open session nor another request held a start back.
+    assert OthersBusy.admitted == [(0, True)]
+    assert set(SweBenchRunStore("r1").finished()) == {"acme__widget-1", "acme__widget-2"}
+    # Open again once the run is over, and the run's record says the gate was in force.
+    assert gated["gate"].run_record() is None and gated["gate"].state()["state"] == "open"
+    sessions = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["sessions"]
+    assert [s["gate"] for s in sessions] == ["in force"] and sessions[0]["ended"]
+    report = SweBenchReport.render(SweBenchRunStore("r1"))
+    assert "Model gate          in force: requests from anything but the run were refused" in report
+    assert "Gate paused" not in report
+
+
+def test_the_refusal_counts_progress_and_estimates_the_time_left(gated):
+    from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
+    assert run(gated, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("r1")
+    for instance_id, wall in (("acme__widget-1", 600), ("acme__widget-2", 1200)):
+        state = store.state(instance_id)
+        state["wall_s"] = wall
+        store.write_state(instance_id, state)
+    hold = SweBenchGateHold(store, "http://localhost:8000", "172.30.0.0/16")
+    hold.instances, hold.total, hold.parallel = ["acme__widget-1", "acme__widget-2", "x-1", "x-2", "x-3", "x-4"], 6, 2
+    assert hold.progress() == {"done": 2, "total": 6, "eta_s": 1800}  # 4 left x median 900 s / 2 at once
+
+
+def test_while_paused_the_run_waits_for_others_and_its_report_names_the_pause(gated, monkeypatch):
+    monkeypatch.setattr(SweBenchRunner, "admission", OthersBusy)
+    gated["gate"].pause(0.6)
+    started = time.time()
+    assert run(gated, instances=["acme__widget-1"]) == 0
+    assert time.time() - started >= 0.5, "no instance started while the pause let others through"
+    pauses = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["pauses"]
+    assert len(pauses) == 1 and 0.3 < pauses[0]["end"] - pauses[0]["start"] <= 0.7
+    assert "Gate paused         1 time(s)" in SweBenchReport.render(SweBenchRunStore("r1"))
+
+
+def test_without_the_networks_subnet_the_gate_stays_open_and_the_run_waits_as_before(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    monkeypatch.setattr(ModelGate, "probe", classmethod(lambda cls, host, timeout=2.0: ModelGate.state()))
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert ModelGate.run_record() is None
+    sessions = json.loads((SweBenchRunStore("r1").directory / "gate.json").read_text())["sessions"]
+    assert sessions[0]["gate"].startswith("open: ")
+
+
+def test_with_no_gate_in_front_of_the_server_the_report_says_others_were_served(bench):
+    # The suite's probe answers "no gate", as a model server started before the gate existed does.
+    assert run(bench, instances=["acme__widget-1"]) == 0
+    assert "Model gate          none in front of the model server" in SweBenchReport.render(SweBenchRunStore("r1"))
+
+
+def test_the_report_names_the_instances_that_ran_during_a_pause(bench):
+    from datetime import datetime
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    store = SweBenchRunStore("r1")
+    for offset, instance_id in enumerate(["acme__widget-1", "acme__widget-2"]):
+        state = store.state(instance_id)
+        state.update(started=datetime.fromtimestamp(10_000 + offset * 1000).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z"),
+                     wall_s=100)
+        store.write_state(instance_id, state)
+    (store.directory / "gate.json").write_text(json.dumps({
+        "sessions": [{"start": 9_000, "end": 20_000, "gate": "in force", "ended": True}],
+        "pauses": [{"start": 10_050, "end": 10_500}]}))
+    lines = SweBenchReport.gate_lines(store, store.states(), ["acme__widget-1", "acme__widget-2"])
+    assert lines[1].startswith("Gate paused         1 time(s), 7 min 30 s in all")
+    assert lines[1].endswith(": acme__widget-1")
+
+
+def test_a_replica_whose_own_gate_is_closed_gets_no_instance(bench, monkeypatch):
+    from dreamference.vllm_server.model_gate import ModelGate
+    replica = {"name": "spark-2", "node": "2222-bbbb", "host": "http://192.168.50.106:8000", "parallel": 1, "budget": None}
+    monkeypatch.setattr(SweBenchRunner, "lanes", classmethod(
+        lambda cls, vllm_host, served, settings, parallel: (
+            [{"name": "this machine", "node": None, "host": vllm_host, "parallel": parallel, "budget": None},
+             dict(replica)], [])))
+
+    def relays(cls, gateway, lanes):
+        for lane in lanes:
+            lane["model_url"] = f"http://{gateway}:40001"
+        return []
+    monkeypatch.setattr(SweBenchRunner, "open_relays", classmethod(relays))
+    monkeypatch.setattr(ModelGate, "probe", classmethod(
+        lambda cls, host, timeout=2.0: {"gate": "mightling", "state": "closed"} if "192.168" in host else None))
+    assert run(bench, instances=["acme__widget-1", "acme__widget-2"]) == 0
+    created = [call for call in bench["docker"].calls if call[0] == "run"]
+    hosts = {dict(a.split("=", 1) for i, a in enumerate(call) if call[i - 1] == "-e")["DREAMFERENCE_VLLM_HOST"]
+             for call in created}
+    assert "http://172.30.0.1:40001" not in hosts and len(created) == 2

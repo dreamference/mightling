@@ -91,6 +91,7 @@ class SGLangLaunchBuilder:
         tool_call_parser: Optional[str],
         reasoning_parser: Optional[str],
         api_key: Optional[str] = None,
+        host: str = "0.0.0.0",
     ) -> List[str]:
         """
         Builds everything after the image name.
@@ -104,6 +105,7 @@ class SGLangLaunchBuilder:
             tool_call_parser (Optional[str]): SGLang tool-call parser name.
             reasoning_parser (Optional[str]): SGLang reasoning parser name.
             api_key (Optional[str]): Optional API key.
+            host (str): Address to serve on: every interface, or loopback behind the model gate.
 
         Returns:
             List[str]: The command, starting with `python3 -m sglang.launch_server`.
@@ -116,7 +118,8 @@ class SGLangLaunchBuilder:
             # Kept to the repository ID, as vLLM reports it, so switching engines renames nothing.
             "--served-model-name", hf_model,
             # Every interface, as vLLM: Onyx and OpenHands reach the server from Docker's bridge.
-            "--host", "0.0.0.0",
+            # Behind the model gate, loopback: the gate then owns the public port.
+            "--host", host,
             "--port", str(port),
             "--tp-size", "1",
             "--mem-fraction-static", str(gpu_memory_utilization),

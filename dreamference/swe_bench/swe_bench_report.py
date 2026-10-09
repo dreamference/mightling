@@ -195,6 +195,7 @@ class SweBenchReport:
         lines.append(f"Tokens              {tokens['input_tokens']:,} in ({tokens['cached_input_tokens']:,} cached), "
                      f"{tokens['output_tokens']:,} out; {summary['commands']:,} commands")
         lines.append(cls.code_index_line(summary))
+        lines += cls.gate_lines(store, summary["states"], manifest.get("instances", []))
         if manifest.get("issue_text") == "names stripped":
             stripped = manifest.get("stripped_issues") or {}
             changed = sum(1 for entry in stripped.values() if entry.get("replaced"))
@@ -328,6 +329,16 @@ class SweBenchReport:
             first, second = (m.get(field, MISSING_FIELDS.get(field)) for m in (a, b))
             if first != second:
                 lines.append(f"  differs: {field}: {first} | {second}")
+        # Timings are only comparable where the model was the run's alone (§18).
+        gates = [cls.gate_lines(run, summary["states"], summary["manifest"].get("instances", []))
+                 for run, summary in ((store, ours), (other, theirs))]
+        if gates[0][:1] != gates[1][:1]:
+            lines.append(f"  differs: model gate: {(gates[0][:1] or ['no record'])[0].split('  ', 1)[-1].strip()} | "
+                         f"{(gates[1][:1] or ['no record'])[0].split('  ', 1)[-1].strip()}")
+        for run_name, gate in zip((name, other.name), gates if other.name != store.name else gates[:1]):
+            if len(gate) > 1:
+                lines.append(f"  note: {run_name} paused its model gate; see its report for the instances "
+                             "whose times are not comparable")
         lines.append(f"Resolved only by {name} ({len(only_ours)}): {', '.join(only_ours) or 'none'}")
         lines.append(f"Resolved only by {other.name} ({len(only_theirs)}): {', '.join(only_theirs) or 'none'}")
         if both:
@@ -457,6 +468,58 @@ class SweBenchReport:
         variance = (only_first + only_second - (only_first - only_second) ** 2 / pairs) / pairs ** 2
         half = 1.96 * math.sqrt(max(variance, 0.0))
         return difference - half, difference + half
+
+    @classmethod
+    def gate_lines(cls, store: SweBenchRunStore, states: Dict[str, Any], instances: List[str]) -> List[str]:
+        """
+        What the model gate did during a run (§18): whether it refused other requests, and the
+        pauses that let them through, with the instances that ran during one, whose times are
+        not comparable with the rest. Nothing for a run made before the gate existed.
+
+        Args:
+            store: The run.
+            states: Its instances' states.
+            instances: The instances it covers.
+
+        Returns:
+            List[str]: Report lines.
+        """
+        from datetime import datetime
+
+        from dreamference.swe_bench.swe_bench_gate_hold import SweBenchGateHold
+        record = SweBenchGateHold.read(store)
+        sessions, pauses = record["sessions"], record["pauses"]
+        if not sessions:
+            return []
+        kinds = {session.get("gate") for session in sessions}
+        if kinds == {"in force"}:
+            lines = ["Model gate          in force: requests from anything but the run were refused"]
+        elif "in force" in kinds:
+            lines = ["Model gate          in force for part of the run only; in the rest other requests were "
+                     "served beside it and held its starts back"]
+        else:
+            lines = ["Model gate          none in front of the model server: other requests were served beside "
+                     "the run and held its starts back, as before the gate"]
+        if not pauses:
+            return lines
+        stamp = lambda t: datetime.fromtimestamp(t).strftime("%m-%d %H:%M")
+        total = sum(max(0.0, pause["end"] - pause["start"]) for pause in pauses)
+        spans = ", ".join(f"{stamp(pause['start'])}-{datetime.fromtimestamp(pause['end']):%H:%M}" for pause in pauses)
+        shared = []
+        for instance_id in instances:
+            state = states.get(instance_id) or {}
+            try:
+                started = datetime.strptime(state["started"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+                ended = started + float(state["wall_s"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if any(started < pause["end"] and ended > pause["start"] for pause in pauses):
+                shared.append(instance_id)
+        lines.append(f"Gate paused         {len(pauses)} time(s), {cls.duration(total)} in all ({spans}); "
+                     f"{len(shared)} instance(s) ran during a pause and may have shared the model with other "
+                     "requests, so their times are not comparable"
+                     + (f": {', '.join(shared)}" if shared else ""))
+        return lines
 
     @classmethod
     def duration(cls, seconds: float) -> str:

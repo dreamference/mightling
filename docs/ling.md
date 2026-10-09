@@ -26,6 +26,12 @@ Before the agent starts, `ling` connects itself to the local model:
 `ling --version`, `ling --help` and commands that never need the model (such as `completion`
 and `apply`) skip all of this and answer at once.
 
+While a SWE-bench run is using the model, the model server turns every other request away, from
+`ling`, the web UI, the desktop app and the messengers alike, and says so: "The model is running a
+benchmark (night 1, 37/100 done, about 9 h left). Try later or run `ling-admin night pause`."
+`ling-admin night pause` (one hour; `--for 2h` for longer) lets you work meanwhile, and
+`ling-admin night resume` hands the model back to the benchmark.
+
 ## Commands and flags
 
 The everyday commands and flags:

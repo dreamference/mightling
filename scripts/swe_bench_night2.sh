@@ -238,8 +238,9 @@ on_signal() {
 arm() {
     local name=$1
     log "round $name"
+    # The label is what anyone the model gate turns away reads (SWE_BENCH spec §18).
     # shellcheck disable=SC2086
-    admin swe-bench run --subset "$LIST" --name "$name" $ARM_FLAGS --eval --remove-images
+    admin swe-bench run --subset "$LIST" --name "$name" $ARM_FLAGS --eval --remove-images --label "night 2, $name"
     log "$name finished ($?)"
     df -h / | tail -1
 }

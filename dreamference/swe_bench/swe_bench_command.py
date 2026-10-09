@@ -78,8 +78,10 @@ class SweBenchCommand:
         run.add_argument("--until", default=None, help="HH:MM after which no new instance starts")
         run.add_argument("--idle-minutes", type=float, default=None, help="Minutes the model must have been idle first (default 10)")
         run.add_argument("--ignore-open-sessions", action="store_true", help="Do not wait for open ling sessions to close (for testing)")
+        run.add_argument("--label", default=None,
+                         help="What the model gate's refusal calls this run, e.g. \"night 1\" (default: SWE-bench run <name>)")
 
-        evaluate = commands.add_parser("eval", help="The grading phase: the upstream harness applies each patch and runs the tests")
+        evaluate =commands.add_parser("eval", help="The grading phase: the upstream harness applies each patch and runs the tests")
         evaluate.add_argument("run", nargs="?", default=None, help="The run (default: the latest)")
         evaluate.add_argument("--drop-test-hunks", action="store_true",
                               help="Grade the same predictions again with every test file left out of each patch, "
@@ -124,7 +126,7 @@ class SweBenchCommand:
                 idle_minutes=args.idle_minutes, ignore_sessions=args.ignore_open_sessions,
                 keep_images=not args.remove_images, code_index=args.code_index, prompt=args.prompt,
                 mask=args.mask, strip_names=args.strip_names, refine=args.refine,
-                task_rules=cls._ids(args.task_rules))
+                task_rules=cls._ids(args.task_rules), label=args.label)
         if command == "eval":
             return cls.evaluate(args.run, DROP_TEST_HUNKS if args.drop_test_hunks else None, args.remove_images)
         if command == "report":
@@ -370,6 +372,10 @@ class SweBenchCommand:
         swe_bench_settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
         free = shutil.disk_usage(swe_bench_settings.CACHE_DIR).free
         print(f"Disk: {free / 1024 ** 3:.0f} GiB free; reserve {swe_bench_settings.SweBenchSettings().disk_reserve}")
+        from dreamference.config import DreamferenceConfig
+        from dreamference.vllm_server.model_gate import ModelGate
+        for line in ModelGate.describe(DreamferenceConfig().vllm_host):
+            print(line)
         return 0
 
     @classmethod

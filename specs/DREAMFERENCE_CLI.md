@@ -38,7 +38,7 @@ There is no `chat` subcommand any more (removed 2026-09-28). The interactive age
 **Commands:**
 
 - **Setup:** `init`, `host {check,setup}`, `model {list,download}`, `main-model {set,inspect}`, `diffusion-model {set}` (absent while diffusion is switched off, §4.2), `clear {model-cache,tensorize-cache}`, `docs setup`
-- **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run}`
+- **Agents:** `run`, `codex {build,start,stop,test}`, `night {enable,disable,status,run,pause,resume}`
 - **Measurement and checks:** `swe-bench {setup,smoke,run,eval,report,status,clean}`, `audit {egress}`
 - **Model server:** `server {start,stop,remove,logs}`, `logs [server|mcp]`, `endpoints`, `benchmark_server`, `node {enable,disable,status,id,list,add,remove,set,start,stop,sync-model,run,jobs,logs,cancel,fetch,provision,prepare}` (plus `authorize`, `serve-job`, `job-exec` and `askpass`, which a person does not type, §4.25)
 - **Web UI, desktop and messengers:** `chat {start,configure,google-auth,gmail,status,password,logs,stop,uninstall}` (Onyx Lite; alias `onyx`), `desktop {install,run,build,status}`, `matrix {start,stop,status,add-user,push,remove}`; `ling web` itself is the launcher's
@@ -88,7 +88,7 @@ These options come before the subcommand (`ling-admin --agent cline run "…"`).
 | **`codex start` / `stop`** | Start / stop the Codex app-server daemon using `ling` | — |
 | **`codex test`** | Run Codex's own test suite on Mightling's patched tree, except the tests in `codex-tests/mightling-skips.toml` | `[-E FILTER] [--test-threads 8] [--jobs 6] [--memory-max 24G] [--accept-snapshots]` |
 | **`code setup`** | Install the pinned tools the code index (`ling-code`) runs | — |
-| **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`; see §4.21 |
+| **`night …`** | Night Shift: the timer and the overnight run of the `/night` queue | `enable [--window]`, `disable`, `status`, `run [--until] [--minutes] [--idle-minutes] [--ignore-open-sessions]`, `pause [--for DURATION]`, `resume` (the model gate during a SWE-bench run); see §4.21 |
 | **`swe-bench …`** | Run `ling` over SWE-bench instances and have the upstream harness grade the patches | `setup`, `smoke`, `run`, `eval`, `report`, `status`, `clean`; see §4.23 |
 | **`audit egress`** | Trace one real `ling` session (or the TUI, the desktop app, `ling web`, the document index) and list every network destination and process, with a verdict | `[--tui \| --app \| --web \| --docs] [--prompt P] [--json]`; see §4.24 |
 | **`node …`** | Advertise this machine on the local network so clients find it with no address typed; list other nodes and, once paired over SSH, manage them, copy a model to them and run jobs on them | `enable [--no-web]`, `disable`, `status [NAME]`, `list`, `add NAME`, `remove NAME`, `set NAME --model M`, `start NAME`, `stop NAME`, `sync-model NAME MODEL`, `run NAME … -- CMD`, `jobs`, `logs`, `cancel`, `fetch`, `provision [HOST…]`, `prepare`; see §4.25 |
@@ -187,13 +187,15 @@ ling-admin server start [--model MODEL] [--port 8000] [--quantization Q] [--draf
   [--hf-token T] [--num-scheduler-steps N] [--attention-backend B] [--kv-cache-dtype D] [--api-key K]
   [--enable-auto-tool-choice] [--tool-call-parser P] [--reasoning-parser P] [--moe-backend B]
   [--max-num-batched-tokens N] [--guided-decoding-backend B] [--tensorize/--no-tensorize]
-  [--docker-image IMG] [--diffusion-model M] [--diffusion-port 8001] [--no-diffusion]
+  [--docker-image IMG] [--diffusion-model M] [--diffusion-port 8001] [--no-diffusion] [--no-gate]
 ```
 
 **Behaviour:**
 1. Refuses while a Night Shift run holds its lock (§4.21), then runs the host-safety pre-flight (`check_host_safety`).
 2. Starts the diffusion sidecar `dreamference-diffusion-<diffusion-port>` **first**, unless `--no-diffusion`, so that vLLM's free-memory check accounts for it.
 3. Starts vLLM in Docker, under the PSI memory-pressure watchdog. It streams logs and memory until the health check passes, then exits, leaving the server running.
+
+**The model gate** (since 2026-10-09, `MIGHTLING_SWE_BENCH.md` §18). The engine listens on `127.0.0.1:<port + 10000>` and a second container, `dreamference-gate-<port>` (the engine's image, `--network host`, the same restart policy, 256 MiB), serves `<port>` on every interface in front of it. Every client reaches the model through it; it passes everything through untouched unless a SWE-bench run holds it. It starts after the old engine container is removed and before the new one; if it cannot start, the engine serves `<port>` itself, as before. `--no-gate` does the same on purpose. `server stop` and `remove` stop and remove the gate with the engine.
 
 Per-model flags come from the model matrix's `launch_overrides`. Options given here override them, and anything unset falls back to the recipe. `--docker-image` overrides the model's pinned image.
 
@@ -395,12 +397,15 @@ ling-admin night enable [--window HH:MM-HH:MM]     # default: [night] window, 01
 ling-admin night disable
 ling-admin night status
 ling-admin night run [--until HH:MM] [--minutes N] [--idle-minutes N] [--ignore-open-sessions]
+ling-admin night pause [--for DURATION]           # default 1h; 90m, 2h, 45s, or minutes
+ling-admin night resume
 ```
 
 Night Shift (`dreamference/night_shift/`, `DREAMFERENCE_MIGHTLING_NIGHT_SHIFT.md`). Tasks are queued from `ling` with `/night add` (or `ling night add …` from a shell); these commands run them.
 
 - **`enable` / `disable`:** install or remove the systemd user timer `mightling-night.timer` that starts `night run` at the window's start.
-- **`status`:** the timer, the window and the queue of every repository.
+- **`status`:** the timer, the window and the queue of every repository, and what the model gate is doing.
+- **`pause` / `resume`:** while a SWE-bench run holds the model gate, it refuses every other request (`MIGHTLING_SWE_BENCH.md` §18). `pause` lets everything through until `--for` has passed (default one hour; a second `pause` extends it from now and keeps one interval); the run starts no new instance meanwhile while others use the model, as before the gate, and its report names the interval. `resume` ends it early. A pause given with no run holding the gate also covers a run that starts before it ends.
 - **`run`:** works through the queue now, until the window ends (`--until`, or `--minutes` from now). It waits for the model server to have been idle for `--idle-minutes` (default 10). `--ignore-open-sessions` skips the wait for open `ling` sessions; it is for testing.
 
 While a night run holds its lock, `server start`, `codex build` and `index` refuse to run. A SWE-bench run takes the same lock (§4.23), so the two exclude each other and the refusal names whichever holds it.
@@ -418,7 +423,7 @@ ling-admin swe-bench smoke [--idle-minutes N] [--ignore-open-sessions]
 ling-admin swe-bench run [--dataset D] [--instances IDS | --subset FILE] [--limit N] [--name NAME]
                            [--eval [--remove-images]] [--code-index off|universal|exact] [--prompt <name>]
                            [--mask off|on] [--strip-names] [--refine] [--task-rules tests]
-                           [--until HH:MM] [--idle-minutes N] [--ignore-open-sessions]
+                           [--until HH:MM] [--idle-minutes N] [--ignore-open-sessions] [--label TEXT]
 ling-admin swe-bench eval [RUN] [--drop-test-hunks] [--remove-images]
 ling-admin swe-bench report [RUN] [--against RUN] [--drop-test-hunks]
 ling-admin swe-bench status
@@ -429,10 +434,10 @@ SWE-bench on this machine (`dreamference/swe_bench/`, `DREAMFERENCE_MIGHTLING_SW
 
 - **`setup`:** installs the upstream harness (`swebench` 5.0.2) in a virtualenv of its own, downloads the dataset and builds the relocated copy of `ling` that starts inside the instance images. `--validate` also checks which instances grade correctly here (the reference patch resolves, a no-op patch does not), which pulls their images.
 - **`smoke`:** proves the whole pipeline on five fixed instances. `run` refuses until a smoke has passed with the installed harness version.
-- **`run`:** the agent phase. One `ling exec` per instance, each inside that instance's own container on the internal Docker network `mightling-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `ling-code` (default `off`). `--prompt <name>` starts the agent under that system prompt (`default`, `high-swe`, or a custom one from `$CODEX_HOME/system-prompts/`, mounted read-only); without it the configured one. The manifest records it, with the custom file's SHA-256, and `report --against` names it when two runs differ. The arms: `--code-index exact` gives the SCIP stores alone and no graph; `--mask on` masks old tool outputs in the agent's requests (MIGHTLING_CONTEXT_BUDGET §4.1); `--strip-names` takes the files, modules, functions and classes the reference fix touches out of the issue; `--refine` runs two sessions per instance, one that studies the issue and writes a refined description without changing the repository and a fresh one that fixes it (MIGHTLING_REFINE); `--task-rules tests` adds rules to the task prompt (never change an existing test, keep your own scripts in `/tmp`, compare failing tests by name with and without the change).
+- **`run`:** the agent phase. One `ling exec` per instance, each inside that instance's own container on the internal Docker network `mightling-swe-bench`, which reaches the model server and nothing else. It writes `predictions.jsonl`. A run with an existing `--name` is resumed. `--eval` grades when the agent phase ends; `--remove-images` then works one repository at a time and removes its images once graded. `--code-index universal` indexes each instance's repository on the host and gives the agent `ling-code` (default `off`). `--prompt <name>` starts the agent under that system prompt (`default`, `high-swe`, or a custom one from `$CODEX_HOME/system-prompts/`, mounted read-only); without it the configured one. The manifest records it, with the custom file's SHA-256, and `report --against` names it when two runs differ. The arms: `--code-index exact` gives the SCIP stores alone and no graph; `--mask on` masks old tool outputs in the agent's requests (MIGHTLING_CONTEXT_BUDGET §4.1); `--strip-names` takes the files, modules, functions and classes the reference fix touches out of the issue; `--refine` runs two sessions per instance, one that studies the issue and writes a refined description without changing the repository and a fresh one that fixes it (MIGHTLING_REFINE); `--task-rules tests` adds rules to the task prompt (never change an existing test, keep your own scripts in `/tmp`, compare failing tests by name with and without the change). While it runs it holds the model gate: any request that does not come from its network is refused with HTTP 503 naming the run, `--label` (default `SWE-bench run <name>`), its progress and the time left (`MIGHTLING_SWE_BENCH.md` §18).
 - **`eval`:** the grading phase: the upstream harness applies each patch and runs the tests. It needs no model. `--drop-test-hunks` grades the same predictions again with every test file left out of each patch, as a separate grading (`eval-drop-test-hunks/`); `--remove-images` grades one repository at a time and removes its images.
 - **`report`:** the resolved rate and what it was measured with; `--against` compares two runs instance by instance; `--drop-test-hunks` reports that second grading.
-- **`status`:** runs, their progress, the images present and free disk.
+- **`status`:** runs, their progress, the images present, free disk, and what the model gate is doing.
 - **`clean`:** removes a run's containers and scratch (every run's, with no `RUN`); `--images` also removes the instance images.
 
 Files: the harness, dataset, runtime and validation results under `~/.cache/dreamference/swe-bench/`; one directory per run under `~/.local/share/dreamference/swe-bench/runs/`. Settings come from the `[swe_bench]` table (§5.1). `run` and `smoke` use Night Shift's admission (idle model, memory) and its runner lock.

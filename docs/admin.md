@@ -133,6 +133,7 @@ Launch local vLLM server optimized for GB10 unified memory.
 |---|---|
 | `--model` | Model name to serve (default: the configured main model; examples: qwen3.8-27b-nvfp4-dflash2, llama-3.3-70b) |
 | `--port` | Port for the model server's /v1 API. |
+| `--no-gate` | Serve the port from the engine itself, without the model gate that lets a SWE-bench run refuse other requests. |
 | `--quantization` | Quantization method (int8, fp8, awq) |
 | `--draft-model` | Speculative decoding draft model (e.g. qwen2.5-coder-1.5b) |
 | `--num-speculative-tokens` | Number of speculative tokens to propose. |
@@ -271,6 +272,18 @@ Work through the queue now, until the window ends.
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing; their requests still pause the run) |
 
+#### `ling-admin night pause`
+
+Let every request through the model gate while a SWE-bench run holds it (the run waits for them, as before the gate).
+
+| Option | Description |
+|---|---|
+| `--for` | How long: 90m, 2h, 45s, or minutes (default 1h) |
+
+#### `ling-admin night resume`
+
+End a pause: the model gate refuses everyone but the benchmark run again.
+
 ### `ling-admin swe-bench`
 
 Run ling over SWE-bench instances on this machine and grade the patches.
@@ -318,6 +331,7 @@ The agent phase: one ling exec per instance, producing predictions.jsonl.
 | `--until` | HH:MM after which no new instance starts. |
 | `--idle-minutes` | Minutes the model must have been idle first (default 10) |
 | `--ignore-open-sessions` | Do not wait for open ling sessions to close (for testing) |
+| `--label` | What the model gate's refusal calls this run, e.g. "night 1" (default: SWE-bench run <name>) |
 
 #### `ling-admin swe-bench eval`
 

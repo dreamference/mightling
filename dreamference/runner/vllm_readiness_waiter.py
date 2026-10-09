@@ -54,6 +54,14 @@ class VLLMReadinessWaiter:
                 print("\n🛑 Cancelled checking vLLM server.")
                 return False
 
+            # The server is up but its gate refuses everyone but a benchmark run: waiting would
+            # last the whole run, so say why instead (specs/DREAMFERENCE_MIGHTLING_SWE_BENCH.md §18).
+            from dreamference.vllm_server.model_gate import ModelGate
+            gate = ModelGate.probe(self.config.vllm_host, timeout=1.0) or {}
+            if gate.get("state") == "closed":
+                print(f"\n⛔ {gate.get('message')}")
+                return False
+
             if max_wait is not None and (time.time() - start_time) > max_wait:
                 print(f"\n❌ Timed out waiting for vLLM server after {max_wait} seconds.")
                 print("💡 Start vLLM in another terminal via: `ling-admin server start`")

@@ -397,3 +397,7 @@ Every task is a sandboxed `ling exec` and its tests run under `ling sandbox`, an
 
 An app server is not an interactive session by its command line, so an idle desktop window or web UI left open never holds a night back. While a turn runs, its client keeps a marker named after the server's pid in `$CODEX_HOME/night/busy/`: the desktop app for its Work window's `ling app-server` (`desktop/electron/src/bridge.ts`), and `ling web serve` itself for every tab's Ask and Work turns (`ling-rs/web/src/server.rs`, the threads that are running, as JSON). `NightShiftHost.busy_app_server_pids()` counts a marker whose pid is alive and is the installed `ling` (which `ling web serve` is) or a bundled `ling` running `app-server`; any other marker was left by a client killed hard, or names a reused pid, and is deleted. A running turn in either counts as an open session (§5.5), so the run waits for it.
 
+
+### 11.8 `night pause` and `resume` (2026-10-09)
+
+The two commands belong to SWE-bench, not to the night queue: while a SWE-bench run holds the model gate it refuses every request that is not the run's, and `ling-admin night pause [--for DURATION]` (default one hour) lets them through until it ends or `night resume` (MIGHTLING_SWE_BENCH §18). They live under `night` because they are about the overnight use of the model. A Night Shift run holds no gate and is unchanged: it gives way to interactive use as §5.5 says. `night status` also says what the gate is doing.
