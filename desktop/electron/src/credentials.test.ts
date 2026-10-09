@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = path.join(__dirname, "..");
 const UI_SRC = path.join(ROOT, "..", "ui", "src");
-const PRELOAD_BUNDLE = path.join(ROOT, ".vite", "build", "preload.js");
-const MAIN_BUNDLE = path.join(ROOT, ".vite", "build", "early-bootstrap.js");
+const PRELOAD_BUNDLE = path.join(ROOT, ".vite", "build", "preload.cjs");
+const MAIN_BUNDLE = path.join(ROOT, ".vite", "build", "early-bootstrap.cjs");
 const RENDERER_BUNDLE = path.join(ROOT, ".vite", "renderer", "main_window");
 
 // What a credential, or the code that handles one, would leave in a bundle: the file it lives in,

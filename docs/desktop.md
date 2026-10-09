@@ -15,7 +15,7 @@ The easiest way is the `.deb` on the release page: it installs the app, its laun
 From a checkout:
 
 ```bash
-ling-admin desktop install    # the app's packages (Node.js 20+ needed) and, once, a sandbox profile (sudo)
+ling-admin desktop install    # the app's packages (Node.js 22.13+ needed) and, once, a sandbox profile (sudo)
 ling-admin desktop run        # build if needed, register the launcher entry, open the window
 ling-admin desktop build      # the installable .deb, in desktop/electron/out/make
 ```

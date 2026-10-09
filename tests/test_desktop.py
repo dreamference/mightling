@@ -46,7 +46,7 @@ def test_electron_is_pinned_exactly_and_stock():
     with open(ELECTRON / "package.json") as handle:
         package = json.load(handle)
     assert package["devDependencies"]["electron"] == "42.11.11"
-    assert package["main"] == ".vite/build/early-bootstrap.js"
+    assert package["main"] == ".vite/build/early-bootstrap.cjs"
     with open(UI_DIR / "package.json") as handle:
         assert not any(name.startswith("@tauri-apps") for name in json.load(handle)["devDependencies"])
 
@@ -202,10 +202,33 @@ def test_cargo_is_found_in_the_rustup_location_as_well_as_on_path():
 
 
 def test_the_toolchain_is_node_only():
-    with patch.object(DesktopInstaller, "node_major", return_value=22), patch("shutil.which", return_value="/usr/bin/npm"):
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 13)), patch("shutil.which", return_value="/usr/bin/npm"):
         assert DesktopInstaller.missing_prerequisites() == []
-    with patch.object(DesktopInstaller, "node_major", return_value=18), patch("shutil.which", return_value=None):
+    with patch.object(DesktopInstaller, "node_version", return_value=(24, 0)), patch("shutil.which", return_value="/usr/bin/npm"):
+        assert DesktopInstaller.missing_prerequisites() == []
+    # Electron Forge 8 declares node >= 22.13.0: an earlier 22 is not enough.
+    with patch.object(DesktopInstaller, "node_version", return_value=(22, 12)), patch("shutil.which", return_value="/usr/bin/npm"):
+        assert DesktopInstaller.missing_prerequisites() == ["node"]
+    with patch.object(DesktopInstaller, "node_version", return_value=(18, 20)), patch("shutil.which", return_value=None):
         assert DesktopInstaller.missing_prerequisites() == ["node", "npm"]
+
+
+def test_the_node_floor_is_forge_s_own():
+    # MIN_NODE_VERSION repeats the `engines` field of the Forge CLI the lockfile pins.
+    from dreamference.chat.desktop_installer import MIN_NODE_VERSION
+    lock = json.loads((ELECTRON / "package-lock.json").read_text(encoding="utf-8"))
+    engines = lock["packages"]["node_modules/@electron-forge/cli"]["engines"]["node"]
+    assert engines == ">= {}.{}.0".format(*MIN_NODE_VERSION)
+
+
+def test_node_version_reads_major_and_minor():
+    from types import SimpleNamespace
+    with patch("shutil.which", return_value="/usr/bin/node"), \
+         patch("subprocess.run", return_value=SimpleNamespace(stdout="v22.13.1\n")):
+        assert DesktopInstaller.node_version() == (22, 13)
+    with patch("shutil.which", return_value="/usr/bin/node"), \
+         patch("subprocess.run", return_value=SimpleNamespace(stdout="garbage\n")):
+        assert DesktopInstaller.node_version() is None
 
 
 def test_desktop_entry_matches_the_window_class_gnome_sees():

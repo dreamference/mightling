@@ -104,7 +104,7 @@ class DesktopRunner:
     def _npm(cls, args: List[str], cwd: Path) -> bool:
         npm = shutil.which("npm")
         if npm is None:
-            print("❌ npm is needed to build the desktop app: install Node.js 20 or later.")
+            print("❌ npm is needed to build the desktop app: install Node.js 22.13 or later.")
             return False
         return subprocess.call([npm, *args], cwd=cwd, env=cls._environment()) == 0
 

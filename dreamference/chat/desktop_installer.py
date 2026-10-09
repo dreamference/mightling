@@ -30,9 +30,9 @@ from typing import Final, List, Optional, Tuple
 CARGO_BIN: Final[str] = os.path.expanduser("~/.cargo/bin")
 RUSTUP_URL: Final[str] = "https://sh.rustup.rs"
 
-# The oldest Node the build accepts: Vite 8 and Electron Forge 7 need Node 20 or later; the
-# release workflow builds with 22.
-MIN_NODE_MAJOR: Final[int] = 20
+# The oldest Node the build accepts: Electron Forge 8 declares `node >= 22.13.0` (its packages are
+# ESM); the release workflows build with the newest 22.
+MIN_NODE_VERSION: Final[Tuple[int, int]] = (22, 13)
 
 # Where a checkout's AppArmor profile goes, and its name.
 APPARMOR_PROFILE_PATH: Final[str] = "/etc/apparmor.d/mightling-desktop-dev"
@@ -58,7 +58,8 @@ class DesktopInstaller:
                 missing. An empty list means the app can be built.
         """
         missing: List[str] = []
-        if cls.node_major() is None or cls.node_major() < MIN_NODE_MAJOR:
+        version = cls.node_version()
+        if version is None or version < MIN_NODE_VERSION:
             missing.append("node")
         if shutil.which("npm") is None:
             missing.append("npm")
@@ -67,12 +68,13 @@ class DesktopInstaller:
         return missing
 
     @classmethod
-    def node_major(cls) -> Optional[int]:
+    def node_version(cls) -> Optional[Tuple[int, int]]:
         """
-        The major version of the `node` on PATH.
+        The major and minor version of the `node` on PATH.
 
         Returns:
-            Optional[int]: The version, or None when there is no node.
+            Optional[Tuple[int, int]]: The version, or None when there is no node or its answer
+                cannot be read.
         """
         node = shutil.which("node")
         if node is None:
@@ -81,9 +83,9 @@ class DesktopInstaller:
             result = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=30, check=False)
         except (OSError, subprocess.SubprocessError):
             return None
-        text = result.stdout.strip().lstrip("v")
+        parts = result.stdout.strip().lstrip("v").split(".")
         try:
-            return int(text.split(".")[0])
+            return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
         except ValueError:
             return None
 
@@ -243,7 +245,7 @@ class DesktopInstaller:
 
         print("⚠️  The Mightling desktop toolchain is incomplete:")
         if "node" in missing:
-            print(f"   • Node.js {MIN_NODE_MAJOR} or later is needed (Electron, Vite and Forge run on it).")
+            print(f"   • Node.js {MIN_NODE_VERSION[0]}.{MIN_NODE_VERSION[1]} or later is needed (Electron, Vite and Forge run on it).")
         if "npm" in missing:
             print("   • npm is needed to install the app's packages.")
         if "fakeroot" in missing:

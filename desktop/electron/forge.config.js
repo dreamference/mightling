@@ -6,8 +6,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-// @electron/fuses 2 (Forge 7's own fuses plugin pins the 1.x line, which has no WasmTrapHandlers
-// fuse), flipped on the packaged binary in the postPackage hook below.
+// @electron/fuses 2 (Forge 7's own fuses plugin pinned the 1.x line, which has no WasmTrapHandlers
+// fuse; Forge 8's takes 2.x, but the hook also removes chrome-sandbox and re-signs on a Mac), flipped
+// on the packaged binary in the postPackage hook below.
 const { FuseV1Options, FuseVersion, flipFuses } = require("@electron/fuses");
 
 const app = require("./app.json");
@@ -60,7 +61,7 @@ module.exports = {
           genericName: "AI assistant",
           description: "Private AI on your GB10: a coding agent and a chat assistant, nothing leaves your machine.",
           productDescription:
-            "Mightling's desktop app. Chat is the local web UI in a window of its own; Work drives the coding agent, ling, which is bundled inside the app.",
+            "Mightling's desktop app: Ask (questions with no project) and Work (the coding agent on your projects) in one window, on ling, which is bundled inside the app.",
           bin: app.executable,
           icon: path.join(__dirname, "icons", "icon.png"),
           categories: ["Utility", "Development"],

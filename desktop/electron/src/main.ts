@@ -64,7 +64,7 @@ export async function main(options: MainOptions): Promise<void> {
       deliver({ channel: "view", payload: view });
       return;
     }
-    window = openWork({ preload: path.join(__dirname, "preload.js"), show, view });
+    window = openWork({ preload: path.join(__dirname, "preload.cjs"), show, view });
     window.on("closed", () => (window = null));
   };
   const actions = { openAsk: () => showView("ask"), openWork: () => showView("work") };

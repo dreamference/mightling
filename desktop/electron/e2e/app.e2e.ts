@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
 
-const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.js");
+const main = path.join(__dirname, "..", ".vite", "build", "early-bootstrap.cjs");
 
 test.skip(!process.env.DISPLAY || !fs.existsSync(main), "needs a display and the Vite build");
 
