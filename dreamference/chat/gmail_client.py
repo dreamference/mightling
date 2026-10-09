@@ -2,7 +2,7 @@
 Gmail Client for the Mightling terminal agent.
 
 This module provides the GmailClient class, the HTTP client behind `ling-admin gmail`. It talks to
-the Gmail search service the web UI already runs (`dreamference-gmail`, published on loopback), so
+the Google service (`dreamference-gmail`, `ling-admin google start`, published on loopback), so
 the terminal agent reads the same mailboxes with the same credentials and opens no IMAP connection
 of its own. The service is the one component that unseals credentials and fans out across
 accounts; a second IMAP path on the host would give two chances to disagree about the same sealed
@@ -21,21 +21,21 @@ from typing import Any, Dict, Final, Optional
 
 from dreamference.chat.gmail_credentials import CREDENTIALS_DIR
 from dreamference.chat.gmail_search_service import IMAP_TIMEOUT_SECONDS, MAX_RESULT_LIMIT
-from dreamference.chat.onyx_runner import GMAIL_AUTH_HEADER, GMAIL_HOST_PORT
+from dreamference.chat.google_service import GMAIL_AUTH_HEADER, GOOGLE_HOST_PORT, SECRET_FILE_NAME
 
-GMAIL_SERVICE_URL: Final[str] = f"http://127.0.0.1:{GMAIL_HOST_PORT}"
+GMAIL_SERVICE_URL: Final[str] = f"http://127.0.0.1:{GOOGLE_HOST_PORT}"
 
-# The file OnyxRunner._gmail_secret() creates and hands the container as MIGHTLING_GMAIL_SECRET. Only
+# The file GoogleService.secret() creates and hands the container as MIGHTLING_GMAIL_SECRET. Only
 # read here: a client that created one would hold a secret the running service does not know.
-SERVICE_SECRET_PATH: Final[str] = os.path.join(CREDENTIALS_DIR, "service-secret")
+SERVICE_SECRET_PATH: Final[str] = os.path.join(CREDENTIALS_DIR, SECRET_FILE_NAME)
 
 NOT_RUNNING_ERROR: Final[Dict[str, str]] = {
     "error": "Gmail service is not running.",
-    "hint": "Start it with: ling-admin chat start",
+    "hint": "Start it with: ling-admin google start",
 }
 NOT_SET_UP_ERROR: Final[Dict[str, str]] = {
     "error": "Gmail has not been set up.",
-    "hint": "Run: ling-admin chat start, then connect in Settings → Gmail Accounts",
+    "hint": "Run: ling-admin google start, then connect Gmail with /apps in ling",
 }
 
 

@@ -10,6 +10,8 @@ from unittest.mock import patch
 import pytest
 
 from dreamference.chat import OnyxInstaller, OnyxRunner
+from dreamference.chat.docker_bridge import DockerBridge
+from dreamference.chat.google_service import GoogleService
 from dreamference.chat.onyx_runner import (
     ONYX_PROVIDER_NAME,
     ONYX_PROVIDER_TYPE,
@@ -20,30 +22,6 @@ from dreamference.chat.onyx_runner import (
     MIGHTLING_EXCLUDED_TOOLS,
     DEFAULT_ONYX_EMAIL,
 )
-
-
-def test_loopback_vllm_host_is_rewritten_to_the_docker_gateway():
-    # Onyx runs on the default bridge, where localhost is the container itself. Without this
-    # rewrite the provider is created successfully and then simply never connects.
-    with patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"):
-        assert OnyxRunner.resolve_container_vllm_url("http://localhost:8000") == (
-            "http://172.17.0.1:8000/v1"
-        )
-        assert OnyxRunner.resolve_container_vllm_url("http://127.0.0.1:9001") == (
-            "http://172.17.0.1:9001/v1"
-        )
-
-
-def test_routable_vllm_host_is_left_alone():
-    with patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"):
-        assert OnyxRunner.resolve_container_vllm_url("http://10.0.0.5:8000") == (
-            "http://10.0.0.5:8000/v1"
-        )
-
-
-def test_gateway_falls_back_when_docker_cannot_be_queried():
-    with patch("subprocess.run", side_effect=OSError("no docker")):
-        assert OnyxRunner.docker_bridge_gateway() == "172.17.0.1"
 
 
 def test_provider_lookup_reads_the_providers_key():
@@ -93,7 +71,7 @@ def test_configure_creates_then_updates_the_same_provider():
 
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None):
         assert runner.configure() == 0
 
@@ -107,7 +85,7 @@ def test_configure_creates_then_updates_the_same_provider():
     calls.clear()
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=42):
         assert runner.configure() == 0
 
@@ -127,7 +105,7 @@ def test_configure_names_the_served_model_and_its_context_length():
 
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None):
         runner.configure()
 
@@ -240,7 +218,7 @@ def test_configure_can_opt_out_of_web_search():
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
          patch.object(OnyxRunner, "enable_web_search") as web:
         assert runner.configure(enable_web=False) == 0
@@ -260,7 +238,7 @@ def test_configure_advertises_vision_for_a_vision_checkpoint():
 
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
          patch.object(OnyxRunner, "enable_web_search", return_value=True):
         assert runner.configure() == 0
@@ -283,7 +261,7 @@ def test_configure_skips_vision_for_a_text_only_model():
 
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", side_effect=fake_request), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
          patch.object(OnyxRunner, "enable_web_search", return_value=True):
         assert runner.configure() == 0
@@ -393,7 +371,7 @@ def test_configure_can_opt_out_of_branding():
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
          patch.object(OnyxRunner, "enable_web_search", return_value=True), \
          patch.object(OnyxRunner, "apply_branding") as brand:
@@ -519,7 +497,7 @@ def test_configure_can_opt_out_of_voice():
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
          patch.object(OnyxRunner, "enable_web_search", return_value=True), \
          patch.object(OnyxRunner, "apply_branding", return_value=True), \
@@ -1135,7 +1113,7 @@ def test_gmail_service_secret_is_shared_by_both_sides():
     # Onyx's custom-tool client performs no SSRF validation and the service sits on a network other
     # containers share, so this header is the only thing protecting a live mailbox credential.
     from dreamference.chat.gmail_search_service import AUTH_HEADER
-    from dreamference.chat.onyx_runner import GMAIL_AUTH_HEADER
+    from dreamference.chat.google_service import GMAIL_AUTH_HEADER
 
     assert GMAIL_AUTH_HEADER == AUTH_HEADER
 
@@ -1149,7 +1127,7 @@ def test_gmail_registration_does_not_wait_for_a_mailbox():
 
     runner = OnyxRunner()
     with patch("dreamference.chat.gmail_credentials.GmailCredentials.load", return_value=None), \
-         patch.object(OnyxRunner, "_gmail_secret", return_value="s3cret"), \
+         patch.object(GoogleService, "secret", return_value="s3cret"), \
          patch.object(OnyxRunner, "_start_gmail_service", return_value=True), \
          patch.object(OnyxRunner, "_get_json", return_value=[]), \
          patch.object(OnyxRunner, "_request", return_value=({}, None)) as request:
@@ -1163,7 +1141,7 @@ def test_configure_registers_gmail_so_a_fresh_install_has_the_tool():
     runner = OnyxRunner()
     with patch.object(OnyxRunner, "_admin_session", return_value="cookie"), \
          patch.object(OnyxRunner, "_request", return_value=({"id": 1}, None)), \
-         patch.object(OnyxRunner, "docker_bridge_gateway", return_value="172.17.0.1"), \
+         patch.object(DockerBridge, "gateway", return_value="172.17.0.1"), \
          patch.object(OnyxRunner, "_find_provider", return_value=None), \
          patch.object(OnyxRunner, "enable_gmail_search") as gmail:
         assert runner.configure() == 0

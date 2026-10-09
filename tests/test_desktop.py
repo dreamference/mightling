@@ -268,12 +268,13 @@ def test_registration_removes_launchers_left_by_earlier_binary_names(tmp_path):
     with patch.object(desktop_runner, "DESKTOP_ENTRY_DIR", str(entries)), \
          patch.object(desktop_runner, "ICON_DIR", str(icons)), \
          patch.object(DesktopRunner, "binary_path", return_value="/opt/Mightling"), \
-         patch("dreamference.chat.onyx_brand_assets.OnyxBrandAssets.render_app_icon"), \
          patch("subprocess.run"):
         assert DesktopRunner.install_desktop_entry() is True
 
     assert sorted(p.name for p in entries.iterdir()) == ["ling-app.desktop"]
-    assert list(icons.iterdir()) == []
+    # The legacy icons are gone and the app's own mark is the one left.
+    assert [p.name for p in icons.iterdir()] == ["ling-app.png"]
+    assert (icons / "ling-app.png").read_bytes() == desktop_runner.APP_ICON_SOURCE.read_bytes()
     entry = (entries / "ling-app.desktop").read_text()
     assert "Exec=/opt/Mightling %U\n" in entry and "MimeType=x-scheme-handler/mightling;" in entry
 

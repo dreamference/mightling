@@ -62,13 +62,13 @@ def test_openhands_stays_on_this_machine_and_off_onyx_port(monkeypatch):
     from dreamference.config import DreamferenceConfig
     from dreamference.runner.openhands_runner import OpenHandsRunner, OPENHANDS_HOST_PORT
     from dreamference.runner.openhands_installer import OpenHandsInstaller
-    from dreamference.chat.onyx_runner import OnyxRunner
+    from dreamference.chat.docker_bridge import DockerBridge
 
     runner = OpenHandsRunner(config=DreamferenceConfig(vllm_host="http://localhost:8000"))
     monkeypatch.setattr(runner.vllm_manager, "check_health", lambda: True)
     monkeypatch.setattr(OpenHandsInstaller, "is_docker_available", classmethod(lambda cls: True))
     monkeypatch.setattr(OpenHandsInstaller, "pull_image_if_missing", classmethod(lambda cls: True))
-    monkeypatch.setattr(OnyxRunner, "docker_bridge_gateway", classmethod(lambda cls: "172.17.0.1"))
+    monkeypatch.setattr(DockerBridge, "gateway", classmethod(lambda cls: "172.17.0.1"))
     monkeypatch.setattr("subprocess.run", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr("subprocess.call", lambda cmd, **k: calls.append(cmd) or 0)

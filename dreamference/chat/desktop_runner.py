@@ -40,6 +40,9 @@ APP_CONFIG: Final[Path] = ELECTRON_DIR / "app.json"
 
 # The binaries bundled into the app, copied here from the installed `ling` build before packaging.
 RESOURCES_DIR: Final[Path] = ELECTRON_DIR / "resources"
+# The app's own 256x256 mark, the size the XDG icon folder below names; the same file the package
+# and the window use, so the launcher entry cannot drift from them.
+APP_ICON_SOURCE: Final[Path] = ELECTRON_DIR / "icons" / "128x128@2x.png"
 BUNDLED_BINARIES: Final[tuple] = ("ling", "codex-code-mode-host")
 
 # Where a desktop entry and its icon go for the current user. A deb puts these under /usr;
@@ -346,9 +349,10 @@ class DesktopRunner:
             print(f"⚠️  Could not create the XDG directories: {exc}")
             return False
 
-        from dreamference.chat.onyx_brand_assets import OnyxBrandAssets
-
-        OnyxBrandAssets.render_app_icon(icon, 256)
+        try:
+            shutil.copyfile(APP_ICON_SOURCE, icon)
+        except OSError as exc:
+            print(f"⚠️  Could not install the app icon: {exc}")
 
         scheme = cls._app_config().get("scheme", "mightling")
         entry = (
