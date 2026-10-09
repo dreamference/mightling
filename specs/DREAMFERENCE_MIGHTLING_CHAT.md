@@ -1,6 +1,6 @@
 # Mightling Chat: talking to Mightling from a phone messenger
 
-**Status:** proposed 2026-10-08; Phase 1 is being built on branch `chat/messengers`, not merged (§14 says what was built and what was not).
+**Status:** Phase 1 implemented and merged into `main` on 2026-10-08, off by default (§14 what was built, §15 the merge: `ling chat …`, `ling-admin matrix …`, stop disables the units). Tested against stand-ins only: nothing has run against a real Telegram bot, a real Matrix client, Element X or Tailscale. Ships in 1.6.0. Proposed 2026-10-08.
 
 **Spec owner:** the user. **Depends on:** MIGHTLING_ASK (Ask threads, `ling web`, the bridge policy), MIGHTLING_NODE (advertised nodes), MIGHTLING_AIRGAPPED, DOCKER §6 (sidecars).
 
