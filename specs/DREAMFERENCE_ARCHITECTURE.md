@@ -178,7 +178,7 @@ A stdio MCP server (`ling-admin mcp`) with `ide_*` tools over an in-process `IDE
 - [x] Puffin renamed Mightling (`ling`, `ling-admin`, `~/.mightling`) with a one-time migration; signed releases (Ed25519 over `SHA256SUMS`); the desktop app rebuilt on Electron; refine mode (off by default); clients for x86-64 Linux, macOS and Windows (preview), 2026-10-07 and 2026-10-08 (release 1.5.1)
 - [x] `node provision` / `node prepare` (FLEET Phases 1–3, tested offline; not yet run against a second machine) and the unattended node install (`install.sh`: one sudo prompt at most, host setup, `node enable`, model download and server start), 1.5.1
 - [x] `ling web` with Ask threads, the bridge policy and the browser view; `ling-docs` Phase 1; Signal and Matrix/Telegram bridges, off by default (on `main` for 1.6.0)
-- [x] Onyx retired (MIGHTLING_ASK Phase C, §19): its code deleted, image search and voice moved to `ling web` and the app, `ling-admin chat remove` for existing installs (branch `chat/onyx-phase-c`, merged after 1.6.0)
+- [x] Onyx retired (MIGHTLING_ASK Phase C, §19): its code deleted, image search and voice moved to `ling web` and the app, `ling-admin chat remove` for existing installs (branch `chat/onyx-phase-c`, merged after 1.6.0; ships in 1.7.0)
 - [ ] Messengers tried against real services, the Windows client run on Windows hardware
 - [ ] Proposed specs are marked *Proposed* in `specs/README.md`
 
