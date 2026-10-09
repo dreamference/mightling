@@ -1,8 +1,8 @@
 # Mightling Agent Runtimes & Integration
 
-> **Version:** 1.2.0
+> **Version:** 1.5.1
 > **Subject:** the agent runners: Codex (`ling`, default), Cline, Continue, OpenHands.
-> **Checked against the code:** 2026-10-01 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
+> **Checked against the code:** 2026-10-09 (`dreamference/runner/`, `dreamference/config/dreamference_config.py`)
 
 ---
 
@@ -125,7 +125,7 @@ The prompt is unused.
 - **Package:** `dreamference/runner/openhands_runner.py`, `openhands_installer.py`
 - **Runtime:** Docker image `ghcr.io/all-hands-ai/openhands:main`, web UI at `http://localhost:3001` (`OPENHANDS_HOST_PORT`)
 
-Port 3001, not 3000, because the Mightling web UI (Onyx) owns 3000; published on `127.0.0.1` only, because the container mounts the Docker socket and a UI on the network would hand root on the host to anyone who can reach it.
+Port 3001, not 3000, because the Onyx web chat owns 3000 (`ling web` is on 3100); published on `127.0.0.1` only, because the container mounts the Docker socket and a UI on the network would hand root on the host to anyone who can reach it.
 
 ### 5.2. Container Launch
 
@@ -177,7 +177,7 @@ The prompt is unused.
 2. the model's `launch_overrides["tool_call_parser"]`;
 3. a guess from the name: `mistral` → `mistral`, otherwise `hermes`.
 
-The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call>` blocks, while Qwen 3.5/3.6 emit XML. The default model `qwen3.8-27b-nvfp4-dflash2` (served by SGLang) resolves to `qwen3_coder`, the 122B and 35B vLLM recipes to `qwen3_xml` (reasoning parser `qwen3` for all of them), and Qwen 2.5 Coder resolves to `hermes`.
+The parser is not a per-family constant. Qwen 2.5 emits Hermes-style `<tool_call>` blocks, while Qwen 3.5/3.6 emit XML. The model `qwen3.8-27b-nvfp4-dflash2` (served by SGLang, the only one since 2026-10-07) resolves to `qwen3_coder` with reasoning parser `qwen3`; the removed 122B and 35B vLLM recipes used `qwen3_xml`, and a Qwen 2.5 Coder name outside the matrix resolves to `hermes`.
 
 
 ## 8. Failure Modes
