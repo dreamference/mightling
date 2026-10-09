@@ -73,10 +73,11 @@ Not checked, and so the first work of Part 1 (Phase 0 in §14):
 
 | Component | Today | Client | Node |
 |---|---|---|---|
-| `ling` (terminal agent) and `codex-code-mode-host` | Rust, linux-arm64 | ✔ | ✔ (a GB10 has both halves) |
+| `ling` (terminal agent) and `codex-code-mode-host` | Rust; released for Linux (arm64, x86-64), macOS and, as a preview, Windows since 1.5.1 | ✔ | ✔ (a GB10 has both halves) |
 | `ling-search`, `ling-fetch` | Rust | ✔ | ✔ |
 | `ling-code` (code index) and its pinned tools | Rust, tools installed by `ling-admin code setup` | ✔, tools installed by `ling-code setup` (§8.3) | ✔ |
-| `ling-app` (desktop window) | Tauri, Linux | ✔ | ✔ |
+| `ling-app` (desktop app) | Electron since 2026-10-07 (Tauri before): a Linux `.deb`, a Mac `.dmg` as an unsigned preview | ✔ | ✔ |
+| `ling web` (the Mightling UI, Ask and Work) | Rust, in `ling` | ✔ | ✔ |
 | Model server (SGLang or vLLM), diffusion sidecar (switched off since 2026-10-03) | Docker | | ✔ |
 | SearXNG, speech-to-text, image search, Gmail service | Docker sidecars | | ✔ |
 | Web UI (Onyx Lite stack) | Docker | | ✔ |
@@ -637,6 +638,8 @@ Live, on two machines:
 Built on one GB10 with no second machine, no root and no Mac or Windows machine. Everything below says which of "tested offline", "run live here" or "not run" applies.
 
 ### 18.1 What exists
+
+*As built on 2026-10-02. The `desktop/src-tauri` rows are history: the Electron app replaced the Tauri one on 2026-10-07 (§7).*
 
 | Piece | Where | State |
 |---|---|---|

@@ -355,6 +355,8 @@ On a 128 GB RTX Spark: start the engine, then allocate host memory in a second p
 
 ## 11. `ling-app` on Windows
 
+> **Superseded in part (2026-10-07):** the desktop app is Electron now ([MIGHTLING_DESKTOP_ELECTRON](./DREAMFERENCE_MIGHTLING_DESKTOP_ELECTRON.md)), so the Tauri build below no longer applies; Electron Forge would build the Windows app instead (its zip maker already lists `win32`), and the WebView2 and theme notes are moot (Electron bundles Chromium). What the window needs from Windows (the firewall rule of §10.2) still holds. No CI job builds the app for Windows yet (`windows.yml` builds `ling` and its commands only).
+
 - **Builds** with `tauri build --target aarch64-pc-windows-msvc`. The bundle is NSIS (the installer itself runs emulated under Prism; the app is native) or MSI; NSIS, because it installs per user without elevation.
 - **The webview is WebView2 (Chromium).** Everything `main.rs` sets for WebKitGTK (`WEBKIT_DISABLE_DMABUF_RENDERER`, `GTK_THEME`) is inert there.
 - **Theme:** Chat's overrides are `html:not(.dark)`, so the window needs the light scheme. On Windows that comes from the window's `theme: "Light"` in `tauri.conf.json`, which Tauri passes to WebView2's preferred colour scheme. To verify.
